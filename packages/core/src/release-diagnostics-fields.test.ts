@@ -13,6 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // obsidian-inline-tag reuses releaseCheck and count below.
     // webdav-host-upload-limit and webdav-host-download-limit reuse releaseCheck, operation, and outcome below.
     // ios-local-attachment-host, ios-attachment-draft-owned, ios-http-transport, ios-secure-storage, ios-sync-crypto, ios-device-storage and ios-legacy-secret-retirement reuse releaseCheck, operation, and outcome below.
     // automation concurrent-write replay; capture routing reuses outcome below.
@@ -93,6 +94,10 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'route', 'elapsedMs', 'moduleElapsedMs',
     // Global shortcut startup: bounded configured and applied shortcut names.
     'requestedShortcut', 'appliedShortcut',
+    // cleanup-batch-fresh-first: batch size and how many targets still had work (with total below).
+    'limit', 'fresh',
+    // PR1348 native reminder replacement fields.
+    'tagged', 'replaced', 'taggedRemoved',
     'releaseCheck', 'backend', 'statusPublished', 'lastSyncAt', 'lastSyncStatus',
     'artifact', 'cloudProvider', 'scheme', 'host', 'delivery', 'deduped',
     // UpNote handoff diagnostics contain only the surface, scheme and outcome.
@@ -106,6 +111,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // desktop-reminder-fired / desktop-notification-path (apps/desktop/src/lib/notification-service.tsx)
     'kind', 'entity', 'fireAt', 'path', 'error',
     'deferred', 'ids',
+    // cloud-data-body-limit reuses status below: the sync data size and the server's limit, in bytes.
+    'limitBytes', 'bodyBytes',
     // streamed-upload-head-fallback (core WebDAV attachment pass): the attachment id only.
     'id',
     // webdav-activation-batches (core activation coordinator)

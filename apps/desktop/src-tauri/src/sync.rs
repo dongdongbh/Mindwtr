@@ -3662,6 +3662,23 @@ fn wrong_sync_server_hint(status: reqwest::StatusCode) -> &'static str {
     }
 }
 
+/// A 413 on the sync document write: name both sizes and the server setting to raise.
+/// Same wording as core `cloud.ts`. The cloud server sends `limitBytes`; a proxy's 413
+/// does not, so the hint also names the proxy.
+fn cloud_data_too_large_message(body_bytes: usize, response_body: &str) -> String {
+    let limit_bytes = serde_json::from_str::<Value>(response_body)
+        .ok()
+        .and_then(|value| value.get("limitBytes").and_then(Value::as_u64));
+    match limit_bytes {
+        Some(limit) => format!(
+            "Cloud PUT failed (413): the sync data ({body_bytes} bytes) is larger than the server's limit ({limit} bytes). Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server."
+        ),
+        None => format!(
+            "Cloud PUT failed (413): the sync data ({body_bytes} bytes) is larger than the server's limit. Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server (and any proxy body limit)."
+        ),
+    }
+}
+
 fn parse_cloud_json_body(body: &str) -> Result<Value, String> {
     let normalized = body.trim_start_matches('\u{feff}').trim();
     serde_json::from_str::<Value>(normalized).map_err(|error| {
@@ -3730,12 +3747,39 @@ fn cloud_put_json_blocking(
     let payload = serde_json::to_string_pretty(data)
         .map_err(|e| format!("Failed to encode Cloud payload: {e}"))?;
     let client = cloud_blocking_http_client(config.proxy_url.as_deref(), allow_insecure_http)?;
-    let response = cloud_request_builder(&client, reqwest::Method::PUT, &url, &token)
+    cloud_put_payload(&client, &url, &token, payload)
+}
+
+/// Same ceiling as core's `MAX_ERROR_BODY_BYTES`: an error body is read only this far.
+const CLOUD_ERROR_BODY_MAX_BYTES: usize = 64 * 1024;
+
+fn cloud_put_payload(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    token: &str,
+    payload: String,
+) -> Result<RemoteJsonWriteResult, String> {
+    let payload_len = payload.len();
+    let response = cloud_request_builder(client, reqwest::Method::PUT, url, token)
         .header("Content-Type", "application/json")
         .body(payload)
         .send()
         .map_err(|e| format_reqwest_send_error("Cloud request failed", &e))?;
 
+    if response.status() == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
+        use std::io::Read;
+        let mut body = Vec::new();
+        let _ = response
+            .take(CLOUD_ERROR_BODY_MAX_BYTES as u64 + 1)
+            .read_to_end(&mut body);
+        // Over the cap: not the cloud server's small JSON answer, so no limit is named.
+        let body = if body.len() > CLOUD_ERROR_BODY_MAX_BYTES {
+            String::new()
+        } else {
+            String::from_utf8_lossy(&body).into_owned()
+        };
+        return Err(cloud_data_too_large_message(payload_len, &body));
+    }
     if !response.status().is_success() {
         return Err(format!(
             "Cloud PUT failed ({}): {}{}",
@@ -4006,6 +4050,91 @@ mod tests {
             wrong_sync_server_hint(reqwest::StatusCode::UNAUTHORIZED),
             ""
         );
+    }
+
+    #[test]
+    fn cloud_data_too_large_names_both_sizes_and_the_setting() {
+        assert_eq!(
+            cloud_data_too_large_message(
+                1234,
+                r#"{"error":"Payload too large: the limit is 2000000 bytes","limitBytes":2000000}"#
+            ),
+            "Cloud PUT failed (413): the sync data (1234 bytes) is larger than the server's limit (2000000 bytes). Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server."
+        );
+        assert_eq!(
+            cloud_data_too_large_message(1234, "<html>nginx</html>"),
+            "Cloud PUT failed (413): the sync data (1234 bytes) is larger than the server's limit. Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server (and any proxy body limit)."
+        );
+    }
+
+    #[test]
+    fn cloud_put_reads_a_413_body_up_to_the_error_body_cap() {
+        use std::io::{Read, Write};
+
+        fn serve_413(body: String) -> (String, std::thread::JoinHandle<()>) {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind cloud test server");
+            let address = listener.local_addr().expect("server address");
+            let handle = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept cloud request");
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request);
+                let response = format!(
+                    "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = stream.write_all(response.as_bytes());
+            });
+            (format!("http://{address}/v1/data"), handle)
+        }
+
+        let client = cloud_blocking_http_client(None, true).expect("client");
+        let refusal = r#"{"error":"Payload too large: the limit is 2000000 bytes","limitBytes":2000000}"#;
+        let (url, server) = serve_413(refusal.to_string());
+        let error = cloud_put_payload(&client, &url, "", "{}".to_string()).expect_err("413");
+        server.join().expect("server thread");
+        assert_eq!(error, cloud_data_too_large_message(2, refusal));
+        assert!(error.contains("(2000000 bytes)"), "unexpected error: {error}");
+
+        // An error body over the cap is not read whole; the message falls back to no limit.
+        let oversized = format!(
+            r#"{{"limitBytes":2000000,"pad":"{}"}}"#,
+            "x".repeat(CLOUD_ERROR_BODY_MAX_BYTES)
+        );
+        let (url, server) = serve_413(oversized);
+        let error = cloud_put_payload(&client, &url, "", "{}".to_string()).expect_err("413");
+        server.join().expect("server thread");
+        assert_eq!(error, cloud_data_too_large_message(2, ""));
+    }
+
+    #[test]
+    fn cloud_put_stops_reading_a_413_body_held_open_past_the_cap() {
+        use std::io::{Read, Write};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind cloud test server");
+        let address = listener.local_addr().expect("server address");
+        let (done_sender, done_receiver) = mpsc::channel::<()>();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept cloud request");
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            // Promise far more than is sent, send past the cap, then hold the connection open.
+            let head = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 10485760\r\n\r\n";
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&vec![b' '; 2 * CLOUD_ERROR_BODY_MAX_BYTES]);
+            let _ = done_receiver.recv_timeout(Duration::from_secs(10));
+        });
+
+        let client = cloud_blocking_http_client(None, true).expect("client");
+        let started = Instant::now();
+        let error = cloud_put_payload(&client, &format!("http://{address}/v1/data"), "", "{}".to_string())
+            .expect_err("413");
+        let elapsed = started.elapsed();
+        let _ = done_sender.send(());
+        server.join().expect("server thread");
+        assert!(elapsed < Duration::from_secs(5), "read waited for the held body: {elapsed:?}");
+        assert_eq!(error, cloud_data_too_large_message(2, ""));
     }
 
     #[test]
@@ -9942,6 +10071,10 @@ mod tests {
             (
                 "set_global_quick_add_shortcut",
                 "OS global-hotkey (un)registration, inherently main/event-loop-bound",
+            ),
+            (
+                "set_tray_labels",
+                "builds three GUI menu items and replaces the tray menu, no file or network I/O",
             ),
             (
                 "set_tray_visible",
@@ -20326,13 +20459,28 @@ pub(crate) fn sync_fs_reserve_attachment_generation(
 ) -> Result<PublicationReservation, String> {
     let target_path = PathBuf::from(target_path);
     with_file_sync_lease(&state, &lease_token, window.label(), |lease| {
-        file_sync_attachment_publication::reserve(
-            &crate::storage::get_data_dir(&app),
+        let data_dir = crate::storage::get_data_dir(&app);
+        let reservation = file_sync_attachment_publication::reserve(
+            &data_dir,
             &mut lease.publication_root,
             &target_path,
             expected_size,
             &expected_sha256,
-        )
+        )?;
+        // The plugin's runtime scope uses literal leading dots on Unix even
+        // when its command scope permits dotfiles. Grant only this reserved file.
+        if let Err(error) = app.fs_scope().allow_file(&reservation.scratch_path) {
+            file_sync_attachment_publication::abandon(
+                &data_dir,
+                &mut lease.publication_root,
+                &reservation.operation_id,
+            )?;
+            return Err(format!("Failed to grant attachment staging access: {error}"));
+        }
+        log::info!(
+            "File Sync attachment staging access granted extra.releaseCheck=v1.3.5/file-sync-staging-scope"
+        );
+        Ok(reservation)
     })
 }
 

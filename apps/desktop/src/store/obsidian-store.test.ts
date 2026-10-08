@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { normalizeObsidianConfig, type ObsidianConfig, type ObsidianScanResult } from '../lib/obsidian-scanner';
 
+const scanFileMock = vi.hoisted(() => vi.fn());
 const scanVaultMock = vi.hoisted(() => vi.fn());
 const setConfigMock = vi.hoisted(() => vi.fn());
 const startWatcherMock = vi.hoisted(() => vi.fn());
@@ -13,6 +14,7 @@ vi.mock('../lib/obsidian-service', async () => {
             getConfig: vi.fn(),
             hasVaultMarker: vi.fn(),
             scanVault: scanVaultMock,
+            scanFile: scanFileMock,
             setConfig: setConfigMock,
             startWatcher: startWatcherMock,
             stopWatcher: stopWatcherMock,
@@ -53,6 +55,7 @@ const resetStore = () => {
 beforeEach(() => {
     resetStore();
     scanVaultMock.mockReset();
+    scanFileMock.mockReset();
     setConfigMock.mockReset();
     startWatcherMock.mockReset();
     stopWatcherMock.mockReset();
@@ -88,4 +91,48 @@ describe('useObsidianStore', () => {
             scannedFileCount: 0,
         });
     });
+});
+
+
+it('invalidates a full scan started before the required tag changed', async () => {
+    let finish!: (value: ObsidianScanResult) => void;
+    scanVaultMock.mockReturnValueOnce(new Promise<ObsidianScanResult>((resolve) => { finish = resolve; }));
+    const pending = useObsidianStore.getState().rescan();
+    const saving = useObsidianStore.getState().updateConfig({ requiredInlineTag: '#task' });
+    finish({ ...emptyScanResult, scannedFileCount: 42 });
+    await Promise.all([pending, saving]);
+    expect(useObsidianStore.getState().config.requiredInlineTag).toBe('#task');
+    expect(useObsidianStore.getState().scannedFileCount).toBe(0);
+    expect(useObsidianStore.getState().hasScannedThisSession).toBe(false);
+    scanVaultMock.mockResolvedValueOnce(emptyScanResult);
+    await useObsidianStore.getState().rescan();
+    expect(scanVaultMock.mock.calls[1][0].requiredInlineTag).toBe('#task');
+});
+
+it('discards an in-flight live file update after a filter change', async () => {
+    useObsidianStore.setState({ hasScannedThisSession: true });
+    let finish!: (value: unknown) => void;
+    scanFileMock.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const pending = useObsidianStore.getState().handleFilesChanged({ changed: ['Inbox.md'], deleted: [] });
+    await vi.waitFor(() => expect(scanFileMock).toHaveBeenCalledOnce());
+    await useObsidianStore.getState().updateConfig({ requiredInlineTag: '#task' });
+    finish({ tasks: [], warning: null, isTracked: true, relativeFilePath: 'Inbox.md', detectedTaskNotes: false });
+    expect(await pending).toBeNull();
+    expect(useObsidianStore.getState().scannedRelativePaths).toEqual([]);
+});
+
+
+it('persists the new filter after an older scan timestamp write finishes', async () => {
+    scanVaultMock.mockResolvedValueOnce(emptyScanResult);
+    let finishWrite!: (value: ObsidianConfig) => void;
+    setConfigMock.mockImplementationOnce(() => new Promise<ObsidianConfig>((resolve) => { finishWrite = resolve; }));
+    const pending = useObsidianStore.getState().rescan();
+    await vi.waitFor(() => expect(setConfigMock).toHaveBeenCalledOnce());
+    const saving = useObsidianStore.getState().updateConfig({ requiredInlineTag: '#task' });
+    expect(setConfigMock).toHaveBeenCalledOnce();
+    finishWrite(normalizeObsidianConfig(setConfigMock.mock.calls[0][0]));
+    await Promise.all([pending, saving]);
+    expect(setConfigMock.mock.calls[1][0].requiredInlineTag).toBe('#task');
+    expect(useObsidianStore.getState().config.requiredInlineTag).toBe('#task');
+    expect(useObsidianStore.getState().hasScannedThisSession).toBe(false);
 });

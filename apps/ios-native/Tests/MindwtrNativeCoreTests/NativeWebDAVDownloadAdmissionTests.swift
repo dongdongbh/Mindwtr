@@ -33,9 +33,15 @@ private final class DownloadAdmissionFixtureProtocol: URLProtocol {
 
 private final class DownloadAdmissionFixtureState: @unchecked Sendable {
     private let lock = NSLock()
-    private var methods: [String] = []
-    func record(_ method: String) { lock.lock(); methods.append(method); lock.unlock() }
+    private var methods: [String] = [], authorizations: [String?] = []
+    func record(_ method: String, authorization: String? = nil) {
+        lock.lock(); methods.append(method); authorizations.append(authorization); lock.unlock()
+    }
     var recorded: [String] { lock.lock(); defer { lock.unlock() }; return methods }
+    var cloudAuthorized: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !authorizations.isEmpty && authorizations.allSatisfy { $0 == "Bearer synthetic-fixture-token-395" }
+    }
 
 }
 
@@ -102,7 +108,7 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
             n.fileCall=request=>{const op=JSON.parse(request).op;ops[op]=(ops[op]||0)+1;return original(request)};
             n.installerCall=request=>{ops.installer=(ops.installer||0)+1;return installer(request)};
             n.cryptoCall=request=>{const op=JSON.parse(request).op;ops[op]=(ops[op]||0)+1;return crypto(request)};
-            try {const result=await gate.run(input.data,input.cap,input.phase,input.url,input.fixture);return {...result,ops,kv:typeof n.kvMultiGet}}
+            try {const result=await gate.run(input.data,input.cap,input.phase,input.url,input.fixture,input.provider,input.activationProbe);return {...result,ops,kv:typeof n.kvMultiGet}}
             finally {n.fileCall=original;n.installerCall=installer;n.cryptoCall=crypto}
           }).then(value=>replies.set(id,JSON.stringify({ok:true,value})),
             error=>replies.set(id,JSON.stringify({ok:false,error:error&&error.message==='Attachment upload fixture gate is unavailable'?'Attachment upload fixture gate is unavailable':'Upload fixture probe failed'})));return id};
@@ -116,7 +122,7 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
         config.protocolClasses = [DownloadAdmissionFixtureProtocol.self]; faults.httpConfiguration = config; faults.httpByteLimit = limit
         DownloadAdmissionFixtureProtocol.install(hostname) { transport in
             let method = transport.request.httpMethod ?? ""
-            state.record(method)
+            state.record(method, authorization: transport.request.value(forHTTPHeaderField: "Authorization"))
             switch method {
             case "HEAD": transport.reply(headers: ["Content-Length": String(bytes.count)])
             case "GET": transport.reply(bytes, headers: headers)
@@ -137,8 +143,10 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
                             parametersJSON: json([taskID, "Synthetic download task", try json([attachment]), at, at]))
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
     }
-    private func plan(_ attachment: [String: Any], phase: String = "post-merge", encrypted: Bool = false) -> [String: Any] {
-        var value: [String: Any] = ["data": data(attachment), "cap": 1024, "phase": phase, "url": remote]
+    private func plan(_ attachment: [String: Any], phase: String = "post-merge", encrypted: Bool = false,
+                      provider: String = "webdav", activationProbe: Bool = true) -> [String: Any] {
+        var value: [String: Any] = ["data": data(attachment), "cap": 1024, "phase": phase, "url": remote,
+                                  "provider": provider, "activationProbe": activationProbe]
         if encrypted { value["fixture"] = ["key": [Int](repeating: 0, count: 32), "salt": [Int](repeating: 0, count: 16), "params": ["mKib": 64, "t": 1, "p": 1]] }
         return value
     }
@@ -172,7 +180,8 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
     }
 
     private func hash(_ bytes: Data) -> String { SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() }
-    private func assertRefused(_ result: [String: Any], limit: Int, mayHashLocal: Bool = false, file: StaticString = #filePath, line: UInt = #line) throws {
+    private func assertRefused(_ result: [String: Any], limit: Int, mayHashLocal: Bool = false, provider: String = "webdav",
+                               file: StaticString = #filePath, line: UInt = #line) throws {
         XCTAssertEqual(result["admitted"] as? Bool, false, file: file, line: line)
         XCTAssertEqual(result["name"] as? String, "TypeError", file: file, line: line)
         XCTAssertEqual(result["code"] as? String, "response-too-large", file: file, line: line)
@@ -185,7 +194,10 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
             XCTAssertEqual(ops[op] ?? 0, 0, "Refused bytes cannot reach " + op, file: file, line: line)
         }
         if !mayHashLocal { XCTAssertEqual(ops["sha256File"] ?? 0, 0, file: file, line: line) }
-        XCTAssertEqual(result["warnings"] as? [[String: String]], [["releaseCheck": "v1.3.5/webdav-host-download-limit", "operation": "download", "outcome": "refused"]], file: file, line: line)
+        let marker = provider == "selfhosted"
+            ? ["releaseCheck": "v1.3.5/cloud-host-response-limit", "operation": "response", "outcome": "refused"]
+            : ["releaseCheck": "v1.3.5/webdav-host-download-limit", "operation": "download", "outcome": "refused"]
+        XCTAssertEqual(result["warnings"] as? [[String: String]], [marker], file: file, line: line)
         XCTAssertEqual(result["kv"] as? String, "undefined", file: file, line: line)
     }
     private func assertInstalled(_ result: [String: Any], bytes: Data, encrypted: Bool = false) throws {
@@ -201,6 +213,79 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
         let ops = try XCTUnwrap(result["ops"] as? [String: Int])
         XCTAssertGreaterThan(ops["writeBytes"] ?? 0, 0); XCTAssertGreaterThan(ops["installer"] ?? 0, 0)
         XCTAssertEqual(ops["aesGcmOpen"] ?? 0, encrypted ? 1 : 0)
+    }
+
+    func testCloudDeclaredStreamedAndDishonestCapsPreserveColdWinnerThenExactResponseInstalls() async throws {
+        let bytes = Data([0,255,128,1,7]), local = Data([9,8,7,6])
+        let candidate = attachment(hash: hash(bytes))
+        try await seed(candidate)
+        var before: [String: String]?
+        let responseHeaders = [["Content-Length": "5"], [:], ["Content-Length": "1"]]
+        for headers in responseHeaders {
+            let value = try host(plans: [plan(candidate, provider: "selfhosted")], bytes: bytes, headers: headers)
+            try await start(value); if before == nil { before = try rows() }
+            let count = state.recorded.filter { $0 == "GET" }.count
+            let managedBefore = try FileManager.default.contentsOfDirectory(atPath: managed.path)
+            let cacheBefore = try FileManager.default.contentsOfDirectory(atPath: cache.path)
+            try assertRefused(await probe(value), limit: 4, provider: "selfhosted")
+            XCTAssertEqual(state.recorded.filter { $0 == "GET" }.count, count + 1, "Candidate cap refusal is not retried")
+            XCTAssertEqual(try rows(), before); XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path), managedBefore)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), cacheBefore)
+            await value.close()
+        }
+
+        try local.write(to: source); let originalInode = try inode(source)
+        var winner = attachment(hash: hash(bytes)); winner["contentMtimeMs"] = 1; winner["contentSize"] = 1
+        let managedBefore = try FileManager.default.contentsOfDirectory(atPath: managed.path)
+        let cacheBefore = try FileManager.default.contentsOfDirectory(atPath: cache.path)
+        // Ordinary mode reaches the real Cloud remote-winner branch. Its presence
+        // HEAD is allowed; the coded GET refusal must not retry or install bytes.
+        for headers in responseHeaders {
+            let value = try host(plans: [plan(winner, provider: "selfhosted", activationProbe: false)], bytes: bytes, headers: headers)
+            try await start(value); let count = state.recorded.filter { $0 == "GET" }.count
+            let result = try await probe(value)
+            try assertRefused(result, limit: 4, mayHashLocal: true, provider: "selfhosted")
+            let ops = try XCTUnwrap(result["ops"] as? [String: Int])
+            XCTAssertGreaterThan(ops["sha256File"] ?? 0, 0, "Local generation is proved before winner GET")
+            XCTAssertEqual(state.recorded.filter { $0 == "GET" }.count, count + 1, "Winner cap refusal is not retried")
+            XCTAssertEqual(try rows(), before); XCTAssertEqual(try inode(source), originalInode)
+            XCTAssertEqual(try Data(contentsOf: source), local)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path), managedBefore)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), cacheBefore)
+            await value.close()
+        }
+        let cold = try host(plans: [plan(winner, provider: "selfhosted", activationProbe: false)], bytes: bytes, headers: ["Content-Length": "5"])
+        try await start(cold); let count = state.recorded.filter { $0 == "GET" }.count
+        try assertRefused(await probe(cold), limit: 4, mayHashLocal: true, provider: "selfhosted")
+        XCTAssertEqual(state.recorded.filter { $0 == "GET" }.count, count + 1)
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try inode(source), originalInode); XCTAssertEqual(try Data(contentsOf: source), local)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path), managedBefore)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), cacheBefore); await cold.close()
+
+        let exact = try host(plans: [plan(winner, provider: "selfhosted", activationProbe: false)], limit: bytes.count, bytes: bytes, headers: ["Content-Length": String(bytes.count)])
+        try await start(exact); let exactCount = state.recorded.filter { $0 == "GET" }.count
+        let installed = try await probe(exact); try assertInstalled(installed, bytes: bytes)
+        XCTAssertEqual(installed["warnings"] as? [[String: String]], [])
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(state.recorded.filter { $0 == "GET" }.count, exactCount + 1)
+        // Present-CAS retains the displaced inode at the engine's first owned
+        // preservation slot and leaves its lock; no journal or staging may remain.
+        let preservedName = ".mindwtr-preserved-" + String(hash(Data(source.path.utf8)).prefix(32)) + "-0"
+        let lockName = ".mindwtr-attachment-installer.lock", preserved = managed.appendingPathComponent(preservedName)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path).sorted(), (managedBefore + [preservedName, lockName]).sorted())
+        XCTAssertEqual(try Data(contentsOf: preserved), local); XCTAssertEqual(try inode(preserved), originalInode)
+        XCTAssertEqual(try Data(contentsOf: managed.appendingPathComponent(lockName)), Data())
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), cacheBefore)
+        XCTAssertFalse(state.recorded.contains { !["HEAD", "GET"].contains($0) })
+        XCTAssertTrue(state.cloudAuthorized, "Cloud requests carry the exact synthetic Bearer authorization"); await exact.close()
+        let log = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)
+        let markers = log.split(separator: "\n").filter { $0.contains("v1.3.5/cloud-host-response-limit") }
+        XCTAssertEqual(markers.count, 7)
+        for marker in markers {
+            XCTAssertEqual(try object(String(marker))["context"] as? [String: String], ["releaseCheck": "v1.3.5/cloud-host-response-limit", "operation": "response", "outcome": "refused"])
+        }
+        XCTAssertFalse(log.contains(hostname)); XCTAssertFalse(log.contains(source.absoluteString))
+        XCTAssertFalse(log.contains("Synthetic private download.bin")); XCTAssertFalse(log.contains("synthetic-fixture-token-395"))
     }
 
     func testMissingLocalDeclaredStreamedAndDishonestCapsKeepPendingDataAndColdRetry() async throws {

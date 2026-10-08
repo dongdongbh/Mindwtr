@@ -328,6 +328,7 @@ export const ruOverrides: Record<string, string> = {
         'attachments.addLink': 'Добавить ссылку',
         'attachments.open': 'Открыть',
         'attachments.download': 'Скачать',
+        "attachments.finishDraftBeforeChanges": "Сохраните или отмените этот черновик, прежде чем вносить другие изменения во вложения.",
         'attachments.missing': 'Отсутствует файл',
         'attachments.downloadConflict': 'Это вложение изменилось во время загрузки. Локальный файл сохранён. Повторите синхронизацию, чтобы устранить конфликт.',
         'attachments.unrecoverable': 'Это вложение больше недоступно в синхронизированном хранилище. Недействительная ссылка была удалена.',

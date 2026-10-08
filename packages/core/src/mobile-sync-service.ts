@@ -48,6 +48,7 @@ import {
   CLOUD_TOKEN_KEY,
   CLOUD_URL_KEY,
   DROPBOX_LAST_REV_KEY,
+  FAST_SYNC_STATE_KEY,
   SYNC_BACKEND_KEY,
   SYNC_PATH_BOOKMARK_KEY,
   SYNC_PATH_KEY,
@@ -85,7 +86,6 @@ const WEBDAV_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 30
 const WEBDAV_READ_RETRY_OPTIONS = { ...WEBDAV_RETRY_OPTIONS, shouldRetry: isRetryableWebdavReadError };
 const DROPBOX_RETRY_OPTIONS = { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 8000 };
 const SYNC_CONFIG_CACHE_TTL_MS = 30_000;
-const FAST_SYNC_STATE_KEY = '@mindwtr_fast_sync_state_v1';
 const LOCAL_SYNC_STATUS_KEY = '@mindwtr_local_sync_status_v1';
 
 type LocalSyncStatus = Pick<AppData['settings'], 'lastSyncAt' | 'lastSyncStatus' | 'lastSyncError' | 'lastSyncStats' | 'lastSyncHistory'>;
@@ -441,6 +441,8 @@ const CLOUDKIT_UNAVAILABLE: MobileSyncCloudKitPort = {
 };
 
 export type MobileSyncServiceHost<Lease> = {
+  /** Defaults to true. False leaves any later cycle to a fresh caller-owned invocation. */
+  allowQueuedFollowUp?: boolean;
   /** The device key-value store (React Native: AsyncStorage). */
   storage: SyncKeyValueStoragePort;
   /** Reads a secret sync key (`isSecretConfigKey`) from the keystore. */
@@ -477,6 +479,7 @@ export type MobileSyncServiceHost<Lease> = {
 };
 
 export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease>) => {
+  const allowQueuedFollowUp = host.allowQueuedFollowUp !== false;
   // Only a new host/service after native journal recovery may resume sync.
   let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
   const core: MobileSyncCoreFunctions = { ...CORE_FUNCTIONS, ...host.core };
@@ -1046,6 +1049,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     }
 
     private queueFollowUp(): void {
+      if (!allowQueuedFollowUp) return;
       this.requestFollowUp({
         syncPathOverride: this.syncPathOverride,
         manual: this.manual,
@@ -1060,6 +1064,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       delayMs: number,
       fileSyncLockBusyRetryAttempt = 0,
     ): void {
+      if (!allowQueuedFollowUp) return;
       this.requestFollowUpAfter(delayMs, {
         syncPathOverride: this.syncPathOverride,
         manual: this.manual,
@@ -2504,9 +2509,9 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       return { success: true, skipped: 'disabled' };
     }
     const wasInFlight = mobileSyncOrchestrator.getState().inFlight;
-    if (wasInFlight && options?.activationProbe) {
-      // The caller that owns this session-only config must observe its proof.
-      // Never leave transient credentials queued after returning a requeue result.
+    if (wasInFlight && (!allowQueuedFollowUp || options?.activationProbe)) {
+      // A caller-owned invocation cannot queue work beyond its current owner.
+      // A session-only activation config must also observe its own proof.
       return { success: true, skipped: 'requeued' };
     }
     const result = mobileSyncOrchestrator.run({

@@ -357,6 +357,7 @@ export const frOverrides: Record<string, string> = {
         'attachments.addLink': 'Ajouter un lien',
         'attachments.open': 'Ouvrir',
         'attachments.download': 'Télécharger',
+        "attachments.finishDraftBeforeChanges": "Enregistrez ou abandonnez ce brouillon avant de modifier d’autres pièces jointes.",
         'attachments.missing': 'Fichier manquant',
         'attachments.downloadConflict': 'Cette pièce jointe a changé pendant le téléchargement. Le fichier local a été conservé. Relancez la synchronisation pour résoudre le conflit.',
         'attachments.unrecoverable': 'Cette pièce jointe n’est plus disponible dans le stockage synchronisé. Sa référence rompue a été supprimée.',

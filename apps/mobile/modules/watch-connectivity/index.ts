@@ -7,6 +7,7 @@ interface MindwtrWatchConnectivityNativeModule extends NativeModule {
   isWatchConnectivityAvailable?: () => boolean;
   activateWatchConnectivity?: () => Promise<void>;
   updateWatchApplicationContext?: (context: Record<string, unknown>) => Promise<void>;
+  settleWatchChecklist?: (id: string, outcome: string) => Promise<void>;
   addListener(
     eventName: 'onPendingCapture',
     listener: () => void,
@@ -18,6 +19,11 @@ const nativeModule = Platform.OS === 'ios'
   : null;
 
 const noOpSubscription = (): WatchConnectivitySubscription => ({ remove: () => undefined });
+
+export async function settleWatchChecklist(id: string, outcome: string): Promise<void> {
+  if (!nativeModule?.settleWatchChecklist) throw new Error('Watch settlement unavailable');
+  await nativeModule.settleWatchChecklist(id, outcome);
+}
 
 function withoutNullValues(value: unknown): unknown {
   if (value === null || value === undefined) return undefined;

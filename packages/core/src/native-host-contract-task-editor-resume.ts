@@ -13,7 +13,7 @@ import type { ChecklistItem, Task } from './types';
 import type { Attachment } from './types';
 import { mergeNativeTaskLinkHalf, readNativeAttachments, readNativeTaskLinkHalf, type NativeTaskLinkHalf } from './native-host-contract-attachments';
 import { mergeTaskDraftAttachments } from './attachment-editor-model';
-import { readNativeAttachmentDraftPayload, validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4 } from './native-attachment-draft';
+import { readNativeAttachmentDraftPayload, validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4, validateNativeAttachmentDraftLineageV5 } from './native-attachment-draft';
 import { captureNativeOwnedFileAddSaveData } from './native-host-contract-owned-file-save';
 
 const OWNED_GROUPS = [SCHEDULE, RECURRENCE, ASSOCIATIONS, LIFECYCLE] as const;
@@ -172,7 +172,7 @@ export function createOwnedTaskEditorResumeMethods(deps: ResumeDependencies) {
             const captured = captureNativeOwnedFileAddSaveData(input, 8 * 1024 * 1024);
             const exact = (value: unknown, fields: readonly string[]): value is Record<string, unknown> => record(value)
                 && Object.keys(value).length === fields.length && fields.every((field) => own(value, field));
-            if (!exact(captured, ['version', 'kind', 'checkpoint', 'ownedDraft']) || (captured.version !== 1 && captured.version !== 2) || captured.kind !== 'owned-editor-resume'
+            if (!exact(captured, ['version', 'kind', 'checkpoint', 'ownedDraft']) || (captured.version !== 1 && captured.version !== 2 && captured.version !== 3) || captured.kind !== 'owned-editor-resume'
                 || !exact(captured.checkpoint, ['version', 'sessionID', 'taskID', 'generation', 'payloadJSON']))
                 return fail('INVALID_INPUT', 'An exact owned editor checkpoint and lineage are required');
             const checkpoint = captured.checkpoint;
@@ -183,7 +183,7 @@ export function createOwnedTaskEditorResumeMethods(deps: ResumeDependencies) {
                 || typeof checkpoint.payloadJSON !== 'string') return fail('INVALID_INPUT', 'Invalid owned editor checkpoint');
             let opening: NativeTaskEditorResumeCheck, attachments: NativeTaskLinkHalf;
             try {
-                const lineage = (captured.version === 2 ? validateNativeAttachmentDraftLineageV4 : validateNativeAttachmentDraftLineageV3)(captured.ownedDraft);
+                const lineage = (captured.version === 3 ? validateNativeAttachmentDraftLineageV5 : captured.version === 2 ? validateNativeAttachmentDraftLineageV4 : validateNativeAttachmentDraftLineageV3)(captured.ownedDraft);
                 if (!record(captured.ownedDraft) || !Array.isArray(captured.ownedDraft.priorOperations)
                     || checkpoint.generation < captured.ownedDraft.priorOperations.length + 1
                     || checkpoint.taskID !== lineage.taskID || checkpoint.payloadJSON !== lineage.payloadJSON)

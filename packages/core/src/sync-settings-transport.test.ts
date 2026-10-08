@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
+import { runSerializedSyncDocumentOperation } from './data-transfer-transaction';
 import { createSyncSettingsTransport, SyncSettingsWriteError, type SyncSettingsSyncResult, type SyncSettingsToast, type SyncSettingsTransportHost } from './sync-settings-transport';
 import { SYNC_BACKEND_KEY, SYNC_PATH_BOOKMARK_KEY, SYNC_PATH_KEY, WEBDAV_PASSWORD_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from './sync-storage-keys';
 
@@ -221,6 +222,90 @@ describe('sync settings transport', () => {
         expect(transport.getProven()).toEqual({ backend: 'webdav', cloudProvider: 'selfhosted', pending: false });
     });
 
+    it('refuses Off during an unfinished encryption change without losing the saved target or announcing Off', async () => {
+        const { transport, storage, host, toasts } = setup([]);
+        storage.set(SYNC_BACKEND_KEY, 'webdav');
+        storage.set(WEBDAV_URL_KEY, 'https://dav.example.com');
+        await transport.load().done;
+        const params = host.params();
+        host.params = () => params;
+        host.encryption.getStatus = async () => ({ state: 'off', incompleteTransition: 'enable' });
+        host.encryption.getIncompleteTransition = async () => 'enable';
+        const setItem = vi.spyOn(host.storage, 'setItem');
+        const reset = vi.spyOn(params, 'resetSyncStatusForBackendSwitch');
+        const logged = vi.spyOn(host, 'logInfo');
+        await expect(transport.handleSelectSyncBackend('off')).rejects.toThrow('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE');
+        expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+        expect(setItem).not.toHaveBeenCalled();
+        expect(reset).not.toHaveBeenCalled();
+        expect(transport.getState().syncBackend).toBe('webdav');
+        expect(transport.getProven()).toEqual({ backend: 'webdav', cloudProvider: 'selfhosted', pending: false });
+        expect(toasts).toContainEqual(expect.objectContaining({
+            tone: 'warning', message: 'settings.syncEncryptionErrorTransitionIncomplete',
+        }));
+        expect(logged).toHaveBeenCalledWith('Sync Off refused during incomplete encryption transition', {
+            scope: 'sync-settings', force: true, extra: {
+                releaseCheck: 'v1.3.5/sync-encryption-off-guard', operation: 'select-off', outcome: 'refused',
+            },
+        });
+    });
+
+    it.each(['status', 'journal'] as const)('fails closed when encryption %s cannot be read', async (unreadable) => {
+        const { transport, storage, host } = setup([]);
+        storage.set(SYNC_BACKEND_KEY, 'webdav');
+        await transport.load().done;
+        const params = host.params();
+        host.params = () => params;
+        if (unreadable === 'status') host.encryption.getStatus = async () => { throw new Error('status unavailable'); };
+        else host.encryption.getIncompleteTransition = async () => { throw new Error('journal unavailable'); };
+        const setItem = vi.spyOn(host.storage, 'setItem');
+        const reset = vi.spyOn(params, 'resetSyncStatusForBackendSwitch');
+        await expect(transport.handleSelectSyncBackend('off')).rejects.toBeInstanceOf(SyncSettingsWriteError);
+        expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+        expect(setItem).not.toHaveBeenCalled();
+        expect(reset).not.toHaveBeenCalled();
+        expect(transport.getState().syncBackend).toBe('webdav');
+    });
+
+    it('keeps the original refusal when the forced diagnostic sink fails', async () => {
+        const { transport, storage, host } = setup([]);
+        storage.set(SYNC_BACKEND_KEY, 'webdav');
+        await transport.load().done;
+        host.encryption.getStatus = async () => ({ state: 'off', incompleteTransition: 'enable' });
+        host.encryption.getIncompleteTransition = async () => 'enable';
+        host.logInfo = async () => { throw new Error('diagnostic sink unavailable'); };
+        await expect(transport.handleSelectSyncBackend('off')).rejects.toThrow('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE');
+        expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+        expect(transport.getState().syncBackend).toBe('webdav');
+    });
+
+    it('checks the journal after earlier document work before writing Off', async () => {
+        const { transport, storage, host } = setup([]);
+        storage.set(SYNC_BACKEND_KEY, 'webdav');
+        await transport.load().done;
+        let release!: () => void;
+        let entered!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const started = new Promise<void>((resolve) => { entered = resolve; });
+        let incomplete = false;
+        host.encryption.getStatus = async () => ({ state: 'off', incompleteTransition: incomplete ? 'enable' : null });
+        host.encryption.getIncompleteTransition = async () => incomplete ? 'enable' : null;
+        const prior = runSerializedSyncDocumentOperation(async () => { entered(); await held; incomplete = true; });
+        await started;
+        const off = transport.handleSelectSyncBackend('off');
+        try {
+            expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+            expect(transport.getState().syncBackend).toBe('webdav');
+            release();
+            await prior;
+            await expect(off).rejects.toThrow('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE');
+            expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+        } finally {
+            release();
+            await off.catch(() => undefined);
+        }
+    });
+
     it('never echoes the password in a failure toast', async () => {
         const { transport, toasts } = setup([{ success: false, error: 'server said: bad password secret-pw for alice' }]);
         await transport.load().done;
@@ -229,27 +314,99 @@ describe('sync settings transport', () => {
         expect(JSON.stringify(toasts)).not.toContain('secret-pw');
     });
 
-    it('lets only the latest Off write restore the screen when a write fails', async () => {
+    it('does not let a queued Off request overwrite a later staged backend selection', async () => {
         const { transport, storage, host } = setup([]);
         storage.set(SYNC_BACKEND_KEY, 'webdav');
         storage.set(WEBDAV_URL_KEY, 'https://dav.example.com');
         await transport.load().done;
-        const setItem = host.storage.setItem;
-        let failFirst!: (error: Error) => void;
-        let calls = 0;
-        host.storage.setItem = async (key, value) => {
-            if (key === SYNC_BACKEND_KEY && calls++ === 0) {
-                return new Promise<void>((_resolve, reject) => { failFirst = reject; });
-            }
-            return setItem(key, value);
-        };
+        let release!: () => void;
+        let entered!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const started = new Promise<void>((resolve) => { entered = resolve; });
+        const prior = runSerializedSyncDocumentOperation(async () => { entered(); await held; });
+        await started;
+        const setItem = vi.spyOn(host.storage, 'setItem');
         const firstOff = transport.handleSelectSyncBackend('off');
         transport.handleSelectSyncBackend('file');
-        await transport.handleSelectSyncBackend('off');
-        expect(storage.get(SYNC_BACKEND_KEY)).toBe('off');
-        failFirst(new Error('late failure'));
-        await expect(firstOff).rejects.toBeInstanceOf(SyncSettingsWriteError);
-        expect(transport.getState().syncBackend).toBe('off');
-        expect(transport.getProven()).toMatchObject({ backend: 'off' });
+        try {
+            release();
+            await prior;
+            await expect(firstOff).rejects.toThrow('newer sync backend selection');
+            expect(setItem).not.toHaveBeenCalled();
+            expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+            expect(transport.getState().syncBackend).toBe('file');
+            expect(transport.getProven()).toEqual({ backend: 'webdav', cloudProvider: 'selfhosted', pending: true });
+        } finally {
+            release();
+            await firstOff.catch(() => undefined);
+        }
+    });
+
+    it('keeps a later selection visible while an admitted Off write commits, then activates that selection', async () => {
+        const { transport, storage, secrets, host, syncs } = setup([]);
+        storage.set(SYNC_BACKEND_KEY, 'webdav');
+        storage.set(WEBDAV_URL_KEY, 'https://dav.example.com');
+        storage.set(WEBDAV_USERNAME_KEY, 'alice');
+        secrets.set(WEBDAV_PASSWORD_KEY, 'secret');
+        await transport.load().done;
+        host.performSync = async (_path, options) => runSerializedSyncDocumentOperation(async () => {
+            syncs.push(options);
+            return { success: true };
+        });
+        let release!: () => void;
+        let entered!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const started = new Promise<void>((resolve) => { entered = resolve; });
+        const setItem = host.storage.setItem;
+        host.storage.setItem = async (key, value) => {
+            if (key === SYNC_BACKEND_KEY && value === 'off') { entered(); await held; }
+            await setItem(key, value);
+        };
+        const off = transport.handleSelectSyncBackend('off');
+        await started;
+        expect(transport.getState().syncBackend).toBe('webdav');
+        expect(transport.getProven()).toEqual({ backend: 'webdav', cloudProvider: 'selfhosted', pending: false });
+        const selected = transport.handleSelectSyncBackend('webdav');
+        try {
+            release();
+            await expect(off).rejects.toThrow('newer sync backend selection');
+            await selected;
+            expect(syncs.length).toBeGreaterThan(0);
+            expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+            expect(transport.getState().syncBackend).toBe('webdav');
+            expect(transport.getProven()).toEqual({ backend: 'webdav', cloudProvider: 'selfhosted', pending: false });
+        } finally {
+            release();
+            await off.catch(() => undefined);
+            await selected;
+        }
+    });
+
+    it('represents durable Off as proven while keeping a later incomplete selection staged', async () => {
+        const { transport, storage, host } = setup([]);
+        storage.set(SYNC_BACKEND_KEY, 'webdav');
+        await transport.load().done;
+        let release!: () => void;
+        let entered!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const started = new Promise<void>((resolve) => { entered = resolve; });
+        const setItem = host.storage.setItem;
+        host.storage.setItem = async (key, value) => {
+            if (key === SYNC_BACKEND_KEY && value === 'off') { entered(); await held; }
+            await setItem(key, value);
+        };
+        const off = transport.handleSelectSyncBackend('off');
+        await started;
+        expect(transport.handleSelectSyncBackend('file')).toBeUndefined();
+        try {
+            release();
+            await expect(off).rejects.toThrow('newer sync backend selection');
+            expect(storage.get(SYNC_BACKEND_KEY)).toBe('off');
+            expect(transport.getState().syncBackend).toBe('file');
+            expect(transport.getProven()).toEqual({ backend: 'off', cloudProvider: 'selfhosted', pending: true });
+        } finally {
+            release();
+            await off.catch(() => undefined);
+        }
     });
 });

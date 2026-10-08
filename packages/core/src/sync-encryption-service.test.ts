@@ -9,7 +9,9 @@ import {
 import { createSyncEncryptionStateStore, readSyncLocationScope } from './sync-encryption-local-state';
 import { SyncEncryptionCleanupDeferredError, createSyncEncryptionService } from './sync-encryption-service';
 import {
+    ATTACHMENT_PRESENCE_RECONCILE_KEY,
     CLOUD_PROVIDER_KEY,
+    FAST_SYNC_STATE_KEY,
     SYNC_BACKEND_KEY,
     SYNC_ENCRYPTION_KEY_KEY,
     SYNC_ENCRYPTION_STATE_KEY,
@@ -62,7 +64,11 @@ const createMemoryFolder = (initial: Record<string, Uint8Array>) => {
 
 type Lease = { id: string };
 
-const createHarness = (backend: Record<string, string> = {}, folder?: SyncEncryptionRemotePort | null) => {
+const createHarness = (
+    backend: Record<string, string> = {},
+    folder?: SyncEncryptionRemotePort | null,
+    options: { maxEncryptedArtifactBytes?: number; webdavUrl?: string; dropboxClientId?: string } = {},
+) => {
     const plain = new Map<string, string>(Object.entries(backend));
     const secrets = new Map<string, string>();
     const logs: Array<{ level: string; message: string; extra: Record<string, string>; force?: boolean }> = [];
@@ -104,6 +110,7 @@ const createHarness = (backend: Record<string, string> = {}, folder?: SyncEncryp
         isLeaseIdentityLostError: (error: unknown) => error instanceof Error && error.name === 'LeaseIdentityLost',
     };
     const service = createSyncEncryptionService<Lease>({
+        maxEncryptedArtifactBytes: options.maxEncryptedArtifactBytes,
         storage,
         state,
         crypto: fastCrypto,
@@ -113,17 +120,42 @@ const createHarness = (backend: Record<string, string> = {}, folder?: SyncEncryp
         parseWebdavXml: () => {
             throw new Error('no XML in this test');
         },
-        loadWebDavConfig: async () => null,
+        loadWebDavConfig: async () => options.webdavUrl ? { url: options.webdavUrl } : null,
         webDavRequestOptions: () => ({}),
-        getDropboxClientId: async () => '',
+        getDropboxClientId: async () => options.dropboxClientId ?? '',
         runDropboxAuthorized: (_clientId, operation) => operation('token'),
         fileSync,
     });
     const transitionLines = () => logs.filter((line) => line.message.includes('transition'));
-    return { plain, secrets, logs, state, fileSync, service, transitionLines };
+    return { plain, secrets, logs, storage, state, fileSync, service, transitionLines };
 };
 
 describe('sync encryption service', () => {
+    it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+        'rejects invalid host capacity %s at construction', (capacity) => {
+            expect(() => createHarness({}, undefined, { maxEncryptedArtifactBytes: capacity }))
+                .toThrow('maxEncryptedArtifactBytes');
+        },
+    );
+
+    it('binds the host capacity to WebDAV only, preserving uncapped File Sync and Dropbox', async () => {
+        const file = createMemoryFolder({ 'data.json': encode({ tasks: ['more than ten bytes'] }) });
+        const cap = 80;
+        const harness = createHarness(
+            { [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync' },
+            file.port,
+            { maxEncryptedArtifactBytes: cap, webdavUrl: 'https://example.com/data.json', dropboxClientId: 'app' },
+        );
+        const webdav = await harness.service.__testUtils.createWebdavRemotePort(null);
+        const dropbox = await harness.service.__testUtils.createDropboxRemotePort(null);
+        expect(webdav.maxEncryptedArtifactBytes).toBe(cap);
+        expect(dropbox.maxEncryptedArtifactBytes).toBeUndefined();
+
+        await harness.service.enableSyncEncryption('correct horse');
+        expect(file.files.has('data.json.enc')).toBe(true);
+        expect(file.files.get('data.json.enc')!.bytes.length).toBeGreaterThan(cap);
+    });
+
     it('manages the key locally before any backend exists, and logs the transition forced', async () => {
         const { plain, secrets, service, transitionLines } = createHarness();
 
@@ -268,6 +300,114 @@ describe('sync encryption service', () => {
         expect(isPlaintextSyncArtifact(folder.files.get('data.json')!.bytes)).toBe(true);
         await expect(service.probeSyncLocationCiphertext()).resolves.toBe('mixed');
         await expect(service.probeSyncLocationCiphertext({ full: true })).resolves.toBe('mixed');
+    });
+
+    it('invalidates both completed-cycle proofs before a whole Recheck clears quarantine', async () => {
+        const scope = '["file","/sync"]';
+        const folder = createMemoryFolder({ 'data.json': encode({ tasks: [] }) });
+        const { plain, service, storage, state, logs } = createHarness({
+            [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync',
+            [SYNC_ENCRYPTION_STATE_KEY]: JSON.stringify({ state: 'off', partlyEncryptedScope: scope }),
+            [FAST_SYNC_STATE_KEY]: 'old completed cycle',
+            [ATTACHMENT_PRESENCE_RECONCILE_KEY]: 'old completed attachment pass',
+        }, folder.port);
+        const removed: string[] = [];
+        const remove = storage.removeItem;
+        vi.spyOn(storage, 'removeItem').mockImplementation(async (key) => {
+            if (key !== SYNC_ENCRYPTION_STATE_KEY) expect(plain.has(SYNC_ENCRYPTION_STATE_KEY)).toBe(true);
+            else expect(removed).toEqual([FAST_SYNC_STATE_KEY, ATTACHMENT_PRESENCE_RECONCILE_KEY]);
+            removed.push(key);
+            await remove(key);
+        });
+
+        await expect(service.recheckPartlyEncryptedLocation()).resolves.toBe('plaintext');
+
+        expect(removed).toEqual([FAST_SYNC_STATE_KEY, ATTACHMENT_PRESENCE_RECONCILE_KEY, SYNC_ENCRYPTION_STATE_KEY]);
+        expect(plain.has(SYNC_ENCRYPTION_STATE_KEY)).toBe(false);
+        await expect(state.isSyncEncryptionPostureUnestablished(scope, false)).resolves.toBe(true);
+        expect(logs.filter((line) => line.extra.releaseCheck === 'v1.3.5/encryption-recheck-posture')).toEqual([
+            expect.objectContaining({ force: true, extra: {
+                kind: 'recheck', phase: 'end', outcome: 'ok', releaseCheck: 'v1.3.5/encryption-recheck-posture',
+            } }),
+        ]);
+    });
+
+    it.each([FAST_SYNC_STATE_KEY, ATTACHMENT_PRESENCE_RECONCILE_KEY])(
+        'retains quarantine when removing %s fails, then allows a complete retry', async (failed) => {
+            const quarantine = JSON.stringify({ state: 'off', partlyEncryptedScope: '["file","/sync"]' });
+            const folder = createMemoryFolder({ 'data.json': encode({ tasks: [] }) });
+            const { plain, service, storage, state, logs } = createHarness({
+                [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync', [SYNC_ENCRYPTION_STATE_KEY]: quarantine,
+                [FAST_SYNC_STATE_KEY]: 'old completed cycle',
+                [ATTACHMENT_PRESENCE_RECONCILE_KEY]: 'old completed attachment pass',
+            }, folder.port);
+            const remove = storage.removeItem;
+            const removals = vi.spyOn(storage, 'removeItem').mockImplementation(async (key) => {
+                if (key === failed) throw new Error('durable proof removal failed');
+                await remove(key);
+            });
+
+            await expect(service.recheckPartlyEncryptedLocation()).rejects.toThrow('durable proof removal failed');
+
+            expect(plain.get(SYNC_ENCRYPTION_STATE_KEY)).toBe(quarantine);
+            expect(state.syncEncryptionLocalState.read()?.partlyEncryptedScope).toBe('["file","/sync"]');
+            expect(plain.has(ATTACHMENT_PRESENCE_RECONCILE_KEY)).toBe(true);
+            expect(plain.has(FAST_SYNC_STATE_KEY)).toBe(failed === FAST_SYNC_STATE_KEY);
+            expect(removals).not.toHaveBeenCalledWith(SYNC_ENCRYPTION_STATE_KEY);
+            expect(logs.some((line) => line.extra.releaseCheck === 'v1.3.5/encryption-recheck-posture')).toBe(false);
+
+            removals.mockImplementation(remove);
+            await expect(service.recheckPartlyEncryptedLocation()).resolves.toBe('plaintext');
+            expect(plain.has(FAST_SYNC_STATE_KEY)).toBe(false);
+            expect(plain.has(ATTACHMENT_PRESENCE_RECONCILE_KEY)).toBe(false);
+            expect(plain.has(SYNC_ENCRYPTION_STATE_KEY)).toBe(false);
+        },
+    );
+
+    it('keeps both completed-cycle proofs and quarantine for a mixed Recheck', async () => {
+        const scope = '["file","/sync"]';
+        const folder = createMemoryFolder({ 'data.json': encode({ tasks: [] }), 'attachments/a.bin': encode('a') });
+        const { plain, service, storage, state, logs } = createHarness({
+            [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync',
+            [FAST_SYNC_STATE_KEY]: 'old completed cycle',
+            [ATTACHMENT_PRESENCE_RECONCILE_KEY]: 'old completed attachment pass',
+        }, folder.port);
+        const write = folder.port.write;
+        folder.port.write = async (name, bytes, version) => {
+            if (name === 'data.json.enc') throw new Error('the document write stopped');
+            await write(name, bytes, version);
+        };
+        await expect(service.enableSyncEncryption('correct horse')).rejects.toThrow('the document write stopped');
+        await service.abandonSyncEncryptionTransition();
+        expect(state.syncEncryptionLocalState.read()?.partlyEncryptedScope).toBe(scope);
+        const before = new Map(plain);
+        const removals = vi.spyOn(storage, 'removeItem');
+
+        await expect(service.recheckPartlyEncryptedLocation()).resolves.toBe('mixed');
+
+        expect(plain).toEqual(before);
+        expect(removals).not.toHaveBeenCalled();
+        expect(logs.some((line) => line.extra.releaseCheck === 'v1.3.5/encryption-recheck-posture')).toBe(false);
+    });
+
+    it('does not fail a completed proof invalidation when its diagnostic rejects', async () => {
+        const folder = createMemoryFolder({ 'data.json': encode({ tasks: [] }) });
+        const { plain, service, state } = createHarness({
+            [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync',
+            [SYNC_ENCRYPTION_STATE_KEY]: JSON.stringify({ state: 'off', partlyEncryptedScope: '["file","/sync"]' }),
+            [FAST_SYNC_STATE_KEY]: 'old completed cycle',
+            [ATTACHMENT_PRESENCE_RECONCILE_KEY]: 'old completed attachment pass',
+        }, folder.port);
+        const log = state.logSyncEncryptionEvent;
+        vi.spyOn(state, 'logSyncEncryptionEvent').mockImplementation((event, extra, options) => (
+            extra.releaseCheck === 'v1.3.5/encryption-recheck-posture'
+                ? Promise.reject(new Error('the diagnostic sink stopped')) : log(event, extra, options)
+        ));
+
+        await expect(service.recheckPartlyEncryptedLocation()).resolves.toBe('plaintext');
+        expect(plain.has(FAST_SYNC_STATE_KEY)).toBe(false);
+        expect(plain.has(ATTACHMENT_PRESENCE_RECONCILE_KEY)).toBe(false);
+        expect(plain.has(SYNC_ENCRYPTION_STATE_KEY)).toBe(false);
     });
 
     it('"Not now" keeps the no-key state', async () => {

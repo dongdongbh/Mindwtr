@@ -10,7 +10,8 @@ import { flushPendingSave, getSaveSnapshotGeneration, getStorageAdapter, setStor
 import type { AppData, Area, Person, Project, Task } from './types';
 
 const AT = '2026-09-01T00:00:00.000Z';
-const DELETED_AT = '2026-09-02T00:00:00.000Z';
+// Relative: a fixed deletion date passes the 90-day tombstone purge and the deleted row is gone on load.
+const DELETED_AT = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
     id, title: id, status: 'next', tags: [], contexts: [], createdAt: AT, updatedAt: AT, rev: 1, revBy: 'device-a', ...extra,
 });

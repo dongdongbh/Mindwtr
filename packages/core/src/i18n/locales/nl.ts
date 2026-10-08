@@ -4,6 +4,7 @@ export const nlOverrides: Record<string, string> = {
     'task.doneCompletedAtOutcomeUnknown': "De wijziging van het voltooiingstijdstip kon niet worden bevestigd. Start Mindwtr opnieuw om opgeslagen gegevens opnieuw te laden.",
     'task.destinationOutcomeUnknown': "De wijziging van de bestemming kon niet worden bevestigd. Start Mindwtr opnieuw om opgeslagen gegevens opnieuw te laden.",
     'task.projectNextActionOutcomeUnknown': "De volgende actie kon niet worden bevestigd. Start Mindwtr opnieuw om opgeslagen gegevens opnieuw te laden.",
+    "attachments.finishDraftBeforeChanges": "Sla dit concept op of verwerp het voordat je andere wijzigingen aan bijlagen maakt.",
     "attachments.linkBatchHint": "Plak één link per regel. Gebruik \"Titel | URL\" voor labels.",
     "attachments.invalidLinkLine": "Regel {{line}}: voer een geldige link in.",
     'attachments.linkFolder': 'Map koppelen…',

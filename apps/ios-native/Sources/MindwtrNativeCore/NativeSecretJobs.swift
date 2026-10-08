@@ -17,6 +17,7 @@ final class NativeSecretJobs: @unchecked Sendable {
     private var service = "app"
     #if DEBUG
     private let faults: HostIOFaults?
+    var beforeRead: ((String) throws -> Void)?
     #endif
 
     private final class Job {
@@ -121,6 +122,9 @@ final class NativeSecretJobs: @unchecked Sendable {
         }
     }
     private func read(_ account: String) throws -> String? {
+        #if DEBUG
+        try beforeRead?(account)
+        #endif
         for alias in ["no-auth", "auth", "legacy"] {
             var input = query(account, alias: alias)
             input[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -191,6 +195,30 @@ final class NativeSecretJobs: @unchecked Sendable {
     }
     /// Do not abort accepted work: finally compensation still runs in this runtime.
     func drain() { worker.sync {} }
+    /// The selected attachment owner compares the same read-only account at its
+    /// serialized mutation boundaries. This does not lock external Keychain writers.
+    func readCloudTokenForAttachmentOwner(cancellation: NativeAttachmentCancellation) throws -> String? {
+        try readForAttachmentOwner("mindwtr_cloud_token", cancellation: cancellation)
+    }
+    func readWebDavPasswordForAttachmentOwner(cancellation: NativeAttachmentCancellation) throws -> String? {
+        try readForAttachmentOwner("mindwtr_webdav_password", cancellation: cancellation)
+    }
+    func readEncryptionKeyForAttachmentOwner(cancellation: NativeAttachmentCancellation) throws -> String? {
+        try readForAttachmentOwner("mindwtr_sync_encryption_key_v1", cancellation: cancellation)
+    }
+    private func readForAttachmentOwner(_ account: String, cancellation: NativeAttachmentCancellation) throws -> String? {
+        try cancellation.check()
+        return try worker.sync {
+            condition.lock(); let open = accepting; condition.unlock()
+            guard open else { throw HostFailure("Secure storage bridge is closed") }
+            try cancellation.check()
+            let value = try read(account)
+            try cancellation.check()
+            condition.lock(); let stillOpen = accepting; condition.unlock()
+            guard stillOpen else { throw HostFailure("Secure storage bridge is closed") }
+            return value
+        }
+    }
     func shutdown() {
         condition.lock(); accepting = false; wake = nil; let current = Array(jobs.values); condition.unlock()
         current.forEach { $0.token.cancel() }

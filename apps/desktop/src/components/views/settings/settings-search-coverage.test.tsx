@@ -311,6 +311,8 @@ const integrationsProps: Parameters<typeof SettingsIntegrationsPage>[0] = {
     obsidianVaultPath: '',
     obsidianEnabled: true,
     obsidianScanFoldersText: '',
+    obsidianRequiredInlineTag: '',
+    onObsidianRequiredInlineTagChange: () => undefined,
     obsidianInboxFile: '',
     obsidianTaskNotesIncludeArchived: false,
     obsidianDataviewMetadataEnabled: false,

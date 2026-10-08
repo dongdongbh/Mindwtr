@@ -138,7 +138,9 @@ private struct MindwtrFocusView: View {
 private struct MindwtrFocusTaskView: View {
     @EnvironmentObject private var model: MindwtrWatchConnectivityModel
     @Environment(\.dismiss) private var dismiss
-    let task: MindwtrWatchFocusTask
+    @State private var task: MindwtrWatchFocusTask
+
+    init(task: MindwtrWatchFocusTask) { _task = State(initialValue: task) }
 
     var body: some View {
         ScrollView {
@@ -147,6 +149,34 @@ private struct MindwtrFocusTaskView: View {
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .privacySensitive()
+                if let description = task.description, !description.isEmpty {
+                    Text(description)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .privacySensitive()
+                }
+                if task.detailsUnavailable == true {
+                    Text("These details are too large for the Watch. Open this task on your iPhone.")
+                        .font(.footnote)
+                }
+                if let checklist = task.checklist, !checklist.isEmpty {
+                    Text("Checklist")
+                        .font(.headline)
+                    Text("\(checklist.filter(\.isCompleted).count) / \(checklist.count)")
+                        .font(.caption)
+                    ForEach(Array(checklist.enumerated()), id: \.offset) { _, item in
+                        Toggle(isOn: Binding(
+                            get: { item.isCompleted },
+                            set: { model.setChecklist(task: task, item: item, completed: $0) }
+                        )) {
+                            Text(item.title).privacySensitive()
+                        }
+                        .disabled(task.createdAt == nil || checklist.filter { $0.id == item.id && $0.title == item.title }.count != 1)
+                        .frame(minHeight: 44)
+                    }
+                }
+                if let message = model.statusMessage {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                }
                 Button {
                     model.complete(task: task)
                     dismiss()
@@ -164,6 +194,9 @@ private struct MindwtrFocusTaskView: View {
             }
         }
         .navigationTitle("Task")
+        .onAppear { task = model.displayedTask(task) }
+        .onChange(of: model.snapshot) { _, _ in task = model.displayedTask(task) }
+        .onChange(of: model.checklistRevision) { _, _ in task = model.displayedTask(task) }
     }
 }
 

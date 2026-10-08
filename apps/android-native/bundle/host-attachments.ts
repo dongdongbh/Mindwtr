@@ -13,12 +13,20 @@
  * (S4), the streamed upload (a WebDAV or cloud upload sends its bytes in one PUT, as RN does where expo has no upload task).
  */
 // Load this leaf directly across deferred store imports and the iOS core alias.
-import { createMobileAttachmentAvailability } from '../../../packages/core/src/mobile-attachment-availability';
+import { createMobileAttachmentAvailability, getAttachmentDownloadFileName, getAttachmentDownloadIdentity } from '../../../packages/core/src/mobile-attachment-availability';
+import type { MobileAttachmentCommonHost } from '../../../packages/core/src/mobile-attachment-common';
+import { readNativeAttachments } from '../../../packages/core/src/native-host-contract-attachments';
+import { bytesToBase64 } from '../../../packages/core/src/base64-bytes';
+import { createSyncSecretVault, getSecureConfigValueReadOnly } from '../../../packages/core/src/sync-secret-storage';
+import { createSyncEncryptionStateStore } from '../../../packages/core/src/sync-encryption-local-state';
+import { normalizeCloudProvider } from '../../../packages/core/src/sync-client-helpers';
+import { SyncEncryptionTransitionIncompleteError } from '../../../packages/core/src/sync-encryption';
 import type { MobileAttachmentCleanupHost } from '../../../packages/core/src/mobile-attachment-cleanup';
 import {
     CLOUD_ALLOW_INSECURE_HTTP_KEY, CLOUD_PROVIDER_KEY, CLOUD_URL_KEY,
     SYNC_BACKEND_KEY, SYNC_PATH_BOOKMARK_KEY, SYNC_PATH_KEY,
     WEBDAV_ALLOW_INSECURE_HTTP_KEY, WEBDAV_ALLOW_WEAK_FINGERPRINT_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY,
+    WEBDAV_PASSWORD_KEY, CLOUD_TOKEN_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_ENCRYPTION_KEY_KEY,
 } from '../../../packages/core/src/sync-storage-keys';
 import {
     createMobileAttachmentBackends,
@@ -54,6 +62,7 @@ export type NativeAttachmentBindings = {
     dropboxAuth?: Pick<MobileSyncDropboxAuthPort, 'getValidAccessToken' | 'forceRefreshAccessToken'>;
     getDropboxClientId?: () => Promise<string>;
     maxWebdavBufferedUploadBytes?: number;
+    maxCloudBufferedUploadBytes?: number;
     retireLocalAttachment?: MobileAttachmentCleanupHost['retireLocalAttachment'];
 };
 
@@ -88,7 +97,8 @@ export const nativeFileChannels = (): NativeFileChannels | null => {
     return { files, installer, directories: JSON.parse(text) as { document: string; cache: string }, deleteNow };
 };
 
-const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels: NativeFileChannels) => {
+const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels: NativeFileChannels,
+    options: { installSha256Provider?: boolean; preparePlaintextDownload?: MobileAttachmentCommonHost['preparePlaintextDownload'] } = {}) => {
     const call = channels.files;
     const { directories } = channels;
     // expo-file-system as RN's attachment-sync-utils.ts binds it; URIs pass through as they are.
@@ -159,6 +169,7 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
         timersPaused: () => false,
         // No cancellable streamed upload here: core falls back to its bounded one-request PUT, as RN does without expo's task.
         uploads: { createUploadTask: () => null },
+        ...(options.preparePlaintextDownload ? { preparePlaintextDownload: options.preparePlaintextDownload } : {}),
     });
 
     const availability = createMobileAttachmentAvailability({
@@ -177,12 +188,16 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
     };
     // Install the global provider only after every optional binding constructed
     // successfully. A refused local capability leaves the prior provider intact.
-    setSha256HexProvider(async (bytes) => await call({ op: 'sha256' }, bytes) as string);
-    return { fs, files, common, installer, contractHost };
+    if (options.installSha256Provider !== false) setSha256HexProvider(async (bytes) => await call({ op: 'sha256' }, bytes) as string);
+    return { fs, files, common, installer, contractHost, availability };
 };
 
 export const createNativeAttachments = (bindings: NativeAttachmentBindings, channels: NativeFileChannels) => {
-    const { fs, files, common, installer, contractHost } = bindNativeAttachmentFiles(bindings, channels);
+    const { fs, files, common, installer, contractHost, availability } = bindNativeAttachmentFiles(bindings, channels, {
+        // Selected existing-file preparation may verify bytes, but never
+        // acquire scratch or report a prepared remote download through this port.
+        preparePlaintextDownload: unavailable('Existing attachment preparation download'),
+    });
 
     const backends = createMobileAttachmentBackends({
         fs,
@@ -191,6 +206,7 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         installer,
         log: { sanitize: (message) => bindings.log.sanitize(message) },
         maxWebdavBufferedUploadBytes: bindings.maxWebdavBufferedUploadBytes,
+        maxCloudBufferedUploadBytes: bindings.maxCloudBufferedUploadBytes,
     });
 
     /** Sync's attachment passes (core's mobile sync service), as RN's lib/sync-service.ts binds them. */
@@ -206,10 +222,266 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         runCleanup: (options) => runMobileAttachmentCleanup(options, { fs, retireLocalAttachment: bindings.retireLocalAttachment }),
     };
 
-    return { contractHost, syncPort };
+    return { contractHost, syncPort, prepareAttachmentAvailableDetailed: availability.prepareAttachmentAvailableDetailed };
 };
 
 export type NativeAttachments = ReturnType<typeof createNativeAttachments>;
+
+const TASK_DOWNLOAD_BYTES = 8 * 1024 * 1024;
+const taskDownloadInvalid = (): never => { throw new Error('INVALID_INPUT: Invalid Task attachment preparation'); };
+const taskDownloadObject = (json: unknown, fields?: readonly string[]): Record<string, unknown> => {
+    if (typeof json !== 'string' || json.length > TASK_DOWNLOAD_BYTES
+        || new TextEncoder().encode(json).byteLength > TASK_DOWNLOAD_BYTES) return taskDownloadInvalid();
+    let value: unknown;
+    try { value = JSON.parse(json); } catch { return taskDownloadInvalid(); }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return taskDownloadInvalid();
+    if (fields && (Object.keys(value).length !== fields.length || fields.some((name) => !Object.hasOwn(value, name)))) return taskDownloadInvalid();
+    return value as Record<string, unknown>;
+};
+const taskDownloadText = (value: unknown, limit: number): string => {
+    if (typeof value !== 'string' || !value || value.length > limit
+        || new TextEncoder().encode(value).byteLength > limit) return taskDownloadInvalid();
+    return value;
+};
+const taskDownloadCapture = (value: Record<string, unknown>) => {
+    if (value.version !== 1) return taskDownloadInvalid();
+    const taskID = taskDownloadText(value.taskID, 500);
+    const beforePayloadJSON = taskDownloadText(value.beforePayloadJSON, 1_000_000);
+    const request = taskDownloadObject(value.requestJSON, ['version', 'requestId', 'sessionID', 'generation', 'attachmentId', 'identity']);
+    const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+    if (request.version !== 1 || typeof request.requestId !== 'string' || !uuid.test(request.requestId)
+        || typeof request.sessionID !== 'string' || !uuid.test(request.sessionID)
+        || !Number.isSafeInteger(request.generation) || (request.generation as number) < 0) return taskDownloadInvalid();
+    const attachmentId = taskDownloadText(request.attachmentId, 2000);
+    const identity = taskDownloadText(request.identity, 1_000_000);
+    const payload = taskDownloadObject(beforePayloadJSON);
+    const attachments = readNativeAttachments(payload.attachments);
+    if (payload.version !== 2 || payload.taskID !== taskID || payload.attachmentsOwned !== true
+        || !readNativeAttachments(payload.attachmentsBase) || !attachments) return taskDownloadInvalid();
+    const selected = attachments.filter((attachment) => attachment.id === attachmentId);
+    if (selected.length !== 1 || selected[0].kind !== 'file' || selected[0].deletedAt !== undefined
+        || !selected[0].cloudKey || getAttachmentDownloadIdentity(selected[0]) !== identity) return taskDownloadInvalid();
+    return { requestId: request.requestId, attachment: selected[0] };
+};
+
+/** Pure route binding, before native installs any submission lease. */
+export const prepareNativeTaskAttachmentAvailabilityPreflight = async (json: string) => {
+    const value = taskDownloadObject(json);
+    const cloud = Object.hasOwn(value, 'cloudURL');
+    const input = taskDownloadObject(json, ['version', 'taskID', 'beforePayloadJSON', 'requestJSON', 'managedDirectoryURI',
+        ...(cloud ? ['cloudURL', 'cloudProvider', 'encryptionStateJSON'] : ['webdavURL'])]);
+    const captured = taskDownloadCapture(input);
+    const url = taskDownloadText(cloud ? input.cloudURL : input.webdavURL, 16 * 1024);
+    if (cloud) {
+        if (!taskDownloadSelfHostedProvider(input.cloudProvider)) return taskDownloadInvalid();
+        await assertNativeSelfHostedAttachmentEncryptionAdmission(input.encryptionStateJSON);
+    }
+    const directory = taskDownloadText(input.managedDirectoryURI, 16 * 1024);
+    if (!directory.startsWith('file:///') || !directory.endsWith('/')) return taskDownloadInvalid();
+    return { version: 1, requestId: captured.requestId, attachmentJSON: JSON.stringify(captured.attachment),
+        initialURL: `${cloud ? getCloudBaseUrl(url) : getBaseSyncUrl(url)}/${captured.attachment.cloudKey}`,
+        targetURI: `${directory}${getAttachmentDownloadFileName(captured.attachment)}` };
+};
+
+const taskDownloadSelfHostedProvider = (value: unknown): boolean => {
+    if (value !== null && typeof value !== 'string') return false;
+    const provider = (value as string | null)?.trim() || null;
+    return (provider === null || provider === 'selfhosted') && normalizeCloudProvider(provider) === 'selfhosted';
+};
+
+const assertSelfHostedAttachmentEncryptionAdmission = async (encryption: ReturnType<typeof createSyncEncryptionStateStore>) => {
+    const status = await encryption.getSyncEncryptionStatus();
+    const incomplete = await encryption.getIncompleteSyncEncryptionTransition();
+    if ((status.incompleteTransition ?? null) !== incomplete) throw new Error('Self-hosted encryption admission is unavailable');
+    if (incomplete) throw new SyncEncryptionTransitionIncompleteError(incomplete);
+};
+
+/** Captured sidecar admission before native proves any relocated local bytes. */
+export const assertNativeSelfHostedAttachmentEncryptionAdmission = async (raw: unknown) => {
+    if (raw !== null && typeof raw !== 'string') return taskDownloadInvalid();
+    const refuse = async (): Promise<never> => { throw new Error('Self-hosted attachment authority is unavailable'); };
+    const encryption = createSyncEncryptionStateStore({
+        storage: { getItem: async (name) => name === SYNC_ENCRYPTION_STATE_KEY ? raw as string | null : refuse(),
+            setItem: refuse, removeItem: refuse },
+        secureConfig: { getSecureConfigValue: refuse, setSecureConfigValue: refuse, deleteSecureConfigValue: refuse },
+        readActiveScope: refuse, log: { info: () => {}, warn: () => {} },
+    });
+    await assertSelfHostedAttachmentEncryptionAdmission(encryption);
+};
+
+export type NativeTaskAttachmentPreparationBindings = {
+    rawConfigJSON: string;
+    getLegacyValue(key: string): Promise<string | null>;
+    getSecret(account: string): Promise<string | null>;
+    crypto: SyncCryptoPrimitives;
+    prepareSource(metadataJSON: string, plaintextBase64: string): string;
+    fetch?: typeof fetch;
+};
+
+/** One selected invocation: no migration, global SHA replacement, sync or publication. */
+export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttachmentPreparationBindings, channels: NativeFileChannels) => {
+    const value = taskDownloadObject(bindings.rawConfigJSON);
+    const cloud = value.backend === 'cloud';
+    const raw = taskDownloadObject(bindings.rawConfigJSON, ['backend', 'url', cloud ? 'provider' : 'username', 'allowInsecureHttp', 'encryptionStateJSON']);
+    if (Object.values(raw).some((value) => value !== null && typeof value !== 'string')) return taskDownloadInvalid();
+    if (cloud && !taskDownloadSelfHostedProvider(raw.provider)) return taskDownloadInvalid();
+    const snapshot = new Map<string, string | null>([
+        [SYNC_BACKEND_KEY, raw.backend as string | null], [cloud ? CLOUD_URL_KEY : WEBDAV_URL_KEY, raw.url as string | null],
+        [cloud ? CLOUD_PROVIDER_KEY : WEBDAV_USERNAME_KEY, (cloud ? raw.provider : raw.username) as string | null],
+        [cloud ? CLOUD_ALLOW_INSECURE_HTTP_KEY : WEBDAV_ALLOW_INSECURE_HTTP_KEY, raw.allowInsecureHttp as string | null],
+        [SYNC_ENCRYPTION_STATE_KEY, raw.encryptionStateJSON as string | null],
+    ]);
+    const refuse = async (): Promise<never> => { throw new Error('Task attachment preparation capability is unavailable'); };
+    const legacy = new Map<string, Promise<string | null>>();
+    const secrets = new Map<string, Promise<string | null>>();
+    const storage: SyncKeyValueStoragePort = {
+        getItem: (name) => {
+            if (snapshot.has(name)) return Promise.resolve(snapshot.get(name)!);
+            if (![cloud ? CLOUD_TOKEN_KEY : WEBDAV_PASSWORD_KEY, SYNC_ENCRYPTION_KEY_KEY].includes(name)) return refuse();
+            if (!legacy.has(name)) legacy.set(name, Promise.resolve().then(() => bindings.getLegacyValue(name)));
+            return legacy.get(name)!;
+        }, setItem: refuse, removeItem: refuse,
+    };
+    const secretPort = {
+        isAvailable: async () => true,
+        getItem: (account: string) => {
+            if (![cloud ? 'mindwtr_cloud_token' : 'mindwtr_webdav_password', 'mindwtr_sync_encryption_key_v1'].includes(account)) return refuse();
+            if (!secrets.has(account)) secrets.set(account, Promise.resolve().then(() => bindings.getSecret(account)));
+            return secrets.get(account)!;
+        }, setItem: refuse, deleteItem: refuse,
+    };
+    const vault = createSyncSecretVault(secretPort);
+    const secureConfig = { getSecureConfigValue: (name: string) => getSecureConfigValueReadOnly({ storage, secrets: secretPort, vault }, name),
+        setSecureConfigValue: refuse, deleteSecureConfigValue: refuse };
+    const encryption = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: refuse,
+        log: { info: () => {}, warn: () => {} } });
+    let sourceAttempted = false;
+    const { availability } = bindNativeAttachmentFiles({ storage, getSecureConfigValue: secureConfig.getSecureConfigValue,
+        crypto: bindings.crypto, fetch: bindings.fetch,
+        log: { info: () => {}, warn: () => {}, sanitize: () => 'Task attachment preparation is unavailable' },
+        encryption: { getSyncEncryptionMaterial: encryption.getSyncEncryptionMaterial, logSyncEncryptionEvent: async () => {} },
+    }, channels, { installSha256Provider: false, preparePlaintextDownload: async (input, bytes, signal) => {
+        if (signal?.aborted) throw signal.reason;
+        if (sourceAttempted || bytes.byteLength > TASK_DOWNLOAD_BYTES) return refuse();
+        sourceAttempted = true;
+        const metadataJSON = JSON.stringify({ version: 1, ...input });
+        if (new TextEncoder().encode(metadataJSON).byteLength > 64 * 1024) return refuse();
+        const result = bindings.prepareSource(metadataJSON, bytesToBase64(bytes));
+        if (typeof result !== 'string' || result.startsWith('!MindwtrNativeError:')) return refuse();
+        try { return JSON.parse(result); } catch { return refuse(); }
+    } });
+    return { prepareAttachmentAvailableDetailed: async (attachment: Parameters<NonNullable<typeof availability.prepareAttachmentAvailableDetailed>>[0], signal?: AbortSignal) => {
+        if (signal?.aborted) throw signal.reason;
+        if (cloud) await assertSelfHostedAttachmentEncryptionAdmission(encryption);
+        return availability.prepareAttachmentAvailableDetailed!(attachment, signal);
+    } };
+};
+
+/** Saved selfhosted relocated Project availability: read-only credentials and native local proof. */
+export const createNativeReadOnlySelfHostedAttachments = (
+    bindings: Pick<NativeTaskAttachmentPreparationBindings, 'getLegacyValue' | 'getSecret' | 'crypto' | 'fetch'> & {
+        getConfigValue(name: string): Promise<string | null>;
+    }, channels: NativeFileChannels, webdav = false,
+) => {
+    const refuse = async (): Promise<never> => { throw new Error('Self-hosted attachment authority is unavailable'); };
+    const configNames = [SYNC_BACKEND_KEY, SYNC_ENCRYPTION_STATE_KEY, ...(webdav
+        ? [WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY, WEBDAV_ALLOW_INSECURE_HTTP_KEY]
+        : [CLOUD_URL_KEY, CLOUD_PROVIDER_KEY, CLOUD_ALLOW_INSECURE_HTTP_KEY])];
+    const storage: SyncKeyValueStoragePort = {
+        getItem: (name) => configNames.includes(name) ? bindings.getConfigValue(name)
+            : [webdav ? WEBDAV_PASSWORD_KEY : CLOUD_TOKEN_KEY, SYNC_ENCRYPTION_KEY_KEY].includes(name) ? bindings.getLegacyValue(name) : refuse(),
+        setItem: refuse, removeItem: refuse,
+    };
+    const secrets = { isAvailable: async () => true,
+        getItem: (account: string) => [webdav ? 'mindwtr_webdav_password' : 'mindwtr_cloud_token', 'mindwtr_sync_encryption_key_v1'].includes(account)
+            ? bindings.getSecret(account) : refuse(), setItem: refuse, deleteItem: refuse };
+    const vault = createSyncSecretVault(secrets);
+    const secureConfig = { getSecureConfigValue: (name: string) => getSecureConfigValueReadOnly({ storage, secrets, vault }, name),
+        setSecureConfigValue: refuse, deleteSecureConfigValue: refuse };
+    const encryption = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: refuse,
+        log: { info: () => {}, warn: () => {} } });
+    const { contractHost, availability } = bindNativeAttachmentFiles({ storage,
+        getSecureConfigValue: secureConfig.getSecureConfigValue, crypto: bindings.crypto, fetch: bindings.fetch,
+        log: { info: () => {}, warn: () => {}, sanitize: () => 'Self-hosted attachment is unavailable' },
+        encryption: { getSyncEncryptionMaterial: encryption.getSyncEncryptionMaterial, logSyncEncryptionEvent: async () => {} },
+    }, channels, { installSha256Provider: false, preparePlaintextDownload: refuse });
+    const admit = async () => {
+        if (webdav ? await storage.getItem(SYNC_BACKEND_KEY) !== 'webdav'
+            : await storage.getItem(SYNC_BACKEND_KEY) !== 'cloud'
+                || !taskDownloadSelfHostedProvider(await storage.getItem(CLOUD_PROVIDER_KEY))) return refuse();
+        await assertSelfHostedAttachmentEncryptionAdmission(encryption);
+    };
+    return {
+        contractHost: { ...contractHost, ensureAttachmentAvailableDetailed: async (attachment: Parameters<typeof contractHost.ensureAttachmentAvailableDetailed>[0]) => {
+            await admit(); return contractHost.ensureAttachmentAvailableDetailed(attachment);
+        } },
+        prepareAttachmentAvailableDetailed: async (attachment: Parameters<NonNullable<typeof availability.prepareAttachmentAvailableDetailed>>[0]) => {
+            await admit(); return availability.prepareAttachmentAvailableDetailed!(attachment);
+        },
+    };
+};
+
+/** Close the selected input/result grammar around the existing shared policy. */
+export const prepareNativeTaskAttachmentAvailability = async (json: string,
+    bindings: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'>, channels: NativeFileChannels, signal: AbortSignal) => {
+    const input = taskDownloadObject(json, ['version', 'taskID', 'beforePayloadJSON', 'requestJSON', 'rawConfigJSON']);
+    const captured = taskDownloadCapture(input);
+    const selected = createNativeTaskAttachmentPreparation({ ...bindings, rawConfigJSON: taskDownloadText(input.rawConfigJSON, TASK_DOWNLOAD_BYTES) }, channels);
+    const result = await selected.prepareAttachmentAvailableDetailed(captured.attachment, signal);
+    const echo = { version: 1, requestId: captured.requestId, status: result.status };
+    if (result.status === 'prepared') return { ...echo, attachmentJSON: JSON.stringify(result.attachment),
+        sourceToken: result.sourceToken, sha256: result.sha256, size: result.size };
+    if (result.status === 'available' || result.status === 'unrecoverable') return { ...echo, attachmentJSON: JSON.stringify(result.attachment) };
+    return echo;
+};
+
+/** Ordinary saved Project download: prepare bytes without a Task/editor or a domain write. */
+export const nativeProjectFileAvailabilityInitialURL = (attachmentJSON: string, url: string, webdav = false): string => {
+    const attachment = readNativeAttachments([taskDownloadObject(attachmentJSON)])?.[0];
+    if (!attachment?.cloudKey || attachment.kind !== 'file' || typeof url !== 'string' || !url) return taskDownloadInvalid();
+    return `${webdav ? getBaseSyncUrl(url) : getCloudBaseUrl(url)}/${attachment.cloudKey}`;
+};
+
+export const prepareNativeProjectFileAvailability = async (json: string,
+    bindings: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'>, channels: NativeFileChannels, signal: AbortSignal) => {
+    const input = taskDownloadObject(json, ['version', 'requestId', 'attachmentJSON', 'targetURI', 'rawConfigJSON']);
+    const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+    if (input.version !== 1 || typeof input.requestId !== 'string' || !uuid.test(input.requestId)) return taskDownloadInvalid();
+    const text = taskDownloadText(input.attachmentJSON, 1_000_000);
+    const parsed = taskDownloadObject(text), items = readNativeAttachments([parsed]);
+    const attachment = items?.[0];
+    if (!attachment || items?.length !== 1 || JSON.stringify(attachment) !== text
+        || !uuid.test(attachment.id) || attachment.kind !== 'file' || attachment.deletedAt !== undefined
+        || !attachment.cloudKey || attachment.fileHash !== undefined && (typeof attachment.fileHash !== 'string' || !/^[0-9a-f]{64}$/i.test(attachment.fileHash))
+        || attachment.size !== undefined && (!Number.isSafeInteger(attachment.size) || attachment.size < 0 || attachment.size > TASK_DOWNLOAD_BYTES)) return taskDownloadInvalid();
+    const config = taskDownloadText(input.rawConfigJSON, TASK_DOWNLOAD_BYTES);
+    const backend = taskDownloadObject(config).backend;
+    if (backend !== 'cloud' && backend !== 'webdav' || backend === 'cloud' && attachment.fileHash === undefined) return taskDownloadInvalid();
+    const target = taskDownloadText(input.targetURI, 16 * 1024);
+    const directory = channels.directories.document;
+    if (!directory || target !== `${directory.endsWith('/') ? directory : directory + '/'}attachments/${getAttachmentDownloadFileName(attachment)}`
+        || backend !== 'webdav' && attachment.uri === target && attachment.localStatus === 'available') return taskDownloadInvalid();
+    const selected = createNativeTaskAttachmentPreparation({ ...bindings, rawConfigJSON: config,
+        prepareSource: (metadata, base64) => {
+            const measured = taskDownloadObject(metadata);
+            if (measured.attachmentId !== attachment.id || measured.targetURI !== target
+                || attachment.fileHash !== undefined && measured.sha256 !== attachment.fileHash.toLowerCase()
+                || attachment.size !== undefined && measured.size !== attachment.size) return taskDownloadInvalid();
+            return bindings.prepareSource(metadata, base64);
+        },
+    }, channels);
+    const result = await selected.prepareAttachmentAvailableDetailed(attachment, signal);
+    if (backend === 'webdav' && result.status === 'unrecoverable') return { version: 1, requestId: input.requestId,
+        status: 'unrecoverable' as const, attachmentJSON: JSON.stringify(result.attachment) };
+    if (result.status !== 'prepared') return { version: 1, requestId: input.requestId,
+        status: result.status === 'generation-conflict' ? 'generation-conflict' as const : 'unavailable' as const };
+    if (!uuid.test(result.sourceToken) || attachment.fileHash !== undefined && result.sha256 !== attachment.fileHash.toLowerCase()
+        || !Number.isSafeInteger(result.size) || result.size < 0 || result.size > TASK_DOWNLOAD_BYTES
+        || attachment.size !== undefined && attachment.size !== result.size
+        || result.attachment.id !== attachment.id || result.attachment.uri !== target) return taskDownloadInvalid();
+    return { version: 1, requestId: input.requestId, status: 'prepared' as const,
+        sourceToken: result.sourceToken, sha256: result.sha256, size: result.size };
+};
 
 const LOCAL_UNAVAILABLE = 'Local attachment capability is not available on this host';
 class LocalAttachmentUnavailableError extends Error {

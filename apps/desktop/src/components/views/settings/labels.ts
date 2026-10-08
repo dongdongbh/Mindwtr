@@ -572,6 +572,8 @@ export const SETTINGS_LABEL_KEYS = [
     'obsidianScanFoldersHint',
     'obsidianInboxFile',
     'obsidianInboxFileHint',
+    'obsidianRequiredInlineTag',
+    'obsidianRequiredInlineTagHint',
     'obsidianDataview',
     'obsidianDataviewDesc',
     'obsidianDataviewMetadata',

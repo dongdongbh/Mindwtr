@@ -104,7 +104,7 @@ export function TaskListBulkDateField({
           <DateTimePicker
             value={selectedDate ?? new Date()}
             mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            display={Platform.OS === 'ios' ? 'inline' : 'default'}
             textColor={tc.text}
             onChange={(event, date) => {
               if (event.type === 'dismissed') {

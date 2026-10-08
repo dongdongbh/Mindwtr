@@ -165,9 +165,22 @@ private struct AppLockRoot: View {
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
 
     var body: some View {
+        let startupToken = model.completedStartupToken
         Group {
             if model.ready && !lock.concealed {
-                if model.taskRecoveryGateVisible {
+                if model.settingsSyncRestartRequired {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                            .font(.system(size: 32)).accessibilityHidden(true)
+                        Text("Sync could not be confirmed. Close and reopen Mindwtr before trying again.")
+                            .rnFont(17, .semibold).multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(palette.bg).foregroundStyle(palette.text)
+                        .accessibilityIdentifier("sync-restart-gate")
+                } else if model.settingsSyncPresented {
+                    SettingsScreen(model: model, palette: palette)
+                } else if model.taskRecoveryGateVisible {
                     TaskRecoveryGate(model: model, palette: palette)
                 } else {
                     InboxScreen(model: model)
@@ -214,6 +227,15 @@ private struct AppLockRoot: View {
                                 Button("Cancel pending change") { Task { await model.cancelAppLockRecovery() } }
                                     .foregroundStyle(palette.onTint)
                                     .accessibilityIdentifier("app-lock-recovery-cancel")
+                            } else if !model.ready && model.projectFileAvailabilityPending && lock.enabled != nil {
+                                if lock.concealed {
+                                    Button(model.label("appLock.unlock").isEmpty ? "Unlock" : model.label("appLock.unlock")) {
+                                        Task { await lock.unlock(label: model.label) }
+                                    }
+                                    .foregroundStyle(palette.onTint).accessibilityIdentifier("app-lock-unlock")
+                                } else {
+                                    ProjectFileAvailabilityRecoveryPanel(model: model, palette: palette)
+                                }
                             } else if !model.ready && !model.projectFileAddSummary.isEmpty && lock.enabled != nil {
                                 if lock.concealed {
                                     Button(model.label("appLock.unlock").isEmpty ? "Unlock" : model.label("appLock.unlock")) {
@@ -253,6 +275,9 @@ private struct AppLockRoot: View {
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         .onAppear { lock.sceneChanged(phase) }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            model.cancelForegroundSync()
+            model.cancelProjectAttachmentDownload()
+            model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
             model.cancelTaskFileImport()
             model.cancelProjectFileImport()
@@ -261,7 +286,12 @@ private struct AppLockRoot: View {
             lock.concealSnapshot()
         }
         .onChange(of: phase) { next in
+            model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
+                model.cancelForegroundSync()
+                model.cancelProjectAttachmentDownload()
+                model.cancelProjectFileAvailabilityRecovery()
+                model.clearSettingsSyncForPrivacy()
                 model.stopTaskAudioForBackground()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()
@@ -273,11 +303,19 @@ private struct AppLockRoot: View {
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
+                model.cancelForegroundSync()
+                model.cancelProjectAttachmentDownload()
+                model.cancelProjectFileAvailabilityRecovery()
+                model.clearSettingsSyncForPrivacy()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()
                 model.dismissTaskShare()
             }
             if !concealed && phase == .active { Task { await model.refresh() } }
+        }
+        .task(id: "\(startupToken?.uuidString ?? "")-\(phase == .active)-\(lock.concealed)") {
+            guard !Task.isCancelled else { return }
+            model.requestForegroundSync(token: startupToken, active: phase == .active)
         }
         .task(id: "\(model.ready)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard model.ready, phase == .active else { return }

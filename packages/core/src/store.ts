@@ -1,3 +1,4 @@
+import { createChecklistProjectConversionActions } from './checklist-project-conversion';
 import { createWithEqualityFn } from 'zustand/traditional';
 import { useShallow } from 'zustand/react/shallow';
 import { subscribeWithSelector } from 'zustand/middleware';
@@ -636,6 +637,8 @@ const STORE_WRITE_ACTION_KEYS = [
     'purgeDeletedTasks',
     'duplicateTask',
     'promoteTaskToProject',
+    'convertChecklistToProject',
+    'undoChecklistToProject',
     'resetTaskChecklist',
     'moveTask',
     'batchUpdateTasks',
@@ -734,6 +737,7 @@ export const useTaskStore = createWithEqualityFn<TaskStore>()(subscribeWithSelec
             getSaveGeneration: () => pendingVersion,
             getStorage: () => storage,
         }),
+        ...createChecklistProjectConversionActions({ set, get, debouncedSave, flushPendingSave }),
         ...createTaskActions({
             set,
             get,

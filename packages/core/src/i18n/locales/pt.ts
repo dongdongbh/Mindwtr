@@ -315,6 +315,7 @@ export const ptOverrides: Record<string, string> = {
         'markdown.toolbar.code': 'Código em linha',
         'markdown.toolbar.codeBlock': 'Bloco de código',
 
+        "attachments.finishDraftBeforeChanges": "Salve ou descarte este rascunho antes de fazer outras alterações nos anexos.",
         'attachments.title': 'Anexos',
         'attachments.addFile': 'Adicionar arquivo',
         'attachments.addPhoto': 'Adicionar foto',

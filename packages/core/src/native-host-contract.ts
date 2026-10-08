@@ -283,6 +283,7 @@ import { createProjectNotesWriteMethods } from './native-host-contract-project-n
 import { createProjectTagsWriteMethods } from './native-host-contract-project-tags';
 import { createProjectAttachmentWriteMethods, createProjectFileRemoveWriteMethods } from './native-host-contract-project-attachments';
 import { createProjectFileAddWriteMethods } from './native-host-contract-project-file-add';
+import { createProjectAvailabilityMethods } from './native-host-contract-project-availability';
 import { createProjectStatusMethods } from './native-host-contract-project-status';
 import { createTrashProjectRestoreMethods } from './native-host-contract-trash-project-restore';
 import { createProjectDeleteMethods } from './native-host-contract-project-delete';
@@ -1846,6 +1847,8 @@ export function createNativeHostContract(options: {
         ...createProjectFileRemoveWriteMethods({ readiness, save,
             revision: projectMutationRevision, t: () => translate }),
         ...createProjectFileAddWriteMethods({ readiness, save, t: () => translate }),
+        ...createProjectAvailabilityMethods({ readiness, save, revision: projectMutationRevision,
+            host: () => options.attachments ?? null }),
         ...createProjectStatusMethods({ readiness, save,
             revision: projectMutationRevision }),
         ...createTrashProjectRestoreMethods({ readiness, save }),

@@ -1,11 +1,12 @@
 import { useTaskStore } from './store';
+import { CLOUD_PROVIDER_DROPBOX } from './sync-storage-keys';
 import { computeSyncChangeFingerprint } from './sync-helpers';
 import { cloneAppData } from './sync-runtime-utils';
 import type { AppData } from './types';
 
 export const DEFAULT_ATTACHMENT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const CLOUD_PROVIDER_SELF_HOSTED = 'selfhosted' as const;
-export const CLOUD_PROVIDER_DROPBOX = 'dropbox' as const;
+export { CLOUD_PROVIDER_DROPBOX } from './sync-storage-keys';
 export type CloudProvider = typeof CLOUD_PROVIDER_SELF_HOSTED | typeof CLOUD_PROVIDER_DROPBOX;
 
 export type LocalSyncAbortReason = 'local-data-changed' | 'remote-write-conflict';

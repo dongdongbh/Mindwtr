@@ -6,6 +6,7 @@ import {
     fetchWithTimeout,
     fetchWithTimeoutAndConsume,
     isAbortError,
+    isHostResponseTooLargeError,
     MAX_ERROR_BODY_BYTES,
     MAX_DOWNLOAD_BYTES,
     MAX_SYNC_DOCUMENT_BYTES,
@@ -16,6 +17,7 @@ import {
     toUint8Array,
 } from './http-utils';
 import { getCloudBaseUrl } from './attachment-paths';
+import { logWarn } from './logger';
 import type { ClockSkewWarning, MergeStats } from './sync-types';
 import { buildHttpRemoteFileFingerprint, type RemoteFileMetadata, type RemoteJsonWriteResult } from './webdav';
 
@@ -135,6 +137,31 @@ export const isBlockedAttachmentContentRefusal = (error: unknown): boolean => {
 const cloudHttpError = (label: string, res: Response): CloudHttpError => {
     const hint = res.status === 405 ? ' — this URL may not be a Mindwtr sync server (check host and port)' : '';
     return new CloudHttpError(`${label} failed (${res.status}): ${res.statusText}${hint}`, res.status);
+};
+
+/** A 413 on the sync document write: name both sizes and the server setting to raise.
+ *  The cloud server sends `limitBytes`; a proxy's 413 does not, so the hint also names it. */
+const cloudDataTooLargeError = async (res: Response, bodyBytes: number, signal?: AbortSignal): Promise<CloudHttpError> => {
+    const text = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
+    let limitBytes: number | undefined;
+    try {
+        const parsed = JSON.parse(text) as { limitBytes?: unknown };
+        if (Number.isSafeInteger(parsed.limitBytes)) limitBytes = parsed.limitBytes as number;
+    } catch {
+        // Not the cloud server talking.
+    }
+    logWarn('Cloud sync data refused as too large', {
+        scope: 'cloud',
+        category: 'sync',
+        context: { releaseCheck: 'v1.3.5/cloud-data-body-limit', status: res.status, limitBytes, bodyBytes },
+    });
+    const limit = limitBytes === undefined ? '' : ` (${limitBytes} bytes)`;
+    const proxy = limitBytes === undefined ? ' (and any proxy body limit)' : '';
+    return new CloudHttpError(
+        `Cloud PUT failed (413): the sync data (${bodyBytes} bytes) is larger than the server's limit${limit}. `
+        + `Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server${proxy}.`,
+        res.status,
+    );
 };
 
 const assertCloudUrl = (url: string, options: CloudOptions): void => {
@@ -353,19 +380,23 @@ export async function cloudPutJson(
     const fetcher = options.fetcher ?? fetch;
     const headers = buildHeaders(options);
     headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    const payload = JSON.stringify(data, null, 2);
 
     return await fetchWithTimeoutAndConsume(
         url,
         {
             method: 'PUT',
             headers,
-            body: JSON.stringify(data, null, 2),
+            body: payload,
             signal: options.signal,
         },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         CLOUD_TIMEOUT_ERROR,
         async (res, signal) => {
+            if (res.status === 413) {
+                throw await cloudDataTooLargeError(res, new TextEncoder().encode(payload).byteLength, signal);
+            }
             if (!res.ok) throw cloudHttpError('Cloud PUT', res);
             const metadata = metadataFromHeaders(res.headers);
             const body = await parseCloudJsonWriteBody(res, signal);
@@ -485,6 +516,7 @@ export async function cloudAttachmentExists(
     try {
         return (await cloudHeadJson(url, options)).exists;
     } catch (error) {
+        if (isHostResponseTooLargeError(error)) throw error;
         if (isAbortError(error)) throw error;
         if (!(error instanceof CloudHttpError) || error.status !== 405) return null;
         if (!options.partialBodyReads) {
@@ -496,6 +528,7 @@ export async function cloudAttachmentExists(
         await cloudGetFile(url, { ...options, maxBytes: 1, onProgress: undefined });
         return true;
     } catch (error) {
+        if (isHostResponseTooLargeError(error)) throw error;
         if (isAbortError(error)) throw error;
         if (error instanceof ResponseTooLargeError) return true;
         return error instanceof CloudHttpError && error.status === 404 ? false : null;

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { spawnSync } from 'child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -16,6 +17,7 @@ describe('resolveCloudRuntimeConfig', () => {
         'MINDWTR_CLOUD_RATE_MAX',
         'MINDWTR_CLOUD_ATTACHMENT_RATE_MAX',
         'MINDWTR_CLOUD_MAX_BODY_BYTES',
+        'MINDWTR_CLOUD_MAX_DATA_BODY_BYTES',
         'MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES',
         'MINDWTR_CLOUD_ANY_TOKEN_MAX_NAMESPACES',
         'MINDWTR_CLOUD_RATE_CLEANUP_MS',
@@ -47,6 +49,35 @@ describe('resolveCloudRuntimeConfig', () => {
         }
     });
 
+    test('passes the sync document limit through both compose files only when set', () => {
+        const composeFiles = ['compose.yaml', 'compose.https.yaml'].map((name) => (
+            new URL(`../../../docker/${name}`, import.meta.url).pathname
+        ));
+        for (const file of composeFiles) {
+            // Name only: a fixed fallback would hide a raised MINDWTR_CLOUD_MAX_BODY_BYTES.
+            expect(readFileSync(file, 'utf8')).toMatch(/^ {6}- MINDWTR_CLOUD_MAX_DATA_BODY_BYTES$/m);
+        }
+        if (spawnSync('docker', ['compose', 'version']).status !== 0) return;
+        const render = (file: string, value?: string): string | null => {
+            const env: Record<string, string | undefined> = {
+                ...process.env,
+                MINDWTR_CLOUD_CORS_ORIGIN: 'https://example.test',
+                MINDWTR_CLOUD_DOMAIN: 'example.test',
+                MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: value,
+            };
+            if (value === undefined) delete env.MINDWTR_CLOUD_MAX_DATA_BODY_BYTES;
+            const result = spawnSync('docker', ['compose', '-f', file, 'config', '--format', 'json'], { env, encoding: 'utf8' });
+            expect(result.status).toBe(0);
+            const config = JSON.parse(result.stdout) as { services: Record<string, { environment: Record<string, string | null> }> };
+            return config.services['mindwtr-cloud'].environment.MINDWTR_CLOUD_MAX_DATA_BODY_BYTES;
+        };
+        for (const file of composeFiles) {
+            expect(render(file, '10000000')).toBe('10000000');
+            // null = name without a value: Docker leaves the variable unset in the container.
+            expect(render(file)).toBeNull();
+        }
+    });
+
     test('keeps the deployed defaults and rate-dependent attachment default', () => {
         expect(resolveCloudRuntimeConfig({})).toEqual({
             port: 8787,
@@ -54,6 +85,7 @@ describe('resolveCloudRuntimeConfig', () => {
             rateMax: 120,
             attachmentRateMax: 120,
             maxBodyBytes: 2_000_000,
+            maxDataBodyBytes: 50_000_000,
             maxAttachmentBytes: 50_000_000,
             anyTokenMaxNamespaces: 32,
             rateCleanupMs: 60_000,
@@ -69,6 +101,23 @@ describe('resolveCloudRuntimeConfig', () => {
             authFailureRateMax: 30,
         });
         expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_RATE_MAX: '77' }).attachmentRateMax).toBe(77);
+    });
+
+    test('gives the sync document its own limit that never drops below a raised small limit', () => {
+        expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_BODY_BYTES: '3000000' }).maxDataBodyBytes).toBe(50_000_000);
+        expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_BODY_BYTES: '64000000' }).maxDataBodyBytes).toBe(64_000_000);
+        expect(resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_BODY_BYTES: '64000000' }).maxBodyBytes).toBe(64_000_000);
+        expect(resolveCloudRuntimeConfig({
+            MINDWTR_CLOUD_MAX_BODY_BYTES: '64000000',
+            MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: '10000000',
+        }).maxDataBodyBytes).toBe(10_000_000);
+        expect(resolveCloudRuntimeConfig({}, { maxBodyBytes: 70_000_000 }).maxDataBodyBytes).toBe(70_000_000);
+        expect(resolveCloudRuntimeConfig(
+            { MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: '10000000' },
+            { maxDataBodyBytes: 1_000 },
+        ).maxDataBodyBytes).toBe(1_000);
+        expect(() => resolveCloudRuntimeConfig({ MINDWTR_CLOUD_MAX_DATA_BODY_BYTES: '0' }))
+            .toThrow('MINDWTR_CLOUD_MAX_DATA_BODY_BYTES');
     });
 
     test('allows zero only for port, namespace capacity, and the slow-request log threshold', () => {

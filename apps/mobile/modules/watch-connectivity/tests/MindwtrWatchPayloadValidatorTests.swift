@@ -5,6 +5,41 @@ import XCTest
 final class MindwtrWatchPayloadValidatorTests: XCTestCase {
     private let id = "9D8A4448-255F-4C49-A40B-1855FA86BE2D"
 
+    func testChecklistCommandUsesExplicitBooleanAndRejectsExtraFields() throws {
+        var payload = basePayload(kind: "checklist")
+        payload["taskId"] = "task"
+        payload["taskCreatedAt"] = "2026-10-07T00:00:00.000Z"
+        payload["itemId"] = "milk"
+        payload["itemTitle"] = "Milk 🥛"
+        payload["isCompleted"] = false
+        let validated = try MindwtrWatchPayloadValidator.validateTransport(payload)
+        XCTAssertEqual(validated.queuePayload["isCompleted"] as? Bool, false)
+        payload["isCompleted"] = NSNumber(value: 1)
+        XCTAssertThrowsError(try MindwtrWatchPayloadValidator.validateTransport(payload))
+        payload["isCompleted"] = true
+        payload["checklist"] = []
+        XCTAssertThrowsError(try MindwtrWatchPayloadValidator.validateTransport(payload))
+    }
+
+    func testDetailsFitActualPropertyListOrAreOmittedWhole() throws {
+        let checklist: [[String: Any]] = (0..<100).map {
+            ["id": "item-\($0)", "title": String(repeating: "牛奶😀\($0)", count: 10), "isCompleted": false]
+        }
+        let context: [String: Any] = [
+            "protocolVersion": 1, "generatedAt": "2026-10-07T00:00:00.000Z",
+            "focus": (0..<20).map { ["id": "task-\($0)", "title": "Shopping", "checklist": checklist,
+                                     "description": String(repeating: "\($0)漢😀", count: 1500)] as [String: Any] },
+            "pomodoro": ["phase": "focus", "isRunning": false, "remainingSeconds": 1500],
+        ]
+        let result = try MindwtrWatchPayloadValidator.normalizeApplicationContext(context)
+        XCTAssertLessThanOrEqual(try PropertyListSerialization.data(fromPropertyList: result, format: .binary, options: 0).count, 60 * 1024)
+        let tasks = try XCTUnwrap(result["focus"] as? [[String: Any]])
+        XCTAssertTrue(tasks.contains { $0["detailsUnavailable"] as? Bool == true })
+        for task in tasks {
+            if let rows = task["checklist"] as? [[String: Any]] { XCTAssertEqual(rows.count, 100) }
+        }
+    }
+
     func testNormalizesTextCaptureAndCanonicalizesUUID() throws {
         let validated = try MindwtrWatchPayloadValidator.validateTransport([
             "protocolVersion": 1,

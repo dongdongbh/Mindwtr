@@ -471,7 +471,7 @@ describe('TaskEditScheduleField', () => {
         expect(setDraftField).toHaveBeenCalledWith('repeatReminderMinutes', 5);
     });
 
-    it('renders the iOS due-time picker with time mode and theme text color', () => {
+    it.each(['due', 'due-time', 'start', 'start-time', 'review', 'recurrence-end'])('renders the iOS %s picker with a calendar for dates and a wheel for times', (pickerMode) => {
         Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
 
         let tree!: renderer.ReactTestRenderer;
@@ -481,7 +481,7 @@ describe('TaskEditScheduleField', () => {
                     customWeekdays: [],
                     dailyInterval: 1,
                     draft: makeDraft({ dueDate: '2026-04-28T09:20:00' }),
-                    fieldId: 'dueDate',
+                    fieldId: pickerMode.startsWith('start') ? 'startTime' : pickerMode === 'review' ? 'reviewAt' : pickerMode === 'recurrence-end' ? 'recurrence' : 'dueDate',
                     formatDate: (value?: string) => value ?? '',
                     formatDueDate: (value?: string) => value ?? '',
                     getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'),
@@ -491,14 +491,14 @@ describe('TaskEditScheduleField', () => {
                     pendingDueDate: null,
                     pendingStartDate: null,
                     recurrenceOptions: [],
-                    recurrenceRRuleValue: '',
-                    recurrenceRuleValue: '',
+                    recurrenceRRuleValue: pickerMode === 'recurrence-end' ? 'FREQ=DAILY;UNTIL=20260428' : '',
+                    recurrenceRuleValue: pickerMode === 'recurrence-end' ? 'daily' : '',
                     recurrenceStrategyValue: 'strict',
                     recurrenceWeekdayButtons: [],
                     setCustomWeekdays: vi.fn(),
                     setDraftField: vi.fn(),
                     setShowDatePicker: vi.fn(),
-                    showDatePicker: 'due-time',
+                    showDatePicker: pickerMode,
                     styles,
                     t,
                     task: null,
@@ -509,8 +509,8 @@ describe('TaskEditScheduleField', () => {
         });
 
         const picker = tree.root.findByType('DateTimePicker' as any);
-        expect(picker.props.mode).toBe('time');
-        expect(picker.props.display).toBe('spinner');
+        expect(picker.props.mode).toBe(pickerMode.endsWith('-time') ? 'time' : 'date');
+        expect(picker.props.display).toBe(pickerMode.endsWith('-time') ? 'spinner' : 'inline');
         expect(picker.props.textColor).toBe(tc.text);
     });
 

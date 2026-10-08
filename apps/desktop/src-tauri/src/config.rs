@@ -2622,6 +2622,7 @@ fn normalize_obsidian_config_payload(payload: ObsidianConfigPayload) -> Obsidian
         scan_folders: normalize_obsidian_scan_folders(payload.scan_folders),
         inbox_file: normalize_obsidian_inbox_file(&payload.inbox_file),
         task_notes_include_archived: payload.task_notes_include_archived,
+        required_inline_tag: payload.required_inline_tag.trim().to_string(),
         dataview_metadata_enabled: payload.dataview_metadata_enabled,
         new_task_format: normalize_obsidian_new_task_format(payload.new_task_format),
         last_scanned_at,
@@ -3157,6 +3158,17 @@ pub(crate) fn read_external_calendar_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn obsidian_required_inline_tag_survives_native_round_trip() {
+        let old: ObsidianConfigPayload = serde_json::from_str(r#"{"vaultPath":"/Vault","vaultName":"Vault","lastScannedAt":null,"enabled":true}"#).unwrap();
+        assert_eq!(old.required_inline_tag, "");
+        let payload = normalize_obsidian_config_payload(ObsidianConfigPayload {
+            required_inline_tag: " #task/work ".into(), ..old
+        });
+        let restored: ObsidianConfigPayload = serde_json::from_str(&serde_json::to_string(&payload).unwrap()).unwrap();
+        assert_eq!(restored.required_inline_tag, "#task/work");
+    }
 
     #[test]
     fn accepts_network_calendar_urls() {

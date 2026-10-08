@@ -1,6 +1,8 @@
+import { logInfo } from './app-log';
 import {
     normalizeObsidianRelativePath,
     parseObsidianTasksFromMarkdown,
+    normalizeObsidianRequiredInlineTag,
     parseTaskNotesFile,
     type ObsidianTask,
 } from '@mindwtr/core';
@@ -13,6 +15,7 @@ export type ObsidianConfig = {
     vaultName: string;
     scanFolders: string[];
     inboxFile: string;
+    requiredInlineTag: string;
     taskNotesIncludeArchived: boolean;
     dataviewMetadataEnabled: boolean;
     newTaskFormat: ObsidianNewTaskFormat;
@@ -187,6 +190,7 @@ export const normalizeObsidianConfig = (config: Partial<ObsidianConfig> | null |
         vaultName: deriveVaultName(vaultPath),
         scanFolders,
         inboxFile: sanitizeObsidianInboxFile(config?.inboxFile),
+        requiredInlineTag: normalizeObsidianRequiredInlineTag(config?.requiredInlineTag),
         taskNotesIncludeArchived: config?.taskNotesIncludeArchived === true,
         dataviewMetadataEnabled: config?.dataviewMetadataEnabled === true,
         newTaskFormat: sanitizeObsidianNewTaskFormat(config?.newTaskFormat),
@@ -364,7 +368,13 @@ const readAndParseObsidianMarkdownFile = async (
         relativeFilePath: normalizedRelativePath,
         fileModifiedAt,
         dataviewMetadataEnabled: config.dataviewMetadataEnabled,
+        requiredInlineTag: config.requiredInlineTag,
     });
+    if (config.requiredInlineTag) {
+        void logInfo('Obsidian inline tag filter applied', {
+            scope: 'obsidian', extra: { releaseCheck: 'v1.3.5/obsidian-inline-tag', count: parsed.tasks.length },
+        });
+    }
     return {
         tasks: parsed.tasks,
         warning: null,

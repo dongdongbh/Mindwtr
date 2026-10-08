@@ -8,6 +8,7 @@ const runtimeMock = vi.hoisted(() => ({
     isFlatpakRuntime: vi.fn(() => false),
     isLinuxRuntime: vi.fn(() => false),
     isWindowsRuntime: vi.fn(() => false),
+    isMacRuntime: vi.fn(() => false),
 }));
 const pluginMock = vi.hoisted(() => ({
     sendNotification: vi.fn(),
@@ -316,6 +317,7 @@ describe('Linux native notification path (#1232)', () => {
         runtimeMock.isFlatpakRuntime.mockReturnValue(false);
         runtimeMock.isLinuxRuntime.mockReturnValue(true);
         runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
         useTaskStore.setState({ settings: { notificationsEnabled: true } });
     });
 
@@ -428,6 +430,7 @@ describe('Windows packaged notification path (#1146)', () => {
         runtimeMock.isFlatpakRuntime.mockReturnValue(false);
         runtimeMock.isLinuxRuntime.mockReturnValue(false);
         runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
         useTaskStore.setState({ settings: { notificationsEnabled: true } });
     });
 
@@ -437,6 +440,7 @@ describe('Windows packaged notification path (#1146)', () => {
         runtimeMock.isTauriRuntime.mockReturnValue(false);
         runtimeMock.isLinuxRuntime.mockReturnValue(false);
         runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
         useTaskStore.setState(initialStoreState, true);
     });
 
@@ -529,5 +533,150 @@ describe('fired reminders are logged (#1146)', () => {
         });
         expect(extra.appState).toMatch(/^(focused|hidden)$/);
         expect(JSON.stringify(extra)).not.toContain(baseTask.title);
+    });
+});
+
+// A repeat reminder used to add one notification per occurrence: six an hour at a 10-minute
+// interval. Every reminder of a task now carries the task's tag, so each platform replaces the
+// task's notification (and alerts again) instead of stacking another one.
+describe('a task\'s reminders replace its notification', () => {
+    const initialStoreState = useTaskStore.getState();
+    const tag = 'mindwtr-reminder:task:task-1';
+
+    afterEach(() => {
+        stopDesktopNotifications();
+        setNativeInvokeTransport(null);
+        useTaskStore.setState(initialStoreState, true);
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+        runtimeMock.isTauriRuntime.mockReturnValue(false);
+        runtimeMock.isLinuxRuntime.mockReturnValue(false);
+        runtimeMock.isWindowsRuntime.mockReturnValue(false);
+        runtimeMock.isMacRuntime.mockReturnValue(false);
+    });
+
+    // The module dedupes each reminder it sent, so every test fires its own day.
+    function captureInvokes(...rejected: string[]) {
+        const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
+        setNativeInvokeTransport(async (command: string, args?: Record<string, unknown>) => {
+            calls.push({ command, args: args ?? {} });
+            if (rejected.includes(command)) throw new Error('not here');
+            return undefined as never;
+        });
+        return calls;
+    }
+
+    async function fireDueThenRepeat(fixedNow: Date) {
+        vi.useFakeTimers();
+        vi.setSystemTime(fixedNow);
+        useTaskStore.setState({
+            _allTasks: [{ ...baseTask, dueDate: fixedNow.toISOString(), repeatReminderMinutes: 10 }],
+            _allProjects: [],
+            settings: { notificationsEnabled: true },
+        });
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+    }
+
+    it('passes the task\'s tag with the due reminder and its repeats on Linux', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isLinuxRuntime.mockReturnValue(true);
+        const calls = captureInvokes();
+
+        await fireDueThenRepeat(new Date(2026, 6, 31, 9, 0, 0, 0));
+
+        const sent = calls.filter((call) => call.command === 'send_linux_notification');
+        expect(sent.length).toBeGreaterThanOrEqual(2);
+        expect(sent.every((call) => call.args.tag === tag)).toBe(true);
+    });
+
+    it('tags the packaged Windows toast', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isWindowsRuntime.mockReturnValue(true);
+        const calls = captureInvokes();
+
+        await fireDueThenRepeat(new Date(2026, 7, 1, 9, 0, 0, 0));
+
+        const sent = calls.filter((call) => call.command === 'send_windows_packaged_notification');
+        expect(sent.length).toBeGreaterThanOrEqual(2);
+        expect(sent.every((call) => call.args.tag === tag)).toBe(true);
+        expect(pluginMock.sendNotification).not.toHaveBeenCalled();
+    });
+
+    it('replaces through the native command on macOS, and falls back to the plugin when it fails', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isMacRuntime.mockReturnValue(true);
+        let calls = captureInvokes('send_windows_packaged_notification');
+        await sendDesktopImmediateNotification('Prepare report');
+        // An immediate notification has no task: no replacing command.
+        expect(calls.map((call) => call.command)).not.toContain('send_replacing_notification');
+        expect(pluginMock.sendNotification).toHaveBeenCalledTimes(1);
+        pluginMock.sendNotification.mockClear();
+
+        await fireDueThenRepeat(new Date(2026, 7, 2, 9, 0, 0, 0));
+        const replaced = calls.filter((call) => call.command === 'send_replacing_notification');
+        expect(replaced.length).toBeGreaterThanOrEqual(2);
+        expect(replaced.every((call) => call.args.tag === tag)).toBe(true);
+        expect(pluginMock.sendNotification).not.toHaveBeenCalled();
+
+        stopDesktopNotifications();
+        calls = captureInvokes('send_windows_packaged_notification', 'send_replacing_notification');
+        await fireDueThenRepeat(new Date(2026, 7, 3, 9, 0, 0, 0));
+        expect(calls.some((call) => call.command === 'send_replacing_notification')).toBe(true);
+        expect(pluginMock.sendNotification.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('replaces through the native command on unpackaged Windows, and falls back to the plugin when it fails', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isWindowsRuntime.mockReturnValue(true);
+        let calls = captureInvokes('send_windows_packaged_notification');
+        await sendDesktopImmediateNotification('Prepare report');
+        // An immediate notification has no task: no replacing command.
+        expect(calls.map((call) => call.command)).not.toContain('send_replacing_notification');
+        expect(pluginMock.sendNotification).toHaveBeenCalledTimes(1);
+        pluginMock.sendNotification.mockClear();
+
+        await fireDueThenRepeat(new Date(2026, 7, 6, 9, 0, 0, 0));
+        const replaced = calls.filter((call) => call.command === 'send_replacing_notification');
+        expect(replaced.length).toBeGreaterThanOrEqual(2);
+        expect(replaced.every((call) => call.args.tag === tag)).toBe(true);
+        expect(pluginMock.sendNotification).not.toHaveBeenCalled();
+
+        stopDesktopNotifications();
+        calls = captureInvokes('send_windows_packaged_notification', 'send_replacing_notification');
+        await fireDueThenRepeat(new Date(2026, 7, 7, 9, 0, 0, 0));
+        expect(calls.some((call) => call.command === 'send_replacing_notification')).toBe(true);
+        expect(pluginMock.sendNotification.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('tags the web notification and alerts again', async () => {
+        // A fresh module: an earlier test's Tauri plugin stays cached in the shared one.
+        vi.resetModules();
+        const core = await import('@mindwtr/core');
+        const service = await import('./notification-service');
+        const NotificationSpy = vi.fn() as any;
+        NotificationSpy.permission = 'granted';
+        vi.stubGlobal('Notification', NotificationSpy);
+        const fixedNow = new Date(2026, 7, 4, 9, 0, 0, 0);
+        vi.useFakeTimers();
+        vi.setSystemTime(fixedNow);
+        core.useTaskStore.setState({
+            _allTasks: [{ ...baseTask, dueDate: fixedNow.toISOString(), repeatReminderMinutes: 10 }],
+            _allProjects: [],
+            settings: { notificationsEnabled: true },
+        });
+
+        try {
+            await service.startDesktopNotifications();
+            await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+            expect(NotificationSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+            for (const [, options] of NotificationSpy.mock.calls) {
+                expect(options).toMatchObject({ tag, renotify: true });
+            }
+        } finally {
+            service.stopDesktopNotifications();
+        }
     });
 });

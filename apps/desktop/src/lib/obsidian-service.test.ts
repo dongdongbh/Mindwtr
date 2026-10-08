@@ -168,6 +168,7 @@ describe('obsidian-service helpers', () => {
             vaultName: 'Vault',
             scanFolders: ['/'],
             inboxFile: 'Mindwtr/Inbox.md',
+            requiredInlineTag: '',
             taskNotesIncludeArchived: false,
             dataviewMetadataEnabled: false,
             newTaskFormat: 'auto',
@@ -198,6 +199,7 @@ describe('obsidian-service helpers', () => {
             vaultName: 'Vault',
             scanFolders: ['/'],
             inboxFile: 'Mindwtr/Inbox.md',
+            requiredInlineTag: '',
             taskNotesIncludeArchived: false,
             dataviewMetadataEnabled: false,
             newTaskFormat: 'auto',
@@ -268,4 +270,16 @@ describe('obsidian-service helpers', () => {
             title: 'Capture task note',
         });
     });
+});
+
+
+it('adds the configured inline tag once at the creation boundary', async () => {
+    setTauriRuntime(true);
+    invokeMock.mockResolvedValue(undefined);
+    for (const [taskText, expected] of [['Capture', 'Capture #task'], ['Capture #task/work', 'Capture #task/work']]) {
+        await ObsidianService.createTask({ vaultPath: '/Vault', relativeFilePath: 'Inbox.md', taskText, requiredInlineTag: '#task' });
+        expect(invokeMock).toHaveBeenLastCalledWith('obsidian_create_task', {
+            vaultPath: '/Vault', relativeFilePath: 'Inbox.md', taskText: expected,
+        });
+    }
 });

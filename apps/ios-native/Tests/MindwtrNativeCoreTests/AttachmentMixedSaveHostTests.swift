@@ -71,7 +71,7 @@ final class AttachmentMixedSaveHostTests: XCTestCase {
         if files { for index in 0..<count { try Data("baseline bytes \(index)".utf8).write(to: target(index)) } }
         _ = try sql("INSERT INTO tasks(id,title,description,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,?,'Saved notes','inbox','[]','[]',?,?,?,1,'fixture')", [taskID, "Saved title", json(baseline), at, at])
         _ = try sql("INSERT INTO tasks(id,title,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES ('unrelated','Untouched','inbox','[]','[]','[]',?,?,1,'fixture')", [at, at])
-        let host = core(faults); if let jobs { await host.configureAttachmentHost(jobs) }; _ = try await host.start()
+        let host = core(faults); if let jobs { try await host.configureAttachmentHost(jobs) }; _ = try await host.start()
         let snapshot = EditorDraftSnapshot(sessionID: UUID().uuidString.lowercased(), taskID: taskID, generation: 1,
             payloadJSON: try payload(baseline, edited: edited, note: note))
         try await host.checkpointEditorDraft(snapshot)
@@ -255,7 +255,7 @@ final class AttachmentMixedSaveHostTests: XCTestCase {
             XCTAssertNotNil((try journalObject()["terminal"] as? [String: Any])?["rejected"])
             await host.close(); let fresh = core(noWrites()), fileHooks = NativeAttachmentHostHooks(); var jobs = 0
             fileHooks.configureJobs = { $0.beforeWork = { _, _ in jobs += 1; throw HostFailure("Rejected terminal cannot run files") } }
-            await fresh.configureAttachmentHost(fileHooks); _ = try await fresh.start()
+            try await fresh.configureAttachmentHost(fileHooks); _ = try await fresh.start()
             XCTAssertEqual(jobs, 0); XCTAssertNil(try editor.read()?.attempt); XCTAssertEqual(try latest(), checkpoint)
             XCTAssertEqual(try Data(contentsOf: store.url), sidecar); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
             XCTAssertTrue(FileManager.default.fileExists(atPath: target().path)); await fresh.close()
@@ -329,7 +329,7 @@ final class AttachmentMixedSaveHostTests: XCTestCase {
             await host.close(); try FileManager.default.removeItem(at: store.url)
             let fresh = core(noWrites()), hooks = NativeAttachmentHostHooks(); var jobs = 0
             hooks.configureJobs = { $0.beforeWork = { _, _ in jobs += 1; throw HostFailure("Missing sidecar cannot grant file job") } }
-            await fresh.configureAttachmentHost(hooks)
+            try await fresh.configureAttachmentHost(hooks)
             if settled { _ = try await fresh.start(); try released() } else { await refused { _ = try await fresh.start() }; XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path)) }
             XCTAssertEqual(jobs, 0); await fresh.close()
         }

@@ -331,6 +331,7 @@ export const trOverrides: Record<string, string> = {
         'attachments.addLink': 'Bağlantı ekle',
         'attachments.open': 'Açık',
         'attachments.download': 'İndirmek',
+        "attachments.finishDraftBeforeChanges": "Eklerde başka değişiklikler yapmadan önce bu taslağı kaydedin veya atın.",
         'attachments.missing': 'Eksik dosya',
         'attachments.downloadConflict': 'Bu ek indirilirken değişti. Yerel dosyanız korundu. Çakışmayı çözmek için yeniden eşitleyin.',
         'attachments.unrecoverable': 'Bu ek artık eşzamanlanan depolamada kullanılamıyor. Bozuk başvurusu kaldırıldı.',

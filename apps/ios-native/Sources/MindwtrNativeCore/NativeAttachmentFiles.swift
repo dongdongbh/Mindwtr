@@ -95,6 +95,7 @@ final class NativeAttachmentFiles {
         case unsafeEntry(targetURI: String)
     }
     static let maximumBytes = 16 * 1024 * 1024
+    static let maximumPlaintextSourceBytes = 8 * 1024 * 1024
     static let maximumProviderBytes: Int64 = 50 * 1024 * 1024
     private static let chunkBytes = 64 * 1024
     private let libraryRoot: URL
@@ -146,7 +147,8 @@ final class NativeAttachmentFiles {
         cacheIdentity = try Self.identity(cacheFD)
     }
 
-    func call(_ json: String, checkCancellation: () throws -> Void = {}) throws -> Reply {
+    func call(_ json: String, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void = {}) throws -> Reply {
+        if let maximumReadBytes { guard (0...Self.maximumBytes).contains(maximumReadBytes) else { throw NativeAttachmentFilesError.invalidRequest } }
         guard json.utf8.count <= 24 * 1024 * 1024,
               let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)),
               let request = object as? [String: Any], let op = request["op"] as? String else {
@@ -169,24 +171,31 @@ final class NativeAttachmentFiles {
         try checkCancellation()
         if op == "barrier" { return Reply(value: nil, bytes: nil) }
         if op == "sha256" {
+            if let maximumReadBytes {
+                guard let encoded = request["base64"] as? String, encoded.utf8.count <= ((maximumReadBytes + 2) / 3) * 4 else { throw NativeAttachmentFilesError.tooLarge }
+            }
             let bytes = try Self.decodeBytes(request["base64"])
+            guard maximumReadBytes == nil || bytes.count <= maximumReadBytes! else { throw NativeAttachmentFilesError.tooLarge }
             try checkCancellation()
             return Reply(value: Self.digest(bytes), bytes: nil)
         }
         let path = try reference(request["uri"])
         switch op {
-        case "getInfo": return Reply(value: try info(path), bytes: nil)
+        case "getInfo":
+            let value = try info(path)
+            if let maximumReadBytes, let size = value["size"] as? NSNumber, size.int64Value > Int64(maximumReadBytes) { throw NativeAttachmentFilesError.tooLarge }
+            return Reply(value: value, bytes: nil)
         case "makeDirectory":
             let directory = try openDirectory(path, create: true)
             defer { Darwin.close(directory) }
             let named = try openDirectory(path); defer { Darwin.close(named) }
             guard try Self.identity(directory) == Self.identity(named) else { throw NativeAttachmentFilesError.unavailable }
         case "readDirectory": return Reply(value: try list(path, checkCancellation: checkCancellation), bytes: nil)
-        case "readBytes": return Reply(value: nil, bytes: try read(path, position: 0, length: nil, checkCancellation: checkCancellation))
+        case "readBytes": return Reply(value: nil, bytes: try read(path, position: 0, length: nil, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation))
         case "readBytesRange":
             let position = try Self.integer(request["position"]), length = try Self.integer(request["length"])
             guard length <= Self.maximumBytes else { throw NativeAttachmentFilesError.tooLarge }
-            return Reply(value: nil, bytes: try read(path, position: position, length: length, checkCancellation: checkCancellation))
+            return Reply(value: nil, bytes: try read(path, position: position, length: length, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation))
         case "writeBytes":
             let bytes = try Self.decodeBytes(request["base64"])
             try publish(path, checkCancellation: checkCancellation) { output in
@@ -205,7 +214,7 @@ final class NativeAttachmentFiles {
             let parent = try openParent(path); defer { Darwin.close(parent.fd) }
             try verify(parent, path: path)
             guard Darwin.fsync(parent.fd) == 0 else { throw NativeAttachmentFilesError.unavailable }
-        case "sha256File": return Reply(value: try hash(path, checkCancellation: checkCancellation), bytes: nil)
+        case "sha256File": return Reply(value: try hash(path, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation), bytes: nil)
         default: throw NativeAttachmentFilesError.invalidRequest
         }
         return Reply(value: nil, bytes: nil)
@@ -223,7 +232,7 @@ final class NativeAttachmentFiles {
 
     /// Captures a shared-selected baseline candidate's current local generation.
     /// This never creates directories, reads unmanaged targets, or retires bytes.
-    func snapshotBaselineAttachment(attachmentID: String, targetURI: String,
+    func snapshotBaselineAttachment(attachmentID: String, targetURI: String, maximumReadBytes: Int? = nil,
                                     checkCancellation: () throws -> Void = {}) throws -> BaselineAttachmentObservation {
         guard Self.validBaselineAttachmentID(attachmentID), !targetURI.isEmpty,
               targetURI.utf8.count <= 16 * 1024, !targetURI.utf8.contains(0),
@@ -289,6 +298,7 @@ final class NativeAttachmentFiles {
         }
         let fd = try openFile(parent); defer { Darwin.close(fd) }
         let before = try Self.regular(fd)
+        if let maximumReadBytes { guard maximumReadBytes >= 0, before.st_size <= Int64(maximumReadBytes) else { throw NativeAttachmentFilesError.tooLarge } }
         guard Self.unchanged(named, before), before.st_nlink == 1,
               before.st_size <= 9_007_199_254_740_991 else { throw NativeAttachmentFilesError.unavailable }
         func validatePresent() throws {
@@ -301,7 +311,7 @@ final class NativeAttachmentFiles {
         // retained descriptors with the named tree on both sides of each call.
         func check() throws { try validatePresent(); try checkCancellation(); try validatePresent() }
         try check()
-        let content = try hashContents(fd, checkCancellation: check)
+        let content = try hashContents(fd, maximumReadBytes: maximumReadBytes, checkCancellation: check)
         try check()
         guard content.size == before.st_size else { throw NativeAttachmentFilesError.unavailable }
         return observed(.present(.init(targetURI: targetURI, sha256: content.sha256, size: content.size,
@@ -397,8 +407,8 @@ final class NativeAttachmentFiles {
                   try sourceParentIdentity() == parentIdentity else { throw NativeAttachmentFilesError.unavailable }
         }
         let metadata = try? url.resourceValues(forKeys: [.nameKey, .contentTypeKey])
-        var fileName = metadata?.name.flatMap { $0.isEmpty ? nil : $0 } ?? fallbackName
-        var mimeType = metadata?.contentType?.preferredMIMEType
+        let fileName = metadata?.name.flatMap { $0.isEmpty ? nil : $0 } ?? fallbackName
+        let mimeType = metadata?.contentType?.preferredMIMEType
         try validateSource()
         var encodedPhoto: NativeAttachmentPhotoEncoder.Encoded?
         if let photo {
@@ -418,11 +428,69 @@ final class NativeAttachmentFiles {
             }
             try validateSource(); try checkCancellation()
         }
-        let leaf = UUID().uuidString.lowercased(), partial = UUID().uuidString.lowercased()
-        if let photo, let encodedPhoto {
-            fileName = (photo.suggestedName ?? leaf) + "." + encodedPhoto.fileExtension
-            mimeType = encodedPhoto.mimeType
+        return try createCacheSource(fileName: { leaf in
+            if let photo, let encodedPhoto { return (photo.suggestedName ?? leaf) + "." + encodedPhoto.fileExtension }
+            return fileName
+        }, mimeType: encodedPhoto == nil ? mimeType : encodedPhoto?.mimeType, validateInput: validateSource,
+           checkCancellation: checkCancellation) { output, check in
+            var written: Int64 = 0
+            let content: AttachmentStageContent
+            if let encodedPhoto {
+                var digest = SHA256()
+                for offset in stride(from: 0, to: encodedPhoto.bytes.count, by: 64 * 1024) {
+                    let bytes = encodedPhoto.bytes.subdata(in: offset..<min(offset + 64 * 1024, encodedPhoto.bytes.count))
+                    try check(); try Self.write(output, bytes); written += Int64(bytes.count); digest.update(data: bytes)
+                }
+                content = AttachmentStageContent(sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(), size: written)
+            } else {
+                content = try hashContents(input, checkCancellation: check) { bytes in
+                    guard written <= Self.maximumProviderBytes - Int64(bytes.count) else {
+                        throw NativeAttachmentFilesError.providerTooLarge
+                    }
+                    try check(); try Self.write(output, bytes); written += Int64(bytes.count)
+                }
+                guard content.size == before.st_size else { throw NativeAttachmentFilesError.unavailable }
+            }
+            try check()
+            guard written == content.size else { throw NativeAttachmentFilesError.unavailable }
+            return content
         }
+    }
+
+    /// Bounded native creation provenance, separate from any publication or
+    /// durable draft authority. No caller pathname, metadata or digest is used.
+    func createPlaintextDownloadSource(bytes: Data, checkCancellation: () throws -> Void) throws
+        -> (receipt: ProviderCacheCopyReceipt, source: CacheSourceProof) {
+        guard bytes.count <= Self.maximumPlaintextSourceBytes else { throw NativeAttachmentFilesError.tooLarge }
+        try checkCancellation()
+        let receipt = try createCacheSource(fileName: { $0 }, mimeType: nil, validateInput: {},
+                                            checkCancellation: checkCancellation) { output, check in
+            var written: Int64 = 0, digest = SHA256()
+            for offset in stride(from: 0, to: bytes.count, by: Self.chunkBytes) {
+                let start = bytes.index(bytes.startIndex, offsetBy: offset)
+                let end = bytes.index(start, offsetBy: min(Self.chunkBytes, bytes.count - offset))
+                let chunk = bytes.subdata(in: start..<end)
+                guard written <= Int64(Self.maximumPlaintextSourceBytes) - Int64(chunk.count) else {
+                    throw NativeAttachmentFilesError.tooLarge
+                }
+                try check(); try Self.write(output, chunk); written += Int64(chunk.count); digest.update(data: chunk)
+            }
+            try check()
+            guard written == Int64(bytes.count) else { throw NativeAttachmentFilesError.unavailable }
+            return AttachmentStageContent(sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(), size: written)
+        }
+        // Return the actual minted receipt even if cancellation arrives after
+        // completion; the caller must retain it before fencing late delivery.
+        return (receipt, receipt.proof)
+    }
+
+    /// The provider and buffered creator share one anchored output lifecycle.
+    /// Only native input validation/filling varies; creation authority stays here.
+    private func createCacheSource(fileName: (String) -> String, mimeType: String?,
+                                   validateInput: () throws -> Void, checkCancellation: () throws -> Void,
+                                   fill: (Int32, () throws -> Void) throws -> AttachmentStageContent) throws -> ProviderCacheCopyReceipt {
+        let leaf = UUID().uuidString.lowercased(), partial = UUID().uuidString.lowercased()
+        let name = fileName(leaf)
         let path = Reference(cache: true, components: [leaf]), partialPath = Reference(cache: true, components: [partial])
         let parent = try openParent(path); defer { Darwin.close(parent.fd) }
         let output = Darwin.openat(parent.fd, partial, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
@@ -465,7 +533,7 @@ final class NativeAttachmentFiles {
                   retained.st_nlink == 1, current.st_nlink == 1 else { throw NativeAttachmentFilesError.unavailable }
         }
         func check() throws {
-            try validateSource(); try validateOutput(); try checkCancellation(); try validateSource(); try validateOutput()
+            try validateInput(); try validateOutput(); try checkCancellation(); try validateInput(); try validateOutput()
         }
         try check()
         let partialURL = cache.appendingPathComponent(partial)
@@ -482,26 +550,9 @@ final class NativeAttachmentFiles {
         try afterSourceOpened?()
         #endif
         try check()
-        var written: Int64 = 0
-        let content: AttachmentStageContent
-        if let encodedPhoto {
-            var digest = SHA256()
-            for offset in stride(from: 0, to: encodedPhoto.bytes.count, by: 64 * 1024) {
-                let bytes = encodedPhoto.bytes.subdata(in: offset..<min(offset + 64 * 1024, encodedPhoto.bytes.count))
-                try check(); try Self.write(output, bytes); written += Int64(bytes.count); digest.update(data: bytes)
-            }
-            content = AttachmentStageContent(sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(), size: written)
-        } else {
-            content = try hashContents(input, checkCancellation: check) { bytes in
-                guard written <= Self.maximumProviderBytes - Int64(bytes.count) else {
-                    throw NativeAttachmentFilesError.providerTooLarge
-                }
-                try check(); try Self.write(output, bytes); written += Int64(bytes.count)
-            }
-            guard content.size == before.st_size else { throw NativeAttachmentFilesError.unavailable }
+        let content = try withoutActuallyEscaping(check) { callback in
+            try fill(output, callback)
         }
-        try check()
-        guard written == content.size else { throw NativeAttachmentFilesError.unavailable }
         #if DEBUG
         try beforeStageSync?()
         #endif
@@ -530,7 +581,7 @@ final class NativeAttachmentFiles {
             throw NativeAttachmentFilesError.unavailable
         }
         complete = true
-        return ProviderCacheCopyReceipt(proof: observed, generation: try Self.regular(output), fileName: fileName, mimeType: mimeType)
+        return ProviderCacheCopyReceipt(proof: observed, generation: try Self.regular(output), fileName: name, mimeType: mimeType)
     }
 
     /// A cheap immutable-generation fence for the existing Add owner checks.
@@ -562,7 +613,23 @@ final class NativeAttachmentFiles {
               proof.parentIdentity == proof.cacheRootIdentity else { throw NativeAttachmentFilesError.invalidRequest }
         return try retireGeneration(path: path,
             proof: .init(sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.parentIdentity),
-            retainDifferent: true, checkCancellation: checkCancellation)
+             retainDifferent: true, checkCancellation: checkCancellation)
+    }
+
+    /// Swift's exact durable Project download journal grants this adopted-source
+    /// authority. A borrowed proof or JSON file call must never reach this method.
+    func retireAdoptedProjectDownloadSource(_ proof: CacheSourceProof,
+                                           requireOwner: () throws -> Void) throws -> BaselineAttachmentRetirementOutcome {
+        try requireOwner()
+        let path = try reference(proof.sourceURI)
+        guard path.cache, path.components.count == 1,
+              UUID(uuidString: path.components[0])?.uuidString.lowercased() == path.components[0],
+              Self.validDigest(proof.sha256), proof.size >= 0, proof.size <= Int64(Self.maximumPlaintextSourceBytes),
+              proof.cacheRootIdentity == Self.token(cacheIdentity), proof.parentIdentity == proof.cacheRootIdentity,
+              Self.validToken(proof.identity) else { throw NativeAttachmentFilesError.invalidRequest }
+        return try retireGeneration(path: path,
+            proof: .init(sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.parentIdentity),
+            retainDifferent: true, checkCancellation: requireOwner)
     }
 
     func snapshotCacheSource(_ uri: String, checkCancellation: () throws -> Void = {}) throws -> CacheSourceProof {
@@ -1125,43 +1192,48 @@ final class NativeAttachmentFiles {
         guard try Self.identity(fd) == Self.identity(current) else { throw NativeAttachmentFilesError.unavailable }
         return names
     }
-    private func read(_ path: Reference, position: Int, length: Int?, checkCancellation: () throws -> Void) throws -> Data {
+    private func read(_ path: Reference, position: Int, length: Int?, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void) throws -> Data {
         let parent = try openParent(path); defer { Darwin.close(parent.fd) }
         let fd = try openFile(parent); defer { Darwin.close(fd) }
         let before = try Self.regular(fd)
-        if length == nil && before.st_size > Self.maximumBytes { throw NativeAttachmentFilesError.tooLarge }
+        let cap = maximumReadBytes ?? Self.maximumBytes
+        if (length == nil || maximumReadBytes != nil) && before.st_size > Int64(cap) { throw NativeAttachmentFilesError.tooLarge }
         guard Darwin.lseek(fd, off_t(position), SEEK_SET) >= 0 else { throw NativeAttachmentFilesError.unavailable }
         #if DEBUG
         try afterSourceOpened?()
         #endif
         var bytes = Data()
-        let capacity = min(max(0, before.st_size - Int64(position)), Int64(length ?? Self.maximumBytes))
+        let capacity = min(max(0, before.st_size - Int64(position)), Int64(min(length ?? cap, cap)))
         bytes.reserveCapacity(Int(capacity))
         try consume(fd, limit: length, checkCancellation: checkCancellation) { chunk in
-            guard bytes.count <= Self.maximumBytes - chunk.count else { throw NativeAttachmentFilesError.tooLarge }
+            guard chunk.count <= cap, bytes.count <= cap - chunk.count else { throw NativeAttachmentFilesError.tooLarge }
             bytes.append(chunk)
         }
-        guard bytes.count <= Self.maximumBytes else { throw NativeAttachmentFilesError.tooLarge }
+        guard bytes.count <= cap else { throw NativeAttachmentFilesError.tooLarge }
         try stable(fd, before: before, parent: parent, path: path)
         return bytes
     }
-    private func hash(_ path: Reference, checkCancellation: () throws -> Void) throws -> String {
+    private func hash(_ path: Reference, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void) throws -> String {
         let parent = try openParent(path); defer { Darwin.close(parent.fd) }
         let fd = try openFile(parent); defer { Darwin.close(fd) }
         let before = try Self.regular(fd)
         #if DEBUG
         try afterSourceOpened?()
         #endif
-        let content = try hashContents(fd, checkCancellation: checkCancellation)
+        let content = try hashContents(fd, maximumReadBytes: maximumReadBytes, checkCancellation: checkCancellation)
         try stable(fd, before: before, parent: parent, path: path)
         return content.sha256
     }
-    private func hashContents(_ fd: Int32, checkCancellation: () throws -> Void,
+    private func hashContents(_ fd: Int32, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void,
                               chunk: (Data) throws -> Void = { _ in }) throws -> AttachmentStageContent {
+        if let maximumReadBytes {
+            guard maximumReadBytes >= 0, try Self.regular(fd).st_size <= Int64(maximumReadBytes) else { throw NativeAttachmentFilesError.tooLarge }
+        }
         var digest = SHA256(), size: Int64 = 0
         try consume(fd, checkCancellation: checkCancellation) { bytes in
             let next = size.addingReportingOverflow(Int64(bytes.count))
             guard !next.overflow else { throw NativeAttachmentFilesError.unavailable }
+            if let maximumReadBytes { guard next.partialValue <= Int64(maximumReadBytes) else { throw NativeAttachmentFilesError.tooLarge } }
             size = next.partialValue
             digest.update(data: bytes)
             try chunk(bytes)

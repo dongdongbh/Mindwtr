@@ -26,6 +26,7 @@ const {
   mockAlarmSendNotification,
   mockAlarmScheduleAlarm,
   mockAlarmGetScheduledAlarms,
+  mockAlarmCollapseDeliveredReminderNotifications,
   mockEnsureReminderNotificationChannel,
   mockRestorePersistentCaptureNotification,
   mockIsLoggingEnabled,
@@ -61,6 +62,7 @@ const {
   mockAlarmSendNotification: vi.fn(),
   mockAlarmScheduleAlarm: vi.fn(async () => ({ id: 99 })),
   mockAlarmGetScheduledAlarms: vi.fn(async () => [] as Record<string, unknown>[]),
+  mockAlarmCollapseDeliveredReminderNotifications: vi.fn(),
   mockEnsureReminderNotificationChannel: vi.fn(async () => undefined),
   mockRestorePersistentCaptureNotification: vi.fn(),
   mockIsLoggingEnabled: vi.fn(() => true),
@@ -122,6 +124,7 @@ vi.mock('react-native-alarm-notification', () => ({
     removeFiredNotification: mockAlarmRemoveFiredNotification,
     removeAllFiredNotifications: mockAlarmRemoveAllFiredNotifications,
     getScheduledAlarms: mockAlarmGetScheduledAlarms,
+    collapseDeliveredReminderNotifications: mockAlarmCollapseDeliveredReminderNotifications,
     requestPermissions: mockAlarmRequestPermissions,
   },
 }));
@@ -195,6 +198,7 @@ describe('notification-service-local', () => {
     mockAlarmScheduleAlarm.mockResolvedValue({ id: 99 });
     mockAlarmGetScheduledAlarms.mockReset();
     mockAlarmGetScheduledAlarms.mockResolvedValue([]);
+    mockAlarmCollapseDeliveredReminderNotifications.mockReset();
     mockEnsureReminderNotificationChannel.mockReset();
     mockEnsureReminderNotificationChannel.mockResolvedValue(undefined);
     mockRestorePersistentCaptureNotification.mockReset();
@@ -727,6 +731,42 @@ describe('notification-service-local', () => {
       expect.anything()
     );
     expect(alarmMapWrites()).toBe(1);
+  });
+
+  it('posts a task\'s due reminder and every repeat into the task\'s one notification', async () => {
+    mockStoreState.tasks = [
+      { id: 'call', title: 'Call back', dueDate: new Date(Date.now() + 5 * 60 * 1000).toISOString(), repeatReminderMinutes: 10 },
+      { id: 'other', title: 'Other', dueDate: new Date(Date.now() + 7 * 60 * 1000).toISOString() },
+    ];
+
+    await startLocalMobileNotifications();
+
+    const scheduled = (mockAlarmScheduleAlarm.mock.calls as unknown as Array<[{ tag?: string; data?: { taskId?: string } }]>)
+      .map(([details]) => details);
+    const callReminders = scheduled.filter((details) => details.data?.taskId === 'call');
+    expect(callReminders.length).toBeGreaterThan(1);
+    expect(new Set(callReminders.map((details) => details.tag))).toEqual(new Set(['mindwtr-reminder:task:call']));
+    expect(scheduled.find((details) => details.data?.taskId === 'other')?.tag).toBe('mindwtr-reminder:task:other');
+    // Android replaces natively; the collapse is iOS's.
+    expect(mockAlarmCollapseDeliveredReminderNotifications).not.toHaveBeenCalled();
+  });
+
+  it('collapses each task\'s delivered iOS reminders to the newest on every cycle', async () => {
+    mockPlatform.OS = 'ios';
+    mockAlarmCollapseDeliveredReminderNotifications.mockResolvedValue(2);
+    mockStoreState.tasks = [
+      { id: 'call', title: 'Call back', dueDate: new Date(Date.now() - 15 * 60 * 1000).toISOString(), repeatReminderMinutes: 10 },
+    ];
+
+    await startLocalMobileNotifications();
+    expect(mockAlarmCollapseDeliveredReminderNotifications).toHaveBeenCalledTimes(1);
+    expect(mockLogInfo).toHaveBeenCalledWith(expect.stringContaining('Delivered reminder threads collapsed'), expect.objectContaining({
+      extra: expect.objectContaining({ releaseCheck: 'v1.3.5/ios-reminder-threads', count: 2 }),
+    }));
+
+    // The app returning to the foreground starts the service again: one more cycle, one more collapse.
+    await startLocalMobileNotifications();
+    expect(mockAlarmCollapseDeliveredReminderNotifications).toHaveBeenCalledTimes(2);
   });
 
   it('only schedules the next 60 upcoming task reminders on iOS', async () => {

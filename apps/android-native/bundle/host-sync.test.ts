@@ -1,8 +1,16 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import * as core from '@mindwtr/core';
 import {
     BACKGROUND_SYNC_FAILURE_STATE_KEY,
+    CLOUD_PROVIDER_KEY,
+    CLOUD_TOKEN_KEY,
+    CLOUD_URL_KEY,
     NativeAttachmentCleanupUnconfirmedError,
+    SyncEncryptionArtifactCapacityError,
     SYNC_BACKEND_KEY,
+    SYNC_ENCRYPTION_KEY_KEY,
+    SYNC_ENCRYPTION_STATE_KEY,
+    SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
     WEBDAV_URL_KEY,
     resetForTests,
     setSha256HexProvider,
@@ -24,6 +32,7 @@ const host = (stored: Record<string, string> = {}, refuseSchedule = false, getDa
     const kv = new Map(Object.entries(stored));
     const schedules: boolean[] = [];
     const lines: string[] = [];
+    const entries: core.DiagnosticsLogEntry[] = [];
     const traces: string[] = [];
     const calls: string[] = [];
     const bindings: Parameters<typeof createNativeSync>[0] = {
@@ -41,7 +50,7 @@ const host = (stored: Record<string, string> = {}, refuseSchedule = false, getDa
         },
         localData: () => ({ getData: getData ?? (async () => { throw new Error('no local data in this test'); }), saveData: async () => undefined }),
         networkState: () => { calls.push('networkState'); return { isConnected: true, isInternetReachable: true }; },
-        appendLog: async (entry) => { calls.push('appendLog'); lines.push(entry.message); return null; },
+        appendLog: async (entry) => { calls.push('appendLog'); lines.push(entry.message); entries.push(entry); return null; },
         translate: (key) => key,
         emit: () => { calls.push('emit'); },
         trace: (line) => { calls.push('trace'); traces.push(line); },
@@ -54,10 +63,140 @@ const host = (stored: Record<string, string> = {}, refuseSchedule = false, getDa
         retireLocalAttachment,
     };
     const sync = createNativeSync(bindings);
-    return { sync, kv, schedules, lines, traces, calls, bindings };
+    return { sync, kv, schedules, lines, entries, traces, calls, bindings };
 };
 
+it('records bounded iOS unlock only after the shared service confirms completion', async () => {
+    const create = core.createSyncEncryptionService;
+    let outcome: 'ok' | 'wrong-passphrase' | 'no-encrypted-remote' | Error = 'ok';
+    let release: (() => void) | undefined;
+    let held: Promise<void> | undefined;
+    spyOn(core, 'createSyncEncryptionService').mockImplementation((options) => ({
+        ...create(options),
+        provideSyncEncryptionPassphrase: async () => {
+            await held;
+            if (outcome instanceof Error) throw outcome;
+            return outcome;
+        },
+    }));
+    for (const platform of ['ios', 'android']) {
+        if (platform === 'ios') iosFiles();
+        globals.__mindwtrHostPlatform = platform;
+        const { sync, bindings } = host({}, false, undefined, async () => false);
+        const entries: Parameters<typeof bindings.appendLog>[0][] = [];
+        bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+        const provide = sync.settingsHost.encryption.transitions!.provide;
+        sync.settingsHost.encryption.unlockOnly = true;
+        for (outcome of ['wrong-passphrase', 'no-encrypted-remote', new Error('synthetic failure')] as const) {
+            try { await provide('synthetic secret'); } catch { /* Shared failure stays a failure. */ }
+            expect(entries.filter((entry) => entry.message === 'Native iOS encrypted unlock service completed')).toHaveLength(0);
+        }
+        outcome = 'ok';
+        held = new Promise<void>((resolve) => { release = resolve; });
+        const pending = provide('synthetic secret');
+        await Promise.resolve();
+        expect(entries).toHaveLength(0);
+        release!();
+        expect(await pending).toBe('ok');
+        held = undefined;
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+        if (platform === 'ios') expect(entries[0]!.context).toEqual({
+            releaseCheck: 'v1.3.5/ios-encryption-unlock', operation: 'unlock', outcome: 'confirmed',
+        });
+        expect(JSON.stringify(entries)).not.toContain('synthetic secret');
+        entries.length = 0;
+        sync.settingsHost.encryption.unlockOnly = false;
+        expect(await provide('synthetic secret')).toBe('ok');
+        expect(entries).toHaveLength(0);
+        delete sync.settingsHost.encryption.unlockOnly;
+        sync.settingsHost.encryption.mode = 'saved-webdav-enable-unlock';
+        expect(await provide('synthetic secret')).toBe('ok');
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+        entries.length = 0;
+        sync.settingsHost.encryption.mode = 'saved-webdav';
+        expect(await provide('synthetic secret')).toBe('ok');
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+        entries.length = 0;
+        sync.settingsHost.encryption.mode = 'saved-webdav-or-local';
+        expect(await provide('synthetic secret')).toBe('ok');
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+    }
+});
+
+it.each(['saved-webdav', 'saved-webdav-or-local'] as const)('records selected iOS encryption settlement for %s without changing a completed outcome when logging fails', async (mode) => {
+    const create = core.createSyncEncryptionService;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    spyOn(core, 'createSyncEncryptionService').mockImplementation((options) => ({
+        ...create(options),
+        enableSyncEncryption: async () => { await held; },
+        changeSyncEncryptionPassphrase: async () => { await held; },
+        disableSyncEncryption: async () => { await held; },
+        abandonSyncEncryptionTransition: async () => 'enable' as const,
+        recheckPartlyEncryptedLocation: async () => 'mixed' as const,
+    }));
+    iosFiles();
+    globals.__mindwtrHostPlatform = 'ios';
+    const { sync, bindings } = host({}, false, undefined, async () => false);
+    sync.settingsHost.encryption.mode = mode;
+    const entries: Parameters<typeof bindings.appendLog>[0][] = [];
+    bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+    const transitions = sync.settingsHost.encryption.transitions!;
+    const pending = transitions.enable('synthetic secret', {});
+    const changing = transitions.change('synthetic current', 'synthetic next', {});
+    const disabling = transitions.disable({});
+    await Promise.resolve();
+    expect(entries).toHaveLength(0);
+    release();
+    await Promise.all([pending, changing, disabling]);
+    expect(await transitions.abandon()).toBe('enable');
+    expect(await transitions.recheck()).toBe('mixed');
+    expect(entries.map((entry) => entry.context)).toEqual(['enable', 'change', 'disable', 'abandon', 'recheck'].map((operation) => ({
+        releaseCheck: 'v1.3.5/ios-encryption-selected', operation, outcome: 'confirmed',
+    })));
+    expect(JSON.stringify(entries)).not.toContain('synthetic secret');
+    bindings.appendLog = () => { throw new Error('synthetic diagnostic failure'); };
+    await transitions.enable('synthetic secret', {});
+    await transitions.change('synthetic current', 'synthetic next', {});
+    await transitions.disable({});
+    expect(await transitions.abandon()).toBe('enable');
+    expect(await transitions.recheck()).toBe('mixed');
+});
+
 const fetches: string[] = [];
+it('binds the iOS encrypted-output capacity and preserves refusal if diagnostics fail', async () => {
+    const create = core.createSyncEncryptionService;
+    const capacities: (number | undefined)[] = [];
+    const refused = new SyncEncryptionArtifactCapacityError();
+    let failure: unknown = refused;
+    spyOn(core, 'createSyncEncryptionService').mockImplementation((options) => {
+        capacities.push(options.maxEncryptedArtifactBytes);
+        return { ...create(options), enableSyncEncryption: async () => { throw failure; } };
+    });
+    for (const platform of ['ios', 'android']) {
+        if (platform === 'ios') iosFiles();
+        globals.__mindwtrHostPlatform = platform;
+        const { sync, bindings } = host({}, false, undefined, async () => false);
+        const entries: Parameters<typeof bindings.appendLog>[0][] = [];
+        bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+        const enable = sync.settingsHost.encryption.transitions!.enable;
+        failure = refused;
+        await expect(enable('synthetic secret', {})).rejects.toBe(refused);
+        expect(entries).toHaveLength(platform === 'ios' ? 1 : 0);
+        if (platform === 'ios') expect(entries[0]!.context).toEqual({
+            releaseCheck: 'v1.3.5/ios-encryption-enable-capacity', operation: 'enable', outcome: 'refused',
+        });
+        expect(JSON.stringify(entries)).not.toContain('synthetic secret');
+        bindings.appendLog = () => { throw new Error('synthetic diagnostic failure'); };
+        await expect(enable('synthetic secret', {})).rejects.toBe(refused);
+        entries.length = 0;
+        bindings.appendLog = async (entry) => { entries.push(entry); return null; };
+        failure = new Error('ordinary transition failure');
+        await expect(enable('synthetic secret', {})).rejects.toBe(failure);
+        expect(entries).toHaveLength(0);
+    }
+    expect(capacities).toEqual([8 * 1024 * 1024, undefined]);
+});
 /** A server that refuses the password: a failure core does not retry, so a cycle fails at once. */
 const failingFetch = (async (input: RequestInfo | URL) => {
     fetches.push(String(input));
@@ -65,6 +204,7 @@ const failingFetch = (async (input: RequestInfo | URL) => {
 }) as typeof fetch;
 
 afterEach(() => {
+    mock.restore();
     globalThis.fetch = realFetch;
     fetches.length = 0;
     delete globals.__mindwtrCryptoCall;
@@ -104,6 +244,24 @@ const iosFiles = () => {
 };
 
 describe('explicit iOS foreground sync factory', () => {
+    it('binds cloud and WebDAV buffered upload caps only on iOS through the real attachment factory', () => {
+        const create = core.createMobileAttachmentBackends;
+        const captured: Parameters<typeof create>[] = [];
+        spyOn(core, 'createMobileAttachmentBackends').mockImplementation((options) => {
+            captured.push([options]);
+            return create(options);
+        });
+        for (const platform of ['ios', 'android']) {
+            iosFiles();
+            globals.__mindwtrHostPlatform = platform;
+            host({}, false, undefined, async () => false);
+            const options = captured.at(-1)![0];
+            expect(options.maxCloudBufferedUploadBytes).toBe(platform === 'ios' ? 8 * 1024 * 1024 : undefined);
+            expect(options.maxWebdavBufferedUploadBytes).toBe(platform === 'ios' ? 8 * 1024 * 1024 : undefined);
+        }
+        expect(captured).toHaveLength(2);
+    });
+
     it('requires the selected cleanup callback and actual file channels instead of admitting no-op cleanup', () => {
         iosFiles();
         expect(() => host()).toThrow('Foreground sync requires owned attachment cleanup on this iOS build');
@@ -207,6 +365,467 @@ describe('explicit iOS foreground sync factory', () => {
         expect(retire).not.toHaveBeenCalled();
         resetForTests();
     });
+});
+
+describe('iOS self-hosted foreground admission', () => {
+    const endpoint = 'https://fixture.invalid/v1/data';
+    const token = 'synthetic-token-for-398';
+    const data = (): AppData => ({ tasks: [], projects: [], sections: [], areas: [], settings: {} });
+    const configured = async (extra: Record<string, string> = {}, local = data()) => {
+        resetForTests(); iosFiles();
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: endpoint, ...extra }, false,
+            async () => structuredClone(local), async () => false);
+        fixture.sync.settingsHost.encryption.mode = 'saved-webdav-or-local';
+        core.setStorageAdapter({ getData: async () => structuredClone(local), saveData: async () => undefined });
+        const secrets = new Map<string, string>();
+        fixture.bindings.secrets.getSecret = async (name) => secrets.get(name) ?? null;
+        fixture.bindings.secrets.setSecret = async (name, value) => { secrets.set(name, value); };
+        fixture.bindings.secrets.deleteSecret = async (name) => { secrets.delete(name); };
+        await fixture.sync.settingsHost.secrets.set(CLOUD_TOKEN_KEY, token);
+        return { ...fixture, secrets };
+    };
+    const serve = () => {
+        const requests: { method: string; body: string; authorization: string | null }[] = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push({ method: init?.method ?? 'GET', body: String(init?.body ?? ''),
+                authorization: new Headers(init?.headers).get('Authorization') });
+            return new Response(init?.method === 'HEAD' ? null : JSON.stringify(data()), {
+                status: 200, headers: { ETag: '"fixture-data"' },
+            });
+        }) as typeof fetch;
+        return requests;
+    };
+
+    it.each(['enable', 'change-passphrase', 'disable'] as const)('refuses a stored self-hosted %s interruption before any HTTP or mutation', async (kind) => {
+        const state = JSON.stringify({ state: kind === 'enable' ? 'off' : 'enabled', incompleteTransition: kind });
+        const fixture = await configured({ [CLOUD_PROVIDER_KEY]: 'selfhosted', [SYNC_ENCRYPTION_STATE_KEY]: state });
+        const requests = serve();
+        const before = [...fixture.kv];
+        const secretsBefore = [...fixture.secrets];
+
+        await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true }))
+            .rejects.toBeInstanceOf(core.SyncEncryptionTransitionIncompleteError);
+
+        expect(requests).toEqual([]);
+        expect([...fixture.kv]).toEqual(before);
+        expect([...fixture.secrets]).toEqual(secretsBefore);
+        expect(fixture.schedules).toEqual([]);
+        expect(fixture.lines).toContain('Native iOS self-hosted encryption admission refused');
+        expect(fixture.entries.filter((entry) => entry.message === 'Native iOS self-hosted encryption admission refused')
+            .map((entry) => entry.context)).toEqual([{
+            releaseCheck: 'v1.3.5/ios-selfhosted-encryption-guard', operation: 'admission', outcome: 'refused',
+        }]);
+    });
+
+    it('checks the activation override instead of trusting the previously stored WebDAV provider', async () => {
+        const fixture = await configured({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json',
+            [SYNC_ENCRYPTION_STATE_KEY]: JSON.stringify({ state: 'off', incompleteTransition: 'enable' }) });
+        const requests = serve();
+
+        await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true, activationProbe: true,
+            configOverride: { backend: 'cloud', cloudProvider: 'selfhosted', cloud: { url: endpoint, token: 'synthetic-token', allowInsecureHttp: false } },
+        })).rejects.toBeInstanceOf(core.SyncEncryptionTransitionIncompleteError);
+
+        expect(requests).toEqual([]);
+        expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('webdav');
+    });
+
+    it('retains the original incomplete-transition refusal when diagnostics reject', async () => {
+        const fixture = await configured({ [SYNC_ENCRYPTION_STATE_KEY]: JSON.stringify({ state: 'off', incompleteTransition: 'enable' }) });
+        fixture.bindings.appendLog = async () => { throw new Error('sink unavailable'); };
+        const requests = serve();
+
+        await expect(fixture.sync.assertSelfHostedSyncAdmission()).rejects.toBeInstanceOf(core.SyncEncryptionTransitionIncompleteError);
+
+        expect(requests).toEqual([]);
+    });
+
+    it('inherits the stored provider when an activation override omits it instead of admitting an unbound provider', async () => {
+        const fixture = await configured({ [CLOUD_PROVIDER_KEY]: 'dropbox' });
+        const requests = serve();
+
+        await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true, activationProbe: true,
+            configOverride: { backend: 'cloud' },
+        })).rejects.toThrow('provider is not available');
+
+        expect(requests).toEqual([]);
+        expect(fixture.kv.get(CLOUD_PROVIDER_KEY)).toBe('dropbox');
+    });
+
+    const open = async (fixture: Awaited<ReturnType<typeof configured>>) => {
+        await core.flushPendingSave();
+        const contract = core.createNativeHostContract({ syncSettings: fixture.sync.settingsHost });
+        const activated = await contract.activate({ writeSafetyReady: true });
+        if (!activated.ok) throw new Error(activated.error.message);
+        const model = await contract.openSyncSettings({});
+        if (!model.ok) throw new Error(model.error.message);
+        return { contract, model: model.value };
+    };
+
+    it('uses the actual shared self-hosted Test/Save/Sync contract with null-token reuse, exact replay and stale revision refusal', async () => {
+        const fixture = await configured({ [CLOUD_PROVIDER_KEY]: 'selfhosted' });
+        const requests = serve();
+        const { contract, model } = await open(fixture);
+        const fields = { url: endpoint, token: null, allowInsecureHttp: false };
+        const before = [...fixture.kv];
+        const secretsBefore = [...fixture.secrets];
+        await fixture.sync.assertSelfHostedSyncAdmission();
+        expect((await contract.testSyncConnection({ selfHosted: fields })).ok).toBe(true);
+        expect(requests.map((request) => request.method)).toEqual(['GET']);
+        expect([...fixture.kv]).toEqual(before);
+        const save = { requestId: core.generateUUID(), revision: model.configRevision, selfHosted: fields };
+        const saved = await contract.saveSyncBackend(save);
+        expect(saved.ok).toBe(true);
+        const count = requests.length;
+        expect(await contract.saveSyncBackend(save)).toEqual(saved);
+        expect(requests).toHaveLength(count);
+        expect([...fixture.secrets]).toEqual(secretsBefore);
+        expect(requests.every((request) => request.authorization === `Bearer ${token}`)).toBe(true);
+        const fresh = contract.getSyncSettings({});
+        if (!fresh.ok) throw new Error(fresh.error.message);
+        expect((await contract.syncNow({ requestId: core.generateUUID(), revision: fresh.value.configRevision, selfHosted: fields })).ok).toBe(true);
+        await core.flushPendingSave();
+        const stable = contract.getSyncSettings({});
+        if (!stable.ok) throw new Error(stable.error.message);
+        fixture.kv.set(CLOUD_URL_KEY, 'https://external.invalid/v1/data');
+        const at = requests.length;
+        expect(await contract.saveSyncBackend({ ...save, requestId: core.generateUUID(), revision: stable.value.configRevision }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(requests).toHaveLength(at);
+        expect(fixture.kv.get(CLOUD_URL_KEY)).toBe('https://external.invalid/v1/data');
+        await contract.closeSyncSettings({});
+    });
+
+    it('keeps the proven WebDAV configuration and secure token when shared self-hosted selection/activation fails', async () => {
+        const fixture = await configured({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://old.invalid/data.json' });
+        const { contract } = await open(fixture);
+        const before = [...fixture.kv];
+        const secretsBefore = [...fixture.secrets];
+        const requests: string[] = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push(init?.method ?? 'GET');
+            return new Response('synthetic failure', { status: 403 });
+        }) as typeof fetch;
+
+        const result = await contract.selectSyncBackend({ requestId: core.generateUUID(), option: 'selfhosted' });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) throw new Error(result.error.message);
+        expect(result.value.toasts.some((toast) => toast.tone === 'error')).toBe(true);
+        expect(requests.length).toBeGreaterThan(0);
+        expect(requests).not.toContain('PUT');
+        expect([...fixture.kv]).toEqual(before);
+        expect([...fixture.secrets]).toEqual(secretsBefore);
+        await contract.closeSyncSettings({});
+    });
+
+    it.each([undefined, '', 'selfhosted', ' selfhosted '])('admits the shared self-hosted provider default %s through the existing stored foreground owner', async (provider) => {
+        const fixture = await configured(provider === undefined ? {} : { [CLOUD_PROVIDER_KEY]: provider });
+        const requests = serve();
+
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toMatchObject({ success: true });
+
+        expect(requests.some((request) => request.method === 'GET')).toBe(true);
+        expect(requests.every((request) => request.authorization === `Bearer ${token}`)).toBe(true);
+        expect(fixture.kv.get(CLOUD_PROVIDER_KEY)).toBe(provider);
+        expect(fixture.schedules).toEqual([]);
+    });
+
+    it.each(['dropbox', 'cloudkit', 'file', 'unknown'])('refuses explicit unsupported stored cloud provider %s before HTTP', async (provider) => {
+        const fixture = await configured({ [CLOUD_PROVIDER_KEY]: provider });
+        const requests = serve();
+        const before = [...fixture.kv];
+
+        await expect(fixture.sync.performStoredAutomaticSync('startup')).rejects.toThrow('provider is not available');
+
+        expect(requests).toEqual([]);
+        expect([...fixture.kv]).toEqual(before);
+    });
+
+    it.each(['enabled', 'remote-encrypted-no-key', 'remote-plaintext', 'quarantine elsewhere'] as const)(
+        'uses self-hosted plaintext while retaining complete local posture %s and material', async (posture) => {
+            const state = JSON.stringify(posture === 'quarantine elsewhere'
+                ? { state: 'off', partlyEncryptedScope: JSON.stringify(['webdav', 'https://elsewhere.invalid', 'synthetic']) }
+                : { state: posture, discoveredScope: JSON.stringify(['webdav', 'https://elsewhere.invalid', 'synthetic']),
+                    discoveredSalt: '01'.repeat(16), discoveredParams: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
+            const local = data();
+            local.tasks.push({ id: 'local-398', title: 'Synthetic', status: 'inbox', tags: [], contexts: [],
+                createdAt: '2026-10-07T00:00:00.000Z', updatedAt: '2026-10-07T00:00:00.000Z' });
+            const fixture = await configured({ [CLOUD_PROVIDER_KEY]: 'selfhosted', [SYNC_ENCRYPTION_STATE_KEY]: state }, local);
+            await fixture.sync.settingsHost.secrets.set(SYNC_ENCRYPTION_KEY_KEY, Buffer.alloc(32, 7).toString('base64'));
+            const secretsBefore = [...fixture.secrets];
+            const requests = serve();
+
+            expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
+
+            expect(requests.some((request) => request.method === 'GET')).toBe(true);
+            expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+            expect(requests.filter((request) => request.method === 'PUT').every((request) => {
+                try { return Array.isArray(JSON.parse(request.body).tasks); } catch { return false; }
+            })).toBe(true);
+            expect(fixture.kv.get(SYNC_ENCRYPTION_STATE_KEY)).toBe(state);
+            expect([...fixture.secrets]).toEqual(secretsBefore);
+            await core.flushPendingSave();
+            const contract = core.createNativeHostContract({ syncSettings: fixture.sync.settingsHost });
+            expect(await contract.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+            const model = await contract.openSyncSettings({});
+            expect(model.ok).toBe(true);
+            if (!model.ok) throw new Error('Expected shared self-hosted model');
+            expect(model.value.panel?.kind).toBe('selfhosted');
+            expect(model.value.encryption).toBeNull();
+        },
+    );
+});
+
+describe('event-owned iOS stored/resume pacing', () => {
+    const data = (): AppData => ({ tasks: [], projects: [], sections: [], areas: [], settings: {} });
+    const configured = (getData: () => Promise<AppData> = async () => data()) => {
+        iosFiles();
+        return host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' },
+            false, getData, async () => false);
+    };
+    const serve = () => {
+        globalThis.fetch = (async () => new Response(JSON.stringify(data()), {
+            status: 200, headers: { ETag: '"fixture-data"' },
+        })) as typeof fetch;
+    };
+    afterEach(() => resetForTests());
+
+    it('seeds resume pacing from cold completion and uses the strict shared 30-second boundary', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let first = true;
+        const fixture = configured(async () => {
+            if (first) { first = false; entered(); await held; }
+            return data();
+        });
+        const operation = fixture.sync.performStoredAutomaticSync('startup');
+        await reached;
+        now += 20_000;
+        release();
+        expect(await operation).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        now += 30_000;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        now += 1;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect(fixture.schedules).toEqual([]);
+    });
+
+    it('retains cold failure cooldown across resume and clears it only after actual manual recovery', async () => {
+        resetForTests(); globalThis.fetch = failingFetch;
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: false, skipped: false });
+        now += 30_001;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        now += 30_000;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: false, skipped: false });
+        expect(fixture.sync.state().cycles).toBe(2);
+        now += 30_001;
+        serve();
+        expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(4);
+    });
+
+    it('keeps shared offline skips outside automatic failure cooldown', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured(async () => { throw new Error('Network request failed'); });
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: true });
+        now += 30_001;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+    });
+
+    it('uses the real selected controller without installing timers and refuses an overlapping frame', async () => {
+        resetForTests(); serve();
+        const create = core.createAutoSyncController;
+        const timer = mock(() => { throw new Error('No deferred controller work is permitted'); });
+        spyOn(core, 'createAutoSyncController').mockImplementation((options) => {
+            expect(options.allowDeferredWork).toBe(false);
+            expect(options.periodicSyncIntervalMs).toBeNull();
+            return create({ ...options, setTimer: timer });
+        });
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const fixture = configured(async () => { entered(); await held; return data(); });
+        const operation = fixture.sync.performStoredAutomaticSync('startup');
+        await reached;
+        await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toThrow('already in progress');
+        release();
+        expect(await operation).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(1);
+        globalThis.fetch = failingFetch;
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: false, skipped: false });
+        expect(timer).not.toHaveBeenCalled();
+        expect(fixture.schedules).toEqual([]);
+    });
+
+    for (const fatal of [false, true]) {
+        it(`propagates the exact ${fatal ? 'fatal' : 'ordinary'} preflush error without service work`, async () => {
+            resetForTests();
+            const refusal = fatal ? new NativeAttachmentCleanupUnconfirmedError() : new Error('Synthetic flush refusal');
+            const create = core.createAutoSyncController;
+            spyOn(core, 'createAutoSyncController').mockImplementation((options) => create({
+                ...options, flushPendingSave: async () => { throw refusal; },
+            }));
+            const fixture = configured();
+            const fetch = mock(async () => { throw new Error('No HTTP after a failed flush'); });
+            globalThis.fetch = fetch as typeof globalThis.fetch;
+            await expect(fixture.sync.performStoredAutomaticSync('startup')).rejects.toBe(refusal);
+            expect(fixture.sync.state().cycles).toBe(0);
+            expect(fetch).not.toHaveBeenCalled();
+            expect(fixture.calls).toEqual(['get']);
+            if (fatal) {
+                const at = fixture.calls.length;
+                await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toBe(refusal);
+                await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true })).rejects.toBe(refusal);
+                await expect(fixture.sync.settingsHost.reconcileBackgroundSync()).rejects.toBe(refusal);
+                expect(fixture.calls.slice(at)).toEqual([]);
+            }
+        });
+    }
+
+    it('retains an actual cleanup fatal before any completion state or later port work', async () => {
+        resetForTests();
+        const files = iosFiles();
+        const date = '2026-10-06T00:00:00.000Z';
+        const id = '00000000-0000-4000-8000-000000000341';
+        const uri = `${MANAGED}${id}.txt`;
+        const snapshot: AppData = { tasks: [{ id: 'purged-automatic-task', title: 'Fixture', status: 'done', tags: [], contexts: [],
+            createdAt: date, updatedAt: date, deletedAt: date, purgedAt: date,
+            attachments: [{ id, kind: 'file', title: 'fixture.txt', uri, createdAt: date, updatedAt: date }] }],
+            projects: [], sections: [], areas: [], settings: {} };
+        const fatal = new NativeAttachmentCleanupUnconfirmedError();
+        files.memory.put(uri, new Uint8Array([1, 2, 3]));
+        globalThis.fetch = (async () => new Response(JSON.stringify(snapshot), {
+            status: 200, headers: { ETag: '"fixture-data"' },
+        })) as typeof fetch;
+        const retire = mock(async (_id: string, _uri: string, keep: () => boolean) => {
+            expect(keep()).toBe(false); throw fatal;
+        });
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+            async () => structuredClone(snapshot), retire);
+        await expect(fixture.sync.performStoredAutomaticSync('startup')).rejects.toBe(fatal);
+        expect(retire).toHaveBeenCalledWith(id, uri, expect.any(Function));
+        expect(fixture.sync.state().cycles).toBe(0);
+        const before = [...fixture.kv], at = fixture.calls.length;
+        await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toBe(fatal);
+        await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true })).rejects.toBe(fatal);
+        expect(fixture.calls.slice(at)).toEqual([]);
+        expect([...fixture.kv]).toEqual(before);
+        expect(files.memory.read(uri)).toEqual(new Uint8Array([1, 2, 3]));
+        expect(files.calls).not.toContain('deleteNow');
+    });
+
+    it('never treats Test verification as an automatic timestamp or cooldown recovery', async () => {
+        resetForTests(); globalThis.fetch = failingFetch;
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: false, skipped: false });
+        now += 30_001;
+        expect(await fixture.sync.settingsHost.performSync(undefined, {
+            manual: true, activationProbe: true, configOverride: { backend: 'off' },
+        })).toMatchObject({ success: true });
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+    });
+
+    it('refuses Android stored/resume calls without any port access', async () => {
+        globals.__mindwtrHostPlatform = 'android';
+        const fixture = host();
+        await expect(fixture.sync.performStoredAutomaticSync('startup')).rejects.toThrow('unavailable');
+        await expect(fixture.sync.performStoredAutomaticSync('resume')).rejects.toThrow('unavailable');
+        expect(fixture.calls).toEqual([]);
+    });
+});
+
+describe('invocation-owned iOS service settlement', () => {
+    for (const platform of ['ios', 'android'] as const) {
+        it(`${platform} ${platform === 'ios' ? 'defers' : 'preserves'} the ordinary remote-fence follow-up`, async () => {
+            resetForTests();
+            if (platform === 'ios') iosFiles();
+            else globals.__mindwtrHostPlatform = 'android';
+            const date = '2026-10-06T00:00:00.000Z';
+            const data: AppData = { tasks: [{ id: 'follow-up-fixture', title: 'Synthetic local Task', status: 'inbox',
+                contexts: [], tags: [], createdAt: date, updatedAt: date }], projects: [], sections: [], areas: [], settings: {} };
+            let reads = 0;
+            const serverNow = Math.floor(Date.now() / 1000) * 1000;
+            globalThis.fetch = (async (input: RequestInfo | URL) => {
+                if (String(input).endsWith('/data.json')) return new Response(JSON.stringify({
+                    tasks: [], projects: [], sections: [], areas: [], settings: {},
+                }), { status: 200, headers: { Date: new Date(serverNow).toUTCString(), ETag: '"fixture-data"' } });
+                expect(String(input)).toContain('.mindwtr-sync-fence-v1.json');
+                reads += 1;
+                if (reads !== 1) return new Response('', { status: 403 });
+                return new Response(JSON.stringify({ schema: 1, leaseId: 'synthetic-peer-lease', ownerId: 'synthetic-peer',
+                    purpose: 'ordinary-sync', expiresAt: serverNow + 1_000 }),
+                    { status: 200, headers: { Date: new Date(serverNow).toUTCString(), ETag: '"fixture-fence"' } });
+            }) as typeof fetch;
+            const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://fixture.invalid/data.json' }, false,
+                async () => structuredClone(data), platform === 'ios' ? async () => false : undefined);
+            try {
+                await fixture.sync.settingsHost.rememberWebdavCapabilityProof({
+                    url: 'https://fixture.invalid/data.json', username: '', password: '', allowInsecureHttp: false,
+                });
+                expect(await fixture.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({
+                    success: true, skipped: 'remoteFenceBusy', retryAfterMs: 1_000,
+                });
+                expect(reads).toBe(1);
+                const at = fixture.calls.length;
+                await new Promise((resolve) => setTimeout(resolve, 1_200));
+                expect(reads).toBe(platform === 'ios' ? 1 : 2);
+                if (platform === 'ios') {
+                    expect(fixture.calls.slice(at)).toEqual([]);
+                    expect(fixture.lines).not.toContain('Sync follow-up scheduled');
+                } else expect(fixture.lines).toContain('Sync follow-up scheduled');
+            } finally { resetForTests(); }
+        });
+
+        it(`${platform} ${platform === 'ios' ? 'awaits' : 'keeps detached'} its own configuration refresh`, async () => {
+            resetForTests();
+            if (platform === 'ios') iosFiles();
+            else globals.__mindwtrHostPlatform = 'android';
+            const fixture = host({}, false, undefined, platform === 'ios' ? async () => false : undefined);
+            let entered!: () => void, release!: () => void;
+            const reached = new Promise<void>((resolve) => { entered = resolve; });
+            const gate = new Promise<void>((resolve) => { release = resolve; });
+            const get = fixture.bindings.keyValue.get;
+            let backendReads = 0;
+            fixture.bindings.keyValue.get = async (key) => {
+                const value = await get(key);
+                if (key === SYNC_BACKEND_KEY && ++backendReads === 2) { entered(); await gate; }
+                return value;
+            };
+            let settled = false;
+            const operation = fixture.sync.settingsHost.performSync(undefined, { manual: true });
+            void operation.then(() => { settled = true; });
+            try {
+                await reached;
+                await Promise.resolve(); await Promise.resolve();
+                expect(settled).toBe(platform === 'android');
+                release();
+                expect(await operation).toMatchObject({ success: true });
+                await Promise.resolve(); await Promise.resolve();
+                expect(fixture.sync.state().cycles).toBe(1);
+            } finally {
+                release(); await operation; resetForTests();
+            }
+        });
+    }
 });
 
 describe('native background sync binding', () => {

@@ -30,6 +30,7 @@ import {
     useTaskStore,
     type NativeHostResult,
 } from '@mindwtr/core';
+import type { NativeReminderAlarm } from '../../../packages/core/src/native-host-contract-reminders';
 
 type ReminderPlan = {
     mode: 'active' | 'inactive' | 'revoked';
@@ -41,7 +42,7 @@ type ReminderPlan = {
 };
 
 /** A Snooze's alarm (core's NativeReminderAlarm, snoozeReminder's reply). */
-type SnoozeAlarm = { key: string; id: number; fireAtMs: number; repeat: 'once'; details: Record<string, unknown>; replacing: null };
+type SnoozeAlarm = NativeReminderAlarm;
 
 /** What is stored: RN's alarm map (RN's key) and the native host's own reminder state (delivered reminders it may withdraw). */
 type Stored = { alarms: string | null; state: string | null };

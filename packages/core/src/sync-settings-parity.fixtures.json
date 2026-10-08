@@ -22499,7 +22499,7 @@
      "Passphrase",
      [
       "danger",
-      "This encryption change may be incomplete because Mindwtr could not verify a remote file version. Sync remains paused. Retry the same encryption change before changing or disconnecting this sync location."
+      "Mindwtr could not confirm that the encryption change is complete. Sync remains paused. Retry the same encryption change before changing or disconnecting this sync location."
      ],
      "Show passphrase",
      "Enter passphrase",
@@ -24133,7 +24133,7 @@
      "Turn off encryption",
      [
       "danger",
-      "This encryption change may be incomplete because Mindwtr could not verify a remote file version. Sync remains paused. Retry the same encryption change before changing or disconnecting this sync location."
+      "Mindwtr could not confirm that the encryption change is complete. Sync remains paused. Retry the same encryption change before changing or disconnecting this sync location."
      ],
      "Abandon setup",
      "Settings sync options",

@@ -401,6 +401,7 @@ export function ObsidianView() {
                     vaultPath: config.vaultPath,
                     relativeFilePath: config.inboxFile,
                     taskText: trimmed,
+                    requiredInlineTag: config.requiredInlineTag,
                 });
             }
             setNewTaskText('');
@@ -420,6 +421,7 @@ export function ObsidianView() {
         }
     }, [
         config.inboxFile,
+        config.requiredInlineTag,
         config.vaultPath,
         effectiveNewTaskFormat,
         isWatching,

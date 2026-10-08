@@ -1,3 +1,4 @@
+import { TaskProjectConversionModal } from './task-edit/TaskProjectConversionModal';
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, Modal, Animated, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -854,6 +855,7 @@ function TaskEditModalInner({
         handleDone,
         handleDuplicateTask,
         handlePromoteTaskToProject,
+        projectConversionOpen, setProjectConversionOpen, confirmProjectConversion,
         handleResetChecklist,
         handleShare,
     } = useTaskEditActions({
@@ -1142,6 +1144,9 @@ function TaskEditModalInner({
                     style={[styles.container, { backgroundColor: tc.bg }]}
                     edges={constrainEditorSurface ? [] : (Platform.OS === 'android' ? ['top', 'bottom'] : ['top'])}
                 >
+                    {projectConversionOpen && task && <TaskProjectConversionModal
+                        task={{ ...task, ...mergedTask } as Task} onConfirm={confirmProjectConversion}
+                        onClose={() => setProjectConversionOpen(false)} />}
                     <SandboxWorkspaceCue />
                     <TaskEditHeader
                         onDone={readOnly ? onClose : handleDone}

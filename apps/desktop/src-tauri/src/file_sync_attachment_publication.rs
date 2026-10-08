@@ -1479,6 +1479,56 @@ mod tests {
         assert!(!named_reopen.contains("expected_size"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn reserved_hidden_stage_needs_exact_runtime_scope_before_upload() {
+        use tauri_plugin_fs::FsExt;
+
+        let (_temp, data_dir, sync_root, target) = fixture();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_fs::init())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let scope = app.fs_scope();
+        scope.allow_directory(&sync_root, true).expect("root grant");
+        let mut root = bind(&sync_root);
+        let bytes = b"attachment payload";
+        let digest = format!("{:x}", Sha256::digest(bytes));
+        let reservation =
+            reserve(&data_dir, &mut root, &target, bytes.len() as u64, &digest).expect("reserve");
+        let stage = Path::new(&reservation.scratch_path);
+        assert!(
+            !scope.is_allowed(stage),
+            "recursive root grant misses hidden stage"
+        );
+        scope.allow_file(stage).expect("exact stage grant");
+        assert!(scope.is_allowed(stage));
+        assert!(!scope.is_allowed(stage.with_file_name("other")));
+        assert!(!scope.is_allowed(sync_root.join(".unrelated/secret")));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(stage)
+            .expect("scratch-open");
+        file.write_all(bytes).expect("scratch-write");
+        drop(file);
+        publish(&data_dir, &mut root, &reservation.operation_id).expect("publish");
+        assert_eq!(fs::read(&target).expect("published bytes"), bytes);
+        assert!(!stage.exists());
+
+        // Keep the production reservation boundary wired to this exact grant.
+        let source = include_str!("sync.rs");
+        let command = source
+            .split_once("pub(crate) fn sync_fs_reserve_attachment_generation(")
+            .unwrap()
+            .1
+            .split_once("\n#[cfg(test)]")
+            .unwrap()
+            .0;
+        assert!(command.contains("app.fs_scope().allow_file(&reservation.scratch_path)"));
+        assert!(command.contains("file_sync_attachment_publication::abandon("));
+    }
+
     #[test]
     fn reservation_is_durable_before_scratch_creation_and_empty_recovery_clears_it() {
         let (_temp, data_dir, sync_root, target) = fixture();

@@ -112,6 +112,141 @@ final class NativeCryptoHostTests: XCTestCase {
         XCTFail("Crypto slots did not drain");XCTAssertEqual(state.slots,0)
     }
 
+    // Synthetic remote generations isolate shared admission from HTTP and the
+    // production Unlock-only parser; all Argon2/AES work still uses native jobs.
+    private let capacityHelpers = """
+    if(typeof g.runEnableSyncEncryptionOverRemote!=='function'||typeof g.SyncEncryptionArtifactCapacityError!=='function'
+      ||typeof g.encryptedSyncArtifactByteLength!=='function')throw new Error('Crypto fixture gate is unavailable');
+    const kdf={mKib:64,t:1,p:1},passphrase='synthetic-capacity-376';
+    const bytes=length=>Uint8Array.from({length},(_,i)=>(i*17+3)%251);
+    const fixture=(seed,capacity)=>{
+      const store=new Map(Object.entries(seed).map(([name,item])=>[name,{bytes:item.bytes.slice(),kind:item.kind,version:1}]));
+      const mutations=[],stateWrites=[],keys={current:null,writes:0,clears:0};let local=null,failAfterWrite=false;
+      const version=name=>store.has(name)?'v'+store.get(name).version:null;
+      const read=name=>({bytes:store.has(name)?store.get(name).bytes.slice():null,version:version(name)});
+      const snapshot=()=>JSON.stringify([...store].sort(([a],[b])=>a.localeCompare(b)).map(([name,item])=>
+        ({name,kind:item.kind,version:item.version,bytes:hex(item.bytes)})));
+      const remote={maxEncryptedArtifactBytes:capacity,
+        async list(){return [...store].map(([name,item])=>({name,kind:item.kind}))},
+        async captureInventory(){const entries=await this.list();return {entries,snapshot:new Map(entries.map(item=>[item.name,read(item.name)]))}},
+        async read(name){return read(name)},
+        async write(name,value,expected){if(version(name)!==expected)throw new Error('Synthetic generation conflict');
+          const current=store.get(name);store.set(name,{bytes:value.slice(),kind:current?current.kind:'document',version:(current?current.version:0)+1});
+          mutations.push({operation:'write',name,expected,length:value.length});
+          if(failAfterWrite){failAfterWrite=false;throw new Error('Synthetic interrupted write acknowledgement')}},
+        async remove(name,expected){if(version(name)!==expected)throw new Error('Synthetic generation conflict');
+          store.delete(name);mutations.push({operation:'remove',name,expected})}};
+      const keyCache={async getKey(){return keys.current&&keys.current.slice()},
+        async setKey(key){keys.current=key.slice();keys.writes++},async clearKey(){keys.current=null;keys.clears++}};
+      const localState={read(){return local},write(value){local=value===null?null:JSON.parse(JSON.stringify(value));stateWrites.push(local)}};
+      return {remote,keyCache,localState,store,mutations,stateWrites,keys,snapshot,
+        interruptNextWrite(){failAfterWrite=true}};
+    };
+    const enable=f=>g.runEnableSyncEncryptionOverRemote(passphrase,f.remote,f.keyCache,f.localState,undefined,g.prims,kdf);
+    """
+
+    func testEnableCapacityRefusesLateAttachmentAndBaseDocumentBeforeAnyMutation() async throws {
+        let host=try host(capacityHelpers+"""
+        const checks=[];
+        for(const kind of ['attachment','document']){
+          const seed={'attachments/first.bin':{bytes:bytes(1),kind:'attachment'}};
+          seed[kind==='attachment'?'attachments/last.bin':'data.json']={bytes:bytes(11),kind};
+          const f=fixture(seed,g.encryptedSyncArtifactByteLength(10)),before=f.snapshot();let typed=false,fixed=false;
+          try{await enable(f)}catch(error){typed=error instanceof g.SyncEncryptionArtifactCapacityError;
+            fixed=error.message==='SYNC_ENCRYPTION_ARTIFACT_CAPACITY: encrypted artifact exceeds host capacity'}
+          checks.push({typed,fixed,unchanged:f.snapshot()===before,mutations:f.mutations.length,
+            states:f.stateWrites.length,keyWrites:f.keys.writes,keyClears:f.keys.clears,
+            keyMissing:f.keys.current===null,stateMissing:f.localState.read()===null});
+        }return {checks};
+        """,faults:faults())
+        try await start(host);let before=try rows(),network=CryptoHTTPFixtureProtocol.counts.0,result=try await probe(host)
+        let checks=try XCTUnwrap(result["checks"] as? [[String:Any]]);XCTAssertEqual(checks.count,2)
+        for check in checks {
+            for name in ["typed","fixed","unchanged","keyMissing","stateMissing"] { XCTAssertEqual(check[name] as? Bool,true,name) }
+            for name in ["mutations","states","keyWrites","keyClears"] { XCTAssertEqual(check[name] as? Int,0,name) }
+        }
+        XCTAssertEqual(state.recorded,["argon2id","argon2id"],"Native KDF runs, but no artifact is sealed before all sizes pass")
+        try await drained();XCTAssertEqual(state.slots,0);XCTAssertEqual(state.retainedBytes,0)
+        XCTAssertEqual(CryptoHTTPFixtureProtocol.counts.0,network,"Synthetic admission performs no HTTP")
+        XCTAssertEqual(try rows(),before,"Capacity refusal preserves every local table byte")
+    }
+
+    func testEnableCapacityExactCanonicalBoundaryEncryptsAndDecryptsThroughNativeJobs() async throws {
+        let host=try host(capacityHelpers+"""
+        const plain=bytes(10),capacity=g.encryptedSyncArtifactByteLength(plain.length);
+        const f=fixture({'attachments/file.bin':{bytes:plain,kind:'attachment'},'data.json':{bytes:plain,kind:'document'}},capacity);
+        await enable(f);const attachment=f.store.get('attachments/file.bin'),document=f.store.get('data.json.enc');
+        const opened=await Promise.all([g.decryptSyncArtifact(attachment.bytes,f.keys.current,g.prims),
+          g.decryptSyncArtifact(document.bytes,f.keys.current,g.prims)]);
+        return {capacity,lengths:[attachment.bytes.length,document.bytes.length],opened:opened.map(value=>hex(value)===hex(plain)),
+          names:[...f.store.keys()].sort(),state:f.localState.read().state,complete:!f.localState.read().incompleteTransition,
+          stateWrites:f.stateWrites.map(value=>value.incompleteTransition||value.state),keyWrites:f.keys.writes,keyClears:f.keys.clears,
+          mutations:f.mutations.map(value=>({operation:value.operation,name:value.name,expected:value.expected})),
+          allWritesAdmitted:f.mutations.filter(value=>value.operation==='write').every(value=>value.length<=capacity)};
+        """,faults:faults())
+        try await start(host);let before=try rows(),network=CryptoHTTPFixtureProtocol.counts.0,result=try await probe(host)
+        XCTAssertEqual(result["capacity"] as? Int,80);XCTAssertEqual(result["lengths"] as? [Int],[80,80])
+        XCTAssertEqual(result["opened"] as? [Bool],[true,true]);XCTAssertEqual(result["names"] as? [String],["attachments/file.bin","data.json.enc"])
+        XCTAssertEqual(result["state"] as? String,"enabled");XCTAssertEqual(result["complete"] as? Bool,true)
+        XCTAssertEqual(result["stateWrites"] as? [String],["enable","enabled"]);XCTAssertEqual(result["keyWrites"] as? Int,1);XCTAssertEqual(result["keyClears"] as? Int,0)
+        let mutations=try XCTUnwrap(result["mutations"] as? [[String:Any]])
+        XCTAssertEqual(try json(mutations),try json([
+            ["operation":"write","name":"attachments/file.bin","expected":"v1"],
+            ["operation":"write","name":"data.json.enc","expected":NSNull()],
+            ["operation":"remove","name":"data.json","expected":"v1"]
+        ] as [[String:Any]]))
+        XCTAssertEqual(result["allWritesAdmitted"] as? Bool,true)
+        XCTAssertTrue(state.recorded.contains("argon2id"));XCTAssertTrue(state.recorded.contains("aesGcmSeal"));XCTAssertTrue(state.recorded.contains("aesGcmOpen"))
+        try await drained();XCTAssertEqual(state.slots,0);XCTAssertEqual(state.retainedBytes,0)
+        XCTAssertEqual(CryptoHTTPFixtureProtocol.counts.0,network);XCTAssertEqual(try rows(),before)
+    }
+
+    func testEnableCapacityResumesInterruptedPaddedForeignGenerationWithoutDataLoss() async throws {
+        let host=try host(capacityHelpers+"""
+        const base=await g.deriveSyncKeyMaterial(passphrase,new Uint8Array(16).fill(1),kdf,g.prims),
+          abandoned=await g.deriveSyncKeyMaterial(passphrase,new Uint8Array(16).fill(2),kdf,g.prims),plain=bytes(10),documentPlain=bytes(1);
+        const baseDocument=await g.encryptSyncArtifact(documentPlain,base,g.prims),foreign=await g.encryptSyncArtifact(plain,abandoned,g.prims),
+          padded=new Uint8Array(foreign.length+9);padded.set(foreign);padded.fill(0x20,foreign.length);
+        const capacity=g.encryptedSyncArtifactByteLength(plain.length),f=fixture({
+          'attachments/file.bin':{bytes:padded,kind:'attachment'},'data.json.enc':{bytes:baseDocument,kind:'document'},
+          'data.json':{bytes:documentPlain,kind:'document'}},capacity);
+        f.interruptNextWrite();let interrupted=false;
+        try{await enable(f)}catch(error){interrupted=error.message==='Synthetic interrupted write acknowledgement'}
+        const afterInterrupted=f.store.get('attachments/file.bin'),journal=f.localState.read();
+        const interruptedChecks={interrupted,inputPadded:padded.length>capacity,journal:journal&&journal.incompleteTransition==='enable',
+          stateOff:journal&&journal.state==='off',keyMissing:f.keys.current===null,keyWrites:f.keys.writes,mutations:f.mutations.length,
+          canonical:afterInterrupted.bytes.length===capacity,version:afterInterrupted.version,
+          attachment:hex(await g.decryptSyncArtifact(afterInterrupted.bytes,base.key,g.prims))===hex(plain),
+          document:hex(f.store.get('data.json.enc').bytes)===hex(baseDocument),
+          original:hex(f.store.get('data.json').bytes)===hex(documentPlain)};
+        await enable(f);const finalState=f.localState.read(),attachment=f.store.get('attachments/file.bin');
+        return {interruptedChecks,complete:finalState.state==='enabled'&&!finalState.incompleteTransition,
+          keyMatches:hex(f.keys.current)===hex(base.key),keyWrites:f.keys.writes,keyClears:f.keys.clears,
+          stateWrites:f.stateWrites.map(value=>value.incompleteTransition||value.state),
+          mutations:f.mutations.map(value=>({operation:value.operation,name:value.name,expected:value.expected})),
+          canonical:attachment.bytes.length===capacity,version:attachment.version,
+          attachment:hex(await g.decryptSyncArtifact(attachment.bytes,f.keys.current,g.prims))===hex(plain),
+          document:hex(await g.decryptSyncArtifact(f.store.get('data.json.enc').bytes,f.keys.current,g.prims))===hex(documentPlain),
+          baseUnchanged:hex(f.store.get('data.json.enc').bytes)===hex(baseDocument),originalRemoved:!f.store.has('data.json'),
+          allWritesAdmitted:f.mutations.filter(value=>value.operation==='write').every(value=>value.length<=capacity)};
+        """,faults:faults())
+        try await start(host);let before=try rows(),network=CryptoHTTPFixtureProtocol.counts.0,result=try await probe(host)
+        let interrupted=try XCTUnwrap(result["interruptedChecks"] as? [String:Any])
+        for name in ["interrupted","inputPadded","journal","stateOff","keyMissing","canonical","attachment","document","original"] { XCTAssertEqual(interrupted[name] as? Bool,true,name) }
+        XCTAssertEqual(interrupted["keyWrites"] as? Int,0);XCTAssertEqual(interrupted["mutations"] as? Int,1);XCTAssertEqual(interrupted["version"] as? Int,2)
+        for name in ["complete","keyMatches","canonical","attachment","document","baseUnchanged","originalRemoved","allWritesAdmitted"] { XCTAssertEqual(result[name] as? Bool,true,name) }
+        XCTAssertEqual(result["version"] as? Int,2,"Resume skips the already-converted exact generation")
+        XCTAssertEqual(result["keyWrites"] as? Int,1);XCTAssertEqual(result["keyClears"] as? Int,0)
+        XCTAssertEqual(result["stateWrites"] as? [String],["enable","enable","enabled"])
+        XCTAssertEqual(try json(try XCTUnwrap(result["mutations"] as? [[String:Any]])),try json([
+            ["operation":"write","name":"attachments/file.bin","expected":"v1"],
+            ["operation":"remove","name":"data.json","expected":"v1"]
+        ] as [[String:Any]]))
+        XCTAssertTrue(state.recorded.contains("aesGcmSeal"));XCTAssertTrue(state.recorded.contains("aesGcmOpen"))
+        try await drained();XCTAssertEqual(state.slots,0);XCTAssertEqual(state.retainedBytes,0)
+        XCTAssertEqual(CryptoHTTPFixtureProtocol.counts.0,network);XCTAssertEqual(try rows(),before)
+    }
+
     func testEightSharedArgon2VectorsAndSevenAESVectorsThroughActualJSC() async throws {
         let host=try host("""
         const argon=[],aes=[];

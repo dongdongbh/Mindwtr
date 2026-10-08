@@ -96,7 +96,7 @@ final class ProjectFileRemoveHostTests: XCTestCase {
         try await seed(attachments); try bytes.write(to: local); try bytes.write(to: outside)
         let hooks = NativeAttachmentHostHooks(); var work = 0
         hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in work += 1 } }
-        let host = core(); await host.configureAttachmentHost(hooks); _ = try await host.start()
+        let host = core(); try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let beforeOther = try otherRows(), siblingBefore = try sibling(), identities = try [local, outside].map(inode)
         let before = try project()
         for id in ["current", "missing", "foreign", "cloud"] {

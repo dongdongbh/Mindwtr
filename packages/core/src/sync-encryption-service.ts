@@ -72,7 +72,9 @@ import {
 } from './sync-remote-fence-providers';
 import { SYNC_FILE_NAME, SyncFileLockUnavailableError } from './sync-service-utils';
 import {
+    ATTACHMENT_PRESENCE_RECONCILE_KEY,
     CLOUD_PROVIDER_KEY,
+    FAST_SYNC_STATE_KEY,
     SYNC_BACKEND_KEY,
     SYNC_PATH_KEY,
     type SyncKeyValueStoragePort,
@@ -256,7 +258,9 @@ export type SyncEncryptionFileSyncPort<Lease> = {
 };
 
 export type SyncEncryptionServiceDeps<Lease> = {
-    storage: Pick<SyncKeyValueStoragePort, 'getItem'>;
+    /** Host WebDAV transport cap; omitted for RN and other backends. */
+    maxEncryptedArtifactBytes?: number;
+    storage: Pick<SyncKeyValueStoragePort, 'getItem' | 'removeItem'>;
     state: SyncEncryptionServiceStatePort;
     crypto: SyncCryptoPrimitives;
     /** The default fetcher for provider inventory requests. */
@@ -280,6 +284,10 @@ type BackendTarget<Lease> =
     | { kind: 'unsupported' };
 
 export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDeps<Lease>) => {
+    if (deps.maxEncryptedArtifactBytes !== undefined
+        && (!Number.isSafeInteger(deps.maxEncryptedArtifactBytes) || deps.maxEncryptedArtifactBytes <= 0)) {
+        throw new RangeError('maxEncryptedArtifactBytes must be a positive safe integer');
+    }
     const { storage, state, crypto } = deps;
 
     // -----------------------------------------------------------------------
@@ -804,6 +812,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         const listAttachmentKeys = () => listWebdavAttachmentKeys(baseSyncUrl, requestOptions);
         let referencedAttachmentKeys: string[] = [];
         return {
+            maxEncryptedArtifactBytes: deps.maxEncryptedArtifactBytes,
             acquireRemoteMutationFence: async () => {
                 // The fence is a versioned write like every transition write: a server without strong ETags is refused
                 // here, before the fence file is written (it could never be read back or removed there).
@@ -1204,8 +1213,18 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             const current = await state.loadSyncEncryptionLocalState();
             const found = await probeSyncLocationCiphertext({ full: true });
             if (found !== 'mixed' && current?.partlyEncryptedScope) {
+                // Old completed cycles cannot establish the newly rechecked encryption posture.
+                // Invalidate both durable proofs before admitting the next discovery cycle.
+                await storage.removeItem(FAST_SYNC_STATE_KEY);
+                await storage.removeItem(ATTACHMENT_PRESENCE_RECONCILE_KEY);
                 await state.syncEncryptionLocalState.write(null);
                 await state.flushSyncEncryptionLocalState();
+                try {
+                    await state.logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.transition, {
+                        kind: 'recheck', phase: 'end', outcome: 'ok',
+                        releaseCheck: 'v1.3.5/encryption-recheck-posture',
+                    }, { level: 'info', force: true });
+                } catch { /* A diagnostic cannot fail the durable quarantine exit. */ }
             }
             const backend = (await storage.getItem(SYNC_BACKEND_KEY).catch(() => null))?.trim() || 'off';
             state.logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.transition, {

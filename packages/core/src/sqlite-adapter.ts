@@ -1069,7 +1069,7 @@ export class SqliteAdapter {
         return keepSavedFilters([filter])[0] ?? null;
     }
 
-    async getData(options?: { rawTasks?: true }): Promise<AppData> {
+    async getData(options?: { rawTasks?: true }): Promise<AppData & { people: Person[] }> {
         await this.ensureSchema();
         const loadSnapshotRows = () => Promise.all([
             this.loadAllRows('tasks'),

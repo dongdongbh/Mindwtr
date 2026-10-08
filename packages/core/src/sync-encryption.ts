@@ -19,6 +19,7 @@ import {
     decryptSyncArtifact,
     defaultSyncCryptoPrimitives,
     deriveSyncKeyMaterial,
+    encryptedSyncArtifactByteLength,
     encryptSyncArtifact,
     inspectSyncArtifact,
     type SyncCryptoKdfParams,
@@ -250,6 +251,14 @@ export class SyncEncryptionRemoteConflictError extends Error {
     }
 }
 
+/** A host cannot write one of the encrypted artifacts in the captured generation. */
+export class SyncEncryptionArtifactCapacityError extends Error {
+    constructor() {
+        super('SYNC_ENCRYPTION_ARTIFACT_CAPACITY: encrypted artifact exceeds host capacity');
+        this.name = 'SyncEncryptionArtifactCapacityError';
+    }
+}
+
 export const SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE = 'SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE';
 
 /** Existing remote bytes without an atomic backend generation cannot be mutated safely.
@@ -284,6 +293,8 @@ export const isSyncEncryptionRemoteVersionUnavailableError = (error: unknown): b
  * dropbox.ts) — this is the ADR 0014 shared-logic seam: one transition implementation,
  * two thin backend adapters, reused by both desktop and mobile. */
 export type SyncEncryptionRemotePort = {
+    /** Host transport's maximum encrypted output size, when it has one. Enable checks the full inventory before mutation. */
+    maxEncryptedArtifactBytes?: number;
     list(): Promise<SyncEncryptionRemoteEntry[]>;
     /** Blob backends can bind their derived worklist to the document reads that
      * produced it. File backends retain the `list` + `read` fallback because they enumerate
@@ -769,6 +780,11 @@ export async function runEnableSyncEncryptionOverRemote(
     // only affects newly written artifacts; tests inject cheap params to stay under timeouts.
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<EnableRemoteEncryptionResult> {
+    const maxEncryptedArtifactBytes = remote.maxEncryptedArtifactBytes;
+    if (maxEncryptedArtifactBytes !== undefined
+        && (!Number.isSafeInteger(maxEncryptedArtifactBytes) || maxEncryptedArtifactBytes <= 0)) {
+        throw new RangeError('maxEncryptedArtifactBytes must be a positive safe integer');
+    }
     const { entries, snapshot } = await captureRemoteEntryVersions(remote, passphrase);
 
     // Authenticate every encrypted generation before the first transition write. A partial
@@ -778,6 +794,7 @@ export async function runEnableSyncEncryptionOverRemote(
     // a later encrypted attachment/document cannot reveal a typo after an earlier plaintext
     // attachment has already been rewritten.
     const recoveredMaterialBySalt = new Map<string, SyncKeyMaterial>();
+    const plaintextLengths = new Map<string, number>();
     const recoverMaterialForSalt = async (salt: Uint8Array, params: SyncCryptoKdfParams): Promise<SyncKeyMaterial> => {
         const cacheKey = bytesToHex(salt);
         const cached = recoveredMaterialBySalt.get(cacheKey);
@@ -805,9 +822,13 @@ export async function runEnableSyncEncryptionOverRemote(
                 new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
             );
         }
-        if (inspected.kind !== 'encrypted') continue;
+        if (inspected.kind !== 'encrypted') {
+            plaintextLengths.set(entry.name, bytes.length);
+            continue;
+        }
         const candidate = await recoverMaterialForSalt(inspected.salt, inspected.params);
-        await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
+        const plaintext = await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
+        plaintextLengths.set(entry.name, plaintext.length);
         if (!attachmentMaterial && entry.kind === 'attachment') attachmentMaterial = candidate;
         if (entry.kind === 'document' && entry.name.includes('.enc')) {
             documentMaterial ??= candidate;
@@ -818,6 +839,25 @@ export async function runEnableSyncEncryptionOverRemote(
     if (!material) {
         const salt = prims.randomBytes(16);
         material = await deriveSyncKeyMaterial(passphrase, salt, kdfParams, prims);
+    }
+
+    // No journal, key, or artifact has been changed yet. Check every captured generation
+    // that Enable may seal, including a later base document and a foreign-salt rewrap.
+    if (maxEncryptedArtifactBytes !== undefined) {
+        for (const entry of entries) {
+            const plaintextLength = plaintextLengths.get(entry.name);
+            if (plaintextLength === undefined) continue;
+            const bytes = snapshotRemoteRead(snapshot, entry.name).bytes!;
+            const inspected = inspectSyncArtifact(bytes);
+            // A ciphertext under a plain document name is left in place. Already-sealed
+            // artifacts under the selected key are read but not written by this run.
+            if (inspected.kind === 'encrypted'
+                && (entry.kind === 'document' && !entry.name.includes('.enc')
+                    || await triesDecrypt(bytes, material.key, prims))) continue;
+            if (encryptedSyncArtifactByteLength(plaintextLength) > maxEncryptedArtifactBytes) {
+                throw new SyncEncryptionArtifactCapacityError();
+            }
+        }
     }
 
     const isBaseDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(s));

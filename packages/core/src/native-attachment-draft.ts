@@ -1,5 +1,7 @@
-import { preparePickedAttachment, persistPreparedPickedAttachment, softDeleteAttachment, type PreparedPickedAttachment } from './attachment-editor-model';
+import { preparePickedAttachment, persistPreparedPickedAttachment, softDeleteAttachment, patchAttachment, type PreparedPickedAttachment } from './attachment-editor-model';
 import { getManagedAttachmentFileName } from './mobile-attachment-files';
+import { getAttachmentAvailabilityPatch, getAttachmentDownloadIdentity, getAttachmentUnrecoverablePatch } from './mobile-attachment-availability';
+import { isSha256Hex } from './attachment-hash';
 import { readNativeAttachments, readNativeTaskLinkHalf } from './native-host-contract-attachments';
 import { taskEditValuesEqual } from './json-value-equality';
 import { validateAttachmentForUpload } from './attachment-validation';
@@ -42,6 +44,14 @@ export type NativeAttachmentDraftRemovePrepared = Readonly<{
     version: 1; kind: 'prepared-file-remove'; taskID: string; requestId: string; attachmentId: string;
     removedAt: string; beforePayloadJSON: string; afterPayloadJSON: string;
 }>;
+/** Selected metadata continuity only; neither a download nor file-retirement permission. */
+export type NativeAttachmentDraftAvailabilityInput = Readonly<{
+    version: 1; taskID: string; requestId: string; attachmentId: string; identity: string;
+    beforePayloadJSON: string; status: 'available' | 'unrecoverable'; resolvedAttachmentJSON: string;
+}>;
+export type NativeAttachmentDraftAvailabilityPrepared = NativeAttachmentDraftAvailabilityInput & Readonly<{
+    kind: 'prepared-file-availability'; afterPayloadJSON: string;
+}>;
 export type NativeAttachmentDraftOperationV3 = Readonly<
     { kind: 'add'; operation: NativeAttachmentDraftPrepared }
     | { kind: 'remove'; operation: NativeAttachmentDraftRemovePrepared }
@@ -70,6 +80,13 @@ export type NativeAttachmentDraftLineageInputV4 = Omit<NativeAttachmentDraftLine
     version: 4; priorOperations: readonly NativeAttachmentDraftOperationV4[];
 };
 export type NativeAttachmentDraftLineageV4 = Omit<NativeAttachmentDraftLineage, 'version'> & { version: 4 };
+export type NativeAttachmentDraftOperationV5 = Readonly<{
+    kind: 'availability'; operation: NativeAttachmentDraftAvailabilityPrepared;
+}>;
+export type NativeAttachmentDraftLineageInputV5 = Omit<NativeAttachmentDraftLineageInputV3, 'version' | 'priorOperations'> & {
+    version: 5; priorOperations: readonly NativeAttachmentDraftOperationV5[];
+};
+export type NativeAttachmentDraftLineageV5 = Omit<NativeAttachmentDraftLineage, 'version'> & { version: 5 };
 export type NativeAttachmentDraftAddedV2 = Omit<NativeAttachmentDraftAdded, 'version' | 'attachment'> & Readonly<{
     version: 2; attachment: NativeAttachmentDraftHashedFile;
 }>;
@@ -638,4 +655,116 @@ export function prepareNativeAttachmentDraftRemoveV4(input: unknown, deps: Nativ
     const captured = { ...captureLineageV3(object, fields, 4), ...fields };
     if (captured.priorOperations.length >= 128 || validateLineageV3(captured).has(captured.requestId)) invalid();
     return prepareCapturedRemove(captured, deps);
+}
+
+const AVAILABILITY_FIELDS = ['version', 'taskID', 'requestId', 'attachmentId', 'identity',
+    'beforePayloadJSON', 'status', 'resolvedAttachmentJSON'];
+const availabilityShape = (value: unknown, frozen: boolean): NativeAttachmentDraftAvailabilityInput => {
+    if (!exact(value, frozen ? [...AVAILABILITY_FIELDS, 'kind', 'afterPayloadJSON'] : AVAILABILITY_FIELDS)) invalid();
+    const input = value as Record<string, unknown>;
+    if (input.version !== 1 || input.status !== 'available' && input.status !== 'unrecoverable'
+        || frozen && input.kind !== 'prepared-file-availability') invalid();
+    return Object.freeze({ version: 1, taskID: text(input.taskID, 500, true), requestId: requestIDV3(input.requestId),
+        attachmentId: attachmentIDV3(input.attachmentId), identity: text(input.identity, PAYLOAD_BYTES, true),
+        beforePayloadJSON: text(input.beforePayloadJSON, PAYLOAD_BYTES, true), status: input.status,
+        resolvedAttachmentJSON: text(input.resolvedAttachmentJSON, PAYLOAD_BYTES, true) }) as NativeAttachmentDraftAvailabilityInput;
+};
+const availabilityAfterPayload = (captured: NativeAttachmentDraftAvailabilityInput): string => {
+    const before = payloadV3(captured.beforePayloadJSON, captured.taskID);
+    const current = before.attachments.find((item) => item.id === captured.attachmentId) ?? invalid();
+    if (current.kind !== 'file' || current.deletedAt !== undefined
+        || getAttachmentDownloadIdentity(current) !== captured.identity) invalid();
+    let value: unknown;
+    try { value = JSON.parse(captured.resolvedAttachmentJSON); } catch { return invalid(); }
+    const rows = readNativeAttachments([value]);
+    if (!rows) invalid();
+    const resolved = rows![0];
+    if (resolved.kind !== 'file' || resolved.id !== current.id
+        || (resolved.contentRev ?? 0) !== (current.contentRev ?? 0)) invalid();
+    if (captured.status === 'available') {
+        if (resolved.deletedAt !== undefined || resolved.localStatus !== 'available'
+            || resolved.cloudKey !== current.cloudKey
+            || current.fileHash && (isSha256Hex(current.fileHash)
+                ? !isSha256Hex(resolved.fileHash) || resolved.fileHash.toLowerCase() !== current.fileHash.toLowerCase()
+                : resolved.fileHash !== current.fileHash)
+            || !current.fileHash && resolved.fileHash !== undefined && !isSha256Hex(resolved.fileHash)) invalid();
+        fileURI(resolved.uri);
+    } else {
+        if (resolved.cloudKey !== undefined || resolved.fileHash !== undefined || resolved.localStatus !== 'missing'
+            || !resolved.deletedAt || resolved.updatedAt !== resolved.deletedAt) invalid();
+        try { if (new Date(resolved.deletedAt!).toISOString() !== resolved.deletedAt) invalid(); } catch { return invalid(); }
+    }
+    const patch = captured.status === 'available'
+        ? getAttachmentAvailabilityPatch(current, resolved) : getAttachmentUnrecoverablePatch(resolved);
+    // Apply undefined lifecycle fields before JSON encoding; a serialized patch would lose deletions.
+    const after = JSON.stringify({ ...before.object, attachments: patchAttachment(before.attachments, current.id, patch) });
+    return text(after, PAYLOAD_BYTES, true);
+};
+
+/** Pure selected outcome projection. Native must separately prove the resolver and installed generation. */
+export function prepareNativeAttachmentDraftAvailability(input: unknown): NativeAttachmentDraftAvailabilityPrepared {
+    const captured = availabilityShape(input, false);
+    const result = Object.freeze({ ...captured, kind: 'prepared-file-availability' as const,
+        afterPayloadJSON: availabilityAfterPayload(captured) });
+    jsonBytes(result, PREPARED_BYTES);
+    return result;
+}
+
+/** Frozen replay never calls current policy, a clock, UUID creation, filesystem or network. */
+export function readNativeAttachmentDraftAvailabilityFrozen(input: unknown): NativeAttachmentDraftAvailabilityPrepared {
+    const captured = availabilityShape(input, true);
+    const afterPayloadJSON = text((input as Record<string, unknown>).afterPayloadJSON, PAYLOAD_BYTES, true);
+    const result = Object.freeze({ ...captured, kind: 'prepared-file-availability' as const, afterPayloadJSON });
+    jsonBytes(result, PREPARED_BYTES);
+    if (afterPayloadJSON !== availabilityAfterPayload(captured)) invalid();
+    return result;
+}
+
+/** Availability-only selection; historical Add/Remove grammars remain sealed. */
+const captureLineageV5 = (value: unknown): NativeAttachmentDraftLineageInputV5 => {
+    if (!exact(value, LINEAGE_V3_FIELDS)) invalid();
+    const input = value as Record<string, unknown>, operations = input.priorOperations;
+    if (input.version !== 5 || !Array.isArray(operations) || Object.getPrototypeOf(operations) !== Array.prototype
+        || operations.length > 128 || Reflect.ownKeys(operations).length !== operations.length + 1) invalid();
+    const captured = { version: 5 as const, taskID: text(input.taskID, 500, true),
+        initialPayloadJSON: text(input.initialPayloadJSON, PAYLOAD_BYTES, true),
+        beforePayloadJSON: text(input.beforePayloadJSON, PAYLOAD_BYTES, true),
+        managedDirectoryURI: fileURI(input.managedDirectoryURI, true), priorOperations: [] };
+    const copied: NativeAttachmentDraftOperationV5[] = [];
+    let bytes = jsonBytes(captured, PREPARE_BYTES);
+    for (let index = 0; index < (operations as unknown[]).length; index++) {
+        const descriptor = Object.getOwnPropertyDescriptor(operations, String(index));
+        if (!descriptor?.enumerable || !own(descriptor, 'value') || !exact(descriptor.value, ['kind', 'operation'])) invalid();
+        const entry = descriptor!.value as Record<string, unknown>;
+        if (entry.kind !== 'availability') invalid();
+        const operation = Object.freeze({ kind: 'availability' as const,
+            operation: readNativeAttachmentDraftAvailabilityFrozen(entry.operation) });
+        bytes += jsonBytes(operation, PREPARED_BYTES) + (index ? 1 : 0);
+        if (bytes > PREPARE_BYTES) invalid();
+        copied.push(operation);
+    }
+    return { ...captured, priorOperations: Object.freeze(copied) };
+};
+
+export function validateNativeAttachmentDraftBeginV5(input: unknown, deps: NativeAttachmentDraftDependencies): NativeAttachmentDraftLineageV5 {
+    const begin = validateNativeAttachmentDraftBeginV3(input, deps);
+    return Object.freeze({ ...begin, version: 5 });
+}
+
+/** Pure metadata lineage; native resolver, installation and retirement authority remain separate. */
+export function validateNativeAttachmentDraftLineageV5(input: unknown): NativeAttachmentDraftLineageV5 {
+    const captured = captureLineageV5(input), initial = payloadV3(captured.initialPayloadJSON, captured.taskID);
+    if (!linkOnlyGapV3(initial.object.attachmentsBase, initial.attachments)) invalid();
+    let previous = initial.attachments;
+    const ids = new Set<string>();
+    for (const { operation } of captured.priorOperations) {
+        const before = payloadV3(operation.beforePayloadJSON, captured.taskID);
+        if (operation.taskID !== captured.taskID || ids.has(operation.requestId)
+            || !same(before.object.attachmentsBase, initial.object.attachmentsBase) || !linkOnlyGapV3(previous, before.attachments)) invalid();
+        ids.add(operation.requestId);
+        previous = payloadV3(operation.afterPayloadJSON, captured.taskID).attachments;
+    }
+    const latest = payloadV3(captured.beforePayloadJSON, captured.taskID);
+    if (!same(latest.object.attachmentsBase, initial.object.attachmentsBase) || !linkOnlyGapV3(previous, latest.attachments)) invalid();
+    return Object.freeze({ version: 5, taskID: captured.taskID, payloadJSON: captured.beforePayloadJSON });
 }

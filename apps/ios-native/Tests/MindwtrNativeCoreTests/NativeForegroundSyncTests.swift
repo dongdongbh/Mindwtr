@@ -57,9 +57,15 @@ final class NativeForegroundSyncTests: XCTestCase {
         try XCTUnwrap(NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any])
     }
 
-    private func host(backend: String) throws -> (CoreHost, ForegroundSyncReadState) {
+    private func host(backend: String?) throws -> (CoreHost, ForegroundSyncReadState) {
         try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(json(["@mindwtr_sync_backend": backend, "unknown": "preserve 🧠"]).utf8).write(to: manifest)
+        var values = ["unknown": "preserve 🧠"]
+        if let backend { values["@mindwtr_sync_backend"] = backend }
+        try Data(json(values).utf8).write(to: manifest)
+        return makeHost()
+    }
+
+    private func makeHost() -> (CoreHost, ForegroundSyncReadState) {
         let state = ForegroundSyncReadState(), faults = HostIOFaults()
         faults.secretBeforeOperation = { operation, _ in state.record(operation) }
         faults.secretStatus = { _, _ in errSecItemNotFound }
@@ -83,7 +89,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let model = try XCTUnwrap(opened["value"] as? [String: Any])
         let backend = try XCTUnwrap(model["backend"] as? [String: Any])
         let options = try XCTUnwrap(backend["options"] as? [[String: Any]])
-        XCTAssertEqual(options.compactMap { $0["option"] as? String }, ["off", "webdav"])
+        XCTAssertEqual(options.compactMap { $0["option"] as? String }, ["off", "webdav", "selfhosted"])
         XCTAssertFalse(state.recorded.isEmpty, "Shared settings read the existing secret adapter")
         XCTAssertTrue(state.recorded.allSatisfy { $0 == "get" })
         XCTAssertEqual(try Data(contentsOf: manifest), before)
@@ -105,5 +111,116 @@ final class NativeForegroundSyncTests: XCTestCase {
         }
         XCTAssertTrue(state.recorded.isEmpty)
         XCTAssertEqual(try Data(contentsOf: manifest), before)
+    }
+
+    private func assertStoredSkip(backend: String?, command: String = "syncStored") async throws {
+        let (host, state) = try host(backend: backend)
+        let before = try Data(contentsOf: manifest)
+        _ = try await host.start()
+        let expected: [String: Any] = ["ok": true, "value": ["success": true, "skipped": true]]
+        let reply = try object(await host.foregroundSync(command: command, requestJSON: "{}"))
+        XCTAssertEqual(try json(reply), try json(expected), "The stored result contains only primitive booleans")
+        XCTAssertTrue(state.recorded.isEmpty, "An unconfigured stored cycle never asks for a secret")
+        XCTAssertEqual(try Data(contentsOf: manifest), before, "The no-op leaves every stored value and its encoding unchanged")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("core.sqlite.pending.json").path))
+        await host.close()
+
+        // Recreate against the existing bytes, without reseeding the manifest.
+        let (cold, coldState) = makeHost()
+        _ = try await cold.start()
+        let coldReply = try object(await cold.foregroundSync(command: command, requestJSON: "{}"))
+        XCTAssertEqual(try json(coldReply), try json(expected))
+        XCTAssertTrue(coldState.recorded.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: manifest), before)
+        await cold.close()
+    }
+
+    func testStoredOffSkipsWithoutNetworkSecretsOrConfigurationWritesAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: "off")
+    }
+
+    func testStoredAbsentBackendSkipsWithoutCreatingConfigurationAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: nil)
+    }
+
+    func testResumeOffSkipsWithoutNetworkSecretsOrConfigurationWritesAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: "off", command: "syncResume")
+    }
+
+    func testResumeAbsentBackendSkipsWithoutCreatingConfigurationAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: nil, command: "syncResume")
+    }
+
+    func testStoredRequestRejectsSuppliedFieldsBeforeWork() async throws {
+        let (host, state) = try host(backend: "webdav")
+        _ = try await host.start()
+        let before = try Data(contentsOf: manifest)
+        for command in ["syncStored", "syncResume"] {
+            for input in ["[]", "null", "{\"manual\":false}", "{\"revision\":\"synthetic\"}",
+                          "{\"webdav\":{\"url\":\"https://native-fixture.invalid/data.json\",\"password\":\"synthetic-only\"}}"] {
+                do {
+                    _ = try await host.foregroundSync(command: command, requestJSON: input)
+                    XCTFail("Stored configuration cannot be overridden by request fields")
+                } catch {
+                    XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed")
+                }
+                XCTAssertTrue(state.recorded.isEmpty)
+                XCTAssertEqual(try Data(contentsOf: manifest), before)
+            }
+        }
+        await host.close()
+    }
+
+    func testStoredUnsupportedProviderIsRefusedWithoutRewritingOrReadingSecrets() async throws {
+        let (host, state) = try host(backend: "cloudkit")
+        let before = try Data(contentsOf: manifest)
+        _ = try await host.start()
+        for command in ["syncStored", "syncResume"] {
+            let response = try object(await host.foregroundSync(command: command, requestJSON: "{}"))
+            XCTAssertEqual(response["ok"] as? Bool, false)
+            XCTAssertEqual((response["error"] as? [String: Any])?["code"] as? String, "ACTION_FAILED")
+        }
+        XCTAssertTrue(state.recorded.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: manifest), before)
+        await host.close()
+    }
+
+    func testIsolatedUIHostKeepsCredentialsInItsExactTestNamespace() async throws {
+        #if !os(iOS)
+        throw XCTSkip("Requires an entitled iOS app host; macOS uses a different Keychain implementation")
+        #else
+        let owner = UUID(), other = UUID()
+        let account = Data("mindwtr_webdav_password".utf8)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "mindwtr.native-keychain.fixture." + owner.uuidString.lowercased() + ":no-auth",
+            kSecAttrAccount as String: account, kSecAttrGeneric as String: account,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+        var seed = query
+        seed[kSecValueData as String] = Data(("isolated-" + owner.uuidString).utf8)
+        seed[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        XCTAssertEqual(SecItemAdd(seed as CFDictionary, nil), errSecSuccess)
+        defer {
+            let status = SecItemDelete(query as CFDictionary)
+            XCTAssertTrue(status == errSecSuccess || status == errSecItemNotFound)
+        }
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(json(["@mindwtr_sync_backend": "off"]).utf8).write(to: manifest)
+        for id in [owner, other, owner] {
+            let host = CoreHost(databaseURL: root.appendingPathComponent("core.sqlite"), bundleURL: bundle,
+                                deviceStorage: (containerURL: container, bundleIdentifier: namespace), isolatedTestID: id)
+            addTeardownBlock { await host.close() }
+            _ = try await host.start()
+            _ = try await host.foregroundSync(command: "openSyncSettings", requestJSON: "{}")
+            _ = try await host.foregroundSync(command: "selectSyncBackend", requestJSON:
+                json(["requestId": UUID().uuidString.lowercased(), "option": "webdav"]))
+            let reply = try object(await host.foregroundSync(command: "syncSettings", requestJSON: "{}"))
+            let model = try XCTUnwrap(reply["value"] as? [String: Any])
+            let panel = try XCTUnwrap(model["panel"] as? [String: Any])
+            let password = try XCTUnwrap(panel["password"] as? [String: Any])
+            let mask = try XCTUnwrap(password["mask"] as? String)
+            XCTAssertTrue(mask.isEmpty == (id == other), "Only the matching isolated host can see its stored credential")
+            await host.close()
+        }
+        #endif
     }
 }

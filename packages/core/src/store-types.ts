@@ -1,3 +1,4 @@
+import type { ChecklistProjectConversion } from './checklist-project-conversion';
 import type { ProjectTaskSummary } from './project-row-meta';
 import type { FocusStarAction } from './focus-star';
 import type { AppData, Area, Attachment, FilterCriteria, FocusGroupBy, Person, Project, SavedFilter, SavedSearch, Section, SortField, Task, TaskStatus } from './types';
@@ -16,6 +17,15 @@ export type PreparedNativeSaveBoundary = { taskReference: Task[]; lastDataChange
 export type PreparedAreaAuthority = { snapshot: AppData; state: Pick<TaskStore,
     '_allTasks' | '_allProjects' | '_allSections' | '_allAreas' | '_allPeople' | 'settings' | 'lastDataChangeAt'>;
     saveBoundary?: PreparedNativeSaveBoundary; rawSavedSnapshot?: AppData };
+
+/** Invocation-local Project availability effect; never a journal or replay capability. */
+export type SelectedProjectAvailabilityWrite = {
+    projectId: string; attachmentId: string; targetURI: string;
+    /** Closed private WebDAV variants; omitted for existing availability writes. */
+    outcome?: 'noop' | 'unrecoverable';
+    before: Project; after: Project; rawBefore: unknown[]; rawAfter: unknown[];
+    deviceIdBefore: string | null; deviceIdToInitialize: string | null; updateAt: string;
+};
 
 export type StoreActionResult = {
     success: boolean;
@@ -693,6 +703,9 @@ export interface TaskStore {
     /** Convert a task into a section of its project; checklist items become tasks and the task is soft-deleted */
     convertTaskToSection: (id: string) => Promise<StoreActionResult>;
     /** Create or reuse a project from a task, then move the task into it */
+    convertChecklistToProject: (command: ChecklistProjectConversion) => Promise<StoreActionResult>;
+    undoChecklistToProject: (command: ChecklistProjectConversion) => Promise<StoreActionResult>;
+    /** Create or reuse a project from a task, then move the task into it. */
     promoteTaskToProject: (id: string, options?: { title?: string; color?: string; areaId?: string }) => Promise<StoreActionResult>;
     /** Reset checklist items to unchecked */
     resetTaskChecklist: (id: string) => Promise<StoreActionResult>;
@@ -734,6 +747,9 @@ export interface TaskStore {
     commitPreparedProjectAttachmentWrite: (input: PreparedProjectAttachmentWrite & { request: { projectId: string; requestId: string; intent: ProjectAttachmentIntent }; result: { id: string; attachmentIds: string[] } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectFileRemoveWrite: (input: PreparedProjectFileRemoveWrite & { request: { projectId: string; requestId: string; intent: ProjectFileRemoveIntent }; result: { id: string; attachmentIds: string[] } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectFileAddWrite: (input: PreparedProjectFileAddWrite & { request: { projectId: string; requestId: string; version?: 2; sourceSha256?: string }; result: { id: string; attachmentIds: string[] } }, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    commitSelectedProjectAvailability: (input: SelectedProjectAvailabilityWrite, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Private frozen ordinary availability; exact-after replay performs no write. */
+    commitPreparedProjectFileAvailability: (input: SelectedProjectAvailabilityWrite, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectStatus: (input: PreparedProjectStatus & { request: { projectId: string; status: 'active' | 'waiting' | 'someday' } }) => Promise<PreparedTaskEditResult>;
     commitPreparedTrashProjectRestore: (input: PreparedTrashProjectRestore) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectDelete: (input: PreparedProjectDelete) => Promise<PreparedTaskEditResult>;

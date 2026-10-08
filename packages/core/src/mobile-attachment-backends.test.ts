@@ -11,6 +11,15 @@ import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from '.
 import { createMobileAttachmentBackends, type MobileAttachmentBackendsCoreFunctions } from './mobile-attachment-backends';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
+import {
+  decryptSyncArtifact,
+  defaultSyncCryptoPrimitives,
+  encryptedSyncArtifactByteLength,
+  inspectSyncArtifact,
+  SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+  type SyncCryptoPrimitives,
+  type SyncKeyMaterial,
+} from './sync-crypto';
 
 const now = '2026-09-28T00:00:00.000Z';
 const LOCAL = new Uint8Array([1, 2, 3, 4]);
@@ -19,6 +28,9 @@ const LOCAL_URI = `${MANAGED}att-1.txt`;
 const BASE_URL = 'https://dav.example.com/Mindwtr';
 const toArrayBuffer = (bytes: Uint8Array) => bytes.slice().buffer as ArrayBuffer;
 const httpError = (status: number) => Object.assign(new Error(`HTTP ${status}`), { status });
+const material: SyncKeyMaterial = {
+  key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+};
 
 const fileAttachment = (overrides: Partial<Attachment> = {}): Attachment => ({
   id: 'att-1',
@@ -55,6 +67,8 @@ const setup = (options: {
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
   createUploadTask?: () => MobileAttachmentUploadTask | null;
   maxWebdavBufferedUploadBytes?: number;
+  maxCloudBufferedUploadBytes?: number;
+  crypto?: SyncCryptoPrimitives;
 } = {}) => {
   const memory = createMemoryFileSystem({ saf: options.saf });
   const { storage } = createMemoryStorage();
@@ -96,7 +110,7 @@ const setup = (options: {
   const common = createMobileAttachmentCommon({
     fs: memory.fs,
     files,
-    crypto: {} as never,
+    crypto: options.crypto ?? {} as never,
     encryption: { logSyncEncryptionEvent: async () => undefined },
     installer,
     installerMayBeMissing: () => false,
@@ -111,6 +125,7 @@ const setup = (options: {
     installer,
     log,
     maxWebdavBufferedUploadBytes: options.maxWebdavBufferedUploadBytes,
+    maxCloudBufferedUploadBytes: options.maxCloudBufferedUploadBytes,
     core: { withRetry: (operation) => operation(), ...options.core },
   });
   return { backends, memory, lines, installer, order, files, common };
@@ -123,14 +138,14 @@ describe('WebDAV attachment pass', () => {
     vi.unstubAllGlobals();
   });
 
-  const stubWebdavServer = (putResponse: () => Response) => {
+  const stubWebdavServer = (putResponse: (body: Uint8Array) => Response) => {
     const requests: { method: string; url: string; headers: Record<string, string> }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = (init.method ?? 'GET').toUpperCase();
       requests.push({ method, url, headers: { ...(init.headers as Record<string, string>) } });
       if (method === 'HEAD') return new Response(null, { status: 404 });
       if (method === 'MKCOL') return new Response(null, { status: 201 });
-      if (method === 'PUT') return putResponse();
+      if (method === 'PUT') return putResponse(new Uint8Array(init.body as ArrayBuffer));
       return new Response(null, { status: 500 });
     }));
     return requests;
@@ -155,6 +170,178 @@ describe('WebDAV attachment pass', () => {
     expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
     expect(attachmentOf(result)?.contentSize).toBe(LOCAL.byteLength);
     expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it.each([0, LOCAL.byteLength])('accepts an encrypted upload at the exact host wire cap for %s plaintext bytes', async (size) => {
+    const source = LOCAL.slice(0, size);
+    const uploaded: Uint8Array[] = [];
+    const requests = stubWebdavServer((body) => {
+      uploaded.push(body);
+      return new Response(null, { status: 201 });
+    });
+    const cap = encryptedSyncArtifactByteLength(source.byteLength);
+    const { backends, memory, lines } = setup({ maxWebdavBufferedUploadBytes: cap, crypto: defaultSyncCryptoPrimitives });
+    memory.put(LOCAL_URI, source);
+    const input = withAttachment(fileAttachment({ size: 1 }));
+    const before = structuredClone(input);
+
+    const result = await backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material });
+
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0].byteLength).toBe(cap);
+    expect(inspectSyncArtifact(uploaded[0]).kind).toBe('encrypted');
+    expect(await decryptSyncArtifact(uploaded[0], material.key)).toEqual(source);
+    expect(requests.find((request) => request.method === 'PUT')?.headers['If-None-Match']).toBe('*');
+    expect(attachmentOf(result)).toMatchObject({ cloudKey: 'attachments/att-1.txt', contentSize: source.byteLength });
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(source);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it.each([
+    ['first upload', {}, undefined],
+    ['pending post-merge upload', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), pendingContentUpload: true }, 'post-merge'],
+    ['pending prepare identity', { cloudKey: 'attachments/att-1.txt', pendingContentUpload: true }, 'prepare'],
+    ['prepare content hash', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 }, 'prepare'],
+    ['foreign source migration', { uri: 'file:///data/files/provider-copy.txt' }, undefined],
+  ] as const)('refuses an encrypted host wire cap +1 before copying, hashing or sealing for %s', async (_name, overrides, phase) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const seal = vi.fn(defaultSyncCryptoPrimitives.aesGcmSeal);
+    const { backends, memory, files, lines } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(LOCAL.byteLength),
+      crypto: { ...defaultSyncCryptoPrimitives, aesGcmSeal: seal },
+      core: { webdavFileExists: async () => true },
+    });
+    const input = withAttachment(fileAttachment({ ...overrides, size: 1 }));
+    const uri = input.tasks[0].attachments![0].uri!;
+    const source = new Uint8Array(LOCAL.byteLength + 1).fill(3);
+    memory.put(uri, source);
+    const before = structuredClone(input);
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material, phase }))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(uri)).toEqual(source);
+    expect([...memory.files.keys()]).toEqual([uri]);
+    expect(hash).not.toHaveBeenCalled();
+    expect(seal).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+    expect(requests.filter((request) => ['MKCOL', 'PUT', 'DELETE'].includes(request.method))).toEqual([]);
+    expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toEqual([{
+      level: 'warn', message: 'WebDAV host upload admission refused',
+      extra: { releaseCheck: 'v1.3.5/webdav-host-upload-limit', operation: 'upload', outcome: 'refused' },
+    }]);
+  });
+
+  it.each([
+    ['first upload', {}, undefined],
+    ['pending prepare identity', { cloudKey: 'attachments/att-1.txt', pendingContentUpload: true }, 'prepare'],
+    ['pending post-merge upload', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), pendingContentUpload: true }, 'post-merge'],
+    ['foreign source migration', { uri: 'file:///data/files/provider-copy.txt' }, undefined],
+  ] as const)('refuses an empty encrypted upload below the envelope cap before local IO for %s', async (_name, overrides, phase) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const seal = vi.fn(defaultSyncCryptoPrimitives.aesGcmSeal);
+    const { backends, memory, lines } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(0) - 1,
+      crypto: { ...defaultSyncCryptoPrimitives, aesGcmSeal: seal },
+      core: { webdavFileExists: async () => true },
+    });
+    const input = withAttachment(fileAttachment(overrides));
+    const uri = input.tasks[0].attachments![0].uri!;
+    memory.put(uri, new Uint8Array(0));
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material, phase }))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(uri)).toEqual(new Uint8Array(0));
+    expect([...memory.files.keys()]).toEqual([uri]);
+    expect(seal).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+    expect(requests.filter((request) => ['MKCOL', 'PUT', 'DELETE'].includes(request.method))).toEqual([]);
+    expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toHaveLength(1);
+  });
+
+  it.each(['copy', 'read'] as const)('refuses encrypted snapshot growth at %s before sealing or remote mutation', async (growth) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const seal = vi.fn(defaultSyncCryptoPrimitives.aesGcmSeal);
+    const { backends, memory, files } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(LOCAL.byteLength),
+      crypto: { ...defaultSyncCryptoPrimitives, aesGcmSeal: seal },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    if (growth === 'copy') {
+      const copy = memory.fs.copy;
+      vi.spyOn(memory.fs, 'copy').mockImplementation(async (from, to) => {
+        await copy(from, to);
+        memory.put(to, new Uint8Array(LOCAL.byteLength + 1));
+      });
+    } else {
+      const read = memory.fs.readBytes;
+      vi.spyOn(memory.fs, 'readBytes').mockImplementation(async (uri) => (
+        uri.includes('mindwtr-upload-') ? new Uint8Array(LOCAL.byteLength + 1) : read(uri)
+      ));
+    }
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const input = withAttachment(fileAttachment());
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material }))
+      .rejects.toBeInstanceOf(WebdavHostUploadLimitError);
+
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(hash).not.toHaveBeenCalled();
+    expect(seal).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    if (growth === 'copy') expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|sha256) /.test(call))).toEqual([]);
+  });
+
+  it.each(['idle', 'unchanged cloud copy'] as const)('does not refuse %s with an encrypted cap below envelope overhead', async (kind) => {
+    const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
+    const { backends, memory, files, lines } = setup({
+      maxWebdavBufferedUploadBytes: encryptedSyncArtifactByteLength(0) - 1,
+      crypto: defaultSyncCryptoPrimitives,
+      core: { webdavFileExists: async () => true },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    const stat = (await files.statAttachmentFile(LOCAL_URI))!;
+    const input = withAttachment(fileAttachment({
+      cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: stat.size, contentMtimeMs: stat.mtimeMs,
+    }));
+    if (kind === 'idle') input.tasks[0].attachments = [];
+    const before = structuredClone(input);
+
+    await expect(backends.syncWebdavAttachments(input, webdavConfig, BASE_URL, undefined, { material, phase: 'prepare' }))
+      .resolves.toBe(false);
+
+    expect(input).toEqual(before);
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
+  });
+
+  it('retains uncapped encrypted upload behavior without a host capability', async () => {
+    const uploaded: Uint8Array[] = [];
+    stubWebdavServer((body) => {
+      uploaded.push(body);
+      return new Response(null, { status: 201 });
+    });
+    const { backends, memory, lines } = setup({ crypto: defaultSyncCryptoPrimitives });
+    memory.put(LOCAL_URI, LOCAL);
+
+    const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL, undefined, { material });
+
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0].byteLength).toBe(encryptedSyncArtifactByteLength(LOCAL.byteLength));
+    expect(await decryptSyncArtifact(uploaded[0], material.key)).toEqual(LOCAL);
+    expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
     expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/webdav-host-upload-limit')).toBe(false);
   });
 
@@ -732,6 +919,323 @@ describe('WebDAV attachment pass', () => {
 
 describe('self-hosted cloud attachment pass', () => {
   const cloudConfig = { url: 'https://cloud.example.com/v1/data', token: 'secret' };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    ['candidate', undefined], ['candidate', 404], ['candidate', 429],
+    ['winner', undefined], ['winner', 404], ['winner', 429],
+  ] as const)('preserves a coded host response refusal from the Cloud %s GET ahead of status %s', async (target, status) => {
+    const failure = Object.assign(new TypeError('network failed at private URL with token and filename'), {
+      code: 'response-too-large', limitBytes: 8, status,
+    });
+    let callsAtRefusal = 0;
+    const cloudGetFile = vi.fn(async (): Promise<ArrayBuffer> => {
+      callsAtRefusal = memory.calls.length;
+      throw failure;
+    });
+    const cloudPutFile = vi.fn(async () => undefined);
+    const { backends, memory, common, installer, lines } = setup({
+      core: { cloudAttachmentExists: async () => true, cloudGetFile, cloudPutFile },
+    });
+    if (target === 'winner') memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment({
+      cloudKey: 'attachments/att-1.txt', fileHash: (await computeSha256Hex(REMOTE))!,
+      contentMtimeMs: 1, contentSize: 1, ...(target === 'candidate' ? { uri: '', localStatus: 'missing' } : {}),
+    }));
+    const before = structuredClone(input);
+    const install = vi.spyOn(common, 'installAttachmentDownloadBytes');
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, {
+      phase: 'post-merge', activationProbe: target === 'candidate',
+    })).rejects.toBe(failure);
+
+    expect(cloudGetFile).toHaveBeenCalledTimes(1);
+    expect(cloudPutFile).not.toHaveBeenCalled();
+    expect(input).toEqual(before);
+    expect([...memory.files.keys()]).toEqual(target === 'winner' ? [LOCAL_URI] : []);
+    if (target === 'winner') expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(memory.calls.slice(callsAtRefusal)).toEqual([]);
+    expect(install).not.toHaveBeenCalled();
+    expect(installer.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(lines.filter((line) => line.level === 'warn')).toEqual([{
+      level: 'warn', message: 'Cloud host response limit refused',
+      extra: { releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused' },
+    }]);
+  });
+
+  it('preserves a Cloud response refusal when the diagnostic sink throws', async () => {
+    const failure = Object.assign(new Error('private transport text'), { code: 'response-too-large', limitBytes: 8 });
+    const { backends, files } = setup({ core: {
+      cloudAttachmentExists: async () => true,
+      cloudGetFile: async () => { throw failure; },
+    } });
+    const diagnostic = vi.spyOn(files, 'logAttachmentWarn').mockImplementation(() => { throw new Error('sink unavailable'); });
+
+    await expect(backends.syncCloudAttachments(withAttachment(fileAttachment({
+      uri: '', localStatus: 'missing', cloudKey: 'attachments/att-1.txt',
+    })), cloudConfig, BASE_URL, { activationProbe: true, phase: 'post-merge' })).rejects.toBe(failure);
+
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith('Cloud host response limit refused', undefined, {
+      releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused',
+    });
+  });
+
+  it('keeps an uncoded RN reader limit on the ordinary candidate warning path', async () => {
+    const { backends, lines } = setup({ core: {
+      cloudAttachmentExists: async () => true,
+      cloudGetFile: async () => { throw new ResponseTooLargeError(8); },
+    } });
+    const input = withAttachment(fileAttachment({ uri: '', localStatus: 'missing', cloudKey: 'attachments/att-1.txt' }));
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, {
+      activationProbe: true, phase: 'post-merge',
+    })).resolves.toBe(false);
+
+    expect(lines).toContainEqual(expect.objectContaining({ message: 'Failed to prove candidate attachment att-1' }));
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-response-limit')).toBe(false);
+  });
+
+  it.each([false, true])('does not acknowledge a capped Cloud PUT reply or classify it as a source 413 (pending=%s)', async (pending) => {
+    const failure = Object.assign(new Error('HTTP 413 private response text'), {
+      code: 'response-too-large', limitBytes: 8, status: 413,
+    });
+    const cloudPutFile = vi.fn<MobileAttachmentBackendsCoreFunctions['cloudPutFile']>(async () => { throw failure; });
+    const { backends, memory, files, lines } = setup({ core: { cloudPutFile, cloudAttachmentExists: async () => true } });
+    memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment(pending ? {
+      cloudKey: 'attachments/att-1.txt', pendingContentUpload: true, fileHash: (await computeSha256Hex(LOCAL))!,
+    } : {}));
+    const before = structuredClone(input);
+    const refuseSource = vi.spyOn(files, 'handleAttachmentUploadRefusal');
+    const acknowledge = vi.spyOn(files, 'clearAttachmentUploadRefusal');
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' })).rejects.toBe(failure);
+
+    expect(cloudPutFile).toHaveBeenCalledTimes(1);
+    expect(input).toEqual(before);
+    expect(refuseSource).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(memory.calls.filter((call) => call.startsWith('delete '))).toEqual([expect.stringContaining('mindwtr-upload-')]);
+    expect(lines.filter((line) => line.level === 'warn')).toEqual([{
+      level: 'warn', message: 'Cloud host response limit refused',
+      extra: { releaseCheck: 'v1.3.5/cloud-host-response-limit', operation: 'response', outcome: 'refused' },
+    }]);
+
+    cloudPutFile.mockResolvedValueOnce(undefined);
+    const retried = await backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' });
+    expect(cloudPutFile).toHaveBeenCalledTimes(2);
+    expect(attachmentOf(retried)).toMatchObject({ cloudKey: 'attachments/att-1.txt', fileHash: await computeSha256Hex(LOCAL) });
+    expect(attachmentOf(retried)?.pendingContentUpload).toBeUndefined();
+    expect(input).toEqual(before);
+    expect(refuseSource).not.toHaveBeenCalled();
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains an earlier successful Cloud PUT without folding either upload when the next reply is capped', async () => {
+    const failure = Object.assign(new Error('private response text'), { code: 'response-too-large', limitBytes: 8 });
+    const accepted: string[] = [];
+    const cloudPutFile = vi.fn(async (url: string) => {
+      accepted.push(url);
+      if (accepted.length === 2) throw failure;
+    });
+    const { backends, memory, files } = setup({ core: { cloudPutFile } });
+    const secondUri = `${MANAGED}att-2.txt`;
+    memory.put(LOCAL_URI, LOCAL);
+    memory.put(secondUri, REMOTE);
+    const input = withAttachment(fileAttachment());
+    input.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', title: 'att-2.txt', uri: secondUri }));
+    const before = structuredClone(input);
+    const acknowledge = vi.spyOn(files, 'clearAttachmentUploadRefusal');
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' })).rejects.toBe(failure);
+
+    expect(accepted).toEqual([`${BASE_URL}/attachments/att-1.txt`, `${BASE_URL}/attachments/att-2.txt`]);
+    expect(input).toEqual(before);
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(memory.read(secondUri)).toEqual(REMOTE);
+    expect([...memory.files.keys()].sort()).toEqual([LOCAL_URI, secondUri].sort());
+    expect(memory.calls.filter((call) => call.startsWith('delete '))).toEqual([
+      expect.stringContaining('mindwtr-upload-'), expect.stringContaining('mindwtr-upload-'),
+    ]);
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects an invalid optional cloud upload capability (%s) at construction', (limit) => {
+      expect(() => setup({ maxCloudBufferedUploadBytes: limit })).toThrow('Cloud buffered upload capability is invalid');
+    },
+  );
+
+  it('publishes exact-cap plaintext through the real cloud PUT before returning metadata', async () => {
+    const requests: { method: string; body: Uint8Array }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit = {}) => {
+      requests.push({ method: init.method ?? 'GET', body: new Uint8Array(init.body as ArrayBuffer) });
+      return new Response(null, { status: 201 });
+    }));
+    const { backends, memory, lines } = setup({ maxCloudBufferedUploadBytes: LOCAL.byteLength });
+    memory.put(LOCAL_URI, LOCAL);
+    const input = withAttachment(fileAttachment({ size: 1 }));
+    const before = structuredClone(input);
+
+    const result = await backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' });
+
+    expect(requests).toEqual([{ method: 'PUT', body: LOCAL }]);
+    expect(attachmentOf(result)).toMatchObject({ cloudKey: 'attachments/att-1.txt', contentSize: LOCAL.byteLength });
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect([...memory.files.keys()]).toEqual([LOCAL_URI]);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit')).toBe(false);
+  });
+
+  it('retains an uncapped Cloud upload when the host capability is absent', async () => {
+    const cloudPutFile = vi.fn<MobileAttachmentBackendsCoreFunctions['cloudPutFile']>(async () => undefined);
+    const { backends, memory, lines } = setup({ core: { cloudPutFile } });
+    const source = new Uint8Array(LOCAL.byteLength + 1).fill(3);
+    memory.put(LOCAL_URI, source);
+
+    const result = await backends.syncCloudAttachments(withAttachment(fileAttachment()), cloudConfig, BASE_URL, { phase: 'post-merge' });
+
+    expect(cloudPutFile).toHaveBeenCalledTimes(1);
+    expect(new Uint8Array(cloudPutFile.mock.calls[0][1] as ArrayBuffer)).toEqual(source);
+    expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
+    expect(memory.read(LOCAL_URI)).toEqual(source);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit')).toBe(false);
+  });
+
+  const cloudAdmissionCases = [
+    ['first upload', {}, 'post-merge'],
+    ['pending post-merge', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), pendingContentUpload: true }, 'post-merge'],
+    ['pending prepare identity', { cloudKey: 'attachments/att-1.txt', pendingContentUpload: true }, 'prepare'],
+    ['prepare content hash', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 }, 'prepare'],
+    ['post-merge winner hash', { cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 }, 'post-merge'],
+    ['foreign source migration', { uri: 'file:///data/files/provider-copy.txt' }, 'post-merge'],
+  ] as const;
+  for (const admission of ['oversize', 'unknown size'] as const) {
+    it.each(cloudAdmissionCases)(`refuses ${admission} cloud source before copy/hash/read or remote mutation for %s`, async (_name, overrides, phase) => {
+      const cloudPutFile = vi.fn(async () => undefined);
+      const cloudGetFile = vi.fn(async () => toArrayBuffer(REMOTE));
+      const { backends, memory, files, lines } = setup({
+        maxCloudBufferedUploadBytes: LOCAL.byteLength,
+        core: { cloudPutFile, cloudGetFile, cloudAttachmentExists: async () => true },
+      });
+      const input = withAttachment(fileAttachment({ ...overrides, size: 1 }));
+      const uri = input.tasks[0].attachments![0].uri!;
+      const source = new Uint8Array(LOCAL.byteLength + 1).fill(3);
+      memory.put(uri, source);
+      if (admission === 'unknown size') vi.spyOn(files, 'statAttachmentFile').mockResolvedValue(null);
+      const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+      const handleRefusal = vi.spyOn(files, 'handleAttachmentUploadRefusal');
+      const before = structuredClone(input);
+
+      await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase }))
+        .rejects.toMatchObject({ name: 'CloudHostUploadLimitError', message: 'Cloud attachment upload cannot be admitted by this host transport' });
+
+      expect(input).toEqual(before);
+      expect(memory.read(uri)).toEqual(source);
+      expect([...memory.files.keys()]).toEqual([uri]);
+      expect(hash).not.toHaveBeenCalled();
+      expect(handleRefusal).not.toHaveBeenCalled();
+      expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+      expect(cloudPutFile).not.toHaveBeenCalled();
+      expect(cloudGetFile).not.toHaveBeenCalled();
+      expect(lines.filter((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit')).toEqual([{
+        level: 'warn', message: 'Cloud host upload admission refused',
+        extra: { releaseCheck: 'v1.3.5/cloud-host-upload-limit', operation: 'upload', outcome: 'refused' },
+      }]);
+    });
+  }
+
+  it.each(['copy', 'snapshot read', 'upload read'] as const)('refuses cloud snapshot growth at %s and retires only its own scratch file', async (growth) => {
+    const cloudPutFile = vi.fn(async () => undefined);
+    const { backends, memory } = setup({ maxCloudBufferedUploadBytes: LOCAL.byteLength, core: { cloudPutFile } });
+    memory.put(LOCAL_URI, LOCAL);
+    const unrelated = 'file:///data/cache/unrelated.txt';
+    memory.put(unrelated, REMOTE);
+    if (growth === 'copy') {
+      const copy = memory.fs.copy;
+      vi.spyOn(memory.fs, 'copy').mockImplementation(async (from, to) => {
+        await copy(from, to);
+        memory.put(to, new Uint8Array(LOCAL.byteLength + 1));
+      });
+    } else {
+      const read = memory.fs.readBytes;
+      let snapshotReads = 0;
+      vi.spyOn(memory.fs, 'readBytes').mockImplementation(async (uri) => {
+        if (uri.includes('mindwtr-upload-')) {
+          snapshotReads += 1;
+          if (growth === 'snapshot read' || snapshotReads === 2) return new Uint8Array(LOCAL.byteLength + 1);
+        }
+        return read(uri);
+      });
+    }
+    const input = withAttachment(fileAttachment());
+    const before = structuredClone(input);
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' }))
+      .rejects.toMatchObject({ name: 'CloudHostUploadLimitError' });
+
+    expect(input).toEqual(before);
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(memory.read(unrelated)).toEqual(REMOTE);
+    expect([...memory.files.keys()].sort()).toEqual([LOCAL_URI, unrelated].sort());
+    expect(memory.calls.filter((call) => call.startsWith('delete '))).toHaveLength(1);
+    expect(memory.calls.find((call) => call.startsWith('delete '))).toContain('mindwtr-upload-');
+    expect(cloudPutFile).not.toHaveBeenCalled();
+    if (growth === 'copy') expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|sha256) /.test(call))).toEqual([]);
+  });
+
+  it.each(['prepare', 'post-merge'] as const)('preserves an unchanged cloud generation above the cap without hashing in phase %s', async (phase) => {
+    const cloudPutFile = vi.fn(async () => undefined);
+    const cloudGetFile = vi.fn(async () => toArrayBuffer(REMOTE));
+    const { backends, memory, files, lines } = setup({
+      maxCloudBufferedUploadBytes: 1,
+      core: { cloudPutFile, cloudGetFile, cloudAttachmentExists: async () => true },
+    });
+    memory.put(LOCAL_URI, LOCAL);
+    const stat = (await files.statAttachmentFile(LOCAL_URI))!;
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const input = withAttachment(fileAttachment({
+      cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: stat.size, contentMtimeMs: stat.mtimeMs,
+    }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase })).resolves.toBe(false);
+
+    expect(input).toEqual(before);
+    expect(hash).not.toHaveBeenCalled();
+    expect(cloudPutFile).not.toHaveBeenCalled();
+    expect(cloudGetFile).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+    expect(lines.some((line) => line.extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit')).toBe(false);
+  });
+
+  it('keeps fatal cloud admission when diagnostics throws and does not publish earlier successful patches', async () => {
+    const cloudPutFile = vi.fn(async () => undefined);
+    const { backends, memory, files } = setup({ maxCloudBufferedUploadBytes: LOCAL.byteLength, core: { cloudPutFile } });
+    memory.put(LOCAL_URI, LOCAL);
+    const secondUri = `${MANAGED}att-2.txt`;
+    memory.put(secondUri, new Uint8Array(LOCAL.byteLength + 1));
+    const warn = files.logAttachmentWarn;
+    vi.spyOn(files, 'logAttachmentWarn').mockImplementation((message, error, extra) => {
+      if (extra?.releaseCheck === 'v1.3.5/cloud-host-upload-limit') throw new Error('synthetic logger failure');
+      warn(message, error, extra);
+    });
+    const input = withAttachment(fileAttachment());
+    input.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', uri: secondUri }));
+    const before = structuredClone(input);
+
+    await expect(backends.syncCloudAttachments(input, cloudConfig, BASE_URL, { phase: 'post-merge' }))
+      .rejects.toMatchObject({ name: 'CloudHostUploadLimitError' });
+
+    expect(cloudPutFile).toHaveBeenCalledTimes(1);
+    expect(input).toEqual(before);
+    expect([...memory.files.keys()].sort()).toEqual([LOCAL_URI, secondUri].sort());
+    expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
+    expect(memory.read(secondUri)).toEqual(new Uint8Array(LOCAL.byteLength + 1));
+  });
 
   it('sends every upload through the checked byte PUT, never the native uploader', async () => {
     // The native uploader follows a redirect by itself (a 303 to /health answers the same

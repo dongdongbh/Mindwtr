@@ -1212,6 +1212,30 @@ struct TaskViewSheet: View {
                     } else {
                         Text(entry.text("title")).rnFont(14).frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    if entry.text("kind") == "file", entry.flag("canDownload") {
+                        if model.taskAttachmentDownloadingID == entry.text("id") {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                Text(strings.text("common.loading")).rnFont(13)
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(strings.text("common.loading"))
+                            .accessibilityIdentifier("task-attachment-downloading-" + entry.text("id"))
+                        } else {
+                            Button {
+                                endEditingBeforeAction()
+                                model.downloadTaskAttachment(entry.text("id"))
+                            } label: {
+                                Text(strings.text("attachments.download")).rnFont(13, .semibold)
+                                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).foregroundStyle(palette.tint)
+                            .disabled(frozen || !model.canDownloadTaskAttachment(entry.text("id")))
+                            .accessibilityLabel(strings.text("attachments.download") + " " + entry.text("title"))
+                            .accessibilityIdentifier("task-attachment-download-" + entry.text("id"))
+                        }
+                    }
                     if entry.text("kind") == "link" {
                         Button {
                             endEditingBeforeAction()
@@ -1220,6 +1244,7 @@ struct TaskViewSheet: View {
                             Image(systemName: "pencil").frame(width: 44, height: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .disabled(frozen || !model.taskAttachmentListChangesAllowed || entry.flag("disabled"))
                         .accessibilityLabel(strings.text("common.edit") + " " + entry.text("title"))
                         .accessibilityIdentifier("task-attachment-edit-" + entry.text("id"))
                         Button {
@@ -1229,6 +1254,7 @@ struct TaskViewSheet: View {
                             Image(systemName: "trash").frame(width: 44, height: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain).foregroundStyle(palette.danger)
+                        .disabled(frozen || !model.taskAttachmentListChangesAllowed || entry.flag("disabled"))
                         .accessibilityLabel(strings.text("attachments.remove") + " " + entry.text("title"))
                         .accessibilityIdentifier("task-attachment-remove-" + entry.text("id"))
                     } else if entry.text("kind") == "file" {
@@ -1249,6 +1275,12 @@ struct TaskViewSheet: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("task-attachment-row-" + entry.text("id"))
             }
+            if model.taskAttachmentChangesNeedSettlement {
+                Text(strings.text("attachments.finishDraftBeforeChanges"))
+                    .rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("task-attachment-settlement-hint")
+            }
             Button {
                 endEditingBeforeAction()
                 model.openTaskLinkSheet()
@@ -1258,6 +1290,7 @@ struct TaskViewSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(palette.tint)
+            .disabled(frozen || !model.taskAttachmentListChangesAllowed)
             .accessibilityIdentifier("task-attachment-add-link")
             Button {
                 endEditingBeforeAction()

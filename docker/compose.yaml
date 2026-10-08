@@ -23,6 +23,9 @@ services:
       # Leave this empty only when using docker/compose.secrets.yaml.
       - MINDWTR_CLOUD_AUTH_TOKENS=${MINDWTR_CLOUD_AUTH_TOKENS:-}
       - MINDWTR_CLOUD_CORS_ORIGIN=${MINDWTR_CLOUD_CORS_ORIGIN:?MINDWTR_CLOUD_CORS_ORIGIN must be set}
+      # Sync document limit; passed only when set (default 50000000, or
+      # MINDWTR_CLOUD_MAX_BODY_BYTES when that is larger).
+      - MINDWTR_CLOUD_MAX_DATA_BODY_BYTES
     volumes:
       - ./data:/app/cloud_data
 

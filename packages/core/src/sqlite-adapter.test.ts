@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -462,6 +462,10 @@ describeSqlite('SqliteAdapter', () => {
         const archivedAt = '2026-09-01T12:00:00.000Z';
         const previousCompletion = '2026-08-31T12:00:00.000Z';
         const restoredAt = '2026-09-05T13:00:00.000Z';
+        // The sync merge reads the real clock, and the 90-day tombstone purge would drop these fixed-date sections.
+        vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+        vi.setSystemTime(new Date(restoredAt));
+        onTestFinished(() => { vi.useRealTimers(); });
         const attachment = {
             id: 'attachment-1',
             kind: 'link' as const,

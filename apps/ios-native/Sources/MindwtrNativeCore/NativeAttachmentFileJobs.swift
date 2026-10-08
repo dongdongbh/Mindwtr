@@ -189,13 +189,13 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         let isDraft: Bool
     }
     private enum Work: Sendable {
-        case raw(String, installer: Bool)
-        case draft(NativeAttachmentDraftFileRequest)
+        case raw(String, installer: Bool, maximumReadBytes: Int?)
+        case draft(NativeAttachmentDraftFileRequest, maximumReadBytes: Int?)
         case ownedBaseline(String, NativeAttachmentFiles.BaselineAttachmentProof, @Sendable () throws -> Void)
         var isInstaller: Bool {
             switch self {
-            case .raw(_, let installer): return installer
-            case .draft(let request): return request.isInstaller
+            case .raw(_, let installer, _): return installer
+            case .draft(let request, _): return request.isInstaller
             case .ownedBaseline: return false
             }
         }
@@ -259,7 +259,8 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     var directoriesJSON: String { files.directoriesJSON }
     func setWake(_ callback: (@Sendable () -> Void)?) { lock.lock(); wake = callback; lock.unlock() }
 
-    func submit(_ json: String, installer isInstaller: Bool = false) throws -> String {
+    func submit(_ json: String, installer isInstaller: Bool = false, maximumReadBytes: Int? = nil) throws -> String {
+        if let maximumReadBytes { guard !isInstaller, (0...NativeAttachmentFiles.maximumBytes).contains(maximumReadBytes) else { throw NativeAttachmentFileJobsError.capacity } }
         let count = json.utf8.count
         guard count <= (isInstaller ? 64 * 1024 : 24 * 1024 * 1024) else { throw NativeAttachmentFileJobsError.capacity }
         // Only small requests can return bytes. Large frames are base64 writes
@@ -270,11 +271,12 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
            let op = value["op"] as? String, ["readBytes", "readBytesRange", "readDirectory"].contains(op) {
             replyReservation = NativeAttachmentFiles.maximumBytes
         }
-        return try enqueue(.raw(json, installer: isInstaller), inputBytes: count, replyReservation: replyReservation)
+        return try enqueue(.raw(json, installer: isInstaller, maximumReadBytes: maximumReadBytes), inputBytes: count, replyReservation: replyReservation)
     }
 
-    func submitDraft(_ request: NativeAttachmentDraftFileRequest) throws -> String {
-        try enqueue(.draft(request), inputBytes: request.encodedInputSize(), replyReservation: 64 * 1024)
+    func submitDraft(_ request: NativeAttachmentDraftFileRequest, maximumReadBytes: Int? = nil) throws -> String {
+        if let maximumReadBytes { guard (0...NativeAttachmentFiles.maximumBytes).contains(maximumReadBytes) else { throw NativeAttachmentFileJobsError.capacity } }
+        return try enqueue(.draft(request, maximumReadBytes: maximumReadBytes), inputBytes: request.encodedInputSize(), replyReservation: 64 * 1024)
     }
 
     /// Native-only immutable journal lease; no raw JSON request can grant it.
@@ -310,16 +312,16 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
                 let value: Any
                 let bytes: Data?
                 switch work {
-                case .raw(let json, true):
+                case .raw(let json, true, _):
                     // Once begun the RN installer must finish; cancellation
                     // cannot undo publication or release the library early.
                     value = try NativeJSON.jsonObject(with: Data(installer.handle(json).utf8))
                     bytes = nil
-                case .raw(let json, false):
-                    let reply = try files.call(json, checkCancellation: token.check)
+                case .raw(let json, false, let cap):
+                    let reply = try files.call(json, maximumReadBytes: cap, checkCancellation: token.check)
                     value = reply.value ?? NSNull(); bytes = reply.bytes
-                case .draft(let request):
-                    value = try executeDraft(request, token: token); bytes = nil
+                case .draft(let request, let cap):
+                    value = try executeDraft(request, maximumReadBytes: cap, token: token); bytes = nil
                 case .ownedBaseline(let attachmentID, let proof, let ownership):
                     value = ["status": try files.retireBaselineAttachment(attachmentID: attachmentID, proof: proof,
                         checkCancellation: token.check, checkOwnership: ownership).rawValue]
@@ -353,7 +355,7 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     /// Called only inside the shared FIFO and mutation lock. Prepare/publish
     /// and private retirement must finish once begun; source/fill and published
     /// retirement retain the existing primitive's cancellation cutover.
-    private func executeDraft(_ request: NativeAttachmentDraftFileRequest,
+    private func executeDraft(_ request: NativeAttachmentDraftFileRequest, maximumReadBytes: Int?,
                               token: NativeAttachmentCancellation) throws -> [String: Any] {
         switch request {
         case .ensureManagedDirectory:
@@ -368,7 +370,7 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
                     "identity": proof.identity, "cacheRootIdentity": proof.cacheRootIdentity,
                     "parentIdentity": proof.parentIdentity]
         case .snapshotBaseline(let attachmentID, let targetURI):
-            switch try files.snapshotBaselineAttachment(attachmentID: attachmentID, targetURI: targetURI, checkCancellation: token.check) {
+            switch try files.snapshotBaselineAttachment(attachmentID: attachmentID, targetURI: targetURI, maximumReadBytes: maximumReadBytes, checkCancellation: token.check) {
             case .present(let proof):
                 return ["kind": "present", "targetURI": proof.targetURI, "sha256": proof.sha256, "size": proof.size,
                         "identity": proof.identity, "directoryIdentity": proof.directoryIdentity]
@@ -460,6 +462,17 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             return try files.copyProviderSource(url, checkCancellation: cancellation.check)
         }
     }
+    func createPlaintextDownloadSource(bytes: Data, cancellation: NativeAttachmentCancellation) throws
+        -> (receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt, source: NativeAttachmentFiles.CacheSourceProof) {
+        guard bytes.count <= NativeAttachmentFiles.maximumPlaintextSourceBytes else { throw NativeAttachmentFilesError.tooLarge }
+        return try queue.sync {
+            lock.lock(); let ready = accepting; lock.unlock()
+            guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+            try cancellation.check()
+            mutationLock.lock(); defer { mutationLock.unlock() }
+            return try files.createPlaintextDownloadSource(bytes: bytes, checkCancellation: cancellation.check)
+        }
+    }
     func copyPhotoProviderSource(_ url: URL, selection: NativeAttachmentPhotoSelection,
                                  cancellation: NativeAttachmentCancellation) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
         try queue.sync {
@@ -486,6 +499,15 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         guard ready else { throw NativeAttachmentFileJobsError.unavailable }
         mutationLock.lock(); defer { mutationLock.unlock() }
         return try files.retireProviderSource(receipt, checkCancellation: requireOwner)
+    }
+    /// After drain, only the owning Engine's validated durable download journal
+    /// can request this retirement; it has no JSON mailbox operation.
+    func retireAdoptedProjectDownloadSource(_ proof: NativeAttachmentFiles.CacheSourceProof,
+                                           requireOwner: () throws -> Void) throws -> NativeAttachmentFiles.BaselineAttachmentRetirementOutcome {
+        lock.lock(); let ready = accepting; lock.unlock()
+        guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+        mutationLock.lock(); defer { mutationLock.unlock() }
+        return try files.retireAdoptedProjectDownloadSource(proof, requireOwner: requireOwner)
     }
     func drain() { queue.sync {} }
     func cancelAndDrain() {

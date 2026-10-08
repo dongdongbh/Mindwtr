@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
     createNativeAttachments, createNativeLocalAttachmentConfiguration,
     type NativeAttachmentBindings, type NativeFileChannels,
@@ -143,5 +144,54 @@ describe('native selected attachment cleanup binding', () => {
         expect(memory.read(uri)).toBeUndefined();
         expect(calls).toContain('barrier');
         expect(calls.slice(-2)).toEqual(['deleteNow', 'syncParent']);
+    });
+});
+
+
+describe('selected existing native attachment preparation adapter', () => {
+    it('verifies the current bytes without any attempted directory creation, install or remote read', async () => {
+        const memory = createMemoryFileSystem(), calls: string[] = [];
+        const uri = MANAGED + '852d70cf-303a-47d0-98cb-d16de850a94d.txt';
+        const bytes = new Uint8Array([0, 255, 17, 32]);
+        memory.put(uri, bytes);
+        const digest = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
+        const channels: NativeFileChannels = {
+            directories: { document: DOCUMENTS, cache: CACHE },
+            files: async (request, body) => {
+                const op = String(request.op); calls.push(op);
+                if (op === 'getInfo') return memory.fs.getInfo(String(request.uri));
+                if (op === 'readBytes') return memory.fs.readBytes(String(request.uri));
+                if (op === 'sha256' && body) return digest(body);
+                throw new Error('Selected adapter attempted a file mutation');
+            },
+            installer: async () => { calls.push('installer'); throw new Error('Selected installer refused'); },
+            deleteNow: () => { calls.push('deleteNow'); throw new Error('Selected delete refused'); },
+        };
+        const local = createNativeLocalAttachmentConfiguration();
+        const network = mock(async () => { throw new Error('Selected network refused'); });
+        const native = createNativeAttachments({ ...local, fetch: network as unknown as typeof fetch,
+            storage: { ...local.storage, getItem: async (key) => key === '@mindwtr_sync_backend' ? 'webdav' : null } }, channels);
+        const selected = { ...attachment(uri), id: '852d70cf-303a-47d0-98cb-d16de850a94d',
+            cloudKey: 'attachments/852d70cf-303a-47d0-98cb-d16de850a94d.txt', fileHash: digest(bytes),
+            pendingContentUpload: false, localStatus: 'missing' as const, size: 4 };
+        expect(await native.prepareAttachmentAvailableDetailed!(selected)).toEqual({ status: 'available',
+            attachment: { ...selected, localStatus: 'available' } });
+        expect(calls).toEqual(['getInfo', 'readBytes', 'sha256']);
+        expect(network).not.toHaveBeenCalled(); expect(memory.read(uri)).toEqual(bytes);
+        calls.length = 0;
+        expect(await native.prepareAttachmentAvailableDetailed!({ ...selected, fileHash: 'a'.repeat(64) }))
+            .toEqual({ status: 'generation-conflict' });
+        expect(calls).toEqual(['getInfo', 'readBytes', 'sha256']);
+        expect(network).not.toHaveBeenCalled(); expect(memory.read(uri)).toEqual(bytes);
+        calls.length = 0;
+        expect(await native.prepareAttachmentAvailableDetailed!({ ...selected, cloudKey: undefined }))
+            .toEqual({ status: 'available', attachment: { ...selected, cloudKey: undefined, localStatus: 'available' } });
+        expect(calls).toEqual(['getInfo', 'readBytes', 'sha256']);
+        expect(network).not.toHaveBeenCalled(); expect(memory.read(uri)).toEqual(bytes);
+        calls.length = 0;
+        memory.files.delete(uri);
+        expect(await native.prepareAttachmentAvailableDetailed!({ ...selected, cloudKey: undefined }))
+            .toEqual({ status: 'unavailable' });
+        expect(calls).toEqual(['getInfo']); expect(network).not.toHaveBeenCalled(); expect(memory.read(uri)).toBeUndefined();
     });
 });

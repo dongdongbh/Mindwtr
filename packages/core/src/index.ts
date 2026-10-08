@@ -363,3 +363,13 @@ export type { NativeAttachmentDraftPreparedV2, NativeAttachmentDraftAddedV2, Nat
     NativeAttachmentDraftOperationV4, NativeAttachmentDraftLineageInputV4, NativeAttachmentDraftLineageV4 } from './native-attachment-draft';
 export { prepareNativeAttachmentDraftDiscardCandidatesV4 } from './native-attachment-draft-discard';
 export type { NativeAttachmentDraftDiscardInputV4, NativeAttachmentDraftDiscardCandidatesV4 } from './native-attachment-draft-discard';
+
+export { prepareNativeAttachmentDraftAvailability, readNativeAttachmentDraftAvailabilityFrozen,
+    validateNativeAttachmentDraftBeginV5, validateNativeAttachmentDraftLineageV5 } from './native-attachment-draft';
+export type { NativeAttachmentDraftAvailabilityInput, NativeAttachmentDraftAvailabilityPrepared, NativeAttachmentDraftOperationV5,
+    NativeAttachmentDraftLineageInputV5, NativeAttachmentDraftLineageV5 } from './native-attachment-draft';
+export { prepareNativeAttachmentDraftDiscardCandidatesV5 } from './native-attachment-draft-discard';
+export type { NativeAttachmentDraftDiscardInputV5, NativeAttachmentDraftDiscardCandidatesV5 } from './native-attachment-draft-discard';
+
+export { checklistProjectBlockReason, prepareChecklistProjectConversion } from './checklist-project-conversion';
+export type { ChecklistProjectConversion } from './checklist-project-conversion';

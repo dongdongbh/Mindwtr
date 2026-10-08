@@ -49,6 +49,7 @@ final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
         switch try XCTUnwrap(store.readVersioned()).record {
         case .legacy(let value): return value.session.checkpoint
         case .mixed(let value): return value.session.checkpoint
+        case .availability(let value): return value.session.checkpoint
         }
     }
     private func operation() throws -> Store.Operation {
@@ -57,6 +58,7 @@ final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
         case .mixed(let value):
             guard case .add(let op) = try XCTUnwrap(value.operations.first) else { throw HostFailure("Fixture Add missing") }
             return op
+        case .availability: throw HostFailure("Historical fixture Add required")
         }
     }
     private func source() -> URL { cache.appendingPathComponent("borrowed.txt") }
@@ -552,7 +554,7 @@ final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
         try (String(contentsOf: originalBundle, encoding: .utf8) + suffix).write(to: bundle, atomically: true, encoding: .utf8)
         let host = core(), hooks = NativeAttachmentHostHooks(); var jobs = 0
         hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let before = try domainRows(), result = try object(await host.call("captureOpen"))
         let answers = try XCTUnwrap(result["rawBridgeAnswers"] as? [String]); XCTAssertEqual(answers.count, requests.count + 2)
         XCTAssertTrue(answers.allSatisfy { $0.hasPrefix("!MindwtrNativeError:") }, "raw mutations must fail synchronously before queueing")

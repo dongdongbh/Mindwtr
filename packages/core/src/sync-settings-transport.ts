@@ -17,6 +17,7 @@
  * reports each state change.
  */
 import { CLOCK_SKEW_THRESHOLD_MS as CORE_CLOCK_SKEW_THRESHOLD_MS, type MergeStats } from './sync-types';
+import { runSerializedSyncDocumentOperation } from './data-transfer-transaction';
 import { cloudGetJson, isValidCloudSyncToken } from './cloud';
 import { isDropboxUnauthorizedError as isCoreDropboxUnauthorizedError } from './dropbox';
 import type { DropboxAccessTokenResolution, DropboxAuthTokens } from './dropbox-auth-tokens';
@@ -39,7 +40,7 @@ import {
 } from './mobile-sync-utils';
 import { isConnectionAllowed, SYNC_LOCAL_INSECURE_URL_OPTIONS } from './http-utils';
 import { addBreadcrumb } from './log-breadcrumbs';
-import { SyncEncryptionRemoteVersionUnavailableError, isSyncEncryptionRemoteVersionUnavailableError, type SyncEncryptionTransitionKind } from './sync-encryption';
+import { SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTransitionIncompleteError, isSyncEncryptionRemoteVersionUnavailableError, type SyncEncryptionTransitionKind } from './sync-encryption';
 import { normalizeCloudUrl, normalizeWebdavUrl } from './sync-helpers';
 import type { SyncRunResult } from './sync-run-ports';
 import { isLikelyOfflineSyncError } from './sync-service-utils';
@@ -205,7 +206,7 @@ export type SyncSettingsTransportHost = {
         delete(key: string): Promise<void>;
     };
     platform: { os(): string };
-    logInfo(message: string, context: { scope: string; extra: Record<string, string> }): unknown;
+    logInfo(message: string, context: { scope: string; force?: boolean; extra: Record<string, string> }): unknown;
     logSettingsError(error: unknown): void;
     performSync(syncPathOverride: string | undefined, options: {
         manual?: boolean;
@@ -271,8 +272,14 @@ const INITIAL_STATE: SyncSettingsTransportState = {
 export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
     const core: SyncSettingsTransportCoreFunctions = { ...CORE_FUNCTIONS, ...host.core };
     let state = INITIAL_STATE;
+    // A later backend/provider selection supersedes an Off request still waiting in
+    // the document queue. A started Off write may still commit, so track that case
+    // separately and make a later selection activate against its durable result.
+    let backendWrites = 0;
+    let offWriteStarted = 0;
     const listeners = new Set<() => void>();
     const set = (patch: Partial<SyncSettingsTransportState>) => {
+        if ('syncBackend' in patch || 'cloudProvider' in patch) backendWrites += 1;
         state = { ...state, ...patch };
         for (const listener of listeners) listener();
     };
@@ -372,14 +379,11 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
         return redacted;
     };
     const logError = (error: unknown) => host.logSettingsError(redactError(error));
-    const logInfo = (message: string, context: { scope: string; extra: Record<string, string> }) => host.logInfo(redact(message), {
+    const logInfo = (message: string, context: { scope: string; force?: boolean; extra: Record<string, string> }) => host.logInfo(redact(message), {
         scope: context.scope,
+        ...(context.force ? { force: true } : {}),
         extra: Object.fromEntries(Object.entries(context.extra).map(([key, entry]) => [key, redact(entry)])),
     });
-
-    // Every write of the backend key takes the next number; a failed Off write restores
-    // the screen only while no later write has started.
-    let backendWrites = 0;
 
     const formatText = (p: SyncSettingsTransportParams, key: string, replacements: Record<string, string | number>) => {
         let text = p.t(key);
@@ -641,32 +645,66 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
         const nextBackend = backend === 'cloud'
             ? (cloudProvider === 'cloudkit' ? 'cloudkit' : 'cloud')
             : backend;
-        const previous = { syncBackend: state.syncBackend, proven: provenSyncBackend, pending: hasPendingSyncConfiguration };
         core.addBreadcrumb(`settings:syncBackend:${nextBackend}`);
-        set({ syncBackend: nextBackend });
         if (nextBackend === 'off') {
-            hasPendingSyncConfiguration = false;
-            provenSyncBackend = 'off';
-            p.resetSyncStatusForBackendSwitch();
             const sequence = ++backendWrites;
-            const write = host.storage.setItem(SYNC_BACKEND_KEY, nextBackend).then(() => {
+            const superseded = () => new Error('A newer sync backend selection replaced this Off request');
+            const write = runSerializedSyncDocumentOperation(async () => {
+                if (sequence !== backendWrites) throw superseded();
+                let incomplete: SyncEncryptionTransitionKind | null;
+                try {
+                    const status = await host.encryption.getStatus();
+                    incomplete = await host.encryption.getIncompleteTransition();
+                    if (Boolean(status.incompleteTransition) !== Boolean(incomplete)) {
+                        throw new Error('Sync encryption transition state is inconsistent');
+                    }
+                } catch (error) {
+                    if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
+                    logError(error);
+                    p.showSettingsErrorToast(p.tr('settings.syncMobile.error'), p.tr('settings.syncEncryptionErrorTransitionIncomplete'));
+                    throw new SyncSettingsWriteError(redact(error instanceof Error ? error.message : String(error)));
+                }
+                if (sequence !== backendWrites) throw superseded();
+                if (incomplete) {
+                    p.showSettingsWarning(p.tr('common.notice'), p.tr('settings.syncEncryptionErrorTransitionIncomplete'));
+                    try {
+                        await Promise.resolve(logInfo('Sync Off refused during incomplete encryption transition', {
+                            scope: 'sync-settings', force: true, extra: {
+                                releaseCheck: 'v1.3.5/sync-encryption-off-guard', operation: 'select-off', outcome: 'refused',
+                            },
+                        }));
+                    } catch {
+                        // A diagnostic sink never masks the refusal.
+                    }
+                    throw new SyncEncryptionTransitionIncompleteError(incomplete);
+                }
+                offWriteStarted += 1;
+                try {
+                    await host.storage.setItem(SYNC_BACKEND_KEY, nextBackend);
+                } catch (error) {
+                    if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
+                    logError(error);
+                    throw new SyncSettingsWriteError(redact(error instanceof Error ? error.message : String(error)));
+                } finally {
+                    offWriteStarted -= 1;
+                }
+                const stillSelected = sequence === backendWrites;
+                provenSyncBackend = 'off';
+                hasPendingSyncConfiguration = !stillSelected && state.syncBackend !== 'off';
+                if (stillSelected) {
+                    p.resetSyncStatusForBackendSwitch();
+                    set({ syncBackend: 'off' });
+                }
                 host.clearSyncConfigCache();
                 reconcileBackgroundSyncRegistration();
-            }, (error: unknown) => {
-                logError(error);
-                // The store still holds the previous backend: the screen must not show Off,
-                // unless a later backend write has started since.
-                if (sequence === backendWrites) {
-                    provenSyncBackend = previous.proven;
-                    hasPendingSyncConfiguration = previous.pending;
-                    if (state.syncBackend === 'off') set({ syncBackend: previous.syncBackend });
-                }
-                throw new SyncSettingsWriteError(redact(error instanceof Error ? error.message : String(error)));
+                if (!stillSelected) throw superseded();
             });
             // React Native's screen does not wait for the write; a caller that does sees the failure.
             write.catch(() => undefined);
             return write;
-        } else if (nextBackend !== provenSyncBackend) {
+        }
+        set({ syncBackend: nextBackend });
+        if (nextBackend !== provenSyncBackend || offWriteStarted > 0) {
             hasPendingSyncConfiguration = true;
             if (isSyncTargetComplete(nextBackend, cloudProvider)) {
                 return handleSync({
@@ -689,6 +727,7 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
         const isNewSelection = (
             provider !== provenCloudProvider
             || nextBackend !== provenSyncBackend
+            || offWriteStarted > 0
         );
         if (isNewSelection) {
             hasPendingSyncConfiguration = true;

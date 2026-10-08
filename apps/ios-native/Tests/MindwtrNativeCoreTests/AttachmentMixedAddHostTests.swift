@@ -83,7 +83,7 @@ final class AttachmentMixedAddHostTests: XCTestCase {
     }
 
     private func seed(note: String = "Ordinary notes / e\u{301} / 文", faults: HostIOFaults = HostIOFaults(),
-                      baselineCount: Int = 1) async throws -> CoreHost {
+                      baselineCount: Int = 1, jobs: NativeAttachmentHostHooks? = nil) async throws -> CoreHost {
         let boot = core(); _ = try await boot.start(); await boot.close()
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
         try Data("baseline sentinel / 文".utf8).write(to: baselineTarget())
@@ -97,7 +97,7 @@ final class AttachmentMixedAddHostTests: XCTestCase {
             _ = try sql("INSERT INTO tasks(id,title,description,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,?,'Saved notes','inbox','[]','[]',?,?,?,1,'fixture')",
                 [id, "Saved title", json(id == taskID ? baseline : []), at, at])
         }
-        let host = core(faults); _ = try await host.start()
+        let host = core(faults); if let jobs { try await host.configureAttachmentHost(jobs) }; _ = try await host.start()
         let checkpoint = EditorDraftSnapshot(sessionID: UUID().uuidString.lowercased(), taskID: taskID,
             generation: 1, payloadJSON: try payload(baseline, note: note))
         try await host.checkpointEditorDraft(checkpoint)
@@ -288,7 +288,7 @@ final class AttachmentMixedAddHostTests: XCTestCase {
         let current = try latest(), editorBytes = try Data(contentsOf: editor.url), editorInode = try inode(editor.url)
         await host.close(); let cold = core()
         let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Replay must not use files"); throw HostFailure("Unexpected replay job") } }
-        await cold.configureAttachmentHost(hooks); _ = try await cold.start()
+        try await cold.configureAttachmentHost(hooks); _ = try await cold.start()
         let replay = try await cold.addAttachmentDraftV3(requestJSON: request)
         XCTAssertEqual(replay, original); XCTAssertEqual(try latest(), current)
         XCTAssertEqual(try Data(contentsOf: editor.url), editorBytes); XCTAssertEqual(try inode(editor.url), editorInode)
@@ -450,12 +450,17 @@ final class AttachmentMixedAddHostTests: XCTestCase {
     func testEditorAndSidecarHardlinksRefuseBeforeAnyProducerFileJob() async throws {
         for editorLink in [false, true] {
             let parent = try isolate(); defer { root = parent }
-            let host = try await seed(), before = try latest(), file = editorLink ? editor.url : store.url
+            var configured = false, armed = false, work = 0
+            let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { jobs in
+                configured = true
+                jobs.beforeWork = { _, _ in if armed { work += 1; throw HostFailure("Unexpected hardlink job") } }
+            }
+            let host = try await seed(jobs: hooks), before = try latest(), file = editorLink ? editor.url : store.url
+            XCTAssertTrue(configured, "The rejecting worker hook must be installed before startup")
             XCTAssertEqual(link(file.path, file.appendingPathExtension("second-link").path), 0)
-            let bytes = try Data(contentsOf: file), hooks = NativeAttachmentHostHooks()
-            hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Hardlink admission must precede source read"); throw HostFailure("Unexpected job") } }
-            await host.configureAttachmentHost(hooks)
+            let bytes = try Data(contentsOf: file); armed = true
             await refused { _ = try await host.addAttachmentDraftV3(requestJSON: self.addRequest(before)) }
+            armed = false; XCTAssertEqual(work, 0, "Hardlink admission must precede source read")
             XCTAssertEqual(try Data(contentsOf: file), bytes); XCTAssertEqual(try latest(), before); XCTAssertEqual(try record().operations.count, 0)
             await host.close()
         }
@@ -557,7 +562,13 @@ final class AttachmentMixedAddHostTests: XCTestCase {
     }
 
     func testSafeGenerationAndStrictPickedRequestRefuseWithoutAnyFileJobs() async throws {
-        let host = try await seed(), before = try latest()
+        var configured = false, armed = false, work = 0
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { jobs in
+            configured = true
+            jobs.beforeWork = { _, _ in if armed { work += 1; throw HostFailure("Unexpected strict-admission job") } }
+        }
+        let host = try await seed(jobs: hooks), before = try latest()
+        XCTAssertTrue(configured, "Strict-admission worker hook must be installed before startup")
         var cases: [[String: Any]] = []
         let valid = try object(addRequest(before))
         var value = valid; value["generation"] = true; cases.append(value)
@@ -566,17 +577,17 @@ final class AttachmentMixedAddHostTests: XCTestCase {
         value = valid; value["sessionID"] = UUID().uuidString.lowercased(); cases.append(value)
         value = valid; var picked = try XCTUnwrap(value["picked"] as? [String: Any]); picked["size"] = true; value["picked"] = picked; cases.append(value)
         value = valid; picked["size"] = NSNull(); picked["name"] = String(repeating: "文", count: 30_000); value["picked"] = picked; cases.append(value)
-        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in
-            XCTFail("Strict admission must precede source snapshot"); throw HostFailure("Unexpected job")
-        } }; await host.configureAttachmentHost(hooks)
         let evidence = try Data(contentsOf: store.url), checkpoint = try Data(contentsOf: editor.url)
+        armed = true
         for input in cases { await refused { _ = try await host.addAttachmentDraftV3(requestJSON: self.json(input)) } }
+        armed = false; XCTAssertEqual(work, 0, "Strict admission must precede source snapshot")
         XCTAssertEqual(try Data(contentsOf: store.url), evidence); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint)
         let high = EditorDraftSnapshot(sessionID: before.sessionID, taskID: before.taskID,
             generation: 9_007_199_254_740_990, payloadJSON: before.payloadJSON)
         try await host.checkpointEditorDraft(high)
         let highRecord = try Data(contentsOf: store.url), highEditor = try Data(contentsOf: editor.url)
-        await refused { _ = try await host.addAttachmentDraftV3(requestJSON: self.addRequest(high)) }
+        armed = true; await refused { _ = try await host.addAttachmentDraftV3(requestJSON: self.addRequest(high)) }; armed = false
+        XCTAssertEqual(work, 0)
         XCTAssertEqual(try Data(contentsOf: store.url), highRecord); XCTAssertEqual(try Data(contentsOf: editor.url), highEditor)
         XCTAssertEqual(try record().operations.count, 0)
     }
@@ -706,18 +717,23 @@ final class AttachmentMixedAddHostTests: XCTestCase {
         let fixture = Store.MixedRecord(session: .init(sessionID: before.sessionID, taskID: taskID, state: .active, checkpoint: before), operations: history)
         XCTAssertEqual(history.count, 127); _ = try Store.mixedFingerprint(fixture)
         try DurableFile.write(encoded(fixture), to: store.url, privateDraft: true); try editor.checkpoint(before)
-        let fresh = core(); _ = try await fresh.start()
+        var configured = false, armed = false, work = 0
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { jobs in
+            configured = true
+            jobs.beforeWork = { _, _ in work += 1; if armed { throw HostFailure("Unexpected capacity job") } }
+        }
+        let fresh = core(); try await fresh.configureAttachmentHost(hooks); _ = try await fresh.start()
         let produced = try await added(fresh)
+        XCTAssertTrue(configured); XCTAssertGreaterThan(work, 0, "The admitted128th operation must exercise the real installed worker")
         XCTAssertEqual(try record().operations.count, 128); XCTAssertEqual(produced.before, before)
         XCTAssertEqual(try Data(contentsOf: target(produced)), try Data(contentsOf: source()))
         let admitted = try encoded(record()).count
         XCTAssertLessThanOrEqual(admitted, Store.maximumBytes)
         print("Task264 actual128 producer Foundation bytes=\(admitted), limit=\(Store.maximumBytes)")
         let evidence = try Data(contentsOf: store.url), checkpoint = try Data(contentsOf: editor.url)
-        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in
-            XCTFail("129th operation must refuse before source read"); throw HostFailure("Unexpected capacity job")
-        } }; await fresh.configureAttachmentHost(hooks)
+        let workBefore = work; armed = true
         await refused { _ = try await fresh.addAttachmentDraftV3(requestJSON: self.addRequest(self.latest())) }
+        armed = false; XCTAssertEqual(work, workBefore, "129th operation must refuse before source read")
         XCTAssertEqual(try Data(contentsOf: store.url), evidence); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint)
         await fresh.close()
     }

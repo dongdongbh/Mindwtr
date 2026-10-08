@@ -110,6 +110,8 @@ export type NativeAttachmentOwner =
 export type NativePickedAttachment = { uri: string; name: string | null; mimeType: string | null; size: number | null };
 
 export type NativeAttachmentRow = AttachmentRowState & {
+    /** Canonical captured download identity; display-only and null for links. */
+    readonly downloadIdentity: string | null;
     /** A task's link: the pencil opens the link sheet on this text; null for any other row. */
     editText: string | null;
     /** A project row's transfer bar: null hides it; `percentage` null shows the bar empty with "...". */
@@ -414,6 +416,7 @@ export function createAttachmentMethods(deps: AttachmentDeps) {
                 const row = getAttachmentRowState(inFlight.has(attachment.id) ? { ...attachment, localStatus: 'downloading' } : attachment);
                 return {
                     ...row,
+                    downloadIdentity: attachment.kind === 'file' ? getAttachmentDownloadIdentity(attachment) : null,
                     editText: owner.kind === 'task' && attachment.kind === 'link' ? getAttachmentLinkEditText(attachment) : null,
                     progress: owner.kind === 'project' ? progressOf(attachment.id) : null,
                 };

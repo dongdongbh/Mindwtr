@@ -36,7 +36,7 @@ final class AttachmentDraftHostTests: XCTestCase {
         let db = try SQLiteBridge(url: database); defer { db.close() }
         return try db.execute(statement, parametersJSON: json(args))
     }
-    private func savedTask() throws -> String { try sql("SELECT * FROM tasks WHERE id=?", [taskID]) }
+    private func savedTask() throws -> String { try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id=?", [taskID]).utf8))) }
     private func seed(extra: String = "opaque / 文") async throws -> (CoreHost, EditorDraftSnapshot) {
         let boot = core(); _ = try await boot.start(); await boot.close()
         _ = try sql("INSERT INTO tasks(id,title,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,?,'inbox','[]','[]','[]',?,?,1,'fixture')", [taskID, "Saved title", at, at])
@@ -515,7 +515,7 @@ final class AttachmentDraftHostTests: XCTestCase {
         // Jobs already exist after start, so configure through a boundary before
         // first reservation via the existing hook on a new owner.
         await host.close()
-        let writing = core(); await writing.configureAttachmentHost(hooks); _ = try await writing.start()
+        let writing = core(); try await writing.configureAttachmentHost(hooks); _ = try await writing.start()
         let operation = Task { try await writing.addAttachmentDraft(requestJSON: request) }
         XCTAssertEqual(entered.wait(timeout: .now() + 10), .success)
         let closeDone = DispatchSemaphore(value: 0)

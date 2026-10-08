@@ -82,9 +82,10 @@ enum MindwtrWatchOutbox {
         let transport: Transport
         let payload: [String: Any]
         let audioURL: URL?
+        let settledAt: Double?
     }
 
-    static func save(payload: [String: Any], transport: Transport, audioURL: URL? = nil) throws {
+    static func save(payload: [String: Any], transport: Transport, audioURL: URL? = nil, settledAt: Double? = nil) throws {
         guard let rawId = payload["id"] as? String,
               let uuid = UUID(uuidString: rawId)
         else {
@@ -99,6 +100,7 @@ enum MindwtrWatchOutbox {
             "payload": canonicalPayload,
         ]
         if let audioURL { value["audioFileName"] = audioURL.lastPathComponent }
+        if let settledAt { value["settledAt"] = settledAt }
         guard JSONSerialization.isValidJSONObject(value) else { throw OutboxError.invalidPayload }
         let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
         try data.write(to: recordURL(id: id), options: .atomic)
@@ -157,7 +159,8 @@ enum MindwtrWatchOutbox {
         } else {
             audioURL = nil
         }
-        return Record(id: id, createdAt: createdAt, transport: transport, payload: payload, audioURL: audioURL)
+        return Record(id: id, createdAt: createdAt, transport: transport, payload: payload, audioURL: audioURL,
+                      settledAt: value["settledAt"] as? Double)
     }
 
     private static func recordURL(id: String) -> URL {

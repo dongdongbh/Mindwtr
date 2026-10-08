@@ -568,6 +568,9 @@ jobs:
 
       # The iOS host runs the same bundle and edits host-entry.ts too: the boot gates catch an
       # edit that breaks an Android guarantee (journaled writes, reads after a failed save, pins).
+      - name: Typecheck the shared native host and iOS fixture entries
+        run: bun run typecheck:native-host
+
       - name: Build the native core bundle
         run: node apps/android-native/scripts/build-bundle.mjs
 
@@ -586,7 +589,7 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.ios_matrix) }}
     runs-on: ${{ matrix.runner }}
     name: iOS SwiftUI client and JavaScriptCore host (${{ matrix.label }})
-    # The full Swift host suite takes about 42 minutes before the isolated app build.
+    # Recent full Swift host suites take about 64 minutes before the isolated app build.
     # Keep the job allowance separate from individual test and performance limits.
     timeout-minutes: 75
     steps:
@@ -613,6 +616,8 @@ jobs:
           bun-version-file: ".bun-version"
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Typecheck the shared native host and iOS fixture entries
+        run: bun run typecheck:native-host
       - name: Test the embedded core and build the isolated SwiftUI client
         run: |
           set -o pipefail

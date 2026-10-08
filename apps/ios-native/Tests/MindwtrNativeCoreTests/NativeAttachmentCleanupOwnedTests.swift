@@ -167,7 +167,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             // captured or unlinked by terminal recovery.
             let terminal = ["afterTerminal", "beforeClear"].contains(boundary)
             if terminal { try bytes.write(to: target) }
-            let cold = core(); await cold.configureAttachmentHost(hooks); _ = try await cold.start()
+            let cold = core(); try await cold.configureAttachmentHost(hooks); _ = try await cold.start()
             XCTAssertEqual(counter.submitted, terminal ? 0 : 1, "Cold recovery never recaptures the baseline")
             XCTAssertEqual(try rows(), before); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
             XCTAssertEqual(FileManager.default.fileExists(atPath: target.path), terminal)
@@ -188,7 +188,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
                 if point == "afterUnlink" { jobs.afterRetirementUnlink = failure }
                 if point == "beforeSync" { jobs.beforeRetirementSync = failure }
             }
-            let value = core(); await value.configureAttachmentHost(hooks); _ = try await value.start()
+            let value = core(); try await value.configureAttachmentHost(hooks); _ = try await value.start()
             let before = try rows(), input = try request()
             await assertFailure { try await value.retireAttachmentCleanup(input) }
             let intent = try Data(contentsOf: journal)
@@ -219,7 +219,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
                 if point == "afterUnlink" { jobs.afterRetirementUnlink = replace }
                 if point == "beforeSync" { jobs.beforeRetirementSync = replace }
             }
-            let value = core(); await value.configureAttachmentHost(hooks); _ = try await value.start()
+            let value = core(); try await value.configureAttachmentHost(hooks); _ = try await value.start()
             let before = try rows(), input = try request()
             await assertFailure { try await value.retireAttachmentCleanup(input) }
             XCTAssertEqual(FileManager.default.fileExists(atPath: target.path), point == "beforeUnlink")
@@ -324,7 +324,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             reached.fulfill()
             guard release.wait(timeout: .now() + 10) == .success else { throw HostFailure("Fixture barrier timed out") }
         } }
-        let value = core(); await value.configureAttachmentHost(hooks); _ = try await value.start()
+        let value = core(); try await value.configureAttachmentHost(hooks); _ = try await value.start()
         let before = try rows(), input = try request()
         let work = Task { try await value.retireAttachmentCleanup(input) }; defer { release.signal() }
         await fulfillment(of: [reached], timeout: 10)
@@ -394,7 +394,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             try Data(changed.utf8).write(to: journal)
             let retained = try Data(contentsOf: journal), counter = CleanupOwnedJobs(), hooks = NativeAttachmentHostHooks()
             hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-            let cold = core(); await cold.configureAttachmentHost(hooks)
+            let cold = core(); try await cold.configureAttachmentHost(hooks)
             do { _ = try await cold.start(); XCTFail("Invalid cleanup evidence must not enter normal boot: " + invalid) } catch { }
             XCTAssertEqual(counter.submitted, 0, invalid); XCTAssertEqual(try Data(contentsOf: target), bytes)
             XCTAssertEqual(try Data(contentsOf: journal), retained); XCTAssertEqual(try markers().count, 0)
@@ -410,7 +410,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             try enterCase(invalid, below: base); try await seed()
             let counter = CleanupOwnedJobs(), hooks = NativeAttachmentHostHooks()
             hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-            let value = core(); await value.configureAttachmentHost(hooks); _ = try await value.start()
+            let value = core(); try await value.configureAttachmentHost(hooks); _ = try await value.start()
             let sql = try SQLiteBridge(url: database)
             if invalid == "blob" { _ = try sql.execute("UPDATE tasks SET attachments=x'5B5D' WHERE id=?", parametersJSON: json([taskID])) }
             else {
@@ -429,7 +429,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
     func testActualEditorCheckpointAndTaskSidecarDenyNewCleanupOwner() async throws {
         try await seed(); let counter = CleanupOwnedJobs(), hooks = NativeAttachmentHostHooks()
         hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-        let value = core(); await value.configureAttachmentHost(hooks); _ = try await value.start()
+        let value = core(); try await value.configureAttachmentHost(hooks); _ = try await value.start()
         let raw: [String: Any] = ["title": "", "note": "", "location": "", "estimate": "", "estimateResolved": "", "timeSpent": "", "timeSpentResolved": "",
             "tokens": [:], "tokenCanonical": [:], "tokenResolved": [:], "tokenEdited": [], "checklistInputs": [:], "checklistAppend": "", "relativeAmount": "", "relativeUnit": "", "relativeOwned": false,
             "relativeCommitRequested": false, "recurrenceInputs": [:], "recurrenceOwned": [], "recurrenceCommitRequested": []]
@@ -463,7 +463,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
                     guard release.wait(timeout: .now() + 10) == .success else { throw HostFailure("Close fixture barrier timed out") }
                 }
             }
-            let value = core(); await value.configureAttachmentHost(hooks)
+            let value = core(); try await value.configureAttachmentHost(hooks)
             if mode == "warm" { _ = try await value.start() }
             let before = try rows()
             let operation = Task { mode == "warm" ? try await value.retireAttachmentCleanup(input) : try await value.start() }
@@ -508,7 +508,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
         try (String(contentsOf: bundle, encoding: .utf8) + suffix).write(to: injected, atomically: true, encoding: .utf8)
         let counter = CleanupOwnedJobs(), hooks = NativeAttachmentHostHooks()
         hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-        let value = core(bundleURL: injected); await value.configureAttachmentHost(hooks); _ = try await value.start()
+        let value = core(bundleURL: injected); try await value.configureAttachmentHost(hooks); _ = try await value.start()
         let input = try request(); try assertReply(await value.retireAttachmentCleanup(input), request: input, outcome: "removed")
         XCTAssertEqual(counter.submitted, 2, "Only native baseline observation and retirement are admitted")
         XCTAssertEqual(try rows(), before); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); await value.close()
@@ -531,7 +531,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             sql.close()
             let counter = CleanupOwnedJobs(), hooks = NativeAttachmentHostHooks()
             hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-            let value = core(); await value.configureAttachmentHost(hooks); _ = try await value.start()
+            let value = core(); try await value.configureAttachmentHost(hooks); _ = try await value.start()
             let before = try rows(), input = try request()
             try assertReply(await value.retireAttachmentCleanup(input), request: input, outcome: "retained")
             XCTAssertEqual(counter.submitted, 0, "RN already-processed tombstone cannot grant fresh native proof")
@@ -544,7 +544,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
         try await seed()
         let counter = CleanupOwnedJobs(), hooks = NativeAttachmentHostHooks(), faults = HostIOFaults()
         hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-        let value = core(faults: faults); await value.configureAttachmentHost(hooks); _ = try await value.start()
+        let value = core(faults: faults); try await value.configureAttachmentHost(hooks); _ = try await value.start()
         faults.journalRemove = { throw HostFailure("Synthetic ordinary clear interruption") }
         do { _ = try await value.call("complete", argumentsJSON: json([taskID])); XCTFail("Ordinary command must retain its terminal on lost clear") } catch { }
         let pending = try Data(contentsOf: journal), before = try rows()

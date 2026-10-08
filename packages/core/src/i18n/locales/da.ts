@@ -1,5 +1,21 @@
 // Danish translation. Keep at full key parity with en.ts.
 export const daOverrides: Record<string, string> = {
+    "task.expandChecklist": "Gør tjeklistens punkter til projektopgaver",
+    "task.keepChecklistDescription": "Behold den oprindelige opgave og dens tjekliste i projektet.",
+    "task.expandChecklistDescription": "Opret en opgave pr. punkt med samme rækkefølge og afkrydsning. Noter, bilag og datoer flyttes til projektet; mærker og kontekster følger de nye opgaver. Originalen flyttes til papirkurven. Fokus kopieres ikke. Konverteringen kan fortrydes.",
+    "task.expandChecklistInvalid": "Hvert punkt på tjeklisten skal have en titel.",
+    "task.expandChecklistInactive": "Tilgængelig for indbakkeopgaver, næste handlinger og afsluttede opgaver i aktive projekter.",
+    "task.expandChecklistSchedule": "Behold listen, eller fjern først gentagelse, relative datoer og påmindelser. Tidspunkter med påmindelser kan ikke overføres til projektet.",
+    "task.expandChecklistMetadata": "Behold listen, eller ryd først ansvarlig, placering, anslået tid og registreret tid. Disse oplysninger kan ikke overføres til projektet.",
+    "task.expandChecklistNameExists": "Der findes allerede et projekt med dette navn i området. Vælg et andet navn til det nye projekt.",
+    "task.expandChecklistConflict": "Opgaverne eller projektet er ændret. Konverteringen blev afbrudt, og dine ændringer er bevaret.",
+    "task.expandChecklistSaveFailed": "Konverteringen kunne ikke gemmes. Prøv igen for at gemme den samme konvertering uden dubletter.",
+
+    'settings.obsidianRequiredInlineTag': "Påkrævet tag for opgaver i tekst",
+    'settings.obsidianRequiredInlineTagHint': "Lad feltet stå tomt for at vise alle opgaver i teksten. #task matcher også #task/work. Kun tags på afkrydsningsfeltets linje tæller, ikke notens tags. Nye opgaver i teksten får automatisk dette tag.",
+    'tray.quickAdd': "Hurtig tilføjelse",
+    'tray.show': "Vis Mindwtr",
+    'tray.quit': "Afslut",
     "settings.mcpTitle": "Lokal MCP-server (avanceret)",
     "settings.mcpDesc": "Forbind en AI-klient på denne computer til Mindwtr.",
     "settings.mcpUnavailable": "Kun tilgængelig i skrivebordsappen uden for sandkassen.",
@@ -418,6 +434,7 @@ export const daOverrides: Record<string, string> = {
     'attachments.addLink': 'Tilføj link',
     'attachments.open': 'Åbn',
     'attachments.download': 'Hent',
+    "attachments.finishDraftBeforeChanges": "Gem eller kassér denne kladde, før du foretager andre ændringer af vedhæftninger.",
     'attachments.missing': 'Manglende fil',
     'attachments.downloadConflict':
         'Den vedhæftede fil blev ændret under overførslen. Din lokale fil blev bevaret. Synkroniser igen for at løse konflikten.',
@@ -1334,7 +1351,7 @@ export const daOverrides: Record<string, string> = {
     'settings.syncEncryptionErrorBackendIncompatible':
         'Denne WebDAV-server tilbyder eller håndhæver ikke sikker versionskontrol (stærke ETags og betingede skrivninger), så Mindwtr kan ikke synkronisere eller ændre kryptering sikkert. Brug en kompatibel WebDAV-udbyder, Filsynkronisering eller Dropbox.',
     'settings.syncEncryptionErrorTransitionIncomplete':
-        'Denne krypteringsændring kan være ufuldstændig, fordi Mindwtr ikke kunne bekræfte en ekstern filversion. Synkronisering forbliver sat på pause. Prøv den samme krypteringsændring igen, før du ændrer eller frakobler denne synkroniseringsplacering.',
+        'Mindwtr kunne ikke bekræfte, at krypteringsændringen er fuldført. Synkronisering forbliver sat på pause. Prøv den samme krypteringsændring igen, før du ændrer eller frakobler denne synkroniseringsplacering.',
     'settings.syncEncryptionAbandon': 'Opgiv opsætning',
     'settings.syncEncryptionAbandonWarning': 'Opgiv den ufærdige ændring af krypteringen kun på denne enhed. Krypteringen slås fra her, og synkroniseringsplaceringen kontaktes ikke, så den kan forblive delvist krypteret, og denne enhed holder synkroniseringen sat på pause der. Gør ændringen færdig eller fortryd den fra en enhed, der kan nå den.',
     'settings.syncEncryptionPassphraseTooLong': 'En adgangssætning må højst bestå af 1.000 tegn.',

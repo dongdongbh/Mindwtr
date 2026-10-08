@@ -19,6 +19,8 @@ type Labels = {
     obsidianScanFoldersHint: string;
     obsidianInboxFile: string;
     obsidianInboxFileHint: string;
+    obsidianRequiredInlineTag: string;
+    obsidianRequiredInlineTagHint: string;
     obsidianDataview: string;
     obsidianDataviewDesc: string;
     obsidianDataviewMetadata: string;
@@ -64,6 +66,8 @@ type SettingsObsidianSectionProps = {
     onObsidianVaultPathChange: (value: string) => void;
     onObsidianEnabledChange: (value: boolean) => void;
     onObsidianScanFoldersTextChange: (value: string) => void;
+    obsidianRequiredInlineTag: string;
+    onObsidianRequiredInlineTagChange: (value: string) => void;
     onObsidianInboxFileChange: (value: string) => void;
     onObsidianTaskNotesIncludeArchivedChange: (value: boolean) => void;
     onObsidianDataviewMetadataEnabledChange: (value: boolean) => void;
@@ -95,6 +99,8 @@ export function SettingsObsidianSection({
     onObsidianEnabledChange,
     onObsidianScanFoldersTextChange,
     onObsidianInboxFileChange,
+    obsidianRequiredInlineTag,
+    onObsidianRequiredInlineTagChange,
     onObsidianTaskNotesIncludeArchivedChange,
     onObsidianDataviewMetadataEnabledChange,
     onObsidianNewTaskFormatChange,
@@ -210,6 +216,17 @@ export function SettingsObsidianSection({
                         <p className="text-xs text-muted-foreground">{t.obsidianScanFoldersHint}</p>
                     </SettingField>
 
+                    <SettingField settingsKey="obsidianRequiredInlineTag" title={t.obsidianRequiredInlineTag}>
+                        <input
+                            type="text"
+                            className="bg-muted p-2 rounded text-sm border border-border"
+                            value={obsidianRequiredInlineTag}
+                            aria-label={t.obsidianRequiredInlineTag}
+                            onChange={(event) => onObsidianRequiredInlineTagChange(event.target.value)}
+                            placeholder="#task"
+                        />
+                        <p className="text-xs text-muted-foreground">{t.obsidianRequiredInlineTagHint}</p>
+                    </SettingField>
                     <SettingField settingsKey="obsidianInboxFile" title={t.obsidianInboxFile}>
                         <input
                             type="text"

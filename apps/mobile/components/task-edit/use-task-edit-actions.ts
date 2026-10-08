@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react';
 import { Alert, Share } from 'react-native';
 import {
+    prepareChecklistProjectConversion,
+    type ChecklistProjectConversion,
     canSkipRecurringTaskOccurrence,
     Task,
     TimeEstimate,
@@ -258,10 +260,46 @@ export function useTaskEditActions({
         }
     }, [canMutate, duplicateTask, onClose, showToast, t, task]);
 
-    const handlePromoteTaskToProject = useCallback(async () => {
+    const [projectConversionOpen, setProjectConversionOpen] = React.useState(false);
+    React.useEffect(() => setProjectConversionOpen(false), [task?.id]);
+    const confirmProjectConversion = useCallback(async (projectTitle?: string, expand = false) => {
         if (!task || !promoteTaskToProject || !canMutate()) return;
         try {
-            const title = String(titleDraftRef.current || mergedTask.title || task.title || '').trim();
+            const title = projectTitle ?? String(titleDraftRef.current || mergedTask.title || task.title || '').trim();
+            if (expand) {
+                const preview = prepareChecklistProjectConversion(useTaskStore.getState(), { ...task, ...mergedTask } as Task, title);
+                if (!preview.success) { showTaskWriteError(t(preview.error)); return; }
+            }
+            if (!await draftLifecycle.save()) return;
+            setProjectConversionOpen(false);
+            if (expand) {
+                const state = useTaskStore.getState();
+                const source = state._tasksById.get(task.id);
+                if (!source) return;
+                const prepared = prepareChecklistProjectConversion(state, source, title);
+                if (!prepared.success) { showTaskWriteError(t(prepared.error)); return; }
+                const command: ChecklistProjectConversion = prepared.command;
+                const convert = async () => {
+                    const result = await useTaskStore.getState().convertChecklistToProject(command);
+                    if (!result.success) {
+                        showToast({ title: t('common.error'), message: t(result.error || 'task.expandChecklistSaveFailed'),
+                            tone: 'error', ...(result.error === 'task.expandChecklistSaveFailed' ? { actionLabel: t('common.retry'), onAction: convert } : {}) });
+                        return;
+                    }
+                    const undo = async () => {
+                        const restored = await useTaskStore.getState().undoChecklistToProject(command);
+                        if (!restored.success) showToast({ title: t('common.error'), tone: 'error',
+                            message: t(restored.error || 'task.expandChecklistConflict'),
+                            ...(restored.error === 'task.expandChecklistSaveFailed' ? { actionLabel: t('common.retry'), onAction: undo } : {}) });
+                        else openTaskScreen(command.source.id, command.source.projectId, 'task');
+                    };
+                    showToast({ title: t('common.success'), message: t('task.promoteToProjectCreated'), tone: 'success',
+                        actionLabel: t('common.undo'), onAction: undo });
+                    openProjectScreen(command.project.id);
+                };
+                await convert();
+                return;
+            }
             const result = await promoteTaskToProject(task.id, { title });
             if (!result.success || !result.id) {
                 showToast({
@@ -288,7 +326,12 @@ export function useTaskEditActions({
                 tone: 'error',
             });
         }
-    }, [canMutate, mergedTask, onClose, promoteTaskToProject, showToast, t, task, titleDraftRef]);
+    }, [canMutate, draftLifecycle, mergedTask, onClose, promoteTaskToProject, showTaskWriteError, showToast, t, task, titleDraftRef]);
+    const handlePromoteTaskToProject = useCallback(() => {
+        if (!task || !canMutate()) return;
+        if ((mergedTask.checklist ?? task.checklist)?.length) setProjectConversionOpen(true);
+        else void confirmProjectConversion();
+    }, [canMutate, confirmProjectConversion, mergedTask.checklist, task]);
 
     const handleDeleteTask = useCallback(async () => {
         if (!task || !canMutate()) return;
@@ -562,6 +605,7 @@ export function useTaskEditActions({
         handleDone,
         handleDuplicateTask,
         handlePromoteTaskToProject,
+        projectConversionOpen, setProjectConversionOpen, confirmProjectConversion,
         handleResetChecklist,
         handleShare,
     };

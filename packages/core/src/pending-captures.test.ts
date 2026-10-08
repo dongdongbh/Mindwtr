@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+    applyPendingChecklist,
+    parsePendingCapture,
     drainPendingCaptureQueue,
     type PendingCaptureDrainDeps,
     type PendingCaptureQueuePort,
     type PendingCaptureRecordPort,
+    type PendingChecklist,
 } from './pending-captures';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Task } from './types';
@@ -97,6 +100,116 @@ const storeData = () => {
 afterEach(async () => {
     await flushPendingSave();
     resetForTests();
+});
+
+describe('Watch checklist delivery', () => {
+    const milk = { id: 'same', title: 'Milk', isCompleted: false };
+    const eggs = { id: 'same', title: 'Eggs', isCompleted: false };
+    const command = (overrides: Partial<PendingChecklist> = {}): PendingChecklist => ({
+        kind: 'checklist', id: CAPTURE_ID, source: 'apple-watch', taskId: 'shopping',
+        taskCreatedAt: '2026-09-01T12:00:00.000Z', createdAt: '2026-10-07T12:00:00.000Z',
+        itemId: milk.id, itemTitle: milk.title, isCompleted: true, ...overrides,
+    });
+
+    it('preserves reordered/phone-added rows, survives restart and does not replay over a phone edit', async () => {
+        await openStore([task('shopping', { checklist: [eggs, milk, { id: 'rice', title: 'Rice', isCompleted: false }] })]);
+        const queue = fakeQueue({ 'a.json': command() });
+        queue.failDelete.add('a.json');
+        const settle = vi.fn(async () => {
+            expect(saved().tasks[0].checklist?.[1].isCompleted).toBe(true);
+        });
+        await drainPendingCaptureQueue(storeDeps(queue.port, { settleWatchChecklist: settle }));
+        expect(saved().tasks[0].checklist?.map((item) => item.title)).toEqual(['Eggs', 'Milk', 'Rice']);
+        await restartStore();
+        await useTaskStore.getState().updateTask('shopping', { checklist: [eggs, milk] });
+        await flushPendingSave();
+        await drainPendingCaptureQueue(storeDeps(queue.port, { settleWatchChecklist: async () => undefined }));
+        expect(useTaskStore.getState().tasks[0].checklist?.[1].isCompleted).toBe(false);
+        expect(queue.stored.size).toBe(0);
+    });
+
+    it('orders rapid check/uncheck per item without discarding another item', async () => {
+        await openStore([task('shopping', { checklist: [milk, eggs] })]);
+        const settle = vi.fn(async () => undefined);
+        const queue = fakeQueue({
+            'first.json': command(),
+            'later.json': command({ id: INTENT_ID, createdAt: '2026-10-07T12:00:02.000Z', isCompleted: false }),
+        });
+        await drainPendingCaptureQueue(storeDeps(queue.port, { settleWatchChecklist: settle }));
+        queue.stored.set('delayed.json', JSON.stringify(command({ id: AUDIO_ID, itemTitle: 'Eggs', createdAt: '2026-10-07T12:00:01.000Z' })));
+        queue.stored.set('old.json', JSON.stringify(command()));
+        await drainPendingCaptureQueue(storeDeps(queue.port, { settleWatchChecklist: settle }));
+        expect(saved().tasks[0].checklist?.map((item) => item.isCompleted)).toEqual([false, true]);
+        expect(settle).toHaveBeenCalledWith(CAPTURE_ID, 'stale');
+    });
+
+    it('rejects ambiguous, renamed, removed and terminal items', async () => {
+        for (const props of [
+            { checklist: [milk, milk] }, { checklist: [eggs] }, { checklist: [] },
+            { checklist: [milk], deletedAt: '2026-10-07' },
+            { checklist: [milk], status: 'archived' as const },
+            { checklist: [milk], createdAt: '2026-09-02T12:00:00.000Z' },
+        ]) {
+            await openStore([task('shopping', props)]);
+            const updateTask = vi.fn(async () => undefined);
+            expect(await applyPendingChecklist(command(), { ...storeDeps(fakeQueue({}).port), updateTask })).not.toBe('applied');
+            expect(updateTask).not.toHaveBeenCalled();
+        }
+        expect(parsePendingCapture(JSON.stringify(command({ isCompleted: 'true' as never })))).toBeNull();
+    });
+
+    it('follows list completion/reopening while ordinary tasks retain status', async () => {
+        for (const taskMode of ['list', 'task'] as const) {
+            await openStore([task('shopping', { checklist: [milk], taskMode })]);
+            await applyPendingChecklist(command(), storeDeps(fakeQueue({}).port));
+            expect(useTaskStore.getState().tasks[0].status).toBe(taskMode === 'list' ? 'done' : 'next');
+            await applyPendingChecklist(command({ isCompleted: false }), storeDeps(fakeQueue({}).port));
+            expect(useTaskStore.getState().tasks[0].status).toBe('next');
+        }
+    });
+
+    it('does not acknowledge before save and ordering persistence; retries the same command', async () => {
+        await openStore([task('shopping', { checklist: [milk] })]);
+        const queue = fakeQueue({ 'a.json': command() });
+        const settle = vi.fn(async () => undefined);
+        await drainPendingCaptureQueue(storeDeps(queue.port, {
+            settleWatchChecklist: settle, flushPendingSave: async () => { throw new Error('disk full'); },
+        }));
+        expect(settle).not.toHaveBeenCalled();
+        expect(queue.stored.size).toBe(1);
+        await drainPendingCaptureQueue(storeDeps(queue.port, { settleWatchChecklist: settle }));
+        expect(settle).toHaveBeenCalledWith(CAPTURE_ID, 'applied');
+        expect(queue.stored.size).toBe(0);
+    });
+
+    it('advances a recurring list once and never applies its delayed uncheck to the next occurrence', async () => {
+        await openStore([task('shopping', { checklist: [milk], taskMode: 'list', recurrence: { rule: 'daily' }, dueDate: '2026-10-07' })]);
+        const deps = storeDeps(fakeQueue({}).port);
+        expect(await applyPendingChecklist(command(), deps)).toBe('applied');
+        await flushPendingSave();
+        const count = useTaskStore.getState()._allTasks.length;
+        expect(count).toBe(2);
+        expect(await applyPendingChecklist(command(), deps)).toBe('applied');
+        expect(await applyPendingChecklist(command({ isCompleted: false }), deps)).toBe('terminal');
+        expect(useTaskStore.getState()._allTasks).toHaveLength(count);
+        expect(useTaskStore.getState()._allTasks.find((item) => item.id !== 'shopping')?.checklist?.[0].isCompleted).toBe(false);
+    });
+
+    it('retains commands on ordering-record failure and stops later commands from overtaking', async () => {
+        await openStore([task('shopping', { checklist: [milk, eggs] })]);
+        const queue = fakeQueue({ 'a.json': command(), 'b.json': command({ id: INTENT_ID, itemTitle: 'Eggs', createdAt: '2026-10-07T12:00:01.000Z' }) });
+        const settle = vi.fn(async () => undefined);
+        await drainPendingCaptureQueue(storeDeps(queue.port, {
+            settleWatchChecklist: settle,
+            lastApplied: { read: lastApplied.read, write: async () => { throw new Error('record unavailable'); } },
+        }));
+        expect(settle).not.toHaveBeenCalled();
+        expect(queue.stored.size).toBe(2);
+        expect(saved().tasks[0].checklist?.[1].isCompleted).toBe(false);
+        await drainPendingCaptureQueue(storeDeps(queue.port, { settleWatchChecklist: settle }));
+        expect(saved().tasks[0].checklist?.every((item) => item.isCompleted)).toBe(true);
+        expect(queue.stored.size).toBe(0);
+    });
 });
 
 describe('drainPendingCaptureQueue', () => {

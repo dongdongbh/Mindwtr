@@ -86,7 +86,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             _ = try sql("INSERT INTO tasks(id,title,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,?,'inbox','[]','[]','[]',?,?,1,'fixture')", [id, "Saved title", at, at])
         }
         let host = core(faults)
-        if let jobs { await host.configureAttachmentHost(jobs) }
+        if let jobs { try await host.configureAttachmentHost(jobs) }
         _ = try await host.start()
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true)
         let baseline = managed.appendingPathComponent("baseline.txt")
@@ -473,7 +473,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
         try probeBundle("MindwtrHost.attachmentDraftDiscardCandidates=()=>{throw Error('No candidate replay')}; MindwtrHost.attachmentDraftDiscardRetire=()=>{throw Error('No live replay')};")
         let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
         jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Durable success must start no file job"); throw HostFailure("Unexpected file job") } }
-        await cold.configureAttachmentHost(jobs); _ = try await cold.start()
+        try await cold.configureAttachmentHost(jobs); _ = try await cold.start()
         try released(); XCTAssertEqual(try Data(contentsOf: target), foreign); XCTAssertEqual(try inode(target), identity)
         try sameFiles(files); XCTAssertEqual(try domain(), saved)
     }
@@ -693,7 +693,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             try probeBundle("MindwtrHost.attachmentDraftDiscardCandidates=()=>{throw Error('No terminal plan')};MindwtrHost.attachmentDraftDiscardRetire=()=>{throw Error('No terminal reference')}")
             let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Durable v4 terminal must start no file job"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); _ = try await cold.start()
+            try await cold.configureAttachmentHost(jobs); _ = try await cold.start()
             try released(); for target in try targets(retained) { XCTAssertEqual(try Data(contentsOf: target), foreign) }
             try sameFiles(files); XCTAssertEqual(try domain(), saved); await cold.close()
         }
@@ -767,7 +767,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             let stageBytes = try stage.flatMap { FileManager.default.fileExists(atPath: $0.path) ? try Data(contentsOf: $0) : nil }
             let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Forged v4 decision must start no work"); throw HostFailure("Unexpected file work") } }
-            await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
+            try await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
             XCTAssertEqual(try Data(contentsOf: journal), evidence); XCTAssertEqual(try Data(contentsOf: store.url), sidecar)
             if let stage, let stageBytes { XCTAssertEqual(try Data(contentsOf: stage), stageBytes) }
             try sameFiles(files); XCTAssertEqual(try domain(), saved); await cold.close()
@@ -925,7 +925,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             let evidence = try Data(contentsOf: journal), sidecar = try Data(contentsOf: store.url), cold = core(noDomainWrites())
             let jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Invalid journal must start no job"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
+            try await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
             XCTAssertEqual(try Data(contentsOf: journal), evidence); XCTAssertEqual(try Data(contentsOf: store.url), sidecar)
             for target in try targets(retained) { XCTAssertTrue(FileManager.default.fileExists(atPath: target.path)) }
             try sameFiles(files); XCTAssertEqual(try domain(), saved)
@@ -1254,7 +1254,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             let stageBytes = try lastStage.flatMap { FileManager.default.fileExists(atPath: $0.path) ? try Data(contentsOf: $0) : nil }
             let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Version/proof mismatch must start no job"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
+            try await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
             XCTAssertEqual(try Data(contentsOf: journal), journalBytes); XCTAssertEqual(try Data(contentsOf: store.url), sidecarBytes)
             if let lastStage, let stageBytes { XCTAssertEqual(try Data(contentsOf: lastStage), stageBytes) }
             try sameFiles(files); XCTAssertEqual(try domain(), saved); await cold.close()
@@ -1278,7 +1278,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             try probeBundle("const h=MindwtrHost;h.attachmentDraftDiscardCandidates=function(){throw new Error('Unexpected terminal plan')};h.attachmentDraftDiscardRetire=function(){throw new Error('Unexpected terminal reference')}")
             let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Durable v2 terminal must start no file job"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); _ = try await cold.start()
+            try await cold.configureAttachmentHost(jobs); _ = try await cold.start()
             try released(); for target in try targets(retained) { XCTAssertEqual(try Data(contentsOf: target), foreign) }
             try sameFiles(files); XCTAssertEqual(try domain(), saved); await cold.close()
         }
@@ -1299,7 +1299,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             try probeBundle("MindwtrHost.attachmentDraftDiscardRetire=()=>{throw Error('Intent must not query target')}")
             let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Last intent must submit no file work"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); _ = try await cold.start()
+            try await cold.configureAttachmentHost(jobs); _ = try await cold.start()
             let beforeLog = try diagnosticText(), result = try await finish(cold, retained)
             let operations = try resultOperations(result, record: retained, status: "discarded")
             XCTAssertEqual(try object(result)["version"] as? Int, 3)
@@ -1351,7 +1351,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             let saved = try domain(), files = try protectedBytes(); await host.close()
             let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Unknown intent namespace must never be adopted or swept"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); _ = try await cold.start()
+            try await cold.configureAttachmentHost(jobs); _ = try await cold.start()
             let operations = try resultOperations(await finish(cold, retained), record: retained, status: "discarded")
             XCTAssertEqual(operations.last?["stage"] as? String, "unclaimed")
             XCTAssertEqual(try Data(contentsOf: stage), bytes); XCTAssertEqual(try inode(stage), identity); XCTAssertEqual(try inode(namespace), namespaceIdentity)
@@ -1382,7 +1382,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
         try probeBundle("const h=MindwtrHost;h.attachmentDraftDiscardCandidates=()=>{throw Error('No terminal plan')};h.attachmentDraftDiscardRetire=()=>{throw Error('No terminal query')}")
         let terminalOwner = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
         jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Logical terminal must start no new job"); throw HostFailure("Unexpected job") } }
-        await terminalOwner.configureAttachmentHost(jobs); _ = try await terminalOwner.start()
+        try await terminalOwner.configureAttachmentHost(jobs); _ = try await terminalOwner.start()
         XCTAssertEqual(try Data(contentsOf: stage), stageBytes); XCTAssertEqual(try inode(stage), stageIdentity); XCTAssertEqual(try inode(namespace), namespaceIdentity)
         XCTAssertEqual(try Data(contentsOf: target), targetBytes); XCTAssertEqual(try inode(target), targetIdentity)
         try released(); try sameFiles(files); XCTAssertEqual(try domain(), saved)
@@ -1402,7 +1402,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             }
             await host.close(); let cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Intent replay must submit no job"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); _ = try await cold.start()
+            try await cold.configureAttachmentHost(jobs); _ = try await cold.start()
             XCTAssertEqual(try Data(contentsOf: stage), bytes); XCTAssertEqual(try inode(stage), identity); XCTAssertEqual(try inode(namespace), namespaceIdentity)
             try released(); try sameFiles(files); XCTAssertEqual(try domain(), saved); await cold.close()
         }
@@ -1479,7 +1479,7 @@ final class AttachmentDiscardFinishHostTests: XCTestCase {
             try setWrapper(value, in: &command); try writeJournal(command)
             let evidence = try Data(contentsOf: journal), sidecar = try Data(contentsOf: store.url), cold = core(noDomainWrites()), jobs = NativeAttachmentHostHooks()
             jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in XCTFail("Forged logical disposition must start no work"); throw HostFailure("Unexpected job") } }
-            await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
+            try await cold.configureAttachmentHost(jobs); await failure { _ = try await cold.start() }
             XCTAssertEqual(try Data(contentsOf: journal), evidence); XCTAssertEqual(try Data(contentsOf: store.url), sidecar)
             try sameFiles(files); XCTAssertEqual(try domain(), saved); await cold.close()
         }

@@ -358,7 +358,7 @@ final class AttachmentResumeHostTests: XCTestCase {
         XCTAssertGreaterThan(input.utf8.count, padded.payloadJSON.utf8.count * 2); XCTAssertLessThanOrEqual(input.utf8.count, 8 * 1024 * 1024)
         let hooks = NativeAttachmentHostHooks(); var jobs = 0
         hooks.configureJobs = { runner in runner.beforeWork = { _, _ in jobs += 1; throw HostFailure("Resume must not inspect or mutate file content") } }
-        let cold = core(); await cold.configureAttachmentHost(hooks); _ = try await cold.start(); let retained = try evidence()
+        let cold = core(); try await cold.configureAttachmentHost(hooks); _ = try await cold.start(); let retained = try evidence()
         _ = try await resume(cold); XCTAssertEqual(jobs, 0); XCTAssertEqual(try latest(), padded); try unchanged(retained)
     }
 

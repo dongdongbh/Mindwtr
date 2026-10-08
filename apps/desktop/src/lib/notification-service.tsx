@@ -5,6 +5,8 @@ import {
     type DigestSchedule,
     getDailyDigestSummary,
     getDigestSchedule,
+    getReminderNotificationTag,
+    getTaskReminderNotificationTag,
     getTaskReminderPlan,
     resolveDueReminders,
     type Language,
@@ -18,7 +20,7 @@ import {
     getSystemDefaultLanguage,
 } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
-import { isFlatpakRuntime, isLinuxRuntime, isTauriRuntime, isWindowsRuntime } from './runtime';
+import { isFlatpakRuntime, isLinuxRuntime, isMacRuntime, isTauriRuntime, isWindowsRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
 import { logInfo, logWarn } from './app-log';
 
@@ -214,7 +216,7 @@ function classifyLinuxNotificationError(error: unknown): string {
  * runtime and panic after IPC already reported success (#1232). Flatpak keeps the portal;
  * native packages await org.freedesktop.Notifications.Notify on the existing runtime.
  */
-async function handleLinuxNotification(title: string, body?: string): Promise<boolean> {
+async function handleLinuxNotification(title: string, body?: string, tag?: string): Promise<boolean> {
     if (!isTauriRuntime() || (!isLinuxRuntime() && !isFlatpakRuntime())) return false;
 
     const flatpak = isFlatpakRuntime();
@@ -225,6 +227,7 @@ async function handleLinuxNotification(title: string, body?: string): Promise<bo
         await invokeNative(command, {
             title,
             body: body?.trim() ? body : undefined,
+            tag,
         });
         void logInfo('Linux desktop notification submitted', {
             scope: 'notification',
@@ -256,13 +259,14 @@ async function handleLinuxNotification(title: string, body?: string): Promise<bo
  * error, so Store users saw no reminder toasts at all (#1146). The command reports "not
  * packaged" on every other Windows install, and those fall through to the plugin as before.
  */
-async function sendWindowsPackagedNotification(title: string, body?: string): Promise<boolean> {
+async function sendWindowsPackagedNotification(title: string, body?: string, tag?: string): Promise<boolean> {
     if (!isTauriRuntime() || !isWindowsRuntime()) return false;
 
     try {
         await invokeNative('send_windows_packaged_notification', {
             title,
             body: body?.trim() ? body : undefined,
+            tag,
         });
         return true;
     } catch (error) {
@@ -271,13 +275,42 @@ async function sendWindowsPackagedNotification(title: string, body?: string): Pr
     }
 }
 
-async function sendNotification(title: string, body?: string) {
-    if (await handleLinuxNotification(title, body)) {
+/**
+ * A macOS or unpackaged Windows reminder that replaces its task's notification. On any error the plugin shows it instead, as one more notification.
+ */
+async function sendReplacingNotification(title: string, body: string | undefined, tag: string): Promise<boolean> {
+    if (!isTauriRuntime() || (!isMacRuntime() && !isWindowsRuntime())) return false;
+
+    try {
+        await invokeNative('send_replacing_notification', {
+            title,
+            body: body?.trim() ? body : undefined,
+            tag,
+        });
+        return true;
+    } catch (error) {
+        logNotificationFailed('replacing', error);
+        return false;
+    }
+}
+
+/**
+ * `tag` names the notification a reminder replaces: one per task (core's getReminderNotificationTag),
+ * so a task's start, due and every due-time repeat show as one notification that alerts again,
+ * instead of one more notification per occurrence.
+ */
+async function sendNotification(title: string, body?: string, tag?: string) {
+    if (await handleLinuxNotification(title, body, tag)) {
         return;
     }
 
-    if (await sendWindowsPackagedNotification(title, body)) {
+    if (await sendWindowsPackagedNotification(title, body, tag)) {
         logNotificationSent('windows-packaged');
+        return;
+    }
+
+    if (tag && await sendReplacingNotification(title, body, tag)) {
+        logNotificationSent('replacing');
         return;
     }
 
@@ -294,7 +327,9 @@ async function sendNotification(title: string, body?: string) {
 
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
-            new Notification(title, body ? { body } : undefined);
+            // `renotify` alerts again when the tag replaces a shown notification.
+            const options = { ...(body ? { body } : {}), ...(tag ? { tag, renotify: true } : {}) } as NotificationOptions;
+            new Notification(title, Object.keys(options).length > 0 ? options : undefined);
             logNotificationSent('web');
         } catch (error) {
             logNotificationFailed('web', error);
@@ -381,7 +416,7 @@ function checkDueAndNotify() {
         const repeat = resolveDueRepeatToFire(task, now, repeatNotifiedByTask.get(task.id), { includeDueDate, catchUpMs });
         if (!repeat) return;
         logReminderFired('due-repeat', repeat.scheduledAt.toISOString());
-        void sendNotification(task.title, buildDesktopTaskNotificationBody(task, 'due-repeat', tr));
+        void sendNotification(task.title, buildDesktopTaskNotificationBody(task, 'due-repeat', tr), getTaskReminderNotificationTag(task.id));
         repeatNotifiedByTask.set(task.id, repeat.key);
     });
 
@@ -399,12 +434,12 @@ function checkDueAndNotify() {
         if (taskId) {
             if (notifiedAtByTask.get(taskId) === fireIso) continue;
             logReminderFired('task', fireIso);
-            void sendNotification(request.title, request.message);
+            void sendNotification(request.title, request.message, getReminderNotificationTag(request.key));
             notifiedAtByTask.set(taskId, fireIso);
         } else if (projectId) {
             if (notifiedAtByProject.get(projectId) === fireIso) continue;
             logReminderFired('project', fireIso);
-            void sendNotification(request.title, request.message);
+            void sendNotification(request.title, request.message, getReminderNotificationTag(request.key));
             notifiedAtByProject.set(projectId, fireIso);
         } else {
             console.warn('resolveDueReminders returned a request with neither taskId nor projectId', request);

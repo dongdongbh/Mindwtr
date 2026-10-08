@@ -1,0 +1,17 @@
+{
+    "extends": "../../packages/core/tsconfig.json",
+    "compilerOptions": {
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "types": [],
+        "baseUrl": "../..",
+        "paths": {
+            "@mindwtr/core": ["packages/core/src/index.ts"]
+        }
+    },
+    "include": [
+        "bundle/**/*.ts",
+        "../ios-native/bundle/**/*.ts",
+        "../../packages/core/src/**/*.d.ts"
+    ],
+    "exclude": ["bundle/**/*.test.ts", "../ios-native/bundle/**/*.test.ts"]
+}

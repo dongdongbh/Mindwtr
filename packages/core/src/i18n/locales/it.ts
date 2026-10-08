@@ -375,6 +375,7 @@ export const itOverrides: Record<string, string> = {
         'attachments.addLink': 'Aggiungi link',
         'attachments.open': 'Apri',
         'attachments.download': 'Scarica',
+        "attachments.finishDraftBeforeChanges": "Salva o scarta questa bozza prima di apportare altre modifiche agli allegati.",
         'attachments.missing': 'File mancante',
         'attachments.downloadConflict': 'Questo allegato è cambiato durante il download. Il file locale è stato conservato. Sincronizza di nuovo per risolvere il conflitto.',
         'attachments.unrecoverable': 'Questo allegato non è più disponibile nello spazio di archiviazione sincronizzato. Il riferimento non valido è stato rimosso.',

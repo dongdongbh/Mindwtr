@@ -1,5 +1,16 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const koOverrides: Record<string, string> = {
+    "task.expandChecklist": "체크리스트 항목을 프로젝트 할 일로 전환",
+    "task.keepChecklistDescription": "원래 할 일과 체크리스트를 프로젝트 안에 유지합니다.",
+    "task.expandChecklistDescription": "순서와 체크 상태를 유지하여 항목마다 할 일을 만듭니다. 메모, 첨부파일, 날짜는 프로젝트로 옮기고 태그와 맥락은 새 할 일에 유지합니다. 원본은 휴지통으로 이동합니다. 집중 표시는 복사하지 않습니다. 전환을 되돌릴 수 있습니다.",
+    "task.expandChecklistInvalid": "체크리스트의 모든 항목에 제목이 필요합니다.",
+    "task.expandChecklistInactive": "활성 프로젝트의 수집함, 다음 행동, 완료된 할 일에서 사용할 수 있습니다.",
+    "task.expandChecklistSchedule": "체크리스트를 유지하거나 반복, 상대 날짜, 알림을 먼저 해제하세요. 알림이 있는 시간은 프로젝트로 옮길 수 없습니다.",
+    "task.expandChecklistMetadata": "체크리스트를 유지하거나 담당자, 위치, 예상 시간, 기록된 시간을 먼저 지우세요. 이 정보는 프로젝트로 옮길 수 없습니다.",
+    "task.expandChecklistNameExists": "이 영역에 같은 이름의 프로젝트가 있습니다. 새 프로젝트에 다른 이름을 사용하세요.",
+    "task.expandChecklistConflict": "할 일이나 프로젝트가 변경되어 전환을 진행하지 못했습니다. 변경 사항은 유지됩니다.",
+    "task.expandChecklistSaveFailed": "전환을 저장하지 못했습니다. 다시 시도하면 중복 없이 같은 전환을 저장합니다.",
+
     'task.copyTitle': '제목 복사',
     'task.titleCopied': '제목이 복사되었습니다',
     "settings.mcpTitle": "로컬 MCP 서버 (고급)",
@@ -467,6 +478,7 @@ export const koOverrides: Record<string, string> = {
         'attachments.addLink': '링크 추가',
         'attachments.open': '열기',
         'attachments.download': '다운로드',
+        "attachments.finishDraftBeforeChanges": "첨부 파일을 추가로 변경하기 전에 이 초안을 저장하거나 버리세요.",
         'attachments.missing': '누락된 파일',
         'attachments.downloadConflict': '다운로드 중에 이 첨부 파일이 변경되었습니다. 로컬 파일은 유지되었습니다. 충돌을 해결하려면 다시 동기화하세요.',
         'attachments.unrecoverable': '이 첨부 파일은 더 이상 동기화된 저장소에서 사용할 수 없습니다. 끊어진 참조가 제거되었습니다.',

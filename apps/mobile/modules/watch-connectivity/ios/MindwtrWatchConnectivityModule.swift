@@ -40,5 +40,9 @@ public final class MindwtrWatchConnectivityModule: Module {
             (context: [String: Any]) async throws -> Void in
             try await MindwtrWatchConnectivityReceiver.shared.updateApplicationContext(context)
         }
+
+        AsyncFunction("settleWatchChecklist") { (id: String, outcome: String) async throws -> Void in
+            try await MindwtrWatchConnectivityReceiver.shared.settleChecklist(id: id, outcome: outcome)
+        }
     }
 }

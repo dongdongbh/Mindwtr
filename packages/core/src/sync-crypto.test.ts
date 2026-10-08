@@ -6,6 +6,7 @@ import {
     decryptSyncArtifact,
     defaultSyncCryptoPrimitives,
     deriveSyncKeyMaterial,
+    encryptedSyncArtifactByteLength,
     encryptSyncArtifact,
     inspectSyncArtifact,
     type SyncCryptoKdfParams,
@@ -29,7 +30,8 @@ describe('sync-crypto MWENC1 format', () => {
         const material = await deriveSyncKeyMaterial('a fresh passphrase', salt, LIGHT);
         const plaintext = new TextEncoder().encode('round trip payload');
         const encrypted = await encryptSyncArtifact(plaintext, material);
-        expect(encrypted.byteLength).toBe(plaintext.byteLength + 70);
+        expect(encryptedSyncArtifactByteLength(0)).toBe(70);
+        expect(encrypted.byteLength).toBe(encryptedSyncArtifactByteLength(plaintext.byteLength));
         const decrypted = await decryptSyncArtifact(encrypted, material.key);
         expect(decrypted).toEqual(plaintext);
 

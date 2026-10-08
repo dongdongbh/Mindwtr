@@ -125,6 +125,26 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         }
     }
 
+    func settleChecklist(id rawID: String, outcome: String) async throws {
+        guard let uuid = UUID(uuidString: rawID),
+              ["applied", "stale", "missing", "terminal", "changed"].contains(outcome) else {
+            throw MindwtrWatchConnectivityError.invalidPayload
+        }
+        try workQueue.sync {
+            let id = uuid.uuidString.lowercased()
+            guard let receipt = try loadReceiptLocked(id: id), receipt.kind == .checklist,
+                  receipt.state == .published else { throw MindwtrWatchConnectivityError.invalidReceipt }
+            let url = try ensuredDirectory(named: "watch-checklist-results").appendingPathComponent("\(id).json")
+            if !FileManager.default.fileExists(atPath: url.path) {
+                let result: [String: Any] = ["outcome": outcome, "settledAt": Date().timeIntervalSince1970]
+                try atomicWrite(try jsonData(result), to: url, replacing: false)
+            }
+            sendDeliveryReceiptLocked(id: id)
+            // Wake the snapshot publisher after the durable task save, even for a no-op/rejection.
+            NotificationCenter.default.post(name: Self.pendingCaptureNotification, object: nil)
+        }
+    }
+
     private func ensureActivationLocked() {
         guard !activationRequested else { return }
         let session = WCSession.default
@@ -203,7 +223,8 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
     ) {
         let reply: [String: Any] = workQueue.sync {
             do {
-                try receivePayloadLocked(message)
+                let id = try receivePayloadLocked(message)
+                if message["kind"] as? String == "checklist" { sendDeliveryReceiptLocked(id: id) }
                 return ["accepted": true]
             } catch let error as MindwtrWatchConnectivityError {
                 return ["accepted": false, "error": error.replyCode]
@@ -910,12 +931,22 @@ final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate {
         guard session.activationState == .activated,
               session.isPaired,
               session.isWatchAppInstalled else { return }
-        _ = session.transferUserInfo([
+        var payload: [String: Any] = [
             "protocolVersion": MindwtrWatchPayloadValidator.protocolVersion,
             "kind": "receipt",
             "id": id,
             "accepted": true,
-        ])
+        ]
+        if let url = try? ensuredDirectory(named: "watch-checklist-results").appendingPathComponent("\(id).json"),
+           let data = try? Data(contentsOf: url),
+           let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let outcome = result["outcome"] as? String,
+           let settledAt = result["settledAt"] as? Double {
+            payload["outcome"] = outcome
+            payload["settledAt"] = settledAt
+        }
+        if session.isReachable { session.sendMessage(payload, replyHandler: nil, errorHandler: nil) }
+        _ = session.transferUserInfo(payload)
     }
 
     private func ensuredDirectory(named name: String) throws -> URL {

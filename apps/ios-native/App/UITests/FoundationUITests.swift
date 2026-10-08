@@ -1,6 +1,1811 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    // These cases require a saved-WebDAV library in the flow's state, staged externally
+    // through the real settings writer. No backend address or credential lives here.
+    private func task371Library(_ suffix: String, prefix: String = "MINDWTR_UNLOCK_UI_") throws -> String {
+        guard let raw = ProcessInfo.processInfo.environment[prefix + suffix + "_LIBRARY"] else {
+            throw XCTSkip("An externally staged WebDAV library in the requested state is required")
+        }
+        guard let id = UUID(uuidString: raw), id.uuidString.lowercased() == raw else {
+            XCTFail("The isolated library must be a canonical lowercase UUID")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return raw
+    }
+
+    private func task371OpenSync(_ app: XCUIApplication, flow: String = "unlock", openFlow: Bool = true, backend: String = "webdav") {
+        if !app.buttons["settings-back"].exists {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30)
+            boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                revealPagedElement(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+        }
+        revealPagedElement(app, app.buttons["settings-sync"], in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-sync")
+        boardEnabled(app.buttons["sync-option-webdav"], timeout: 30)
+        XCTAssertTrue(app.buttons["sync-option-" + backend].isSelected)
+        if !openFlow { return }
+        let openID = flow == "unlock" ? "sync-encryption-open" : "sync-encryption-open-" + flow
+        let open = app.buttons[openID]
+        boardEnabled(open, timeout: 30)
+        revealPagedElement(app, open, in: app.scrollViews["sync-screen"])
+        XCTAssertGreaterThanOrEqual(open.frame.height, 44 - 0.01)
+        boardTap(app, openID)
+        let fields = encryptionFields(flow)
+        for name in fields {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            boardEnabled(field, timeout: 30)
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+            XCTAssertFalse(app.textFields["sync-encryption-" + name].exists)
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-reveal"].exists)
+        XCTAssertFalse(app.buttons["sync-encryption-generate"].exists)
+        if !fields.isEmpty { XCTAssertFalse(app.buttons["sync-encryption-" + flow].isEnabled) }
+    }
+
+    private func encryptionFields(_ flow: String) -> [String] {
+        switch flow {
+        case "unlock": return ["current"]
+        case "enable": return ["next", "confirm"]
+        case "change": return ["current", "next", "confirm"]
+        default: return []
+        }
+    }
+
+    private func task371Type(_ app: XCUIApplication, _ text: String) {
+        task322Type(app, "sync-encryption-current", text, secure: true)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch.exists)
+    }
+
+    func testNativeEncryptionUnlockCompletesAndColdReopensEnabled() throws {
+        let library = try task371Library("SUCCESS")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app)
+        task371Type(app, "correct horse battery staple")
+        revealPagedElement(app, app.buttons["sync-encryption-unlock"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-unlock")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.secureTextFields["sync-encryption-current"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "change")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].exists)
+    }
+
+    func testNativeEncryptionEnableMismatchAndCancelRetireBothFields() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_ENABLE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable")
+        task322Type(app, "sync-encryption-next", "synthetic-enable-first-379", secure: true)
+        XCTAssertFalse(app.buttons["sync-encryption-enable"].isEnabled)
+        task322Type(app, "sync-encryption-confirm", "synthetic-enable-other-379", secure: true)
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable")
+        XCTAssertTrue(app.staticTexts["The two passphrases do not match."].waitForExistence(timeout: 30))
+        for name in ["next", "confirm"] {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-enable"].isEnabled)
+        task322Type(app, "sync-encryption-next", String(repeating: "a", count: 1001), secure: true)
+        XCTAssertTrue(app.staticTexts["sync-encryption-too-long"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["sync-encryption-enable"].isEnabled)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        for name in ["next", "confirm"] { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 15)) }
+        boardTap(app, "sync-back")
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "enable")
+    }
+
+    func testNativeEncryptionEnableUnknownFirstTypedRequiresColdRestart() throws {
+        let library = try task371Library("UNKNOWN", prefix: "MINDWTR_ENABLE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-encryption-typed-throw-once",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable")
+        for name in ["next", "confirm"] { task322Type(app, "sync-encryption-" + name, "synthetic-enable-unknown-379", secure: true) }
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable"); task322RestartGate(app)
+        for name in ["next", "confirm"] { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        app.terminate()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); task371OpenSync(app, flow: "enable")
+    }
+
+    func testNativeEncryptionEnableCompletesAndColdReopensEnabled() throws {
+        let library = try task371Library("SUCCESS", prefix: "MINDWTR_ENABLE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable")
+        for name in ["next", "confirm"] { task322Type(app, "sync-encryption-" + name, "synthetic-native-enable-379", secure: true) }
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].waitForExistence(timeout: 60))
+        for name in ["next", "confirm"] { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        XCTAssertFalse(app.buttons["sync-encryption-open-enable"].exists)
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        if !app.buttons["menu-settings"].isHittable {
+            revealPagedElement(app, app.buttons["menu-settings"], in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+        }
+        boardTap(app, "menu-settings")
+        revealPagedElement(app, app.buttons["settings-sync"], in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-sync")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["sync-encryption-open-enable"].exists)
+    }
+
+    func testNativeEncryptionChangeMismatchAndCancelRetireAllFields() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_CHANGE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "change")
+        task322Type(app, "sync-encryption-current", "synthetic-old-382", secure: true)
+        task322Type(app, "sync-encryption-next", "synthetic-next-382", secure: true)
+        XCTAssertFalse(app.buttons["sync-encryption-change"].isEnabled)
+        task322Type(app, "sync-encryption-confirm", "synthetic-different-382", secure: true)
+        revealPagedElement(app, app.buttons["sync-encryption-change"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-change")
+        XCTAssertTrue(app.staticTexts["The two passphrases do not match."].waitForExistence(timeout: 30))
+        for name in encryptionFields("change") {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-change"].isEnabled)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        for name in encryptionFields("change") { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 15)) }
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "change")
+    }
+
+    func testNativeEncryptionChangeCompletesAndColdReopensEnabled() throws {
+        let library = try task371Library("SUCCESS", prefix: "MINDWTR_CHANGE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "change")
+        for name in encryptionFields("change") {
+            task322Type(app, "sync-encryption-" + name, name == "current" ? "correct horse battery staple" : "synthetic-native-change-382", secure: true)
+        }
+        revealPagedElement(app, app.buttons["sync-encryption-change"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-change")
+        for name in encryptionFields("change") { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 60)) }
+        boardEnabled(app.buttons["sync-encryption-open-change"], timeout: 30)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "change")
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].exists)
+    }
+
+    func testNativeEncryptionDisableCancelThenCompletesAndColdReopensOff() throws {
+        let library = try task371Library("SUCCESS", prefix: "MINDWTR_DISABLE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "disable")
+        for name in encryptionFields("change") { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        boardEnabled(app.buttons["sync-encryption-disable"])
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        XCTAssertFalse(app.buttons["sync-encryption-disable"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "disable")
+        revealPagedElement(app, app.buttons["sync-encryption-disable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-disable")
+        XCTAssertTrue(app.buttons["sync-encryption-open-enable"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.buttons["sync-encryption-open-change"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "enable")
+        XCTAssertFalse(app.buttons["sync-encryption-open-disable"].exists)
+    }
+
+    func testNativeEncryptionInterruptedEnableRetainsRecoveryAfterColdRestart() throws {
+        let library = try task371Library("PARTIAL", prefix: "MINDWTR_RECOVERY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable")
+        for name in encryptionFields("enable") {
+            task322Type(app, "sync-encryption-" + name, "synthetic-native-recovery-383", secure: true)
+        }
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable")
+        // Root's one-shot HTTP failure must leave a real unfinished transition.
+        // A normally completed Enable has no Abandon opener and fails this check.
+        boardEnabled(app.buttons["sync-encryption-open-abandon"], timeout: 60)
+        for name in encryptionFields("enable") {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            if field.exists {
+                let value = field.value as? String ?? ""
+                XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+            }
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-enable"].isEnabled)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "abandon")
+        for name in encryptionFields("change") { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        boardEnabled(app.buttons["sync-encryption-open-abandon"], timeout: 30)
+        // Preserve the unfinished journal and bytes for root's external snapshot.
+    }
+
+    func testNativeEncryptionAbandonCancelAndMixedRecheckKeepLocationPaused() throws {
+        let library = try task371Library("PARTIAL", prefix: "MINDWTR_RECOVERY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "abandon")
+        for name in encryptionFields("change") { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Abandon the unfinished encryption change on this device only. Encryption turns off here and the sync location is not contacted, so it may stay partly encrypted, and this device keeps sync paused there. Finish or undo the change from a device that can reach it.")).firstMatch.exists)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        let abandon = app.buttons["sync-encryption-open-abandon"]
+        boardEnabled(abandon, timeout: 30)
+        revealPagedElement(app, abandon, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-open-abandon")
+        revealPagedElement(app, app.buttons["sync-encryption-abandon"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-abandon")
+        let recheck = app.buttons["sync-encryption-recheck"]
+        boardEnabled(recheck, timeout: 60)
+        let partly = app.staticTexts.matching(NSPredicate(format: "label == %@", "This sync location is partly encrypted: an encryption change was cut off there. Sync stays paused here so plain files never land beside encrypted ones. Finish or undo the change from a device that can reach it, then check again.")).firstMatch
+        XCTAssertTrue(partly.exists)
+        for id in ["open-enable", "open", "open-change", "open-disable", "open-abandon"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+        revealPagedElement(app, recheck, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-recheck")
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        boardEnabled(recheck, timeout: 60)
+        XCTAssertTrue(partly.exists)
+        XCTAssertFalse(app.buttons["sync-encryption-open-enable"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, openFlow: false)
+        boardEnabled(app.buttons["sync-encryption-recheck"], timeout: 30)
+        XCTAssertTrue(partly.exists)
+        for id in ["open-enable", "open", "open-change", "open-disable", "open-abandon"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+    }
+
+    func testNativeEncryptionWholeRecheckColdDiscoveryOffersUnlock() throws {
+        let library = try task371Library("PARTIAL", prefix: "MINDWTR_RECOVERY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        // Root has conditionally finished the peer's canonical ciphertext before launch.
+        task371OpenSync(app, openFlow: false)
+        let recheck = app.buttons["sync-encryption-recheck"]
+        boardEnabled(recheck, timeout: 30)
+        let partly = app.staticTexts.matching(NSPredicate(format: "label == %@", "This sync location is partly encrypted: an encryption change was cut off there. Sync stays paused here so plain files never land beside encrypted ones. Finish or undo the change from a device that can reach it, then check again.")).firstMatch
+        XCTAssertTrue(partly.exists)
+        revealPagedElement(app, recheck, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-recheck")
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 60)
+        XCTAssertTrue(partly.waitForNonExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["sync-encryption-recheck"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app)
+        XCTAssertFalse(app.buttons["sync-encryption-unlock"].isEnabled)
+        for id in ["open-enable", "open-change", "open-disable"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+        // Leave Unlock unsubmitted so root can verify discovery wrote no plaintext.
+    }
+
+    func testNativeEncryptionLocalEnableSurvivesColdRestartWithoutBackend() throws {
+        let library = try task371Library("SUCCESS", prefix: "MINDWTR_LOCAL_ENCRYPTION_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable", backend: "off")
+        let hint = "Sync is not set up yet — the passphrase is saved on this device now, and the first sync uploads everything already encrypted."
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", hint)).firstMatch.exists)
+        for name in encryptionFields("enable") {
+            task322Type(app, "sync-encryption-" + name, "synthetic-native-local-388", secure: true)
+        }
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable")
+        for name in encryptionFields("enable") { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 60)) }
+        boardEnabled(app.buttons["sync-encryption-open-disable"], timeout: 30)
+        XCTAssertFalse(app.buttons["sync-encryption-open-change"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, openFlow: false, backend: "off")
+        boardEnabled(app.buttons["sync-encryption-open-disable"], timeout: 30)
+        XCTAssertTrue(app.staticTexts["Sync encryption is on"].exists)
+        for id in ["open-enable", "open-change", "open", "open-abandon", "recheck"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+    }
+
+    func testNativeEncryptionLocalDisableCancelAndColdOffWithoutBackend() throws {
+        let library = try task371Library("SUCCESS", prefix: "MINDWTR_LOCAL_ENCRYPTION_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "disable", backend: "off")
+        let warning = "Sync is not set up, so no synced files change — this only removes the passphrase and key from this device. A sync location that was encrypted earlier stays encrypted and still needs the passphrase."
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", warning)).firstMatch.exists)
+        for name in encryptionFields("change") { XCTAssertFalse(app.secureTextFields["sync-encryption-" + name].exists) }
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        XCTAssertFalse(app.buttons["sync-encryption-disable"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "disable", backend: "off")
+        revealPagedElement(app, app.buttons["sync-encryption-disable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-disable")
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 60)
+        XCTAssertFalse(app.buttons["sync-encryption-open-disable"].exists)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "enable", backend: "off")
+        XCTAssertFalse(app.buttons["sync-encryption-open-disable"].exists)
+    }
+
+    func testNativeEncryptionProviderStagesSavedWebDAVAndColdOffersEnable() throws {
+        let library = try task371Library("INCOMPATIBLE", prefix: "MINDWTR_PROVIDER_UI_")
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_PROVIDER_UI_CONFIG"] else {
+            throw XCTSkip("Private isolated provider configuration is required for staging")
+        }
+        let prefix = "/dav/Mindwtr-test/native-ios-refusal-384-"
+        guard let config = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String],
+              let url = config["url"], let account = config["account"], let password = config["password"],
+              !account.isEmpty, !password.isEmpty,
+              let target = URLComponents(string: url), target.scheme == "https", target.host == "dav.jianguoyun.com",
+              target.user == nil, target.password == nil, target.query == nil, target.fragment == nil,
+              target.port == nil || target.port == 443, target.path.hasPrefix(prefix),
+              let collection = UUID(uuidString: String(target.path.dropFirst(prefix.count))),
+              collection.uuidString.lowercased() == String(target.path.dropFirst(prefix.count)) else {
+            XCTFail("Provider staging requires valid private credentials and the exact isolated test collection")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-url", url)
+        task322Type(app, "sync-username", account)
+        task322Type(app, "sync-password", password, secure: true)
+        boardEnabled(app.buttons["sync-save"], timeout: 30)
+        revealPagedElement(app, app.buttons["sync-save"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-save")
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 60)
+        app.terminate(); app.launch(); task371OpenSync(app, openFlow: false)
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 60)
+    }
+
+    func testNativeEncryptionProviderWithoutSafeVersionsRefusesEnableAndColdRemainsOff() throws {
+        let library = try task371Library("INCOMPATIBLE", prefix: "MINDWTR_PROVIDER_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: "enable")
+        for name in encryptionFields("enable") {
+            task322Type(app, "sync-encryption-" + name, "synthetic-native-provider-384", secure: true)
+        }
+        revealPagedElement(app, app.buttons["sync-encryption-enable"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-enable")
+        let refusal = app.staticTexts.matching(NSPredicate(format: "label == %@", "This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.")).firstMatch
+        XCTAssertTrue(refusal.waitForExistence(timeout: 60))
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        for name in encryptionFields("enable") {
+            let field = app.secureTextFields["sync-encryption-" + name]
+            boardEnabled(field, timeout: 30)
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue)
+        }
+        XCTAssertFalse(app.buttons["sync-encryption-enable"].isEnabled)
+        for id in ["open-abandon", "recheck"] { XCTAssertFalse(app.buttons["sync-encryption-" + id].exists) }
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        boardEnabled(app.buttons["sync-encryption-open-enable"], timeout: 30)
+        app.terminate(); app.launch(); task371OpenSync(app, flow: "enable")
+        for id in ["open-abandon", "recheck"] { XCTAssertFalse(app.buttons["sync-encryption-" + id].exists) }
+    }
+
+    private func task371Restart(_ app: XCUIApplication) {
+        task322RestartGate(app)
+        XCTAssertFalse(app.secureTextFields["sync-encryption-current"].exists)
+        for id in ["open", "unlock", "cancel", "decline", "retry"] {
+            XCTAssertFalse(app.buttons["sync-encryption-" + id].exists)
+        }
+    }
+
+    func testNativeEncryptionLocalFieldBoundsDirtyFormAndCancelNeverSubmit() throws {
+        let library = try task371Library("MASK")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app)
+        task371Type(app, "synthetic-local-371")
+        boardEnabled(app.buttons["sync-encryption-unlock"], timeout: 15)
+        let username = app.textFields["sync-username"]
+        revealPagedElement(app, username, in: app.scrollViews["sync-screen"])
+        username.tap(); username.typeText(" draft")
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        for id in ["unlock", "cancel", "decline"] { XCTAssertFalse(app.buttons["sync-encryption-" + id].isEnabled) }
+        revealPagedElement(app, username, in: app.scrollViews["sync-screen"])
+        username.tap(); username.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6))
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        XCTAssertTrue(app.secureTextFields["sync-encryption-current"].waitForNonExistence(timeout: 15))
+        boardEnabled(app.buttons["sync-encryption-open"], timeout: 15)
+        boardTap(app, "sync-encryption-open")
+        task371Type(app, String(repeating: "a", count: 1001))
+        XCTAssertTrue(app.staticTexts["sync-encryption-too-long"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["sync-encryption-unlock"].isEnabled)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel")
+        boardTap(app, "sync-back"); task371OpenSync(app)
+        revealPagedElement(app, app.buttons["sync-encryption-cancel"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-cancel"); boardTap(app, "sync-back")
+        app.terminate(); app.launch(); task371OpenSync(app)
+    }
+
+    func testNativeEncryptionUnknownTypedCompletionRequiresColdRestart() throws {
+        let library = try task371Library("UNKNOWN")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-encryption-typed-throw-once",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app); task371Type(app, "synthetic-unknown-371")
+        revealPagedElement(app, app.buttons["sync-encryption-unlock"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-unlock"); task371Restart(app)
+        app.terminate()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); task371OpenSync(app)
+    }
+
+    func testNativeEncryptionBackgroundDuringTypedReplyDelayRetainsOwnerUntilClose() throws {
+        try encryptionBackgroundDuringTypedReply(flow: "unlock", library: task371Library("BACKGROUND"))
+    }
+
+    func testNativeEncryptionEnableBackgroundBetweenTypedFieldsRetainsOwnerUntilClose() throws {
+        try encryptionBackgroundDuringTypedReply(flow: "enable", library: task371Library("BACKGROUND", prefix: "MINDWTR_ENABLE_UI_"))
+    }
+
+    func testNativeEncryptionChangeBackgroundBetweenTypedFieldsRetainsOwnerUntilClose() throws {
+        try encryptionBackgroundDuringTypedReply(flow: "change", library: task371Library("BACKGROUND", prefix: "MINDWTR_CHANGE_UI_"))
+    }
+
+    private func encryptionBackgroundDuringTypedReply(flow: String, library: String) throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-encryption-typed-delay-once",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task371OpenSync(app, flow: flow)
+        let fields = encryptionFields(flow)
+        for name in fields { task322Type(app, "sync-encryption-" + name, "synthetic-background-371", secure: true) }
+        revealPagedElement(app, app.buttons["sync-encryption-" + flow], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-encryption-" + flow)
+        let held = app.descendants(matching: .any).matching(identifier: "sync-encryption-typed-held").firstMatch
+        XCTAssertTrue(held.waitForExistence(timeout: 15), "Actual successful Typed must reach the bounded reply-delay hook")
+        XCTAssertFalse(app.buttons["sync-back"].isEnabled)
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home)
+        #else
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        #endif
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed)
+        app.activate()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "sync-encryption-typed-held").firstMatch.exists,
+            "Return while the actual typed reply is still held; a later phase is not this boundary")
+        XCTAssertFalse(app.buttons["sync-back"].isEnabled)
+        XCTAssertFalse(app.buttons["sync-reload"].isEnabled)
+        for name in fields { XCTAssertTrue(app.secureTextFields["sync-encryption-" + name].waitForNonExistence(timeout: 10)) }
+        XCTAssertFalse(app.staticTexts["synthetic-background-371"].exists)
+        // No editable reload/new operation may replace the retained delayed owner.
+        if app.buttons["sync-reload"].exists { XCTAssertFalse(app.buttons["sync-reload"].isEnabled) }
+        task371Restart(app)
+        app.terminate()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); task371OpenSync(app, flow: flow)
+    }
+
+    private func task322OpenSync(_ app: XCUIApplication) {
+        if !app.buttons["settings-back"].exists {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30)
+            boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                revealPagedElement(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+        }
+        let entry = app.buttons["settings-sync"]
+        revealPagedElement(app, entry, in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-sync")
+        boardEnabled(app.buttons["sync-option-off"], timeout: 30)
+        expectation(for: NSPredicate(format: "selected == true AND enabled == true"), evaluatedWith: app.buttons["sync-option-off"])
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.textFields["sync-url"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+        XCTAssertFalse(app.buttons["tab-menu"].exists, "Sync remains on its explicit Back-owned settings surface")
+        XCTAssertGreaterThanOrEqual(app.buttons["sync-reload"].frame.height, 44 - 0.01)
+    }
+
+    private func task322WebDav(_ app: XCUIApplication) {
+        let option = app.buttons["sync-option-webdav"]
+        revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-webdav")
+        boardEnabled(app.textFields["sync-url"], timeout: 30)
+        expectation(for: NSPredicate(format: "selected == true AND enabled == true"), evaluatedWith: option)
+        waitForExpectations(timeout: 15)
+    }
+
+    private func task322Type(_ app: XCUIApplication, _ id: String, _ text: String, secure: Bool = false) {
+        let field = secure ? app.secureTextFields[id] : app.textFields[id]
+        boardEnabled(field, timeout: 30)
+        revealPagedElement(app, field, in: app.scrollViews["sync-screen"])
+        XCTAssertGreaterThanOrEqual(field.frame.height, 44 - 0.01)
+        field.tap(); field.typeText(text)
+        if secure {
+            XCTAssertFalse((field.value as? String ?? "").isEmpty)
+            XCTAssertNotEqual(field.value as? String, field.placeholderValue)
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch.exists, "Synthetic password must not be rendered as plaintext")
+        } else { XCTAssertEqual(field.value as? String, text) }
+    }
+
+    private func task322EmptyWebDavFields(_ app: XCUIApplication) {
+        for field in [app.textFields["sync-url"], app.textFields["sync-username"], app.secureTextFields["sync-password"]] {
+            boardEnabled(field, timeout: 30)
+            let value = field.value as? String ?? ""
+            XCTAssertTrue(value.isEmpty || value == field.placeholderValue, "A new WebDAV form must not recover the discarded fields")
+        }
+    }
+
+    private func task322RestartGate(_ app: XCUIApplication) {
+        let gate = app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch
+        XCTAssertTrue(gate.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Sync could not be confirmed. Close and reopen Mindwtr before trying again."].exists)
+        for id in ["tab-menu", "tab-inbox", "capture-open", "settings-back", "sync-back", "sync-save", "sync-now", "sync-test",
+                   "sync-reload", "persistence-retry", "task-attachment-retry", "task-recovery-retry-checkpoint"] {
+            XCTAssertFalse(app.buttons[id].exists, "Unknown Sync completion cannot expose editing or same-host retry")
+        }
+        XCTAssertFalse(app.textFields["sync-url"].exists)
+        XCTAssertFalse(app.textFields["sync-username"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+    }
+
+    func testNativeSelfHostedTokenValidationDiscardAndColdPrivacy() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_SELFHOSTED_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication(), typed = "synthetic-selfhosted-ui-399"
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app)
+        let option = app.buttons["sync-option-selfhosted"]
+        boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-selfhosted")
+        let token = app.secureTextFields["sync-token"]
+        boardEnabled(token, timeout: 30)
+        XCTAssertTrue(option.isSelected); XCTAssertFalse(app.textFields["sync-token"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists); XCTAssertFalse(app.textFields["sync-username"].exists)
+        XCTAssertFalse(app.buttons["sync-encryption-open-enable"].exists); XCTAssertFalse(app.buttons["sync-encryption-open"].exists)
+        task322Type(app, "sync-url", "https://native-ui.invalid/v1/data")
+        task322Type(app, "sync-token", typed, secure: true)
+        boardEnabled(app.buttons["sync-save"], timeout: 30)
+        task322Type(app, "sync-token", "!", secure: true)
+        XCTAssertTrue(app.staticTexts["sync-token-invalid"].waitForExistence(timeout: 15))
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        for id in ["sync-save", "sync-now", "sync-test"] {
+            let action = app.buttons[id]
+            XCTAssertTrue(action.exists); XCTAssertFalse(action.isEnabled)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.01)
+        }
+        boardTap(app, "sync-reload")
+        boardTap(app, "sync-reload-cancel")
+        XCTAssertTrue(option.isSelected); XCTAssertTrue(app.staticTexts["sync-token-invalid"].exists)
+        XCTAssertFalse((token.value as? String ?? "").isEmpty); XCTAssertNotEqual(token.value as? String, token.placeholderValue)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", typed + "!", typed + "!")).firstMatch.exists)
+
+        // An explicitly edited empty token is accepted by the shared form for
+        // unauthenticated servers; it must not be treated as untouched authority.
+        revealPagedElement(app, token, in: app.scrollViews["sync-screen"])
+        token.tap(); token.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count + 1))
+        boardEnabled(app.buttons["sync-save"], timeout: 30)
+        XCTAssertFalse(app.staticTexts["sync-token-invalid"].exists)
+        XCTAssertTrue((token.value as? String ?? "").isEmpty || (token.value as? String) == token.placeholderValue)
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-reload"); boardTap(app, "sync-reload-confirm")
+        boardEnabled(app.buttons["sync-option-off"], timeout: 30)
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected); XCTAssertFalse(token.exists)
+
+        for cold in [false, true] {
+            boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+            boardTap(app, "sync-option-selfhosted"); boardEnabled(token, timeout: 30)
+            let url = app.textFields["sync-url"]
+            XCTAssertTrue((url.value as? String ?? "").isEmpty || (url.value as? String) == url.placeholderValue)
+            XCTAssertTrue((token.value as? String ?? "").isEmpty || (token.value as? String) == token.placeholderValue)
+            task322Type(app, "sync-token", typed, secure: true)
+            boardEnabled(app.buttons["sync-back"], timeout: 30); boardTap(app, "sync-back")
+            if cold { app.terminate(); app.launch() }
+            task322OpenSync(app); XCTAssertFalse(token.exists)
+        }
+        boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-selfhosted"); boardEnabled(token, timeout: 30)
+        XCTAssertTrue((token.value as? String ?? "").isEmpty || (token.value as? String) == token.placeholderValue)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", typed, typed)).firstMatch.exists)
+        // Save/Sync/Test are never invoked; this case requires no server.
+    }
+
+    func testNativeSelfHostedMaintainedServerTestSaveAndColdTokenReuse() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_SELFHOSTED_PHONE_")
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_SELFHOSTED_PHONE_CONFIG"] else {
+            throw XCTSkip("Private Task402 maintained-server configuration is required")
+        }
+        let prefix = "native-selfhosted-402-"
+        guard raw.utf8.count <= 2048,
+              let config = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String],
+              Set(config.keys) == Set(["url", "token"]), let url = config["url"], let token = config["token"],
+              let target = URLComponents(string: url), target.scheme == "https", let hostname = target.host,
+              hostname.range(of: #"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.trycloudflare\.com\z"#, options: .regularExpression) != nil,
+              target.user == nil, target.password == nil, target.query == nil, target.fragment == nil, target.port == nil,
+              target.percentEncodedPath == "/v1/data", url == "https://" + hostname + "/v1/data",
+              (20...512).contains(token.utf8.count), token.hasPrefix(prefix),
+              let namespace = UUID(uuidString: String(token.dropFirst(prefix.count))),
+              namespace.uuidString.lowercased() == String(token.dropFirst(prefix.count)) else {
+            XCTFail("Task402 requires only its exact temporary HTTPS tunnel route and generated synthetic token")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(), title = "Native self-hosted round trip 402"
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        // The private test-runner configuration is never copied into app arguments/environment.
+        app.launchEnvironment = [:]
+        app.launch(); defer { app.terminate() }
+        func stageForm() {
+            let option = app.buttons["sync-option-selfhosted"]
+            boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+            boardTap(app, "sync-option-selfhosted")
+            let field = app.secureTextFields["sync-token"]
+            boardEnabled(field, timeout: 30)
+            XCTAssertTrue(option.isSelected); XCTAssertFalse(app.textFields["sync-token"].exists)
+            XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+            let address = app.textFields["sync-url"]
+            boardEnabled(address, timeout: 30); revealPagedElement(app, address, in: app.scrollViews["sync-screen"])
+            address.tap(); address.typeText(url)
+            XCTAssertTrue((address.value as? String) == url, "The validated private location must reach its form")
+            revealPagedElement(app, field, in: app.scrollViews["sync-screen"])
+            field.tap(); field.typeText(token)
+            XCTAssertFalse((field.value as? String ?? "").isEmpty)
+            XCTAssertNotEqual(field.value as? String, field.placeholderValue)
+            XCTAssertFalse((field.value as? String ?? "").contains(token))
+            boardEnabled(app.buttons["sync-save"], timeout: 30)
+        }
+        func completed(_ text: String) {
+            let status = app.staticTexts["sync-status"]
+            expectation(for: NSPredicate(format: "exists == true AND label == %@", text), evaluatedWith: status)
+            waitForExpectations(timeout: 60)
+            boardEnabled(app.buttons["sync-back"], timeout: 60)
+            XCTAssertFalse(app.staticTexts["sync-error"].exists)
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+            XCTAssertFalse(app.staticTexts.allElementsBoundByIndex.contains {
+                $0.label.contains(token) || ($0.value as? String ?? "").contains(token)
+            }, "No static text may expose the synthetic authority")
+        }
+        func importedTaskIdentity() -> String {
+            boardTap(app, "sync-back"); boardTap(app, "settings-back")
+            boardEnabled(app.buttons["tab-inbox"], timeout: 30); boardTap(app, "tab-inbox")
+            boardEnabled(app.buttons["search-open"], timeout: 30); boardTap(app, "search-open")
+            let search = app.textFields["search-input"]
+            boardEnabled(search, timeout: 30); replaceTextView(search, with: title)
+            let results = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "search-task-", title))
+            boardEnabled(results.firstMatch, timeout: 30); XCTAssertEqual(results.count, 1)
+            let identity = results.firstMatch.identifier
+            XCTAssertFalse(String(identity.dropFirst("search-task-".count)).isEmpty)
+            results.firstMatch.tap()
+            let viewTitle = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
+            XCTAssertTrue(viewTitle.waitForExistence(timeout: 15)); XCTAssertTrue(viewTitle.label.hasSuffix(title))
+            boardTap(app, "task-view-close"); boardTap(app, "search-close")
+            return identity
+        }
+
+        task322OpenSync(app); stageForm()
+        revealPagedElement(app, app.buttons["sync-test"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-test")
+        completed("Connection OK\nSelf-hosted endpoint is reachable.")
+        XCTAssertTrue(app.buttons["sync-option-selfhosted"].isSelected, "Test keeps the selected form staged")
+        boardTap(app, "sync-back"); task322OpenSync(app)
+        // Reopening reads stored Off: connection Test did not activate the staged form.
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected); XCTAssertFalse(app.secureTextFields["sync-token"].exists)
+        stageForm()
+        revealPagedElement(app, app.buttons["sync-save"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-save"); completed("Success\nSync completed!")
+        let acceptedIdentity = importedTaskIdentity()
+
+        app.terminate(); app.launch()
+        task371OpenSync(app, openFlow: false, backend: "selfhosted")
+        let field = app.secureTextFields["sync-token"], savedURL = app.textFields["sync-url"]
+        boardEnabled(field, timeout: 30)
+        XCTAssertFalse(app.textFields["sync-token"].exists)
+        XCTAssertTrue((savedURL.value as? String) == url, "Cold Settings must show the proven document location")
+        XCTAssertEqual(field.placeholderValue, String(repeating: "•", count: token.count))
+        XCTAssertTrue((field.value as? String ?? "").isEmpty || (field.value as? String) == field.placeholderValue)
+        XCTAssertFalse(app.staticTexts["sync-status"].exists, "The later completion must come from this explicit Sync")
+        boardEnabled(app.buttons["sync-now"], timeout: 30)
+        revealPagedElement(app, app.buttons["sync-now"], in: app.scrollViews["sync-screen"])
+        // No token setter or typing occurs after cold reopening: shared null-token reuse owns this Sync.
+        boardTap(app, "sync-now"); completed("Success\nSync completed!")
+        XCTAssertTrue(app.buttons["sync-option-selfhosted"].isSelected)
+        XCTAssertEqual(importedTaskIdentity(), acceptedIdentity)
+        // Root independently verifies the original seeded ID, phone SQLite and maintained server bytes/receipts.
+    }
+
+    func testNativeSelfHostedProjectDownloadOpenColdAndArchived() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_PROJECT_DOWNLOAD_PHONE_")
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_PROJECT_DOWNLOAD_PHONE_CONFIG"] else {
+            throw XCTSkip("Private Task406 maintained-server configuration is required")
+        }
+        let prefix = "native-project-download-406-"
+        guard raw.utf8.count <= 2048,
+              let config = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String],
+              Set(config.keys) == Set(["url", "token"]), let url = config["url"], let token = config["token"],
+              let target = URLComponents(string: url), target.scheme == "https", let hostname = target.host,
+              hostname.range(of: #"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.trycloudflare\.com\z"#, options: .regularExpression) != nil,
+              target.user == nil, target.password == nil, target.query == nil, target.fragment == nil, target.port == nil,
+              target.percentEncodedPath == "/v1/data", url == "https://" + hostname + "/v1/data",
+              (20...512).contains(token.utf8.count), token.hasPrefix(prefix),
+              let namespace = UUID(uuidString: String(token.dropFirst(prefix.count))),
+              namespace.uuidString.lowercased() == String(token.dropFirst(prefix.count)) else {
+            XCTFail("Task406 requires only its exact temporary HTTPS tunnel route and generated synthetic token")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment = [:]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app)
+        let option = app.buttons["sync-option-selfhosted"]
+        boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-selfhosted")
+        let field = app.secureTextFields["sync-token"], address = app.textFields["sync-url"]
+        boardEnabled(field, timeout: 30); boardEnabled(address, timeout: 30)
+        XCTAssertTrue(option.isSelected); XCTAssertFalse(app.textFields["sync-token"].exists)
+        revealPagedElement(app, address, in: app.scrollViews["sync-screen"])
+        address.tap(); address.typeText(url)
+        XCTAssertTrue((address.value as? String) == url, "The validated private location must reach its form")
+        revealPagedElement(app, field, in: app.scrollViews["sync-screen"])
+        field.tap(); field.typeText(token)
+        XCTAssertFalse((field.value as? String ?? "").isEmpty)
+        XCTAssertNotEqual(field.value as? String, field.placeholderValue)
+        XCTAssertFalse((field.value as? String ?? "").contains(token))
+        revealPagedElement(app, app.buttons["sync-save"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-save")
+        expectation(for: NSPredicate(format: "exists == true AND label == %@", "Success\nSync completed!"),
+                    evaluatedWith: app.staticTexts["sync-status"])
+        waitForExpectations(timeout: 60)
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        XCTAssertFalse(app.staticTexts["sync-error"].exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.allElementsBoundByIndex.contains {
+            $0.label.contains(token) || ($0.value as? String ?? "").contains(token)
+        }, "No static text may expose the synthetic authority")
+        boardTap(app, "sync-back"); boardTap(app, "settings-back")
+
+        let active = "40600000-1111-4111-8111-111111111111"
+        let archived = "40600000-2222-4222-8222-222222222222"
+        let scroll = app.scrollViews["project-detail-scroll"]
+        func projects() {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30)
+            boardTap(app, "tab-menu"); boardTap(app, "menu-projects")
+            boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+        }
+        func open(_ archivedProject: Bool) {
+            if archivedProject {
+                let section = app.buttons["projects-section-archived"]
+                revealPagedElement(app, section, in: app.scrollViews["projects-scroll"])
+                boardEnabled(section)
+                if section.value as? String == "Expand" { section.tap() }
+            }
+            let row = app.buttons["project-open-project-download-406-" + (archivedProject ? "archived" : "active")]
+            revealPagedElement(app, row, in: app.scrollViews["projects-scroll"])
+            boardEnabled(row); row.tap()
+            boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+            XCTAssertEqual(app.staticTexts["project-detail-title"].label,
+                           archivedProject ? "Archived native project download406" : "Native project download406")
+            boardTap(app, "project-details-toggle")
+            let file = app.buttons["project-attachment-open-" + (archivedProject ? archived : active)]
+            revealPagedElement(app, file, in: scroll, outerEdge: true)
+            boardEnabled(file, timeout: 30)
+            XCTAssertEqual(file.label, archivedProject ? "Archived native project file406.txt" : "Native project file406.txt")
+        }
+        func ready(_ id: String) {
+            boardEnabled(app.buttons["project-back"], timeout: 30)
+            boardEnabled(app.buttons["project-attachment-open-" + id], timeout: 30)
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "project-attachment-downloading-" + id).firstMatch.exists)
+            for error in ["project-attachment-open-error", "project-attachments-error", "project-attachment-add-error",
+                          "project-notes-write-error"] {
+                XCTAssertFalse(app.staticTexts[error].exists)
+            }
+            XCTAssertFalse(app.buttons["project-attachment-write-retry"].exists)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+        }
+        func archivedControls() {
+            revealPagedElement(app, app.buttons["project-notes-toggle"], in: scroll, outerEdge: true)
+            for id in ["project-attachment-add-file", "project-attachment-add-link", "project-attachment-remove-" + archived] {
+                let button = app.buttons[id]
+                XCTAssertTrue(button.exists); XCTAssertFalse(button.isEnabled)
+                XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
+            }
+        }
+        func download(_ id: String) {
+            let button = app.buttons["project-attachment-download-" + id]
+            revealPagedElement(app, button, in: scroll, outerEdge: true)
+            boardEnabled(button, timeout: 30)
+            XCTAssertEqual(button.label, "Download")
+            button.tap()
+            // Missing becomes available only after the owned download's row refresh.
+            // A previously enabled Open/Back alone cannot prove this transition.
+            XCTAssertTrue(button.waitForNonExistence(timeout: 60))
+            ready(id)
+            XCTAssertFalse(app.buttons["Close"].firstMatch.exists, "Download must not automatically open its file")
+            XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+        }
+        func view(_ id: String) {
+            XCTAssertFalse(app.buttons["project-attachment-download-" + id].exists)
+            let file = app.buttons["project-attachment-open-" + id]
+            revealPagedElement(app, file, in: scroll, outerEdge: true)
+            boardEnabled(file, timeout: 30); file.tap()
+            // Project text documents use the existing system Share presentation.
+            let close = app.buttons["Close"].firstMatch
+            boardEnabled(close, timeout: 20)
+            var previousFrame: CGRect?
+            var stableSince: TimeInterval?
+            let closeReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                guard close.exists, close.isEnabled, close.isHittable else {
+                    previousFrame = nil; stableSince = nil; return false
+                }
+                let frame = close.frame, now = ProcessInfo.processInfo.systemUptime
+                if previousFrame == frame, let stableSince { return now - stableSince >= 0.5 }
+                previousFrame = frame; stableSince = now; return false
+            }, object: close)
+            XCTAssertEqual(XCTWaiter.wait(for: [closeReady], timeout: 10), .completed)
+            XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            close.tap(); XCTAssertTrue(close.waitForNonExistence(timeout: 15))
+            ready(id)
+            XCTAssertFalse(app.buttons["project-attachment-download-" + id].exists)
+        }
+
+        projects(); open(false); download(active); view(active)
+        boardTap(app, "project-back")
+        app.terminate(); app.launch(); projects(); open(false)
+        // No Save, token edit, Sync or Download occurs in the cold active-file phase.
+        ready(active); view(active); boardTap(app, "project-back")
+        open(true); ready(archived); archivedControls(); download(archived)
+        archivedControls(); view(archived); archivedControls(); boardTap(app, "project-back")
+        boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+        // Root independently verifies GET receipts, exact hashes/rows and cold no-GET.
+    }
+
+    func testNativeSelfHostedProjectDownloadColdRetryAndStop() throws {
+        let retryLibrary = try task371Library("RETRY", prefix: "MINDWTR_PROJECT_DOWNLOAD_RECOVERY_PHONE_")
+        let stopLibrary = try task371Library("STOP", prefix: "MINDWTR_PROJECT_DOWNLOAD_RECOVERY_PHONE_")
+        guard retryLibrary != stopLibrary else {
+            XCTFail("Task408 requires two distinct fresh isolated libraries")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment = [:]
+        defer { app.terminate() }
+        let fileID = "40600000-1111-4111-8111-111111111111"
+        let scroll = app.scrollViews["project-detail-scroll"]
+        let panel = app.descendants(matching: .any).matching(identifier: "project-file-download-recovery").firstMatch
+        let gate = app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch
+        func noViewer() {
+            XCTAssertFalse(app.buttons["Close"].firstMatch.exists, "Recovery must not automatically open its file")
+            XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+            XCTAssertFalse(app.otherElements["task-audio-player"].exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+        }
+        func pending() {
+            XCTAssertTrue(panel.waitForExistence(timeout: 60))
+            for id in ["project-file-download-retry", "project-file-download-stop"] {
+                let button = app.buttons[id]
+                boardEnabled(button, timeout: 30)
+                XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
+            }
+            XCTAssertFalse(gate.exists)
+            noViewer()
+        }
+        func openActiveProject() {
+            boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+            let row = app.buttons["project-open-project-download-406-active"]
+            revealPagedElement(app, row, in: app.scrollViews["projects-scroll"])
+            boardEnabled(row); row.tap()
+            boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+            XCTAssertEqual(app.staticTexts["project-detail-title"].label, "Native project download406")
+            boardTap(app, "project-details-toggle")
+            let file = app.buttons["project-attachment-open-" + fileID]
+            revealPagedElement(app, file, in: scroll, outerEdge: true)
+            boardEnabled(file, timeout: 30)
+            XCTAssertEqual(file.label, "Native project file406.txt")
+        }
+        func ready() {
+            boardEnabled(app.buttons["project-back"], timeout: 30)
+            boardEnabled(app.buttons["project-attachment-open-" + fileID], timeout: 30)
+            XCTAssertFalse(panel.exists); XCTAssertFalse(gate.exists)
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "project-attachment-downloading-" + fileID).firstMatch.exists)
+            for error in ["project-attachment-open-error", "project-attachments-error", "project-attachment-add-error",
+                          "project-notes-write-error"] {
+                XCTAssertFalse(app.staticTexts[error].exists)
+            }
+            XCTAssertFalse(app.buttons["project-attachment-write-retry"].exists)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            noViewer()
+        }
+
+        for (library, stop) in [(retryLibrary, false), (stopLibrary, true)] {
+            let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launchArguments = arguments + ["--native-project-download-stop-after-filled-once"]
+            app.launch()
+            // Preflight the stopped library with scripts/check-project-download-fixture.py (README).
+            // Root stages only synthetic SQLite/config in this fresh library; no files or journal.
+            // The isolated filled-stage flag starts at Projects to avoid automatic Sync prefetch.
+            openActiveProject()
+            let download = app.buttons["project-attachment-download-" + fileID]
+            revealPagedElement(app, download, in: scroll, outerEdge: true)
+            boardEnabled(download, timeout: 30); XCTAssertEqual(download.label, "Download")
+            download.tap()
+            // The approved hook fails only after this invocation durably fills its real stage.
+            pending()
+            for id in ["project-back", "project-attachment-open-" + fileID] {
+                let button = app.buttons[id]
+                XCTAssertTrue(button.exists); XCTAssertFalse(button.isEnabled)
+            }
+            app.terminate()
+            app.launchArguments = arguments // Cold recovery must not rearm the filled-stage hook.
+            app.launch()
+            pending()
+            XCTAssertFalse(app.buttons["tab-menu"].exists)
+            XCTAssertFalse(app.buttons["project-back"].exists)
+            XCTAssertFalse(app.buttons["project-attachment-open-" + fileID].exists)
+            let checkpoint = XCTAttachment(screenshot: app.screenshot())
+            checkpoint.name = stop ? "Task408 cold Stop checkpoint" : "Task408 cold Retry checkpoint"
+            checkpoint.lifetime = .keepAlways; add(checkpoint)
+            boardTap(app, stop ? "project-file-download-stop" : "project-file-download-retry")
+            XCTAssertTrue(panel.waitForNonExistence(timeout: 60))
+            // This cold phase performs no Save, Sync or Download; root verifies zero GETs.
+            openActiveProject(); ready()
+            if stop {
+                let missing = app.buttons["project-attachment-download-" + fileID]
+                revealPagedElement(app, missing, in: scroll, outerEdge: true)
+                boardEnabled(missing, timeout: 30); XCTAssertEqual(missing.label, "Download")
+                noViewer() // Stop preserves the original missing attachment; no follow-up download.
+            } else {
+                XCTAssertFalse(app.buttons["project-attachment-download-" + fileID].exists)
+                let file = app.buttons["project-attachment-open-" + fileID]
+                revealPagedElement(app, file, in: scroll, outerEdge: true)
+                boardEnabled(file, timeout: 30); file.tap()
+                let close = app.buttons["Close"].firstMatch
+                boardEnabled(close, timeout: 20)
+                var previousFrame: CGRect?
+                var stableSince: TimeInterval?
+                let closeReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    guard close.exists, close.isEnabled, close.isHittable else {
+                        previousFrame = nil; stableSince = nil; return false
+                    }
+                    let frame = close.frame, now = ProcessInfo.processInfo.systemUptime
+                    if previousFrame == frame, let stableSince { return now - stableSince >= 0.5 }
+                    previousFrame = frame; stableSince = now; return false
+                }, object: close)
+                XCTAssertEqual(XCTWaiter.wait(for: [closeReady], timeout: 10), .completed)
+                XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+                XCTAssertFalse(app.alerts.firstMatch.exists)
+                close.tap(); XCTAssertTrue(close.waitForNonExistence(timeout: 15))
+                ready(); XCTAssertFalse(app.buttons["project-attachment-download-" + fileID].exists)
+            }
+            boardTap(app, "project-back")
+            boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+            app.terminate()
+        }
+        // Root independently requires exactly two filled-source GETs and zero cold GETs.
+    }
+
+    private func task416OpenProject404(_ app: XCUIApplication, expectFile: Bool) {
+        boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+        let row = app.buttons["project-open-project-download-406-active"]
+        revealPagedElement(app, row, in: app.scrollViews["projects-scroll"])
+        boardEnabled(row); row.tap()
+        boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+        XCTAssertEqual(app.staticTexts["project-detail-title"].label, "Native project download406")
+        boardTap(app, "project-details-toggle")
+        if expectFile {
+            let file = app.buttons["project-attachment-open-40600000-1111-4111-8111-111111111111"]
+            revealPagedElement(app, file, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+            boardEnabled(file, timeout: 30); XCTAssertEqual(file.label, "Native project file406.txt")
+        }
+    }
+
+    private func task416TerminalProject404(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["project-back"], timeout: 30)
+        boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+        boardEnabled(app.buttons["project-attachment-add-link"], timeout: 30)
+        let fileID = "40600000-1111-4111-8111-111111111111"
+        // RN terminal 404 soft-deletes this broken reference; it stays in SQLite.
+        for action in ["open", "download", "remove"] {
+            XCTAssertFalse(app.buttons["project-attachment-" + action + "-" + fileID].exists)
+        }
+        for id in ["project-file-download-recovery", "sync-restart-gate", "project-attachment-downloading-" + fileID] {
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: id).firstMatch.exists)
+        }
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCTAssertFalse(app.staticTexts["project-notes-write-error"].exists)
+        XCTAssertFalse(app.staticTexts["project-attachments-error"].exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        task350NoFilePresentation(app)
+    }
+
+    func testNativeWebDAVProject404CompletesAndCreatesColdRetryIntent() throws {
+        let normal = try task371Library("NORMAL", prefix: "MINDWTR_PROJECT_404_PHONE_")
+        let cold = try task371Library("COLD", prefix: "MINDWTR_PROJECT_404_PHONE_")
+        guard normal != cold else {
+            XCTFail("Task416 requires two distinct fresh isolated libraries")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchEnvironment = [:]
+        defer { app.terminate() }
+        // Root stages only the 406 active Project and saved synthetic WebDAV;
+        // its cloudKey names an absent remote file, with no local bytes/journal.
+        // The unchanged filled hook selects Projects and cannot fire for a 404.
+        app.launchArguments = task350Arguments(normal, hook: "--native-project-download-stop-after-filled-once")
+        app.launch(); task416OpenProject404(app, expectFile: true)
+        task350TapProject(app, "project-attachment-download-40600000-1111-4111-8111-111111111111")
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 60))
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label == %@",
+            "This attachment is no longer available in synced storage. Its broken reference was removed.")).firstMatch.exists)
+        let dismiss = alert.buttons["project-attachment-open-dismiss"]
+        boardEnabled(dismiss); dismiss.tap(); XCTAssertTrue(alert.waitForNonExistence(timeout: 15))
+        task416TerminalProject404(app)
+        app.terminate(); app.launch() // Same normal library; no remote-capable file remains.
+        task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
+        app.terminate()
+
+        app.launchArguments = task350Arguments(cold, hook: "--native-project-download-stop-after-metadata-intent-once")
+        app.launch(); task416OpenProject404(app, expectFile: true)
+        task350TapProject(app, "project-attachment-download-40600000-1111-4111-8111-111111111111")
+        let panel = app.descendants(matching: .any).matching(identifier: "project-file-download-recovery").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 60))
+        for id in ["project-file-download-retry", "project-file-download-stop"] {
+            let button = app.buttons[id]; boardEnabled(button, timeout: 30)
+            XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
+        }
+        XCTAssertTrue(app.buttons["project-back"].exists); XCTAssertFalse(app.buttons["project-back"].isEnabled)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists); task350NoFilePresentation(app)
+        // End before Retry so root can capture the actual device-created,
+        // version2 metadata-only intent and exact unchanged before rows/files.
+    }
+
+    func testNativeWebDAVProject404ColdRetryAcknowledgesTerminalResult() throws {
+        let library = try task371Library("COLD", prefix: "MINDWTR_PROJECT_404_PHONE_")
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchEnvironment = [:]
+        app.launchArguments = task350Arguments(library) // Do not rearm afterIntent.
+        app.launch(); defer { app.terminate() }
+        let panel = app.descendants(matching: .any).matching(identifier: "project-file-download-recovery").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 60))
+        boardEnabled(app.buttons["project-file-download-retry"], timeout: 30)
+        boardEnabled(app.buttons["project-file-download-stop"], timeout: 30)
+        XCTAssertFalse(app.buttons["tab-menu"].exists); XCTAssertFalse(app.buttons["project-back"].exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists); task350NoFilePresentation(app)
+        boardTap(app, "project-file-download-retry")
+        XCTAssertTrue(panel.waitForNonExistence(timeout: 60))
+        task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
+        app.terminate()
+        // Only the old filled selector is used to reopen at Projects. No source
+        // exists and no Download is issued, so neither fault can fire here.
+        app.launchArguments = task350Arguments(library, hook: "--native-project-download-stop-after-filled-once")
+        app.launch(); task416OpenProject404(app, expectFile: false); task416TerminalProject404(app)
+        // Root independently verifies exactly one 404 per library, zero cold
+        // requests, exact RN tombstone effects, and no files or retained journal.
+    }
+
+    func testNativeWebDAVProject404CompletesAndColdRetriesInOneInvocation() throws {
+        // Separate XCTest invocations can reinstall the app and change its
+        // container identity. Keep the real terminate/relaunch in one invocation.
+        try testNativeWebDAVProject404CompletesAndCreatesColdRetryIntent()
+        try testNativeWebDAVProject404ColdRetryAcknowledgesTerminalResult()
+    }
+
+    func testNativeSyncInvalidDraftDiscardsToOffAndColdReopenHasNoPlaintext() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-url", "not-a-webdav-url")
+        XCTAssertTrue(app.staticTexts["sync-url-invalid"].waitForExistence(timeout: 15))
+        boardEnabled(app.buttons["sync-back"], timeout: 30)
+        task322Type(app, "sync-username", "fixture-322")
+        task322Type(app, "sync-password", "synthetic-invalid-draft-322", secure: true)
+        // The shared reveal helper requires an enabled target. Use Reload as
+        // the anchor, then inspect disabled actions without trying to tap them.
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        for id in ["sync-save", "sync-now", "sync-test"] {
+            let action = app.buttons[id]
+            XCTAssertTrue(action.exists); XCTAssertFalse(action.isEnabled)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.01)
+        }
+        boardTap(app, "sync-back"); task322OpenSync(app); task322WebDav(app); task322EmptyWebDavFields(app)
+        boardTap(app, "sync-back"); app.terminate(); app.launch()
+        task322OpenSync(app); task322WebDav(app); task322EmptyWebDavFields(app)
+    }
+
+    func testNativeSyncBackgroundClearsPasswordWithAppLockOffAndReloadKeepsSavedOff() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        task97Open(app); XCTAssertEqual(task102LockToggle(app).value as? String, "0")
+        boardTap(app, "general-back"); task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-password", "synthetic-background-draft-322", secure: true)
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home)
+        #else
+        // On the iPhone 12, the synthetic Home button leaves this form foreground.
+        // Use its actual Home gesture, then require observed background state.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        #endif
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed, "The app must reach actual background before activation")
+        app.activate()
+        boardEnabled(app.buttons["sync-reload"], timeout: 30)
+        let password = app.secureTextFields["sync-password"]
+        let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: password)
+        let clearedResult = XCTWaiter.wait(for: [cleared], timeout: 10)
+        if clearedResult != .completed {
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Task322 synthetic background privacy failure"; screenshot.lifetime = .keepAlways; add(screenshot)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Task322 synthetic background privacy hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        }
+        XCTAssertEqual(clearedResult, .completed, "Background must remove the secure password field")
+        XCTAssertFalse(app.buttons["app-lock-unlock"].exists)
+        XCTAssertFalse(app.secureTextFields["sync-password"].exists)
+        XCTAssertFalse(app.textFields["sync-url"].exists)
+        XCTAssertFalse(app.textFields["sync-username"].exists)
+        XCTAssertFalse(app.staticTexts["synthetic-background-draft-322"].exists)
+        revealPagedElement(app, app.buttons["sync-reload"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-reload")
+        boardEnabled(app.buttons["sync-option-off"], timeout: 30)
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+        task322WebDav(app); task322EmptyWebDavFields(app)
+    }
+
+    func testNativeSyncUnknownCompletionBlocksEditingUntilColdRestart() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-sync-command-throw-once", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        #if targetEnvironment(simulator)
+        // Existing simulator authentication hook only; physical devices retain
+        // their real security state and run this test with the fresh AppLock off.
+        app.launchArguments += ["--native-app-lock-auth", "success,cancel,success"]
+        #endif
+        app.launch(); defer { app.terminate() }
+        #if targetEnvironment(simulator)
+        task97Open(app); task102LockToggle(app).tap()
+        XCTAssertEqual(task102LockToggle(app).value as? String, "1")
+        boardTap(app, "general-back")
+        #endif
+        task322OpenSync(app); task322WebDav(app)
+        task322Type(app, "sync-url", "https://native-ui.invalid/data.json")
+        boardEnabled(app.buttons["sync-back"], timeout: 30)
+        task322Type(app, "sync-username", "fixture-322")
+        task322Type(app, "sync-password", "synthetic-unknown-draft-322", secure: true)
+        revealPagedElement(app, app.buttons["sync-test"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-test") // DEBUG throws before any actual HTTP call.
+        task322RestartGate(app)
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home); app.activate(); task102Gate(app)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        boardTap(app, "app-lock-unlock"); task322RestartGate(app)
+        #endif
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        task322OpenSync(app)
+    }
+
+    private func task337NoRestartGate(_ app: XCUIApplication, timeout: TimeInterval = 10) {
+        let gate = app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch
+        let appeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: gate)
+        appeared.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: timeout), .completed,
+            "No delayed cold-start Sync may cross the current admission boundary")
+        XCTAssertFalse(gate.exists)
+    }
+
+    func testColdStartupSyncUnknownCompletionBlocksEditingWithoutOpeningSettings() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        print("Task337 cold startup gate isolated library: " + library)
+        app.launchArguments = arguments + ["--native-startup-sync-command-throw-once"]
+        app.launch(); defer { app.terminate() }
+        // The startup-only hook fires before the stored native command. No
+        // Settings action, form input, credential, or network is involved.
+        task322RestartGate(app)
+        app.terminate()
+        app.launchArguments = arguments // The same library, without the hook.
+        app.launch()
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+
+        // Prove that ordinary Inbox editing is available after cold settlement.
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText("Task337 cold editable")
+        boardTap(app, "capture-save")
+        let row = app.buttons["Task337 cold editable"]
+        boardEnabled(row, timeout: 30); row.tap(); boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title, timeout: 30)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" saved")
+        XCTAssertEqual(title.value as? String, "Task337 cold editable saved")
+        boardTap(app, "task-editor-save")
+        boardEnabled(app.buttons["Task337 cold editable saved"], timeout: 30)
+        task322OpenSync(app) // A fresh library still presents stored Off.
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+    }
+
+    func testColdStartupSyncPreservesRecoveredAndKeptTaskDraftAcrossRestarts() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        let original = "Task337 protected", draft = original + " retained draft"
+        print("Task337 retained startup draft isolated library: " + library)
+        app.launchArguments = arguments
+        app.launch(); defer { app.terminate() }
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText(original)
+        boardTap(app, "capture-save")
+        boardEnabled(app.buttons[original], timeout: 30); app.buttons[original].tap()
+        boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" retained draft")
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        app.terminate()
+
+        app.launchArguments = arguments + ["--native-startup-sync-command-throw-once"]
+        app.launch()
+        // Existing recovery auto-resumes a valid protected draft. Its exact
+        // editor state is the positive proof; the gate need not stay onscreen.
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-keep-for-later")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app)
+
+        // Keep for later hides the editor, not its durable ownership. Ordinary
+        // Inbox/read actions and idle completion must not mint a new intent.
+        boardTap(app, "tab-inbox")
+        boardTap(app, "search-open"); boardEnabled(app.textFields["search-input"], timeout: 30)
+        boardTap(app, "search-close")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        app.terminate(); app.launch() // The startup hook remains armed on this cold launch.
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft, "Keep for later must preserve the exact unsaved title on disk")
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+    }
+
+    private func task344BackgroundAndActivate(_ app: XCUIApplication) {
+        #if targetEnvironment(simulator)
+        XCUIDevice.shared.press(.home)
+        #else
+        // The actual Home gesture is required on the iPhone 12; the synthetic
+        // Home button does not reliably leave the current app foreground.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.995))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        #endif
+        let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed,
+            "Resume admission requires observed actual background before activation")
+        app.activate()
+    }
+
+    func testForegroundResumeSyncUnknownCompletionBlocksEditingUntilColdRestart() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        print("Task344 foreground resume gate isolated library: " + library)
+        app.launchArguments = arguments + ["--native-resume-sync-command-throw-once"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        // A clean cold launch invokes only startup. The resume-only hook must
+        // remain armed until a real background-to-foreground episode occurs.
+        task337NoRestartGate(app, timeout: 5)
+        task344BackgroundAndActivate(app)
+        task322RestartGate(app) // No Settings visit, credentials, or HTTP.
+
+        app.terminate()
+        app.launchArguments = arguments // Same storage, without the hook.
+        app.launch()
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText("Task344 resume editable")
+        boardTap(app, "capture-save")
+        let row = app.buttons["Task344 resume editable"]
+        boardEnabled(row, timeout: 30); row.tap(); boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title, timeout: 30)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" saved")
+        XCTAssertEqual(title.value as? String, "Task344 resume editable saved")
+        boardTap(app, "task-editor-save")
+        boardEnabled(app.buttons["Task344 resume editable saved"], timeout: 30)
+        task322OpenSync(app)
+        XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+    }
+
+    func testForegroundResumeSyncPreservesVisibleAndKeptTaskDraftAcrossBackgroundAndColdRestart() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        let original = "Task344 protected", draft = original + " retained draft"
+        print("Task344 retained resume draft isolated library: " + library)
+        app.launchArguments = arguments + ["--native-resume-sync-command-throw-once"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText(original)
+        boardTap(app, "capture-save")
+        boardEnabled(app.buttons[original], timeout: 30); app.buttons[original].tap()
+        boardTap(app, "task-mode-edit")
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        boardEnabled(title)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" retained draft")
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+
+        task344BackgroundAndActivate(app)
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-keep-for-later")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+
+        // A hidden kept draft retains its disk ownership. Actual resume and
+        // ordinary reads cannot create a delayed Sync after the editor closes.
+        task344BackgroundAndActivate(app)
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app)
+        boardTap(app, "tab-inbox")
+        boardTap(app, "search-open"); boardEnabled(app.textFields["search-input"], timeout: 30)
+        boardTap(app, "search-close")
+        boardEnabled(app.buttons[original], timeout: 30)
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+
+        app.terminate(); app.launch() // Same storage; the resume-only hook remains armed.
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, draft, "The exact unsaved title must survive kept-draft cold recovery")
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task337NoRestartGate(app, timeout: 5)
+    }
+
+    private func task350Arguments(_ library: String, hook: String? = nil) -> [String] {
+        var arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if let hook { arguments.append(hook) }
+        return arguments
+    }
+
+    private func task350OpenProject(_ app: XCUIApplication, archived: Bool = false) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-projects")
+        let scroll = app.scrollViews["projects-scroll"]
+        if archived {
+            let section = app.buttons["projects-section-archived"]
+            revealPagedElement(app, section, in: scroll)
+            boardEnabled(section)
+            if section.value as? String == "Expand" { section.tap() }
+        }
+        let row = app.buttons["project-open-task121-" + (archived ? "archived" : "active")]
+        revealPagedElement(app, row, in: scroll)
+        boardEnabled(row); row.tap(); boardTap(app, "project-details-toggle")
+    }
+
+    private func task350TapProject(_ app: XCUIApplication, _ id: String) {
+        let element = app.buttons[id]
+        revealPagedElement(app, element, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        boardEnabled(element)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44 - 0.01)
+        element.tap()
+    }
+
+    private func task350EditNotes(_ app: XCUIApplication, _ text: String) {
+        if !app.textViews["project-notes-input"].exists {
+            task350TapProject(app, "project-notes-toggle")
+            if app.buttons["project-notes-mode-edit"].isEnabled {
+                task350TapProject(app, "project-notes-mode-edit")
+            }
+        }
+        let input = app.textViews["project-notes-input"]
+        boardEnabled(input, timeout: 30)
+        revealPagedElement(app, input, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        replaceProjectNotesText(input, with: text)
+        XCTAssertEqual(input.value as? String, text)
+    }
+
+    private func task350NoFilePresentation(_ app: XCUIApplication) {
+        XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+        XCTAssertFalse(app.otherElements["task-audio-player"].exists)
+        XCTAssertFalse(app.buttons["Close"].firstMatch.exists, "Download must not present the system file viewer")
+    }
+
+    private func task350KnownOffRefusal(_ app: XCUIApplication) {
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 15))
+        let message = "This sync provider is not available in native iOS yet; the stored configuration is unchanged"
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label == %@", message)).firstMatch.exists)
+        let dismiss = alert.buttons["project-attachment-open-dismiss"].firstMatch
+        boardEnabled(dismiss); dismiss.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        boardEnabled(app.buttons["project-attachment-download-task121-file"], timeout: 30)
+        task350NoFilePresentation(app)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+    }
+
+    private func task350ColdNotes(_ app: XCUIApplication, library: String, text: String) {
+        app.terminate(); app.launchArguments = task350Arguments(library); app.launch()
+        task350OpenProject(app)
+        task350TapProject(app, "project-notes-toggle")
+        if app.buttons["project-notes-mode-preview"].exists && app.buttons["project-notes-mode-preview"].isEnabled {
+            task350TapProject(app, "project-notes-mode-preview")
+        }
+        let notes = app.staticTexts[text]
+        revealPagedElement(app, notes, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        XCTAssertTrue(notes.exists, "The exact flushed Notes must survive cold reopening")
+        boardEnabled(app.buttons["project-attachment-download-task121-file"], timeout: 30)
+        task350NoFilePresentation(app)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+    }
+
+    func testProjectDownloadKnownOffRefusalFlushesNotesAndArchivedRemainsEligible() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "474dc5da-dc25-476a-a08b-2a151facc3b1"
+        let first = "Task350 Notes before known Off refusal", final = first + " and still editable"
+        // Root stages the existing Task121 missing-cloud-file fixture in this
+        // fresh isolated library with stored Off, no credential or local bytes.
+        app.launchArguments = task350Arguments(library)
+        app.launch(); defer { app.terminate() }
+        task350OpenProject(app); task350EditNotes(app, first)
+        task350TapProject(app, "project-attachment-download-task121-file")
+        task350KnownOffRefusal(app)
+        XCTAssertEqual(app.textViews["project-notes-input"].value as? String, first)
+        // Notes changed the Project revision before dispatch. The known reply
+        // must leave the current Notes options usable, without an auto Open.
+        task350EditNotes(app, final)
+        task350TapProject(app, "project-attachment-download-task121-file")
+        task350KnownOffRefusal(app)
+        task350ColdNotes(app, library: library, text: final)
+
+        boardTap(app, "project-back"); task350OpenProject(app, archived: true)
+        let download = app.buttons["project-attachment-download-task121-file"]
+        revealPagedElement(app, download, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        boardEnabled(download)
+        XCTAssertGreaterThanOrEqual(download.frame.height, 44 - 0.01)
+        for id in ["project-attachment-add-file", "project-attachment-add-link"] {
+            XCTAssertTrue(app.buttons[id].exists); XCTAssertFalse(app.buttons[id].isEnabled)
+        }
+        download.tap(); task350KnownOffRefusal(app)
+        boardEnabled(app.buttons["project-back"])
+    }
+
+    func testProjectDownloadUnknownThrowAndMalformedReplyRequireColdRestartWithNotesRetained() {
+        continueAfterFailure = false
+        for (library, hook, notes) in [
+            ("4c1d59d0-a06e-40cf-967a-7a815aa1d919", "--native-project-download-command-throw-once", "Task350 Notes before unknown throw"),
+            ("8b777ea5-9f9a-49e0-8c19-4bb46e03fe63", "--native-project-download-malformed-reply-once", "Task350 Notes before malformed reply")
+        ] {
+            let app = XCUIApplication()
+            app.launchArguments = task350Arguments(library, hook: hook)
+            app.launch(); defer { app.terminate() }
+            task350OpenProject(app); task350EditNotes(app, notes)
+            task350TapProject(app, "project-attachment-download-task121-file")
+            // Throw is before dispatch; malformed substitutes non-null Project
+            // update only after the actual native Off refusal has returned.
+            task322RestartGate(app)
+            for id in ["project-back", "project-attachment-download-task121-file", "project-attachment-open-task121-file",
+                       "project-attachment-add-file", "project-notes-mode-edit"] {
+                XCTAssertFalse(app.buttons[id].exists)
+            }
+            XCTAssertFalse(app.textViews["project-notes-input"].exists)
+            task350NoFilePresentation(app)
+            task350ColdNotes(app, library: library, text: notes)
+            task350TapProject(app, "project-notes-mode-edit")
+            boardEnabled(app.textViews["project-notes-input"])
+            XCTAssertEqual(app.textViews["project-notes-input"].value as? String, notes)
+            boardTap(app, "project-back"); task322OpenSync(app)
+            XCTAssertTrue(app.buttons["sync-option-off"].isSelected)
+        }
+    }
+
+    func testProjectDownloadDelayedOffReplyRetainsBusyThroughBackgroundAndDropsStaleError() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "bec4af4a-9f68-43cc-b09a-de629e00b0d8"
+        let first = "Task350 Notes before delayed Off reply", final = first + " and after drainage"
+        app.launchArguments = task350Arguments(library, hook: "--native-project-download-delay-reply-once")
+        app.launch(); defer { app.terminate() }
+        task350OpenProject(app); task350EditNotes(app, first)
+        let download = app.buttons["project-attachment-download-task121-file"]
+        revealPagedElement(app, download, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        boardEnabled(download); XCTAssertGreaterThanOrEqual(download.frame.height, 44 - 0.01)
+        let began = ProcessInfo.processInfo.systemUptime
+        download.tap()
+        let loading = app.descendants(matching: .any).matching(identifier: "project-attachment-downloading-task121-file").firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 10))
+        XCTAssertFalse(download.isEnabled)
+        XCTAssertFalse(app.buttons["project-attachment-open-task121-file"].isEnabled)
+        XCTAssertFalse(app.textViews["project-notes-input"].isEnabled)
+
+        // The hook delays App delivery after a real native Off reply; it is
+        // not a held network transfer. Require actual background/activation
+        // inside its eight-second window rather than accept vacuous coverage.
+        task344BackgroundAndActivate(app)
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - began, 8,
+            "Automation must background and reactivate before the delayed reply can settle")
+        XCTAssertTrue(loading.exists, "Cancellation must retain the owner until its delayed reply drains")
+        XCTAssertFalse(download.isEnabled)
+        XCTAssertFalse(app.textViews["project-notes-input"].isEnabled)
+        XCTAssertTrue(loading.waitForNonExistence(timeout: 20))
+        boardEnabled(download, timeout: 30)
+        boardEnabled(app.textViews["project-notes-input"], timeout: 30)
+        XCTAssertEqual(app.textViews["project-notes-input"].value as? String, first)
+        XCTAssertFalse(app.alerts.firstMatch.exists, "A canceled known reply must not publish the old refusal")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "project-attachment-open-error").firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        task350NoFilePresentation(app)
+        task350EditNotes(app, final)
+        task350TapProject(app, "project-attachment-download-task121-file")
+        task350KnownOffRefusal(app) // Explicit new dispatch works after drainage.
+        task350ColdNotes(app, library: library, text: final)
+    }
+
+    private let task364AttachmentID = "9592d24c-d0f6-4281-8d2f-386bc9de9988"
+
+    private func task364Title(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+    }
+
+    private func task364RevealTitle(_ app: XCUIApplication) {
+        let title = task364Title(app), scroll = app.scrollViews["task-editor-scroll"]
+        // Reuse the existing topward gutter gesture, with the editor's actual
+        // type-agnostic title lookup (the control may be a multiline text view).
+        for _ in 0..<8 {
+            if title.exists && title.isHittable && scroll.frame.contains(title.frame) { return }
+            let frame = scroll.frame.intersection(app.frame)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: frame.minX + 4, dy: frame.minY + frame.height * 0.25))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(
+                    CGVector(dx: frame.minX + 4, dy: frame.minY + frame.height * 0.8)))
+        }
+        XCTAssertTrue(title.exists && title.isHittable)
+    }
+
+    private func task364OpenEditor(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+        app.buttons["Task364 Remote file"].tap(); boardTap(app, "task-mode-edit")
+        boardEnabled(task364Title(app), timeout: 30)
+    }
+
+    private func task364Details(_ app: XCUIApplication) {
+        let details = app.buttons["task-editor-section-details"]
+        task364RevealTitle(app)
+        revealPagedElement(app, details, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        if details.value as? String == "Expand" { details.tap() }
+    }
+
+    private func task364EditDraft(_ app: XCUIApplication, title: String, notes: String, checklist: String) {
+        task364RevealTitle(app)
+        replaceProjectNotesText(task364Title(app), with: title)
+        task364Details(app)
+        let note = app.textViews["task-editor-note"], item = app.textFields["task-checklist-input-0"]
+        revealPagedElement(app, note, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        replaceProjectNotesText(note, with: notes)
+        revealPagedElement(app, item, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        replaceProjectNotesText(item, with: checklist)
+    }
+
+    private func task364Download(_ app: XCUIApplication) -> XCUIElement {
+        let button = app.buttons["task-attachment-download-" + task364AttachmentID]
+        revealPagedElement(app, button, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        boardEnabled(button)
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44 - 0.01)
+        XCTAssertEqual(button.label, "Download Task364 remote.txt")
+        return button
+    }
+
+    private func task364NoFilePresentation(_ app: XCUIApplication) {
+        XCTAssertFalse(app.buttons["task-attachment-preview-done"].exists)
+        XCTAssertFalse(app.otherElements["task-audio-player"].exists)
+        // The Task editor itself has a Close label, with task-view-close ID.
+        // Check the system viewer identifier rather than that shared label.
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier == %@", "Close")).firstMatch.exists)
+    }
+
+    private func task364KnownOffRefusal(_ app: XCUIApplication) {
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 15))
+        XCTAssertTrue(alert.staticTexts["Missing file"].exists)
+        let dismiss = alert.buttons["task-attachment-open-dismiss"].firstMatch
+        boardEnabled(dismiss); dismiss.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        boardEnabled(app.buttons["task-attachment-download-" + task364AttachmentID], timeout: 30)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        task364NoFilePresentation(app)
+    }
+
+    private func task364AssertDraft(_ app: XCUIApplication, title: String, notes: String, checklist: String) {
+        task364RevealTitle(app)
+        boardEnabled(task364Title(app), timeout: 30)
+        XCTAssertEqual(task364Title(app).value as? String, title)
+        boardEnabled(app.staticTexts["task-recovery-protected"], timeout: 30)
+        task364Details(app)
+        let note = app.textViews["task-editor-note"], item = app.textFields["task-checklist-input-0"]
+        revealPagedElement(app, note, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(note.value as? String, notes)
+        revealPagedElement(app, item, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(item.value as? String, checklist)
+        _ = task364Download(app)
+        task364NoFilePresentation(app)
+    }
+
+    private func task364ColdResume(_ app: XCUIApplication, library: String, title: String, notes: String, checklist: String) {
+        app.terminate(); app.launchArguments = task350Arguments(library); app.launch()
+        boardEnabled(task364Title(app), timeout: 30)
+        task364AssertDraft(app, title: title, notes: notes, checklist: checklist)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+    }
+
+    func testTaskDownloadKnownOffRefusalPreservesDirtyDraftThroughKeepColdResumeAndSave() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "bfa04966-0c33-4c1a-bd13-6f29f47e79a7"
+        let title = "Task364 Off draft saved", notes = "Task364 Notes before Off refusal", checklist = "Task364 checklist before Download"
+        // Root stages a saved mutable Task with one real RN remote-only file,
+        // stored Off, no credential, local bytes, or owned attachment history.
+        app.launchArguments = task350Arguments(library); app.launch(); defer { app.terminate() }
+        task364OpenEditor(app)
+        task364EditDraft(app, title: title, notes: notes, checklist: checklist)
+        task364Download(app).tap(); task364KnownOffRefusal(app)
+        task364AssertDraft(app, title: title, notes: notes, checklist: checklist)
+        task364RevealTitle(app)
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-keep-for-later")
+        boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+        XCTAssertFalse(app.buttons[title].exists, "Download and Keep must not save the descriptive draft")
+        boardEnabled(app.buttons["task-recovery-open"], timeout: 30)
+        task364ColdResume(app, library: library, title: title, notes: notes, checklist: checklist)
+        task364RevealTitle(app); boardTap(app, "task-editor-save")
+        boardEnabled(app.buttons[title], timeout: 30)
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons[title], timeout: 30)
+        XCTAssertFalse(app.buttons["task-recovery-open"].exists)
+        app.buttons[title].tap(); boardTap(app, "task-mode-edit")
+        task364Details(app)
+        let note = app.textViews["task-editor-note"], item = app.textFields["task-checklist-input-0"]
+        revealPagedElement(app, note, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(note.value as? String, notes)
+        revealPagedElement(app, item, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
+        XCTAssertEqual(item.value as? String, checklist)
+        _ = task364Download(app) // Off refusal never claims installed availability.
+        task364NoFilePresentation(app)
+    }
+
+    func testTaskDownloadUnknownThrowAndMalformedReplyRequireColdRestartWithExactDraft() {
+        continueAfterFailure = false
+        for (library, hook, title) in [
+            ("de10cc6a-2119-4b93-a967-38b0a7d297bd", "--native-task-download-command-throw-once", "Task364 unknown throw draft"),
+            ("82674b1c-b846-4256-beda-201d3447e3b7", "--native-task-download-malformed-reply-once", "Task364 malformed reply draft")
+        ] {
+            let app = XCUIApplication(), notes = title + " exact Notes", checklist = title + " checklist"
+            app.launchArguments = task350Arguments(library, hook: hook); app.launch()
+            task364OpenEditor(app)
+            task364EditDraft(app, title: title, notes: notes, checklist: checklist)
+            task364Download(app).tap()
+            // Throw runs before native dispatch; malformed substitutes only
+            // after the real Off refusal. Neither path may retry a fresh UUID.
+            task322RestartGate(app)
+            for id in ["task-view-close", "task-editor-save", "task-attachment-download-" + task364AttachmentID,
+                       "task-attachment-open-" + task364AttachmentID, "task-attachment-add-file", "task-attachment-add-link"] {
+                XCTAssertFalse(app.buttons[id].exists)
+            }
+            XCTAssertFalse(task364Title(app).exists)
+            task364NoFilePresentation(app)
+            task364ColdResume(app, library: library, title: title, notes: notes, checklist: checklist)
+            task364RevealTitle(app)
+            boardTap(app, "task-view-close"); boardTap(app, "task-editor-discard")
+            boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+            XCTAssertFalse(app.buttons[title].exists)
+            XCTAssertFalse(app.buttons["task-recovery-open"].exists)
+            app.terminate(); app.launch()
+            boardEnabled(app.buttons["Task364 Remote file"], timeout: 30)
+            XCTAssertFalse(app.buttons["task-recovery-open"].exists)
+            app.terminate()
+        }
+    }
+
+    func testTaskDownloadDelayedOffReplyRetainsBusyThroughObservedBackgroundUntilRecoveryGate() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = "523421f1-03da-4018-8276-02f4853ad656"
+        let title = "Task364 delayed reply draft", notes = title + " exact Notes", checklist = title + " checklist"
+        app.launchArguments = task350Arguments(library, hook: "--native-task-download-delay-reply-once")
+        app.launch(); defer { app.terminate() }
+        task364OpenEditor(app)
+        task364EditDraft(app, title: title, notes: notes, checklist: checklist)
+        let download = task364Download(app), began = ProcessInfo.processInfo.systemUptime
+        download.tap()
+        let loading = app.descendants(matching: .any).matching(identifier: "task-attachment-downloading-" + task364AttachmentID).firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 10))
+        XCTAssertFalse(download.isEnabled)
+        XCTAssertFalse(app.buttons["task-attachment-open-" + task364AttachmentID].isEnabled)
+        XCTAssertFalse(app.buttons["task-editor-save"].isEnabled)
+        XCTAssertFalse(app.buttons["task-view-close"].isEnabled)
+        // This holds App delivery after a real Off reply, not a network task.
+        task344BackgroundAndActivate(app)
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - began, 8,
+            "Actual background and reactivation must occur inside the reply-delay window")
+        XCTAssertTrue(loading.exists, "Cancel cannot release the retained owner before its awaited reply drains")
+        XCTAssertFalse(app.buttons["task-editor-save"].isEnabled)
+        XCTAssertFalse(app.buttons["task-view-close"].isEnabled)
+        task322RestartGate(app)
+        XCTAssertFalse(app.alerts.firstMatch.exists, "A revoked reply must not publish the stale Off error")
+        task364NoFilePresentation(app)
+        task364ColdResume(app, library: library, title: title, notes: notes, checklist: checklist)
+    }
+
     private func task147Mode(_ app: XCUIApplication, _ value: String) {
         task144Open(app)
         let option = app.buttons["gtd-taskOpenMode-" + value]

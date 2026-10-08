@@ -1,4 +1,4 @@
-import type { ObsidianSourceRef } from '@mindwtr/core';
+import { appendObsidianRequiredInlineTag, type ObsidianSourceRef } from '@mindwtr/core';
 import { getDesktopTimerHost, isTauriRuntime } from './runtime';
 import { reportError } from './report-error';
 import { invokeNative, invokeNativeOr } from './tauri-invoke';
@@ -380,6 +380,7 @@ export class ObsidianService {
     }
 
     static async createTask(task: {
+        requiredInlineTag?: string;
         vaultPath: string;
         relativeFilePath: string;
         taskText: string;
@@ -387,7 +388,10 @@ export class ObsidianService {
         if (!isTauriRuntime()) {
             throw new Error('Obsidian task creation is only available on desktop.');
         }
-        await invokeNative('obsidian_create_task', task);
+        const { requiredInlineTag = '', ...payload } = task;
+        await invokeNative('obsidian_create_task', {
+            ...payload, taskText: appendObsidianRequiredInlineTag(task.taskText, requiredInlineTag),
+        });
     }
 
     static async createTaskNotesTask(task: {

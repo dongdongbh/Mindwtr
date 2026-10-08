@@ -30,6 +30,9 @@ export type AutoSyncAdaptivePacing = {
 
 export type AutoSyncControllerOptions = {
     performSync: () => Promise<SyncResult>;
+    /** False limits delivery to awaited request methods: no timers, window/data
+     *  triggers, or queued in-flight follow-ups. Ordinary platforms default true. */
+    allowDeferredWork?: boolean;
     flushPendingSave: () => Promise<void>;
     reportError: (label: string, error: unknown) => void;
     isRuntimeActive: () => boolean;
@@ -155,6 +158,7 @@ export const createAutoSyncController = (
         && Number.isFinite(periodicSyncIntervalMs)
         && periodicSyncIntervalMs > 0;
     const adaptivePacing = options.adaptivePacing;
+    const allowDeferredWork = options.allowDeferredWork ?? true;
 
     let lastAutoSyncAt = 0;
     let lastCycleDurationMs = 0;
@@ -198,7 +202,7 @@ export const createAutoSyncController = (
 
     const schedulePeriodicSync = () => {
         clearPeriodicSync();
-        if (!periodicSyncEnabled || disposed) return;
+        if (!allowDeferredWork || !periodicSyncEnabled || disposed) return;
         periodicSyncTimer = setTimer(() => {
             periodicSyncTimer = null;
             if (disposed) return;
@@ -211,6 +215,7 @@ export const createAutoSyncController = (
     };
 
     const scheduleAutoRetryAfterCooldown = (source: string, replaceExisting = false) => {
+        if (!allowDeferredWork) return;
         const waitMs = Math.max(0, autoSyncRetryAfter - now());
         if (replaceExisting) {
             clearSyncThrottle();
@@ -271,7 +276,7 @@ export const createAutoSyncController = (
             const effectiveMinIntervalMs = resolveEffectiveMinIntervalMs(request.minIntervalMs);
             const nowMs = now();
             if (nowMs - lastAutoSyncAt < effectiveMinIntervalMs) {
-                if (!syncThrottleTimer) {
+                if (allowDeferredWork && !syncThrottleTimer) {
                     const waitMs = Math.max(0, effectiveMinIntervalMs - (nowMs - lastAutoSyncAt));
                     trace('Auto sync throttled', {
                         waitMs: String(waitMs),
@@ -358,7 +363,7 @@ export const createAutoSyncController = (
                     // backgrounded is what the platform will not let finish anyway.
                     requestedWhileSuspended = false;
                     autoSyncOrchestrator.clearFollowUp();
-                } else if (autoSyncOrchestrator.getState().queued) {
+                } else if (allowDeferredWork && autoSyncOrchestrator.getState().queued) {
                     controls.requestFollowUp({
                         minIntervalMs: cadence().minIntervalMs,
                         source: 'follow-up',
@@ -372,6 +377,7 @@ export const createAutoSyncController = (
 
     const requestSync = async (overrideMinIntervalMs?: number): Promise<void> => {
         if (!options.isRuntimeActive()) return;
+        if (!allowDeferredWork && autoSyncOrchestrator.getState().inFlight) return;
         await autoSyncOrchestrator.run({
             minIntervalMs: overrideMinIntervalMs,
             source: 'manual',
@@ -385,6 +391,7 @@ export const createAutoSyncController = (
         internalRetry = false,
     ): Promise<void> => {
         if (!options.isRuntimeActive()) return;
+        if (!allowDeferredWork && autoSyncOrchestrator.getState().inFlight) return;
         if (options.isSuspended?.() && autoSyncOrchestrator.getState().inFlight) {
             requestedWhileSuspended = true;
         }
@@ -405,7 +412,7 @@ export const createAutoSyncController = (
             requestAutoSync(overrideMinIntervalMs, source)
         ),
         handleFocus: () => {
-            if (!canRunWindowSync()) return;
+            if (!allowDeferredWork || !canRunWindowSync()) return;
             const nowMs = now();
             if (nowMs - lastFocusTriggerAt < FOCUS_TRIGGER_DEDUPE_MS) return;
             if (nowMs - lastAutoSyncAt > focusMinIntervalMs) {
@@ -415,12 +422,12 @@ export const createAutoSyncController = (
             }
         },
         handleBlur: () => {
-            if (!shouldRunBlurSync()) return;
+            if (!allowDeferredWork || !shouldRunBlurSync()) return;
             trace('Auto sync trigger', { source: 'blur' });
             void requestAutoSync(undefined, 'blur').catch((error) => options.reportError('Sync failed', error));
         },
         handleDataChange: () => {
-            if (!options.isRuntimeActive()) return;
+            if (!allowDeferredWork || !options.isRuntimeActive()) return;
             const hadTimer = !!syncDebounceTimer;
             clearSyncDebounce();
             const activeCadence = cadence();
@@ -449,6 +456,7 @@ export const createAutoSyncController = (
             }, debounceMs);
         },
         scheduleInitialSync: () => {
+            if (!allowDeferredWork) return;
             clearInitialSync();
             initialSyncTimer = setTimer(() => {
                 initialSyncTimer = null;

@@ -17,7 +17,99 @@
     "Retry recording" : {},
     "Saved for delivery" : {},
     "Sent" : {},
-    "Time for a break." : {}
+    "Time for a break." : {},
+    "Checklist" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checklist"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查清单"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢查清單"
+          }
+        }
+      }
+    },
+    "These details are too large for the Watch. Open this task on your iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These details are too large for the Watch. Open this task on your iPhone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内容过多，无法在手表上完整显示。请在 iPhone 上打开此任务。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "內容過多，無法在手錶上完整顯示。請在 iPhone 上開啟此任務。"
+          }
+        }
+      }
+    },
+    "This checklist changed. Open Mindwtr on your iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This checklist changed. Open Mindwtr on your iPhone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查清单已更改。请在 iPhone 上打开 Mindwtr。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢查清單已更改。請在 iPhone 上開啟 Mindwtr。"
+          }
+        }
+      }
+    },
+    "Saved on iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved on iPhone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存到 iPhone"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已儲存到 iPhone"
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }

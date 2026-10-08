@@ -718,6 +718,16 @@ mod tests {
     }
 
     #[test]
+    fn toggle_filtered_task_preserves_other_checkboxes_and_marker() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("Inbox.md");
+        let markdown = "---\ntags: [task]\n---\n- [ ] Checklist\n- [ ] Action #task/work\n- [ ] Other #tasks\n";
+        fs::write(&path, markdown).unwrap();
+        toggle_task_in_vault(&temp.path().to_string_lossy(), "Inbox.md", 5, "Action #task/work", true).unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), markdown.replace("- [ ] Action", "- [x] Action"));
+    }
+
+    #[test]
     fn toggle_task_preserves_indentation_and_line_endings() {
         let temp = tempdir().expect("should create temp vault");
         let file_path = temp.path().join("Projects.md");

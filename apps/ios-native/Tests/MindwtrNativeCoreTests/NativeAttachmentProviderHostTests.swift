@@ -63,7 +63,7 @@ final class NativeAttachmentProviderHostTests: XCTestCase {
         let boot = core(); _ = try await boot.start(); await boot.close()
         _ = try sql("INSERT INTO tasks(id,title,description,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,'Saved','Kept','inbox','[]','[]','[]',?,?,1,'fixture')", [taskID, at, at])
         let host = core(faults)
-        if let hooks { await host.configureAttachmentHost(hooks) }
+        if let hooks { try await host.configureAttachmentHost(hooks) }
         _ = try await host.start()
         let snapshot = EditorDraftSnapshot(sessionID: UUID().uuidString.lowercased(), taskID: taskID, generation: 1, payloadJSON: try payload())
         try await host.checkpointEditorDraft(snapshot)

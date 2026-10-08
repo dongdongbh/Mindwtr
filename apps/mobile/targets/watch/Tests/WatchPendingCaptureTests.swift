@@ -4,6 +4,30 @@ import XCTest
 @testable import MindwtrWatchProtocolCore
 
 final class WatchPendingCaptureTests: XCTestCase {
+    func testChecklistPersistsOfflineAndOverlaysOldSnapshotsUntilSettlement() throws {
+        let item = MindwtrWatchChecklistItem(id: "milk", title: "Milk 🥛", isCompleted: false)
+        let task = MindwtrWatchFocusTask(id: "shopping", title: "Shopping", createdAt: "2026-10-07T00:00:00.000Z",
+                                        description: "Keep chilled\nCheck expiry", checklist: [item])
+        let payload = try XCTUnwrap(MindwtrWatchProtocol.checklistCommand(task: task, item: item, completed: true))
+        let id = try XCTUnwrap(payload["id"] as? String)
+        defer { MindwtrWatchOutbox.remove(id: id, removeAudio: false) }
+        try MindwtrWatchOutbox.save(payload: payload, transport: .command)
+        let reloaded = try XCTUnwrap(MindwtrWatchOutbox.records().first { $0.id == id })
+        XCTAssertNil(reloaded.settledAt)
+        XCTAssertTrue(MindwtrWatchProtocol.overlay([reloaded.payload], on: task).checklist![0].isCompleted)
+        try MindwtrWatchOutbox.save(payload: reloaded.payload, transport: .command, settledAt: 123)
+        XCTAssertEqual(MindwtrWatchOutbox.records().first { $0.id == id }?.settledAt, 123)
+        var unchecked = payload
+        unchecked["isCompleted"] = false
+        XCTAssertFalse(MindwtrWatchProtocol.overlay([payload, unchecked], on: task).checklist![0].isCompleted)
+        var ambiguous = task
+        ambiguous.checklist = [item, item]
+        XCTAssertNil(MindwtrWatchProtocol.checklistCommand(task: ambiguous, item: item, completed: true))
+        let old = try JSONDecoder().decode(MindwtrWatchFocusTask.self, from: Data(#"{"id":"old","title":"Old snapshot"}"#.utf8))
+        XCTAssertNil(old.checklist)
+        XCTAssertEqual(try JSONDecoder().decode(MindwtrWatchFocusTask.self, from: JSONEncoder().encode(task)), task)
+    }
+
     func testFailedTextCaptureRetryKeepsIdentityUntilSaveSucceeds() throws {
         let id = UUID(uuidString: "42fe1a71-9232-4976-bf09-bebcb875b370")!
         let createdAt = Date(timeIntervalSince1970: 1_789_000_000)

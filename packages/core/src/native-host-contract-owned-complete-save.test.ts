@@ -4,10 +4,13 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import { prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftRemoveV3, prepareNativeAttachmentDraftAddV4, prepareNativeAttachmentDraftRemoveV4, type NativeAttachmentDraftOperationV3, type NativeAttachmentDraftOperationV4 } from './native-attachment-draft';
+import { prepareNativeAttachmentDraftAvailability, type NativeAttachmentDraftLineageInputV5 } from './native-attachment-draft';
+import { getAttachmentDownloadIdentity } from './mobile-attachment-availability';
 import { ASSOCIATIONS, LIFECYCLE, RECURRENCE, SCHEDULE, getNativeTaskRecurrenceBase, getNativeTaskScheduleBase } from './native-host-contract-task-save';
 import { createOwnedEditorCompleteTaskDraftSaveMethods, createOwnedEditorFileEditTaskDraftSaveMethods,
     type OwnedEditorCompleteSaveRequest, type OwnedEditorCompleteSaveEnvelope,
     type OwnedEditorCompleteCancellationUndoEnvelope } from './native-host-contract-owned-file-edit-save';
+import { createOwnedTaskEditorResumeMethods } from './native-host-contract-task-editor-resume';
 import { validateNativeTaskEditorSaveCheckpoint } from './native-task-editor-save-checkpoint';
 import { createNativeRequestReceipts, NativeReceiptSqliteAdapter, resetNativeRequestReceipts } from './native-request-receipts';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -137,6 +140,24 @@ async function request(options: RequestOptions = {}): Promise<OwnedEditorComplet
         ...(RECURRENCE.some((field) => changed.has(field)) ? { recurrenceBase: getNativeTaskRecurrenceBase({ ...raw, recurrence: normalizeRecurrenceForLoad(raw.recurrence) }) } : {}),
         checklist: { base: checklistBase, value: checklistValue }, attachments: { base, value: JSON.parse(beforePayloadJSON).attachments },
         ...(options.intent ? { intent: options.intent } : {}) } }) as OwnedEditorCompleteSaveRequest;
+}
+const remoteFile: Attachment = { ...file, uri: 'files/attachments/baseline.pdf', localStatus: 'missing',
+    cloudKey: 'attachments/baseline.pdf', fileHash: 'a'.repeat(64), contentRev: 7, contentSize: 3, pendingContentUpload: false };
+async function availabilityRequest(options: RequestOptions = {}, status: 'available' | 'unrecoverable' | 'empty' = 'available'):
+Promise<OwnedEditorCompleteSaveRequest> {
+    const input = await request({ ...options, events: [] }), initialPayloadJSON = input.checkpoint.payloadJSON;
+    const selected: Attachment = JSON.parse(initialPayloadJSON).attachments.find((row: Attachment) => row.id === file.id);
+    const operation = status === 'empty' ? null : prepareNativeAttachmentDraftAvailability({ version: 1, taskID: 'complete',
+        requestId: '35500000-1111-4111-8111-111111111111', attachmentId: selected.id, identity: getAttachmentDownloadIdentity(selected),
+        beforePayloadJSON: initialPayloadJSON, status, resolvedAttachmentJSON: JSON.stringify(status === 'available'
+            ? { ...selected, uri: ROOT + 'downloaded.pdf', localStatus: 'available' }
+            : { ...selected, cloudKey: undefined, fileHash: undefined, localStatus: 'missing',
+                deletedAt: '2026-10-07T01:00:00.000Z', updatedAt: '2026-10-07T01:00:00.000Z' }) });
+    const payloadJSON = operation?.afterPayloadJSON ?? initialPayloadJSON;
+    return { ...input, version: 4, checkpoint: { ...input.checkpoint, generation: operation ? 2 : 1, payloadJSON },
+        ownedDraft: { version: 5, taskID: 'complete', initialPayloadJSON, beforePayloadJSON: payloadJSON,
+            priorOperations: operation ? [{ kind: 'availability', operation }] : [], managedDirectoryURI: ROOT } satisfies NativeAttachmentDraftLineageInputV5,
+        saveRequest: { ...input.saveRequest, attachments: { ...input.saveRequest.attachments, value: JSON.parse(payloadJSON).attachments } } };
 }
 async function plan(input?: OwnedEditorCompleteSaveRequest): Promise<OwnedEditorCompleteSaveEnvelope> {
     const selected = input ?? await request();
@@ -453,5 +474,105 @@ describe('internal complete owned editor Save', () => {
         unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); const saved = rows(); env = await open(path);
         unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); expect(rows()).toEqual(saved);
         expect((await env.adapter.getData({ rawTasks: true })).tasks).toHaveLength(3);
+    });
+});
+
+
+describe('complete Save4/history5 availability selection', () => {
+    beforeEach(async () => { env = await open(path, seed({ attachments: [remoteFile, link, { ...file, id: 'old-tombstone', deletedAt: AT }] })); });
+    it('saves availability with resolved dirty raw buffers and checklist through the actual writer and exact cold replay', async () => {
+        const input = await availabilityRequest({ edits: { title: 'Literal @title', description: 'Dirty notes 🧪\n#literal' },
+            checklist: [item('one', 'Edited checklist', true)] }), retained = JSON.stringify(input), other = rows().find((row: any) => row.id === 'other');
+        const envelope = await plan(input);
+        expect(envelope.prepared.version).toBe(4); expect(envelope.prepared.decision.prepared.version).toBe(2);
+        expect(unwrap(env.host.validatePreparedOwnedEditorCompleteTaskDraftSave(envelope)).version).toBe(4);
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope));
+        expect(await rawTask()).toMatchObject({ title: 'Literal @title', description: 'Dirty notes 🧪\n#literal', rev: 9,
+            checklist: [item('one', 'Edited checklist', true)] });
+        expect(clone((await rawTask()).attachments)).toEqual(input.saveRequest.attachments.value);
+        expect(rows().find((row: any) => row.id === 'other')).toEqual(other); expect(JSON.stringify(input)).toBe(retained);
+        const saved = rows(); env = await open(path); env.writes.mockClear(); vi.setSystemTime('2027-01-01T00:00:00.000Z');
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); expect(rows()).toEqual(saved); expect(env.writes).not.toHaveBeenCalled();
+    });
+    it('saves the terminal clear and captured timestamp without inventing a new attachment or changing its base', async () => {
+        const input = await availabilityRequest({}, 'unrecoverable'), baseline = clone(input.saveRequest.attachments.base), envelope = await plan(input);
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope));
+        const selected = (await rawTask()).attachments!.find((row) => row.id === file.id)!;
+        expect(selected).toMatchObject({ id: file.id, uri: remoteFile.uri, localStatus: 'missing', deletedAt: '2026-10-07T01:00:00.000Z' });
+        expect(selected.cloudKey).toBeUndefined(); expect(selected.fileHash).toBeUndefined();
+        const durable = JSON.parse((rows().find((row: any) => row.id === 'complete') as any).attachments)[0];
+        expect(durable).not.toHaveProperty('cloudKey'); expect(durable).not.toHaveProperty('fileHash');
+        expect(input.saveRequest.attachments.base).toEqual(baseline); expect((await rawTask()).attachments).toHaveLength(3);
+    });
+    it.each(['tombstone', 'H2'] as const)('preserves the actual concurrent %s instead of reviving the stale downloaded generation', async (mode) => {
+        const input = await availabilityRequest({ edits: { description: 'Saved draft note' } });
+        const fresh = { ...input.saveRequest.attachments.base[0], ...(mode === 'tombstone' ? { deletedAt: '2026-10-06T00:00:00.000Z' }
+            : { fileHash: 'b'.repeat(64), contentRev: 8, cloudKey: 'attachments/new-generation.pdf' }) };
+        env.db.prepare('UPDATE tasks SET attachments = ? WHERE id = ?').run(JSON.stringify([fresh, link, { ...file, id: 'old-tombstone', deletedAt: AT }]), 'complete');
+        const envelope = await plan(input); expect(after(envelope).attachments![0]).toEqual(fresh);
+        const validation = unwrap(env.host.validatePreparedOwnedEditorCompleteTaskDraftSave(envelope));
+        expect(validation.settlementPlan).toContainEqual({ attachment: input.saveRequest.attachments.value[0], reason: 'uncommitted-draft' });
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); expect(clone((await rawTask()).attachments![0])).toEqual(fresh);
+    });
+    it('rejects crosswired outer/history/checkpoint and count proofs before any actual writer call', async () => {
+        const input = await availabilityRequest({ edits: { title: 'Changed' } }), before = rows();
+        const mutate: Array<(value: any) => void> = [
+            (value) => { value.version = 2; }, (value) => { value.version = 3; }, (value) => { value.ownedDraft.version = 4; },
+            (value) => { value.checkpoint.generation = 1; }, (value) => { value.checkpoint.taskID = 'other'; },
+            (value) => { value.checkpoint.payloadJSON += ' '; }, (value) => { value.ownedDraft.priorOperations.push(clone(value.ownedDraft.priorOperations[0])); },
+            (value) => { value.ownedDraft.priorOperations = Array.from({ length: 129 }, () => clone(value.ownedDraft.priorOperations[0])); },
+        ];
+        for (const change of mutate) { const wrong = clone(input); change(wrong); expect(await env.host.prepareOwnedEditorCompleteTaskDraftSave(wrong)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } }); }
+        const envelope = await plan(input), wrong = clone(envelope); wrong.prepared.version = 3;
+        expect(env.host.validatePreparedOwnedEditorCompleteTaskDraftSave(wrong)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(rows()).toEqual(before); expect(env.writes).not.toHaveBeenCalled();
+    });
+    it('retains full checkpoint correspondence and keeps the legacy ordinary file-edit writer sealed', async () => {
+        const input = await availabilityRequest({ edits: { title: 'Resolved' } }), original = clone(input);
+        const payload = JSON.parse(input.checkpoint.payloadJSON); payload.raw.title = 'Unresolved';
+        input.checkpoint.payloadJSON = input.ownedDraft.beforePayloadJSON = JSON.stringify(payload);
+        expect(await env.host.prepareOwnedEditorCompleteTaskDraftSave(input)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const envelope = await plan(original), old = createOwnedEditorFileEditTaskDraftSaveMethods(env.deps);
+        expect(old.validatePreparedOwnedEditorFileEditTaskDraftSave(envelope as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(env.writes).not.toHaveBeenCalled();
+    });
+    it('accepts empty availability history as an exact no-op without baseline cleanup or device writes', async () => {
+        const input = await availabilityRequest({}, 'empty'), before = rows(), envelope = await plan(input);
+        expect(envelope.prepared.decision.kind).toBe('noop'); expect(unwrap(env.host.validatePreparedOwnedEditorCompleteTaskDraftSave(envelope)).settlementPlan).toEqual([]);
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); expect(rows()).toEqual(before); expect(env.writes).not.toHaveBeenCalled();
+    });
+    it.each(['commits', 'after'] as const)('retries a retained Save4 after %s failure and cold-replays the exact saved row', async (fault) => {
+        const envelope = await plan(await availabilityRequest({ edits: { description: 'Retained notes' } })); env.fault[fault] = 100;
+        expect(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        env.fault[fault] = 0; unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); const saved = rows(); env = await open(path);
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); expect(rows()).toEqual(saved); expect((await rawTask()).attachments![0].uri).toBe(ROOT + 'downloaded.pdf');
+    });
+    it.each([2, 3, 4] as const)('documents the existing false-member projection for outer%s without a pre-Save raw rewrite', async (version) => {
+        const current = JSON.parse((rows().find((row: any) => row.id === 'complete') as any).attachments);
+        current[0].pendingContentUpload = false;
+        env.db.prepare('UPDATE tasks SET attachments = ? WHERE id = ?').run(JSON.stringify(current), 'complete');
+        const before = rows(), input = version === 4 ? await availabilityRequest({ edits: { title: 'Compared writer' } })
+            : await request({ historyVersion: version === 3 ? 4 : 3, events: [], edits: { title: 'Compared writer' } });
+        expect(input.saveRequest.attachments.base[0]).not.toHaveProperty('pendingContentUpload');
+        const envelope = await plan(input), owned = createOwnedTaskEditorResumeMethods(env.deps);
+        expect(await owned.checkOwnedTaskEditorResume({ version: version - 1, kind: 'owned-editor-resume',
+            checkpoint: input.checkpoint, ownedDraft: input.ownedDraft })).toMatchObject({ ok: true });
+        expect(rows()).toEqual(before); expect(env.writes).not.toHaveBeenCalled();
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope));
+        const persisted = JSON.parse((rows().find((row: any) => row.id === 'complete') as any).attachments);
+        expect(persisted[0]).not.toHaveProperty('pendingContentUpload');
+        expect(persisted).toEqual(after(envelope).attachments);
+    });
+    it('keeps selected Cancel/Undo inner2 and cold replays the saved availability without recopying', async () => {
+        const cancel = await plan(await availabilityRequest({ intent: 'cancel', edits: { title: 'Cancelled availability' } }));
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(cancel)); env = await open(path);
+        const request = { requestId: '88888888-1111-4111-8111-111111111111', cancelRequestId: ID };
+        const prepared = unwrap(await env.host.prepareOwnedEditorCompleteTaskCancellationUndo({ request, cancel })).prepared;
+        expect(prepared.version).toBe(2); expect(prepared.cancel.request.version).toBe(4);
+        const undo = { request, prepared }; unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskCancellationUndo(undo));
+        expect((await rawTask()).status).toBe('next');
+        expect(clone((await rawTask()).attachments)).toEqual(cancel.request.saveRequest.attachments.value);
+        const saved = rows(); env = await open(path); env.writes.mockClear(); unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskCancellationUndo(undo));
+        expect(rows()).toEqual(saved); expect(env.writes).not.toHaveBeenCalled();
     });
 });

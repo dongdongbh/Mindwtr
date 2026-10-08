@@ -76,7 +76,7 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
         let recurrence: Any = recurring ? try json(["rule": "daily", "strategy": "strict", "count": 3, "seriesId": taskID]) : NSNull()
         _ = try sql("INSERT INTO tasks(id,title,description,status,taskMode,contexts,tags,attachments,checklist,recurrence,dueDate,createdAt,updatedAt,rev,revBy) VALUES (?,?,'Saved notes','next','list','[]','[]',?,?,?,?,?,?,1,'fixture')", [taskID, "Saved title", json(attachments), json(items), recurrence, recurring ? "2026-10-05" : NSNull(), at, at])
         _ = try sql("INSERT INTO tasks(id,title,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES ('unrelated','Untouched','inbox','[]','[]','[]',?,?,1,'fixture')", [at, at])
-        let host = core(faults); if let jobs { await host.configureAttachmentHost(jobs) }; _ = try await host.start()
+        let host = core(faults); if let jobs { try await host.configureAttachmentHost(jobs) }; _ = try await host.start()
         let opening = try object(await host.call("editorModel", argumentsJSON: json([taskID])))
         let draft = try XCTUnwrap(opening["draft"] as? [String: Any]); scheduleBase = try XCTUnwrap(opening["scheduleBase"] as? [String: Any])
         var edits: [String: Any] = edited ? ["title": title, "description": notes] : [:]
@@ -359,7 +359,7 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
         try released(); await cold.close()
         let again = core(noWrites()), hooks = NativeAttachmentHostHooks(); var jobs = 0
         hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }
-        await again.configureAttachmentHost(hooks)
+        try await again.configureAttachmentHost(hooks)
         let reopened = try object(await again.start()); XCTAssertNil(reopened["recovery"])
         XCTAssertEqual(jobs, 0); XCTAssertEqual(try rows(), savedRows); try released()
     }
@@ -375,7 +375,7 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
         XCTAssertTrue(originalURI.hasPrefix(frozen.original.absoluteString))
         let published = managed.appendingPathComponent(originalTarget.lastPathComponent), bytes = try Data(contentsOf: published), identity = try inode(published)
         let cold = core(noWrites()), hooks = NativeAttachmentHostHooks(); var jobs = 0
-        hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }; await cold.configureAttachmentHost(hooks)
+        hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }; try await cold.configureAttachmentHost(hooks)
         let recovered = try recovery(await cold.start())
         XCTAssertEqual(try json(XCTUnwrap(recovered["result"])), try json(object(frozen.result)))
         XCTAssertEqual(jobs, 0); XCTAssertEqual(try rows(), savedRows); XCTAssertEqual(try Data(contentsOf: published), bytes)
@@ -395,7 +395,7 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
                     [json([attachment]), at, at])
             } else { _ = try sql("UPDATE tasks SET attachments=? WHERE id='unrelated'", [json([attachment])]) }
             let savedRows = try rows(), cold = core(noWrites()), hooks = NativeAttachmentHostHooks(); var jobs = 0
-            hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }; await cold.configureAttachmentHost(hooks)
+            hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }; try await cold.configureAttachmentHost(hooks)
             let recovered = try recovery(await cold.start())
             XCTAssertEqual(try json(XCTUnwrap(recovered["result"])), try json(object(frozen.result)))
             XCTAssertEqual(jobs, 0, "a fresh old/current reference selects keep before native file IO")

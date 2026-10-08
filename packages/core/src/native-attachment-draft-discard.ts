@@ -2,7 +2,8 @@ import { planAttachmentDraftSettlement } from './attachment-draft-settlement';
 import { readNativeAttachmentDraftFrozen, readNativeAttachmentDraftFrozenV2, readNativeAttachmentDraftPayload,
     readNativeAttachmentDraftRemoveFrozen, validateNativeAttachmentDraftLineage,
     validateNativeAttachmentDraftLineageV2, validateNativeAttachmentDraftLineageV3, validateNativeAttachmentDraftLineageV4,
-    type NativeAttachmentDraftOperationV3, type NativeAttachmentDraftOperationV4 } from './native-attachment-draft';
+    readNativeAttachmentDraftAvailabilityFrozen, validateNativeAttachmentDraftLineageV5,
+    type NativeAttachmentDraftOperationV3, type NativeAttachmentDraftOperationV4, type NativeAttachmentDraftOperationV5 } from './native-attachment-draft';
 
 export type NativeAttachmentDraftDiscardPhase =
     'intent' | 'stagePrepared' | 'stageFilled' | 'published' | 'resultDurable' | 'checkpointed';
@@ -295,5 +296,102 @@ function prepareMixedCandidates(input: unknown, version: 2 | 3): NativeAttachmen
         if (utf8Bytes(encoded, OUTPUT_BYTES) > OUTPUT_BYTES) invalid();
         return Object.freeze({ version, kind: 'owned-mixed-discard-candidates', taskID: captured.taskID,
             historyVersion: captured.historyVersion, candidates: Object.freeze(candidates) }) as NativeAttachmentDraftDiscardCandidatesV3 | NativeAttachmentDraftDiscardCandidatesV4;
+    } catch { return invalid(); }
+}
+
+export type NativeAttachmentDraftDiscardInputV5 = Readonly<{
+    version: 4; historyVersion: 5; taskID: string; managedDirectoryURI: string;
+    initialPayloadJSON: string; checkpointPayloadJSON: string;
+    operations: readonly Readonly<{ kind: 'availability'; phase: 'intent' | 'checkpointed'; preparedJSON: string }>[];
+}>;
+export type NativeAttachmentDraftDiscardCandidatesV5 = Readonly<{
+    version: 4; kind: 'owned-availability-discard-candidates'; taskID: string; historyVersion: 5;
+    candidates: readonly Readonly<{ requestId: string; attachmentId: string; targetURI: string; reason: 'uncommitted-draft' }>[];
+}>;
+
+const captureAvailability = (input: unknown): NativeAttachmentDraftDiscardInputV5 => {
+    const value = fields(input, ['version', 'historyVersion', 'taskID', 'managedDirectoryURI',
+        'initialPayloadJSON', 'checkpointPayloadJSON', 'operations']);
+    if (value.version !== 4 || value.historyVersion !== 5) invalid();
+    const taskID = text(value.taskID, 500), managedDirectoryURI = text(value.managedDirectoryURI, 16 * 1024);
+    const initialPayloadJSON = text(value.initialPayloadJSON, PAYLOAD_BYTES);
+    const checkpointPayloadJSON = text(value.checkpointPayloadJSON, PAYLOAD_BYTES);
+    if (!Array.isArray(value.operations) || Object.getPrototypeOf(value.operations) !== Array.prototype) invalid();
+    const length = Object.getOwnPropertyDescriptor(value.operations, 'length')?.value as unknown;
+    if (typeof length !== 'number' || length > 128 || Reflect.ownKeys(value.operations).length !== length + 1) invalid();
+    const header = `{"version":4,"historyVersion":5,"taskID":${quote(taskID)},`
+        + `"managedDirectoryURI":${quote(managedDirectoryURI)},"initialPayloadJSON":${quote(initialPayloadJSON)},`
+        + `"checkpointPayloadJSON":${quote(checkpointPayloadJSON)},"operations":[]}`;
+    let encodedBytes = utf8Bytes(header, INPUT_BYTES);
+    if (encodedBytes > INPUT_BYTES) invalid();
+    const operations: NativeAttachmentDraftDiscardInputV5['operations'][number][] = [], seen = new Set<object>();
+    for (let index = 0; index < length; index++) {
+        const descriptor = Object.getOwnPropertyDescriptor(value.operations, String(index));
+        if (!descriptor?.enumerable || !own(descriptor, 'value')) invalid();
+        const raw: unknown = descriptor!.value;
+        if (!raw || typeof raw !== 'object' || seen.has(raw)) invalid();
+        seen.add(raw as object);
+        const operation = fields(raw, ['kind', 'phase', 'preparedJSON']);
+        if (operation.kind !== 'availability' || operation.phase !== 'intent' && operation.phase !== 'checkpointed'
+            || index < length - 1 && operation.phase !== 'checkpointed') invalid();
+        const captured = { kind: 'availability', phase: operation.phase,
+            preparedJSON: text(operation.preparedJSON, PREPARED_BYTES) } as NativeAttachmentDraftDiscardInputV5['operations'][number];
+        encodedBytes += utf8Bytes(`{"kind":"availability","phase":${quote(captured.phase)},`
+            + `"preparedJSON":${quote(captured.preparedJSON)}}`, INPUT_BYTES) + (index ? 1 : 0);
+        if (encodedBytes > INPUT_BYTES) invalid();
+        operations.push(captured);
+    }
+    return { version: 4, historyVersion: 5, taskID, managedDirectoryURI, initialPayloadJSON, checkpointPayloadJSON, operations };
+};
+
+/** Availability metadata candidates only; native must separately prove the installed file generation and live references. */
+export function prepareNativeAttachmentDraftDiscardCandidatesV5(input: unknown): NativeAttachmentDraftDiscardCandidatesV5 {
+    try {
+        const captured = captureAvailability(input);
+        const parse = (json: string): unknown => parsed(json, { remaining: 100_000 }, 64);
+        parse(captured.initialPayloadJSON); parse(captured.checkpointPayloadJSON);
+        const history: NativeAttachmentDraftOperationV5[] = captured.operations.map((entry) => {
+            const raw = parse(entry.preparedJSON);
+            const value = fields(raw, ['version', 'kind', 'taskID', 'requestId', 'attachmentId', 'identity',
+                'beforePayloadJSON', 'status', 'resolvedAttachmentJSON', 'afterPayloadJSON']);
+            parse(text(value.beforePayloadJSON, PAYLOAD_BYTES)); parse(text(value.afterPayloadJSON, PAYLOAD_BYTES));
+            return { kind: 'availability', operation: readNativeAttachmentDraftAvailabilityFrozen(raw) };
+        });
+        const last = history[history.length - 1];
+        const pending = Boolean(last) && captured.operations[captured.operations.length - 1].phase === 'intent';
+        const lineage = (priorOperations: typeof history, beforePayloadJSON: string) => validateNativeAttachmentDraftLineageV5({
+            version: 5, taskID: captured.taskID, managedDirectoryURI: captured.managedDirectoryURI,
+            initialPayloadJSON: captured.initialPayloadJSON, beforePayloadJSON, priorOperations,
+        });
+        const latestPayloadJSON = pending ? last.operation.afterPayloadJSON : captured.checkpointPayloadJSON;
+        lineage(history, latestPayloadJSON);
+        if (pending) {
+            if (captured.checkpointPayloadJSON !== last.operation.beforePayloadJSON) invalid();
+            lineage(history.slice(0, -1), captured.checkpointPayloadJSON);
+        }
+        const opening = readNativeAttachmentDraftPayload(captured.initialPayloadJSON, captured.taskID);
+        const latest = readNativeAttachmentDraftPayload(latestPayloadJSON, captured.taskID);
+        const planned = planAttachmentDraftSettlement({ baselineAttachments: opening.baselineAttachments,
+            draftAttachments: latest.attachments, committedAttachments: opening.baselineAttachments });
+        const available = history.flatMap(({ operation }) => operation.status === 'available' ? [{ operation,
+            attachments: readNativeAttachmentDraftPayload(operation.afterPayloadJSON, captured.taskID).attachments }] : []);
+        const baselineURIs = new Set(opening.baselineAttachments.filter((row) => row.kind === 'file').map((row) => row.uri));
+        const targets = new Set<string>();
+        const candidates: NativeAttachmentDraftDiscardCandidatesV5['candidates'][number][] = [];
+        for (const candidate of planned) {
+            // Baseline tombstones can appear in the generic plan but confer no ownership on this projection.
+            if (candidate.reason !== 'uncommitted-draft') continue;
+            const attachmentId = candidate.attachment.id, targetURI = candidate.attachment.uri;
+            if (baselineURIs.has(targetURI) || targets.has(targetURI)) invalid();
+            const bindings = available.filter(({ operation, attachments }) => operation.attachmentId === attachmentId
+                && attachments.some((row) => row.id === attachmentId && row.uri === targetURI));
+            if (bindings.length !== 1) invalid();
+            targets.add(targetURI);
+            candidates.push(Object.freeze({ requestId: bindings[0].operation.requestId, attachmentId, targetURI, reason: 'uncommitted-draft' }));
+        }
+        const result: NativeAttachmentDraftDiscardCandidatesV5 = { version: 4, kind: 'owned-availability-discard-candidates',
+            taskID: captured.taskID, historyVersion: 5, candidates: Object.freeze(candidates) };
+        if (utf8Bytes(JSON.stringify(result), OUTPUT_BYTES) > OUTPUT_BYTES) invalid();
+        return Object.freeze(result);
     } catch { return invalid(); }
 }

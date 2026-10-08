@@ -3,7 +3,7 @@ import type { Attachment } from './types';
 import { computeSha256Hex } from './attachment-hash';
 import { createMobileAttachmentFiles } from './mobile-attachment-files';
 import { SyncEncryptionPartlyEncryptedError } from './sync-encryption';
-import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from './mobile-attachment-common';
+import { createMobileAttachmentCommon, type MobileAttachmentCommonHost, type MobileAttachmentUploadTask } from './mobile-attachment-common';
 import { AttachmentFileInstallerUnavailableError, type AttachmentFileInstallResult } from './mobile-attachment-installer';
 import { defaultSyncCryptoPrimitives, SYNC_CRYPTO_DEFAULT_KDF_PARAMS, type SyncKeyMaterial } from './sync-crypto';
 import { WebDavRemoteWriteConflictError } from './webdav';
@@ -31,6 +31,7 @@ const setup = (options: {
   installerMayBeMissing?: boolean;
   timersPaused?: boolean;
   createUploadTask?: () => MobileAttachmentUploadTask | null;
+  preparePlaintextDownload?: MobileAttachmentCommonHost['preparePlaintextDownload'];
 } = {}) => {
   const memory = createMemoryFileSystem({ sha256: options.sha256 });
   const { log, lines } = createRecordingLog();
@@ -64,11 +65,106 @@ const setup = (options: {
     installerMayBeMissing: () => options.installerMayBeMissing === true,
     timersPaused: () => options.timersPaused === true,
     uploads: { createUploadTask },
+    preparePlaintextDownload: options.preparePlaintextDownload,
   });
   return { common, files, memory, lines, installAttachmentFileGeneration, logSyncEncryptionEvent, createUploadTask };
 };
 
 const stagedFiles = (keys: Iterable<string>) => [...keys].filter((key) => key.includes('.mindwtr-download-'));
+const SOURCE_TOKEN = '27bc6994-c737-48ea-8e69-8c2f963858c5';
+
+describe('mobile attachment common: private plaintext preparation', () => {
+  it('omits preparation when the host does not bind it', () => {
+    expect(setup().common).not.toHaveProperty('prepareAttachmentDownloadBytes');
+  });
+
+  it('hands off verified plaintext without mutating metadata or touching files', async () => {
+    const preparePlaintextDownload = vi.fn(async () => ({ kind: 'prepared-source' as const, sourceToken: SOURCE_TOKEN }));
+    const { common, memory, installAttachmentFileGeneration } = setup({ preparePlaintextDownload });
+    const payload = bytes(1, 2, 3);
+    const hash = (await computeSha256Hex(payload))!;
+    const target = Object.freeze(attachment({ fileHash: hash.toUpperCase() }));
+    const before = { ...target };
+    const controller = new AbortController();
+
+    await expect(common.prepareAttachmentDownloadBytes!(target, target.uri!, payload, controller.signal))
+      .resolves.toEqual({ kind: 'prepared-plaintext', sourceToken: SOURCE_TOKEN, sha256: hash, size: 3 });
+    expect(preparePlaintextDownload).toHaveBeenCalledWith({
+      attachmentId: target.id, targetURI: target.uri, expectation: { kind: 'absent' }, sha256: hash, size: 3,
+    }, payload, controller.signal);
+    expect(target).toEqual(before);
+    expect(memory.calls).toEqual([]);
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it('rejects a wrong plaintext hash before the source callback', async () => {
+    const preparePlaintextDownload = vi.fn(async () => ({ kind: 'prepared-source' as const, sourceToken: SOURCE_TOKEN }));
+    const { common, memory, installAttachmentFileGeneration } = setup({ preparePlaintextDownload });
+
+    await expect(common.prepareAttachmentDownloadBytes!(attachment({ fileHash: 'a'.repeat(64) }), `${MANAGED}att-1.txt`, bytes(1)))
+      .rejects.toThrow('Integrity validation failed');
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+    expect(memory.calls).toEqual([]);
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['null', null],
+    ['missing kind', { sourceToken: SOURCE_TOKEN }],
+    ['missing token', { kind: 'prepared-source' }],
+    ['extra field', { kind: 'prepared-source', sourceToken: SOURCE_TOKEN, path: '/tmp/source' }],
+    ['installed', { kind: 'installed', sourceToken: SOURCE_TOKEN }],
+    ['uppercase UUID', { kind: 'prepared-source', sourceToken: SOURCE_TOKEN.toUpperCase() }],
+    ['UUIDv1', { kind: 'prepared-source', sourceToken: SOURCE_TOKEN.replace('-48ea-', '-18ea-') }],
+    ['wrong variant', { kind: 'prepared-source', sourceToken: SOURCE_TOKEN.replace('-8e69-', '-7e69-') }],
+    ['path token', { kind: 'prepared-source', sourceToken: `${MANAGED}source` }],
+  ])('rejects a %s source reply without an installer fallback', async (_name, reply) => {
+    const { common, memory, installAttachmentFileGeneration } = setup({ preparePlaintextDownload: async () => reply as never });
+
+    await expect(common.prepareAttachmentDownloadBytes!(attachment(), `${MANAGED}att-1.txt`, bytes(1)))
+      .rejects.toThrow('Attachment download source is invalid');
+    expect(memory.calls).toEqual([]);
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it('propagates a source refusal without scratch writes or fallback', async () => {
+    const failure = new Error('Source refused');
+    const { common, memory, installAttachmentFileGeneration } = setup({ preparePlaintextDownload: async () => { throw failure; } });
+
+    await expect(common.prepareAttachmentDownloadBytes!(attachment(), `${MANAGED}att-1.txt`, bytes(1))).rejects.toBe(failure);
+    expect(memory.calls).toEqual([]);
+    expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
+  });
+
+  it('checks cancellation before admission and after the source callback settles', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Canceled selected download');
+    const preparePlaintextDownload = vi.fn(async () => {
+      controller.abort(reason);
+      return { kind: 'prepared-source' as const, sourceToken: SOURCE_TOKEN };
+    });
+    const { common, memory } = setup({ preparePlaintextDownload });
+
+    await expect(common.prepareAttachmentDownloadBytes!(attachment(), `${MANAGED}att-1.txt`, bytes(1), controller.signal))
+      .rejects.toBe(reason);
+    expect(preparePlaintextDownload).toHaveBeenCalledTimes(1);
+    await expect(common.prepareAttachmentDownloadBytes!(attachment(), `${MANAGED}att-1.txt`, bytes(1), controller.signal))
+      .rejects.toBe(reason);
+    expect(preparePlaintextDownload).toHaveBeenCalledTimes(1);
+    expect(memory.calls).toEqual([]);
+  });
+
+  it('keeps ordinary installation on the installer when a source adapter is bound', async () => {
+    const preparePlaintextDownload = vi.fn(async () => ({ kind: 'prepared-source' as const, sourceToken: SOURCE_TOKEN }));
+    const { common, memory, installAttachmentFileGeneration } = setup({ preparePlaintextDownload });
+    const target = attachment();
+
+    await expect(common.installAttachmentDownloadBytes(target, MANAGED, target.uri!, bytes(1), { kind: 'absent' })).resolves.toBe(true);
+    expect(installAttachmentFileGeneration).toHaveBeenCalledTimes(1);
+    expect(memory.read(target.uri!)).toEqual(bytes(1));
+    expect(preparePlaintextDownload).not.toHaveBeenCalled();
+  });
+});
 
 describe('mobile attachment common: download installation', () => {
   it('stages the bytes in the managed folder and installs that exact generation', async () => {
@@ -303,6 +399,41 @@ describe('mobile attachment common: streamed uploads', () => {
 });
 
 describe('mobile attachment common: pre-passes', () => {
+  it.each(['prepare', 'winner'] as const)('refuses optional bespoke %s hash admission before reading oversized bytes', async (kind) => {
+    const { common, memory, files } = setup();
+    const item = attachment({ cloudKey: 'attachments/att-1.txt', fileHash: 'a'.repeat(64), contentSize: 1, contentMtimeMs: 0 });
+    memory.put(item.uri!, bytes(1, 2, 3));
+    const before = { ...item };
+    const hash = vi.spyOn(files, 'computeAttachmentFileHash');
+    const pending = kind === 'prepare'
+      ? common.prepareBespokeAttachmentContentCandidate(item, item.uri!, 2)
+      : common.checkBespokeAttachmentRemoteWinner(item, item.uri!, 2);
+
+    await expect(pending).rejects.toBeInstanceOf(AttachmentUploadTooLargeError);
+    expect(item).toEqual(before);
+    expect(hash).not.toHaveBeenCalled();
+    expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
+  });
+
+  it('invokes optional upload stat admission before copying an empty foreign source', async () => {
+    const { common, memory } = setup();
+    const uri = 'file:///data/files/provider-copy.txt';
+    memory.put(uri, new Uint8Array(0));
+    const original = attachment({ uri });
+    const attachmentsById = new Map([[original.id, original]]);
+    const refusal = new AttachmentUploadTooLargeError(1, 0);
+    const assertUploadStat = vi.fn(() => { throw refusal; });
+
+    await expect(common.migrateAttachmentsLocallyBeforeSync(attachmentsById, undefined, 0, assertUploadStat))
+      .rejects.toBe(refusal);
+
+    expect(assertUploadStat).toHaveBeenCalledTimes(1);
+    expect(assertUploadStat).toHaveBeenCalledWith(expect.objectContaining({ size: 0 }));
+    expect(attachmentsById.get(original.id)).toBe(original);
+    expect([...memory.files.keys()]).toEqual([uri]);
+    expect(memory.calls.filter((call) => /^(readBytes|readBytesRange|copy|sha256|writeBytes|move|delete) /.test(call))).toEqual([]);
+  });
+
   it('migrates at most three outside files per pass and drops unreadable ones from the round', async () => {
     const { common, memory } = setup();
     const attachmentsById = new Map<string, Attachment>();

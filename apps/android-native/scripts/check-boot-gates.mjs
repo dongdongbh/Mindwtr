@@ -1273,7 +1273,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*\.\.\.\(attachmentsHost \? \{ attachments: attachmentsHost \} : \{\}\) \}\)/);
+    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
+    assert.match(hostEntry, /const result = await \(iosSelfHostedProjectAttachments \?\? iosManualSync\)\?\.prepareAttachmentAvailableDetailed\?\.\(attachment\);/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
     // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
     // boolean for a boolean, a Menu command for menuCommand's name, text for the rest; MENU names exactly host-entry's
@@ -1328,7 +1329,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         assert(sites >= 26, 'core\'s receipt payloads parsed');
         // A name is a receipt payload's, or a core write that keeps no payload at all (Settings › Sync's screen commands).
         for (const name of unjournaledCore) assert([...receiptNames.values()].flat().includes(name) || receiptNames.get(name)?.length === 0, `core's unjournaled ${name} is a core write's receipt payload, or a payload-less core write`);
-        const menuKeys = [...table('MENU_COMMANDS').matchAll(/\n    (\w+): \(input\) => contract\.(\w+)\(input\),/g)].map(([, key, write]) => ({ key, writes: [write] }));
+        const menuKeys = [...table('MENU_COMMANDS').matchAll(/\n    (\w+): \((input)?\) => contract\.(\w+)\(\2\),/g)].map(([, key, , write]) => ({ key, writes: [write] }));
         assert.equal(menuKeys.length, table('MENU_COMMANDS').match(/\n    \w+: /g).length, 'every Menu command parsed');
         const keys = [...methods.filter((m) => writes.includes(m.name) && m.name !== 'menuCommand').map((m) => ({ key: m.name, writes: called(m.body) })), ...menuKeys];
         const expected = keys.filter((key) => key.writes.some((write) => unjournaledCore.includes(write) || receiptNames.get(write).some((name) => unjournaledCore.includes(name))))
@@ -2065,7 +2066,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(menuModel, /"savedSearchDelete"\) \+ SETTINGS_KINDS/);
     const kinds = [...[...new RegExp('val MENU_KINDS = setOf\\(([^)]*)\\)').exec(menuModel)[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind),
         ...[...new RegExp('val SETTINGS_KINDS = setOf\\(([^)]*)\\)').exec(source('SettingsModel.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind)];
-    const hostKinds = [...hostEntry.slice(hostEntry.indexOf('const MENU_COMMANDS'), hostEntry.indexOf('};', hostEntry.indexOf('const MENU_COMMANDS'))).matchAll(/^\s+(\w+): \(input\) => contract\.\w+\(input\),$/gm)].map(([, kind]) => kind);
+    const hostKinds = [...hostEntry.slice(hostEntry.indexOf('const MENU_COMMANDS'), hostEntry.indexOf('};', hostEntry.indexOf('const MENU_COMMANDS'))).matchAll(/^\s+(\w+): \((input)?\) => contract\.\w+\(\2\),$/gm)].map(([, kind]) => kind);
     // Settings › Sync's screen commands are Menu commands too, sent by SyncSettings.kt through CoreHost.syncCommand, never by send().
     const syncKinds = [.../val SYNC_COMMANDS = setOf\(([^)]*)\)/.exec(source('SyncSettings.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     // Settings › AI's screen writes too (its open, a key, a base URL), sent by AISettings.kt; its controls' setAISetting is a Settings kind.
@@ -3614,6 +3615,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 }
 
 const fakeCore = `
+export { SYNC_BACKEND_KEY, CLOUD_PROVIDER_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
+export { getBaseSyncUrl } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-paths.ts'))};
+import { NativeAttachmentCleanupUnconfirmedError as RealCleanupError } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
+export { RealCleanupError as NativeAttachmentCleanupUnconfirmedError };
 import { mapSqliteTaskRow as hydrateTask285 } from ${JSON.stringify(resolve(app, '../../packages/core/src/sqlite-adapter.ts'))};
 globalThis.hydrateTaskAttachments285 = (attachments) => hydrateTask285({ id: 'task285', attachments: JSON.stringify(attachments) }).attachments;
 export { planAttachmentOpen, getAttachmentResolutionMessage } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-editor-model.ts'))};
@@ -3621,10 +3626,11 @@ import { logInfo as realLogInfo, setLogger as setRealLogger } from ${JSON.string
 export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
 export { validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftLineageV3,
     validateNativeAttachmentDraftBeginV4, validateNativeAttachmentDraftLineageV4,
+    validateNativeAttachmentDraftBeginV5, validateNativeAttachmentDraftLineageV5,
     prepareNativeAttachmentDraftAddV4, prepareNativeAttachmentDraftRemoveV4, completeNativeAttachmentDraftAddV4,
     prepareNativeAttachmentDraftAddV3, prepareNativeAttachmentDraftRemoveV3,
-    readNativeAttachmentDraftRemoveFrozen } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft.ts'))};
-export { prepareNativeAttachmentDraftDiscardCandidates, prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4 } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft-discard.ts'))};
+    readNativeAttachmentDraftRemoveFrozen, prepareNativeAttachmentDraftAvailability } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft.ts'))};
+export { prepareNativeAttachmentDraftDiscardCandidates, prepareNativeAttachmentDraftDiscardCandidatesV3, prepareNativeAttachmentDraftDiscardCandidatesV4, prepareNativeAttachmentDraftDiscardCandidatesV5 } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-draft-discard.ts'))};
 export { prepareNativeAttachmentCleanupWitness, isNativeAttachmentCleanupWitnessEligible } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
 import { createOwnedEditorFileEditTaskDraftSaveMethods as createRealMixedSaveMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-owned-file-edit-save.ts'))};
 import { createNativeHostContract as createRealCompleteContract } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract.ts'))};
@@ -3733,7 +3739,8 @@ export function setNativeReplayTokens(mode) { globalThis.replayTokens = mode; }
 export async function pruneNativeRequestReceipts() { return 3; }
 export function setStorageAdapter(adapter) { globalThis.adapter = adapter; }
 export function getStorageAdapter() { return globalThis.adapter; }
-export async function flushPendingSave() { globalThis.events.push('flush'); }
+export async function flushPendingSave() { globalThis.events.push('flush'); await globalThis.flushHold;
+  if (globalThis.flushError) throw new Error(globalThis.flushError); }
 export function getPersistenceStatus() { globalThis.onPersistenceStatus?.(); return globalThis.persistenceStatus ||
   { generation: 0, queued: false, inFlight: false, immediate: false, retrying: false, failed: false }; }
 export function isSupportedLanguage(value) { return ['en', 'zh', 'fa', 'de'].includes(value); }
@@ -3822,10 +3829,42 @@ export function createNativeHostContract(bindings = {}) {
     async addAttachmentFile(input) { globalThis.attachmentInputs.push(['draftAddFile', input]); return globalThis.attachmentReply; },
     async removeAttachment(input) { globalThis.attachmentInputs.push(['draftRemove', input]); return globalThis.attachmentReply; },
     getProjectAttachmentEditOptions(input) {
+      globalThis.projectOptionsReads = (globalThis.projectOptionsReads ?? 0) + 1;
       const project = globalThis.ownerProjects.find((item) => item.id === input.projectId);
       return project && !project.deletedAt && !project.purgedAt
         ? { ok: true, value: { revision: 'project-revision', project, canEdit: project.status !== 'archived' } }
         : { ok: false, error: { code: 'STALE_REVISION', message: 'Project unavailable' } };
+    },
+    async runSyncEncryptionAction(input) {
+      globalThis.encryptionInputs ??= [];
+      globalThis.encryptionInputs.push(input);
+      if (bindings.syncSettings?.encryption?.mode !== 'saved-webdav-or-local'
+          || bindings.syncSettings.encryption.unlockOnly !== undefined) throw new Error('Missing selected WebDAV or local encryption capability');
+      return globalThis.encryptionReply ?? { ok: true, value: { toasts: [], passphrase: null } };
+    },
+    getSyncSettings() { return { ok: true, value: { backend: { options: ['off', 'webdav', 'selfhosted', 'dropbox', 'cloudkit', 'file'].map(option => ({ option })) } } }; },
+    async openSyncSettings(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['openSyncSettings', input]); return this.getSyncSettings(); },
+    async selectSyncBackend(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['selectSyncBackend', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
+    async saveSyncBackend(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['saveSyncBackend', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
+    async syncNow(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['syncNow', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
+    async testSyncConnection(input) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['testSyncConnection', input]); return globalThis.foregroundReply ?? { ok: true, value: { toasts: [] } }; },
+    async downloadAttachment(input) {
+      globalThis.attachmentInputs.push(['downloadAttachment', input]);
+      globalThis.downloadHosts.push(bindings.attachments);
+      await globalThis.downloadHold;
+      if (globalThis.downloadFatal) throw new RealCleanupError();
+      if (globalThis.downloadError) throw new Error(globalThis.downloadError);
+      globalThis.afterDownload?.();
+      return globalThis.attachmentReply;
+    },
+    async downloadRelocatedProjectAttachment(input, currentTargetURI) {
+      globalThis.attachmentInputs.push(['downloadRelocatedProjectAttachment', input, currentTargetURI]);
+      globalThis.downloadHosts.push(bindings.attachments);
+      await globalThis.downloadHold;
+      if (globalThis.downloadFatal) throw new RealCleanupError();
+      if (globalThis.downloadError) throw new Error(globalThis.downloadError);
+      globalThis.afterDownload?.();
+      return globalThis.attachmentReply;
     },
     async openAttachment(input) { globalThis.attachmentInputs.push(['openAttachment', input]); return globalThis.attachmentReply; },
     async settleTaskDraftAttachments(input) { globalThis.attachmentInputs.push(['settleTaskDraftAttachments', input]); return globalThis.attachmentReply; },
@@ -4015,8 +4054,9 @@ export function createMobileAttachmentInstaller() {
   if (!globalThis.localAttachmentTest) throw new Error('local attachments unbound');
   return { installAttachmentFileGeneration: async () => { throw new Error('no remote installer call'); } };
 }
-export function createMobileAttachmentCommon() {
+export function createMobileAttachmentCommon(host) {
   if (!globalThis.localAttachmentTest) throw new Error('local attachments unbound');
+  if (host.preparePlaintextDownload) return { prepareAttachmentDownloadBytes: async () => { throw new Error('Unexpected source creation in Off entry fixture'); } };
   return {};
 }
 export function setSha256HexProvider() {
@@ -4037,7 +4077,7 @@ assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('create
 // device with encryption off would upload plain attachments beside ciphertext. The card's "Check this location again" needs recheck.
 // The cycle names its own folder (an activation's candidate is not the stored one), passed through as it is.
 assert(/probeLocationCiphertext: \(target\) => transitions\.probeSyncLocationCiphertext\(target\),/.test(hostSyncTs), 'the native sync service asks whether the location holds ciphertext');
-assert(/recheck: \(\) => transitions\.recheckPartlyEncryptedLocation\(\),/.test(hostSyncTs), 'the native encryption card rechecks a partly encrypted location');
+assert(/recheck: async \(\) => \{\s*const outcome = await transitions\.recheckPartlyEncryptedLocation\(\);/.test(hostSyncTs), 'the native encryption card rechecks a partly encrypted location');
 const fakeCoreWithSync = `${fakeCore}\n${syncOnly.map((name) => `export const ${name} = () => { throw new Error('${name}: sync is not bound in the gates'); };`).join('\n')}\n`;
 const built = await build({
     entryPoints: [resolve(app, 'bundle/host-entry.ts')], bundle: true, write: false, format: 'iife',
@@ -4046,7 +4086,7 @@ const built = await build({
         plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: fakeCoreWithSync, loader: 'js', resolveDir: app }));
     } }],
 });
-const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, configure = () => {}) => {
+const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, configure = () => {}, source = built.outputFiles[0].text) => {
     const state = {
         fakeData: { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} },
         fakeDataSequence, activationCount: 0, saveCount: 0, queryCount: 0,
@@ -4125,13 +4165,70 @@ const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, c
         },
     };
     configure(state);
-    vm.runInNewContext(built.outputFiles[0].text, state);
+    vm.runInNewContext(source, state);
     return state;
 };
 const poll = async (state, id) => {
     await new Promise((resolveTick) => setImmediate(resolveTick));
     return JSON.parse(state.MindwtrHost.poll(id));
 };
+// Task362: real pure route/projection and the production private-entry Off/admission path.
+// Native363 separately proves actual HTTP/receipt/intent/recovery with the real core bundle.
+{
+    const AT = '2026-10-07T00:00:00.000Z', taskID = 'task362';
+    const selected = { id: 'baseline362', kind: 'file', title: 'Fixture.txt', uri: '', cloudKey: 'attachments/baseline362.txt',
+        localStatus: 'missing', createdAt: AT, updatedAt: AT };
+    const request = { version: 1, requestId: '00000000-0000-4000-8000-000000000362',
+        sessionID: '00000000-0000-4000-8000-000000000363', generation: 0, attachmentId: selected.id,
+        identity: '' };
+    const beforePayloadJSON = JSON.stringify({ version: 2, taskID, attachmentsOwned: true,
+        attachmentsBase: [selected], attachments: [selected], opaque: 'Retain 文' });
+    // Use the actual shared identity grammar, not an independently guessed tuple.
+    const identityBuild = await build({ stdin: { contents: `export { getAttachmentDownloadIdentity } from './mobile-attachment-availability';`,
+        resolveDir: resolve(app, '../../packages/core/src'), loader: 'ts' }, bundle: true, write: false, format: 'iife', globalName: 'identity362' });
+    const identityState = {}; vm.runInNewContext(identityBuild.outputFiles[0].text, identityState);
+    request.identity = identityState.identity362.getAttachmentDownloadIdentity(selected);
+    const base = { version: 1, taskID, beforePayloadJSON, requestJSON: JSON.stringify(request) };
+    const route = { ...base, webdavURL: 'https://synthetic.invalid/dav/data.json', managedDirectoryURI: 'file:///library/documents/attachments/' };
+    const configure = (state) => {
+        state.localAttachmentTest = true; state.localShaInstallCount = 0; state.selectedIoCalls = 0;
+        for (const name of ['fileCall', 'installerCall', 'fileAbort', 'fileDeleteNow', 'ioNext', 'ioBody']) {
+            state.__mindwtrNative[name] = () => { state.selectedIoCalls++; throw new Error('Unexpected selected IO'); };
+        }
+        state.__mindwtrNative.fileDirectories = () => JSON.stringify({ document: 'file:///library/documents/', cache: 'file:///library/cache/' });
+        state.__mindwtrFileCall = async () => { state.selectedIoCalls++; throw new Error('Unexpected selected file IO'); };
+        state.__mindwtrInstallerCall = async () => { throw new Error('No selected installer'); };
+        state.__mindwtrSyncSecrets = { getSecret: async () => { state.selectedIoCalls++; throw new Error('No Off secret read'); } };
+    };
+    const state = makeState(0, [], 'ios', configure);
+    const preflight = () => poll(state, state.MindwtrHost.attachmentDraftAvailabilityPreflight(JSON.stringify(route)));
+    assert.match((await preflight()).error, /^NOT_READY:/);
+    assert.equal((await poll(state, state.MindwtrHost.boot())).ok, true);
+    assert.deepEqual((await preflight()).value, { version: 1, requestId: request.requestId, attachmentJSON: JSON.stringify(selected),
+        initialURL: 'https://synthetic.invalid/dav/attachments/baseline362.txt', targetURI: 'file:///library/documents/attachments/baseline362.txt' });
+    const rawConfigJSON = JSON.stringify({ backend: 'off', url: null, username: null, allowInsecureHttp: null, encryptionStateJSON: null });
+    const run = (input = { ...base, rawConfigJSON }, callback = () => { throw new Error('No Off source callback'); }) =>
+        poll(state, state.MindwtrHost.iosTaskDraftPrepareAvailability(JSON.stringify(input), callback));
+    const logBefore = state.logText, shaBefore = state.localShaInstallCount;
+    assert.deepEqual(await run(), { ok: true, value: { version: 1, requestId: request.requestId, status: 'unavailable' } });
+    assert.match((await run({ ...base, rawConfigJSON, extra: true })).error, /^INVALID_INPUT:/);
+    assert.deepEqual((await run()).value, { version: 1, requestId: request.requestId, status: 'unavailable' }, 'A refused invocation releases its private slot');
+    assert.match((await run(undefined, null)).error, /^NOT_READY:/);
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        state[field] = true; assert.match((await run()).error, /^NOT_READY:/); assert.match((await preflight()).error, /^NOT_READY:/); state[field] = false;
+    }
+    assert.equal(state.selectedIoCalls, 0); assert.equal(state.localShaInstallCount, shaBefore); assert.equal(state.logText, logBefore);
+    const resolved = { ...selected, uri: route.managedDirectoryURI + 'baseline362.txt', localStatus: 'available', fileHash: 'a'.repeat(64) };
+    const proof = await poll(state, state.MindwtrHost.attachmentDraftPrepareAvailability(JSON.stringify({ version: 1, taskID,
+        requestId: request.requestId, attachmentId: selected.id, identity: request.identity, beforePayloadJSON,
+        status: 'available', resolvedAttachmentJSON: JSON.stringify(resolved) })));
+    assert.equal(proof.ok, true); assert.equal(proof.value.kind, 'prepared-file-availability');
+    assert.deepEqual(JSON.parse(proof.value.afterPayloadJSON).attachments, [resolved]);
+    assert.equal(JSON.parse(proof.value.afterPayloadJSON).opaque, 'Retain 文');
+    const android = makeState(0, [], 'android');
+    assert.match((await poll(android, android.MindwtrHost.attachmentDraftAvailabilityPreflight(JSON.stringify(route)))).error, /^NOT_READY:/);
+    assert.match((await poll(android, android.MindwtrHost.iosTaskDraftPrepareAvailability(JSON.stringify({ ...base, rawConfigJSON }), () => ''))).error, /^NOT_READY:/);
+}
 // HTTP transport alone enables no KV/sync/AI binding. Its private fixed
 // receipt uses the existing forced Diagnostics writer, without request input.
 {
@@ -4265,6 +4362,341 @@ for (const [bridge, receipt, operation] of [
         assert.equal(typeof other.__mindwtrNative.kvMultiGet, 'undefined');
     }
 }
+// Task346 and selected encryption exercise the production entry with narrow factory/core stand-ins.
+// Actual contract state admission and availability/installer/crypto/JSC acceptance have separate suites.
+{
+    const syncFixture = `
+export function createHostSyncCrypto() { return {}; }
+export function isNativeIosSelfHostedProvider(value) { return !value?.trim() || value.trim() === 'selfhosted'; }
+export function createNativeSync() {
+  globalThis.syncFactoryCalls++;
+  return { attachmentsHost: globalThis.remoteAttachmentHost, settingsHost: { encryption: {} },
+    async assertSelfHostedSyncAdmission() { globalThis.admissionChecks = (globalThis.admissionChecks ?? 0) + 1;
+      if (globalThis.incompleteTransition) throw new Error('Sync encryption transition is incomplete'); },
+    async performStoredAutomaticSync(reason) { globalThis.foregroundInputs ??= []; globalThis.foregroundInputs.push(['stored', reason]);
+      return globalThis.storedReply ?? { success: true, skipped: false }; } };
+}
+`;
+    const downloadBuilt = await build({
+        entryPoints: [resolve(app, 'bundle/host-entry.ts')], bundle: true, write: false, format: 'iife',
+        plugins: [{ name: 'project-download-entry', setup(plugin) {
+            plugin.onResolve({ filter: /^\.\/host-sync$/ }, () => ({ path: 'sync', namespace: 'download-test' }));
+            plugin.onLoad({ filter: /.*/, namespace: 'download-test' }, () => ({ contents: syncFixture, loader: 'js' }));
+            plugin.onResolve({ filter: /^@mindwtr\/core$/ }, () => ({ path: 'core', namespace: 'test' }));
+            plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: fakeCoreWithSync, loader: 'js', resolveDir: app }));
+        } }],
+    });
+    const input = { projectId: 'project346', attachmentId: 'attachment346', revision: 'project-revision' };
+    const attachment = { id: input.attachmentId, kind: 'file', title: 'Synthetic346', uri: 'file:///library/documents/attachments/attachment346.pdf' };
+    const create = (platform = 'ios') => makeState(0, [], platform, (state) => {
+        state.localAttachmentTest = true;
+        for (const name of ['fileCall', 'installerCall', 'fileAbort', 'fileDeleteNow', 'ioNext', 'ioBody']) state.__mindwtrNative[name] = () => '';
+        state.__mindwtrNative.fileDirectories = () => JSON.stringify({ document: 'file:///library/documents/', cache: 'file:///library/cache/' });
+        state.__mindwtrFileCall = async () => null; state.__mindwtrInstallerCall = async () => null;
+        state.syncFactoryCalls = 0; state.secretReads = 0; state.storedReads = 0; state.downloadHosts = [];
+        state.remoteAttachmentHost = { selected: 'remote-346' };
+        state.ownerProjects = []; // Install the selected row only after the empty VM boot verifies.
+        state.storedBackend = 'webdav';
+        // On non-iOS, avoid eager normal Sync so the explicit entry itself is tested.
+        if (platform === 'ios') state.__mindwtrNative.kvMultiGet = () => { throw new Error('Unexpected multi-read'); };
+        state.__mindwtrNative.kvGet = (key) => { state.storedReads++; return JSON.stringify([
+            key === '@mindwtr_cloud_provider' ? state.storedProvider ?? null : state.storedBackend ?? null]); };
+        state.__mindwtrSyncSecrets = { getSecret: () => { state.secretReads++; throw new Error('Unexpected secret read'); } };
+        state.attachmentReply = { ok: true, value: { status: 'available', message: null, update: null } };
+        state.settings = { diagnostics: { loggingEnabled: false } };
+    }, downloadBuilt.outputFiles[0].text);
+    const boot = async (state) => {
+        const answer = await poll(state, state.MindwtrHost.boot());
+        if (answer.ok) state.ownerProjects = [{ id: input.projectId, status: 'active', attachments: [{ ...attachment }] }];
+        return answer;
+    };
+    const command = (state, value = input) => poll(state,
+        state.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(value), () => ''));
+    const markerLines = (state) => (state.logText ?? '').split('\n').filter((line) => line.includes('v1.3.5/ios-project-file-download'));
+    // Selected encryption admission runs before any configured service or secret read.
+    const encrypted = create();
+    const unlock = { revision: 'saved-location', action: { type: 'open', flow: 'unlock' } };
+    const unlockCommand = (value) => poll(encrypted,
+        encrypted.MindwtrHost.iosForegroundSync('runSyncEncryptionAction', JSON.stringify(value), () => ''));
+    assert.equal((await boot(encrypted)).ok, true);
+    const invalidEncryptionInputs = [null, [], {}, { ...unlock, revision: '' }, { ...unlock, revision: 'r'.repeat(101) },
+        { ...unlock, requestId: '11111111-1111-1111-1111-111111111111' }, { ...unlock, extra: true },
+        { ...unlock, action: { type: 'open', flow: 'unknown' } },
+        ...['generate', 'reveal', 'recheck'].map((type) => ({ ...unlock, action: { type } })),
+        { ...unlock, action: { type: 'typed', field: 'unknown', value: 'synthetic' } },
+        ...['current', 'next', 'confirm'].map((field) => ({ ...unlock, action: { type: 'typed', field, value: 'x'.repeat(1001) } })),
+        { ...unlock, action: { type: 'typed', field: 'confirm', value: '🧠'.repeat(501) } },
+        ...['unlock', 'enable', 'change', 'disable', 'abandon'].map((flow) => ({ ...unlock, action: { type: 'submit', flow } })),
+        { ...unlock, action: { type: 'decline' }, requestId: 'invalid' },
+        { ...unlock, action: { type: 'recheck' }, requestId: 'invalid' },
+        { ...unlock, action: { type: 'open', flow: 'enable', extra: true } },
+        { ...unlock, action: { type: 'typed', field: 'next', value: 'synthetic', extra: true } }];
+    for (const value of invalidEncryptionInputs) {
+        assert.match((await unlockCommand(value)).error, /^INVALID_INPUT:/);
+    }
+    assert.equal(encrypted.storedReads, 0);
+    assert.equal(encrypted.syncFactoryCalls, 0);
+    assert.equal(encrypted.secretReads, 0);
+    const unsupportedEncryptionBackends = ['dropbox', 'file', 'cloud', 'cloudkit', 'unsupported'];
+    for (const backend of unsupportedEncryptionBackends) {
+        encrypted.storedBackend = backend;
+        assert.deepEqual((await unlockCommand(unlock)).value, { ok: false, error: { code: 'ACTION_FAILED',
+            message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } });
+        assert.equal(encrypted.storedBackend, backend);
+    }
+    assert.equal(encrypted.syncFactoryCalls, 0);
+    assert.equal(encrypted.secretReads, 0);
+    assert.equal(encrypted.encryptionInputs?.length ?? 0, 0, 'Unsupported providers never reach the selected contract');
+    // This entry routes Off/missing envelopes to core; it does not decide local state, revision or transition admission.
+    const localEncryptionActions = [{ type: 'open', flow: 'enable' },
+        ...['next', 'confirm'].map((field) => ({ type: 'typed', field, value: 'synthetic-local-388' })),
+        { type: 'submit', flow: 'enable' }, { type: 'open', flow: 'disable' }, { type: 'submit', flow: 'disable' }];
+    const locallyRoutedBackends = [undefined, '', 'off', ' off '];
+    for (const backend of locallyRoutedBackends) {
+        const localEncryption = create(); assert.equal((await boot(localEncryption)).ok, true);
+        localEncryption.storedBackend = backend;
+        const localCommand = (value) => poll(localEncryption,
+            localEncryption.MindwtrHost.iosForegroundSync('runSyncEncryptionAction', JSON.stringify(value), () => ''));
+        for (const action of localEncryptionActions) {
+            const value = { revision: unlock.revision, action,
+                ...(action.type === 'submit' ? { requestId: '11111111-1111-1111-1111-111111111111' } : {}) };
+            assert.deepEqual((await localCommand(value)).value, { ok: true, value: { toasts: [], passphrase: null } });
+            assert.deepEqual(JSON.parse(JSON.stringify(localEncryption.encryptionInputs.at(-1))), value);
+            assert.equal(localEncryption.storedBackend, backend, 'Routing never activates or rewrites a backend');
+        }
+        assert.equal(localEncryption.syncFactoryCalls, 1, 'Local routing retains one foreground service');
+        assert.equal(localEncryption.contractBindings.syncSettings.encryption.mode, 'saved-webdav-or-local');
+        localEncryption.encryptionReply = { ok: false, error: { code: 'ACTION_FAILED', message: 'Synthetic selected-state refusal' } };
+        assert.deepEqual(await localCommand({ ...unlock, action: { type: 'open', flow: 'disable' } }),
+            { ok: true, value: localEncryption.encryptionReply }, 'Core admission refusals survive local routing');
+        assert.equal(localEncryption.syncFactoryCalls, 1); assert.equal(localEncryption.secretReads, 0);
+        assert(!(localEncryption.logText ?? '').includes('synthetic-local-388'), 'Local field text never enters entry diagnostics');
+    }
+    encrypted.storedBackend = 'webdav';
+    const selectedEncryptionActions = [...['unlock', 'enable', 'change', 'disable', 'abandon'].map((flow) => ({ type: 'open', flow })),
+        ...['current', 'next', 'confirm'].map((field) => ({ type: 'typed', field, value: 'synthetic' })),
+        ...['unlock', 'enable', 'change', 'disable', 'abandon'].map((flow) => ({ type: 'submit', flow })),
+        { type: 'decline' }, { type: 'cancel' }, { type: 'retry' }, { type: 'recheck' }];
+    for (const action of selectedEncryptionActions) {
+        const value = { revision: unlock.revision, action,
+            ...(['submit', 'decline', 'recheck'].includes(action.type) ? { requestId: '11111111-1111-1111-1111-111111111111' } : {}) };
+        assert.equal((await unlockCommand(value)).value.ok, true);
+        assert.deepEqual(JSON.parse(JSON.stringify(encrypted.encryptionInputs.at(-1))), value);
+    }
+    assert.equal(encrypted.syncFactoryCalls, 1, 'Selected encryption uses the retained foreground service');
+    assert.equal(encrypted.secretReads, 0, 'Entry fixture reads no credentials');
+    assert(!(encrypted.logText ?? '').includes('synthetic'), 'Passphrase never enters entry diagnostics');
+    console.log(`Selected encryption: ${invalidEncryptionInputs.length} invalid envelopes refused before storage; ${unsupportedEncryptionBackends.length} providers refused before factory; ${selectedEncryptionActions.length} WebDAV and ${localEncryptionActions.length * locallyRoutedBackends.length} local envelopes routed with exact mode and UUID ownership; ${locallyRoutedBackends.length} core refusals preserved (NodeVM)`);
+    const foreground = create();
+    assert.equal((await boot(foreground)).ok, true);
+    const foregroundCommand = (name, value, currentTargetURI) => poll(foreground,
+        foreground.MindwtrHost.iosForegroundSync(name, JSON.stringify(value), () => '', currentTargetURI));
+    const selfHostedFields = { url: 'https://synthetic398.invalid/v1/data', token: null, allowInsecureHttp: false };
+    const webdavFields = { url: 'https://synthetic398.invalid/data.json', username: 'synthetic', password: null, allowInsecureHttp: false };
+    const request = { requestId: '11111111-1111-1111-1111-111111111111', revision: 'config-398' };
+    const malformedForms = [{}, { webdav: webdavFields, selfHosted: selfHostedFields }, { selfHosted: null },
+        { selfHosted: [] }, { selfHosted: { ...selfHostedFields, password: 'synthetic' } },
+        { webdav: { ...webdavFields, token: null } }, { selfHosted: { ...selfHostedFields, token: 1 } }];
+    for (const name of ['saveSyncBackend', 'syncNow', 'testSyncConnection']) for (const fields of malformedForms) {
+        assert.match((await foregroundCommand(name, { ...request, ...fields })).error, /^INVALID_INPUT:/);
+    }
+    assert.equal(foreground.storedReads, 0, 'Malformed/mixed forms never read configuration');
+    assert.equal(foreground.syncFactoryCalls, 0, 'Malformed/mixed forms never construct a service');
+    assert.equal(foreground.secretReads, 0);
+    foreground.storedBackend = 'cloud';
+    for (const provider of ['dropbox', 'cloudkit', 'file', 'unknown']) {
+        foreground.storedProvider = provider;
+        const refusal = await foregroundCommand('openSyncSettings', {});
+        assert.equal(refusal.value.error.code, 'ACTION_FAILED');
+        assert.equal(foreground.storedProvider, provider, 'Unsupported provider authority is never rewritten');
+    }
+    assert.equal(foreground.syncFactoryCalls, 0);
+    for (const provider of [undefined, '', 'selfhosted', ' selfhosted ']) {
+        foreground.storedProvider = provider;
+        const model = await foregroundCommand('openSyncSettings', {});
+        assert.deepEqual(JSON.parse(JSON.stringify(model.value.value.backend.options.map(({ option }) => option))), ['off', 'webdav', 'selfhosted']);
+        for (const name of ['saveSyncBackend', 'syncNow', 'testSyncConnection']) {
+            const value = { ...request, selfHosted: selfHostedFields };
+            assert.equal((await foregroundCommand(name, value)).value.ok, true);
+            assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), [name, value]);
+        }
+        for (const [name, reason] of [['syncStored', 'startup'], ['syncResume', 'resume']]) {
+            assert.deepEqual((await foregroundCommand(name, {})).value.value, { success: true, skipped: false });
+            assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), ['stored', reason]);
+        }
+    }
+    assert.equal(foreground.syncFactoryCalls, 1, 'All self-hosted foreground commands retain one owned factory');
+    assert.equal(foreground.secretReads, 0, 'Entry never reads credentials itself');
+    assert(!(foreground.logText ?? '').includes('synthetic398'), 'Owned command marker contains no endpoint or token');
+    for (const [name, value] of [['selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' }],
+        ...['saveSyncBackend', 'syncNow', 'testSyncConnection'].map(name => [name, { ...request, selfHosted: selfHostedFields }]),
+        ['syncStored', {}], ['syncResume', {}]]) {
+        foreground.incompleteTransition = true;
+        const prior = foreground.foregroundInputs.length;
+        const priorDownloads = foreground.attachmentInputs.length;
+        const priorLog = foreground.logText;
+        const refusal = await foregroundCommand(name, value);
+        assert.deepEqual(refusal.value, { ok: false, error: { code: 'ACTION_FAILED', message: 'Sync encryption transition is incomplete' } });
+        assert.equal(foreground.foregroundInputs.length, prior, 'Incomplete transition refuses before shared settings dispatch');
+        assert.equal(foreground.attachmentInputs.length, priorDownloads, 'Incomplete transition refuses before availability bytes');
+        assert.equal(foreground.logText, priorLog, 'Refused admission emits no settled-command marker');
+    }
+    foreground.incompleteTransition = false;
+    assert.equal((await foregroundCommand('selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' })).value.ok, true);
+    // Ordinary cloud Project requests refuse independently at entry, even when
+    // configuration is valid. They never reach options, factory or availability.
+    const ordinaryCloudProject = create(); assert.equal((await boot(ordinaryCloudProject)).ok, true);
+    ordinaryCloudProject.storedBackend = 'cloud';
+    const ordinaryLogs = ordinaryCloudProject.logText;
+    for (const provider of [undefined, '', 'selfhosted', ' selfhosted ']) {
+        ordinaryCloudProject.storedProvider = provider;
+        assert.deepEqual((await command(ordinaryCloudProject)).value, { ok: false, error: { code: 'ACTION_FAILED',
+            message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } });
+    }
+    assert.equal(ordinaryCloudProject.syncFactoryCalls, 0); assert.equal(ordinaryCloudProject.secretReads, 0);
+    assert.equal(ordinaryCloudProject.projectOptionsReads ?? 0, 0); assert.equal(ordinaryCloudProject.attachmentInputs.length, 0);
+    assert.equal(ordinaryCloudProject.logText, ordinaryLogs, 'Gated ordinary cloud Project emits no completion marker');
+    const downloadsBefore = foreground.attachmentInputs.length;
+    const localForegroundHost = foreground.contractBindings.attachments;
+    const mappedTarget = attachment.uri;
+    assert.equal((await foregroundCommand('projectAttachmentDownload', input, mappedTarget)).value.ok, true);
+    assert.equal(foreground.attachmentInputs.length, downloadsBefore + 1, 'Saved selfhosted relocated Project routes through selected availability');
+    assert.deepEqual(JSON.parse(JSON.stringify(foreground.attachmentInputs.at(-1))), ['downloadRelocatedProjectAttachment', {
+        ...input, managedDirectoryURI: mappedTarget.slice(0, mappedTarget.lastIndexOf('/') + 1),
+    }, mappedTarget]);
+    assert.notEqual(foreground.downloadHosts.at(-1), foreground.remoteAttachmentHost, 'Relocated selfhosted availability uses its read-only scoped host');
+    assert.equal(foreground.contractBindings.attachments, localForegroundHost, 'Relocated Project scope restores the local host');
+    foreground.incompleteTransition = true;
+    const blockedDownloads = foreground.attachmentInputs.length;
+    const blockedLogs = foreground.logText;
+    assert.deepEqual((await foregroundCommand('projectAttachmentDownload', input, mappedTarget)).value,
+        { ok: false, error: { code: 'ACTION_FAILED', message: 'Sync encryption transition is incomplete' } });
+    assert.equal(foreground.attachmentInputs.length, blockedDownloads, 'Incomplete transition refuses before relocated Project availability');
+    assert.equal(foreground.logText, blockedLogs, 'Refused relocated admission emits no completion marker');
+    foreground.incompleteTransition = false;
+    foreground.foregroundReply = { ok: false, error: { code: 'STALE_REVISION', message: 'Synthetic shared stale refusal' } };
+    assert.deepEqual((await foregroundCommand('saveSyncBackend', { ...request, selfHosted: selfHostedFields })).value,
+        foreground.foregroundReply, 'Shared revision/admission refusal survives routing');
+    console.log(`Self-hosted entry: ${malformedForms.length * 3} invalid/mixed forms before storage; 4 unsupported providers before factory; 4 legacy/provider forms routed; 7 incomplete-transition commands before dispatch; 4 ordinary cloud Project forms before factory; scoped read-only relocated Project routing and restoration (NodeVM)`);
+    const malformed = create();
+    assert.match((await command(malformed)).error, /^NOT_READY:/);
+    const bootMalformed = await boot(malformed);
+    assert.equal(bootMalformed.ok, true, JSON.stringify(bootMalformed));
+    for (const value of [null, [], {}, { ...input, projectId: '' }, { ...input, attachmentId: 1 }, { ...input, revision: null },
+        { ...input, projectId: 'x'.repeat(501) }, { ...input, attachmentId: 'x'.repeat(501) }, { ...input, revision: 'x'.repeat(201) },
+        { ...input, uri: 'file:///foreign' }, { ...input, remoteKey: 'synthetic' }, { ...input, password: 'synthetic' },
+        { ...input, extra: 'x'.repeat(128 * 1024) }]) assert.match((await command(malformed, value)).error, /^INVALID_INPUT:/);
+    assert.equal(malformed.storedReads, 0); assert.equal(malformed.syncFactoryCalls, 0); assert.equal(malformed.secretReads, 0);
+    for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
+        malformed.persistenceStatus = { [flag]: true }; assert.match((await command(malformed)).error, /^NOT_READY:/);
+    }
+    malformed.persistenceStatus = null;
+    for (const field of ['sandbox', 'workspaceTransition']) {
+        malformed[field] = true; assert.match((await command(malformed)).error, /^NOT_READY:/); malformed[field] = false;
+    }
+    assert.equal(malformed.storedReads, 0);
+    for (const stored of [undefined, '', 'off', ' off ', 'dropbox', 'cloudkit']) {
+        malformed.storedBackend = stored;
+        const result = await command(malformed);
+        assert.equal(result.ok, true); assert.equal(result.value.ok, false); assert.equal(result.value.error.code, 'ACTION_FAILED');
+        assert.equal(malformed.storedBackend, stored);
+    }
+    assert.equal(malformed.syncFactoryCalls, 0); assert.equal(malformed.secretReads, 0); assert.equal(malformed.projectOptionsReads ?? 0, 0);
+    assert.equal(markerLines(malformed).length, 0);
+    const noIos = create('android'); assert.equal((await boot(noIos)).ok, true);
+    assert.match((await command(noIos)).error, /^NOT_READY:/); assert.equal(noIos.syncFactoryCalls, 0);
+
+    const stale = create(); assert.equal((await boot(stale)).ok, true);
+    const staleCases = [
+        () => ({ ...input, revision: 'older-revision' }),
+        () => { stale.ownerProjects = []; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, deletedAt: 'deleted', attachments: [attachment] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, purgedAt: 'purged', attachments: [attachment] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [{ ...attachment, kind: 'link' }] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [{ ...attachment, deletedAt: 'deleted' }] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [{ ...attachment, id: 'replacement' }] }]; return input; },
+        () => { stale.ownerProjects = [{ id: input.projectId, attachments: [attachment, attachment] }]; return input; },
+    ];
+    for (const replace of staleCases) {
+        const result = await command(stale, replace());
+        assert.equal(result.ok, true); assert.equal(result.value.ok, false); assert.equal(result.value.error.code, 'STALE_REVISION');
+    }
+    assert.equal(stale.syncFactoryCalls, 0); assert.equal(stale.secretReads, 0); assert.equal(stale.attachmentInputs.length, 0);
+    assert.equal(markerLines(stale).length, 0);
+
+    const selected = create(); assert.equal((await boot(selected)).ok, true);
+    const localHost = selected.contractBindings.attachments;
+    assert.notEqual(localHost, selected.remoteAttachmentHost);
+    const rowsBefore = JSON.stringify(selected.ownerProjects);
+    assert.deepEqual(await command(selected), { ok: true, value: selected.attachmentReply });
+    assert.equal(selected.syncFactoryCalls, 1); assert.equal(selected.downloadHosts[0], selected.remoteAttachmentHost);
+    assert.equal(selected.contractBindings.attachments, localHost, 'Successful download restores the local-only host');
+    assert.equal(JSON.stringify(selected.ownerProjects), rowsBefore);
+    assert.equal(JSON.stringify(selected.attachmentInputs[0]), JSON.stringify(['downloadAttachment', { owner: { kind: 'project', projectId: input.projectId }, attachmentId: input.attachmentId }]));
+    assert.equal(markerLines(selected).length, 1, 'Forced availability marker is persisted with diagnostics disabled');
+    const marker = JSON.parse(markerLines(selected)[0]);
+    assert.deepEqual(marker.context, { releaseCheck: 'v1.3.5/ios-project-file-download', operation: 'projectAttachmentDownload', outcome: 'available' });
+    assert.equal(marker.message, 'Native iOS Project file availability settled');
+    for (const privateValue of [input.projectId, input.attachmentId, input.revision, attachment.title, attachment.uri]) assert(!markerLines(selected)[0].includes(privateValue));
+    selected.ownerProjects[0].status = 'archived';
+    assert.deepEqual(await command(selected), { ok: true, value: selected.attachmentReply });
+    assert.equal(selected.syncFactoryCalls, 1, 'The same retained factory handles archived availability');
+    assert.equal(selected.contractBindings.attachments, localHost);
+    selected.logFailure = 'synthetic log refusal';
+    assert.deepEqual(await command(selected), { ok: true, value: selected.attachmentReply });
+    assert.equal(markerLines(selected).length, 2, 'A failed log append cannot invalidate durable availability');
+    selected.logFailure = null;
+    for (const answer of [{ ok: true, value: { status: 'unavailable', message: 'synthetic refusal', update: null } },
+        { ok: false, error: { code: 'ACTION_FAILED', message: 'synthetic host refusal' } }]) {
+        selected.attachmentReply = answer; const count = markerLines(selected).length;
+        assert.deepEqual(await command(selected), { ok: true, value: answer });
+        assert.equal(markerLines(selected).length, count);
+        assert.equal(selected.contractBindings.attachments, localHost);
+    }
+    selected.downloadError = 'synthetic download failure';
+    assert.match((await command(selected)).error, /synthetic download failure/);
+    assert.equal(selected.contractBindings.attachments, localHost, 'Thrown download restores the local-only host');
+    selected.downloadError = null;
+    const general = await poll(selected, selected.MindwtrHost.attachmentRequest('downloadAttachment', JSON.stringify({ owner: { kind: 'project', projectId: input.projectId }, attachmentId: input.attachmentId })));
+    assert.equal(general.ok, false, 'General local attachment download remains closed');
+
+    const draining = create(); assert.equal((await boot(draining)).ok, true);
+    const drainingLocalHost = draining.contractBindings.attachments;
+    let releaseDownload, releaseFlush;
+    draining.downloadHold = new Promise((resolveHold) => { releaseDownload = resolveHold; });
+    draining.flushHold = new Promise((resolveHold) => { releaseFlush = resolveHold; });
+    const ticket = draining.MindwtrHost.iosForegroundSync('projectAttachmentDownload', JSON.stringify(input), () => '');
+    await new Promise((tick) => setImmediate(tick));
+    assert.equal(draining.MindwtrHost.poll(ticket), null);
+    assert.equal(draining.contractBindings.attachments, draining.remoteAttachmentHost);
+    assert.match((await command(draining)).error, /^NOT_READY:/, 'The current invocation excludes another command');
+    releaseDownload(); await new Promise((tick) => setImmediate(tick));
+    assert.equal(draining.contractBindings.attachments, drainingLocalHost);
+    assert.notEqual(draining.contractBindings.attachments, draining.remoteAttachmentHost, 'Scope is restored before durable flush');
+    assert.equal(draining.MindwtrHost.poll(ticket), null, 'No result before the durable barrier settles');
+    assert.equal(markerLines(draining).length, 0);
+    releaseFlush(); assert.deepEqual(await poll(draining, ticket), { ok: true, value: draining.attachmentReply });
+    for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
+        const failure = create(); assert.equal((await boot(failure)).ok, true);
+        const originalHost = failure.contractBindings.attachments;
+        failure.afterDownload = () => { failure.persistenceStatus = { [flag]: true }; };
+        assert.match((await command(failure)).error, /^NOT_READY:/);
+        assert.equal(failure.contractBindings.attachments, originalHost); assert.equal(markerLines(failure).length, 0);
+    }
+    const flushFailure = create(); assert.equal((await boot(flushFailure)).ok, true);
+    const originalHost = flushFailure.contractBindings.attachments;
+    flushFailure.flushError = 'synthetic durable failure';
+    assert.match((await command(flushFailure)).error, /synthetic durable failure/);
+    assert.equal(flushFailure.contractBindings.attachments, originalHost); assert.equal(markerLines(flushFailure).length, 0);
+    const fatal = create(); assert.equal((await boot(fatal)).ok, true);
+    fatal.downloadFatal = true;
+    assert.match((await command(fatal)).error, /cleanup could not be confirmed/i);
+    const counts = [fatal.storedReads, fatal.attachmentInputs.length, fatal.events.length];
+    assert.match((await command(fatal)).error, /cleanup could not be confirmed/i);
+    assert.deepEqual([fatal.storedReads, fatal.attachmentInputs.length, fatal.events.length], counts);
+    assert.equal(markerLines(fatal).length, 0);
+    console.log('Task346: strict selected Project Download admission, archived eligibility, scoped host restoration and durable availability acknowledgment (NodeVM)');
+}
 // Production host-entry selects independent local attachment policy only for
 // complete iOS file capabilities. No kvMultiGet, sync settings, AI or backend
 // constructor is supplied; readiness and diagnostic acknowledgments are real.
@@ -4276,6 +4708,65 @@ for (const [bridge, receipt, operation] of [
         state.__mindwtrFileCall = async () => null;
         state.__mindwtrInstallerCall = async () => null;
     };
+    // Stored Sync's empty/Off admission must not construct the throwing Sync
+    // stand-ins, read secrets, or open a form. Actual configured runs use JSC tests.
+    const stored = makeState(0, [], 'ios', (state) => {
+        configureLocal(state);
+        state.storedReads = 0; state.secretReads = 0;
+        state.__mindwtrNative.kvMultiGet = () => { throw new Error('Unexpected stored multi-read'); };
+        state.__mindwtrNative.kvGet = (key) => {
+            assert.equal(key, '@mindwtr_sync_backend');
+            state.storedReads++;
+            return JSON.stringify([state.storedBackend ?? null]);
+        };
+        state.__mindwtrSyncSecrets = { getSecret: () => {
+            state.secretReads++; throw new Error('Unexpected stored secret read');
+        } };
+    });
+    for (const name of ['syncStored', 'syncResume']) {
+        assert.match((await poll(stored, stored.MindwtrHost.iosForegroundSync(name, '{}', () => ''))).error, /^NOT_READY:/);
+    }
+    assert.equal(stored.storedReads, 0);
+    assert.equal((await poll(stored, stored.MindwtrHost.boot())).ok, true);
+    for (const name of ['syncStored', 'syncResume']) {
+        const command = (json = '{}') => poll(stored, stored.MindwtrHost.iosForegroundSync(name, json, () => ''));
+        stored.storedReads = 0;
+        stored.storedBackend = undefined;
+        for (const input of ['null', '[]', '{', '{"revision":"r"}', '{"config":{}}', '{"password":"synthetic"}', '{"x":"' + 'x'.repeat(128 * 1024) + '"}']) {
+            assert.match((await command(input)).error, /^INVALID_INPUT:/, `${name} accepts only a bounded empty object`);
+        }
+        assert.equal(stored.storedReads, 0, 'Invalid requests reach no storage port');
+        for (const flag of ['failed', 'queued', 'inFlight', 'immediate', 'retrying']) {
+            stored.persistenceStatus = { [flag]: true };
+            assert.match((await command()).error, /^NOT_READY:/, `${name} preserves strict persistence admission`);
+        }
+        stored.persistenceStatus = null;
+        for (const field of ['sandbox', 'workspaceTransition']) {
+            stored[field] = true;
+            assert.match((await command()).error, /^NOT_READY:/);
+            stored[field] = false;
+        }
+        assert.equal(stored.storedReads, 0, 'Unsettled requests reach no storage port');
+        const beforeRows = JSON.stringify(stored.fakeData);
+        const beforeLog = stored.logText;
+        for (const value of [undefined, '', 'off', ' off ']) {
+            stored.storedBackend = value;
+            assert.deepEqual(await command('  {}  '), { ok: true, value: { ok: true, value: { success: true, skipped: true } } });
+        }
+        stored.storedBackend = 'dropbox';
+        const unsupported = await command();
+        assert.equal(unsupported.ok, true);
+        assert.equal(unsupported.value.ok, false);
+        assert.equal(unsupported.value.error.code, 'ACTION_FAILED');
+        assert.equal(stored.storedBackend, 'dropbox', 'Unsupported stored provider is preserved');
+        assert.equal(stored.storedReads, 5, 'One exact provider read per admitted invocation');
+        assert.equal(stored.secretReads, 0, 'Off and unsupported runs read no secret');
+        assert.equal(JSON.stringify(stored.fakeData), beforeRows, 'Off admission writes no domain rows');
+        assert.equal(stored.logText, beforeLog, 'No configured-run settlement marker is emitted for skipped/refused admission');
+        assert.equal(stored.contractBindings.syncSettings, undefined, 'Off and unsupported runs never construct the Sync factory');
+    }
+    assert.ok(hostEntry.includes("name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }"));
+    assert.match(hostEntry, /context: \{ releaseCheck: diagnostic\.releaseCheck, operation: name, outcome:/);
     const local = makeState(0, [], 'ios', configureLocal);
     assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');
@@ -4428,6 +4919,43 @@ for (const [bridge, receipt, operation] of [
         const wrong = structuredClone(full); wrong.priorOperations[0].operation.sourceSha256 = 'b'.repeat(64);
         assert.equal((await call(local, 'attachmentDraftValidateLineageV4', wrong)).ok, false);
     });
+    // Selected availability metadata retains a baseline ID while acquiring a different URI.
+    await check(async () => {
+        const missing = { ...baseline, uri: '', cloudKey: 'attachments/baseline.pdf',
+            fileHash: 'a'.repeat(64), localStatus: 'missing' };
+        const before = { ...JSON.parse(opening), attachmentsBase: [missing], attachments: [missing] };
+        const beforePayloadJSON = JSON.stringify(before);
+        const resolved = { ...missing, uri: ROOT + 'baseline.pdf', localStatus: 'available' };
+        const afterPayloadJSON = JSON.stringify({ ...before, attachments: [resolved] });
+        const operation = { version: 1, kind: 'prepared-file-availability', taskID: 'task257',
+            requestId: '35600000-0000-4000-8000-000000000001', attachmentId: missing.id,
+            identity: JSON.stringify([missing.id, missing.cloudKey, missing.fileHash, 0]),
+            beforePayloadJSON, afterPayloadJSON, status: 'available', resolvedAttachmentJSON: JSON.stringify(resolved) };
+        const selected = { ...lineage, version: 5, initialPayloadJSON: beforePayloadJSON,
+            beforePayloadJSON: afterPayloadJSON, priorOperations: [{ kind: 'availability', operation }] };
+        const beforeFiles = structuredClone(local.fileCalls), beforeSaves = local.saveCount;
+        assert.deepEqual(await call(local, 'attachmentDraftBeginV5', { ...begin, payloadJSON: beforePayloadJSON }),
+            { ok: true, value: { version: 5, taskID: 'task257', payloadJSON: beforePayloadJSON } });
+        assert.deepEqual(await call(local, 'attachmentDraftValidateLineageV5', selected),
+            { ok: true, value: { version: 5, taskID: 'task257', payloadJSON: afterPayloadJSON } });
+        for (const method of ['attachmentDraftValidateLineageV3', 'attachmentDraftValidateLineageV4']) {
+            assert.equal((await call(local, method, selected)).ok, false);
+        }
+        const discarded = { version: 4, historyVersion: 5, taskID: 'task257', managedDirectoryURI: ROOT,
+            initialPayloadJSON: beforePayloadJSON, checkpointPayloadJSON: afterPayloadJSON,
+            operations: [{ kind: 'availability', phase: 'checkpointed', preparedJSON: JSON.stringify(operation) }] };
+        const planned = await call(local, 'attachmentDraftDiscardCandidatesV5', discarded);
+        assert.equal(planned.ok, true);
+        assert.equal(planned.value.kind, 'owned-availability-discard-candidates');
+        assert.deepEqual(planned.value.candidates, [{ requestId: operation.requestId,
+            attachmentId: missing.id, targetURI: resolved.uri, reason: 'uncommitted-draft' }]);
+        assert.equal((await call(local, 'attachmentDraftDiscardCandidatesV4', discarded)).ok, false);
+        assert.deepEqual(local.fileCalls, beforeFiles, 'metadata continuity never installs or retires bytes');
+        assert.equal(local.saveCount, beforeSaves, 'metadata continuity never saves the Task');
+        const forged = structuredClone(selected);
+        forged.priorOperations[0].operation.afterPayloadJSON = afterPayloadJSON.replace('Retain opaque checkpoint', 'forged');
+        assert.equal((await call(local, 'attachmentDraftValidateLineageV5', forged)).ok, false);
+    });
     // Historical retry has no optional capability, current editable task or fresh clock.
     const historical = makeState(0, [], 'ios'); historical.localTaskReadOnly = true;
     historical.sandbox = true; historical.workspaceTransition = true;
@@ -4438,7 +4966,7 @@ for (const [bridge, receipt, operation] of [
     await check(async () => assert.deepEqual(await call(historical, 'attachmentDraftValidateRemove', removed), { ok: true, value: removed }));
     await check(async () => assert.deepEqual(await call(historical, 'attachmentDraftValidateLineageV3', mixed),
         { ok: true, value: { version: 3, taskID: 'task257', payloadJSON: removed.afterPayloadJSON } }));
-    for (const method of ['attachmentDraftValidateRemove', 'attachmentDraftValidateLineageV3', 'attachmentFileEditSaveValidate']) {
+    for (const method of ['attachmentDraftValidateRemove', 'attachmentDraftValidateLineageV3', 'attachmentDraftValidateLineageV5', 'attachmentDraftDiscardCandidatesV5', 'attachmentFileEditSaveValidate']) {
         await check(async () => assert.match((await call(makeState(0), method, {})).error, /^NOT_READY:/));
     }
     for (const variant of ['nonIOS', 'noCapability', 'sandbox', 'workspace', 'readOnly', 'taskMissing', 'persistence']) {
@@ -4448,7 +4976,7 @@ for (const [bridge, receipt, operation] of [
         if (variant === 'readOnly') state.localTaskReadOnly = true;
         if (variant === 'taskMissing') state.localTaskViewFailure = { ok: false, error: { code: 'TASK_NOT_FOUND', message: 'Not found' } };
         if (variant === 'persistence') state.persistenceFailure = { message: 'failed' };
-        for (const [method, input] of [['attachmentDraftBeginV3', begin], ['attachmentDraftBeginV4', begin], ['attachmentDraftPrepareV3', addInput], ['attachmentDraftRemovePrepareV3', removeInput]]) {
+        for (const [method, input] of [['attachmentDraftBeginV3', begin], ['attachmentDraftBeginV4', begin], ['attachmentDraftBeginV5', begin], ['attachmentDraftPrepareV3', addInput], ['attachmentDraftRemovePrepareV3', removeInput]]) {
             await check(async () => assert.equal((await call(state, method, input)).ok, false, `${variant}/${method}`));
         }
         if (variant !== 'readOnly' && variant !== 'taskMissing') {
@@ -4894,10 +5422,11 @@ for (const [bridge, receipt, operation] of [
     const databases = []; let cases = 0;
     const check = async (work) => { await work(); cases++; };
     const call = (state, method, input) => poll(state, state.MindwtrHost[method](JSON.stringify(input)));
-    const fixture = async ({ empty = false, noop = false, recurring = false, cancel = false, large = false, withAdd = false,
+    const fixture = async ({ empty = false, noop = false, recurring = false, cancel = false, large = false, withAdd = false, availability = false, availabilityTombstone = false, availabilitySameURI = false,
         managedDirectoryURI = ROOT } = {}) => {
         const baseline = Array.from({ length: 2 }, (_, n) => ({ id: `file${n}`, kind: 'file', title: 'File', uri: managedDirectoryURI + `${n}.pdf`,
             size: 3, localStatus: 'available', createdAt: AT, updatedAt: AT }));
+        if (availability) Object.assign(baseline[0], { uri: availabilitySameURI ? managedDirectoryURI + '0.pdf' : '', cloudKey: 'attachments/file0.pdf', fileHash: 'a'.repeat(64), localStatus: 'missing' });
         baseline.push({ ...baseline[0], id: 'old-tombstone', uri: managedDirectoryURI + 'old.pdf', deletedAt: AT });
         const source = { id: 'task268', title: 'Task', status: 'next', taskMode: 'list', tags: [], contexts: [], checklist: [],
             description: large ? 'x'.repeat(270_000) : 'Notes', attachments: baseline, createdAt: AT, updatedAt: AT, rev: 8, revBy: 'before',
@@ -4920,9 +5449,9 @@ for (const [bridge, receipt, operation] of [
                 relativeAmount: '', relativeUnit: '', relativeOwned: false, relativeCommitRequested: false,
                 recurrenceInputs: {}, recurrenceOwned: [], recurrenceCommitRequested: [] }, scheduleEdits: [], scheduleFailedID: null,
             attachmentsOwned: true, attachmentsBase: baseline, attachments: baseline, linkSheet: {} });
-        const ownedDraft = { version: 3, taskID: source.id, initialPayloadJSON, beforePayloadJSON: initialPayloadJSON,
+        const ownedDraft = { version: availability ? 5 : 3, taskID: source.id, initialPayloadJSON, beforePayloadJSON: initialPayloadJSON,
             priorOperations: [], managedDirectoryURI };
-        if (!empty) for (let index = 0; index < (recurring || cancel ? 1 : 2); index++) {
+        if (!empty && !availability) for (let index = 0; index < (recurring || cancel ? 1 : 2); index++) {
             const removed = await call(state, 'attachmentDraftRemovePrepareV3', { ...ownedDraft,
                 requestId: `26800000-0000-4000-8000-${String(index + 3).padStart(12, '0')}`, attachmentId: `file${index}` });
             assert.equal(removed.ok, true); ownedDraft.beforePayloadJSON = removed.value.afterPayloadJSON;
@@ -4936,9 +5465,20 @@ for (const [bridge, receipt, operation] of [
             ownedDraft.beforePayloadJSON = added.value.afterPayloadJSON;
             ownedDraft.priorOperations.push({ kind: 'add', operation: added.value });
         }
+        if (availability) {
+            const resolved = { ...baseline[0], uri: managedDirectoryURI + '0.pdf', localStatus: 'available' };
+            const afterPayloadJSON = JSON.stringify({ ...JSON.parse(initialPayloadJSON), attachments: [resolved, ...baseline.slice(1)] });
+            ownedDraft.priorOperations.push({ kind: 'availability', operation: { version: 1, kind: 'prepared-file-availability',
+                taskID: source.id, requestId: '35600000-0000-4000-8000-000000000002', attachmentId: baseline[0].id,
+                identity: JSON.stringify([baseline[0].id, baseline[0].cloudKey, baseline[0].fileHash, 0]),
+                beforePayloadJSON: initialPayloadJSON, afterPayloadJSON, status: 'available', resolvedAttachmentJSON: JSON.stringify(resolved) } });
+            ownedDraft.beforePayloadJSON = afterPayloadJSON;
+        }
         const draft = JSON.parse(ownedDraft.beforePayloadJSON).attachments;
         if (noop && !empty) source.attachments = draft;
-        const request = { version: 2, kind: 'owned-editor-file-edit-save',
+        if (availabilityTombstone) source.attachments = baseline.map((row, index) => index === 0
+            ? { ...row, deletedAt: '2026-10-06T00:00:00.000Z' } : row);
+        const request = { version: availability ? 4 : 2, kind: 'owned-editor-file-edit-save',
             checkpoint: { version: 1, sessionID: SESSION, taskID: source.id, generation: ownedDraft.priorOperations.length + 1, payloadJSON: ownedDraft.beforePayloadJSON },
             ownedDraft, saveRequest: { id: source.id, requestId: REQUEST, base: touchedBase, patch: edited,
                 scheduleBase: { startTime: null, dueDate: recurring ? '2026-10-05' : null, relativeStartOffset: null, reviewAt: null },
@@ -4973,6 +5513,61 @@ for (const [bridge, receipt, operation] of [
             assert.equal(f.state.fileEditSaveInputs.at(-1)[0], 'completeCommit'); syncLive(f);
             if (!options.empty) assert.deepEqual(invoke(f), { result: { outcome: 'removed' }, seen: ['removed'] });
             if (options.empty && options.noop) assert.equal(f.db.prepare('SELECT rev FROM tasks WHERE id = ?').get('task268').rev, 8);
+        });
+        await check(async () => {
+            const f = await fixture({ availability: true });
+            assert.equal(f.envelope.prepared.version, 4);
+            assert.equal(JSON.parse(f.db.prepare('SELECT attachments FROM tasks WHERE id = ?').get('task268').attachments)[0].uri, '',
+                'selected download proof and Save preparation leave stored Task unchanged');
+            const resumed = await call(f.state, 'attachmentDraftResumeCheckV3', { version: 3, kind: 'owned-editor-resume',
+                checkpoint: f.request.checkpoint, ownedDraft: f.request.ownedDraft });
+            assert.equal(resumed.ok, true, JSON.stringify(resumed));
+            assert.equal((await call(f.state, 'attachmentFileEditSaveCommit', f.envelope)).ok, true);
+            syncLive(f);
+            const row = f.db.prepare('SELECT title, attachments FROM tasks WHERE id = ?').get('task268');
+            assert.equal(row.title, 'Edited'); assert.equal(JSON.parse(row.attachments)[0].uri, ROOT + '0.pdf');
+            assert.equal(f.state.fileEditSaveInputs.at(-1)[0], 'completeCommit');
+            assert(f.plan.length > 0);
+            assert.deepEqual(invoke(f), { result: { outcome: 'removed' }, seen: ['removed'] },
+                'outer4 uses complete result classification at the existing retirement fence');
+        });
+        await check(async () => {
+            const f = await fixture({ availability: true, cancel: true });
+            assert.equal((await call(f.state, 'attachmentFileEditSaveCommit', f.envelope)).ok, true);
+            const request = { requestId: '35600000-0000-4000-8000-000000000099', cancelRequestId: REQUEST };
+            const prepared = await call(f.state, 'taskCancellationUndoPrepare', { request, cancel: f.envelope });
+            assert.equal(prepared.ok, true, JSON.stringify(prepared));
+            assert.equal(f.state.fileEditSaveInputs.at(-1)[0], 'completeUndoPrepare');
+            assert.equal((await call(f.state, 'taskCancellationUndoCommit', { request, prepared: prepared.value.prepared })).ok, true);
+            const row = f.db.prepare('SELECT status, attachments FROM tasks WHERE id = ?').get('task268');
+            assert.equal(row.status, 'next'); assert.equal(JSON.parse(row.attachments)[0].uri, ROOT + '0.pdf');
+        });
+        await check(async () => {
+            const f = await fixture({ availability: true, availabilityTombstone: true });
+            assert.equal((await call(f.state, 'attachmentFileEditSaveCommit', f.envelope)).ok, true); syncLive(f);
+            const index = f.plan.findIndex((row) => row.reason === 'uncommitted-draft' && row.attachment.uri === ROOT + '0.pdf');
+            assert(index >= 0, 'new available URI survives as an uncommitted candidate when a concurrent tombstone wins');
+            const input = JSON.stringify({ version: 1, envelopeJSON: JSON.stringify(f.envelope), candidateIndex: index });
+            let borrowed = 0;
+            const keep = () => '{"outcome":"referenced"}', changed = () => { throw Error('wrong branch'); };
+            const retire = () => { borrowed++; return '{"outcome":"notOwned"}'; };
+            assert.equal(f.state.MindwtrHost.attachmentFileEditSaveRetire(input, keep, changed, retire), '{"outcome":"notOwned"}');
+            assert.equal(borrowed, 1);
+            assert.equal(f.state.MindwtrHost.attachmentFileEditSaveRetire(input, changed, changed, keep), '{"outcome":"referenced"}', 'selected native durable-reference backstop can retain bytes');
+            f.state.ownerProjects = [{ attachments: [{ kind: 'file', uri: ROOT + '0.pdf' }] }];
+            assert.equal(f.state.MindwtrHost.attachmentFileEditSaveRetire(input, keep, changed, retire), '{"outcome":"referenced"}');
+            assert.equal(borrowed, 1, 'fresh references keep the file even on a cached selected plan');
+            f.state.ownerProjects = [];
+            const same = await fixture({ availability: true, availabilityTombstone: true, availabilitySameURI: true });
+            assert.equal((await call(same.state, 'attachmentFileEditSaveCommit', same.envelope)).ok, true); syncLive(same);
+            const baseline = same.plan.findIndex((row) => row.reason === 'deleted-after-save' && row.attachment.uri === ROOT + '0.pdf');
+            assert(baseline >= 0, 'same-URI borrowed availability can become a baseline cleanup candidate');
+            assert.equal(same.state.MindwtrHost.attachmentFileEditSaveRetire(JSON.stringify({ version: 1,
+                envelopeJSON: JSON.stringify(same.envelope), candidateIndex: baseline }), keep, changed, retire), '{"outcome":"notOwned"}');
+            const historical = await fixture();
+            assert.equal((await call(historical.state, 'attachmentFileEditSaveCommit', historical.envelope)).ok, true); syncLive(historical);
+            assert.throws(() => historical.state.MindwtrHost.attachmentFileEditSaveRetire(JSON.stringify({ version: 1,
+                envelopeJSON: JSON.stringify(historical.envelope), candidateIndex: 0 }), keep, changed, retire), /INVALID_INPUT/);
         });
         const recurring = await fixture({ recurring: true });
         await check(async () => {
@@ -5333,6 +5928,30 @@ for (const [bridge, receipt, operation] of [
         const state = makeState(0);
         assert.match((await poll(state, state.MindwtrHost.attachmentDraftDiscardCandidates('{}'))).error, /^NOT_READY:/);
     });
+    await check('availability-only Discard accepts truthful borrowed retention with sealed historical grammar', async () => {
+        const local = await bootLocal(), raw = JSON.stringify({ version: 2, requestId: ID, targetURI: TARGET });
+        let entered = 0;
+        const keep = () => { entered++; return '{"outcome":"referenced"}'; };
+        const borrowed = () => { entered++; return '{"outcome":"notOwned"}'; };
+        assert.equal(local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, keep, borrowed), '{"outcome":"notOwned"}');
+        assert.equal(entered, 1);
+        for (const invalidRaw of [input, JSON.stringify({ version: true, requestId: ID, targetURI: TARGET }),
+            JSON.stringify({ version: 2, requestId: ID, targetURI: TARGET, extra: true })]) {
+            assert.throws(() => local.MindwtrHost.attachmentDraftDiscardRetireV5(invalidRaw, keep, borrowed), /INVALID_INPUT/);
+        }
+        assert.throws(() => call(local, raw, keep, borrowed), /INVALID_INPUT/); assert.equal(entered, 1);
+        assert.throws(() => call(local, input, keep, borrowed), /INVALID_INPUT/); assert.equal(entered, 2);
+        assert.equal(local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, borrowed, () => '{"outcome":"referenced"}'), '{"outcome":"referenced"}');
+        assert.throws(() => call(local, input, borrowed, () => '{"outcome":"referenced"}'), /INVALID_INPUT/);
+        local.ownerProjects = [{ attachments: [{ kind: 'file', uri: TARGET }] }];
+        assert.equal(local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, keep, borrowed), '{"outcome":"referenced"}');
+        assert.equal(entered, 3);
+        assert.throws(() => local.MindwtrHost.attachmentDraftDiscardRetireV5(raw, borrowed, borrowed), /INVALID_INPUT/);
+        const calls = entered;
+        for (const other of [makeLocal(), makeState(0, [], 'android', configureLocal)])
+            assert.throws(() => other.MindwtrHost.attachmentDraftDiscardRetireV5(raw, keep, borrowed), /NOT_READY/);
+        assert.equal(entered, calls);
+    });
     await check('before validated boot', () => refused(makeLocal()));
     await check('normal bootRecovery ready state', async () => {
         const state = await bootLocal(true);
@@ -5689,6 +6308,28 @@ for (const [bridge, receipt, operation] of [
         assert.equal((await poll(android, android.MindwtrHost.attachmentDraftAcknowledged('add-mixed', 'confirmed'))).ok, true);
         assert.equal(android.logText, null);
     });
+    await check('selfhosted availability acknowledgments are fixed, private, iOS-only and best effort', async () => {
+        const local = makeState(0, [], 'ios');
+        for (const operation of ['selfhosted-task-availability', 'selfhosted-project-availability']) {
+            assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged(operation, 'confirmed'))).ok, true);
+            const marker = JSON.parse(local.logText.trim().split('\n').at(-1));
+            assert.deepEqual(marker.context, { releaseCheck: 'v1.3.5/ios-selfhosted-file-availability', operation, outcome: 'confirmed' });
+            const before = local.logText;
+            for (const outcome of ['retained', 'replayed', 'removed', 'settled', 'private://credential/task']) {
+                assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged(operation, outcome))).ok, true);
+            }
+            assert.equal(local.logText, before);
+            local.logFailure = 'private diagnostics failure';
+            assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged(operation, 'confirmed'))).ok, true);
+            assert.equal(local.logText, before); local.logFailure = null;
+            const android = makeState(0);
+            assert.equal((await poll(android, android.MindwtrHost.attachmentDraftAcknowledged(operation, 'confirmed'))).ok, true);
+            assert.equal(android.logText, null);
+        }
+        const before = local.logText;
+        assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged('selfhosted-task-availability/private', 'confirmed'))).ok, true);
+        assert.equal(local.logText, before);
+    });
     await check('provider Add acknowledgment is iOS-only, fixed, and independent of optional diagnostics', async () => {
         const local = makeState(0, [], 'ios');
         assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged('provider-add', 'confirmed'))).ok, true);
@@ -5860,6 +6501,31 @@ for (const [bridge, receipt, operation] of [
             }
         }
     });
+    await check('availability consumer markers persist only fixed iOS acknowledgment pairs', async () => {
+        const pairs = [['availability-resume', 'validated'], ['availability-checkpoint', 'confirmed'],
+            ['availability-save', 'domainSaved'], ['availability-save', 'settled'], ['availability-discard', 'settled']];
+        for (const [operation, outcome] of pairs) {
+            const local = makeState(0, [], 'ios');
+            local.settings = { diagnostics: { loggingEnabled: false } };
+            const ack = (state, op = operation, result = outcome) => poll(state, state.MindwtrHost.attachmentDraftAcknowledged(op, result));
+            assert.equal((await ack(local)).ok, true);
+            assert.deepEqual(JSON.parse(local.logText.trim()).context,
+                { releaseCheck: 'v1.3.5/ios-task-availability-consumers', operation, outcome });
+            const before = local.logText;
+            for (const result of ['validated', 'confirmed', 'domainSaved', 'settled', 'prepared', 'downloaded', '', null]) {
+                if (!pairs.some(([op, accepted]) => op === operation && accepted === result))
+                    assert.equal((await ack(local, operation, result)).ok, true);
+            }
+            assert.equal((await ack(local, operation + '-extra')).ok, true);
+            assert.equal(local.logText, before);
+            assert.deepEqual((await poll(local, local.MindwtrHost.logShare())).value, { path: 'files/logs/mindwtr.log' });
+            const exported = local.logText;
+            local.logFailure = 'private diagnostics failure'; assert.equal((await ack(local)).ok, true); assert.equal(local.logText, exported);
+            for (const platform of ['android', undefined]) {
+                const other = makeState(0, [], platform); assert.equal((await ack(other)).ok, true); assert.equal(other.logText, null);
+            }
+        }
+    });
     await check('owned resume acknowledgment is iOS-only and fixed without claiming Save or UI hydration', async () => {
         const local = makeState(0, [], 'ios');
         assert.equal((await poll(local, local.MindwtrHost.attachmentDraftAcknowledged('owned-resume', 'validated'))).ok, true);
@@ -5878,6 +6544,21 @@ for (const [bridge, receipt, operation] of [
             assert.equal(absent.logText, null);
         }
     });
+    await check('cached Project private bridges refuse boot and non-iOS authority', async () => {
+        const request = JSON.stringify({ projectId: 'cached-410', attachmentId: '41000000-1111-4111-8111-111111111111',
+            revision: 'fixture', managedDirectoryURI: 'file:///documents/attachments/' });
+        for (const platform of ['ios', 'android', undefined]) {
+            const state = makeState(0, [], platform);
+            for (const [name, args] of [
+                ['projectAttachmentCachedAvailabilityPreflight', [request, null]],
+                ['projectAttachmentCachedAvailability', [request, 'file:///documents/attachments/41000000-1111-4111-8111-111111111111.txt']],
+            ]) {
+                const answer = await poll(state, state.MindwtrHost[name](...args));
+                assert.equal(answer.ok, false); assert.match(answer.error, /^NOT_READY:/);
+            }
+            assert.equal(state.logText, null);
+        }
+    });
     for (const [operation, releaseCheck, accepted = 'confirmed'] of [
         ['preexisting-journal-replay', 'v1.3.5/ios-preexisting-attachment-journal-replay'],
         ['container-relocation', 'v1.3.5/ios-attachment-container-recovery'],
@@ -5888,6 +6569,8 @@ for (const [bridge, receipt, operation] of [
         ['project-file-remove', 'v1.3.5/ios-project-file-remove', 'saved'],
         ['project-file-add', 'v1.3.5/ios-project-file-add', 'saved'],
         ['project-file-add', 'v1.3.5/ios-project-file-add', 'abandoned'],
+        ['cached-project-availability', 'v1.3.5/ios-cached-project-availability'],
+        ...['saved', 'abandoned', 'refused', 'cleanup-pending'].map(outcome => ['selfhosted-project-download', 'v1.3.5/ios-selfhosted-project-download', outcome]),
         ['project-file-hash', 'v1.3.5/ios-project-file-hash', 'saved'],
         ['task-file-hash', 'v1.3.5/ios-task-file-hash', 'saved'],
     ]) await check(`${operation} acknowledgment is fixed, exportable and best effort`, async () => {
@@ -6030,6 +6713,9 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
         { title: '合并备份', message: '2 added / 1 updated', undoLabel: 'settings.undoImport', doneLabel: 'common.done' });
     assert.equal((await poll(backup, backup.MindwtrHost.backupSnapshotRestoreModel(snapshotName))).value.message,
         `Restore ${snapshotName}; later edits are rolled back`);
+    assert.deepEqual(await poll(backup, backup.MindwtrHost.backupExportPrepared('json')), { ok: true, value: {} },
+        'completed export callback settles through submit\'s Promise slot');
+    assert.match(backup.logText, /v1\.3\.5\/ios-backup-export/, 'completed export records its fixed marker');
     assert.equal(JSON.stringify({ events: backup.events, saves: backup.saveCount, data: backup.fakeData }), domainBefore,
         'inspection and localized result/confirmation reads neither flush nor mutate domain state');
     let release;

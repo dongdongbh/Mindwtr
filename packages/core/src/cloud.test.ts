@@ -17,6 +17,7 @@ import {
     isValidCloudSyncToken,
 } from './cloud';
 import { MAX_DOWNLOAD_BYTES, ResponseTooLargeError } from './http-utils';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 
 const okResponse = (text: string) =>
     ({
@@ -220,6 +221,54 @@ describe('cloud sync http helpers', () => {
         ).rejects.toThrow(
             'Cloud PUT failed (405): Method Not Allowed — this URL may not be a Mindwtr sync server (check host and port)',
         );
+    });
+
+    it('explains a 413 on the sync document write and logs the sizes', async () => {
+        const logs: LogPayload[] = [];
+        setLogger((payload) => logs.push(payload));
+        try {
+            const fetcher = vi.fn(async () => ({
+                ok: false,
+                status: 413,
+                statusText: 'Payload Too Large',
+                text: async () => JSON.stringify({ error: 'Payload too large: the limit is 2000000 bytes', limitBytes: 2_000_000 }),
+            }) as unknown as Response);
+            const data = { tasks: [{ id: 't1', title: 'Secret title' }] };
+            const bodyBytes = new TextEncoder().encode(JSON.stringify(data, null, 2)).byteLength;
+            const error = await cloudPutJson('https://example.com/v1/data', data, { fetcher }).catch((e: unknown) => e);
+            expect(error).toBeInstanceOf(CloudHttpError);
+            expect((error as CloudHttpError).status).toBe(413);
+            expect((error as Error).message).toBe(
+                `Cloud PUT failed (413): the sync data (${bodyBytes} bytes) is larger than the server's limit (2000000 bytes). `
+                + 'Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server.',
+            );
+            expect(logs).toEqual([expect.objectContaining({
+                level: 'warn',
+                message: 'Cloud sync data refused as too large',
+                context: { releaseCheck: 'v1.3.5/cloud-data-body-limit', status: 413, limitBytes: 2_000_000, bodyBytes },
+            })]);
+            expect(JSON.stringify(logs)).not.toContain('Secret title');
+        } finally {
+            setLogger(consoleLogger);
+        }
+    });
+
+    it('explains a 413 from a proxy that names no limit', async () => {
+        setLogger(() => undefined);
+        try {
+            const fetcher = vi.fn(async () => ({
+                ok: false,
+                status: 413,
+                statusText: 'Request Entity Too Large',
+                text: async () => '<html>nginx</html>',
+            }) as unknown as Response);
+            await expect(cloudPutJson('https://example.com/v1/data', {}, { fetcher })).rejects.toThrow(
+                "Cloud PUT failed (413): the sync data (2 bytes) is larger than the server's limit. "
+                + 'Raise MINDWTR_CLOUD_MAX_DATA_BODY_BYTES on the server (and any proxy body limit).',
+            );
+        } finally {
+            setLogger(consoleLogger);
+        }
     });
 
     it('does not append the wrong-server hint for non-405 statuses', async () => {
@@ -532,6 +581,31 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
 
         await expect(cloudAttachmentExists(url, { fetcher })).resolves.toBe(true);
         expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method)).toEqual(['HEAD']);
+    });
+
+    it.each(['HEAD', 'fallback GET'] as const)('rethrows the original coded host refusal from %s without a presence answer', async (site) => {
+        const failure = Object.assign(new TypeError('network failed'), { code: 'response-too-large', limitBytes: 8 });
+        const fetcher = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+            if (site === 'fallback GET' && init?.method === 'HEAD') return statusResponse(405);
+            throw failure;
+        });
+
+        await expect(cloudAttachmentExists(url, { fetcher, partialBodyReads: true })).rejects.toBe(failure);
+
+        expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(site === 'HEAD' ? ['HEAD'] : ['HEAD', 'GET']);
+    });
+
+    it.each([
+        Object.assign(new Error('network down'), { code: 'response-too-large', limitBytes: 0 }),
+        Object.assign(new Error('network down'), { code: 'response-too-large', limitBytes: 1.5 }),
+        Object.assign(new Error('network down'), { code: 'other', limitBytes: 8 }),
+        { message: 'network down', code: 'response-too-large', limitBytes: 8 },
+    ])('keeps malformed host refusal metadata on the ordinary unknown path (%#)', async (failure) => {
+        const fetcher = vi.fn(async (): Promise<Response> => { throw failure; });
+
+        await expect(cloudAttachmentExists(url, { fetcher })).resolves.toBeNull();
+
+        expect(fetcher).toHaveBeenCalledTimes(1);
     });
 
     it('reports a HEAD 404 as a definitive absence', async () => {

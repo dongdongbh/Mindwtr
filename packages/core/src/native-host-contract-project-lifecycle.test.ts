@@ -10,6 +10,8 @@ import type { SqliteClient } from './sqlite-adapter';
 import type { AppData, Project, Section, Task } from './types';
 
 const AT = '2026-10-01T12:00:00.000Z';
+// The 'done' child must stay done: a fixed completion date would age past auto-archive's 7 days and turn it archived on load.
+const DONE_AT = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const ID = 'project-lifecycle';
 const COMPLETE_ID = '8bebf523-dd4e-40dc-9fce-37e456295d49';
 const REACTIVATE_ID = '9bebf523-dd4e-40dc-9fce-37e456295d49';
@@ -37,7 +39,7 @@ const initial = (): AppData => ({
             recurrence: { rule: 'daily', strategy: 'strict' },
             attachments: [{ id: 'link', kind: 'link', title: 'Link', uri: 'https://example.com',
                 createdAt: AT, updatedAt: AT }] }),
-        task('done', { status: 'done', completedAt: AT }),
+        task('done', { status: 'done', completedAt: DONE_AT }),
         task('archived', { status: 'archived', archivedAt: AT }),
         task('deleted', { deletedAt: AT }),
         task('section-only', { projectId: undefined }),
@@ -345,7 +347,7 @@ describe('prepared Project Cancel', () => {
             attachments: [{ id: 'file', uri: 'https://example.com/keep' }],
         });
         expect(native.state()._tasksById.get('reference')?.status).toBe('reference');
-        expect(native.state()._tasksById.get('done')).toMatchObject({ status: 'done', completedAt: AT });
+        expect(native.state()._tasksById.get('done')).toMatchObject({ status: 'done', completedAt: DONE_AT });
         expect(native.state()._tasksById.get('archived')).toMatchObject({ status: 'archived', cancelledAt: AT });
         expect(native.state()._tasksById.get('deleted')?.deletedAt).toBe(AT);
         expect(native.state()._tasksById.get('foreign')?.projectId).toBe('foreign-project');
@@ -372,7 +374,7 @@ describe('prepared Project Cancel', () => {
             projectArchivedAt: undefined });
         expect(env.state()._tasksById.get('waiting')).toMatchObject({ status: 'archived',
             cancelledAt: cancelled.prepared.updateAt, title: 'Later independent edit' });
-        expect(env.state()._tasksById.get('done')).toMatchObject({ status: 'done', completedAt: AT });
+        expect(env.state()._tasksById.get('done')).toMatchObject({ status: 'done', completedAt: DONE_AT });
         expect(env.state()._sectionsById.get('section-live')?.deletedAt).toBeUndefined();
 
         const old = initial();

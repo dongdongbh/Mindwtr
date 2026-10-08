@@ -73,10 +73,10 @@ final class NativeForegroundCleanupTests: XCTestCase {
     private func input(_ requests: [String], mode: String = "cleanup", extra: [String: Any] = [:]) throws -> String {
         var row = extra; row["mode"] = mode; row["requests"] = requests; return try json(row)
     }
-    private func configured(_ value: CoreHost, counter: ForegroundCleanupJobs) async {
+    private func configured(_ value: CoreHost, counter: ForegroundCleanupJobs) async throws {
         let hooks = NativeAttachmentHostHooks()
         hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-        await value.configureAttachmentHost(hooks)
+        try await value.configureAttachmentHost(hooks)
     }
     private func assertFailure(_ expected: String, _ work: () async throws -> String,
                                file: StaticString = #filePath, line: UInt = #line) async {
@@ -187,7 +187,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
 
     func testSelectedCleanupInsideOuterInvocationDefersAcknowledgementAndInvalidatesRetainedCallback() async throws {
         try await seed(); let value = core(bundleURL: try probeBundle()), counter = ForegroundCleanupJobs()
-        await configured(value, counter: counter); _ = try await value.start()
+        try await configured(value, counter: counter); _ = try await value.start()
         let before = try rows(), selected = try request()
         let result = try object(await value.foregroundSync(command: "syncNow", requestJSON: input([selected])))
         let replies = try XCTUnwrap(result["results"] as? [Any]); XCTAssertEqual(replies.count, 1)
@@ -210,7 +210,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
         try insertTask(id: UUID().uuidString.lowercased(), attachments: [attachment(id: otherID, uri: otherFile.absoluteString, deleted: true)])
         try bytes.write(to: otherFile)
         let value = core(bundleURL: try probeBundle()), counter = ForegroundCleanupJobs()
-        await configured(value, counter: counter); _ = try await value.start()
+        try await configured(value, counter: counter); _ = try await value.start()
         let before = try rows(), inputs = [try request(), try request(attachment: otherID, target: otherFile)]
         let result = try object(await value.foregroundSync(command: "syncNow", requestJSON: input(inputs)))
         let replies = try XCTUnwrap(result["results"] as? [Any]); XCTAssertEqual(replies.count, 2)
@@ -226,7 +226,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
         try await seed()
         try insertTask(id: UUID().uuidString.lowercased(), attachments: [attachment(id: UUID().uuidString.lowercased(), uri: target.absoluteString, deleted: false)])
         let value = core(bundleURL: try probeBundle()), counter = ForegroundCleanupJobs()
-        await configured(value, counter: counter); _ = try await value.start()
+        try await configured(value, counter: counter); _ = try await value.start()
         let before = try rows(), selected = try request()
         let result = try object(await value.foregroundSync(command: "syncNow", requestJSON: input([selected])))
         try assertReply(try XCTUnwrap((result["results"] as? [Any])?.first), input: selected, outcome: "retained")
@@ -238,7 +238,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
 
     func testReentrantCallbackRefusesDuringActualPureCleanupPreparation() async throws {
         try await seed(); let value = core(bundleURL: try probeBundle()), counter = ForegroundCleanupJobs()
-        await configured(value, counter: counter); _ = try await value.start()
+        try await configured(value, counter: counter); _ = try await value.start()
         let before = try rows(), selected = try request()
         let result = try object(await value.foregroundSync(command: "syncNow", requestJSON: input([selected], mode: "reentrant")))
         XCTAssertEqual(result["reentrant"] as? String, marker)
@@ -252,7 +252,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
         try await seed(); let faults = HostIOFaults(); var fired = false
         faults.cleanupBoundary = { if $0 == "afterIntent" && !fired { fired = true; throw HostFailure("Synthetic foreground interruption") } }
         let value = core(faults: faults, bundleURL: try probeBundle()), counter = ForegroundCleanupJobs()
-        await configured(value, counter: counter); _ = try await value.start()
+        try await configured(value, counter: counter); _ = try await value.start()
         let before = try rows(), selected = try request(), secret = "Synthetic secret excluded from retained cleanup"
         await assertFailure(cleanupFailure) { try await value.foregroundSync(command: "syncNow", requestJSON: self.input([selected], extra: ["secret": secret])) }
         let frozen = try Data(contentsOf: journal), outer = try object(String(decoding: frozen, as: UTF8.self))
@@ -283,7 +283,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
         await assertFailure(cleanupFailure) { try await value.foregroundSync(command: "syncNow", requestJSON: self.input([selected])) }
         let frozen = try Data(contentsOf: journal); XCTAssertFalse(frozen.isEmpty); XCTAssertEqual(try markers().count, 0)
         await value.close()
-        let cold = core(), counter = ForegroundCleanupJobs(); await configured(cold, counter: counter); _ = try await cold.start()
+        let cold = core(), counter = ForegroundCleanupJobs(); try await configured(cold, counter: counter); _ = try await cold.start()
         XCTAssertEqual(counter.submitted, 1, "Cold recovery retires the captured proof without a new baseline snapshot")
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         XCTAssertEqual(try rows(), before); await cold.close(); XCTAssertEqual(try markers().count, 1)
@@ -303,7 +303,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
                     guard release.wait(timeout: .now() + 10) == .success else { throw HostFailure("Foreground fixture barrier timed out") }
                 }
             }
-            let value = core(bundleURL: try probeBundle()); await value.configureAttachmentHost(hooks); _ = try await value.start()
+            let value = core(bundleURL: try probeBundle()); try await value.configureAttachmentHost(hooks); _ = try await value.start()
             let before = try rows(), selected = try request(), outer = try input([selected])
             let operation = Task { try await value.foregroundSync(command: "syncNow", requestJSON: outer) }
             defer { release.signal() }; await fulfillment(of: [reached], timeout: 10)
@@ -334,7 +334,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
 
     func testOuterAdmissionIsBoundedFixedAndDoesNotPersistSecretBearingFields() async throws {
         try await seed(); let value = core(bundleURL: try probeBundle()), counter = ForegroundCleanupJobs()
-        await configured(value, counter: counter); _ = try await value.start(); let before = try rows()
+        try await configured(value, counter: counter); _ = try await value.start(); let before = try rows()
         for (command, request) in [("unsupported", "{}"), ("syncNow", "[]"), ("syncNow", "null"), ("syncNow", "broken"),
                                    ("syncNow", try json(["secret": String(repeating: "é", count: 65_536)]))] {
             await assertFailure(foregroundFailure) { try await value.foregroundSync(command: command, requestJSON: request) }
@@ -361,7 +361,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
 
     func testActualEditorSidecarAndPhysicalJournalRefuseBeforeCallbackIO() async throws {
         try await seed(); let value = core(bundleURL: try probeBundle()), counter = ForegroundCleanupJobs()
-        await configured(value, counter: counter); _ = try await value.start(); let before = try rows(), outer = try input([request()])
+        try await configured(value, counter: counter); _ = try await value.start(); let before = try rows(), outer = try input([request()])
         let pending = try json(["version": 2, "method": "complete", "argumentsJSON": json([taskID])])
         try Data(pending.utf8).write(to: journal)
         await assertFailure(foregroundFailure) { try await value.foregroundSync(command: "syncNow", requestJSON: outer) }

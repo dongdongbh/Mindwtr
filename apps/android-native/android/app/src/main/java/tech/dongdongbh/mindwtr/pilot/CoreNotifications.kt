@@ -8,10 +8,14 @@ import android.content.Intent
 import android.graphics.Color
 import android.media.AudioAttributes
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
+import android.service.notification.StatusBarNotification
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
+import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.util.UUID
 
 /**
@@ -24,6 +28,14 @@ internal object CoreNotifications {
     const val REMINDER_CHANNEL = "mindwtr_reminders_v2"
     /** A tap's payload for MainActivity: the notification's data as JSON, which core routes (EntryPoints.kt, routeNotificationOpen). */
     const val EXTRA_OPEN = "tech.dongdongbh.mindwtr.notificationOpen"
+
+    /** The alarm a reminder notification was posted for: a tagged reminder shares its slot's id, so the alarm rides in its extras. */
+    private const val EXTRA_ALARM_ID = "tech.dongdongbh.mindwtr.reminderAlarmId"
+
+    /** The id every tagged reminder posts under, beside its tag (core's getReminderNotificationTag: one per task). */
+    private const val REMINDER_SLOT_ID = 1
+    /** Android enqueues notify asynchronously; its active snapshot may still name the previous alarm. Guarded by the reminder lock. */
+    private val reminderOwners = mutableMapOf<String, Int>()
 
     /** Posts [details] now; false when Android drops it (no notification permission, Android 13+). */
     fun post(context: Context, details: JSONObject): Boolean {
@@ -55,7 +67,46 @@ internal object CoreNotifications {
                 .putExtra(ReminderActionReceiver.EXTRA_REQUEST, UUID.randomUUID().toString()).putExtra(ReminderAlarms.EXTRA_ALARM, alarm.toString())))
             builder.addAction(android.R.drawable.ic_lock_idle_alarm, "DISMISS", broadcast(action(ReminderActionReceiver.DISMISS)))
         }
-        context.getSystemService(NotificationManager::class.java).notify(id, builder.build())
+        builder.addExtras(Bundle().apply { putInt(EXTRA_ALARM_ID, id) })
+        // A tagged reminder replaces the one its task shows (and alerts again) instead of stacking one notification per
+        // occurrence: a task's start, due and due-time repeats share the tag. An untagged one posts under the alarm's id.
+        val tag = details.optString("tag")
+        val manager = context.getSystemService(NotificationManager::class.java)
+        synchronized(ReminderAlarms.LOCK) {
+            if (tag.isEmpty()) manager.notify(id, builder.build()) else {
+                manager.notify(tag, REMINDER_SLOT_ID, builder.build())
+                reminderOwners[tag] = id
+            }
+        }
+    }
+
+    /** The alarm a shown reminder notification belongs to (the one shown in its task's slot), by the id it was posted for. */
+    fun reminderAlarmId(shown: StatusBarNotification): Int = shown.notification.extras.getInt(EXTRA_ALARM_ID, shown.id)
+
+    /**
+     * Removes what alarm [id] put in the tray: a notification under its own id, or its task's slot while [id] is still the reminder
+     * shown there. A reminder that a later one of its task replaced is gone already, and the later one stays.
+     */
+    fun cancelReminder(context: Context, id: Int): Unit = synchronized(ReminderAlarms.LOCK) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(id)
+        var taggedRemoved = 0
+        for ((tag, owner) in reminderOwners) {
+            if (owner == id) {
+                manager.cancel(tag, REMINDER_SLOT_ID)
+                taggedRemoved += 1
+            }
+        }
+        for (shown in manager.activeNotifications) {
+            if (shown.tag == null || NotificationCompat.getChannelId(shown.notification) != REMINDER_CHANNEL) continue
+            if (shown.tag in reminderOwners) continue
+            if (reminderAlarmId(shown) == id) {
+                manager.cancel(shown.tag, shown.id)
+                taggedRemoved += 1
+            }
+        }
+        reminderOwners.entries.removeAll { it.value == id }
+        Log.i(CoreHost.TAG, "Native Android reminder slot releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=$taggedRemoved")
     }
 
     /**

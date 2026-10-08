@@ -519,6 +519,32 @@ pub(crate) fn quit_app(app: tauri::AppHandle) {
     });
 }
 
+pub(crate) fn build_tray_menu(
+    app: &tauri::AppHandle,
+    quick_add: &str,
+    show: &str,
+    quit: &str,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let quick_add_item = MenuItem::with_id(app, "quick_add", quick_add, true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, "show", show, true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", quit, true, None::<&str>)?;
+    Menu::with_items(app, &[&quick_add_item, &show_item, &quit_item])
+}
+
+#[tauri::command]
+pub(crate) fn set_tray_labels(
+    app: tauri::AppHandle,
+    quick_add: String,
+    show: String,
+    quit: String,
+) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id("main") else {
+        return Ok(());
+    };
+    let menu = build_tray_menu(&app, &quick_add, &show, &quit).map_err(|e| e.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub(crate) fn set_tray_visible(app: tauri::AppHandle, visible: bool) -> Result<(), String> {
     if let Some(tray) = app.tray_by_id("main") {
@@ -629,7 +655,7 @@ pub(crate) fn nudge_wayland_csd_after_show(window: &tauri::WebviewWindow) {
 pub(crate) fn nudge_wayland_csd_after_show(_window: &tauri::WebviewWindow) {}
 
 /// The single funnel for putting the main window back on screen: the tray menu
-/// and tray click, a second instance (including the Flatpak listener), the
+/// and tray click, macOS Dock reopen, a second instance (including the Flatpak listener), the
 /// first reveal after launch, and the quick-add fallback all land here.
 ///
 /// The macOS activation policy is restored to Regular before the window

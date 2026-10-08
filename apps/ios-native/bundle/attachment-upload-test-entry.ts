@@ -3,7 +3,7 @@ import '../../android-native/bundle/host-entry';
 import { createNativeAttachments, createNativeLocalAttachmentConfiguration, nativeFileChannels } from '../../android-native/bundle/host-attachments';
 import { createHostSyncCrypto } from '../../android-native/bundle/host-sync';
 import { logInfo, logWarn } from '../../../packages/core/src/logger';
-import { SYNC_BACKEND_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from '../../../packages/core/src/sync-storage-keys';
+import { CLOUD_PROVIDER_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from '../../../packages/core/src/sync-storage-keys';
 import type { AppData, SyncKeyMaterial } from '@mindwtr/core';
 import { ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, LocalSyncAbort, useTaskStore } from '@mindwtr/core';
 
@@ -61,14 +61,19 @@ host.attachmentCleanupGate = {
     },
 };
 host.attachmentUploadGate = {
-    async run(data: AppData, cap: number, phase: 'prepare' | 'post-merge', url: string, fixture?: SyntheticEncryptionFixture) {
+    async run(data: AppData, cap: number, phase: 'prepare' | 'post-merge', url: string, fixture?: SyntheticEncryptionFixture, provider: 'webdav' | 'selfhosted' = 'webdav', activationProbe = true) {
+        if (!['webdav', 'selfhosted'].includes(provider) || provider === 'selfhosted' && fixture) {
+            throw new Error('Attachment upload fixture provider is unavailable');
+        }
         const channels = nativeFileChannels();
         if (!channels) throw new Error('Attachment upload fixture file channels are unavailable');
         const before = JSON.stringify(data), warnings: Record<string, string>[] = [];
         const material: SyncKeyMaterial | null = fixture
             ? { key: new Uint8Array(fixture.key), salt: new Uint8Array(fixture.salt), params: fixture.params } : null;
         const values = new Map<string, string>([
-            [SYNC_BACKEND_KEY, 'webdav'], [WEBDAV_URL_KEY, url], [WEBDAV_USERNAME_KEY, 'synthetic-fixture'],
+            [SYNC_BACKEND_KEY, provider === 'webdav' ? 'webdav' : 'cloud'],
+            [WEBDAV_URL_KEY, url], [WEBDAV_USERNAME_KEY, 'synthetic-fixture'],
+            [CLOUD_URL_KEY, url], [CLOUD_PROVIDER_KEY, 'selfhosted'],
         ]);
         const refuse = async (): Promise<never> => { throw new Error('Attachment upload fixture secret port is unavailable'); };
         const attachments = createNativeAttachments({
@@ -81,28 +86,39 @@ host.attachmentUploadGate = {
             log: {
                 info: () => {}, sanitize: () => 'Attachment upload fixture refused',
                 warn: (_message, options) => {
-                    const releaseCheck = options?.extra?.releaseCheck;
-                    if (releaseCheck !== 'v1.3.5/webdav-host-upload-limit'
-                        && releaseCheck !== 'v1.3.5/webdav-host-download-limit') return;
+                    const extra = options?.extra;
+                    const releaseCheck = extra?.releaseCheck;
+                    if (!extra || releaseCheck !== 'v1.3.5/webdav-host-upload-limit'
+                        && releaseCheck !== 'v1.3.5/webdav-host-download-limit'
+                        && releaseCheck !== 'v1.3.5/cloud-host-upload-limit'
+                        && releaseCheck !== 'v1.3.5/cloud-host-response-limit') return;
                     const context = {
-                        releaseCheck: options.extra.releaseCheck,
-                        operation: options.extra.operation, outcome: options.extra.outcome,
+                        releaseCheck: extra.releaseCheck,
+                        operation: extra.operation, outcome: extra.outcome,
                     };
                     warnings.push(context);
-                    logWarn('WebDAV host transfer admission refused', { scope: 'native-ios', force: true, context });
+                    logWarn(provider === 'webdav' ? 'WebDAV host transfer admission refused' : 'Cloud host transfer admission refused',
+                        { scope: 'native-ios', force: true, context });
                 },
             },
             crypto: createHostSyncCrypto(host.__mindwtrCryptoCall),
             encryption: {
                 getSyncEncryptionMaterial: async () => material,
-                logSyncEncryptionEvent: () => {},
+                logSyncEncryptionEvent: async () => {},
             },
-            maxWebdavBufferedUploadBytes: cap,
+            ...(provider === 'webdav' ? { maxWebdavBufferedUploadBytes: cap } : { maxCloudBufferedUploadBytes: cap }),
         }, channels);
         try {
-            const result = await attachments.syncPort.syncWebdav(data, {
+            const signal = new AbortController().signal;
+            const assertCurrent = () => {
+                if (signal.aborted) throw signal.reason;
+                if (JSON.stringify(data) !== before) throw new Error('Attachment upload fixture input changed');
+            };
+            const result = provider === 'webdav' ? await attachments.syncPort.syncWebdav(data, {
                 url, username: 'synthetic-fixture', password: 'synthetic-not-a-credential',
-            }, new AbortController().signal, { phase, activationProbe: true, material });
+            }, signal, { phase, activationProbe: true, material: material ?? undefined }) : await attachments.syncPort.syncCloud(data, {
+                url, token: 'synthetic-fixture-token-395',
+            }, { signal, phase, activationProbe, assertCurrent });
             return { admitted: true, result, inputUnchanged: JSON.stringify(data) === before, warnings };
         } catch (error) {
             const name = error instanceof Error ? error.name : 'Error';
@@ -111,7 +127,7 @@ host.attachmentUploadGate = {
                 && Number.isSafeInteger(structured.limitBytes) && (structured.limitBytes as number) > 0;
             return {
                 admitted: false, name,
-                message: name === 'WebdavHostUploadLimitError'
+                message: name === 'WebdavHostUploadLimitError' || name === 'CloudHostUploadLimitError'
                     ? (error as Error).message : capped
                         ? `Response exceeds the ${structured.limitBytes} byte download limit` : 'Attachment upload fixture failed',
                 ...(capped ? { code: structured.code, limitBytes: structured.limitBytes } : {}),
