@@ -1,3 +1,4 @@
+import CoreFoundation
 import CryptoKit
 import Darwin
 import Foundation
@@ -1018,7 +1019,19 @@ final class ProjectFileDownloadHostTests: XCTestCase {
             XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
             if variant.hasSuffix("after-commit") { try assertWebDAVEffect416(before, original: original, unrecoverable: true) }
             else { XCTAssertEqual(try json(projectRows416()), try json(before)) }
-            let preCold = try rows(); await core.close(); let cold = host(); try await retainedStart(cold)
+            let preCold = try rows(), retainedJournal = try Data(contentsOf: journal)
+            await core.close(); let cold = host(); try await retainedStart(cold)
+            let summary = try object(await cold.projectFileAvailabilitySummary())
+            XCTAssertEqual(try json(summary), try json(["requestId": id, "projectId": projectID, "attachmentId": attachmentID, "phase": "intent"]))
+            let appLock = try object(await cold.call("appLockOptions", argumentsJSON: "[\"{}\"]"))
+            XCTAssertEqual(Set(appLock.keys), Set(["row", "value", "expected"]))
+            let lockValue = try XCTUnwrap(appLock["value"] as? NSNumber)
+            XCTAssertEqual(CFGetTypeID(lockValue), CFBooleanGetTypeID()); XCTAssertFalse(lockValue.boolValue)
+            XCTAssertFalse(try XCTUnwrap(appLock["row"] as? [String: Any]).isEmpty)
+            XCTAssertFalse(try XCTUnwrap(appLock["expected"] as? [String: Any]).isEmpty)
+            XCTAssertEqual(try Data(contentsOf: journal), retainedJournal); XCTAssertEqual(try rows(), preCold)
+            XCTAssertEqual(try others(), other); XCTAssertEqual(try Data(contentsOf: manifest), config)
+            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
             let reply: String
             if variant.hasPrefix("stop") { reply = try await cold.abandonProjectFileAvailability(requestId: id) }
             else { reply = try await cold.recoverProjectFileAvailability(requestId: id) }

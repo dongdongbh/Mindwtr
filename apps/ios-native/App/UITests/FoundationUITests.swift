@@ -1130,6 +1130,13 @@ final class FoundationUITests: XCTestCase {
         // requests, exact RN tombstone effects, and no files or retained journal.
     }
 
+    func testNativeWebDAVProject404CompletesAndColdRetriesInOneInvocation() throws {
+        // Separate XCTest invocations can reinstall the app and change its
+        // container identity. Keep the real terminate/relaunch in one invocation.
+        try testNativeWebDAVProject404CompletesAndCreatesColdRetryIntent()
+        try testNativeWebDAVProject404ColdRetryAcknowledgesTerminalResult()
+    }
+
     func testNativeSyncInvalidDraftDiscardsToOffAndColdReopenHasNoPlaintext() {
         continueAfterFailure = false
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()
