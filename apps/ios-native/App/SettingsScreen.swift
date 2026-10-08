@@ -44,7 +44,7 @@ struct SettingsScreen: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.settingsSyncChecking || model.settingsSyncRestartRequired || (!model.settingsDataPresented && (model.busy || model.retryNeeded || model.somedaySectionRenamePending
+                .disabled(model.settingsSyncChecking || model.settingsSyncRestartRequired || (!model.settingsDataPresented && ((model.busy && !model.settingsAboutCanCancel) || model.retryNeeded || model.somedaySectionRenamePending
                           || model.somedaySectionRenameAwaitingRefresh
                           || model.somedaySectionDeletePending || model.somedaySectionDeleteAwaitingRefresh
                           || model.somedaySectionOrderActive || model.unassignedAreaColorActive
@@ -2456,7 +2456,7 @@ private struct DiagnosticsActivitySheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
-// Static RN About rows share the existing Settings destination and OS handoff.
+// RN About actions share the existing Settings destination and page-owned OS handoff.
 private struct AboutSettingsCard: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2490,6 +2490,34 @@ private struct AboutSettingsCard: View {
                         .accessibilityIdentifier("about-version")
                 }.frame(maxWidth: .infinity).padding(.vertical, 12)
                 VStack(spacing: 0) {
+                    action("check-updates", label: "settings.checkForUpdates", value: model.label(model.settingsAboutChecking
+                        ? "settings.checking" : "settings.aboutMobile.tapToCheck")) { model.checkAboutUpdates() }
+                    divider
+                    action("rate", label: "settings.aboutMobile.rateOurApp", value: "App Store") { model.rateAboutApp() }
+                }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                if model.settingsAboutChecking || model.settingsAboutOpening {
+                    ProgressView().accessibilityLabel(model.label(model.settingsAboutChecking ? "settings.checking" : "common.loading"))
+                        .accessibilityIdentifier("about-progress")
+                }
+                if let failure = model.settingsAboutError {
+                    Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("about-open-error")
+                }
+                if model.settingsAboutUpdate != nil {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(model.settingsAboutUpdateTitle).rnFont(16, .semibold).foregroundStyle(palette.text)
+                            .accessibilityAddTraits(.isHeader).accessibilityIdentifier("about-update-title")
+                        Text(model.settingsAboutUpdateMessage).rnFont(14).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("about-update-message")
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 12) { updateChoices }
+                            VStack(alignment: .leading, spacing: 8) { updateChoices }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                        .accessibilityIdentifier("about-update-notice")
+                }
+                VStack(spacing: 0) {
                     link("website", label: "settings.officialWebsite", value: "Mindwtr")
                     divider
                     link("tutorials", label: "settings.videoTutorials", value: "YouTube")
@@ -2506,13 +2534,6 @@ private struct AboutSettingsCard: View {
                             .accessibilityIdentifier("about-license-value")
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                if model.settingsAboutOpening {
-                    ProgressView().accessibilityLabel(model.label("common.loading"))
-                }
-                if let failure = model.settingsAboutError {
-                    Text(failure).rnFont(14).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("about-open-error")
-                }
             }.padding(16).padding(.bottom, 24)
         }.accessibilityIdentifier("about-scroll")
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
@@ -2521,7 +2542,33 @@ private struct AboutSettingsCard: View {
             .onDisappear { model.invalidateAboutLinkOpening() }
     }
 
+    @ViewBuilder private var updateChoices: some View {
+        Button(model.label(model.settingsAboutUpdate?.updateAvailable == true ? "settings.later" : "common.ok")) {
+            model.dismissAboutUpdate()
+        }.buttonStyle(.plain).rnFont(15, .semibold).foregroundStyle(palette.tint)
+            .frame(minWidth: 44, minHeight: 44).accessibilityIdentifier("about-update-later")
+        if model.settingsAboutUpdate?.updateAvailable == true, model.settingsAboutUpdate?.listing != nil {
+            Button(model.label("attachments.open")) { model.openAboutUpdate() }
+                .buttonStyle(.plain).rnFont(15, .semibold).foregroundStyle(palette.tint)
+                .frame(minWidth: 44, minHeight: 44).disabled(!model.settingsAboutUpdateCanOpen)
+                .accessibilityIdentifier("about-update-open")
+        }
+    }
+
     private var divider: some View { palette.border.frame(height: 0.5).padding(.horizontal, 14) }
+
+    private func action(_ id: String, label: String, value: String, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(model.label(label)).rnFont(15, .semibold).foregroundStyle(palette.text)
+                    Text(value).rnFont(14).foregroundStyle(palette.secondary)
+                }.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").foregroundStyle(palette.secondary).accessibilityHidden(true)
+            }.padding(14).frame(minHeight: 52).contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(!model.settingsAboutLinksEnabled)
+            .accessibilityIdentifier("about-" + id)
+    }
 
     private func link(_ id: String, label: String, value: String) -> some View {
         Button { model.openAboutLink(id) } label: {

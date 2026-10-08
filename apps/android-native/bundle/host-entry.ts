@@ -50,6 +50,8 @@ import {
     diagnosticsEntryFromLogPayload,
     getGeneralSettingsDeviceWrites,
     getPersistenceStatus,
+    compareAppVersions,
+    fetchAppStoreInfo,
     getStorageAdapter,
     isSupportedLanguage,
     isDiagnosticsLoggingEnabled,
@@ -139,7 +141,7 @@ type NativeBridge = {
     bgSyncSchedule?(on: boolean): string | null;
 };
 
-declare const globalThis: Record<string, unknown> & { MindwtrHost?: unknown };
+declare const globalThis: Record<string, unknown> & { MindwtrHost?: unknown; fetch: typeof fetch };
 const native = (): NativeBridge => {
     const bridge = globalThis.__mindwtrNative as NativeBridge | undefined;
     if (!bridge) throw new Error('Native bridge unavailable');
@@ -4018,6 +4020,54 @@ globalThis.MindwtrHost = {
         (globalThis.__cancelHostCalls as (message: string) => void)('The host operation timed out');
         pending.get(Number(idText))?.controller.abort(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
         return null;
+    },
+    /** Read-only About lookup; the native invocation still owns HTTP admission. */
+    iosAboutAppStoreInfo(bundleIdentifier: string, currentVersion: string): string {
+        return submit(async (signal) => {
+            const unavailable = () => new Error('NOT_READY: App Store lookup is unavailable');
+            const cancelled = () => new Error('CANCELLED: App Store lookup was cancelled');
+            const adapter = bootAdapter;
+            const assertReady = () => {
+                if (signal.aborted) throw cancelled();
+                if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+                    || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
+                requireSaved();
+                if (!contract.getDataSettings().ok) throw unavailable();
+            };
+            assertReady();
+            if (typeof bundleIdentifier !== 'string' || bundleIdentifier.length > 255
+                || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(bundleIdentifier)) {
+                throw new Error('INVALID_INPUT: Invalid App Store bundle identifier');
+            }
+            if (typeof currentVersion !== 'string' || currentVersion.length > 200 || !currentVersion.trim()
+                || [...currentVersion].some((character) => {
+                    const code = character.charCodeAt(0);
+                    return code < 32 || code >= 127 && code <= 159;
+                })) {
+                throw new Error('INVALID_INPUT: Invalid installed app version');
+            }
+            try {
+                const info = await fetchAppStoreInfo(bundleIdentifier, async (input, init) => {
+                    assertReady();
+                    const response = await globalThis.fetch(input, { ...init, signal });
+                    assertReady();
+                    return response;
+                });
+                assertReady();
+                const result = { ...info, updateAvailable: compareAppVersions(info.version, currentVersion) > 0 };
+                try {
+                    await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                        message: 'Native iOS App Store information fetched',
+                        context: { releaseCheck: 'v1.3.5/ios-about-app-store', outcome: 'fetched' },
+                    }, { force: true });
+                } catch { /* Diagnostics cannot change the lookup result. */ }
+                assertReady();
+                return result;
+            } catch {
+                assertReady();
+                throw new Error('LOOKUP_FAILED: App Store lookup could not be completed');
+            }
+        });
     },
     /** Only CoreHost.foregroundSync supplies this invocation-scoped physical cleanup callback. */
     iosForegroundSync(name: string, json: string, cleanup: unknown, currentTargetURI?: unknown): string {

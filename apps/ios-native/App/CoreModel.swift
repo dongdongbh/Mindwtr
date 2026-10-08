@@ -23,6 +23,13 @@ private struct SimulatedManageAreaRefusal: LocalizedError {
 }
 #endif
 
+struct AboutAppStoreNotice {
+    let currentVersion: String
+    let latestVersion: String
+    let updateAvailable: Bool
+    let listing: String?
+}
+
 struct DiagnosticsSharePayload: Identifiable {
     let id: UUID
     let owner: UUID
@@ -303,8 +310,15 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsManagePresented = false
     @Published private(set) var settingsAboutPresented = false
     @Published private(set) var settingsAboutOpening = false
+    @Published private(set) var settingsAboutChecking = false
     @Published private(set) var settingsAboutError: String?
+    @Published private(set) var settingsAboutUpdate: AboutAppStoreNotice?
     private var settingsAboutSession = UUID()
+    @Published private var settingsAboutTask: Task<Void, Never>?
+    private var settingsAboutBusySession: UUID?
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var settingsAboutTestUnavailable = false
+    #endif
     @Published private(set) var settingsReadError: String?
     @Published private(set) var settingsSyncPresented = false
     @Published private(set) var settingsSync: CoreObject = [:]
@@ -4357,6 +4371,7 @@ final class CoreModel: ObservableObject {
                     backupExportTestHoldOnce = arguments.contains("--native-backup-export-hold-once")
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
+                    settingsAboutTestUnavailable = arguments.contains("--native-about-lookup-unavailable")
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
                     settingsSyncEncryptionTypedThrowOnce = arguments.contains("--native-encryption-typed-throw-once")
                     settingsSyncEncryptionTypedDelayOnce = arguments.contains("--native-encryption-typed-delay-once")
@@ -6595,10 +6610,39 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    var settingsAboutLinksEnabled: Bool {
-        ready && selectedSurface == .settings && settingsAboutPresented && !settingsAboutOpening
-            && !busy && !retryNeeded && !settingsSyncRestartRequired && !appLock.concealed
+    private func settingsAboutCurrent(host capturedHost: CoreHost, session: UUID) -> Bool {
+        host === capturedHost && settingsAboutSession == session && ready
+            && selectedSurface == .settings && settingsAboutPresented
+            && (!busy || settingsAboutBusySession == session) && !retryNeeded
+            && !settingsSyncRestartRequired && !appLock.concealed
             && UIApplication.shared.applicationState == .active
+    }
+
+    var settingsAboutCanCancel: Bool { settingsAboutPresented && settingsAboutBusySession != nil }
+
+    var settingsAboutLinksEnabled: Bool {
+        guard let currentHost = host else { return false }
+        return settingsAboutCurrent(host: currentHost, session: settingsAboutSession)
+            && settingsAboutTask == nil && !settingsAboutChecking && !settingsAboutOpening
+    }
+
+    var settingsAboutUpdateTitle: String {
+        label(settingsAboutUpdate?.updateAvailable == true ? "settings.updateAvailable" : "settings.aboutMobile.upToDate")
+    }
+
+    var settingsAboutUpdateMessage: String {
+        guard let notice = settingsAboutUpdate else { return "" }
+        return notice.updateAvailable
+            ? label("settings.aboutMobile.appStoreUpdateAvailableWithVersions")
+                .replacingOccurrences(of: "{{currentVersion}}", with: notice.currentVersion)
+                .replacingOccurrences(of: "{{latestVersion}}", with: notice.latestVersion)
+            : label("settings.aboutMobile.youAreUsingTheLatestAppStoreVersion")
+    }
+
+    var settingsAboutUpdateCanOpen: Bool {
+        guard settingsAboutLinksEnabled, let notice = settingsAboutUpdate,
+              notice.updateAvailable, let listing = notice.listing else { return false }
+        return Self.aboutAppleListing(listing) != nil
     }
 
     func openAboutSettings() {
@@ -6619,8 +6663,136 @@ final class CoreModel: ObservableObject {
 
     func invalidateAboutLinkOpening() {
         settingsAboutSession = UUID()
+        settingsAboutTask?.cancel()
+        // Keep the task until it drains so reopening cannot overlap an old lookup.
+        settingsAboutChecking = false
         settingsAboutOpening = false
         settingsAboutError = nil
+        settingsAboutUpdate = nil
+    }
+
+    func dismissAboutUpdate() { settingsAboutUpdate = nil }
+
+    func checkAboutUpdates() { lookupAboutAppStore(rating: false) }
+    func rateAboutApp() { lookupAboutAppStore(rating: true) }
+
+    private func lookupAboutAppStore(rating: Bool) {
+        guard settingsAboutLinksEnabled, let currentHost = host else { return }
+        let session = settingsAboutSession
+        settingsAboutChecking = true
+        settingsAboutError = nil
+        settingsAboutUpdate = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer {
+                settingsAboutTask = nil
+                if settingsAboutSession == session {
+                    settingsAboutChecking = false
+                    settingsAboutOpening = false
+                }
+                if settingsAboutBusySession == session {
+                    settingsAboutBusySession = nil
+                    finishOperation()
+                }
+            }
+            do {
+                guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled,
+                      let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty,
+                      let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                      !currentVersion.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if settingsAboutTestUnavailable { throw CocoaError(.fileReadUnknown) }
+                #endif
+                let result = try decode(await currentHost.aboutAppStoreInfo(bundleIdentifier: identifier, currentVersion: currentVersion))
+                guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                guard Set(result.keys) == Set(["version", "trackViewUrl", "updateAvailable"]),
+                      let version = result["version"] as? String, !version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      version.utf16.count <= 200, !version.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                      let available = result["updateAvailable"] as? NSNumber, CFGetTypeID(available) == CFBooleanGetTypeID(),
+                      result["trackViewUrl"] is NSNull || result["trackViewUrl"] is String else { throw CocoaError(.coderReadCorrupt) }
+                let listing = (result["trackViewUrl"] as? String).flatMap(Self.aboutAppleListing)?.url.absoluteString
+                if rating {
+                    guard let listing, let destination = Self.aboutStoreDestination(listing, rating: true) else { throw CocoaError(.coderReadCorrupt) }
+                    settingsAboutChecking = false
+                    settingsAboutOpening = true
+                    try await handoffAboutURL(destination, host: currentHost, session: session)
+                } else {
+                    settingsAboutUpdate = AboutAppStoreNotice(currentVersion: currentVersion, latestVersion: version,
+                        updateAvailable: available.boolValue, listing: listing)
+                }
+            } catch {
+                guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                settingsAboutError = label(rating
+                    ? "settings.aboutMobile.couldNotOpenTheAppStoreRatingPagePleaseTry" : "settings.checkFailed")
+            }
+        }
+    }
+
+    // Validate the original authority before Foundation can normalize userinfo,
+    // escapes or ports. Only a validated Apple listing can mint a store deep link.
+    private static func aboutAppleListing(_ value: String) -> (url: URL, id: String)? {
+        guard !value.isEmpty, value.utf8.count <= 2_048, !value.contains("\\"),
+              !value.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 }),
+              value.range(of: #"^https://(?:apps|itunes)\.apple\.com(?::443)?/"#, options: [.regularExpression, .caseInsensitive]) != nil,
+              let components = URLComponents(string: value), components.scheme?.lowercased() == "https",
+              ["apps.apple.com", "itunes.apple.com"].contains(components.host?.lowercased() ?? ""),
+              components.user == nil, components.password == nil, components.port == nil || components.port == 443,
+              components.percentEncodedPath.range(of: #"^/(?:[a-z]{2}/)?app/(?:[^/]+/)?id[0-9]+/?$"#,
+                  options: [.regularExpression, .caseInsensitive]) != nil,
+              let idPart = components.percentEncodedPath.split(separator: "/").last,
+              idPart.lowercased().hasPrefix("id"), let url = components.url else { return nil }
+        let id = String(idPart.dropFirst(2))
+        guard !id.isEmpty, id.allSatisfy({ $0 >= "0" && $0 <= "9" }) else { return nil }
+        return (url, id)
+    }
+
+    private static func aboutStoreDestination(_ listing: String, rating: Bool) -> URL? {
+        guard let validated = aboutAppleListing(listing),
+              let deepLink = URL(string: rating
+                ? "itms-apps://itunes.apple.com/app/id\(validated.id)?action=write-review"
+                : "itms-apps://apps.apple.com/app/id\(validated.id)") else { return nil }
+        return UIApplication.shared.canOpenURL(deepLink) ? deepLink : validated.url
+    }
+
+    func openAboutUpdate() {
+        guard settingsAboutUpdateCanOpen, let currentHost = host,
+              let listing = settingsAboutUpdate?.listing,
+              let destination = Self.aboutStoreDestination(listing, rating: false) else { return }
+        openOwnedAboutURL(destination, host: currentHost)
+    }
+
+    private func handoffAboutURL(_ url: URL, host currentHost: CoreHost, session: UUID) async throws {
+        guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+        let opened = await withCheckedContinuation { continuation in
+            UIApplication.shared.open(url, options: [:]) { continuation.resume(returning: $0) }
+        }
+        guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+        if !opened { throw CocoaError(.fileReadUnknown) }
+    }
+
+    private func openOwnedAboutURL(_ url: URL, host currentHost: CoreHost) {
+        let session = settingsAboutSession
+        settingsAboutOpening = true
+        settingsAboutError = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer {
+                settingsAboutTask = nil
+                if settingsAboutSession == session { settingsAboutOpening = false }
+                if settingsAboutBusySession == session {
+                    settingsAboutBusySession = nil
+                    finishOperation()
+                }
+            }
+            do { try await handoffAboutURL(url, host: currentHost, session: session) }
+            catch {
+                if settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled {
+                    settingsAboutError = label("attachments.openLinkFailed")
+                }
+            }
+        }
     }
 
     func openAboutLink(_ link: String) {
@@ -6633,28 +6805,7 @@ final class CoreModel: ObservableObject {
         ]
         guard settingsAboutLinksEnabled, let currentHost = host,
               let destination = destinations[link], let url = URL(string: destination) else { return }
-        let session = settingsAboutSession
-        settingsAboutOpening = true
-        settingsAboutError = nil
-        Task {
-            // Recheck the captured page before handing anything to the OS.
-            guard host === currentHost, settingsAboutSession == session, settingsAboutPresented,
-                  selectedSurface == .settings, !Task.isCancelled, ready, !busy, !retryNeeded,
-                  !settingsSyncRestartRequired, !appLock.concealed,
-                  UIApplication.shared.applicationState == .active else {
-                if settingsAboutSession == session { settingsAboutOpening = false }
-                return
-            }
-            let opened = await withCheckedContinuation { continuation in
-                UIApplication.shared.open(url, options: [:]) { continuation.resume(returning: $0) }
-            }
-            guard host === currentHost, settingsAboutSession == session,
-                  selectedSurface == .settings, settingsAboutPresented else { return }
-            settingsAboutOpening = false
-            guard !Task.isCancelled, ready, !retryNeeded, !settingsSyncRestartRequired, !appLock.concealed,
-                  UIApplication.shared.applicationState == .active else { return }
-            if !opened { settingsAboutError = label("attachments.openLinkFailed") }
-        }
+        openOwnedAboutURL(url, host: currentHost)
     }
 
     func openGeneralSettings() async {
@@ -6886,6 +7037,10 @@ final class CoreModel: ObservableObject {
                     "sort.label", "list.groupBy", "taskEdit.moreOptions", "dailyReview.completeDesc",
                     "settings.about", "settings.officialWebsite", "settings.videoTutorials", "settings.privacy", "settings.terms",
                     "settings.sponsorProject", "settings.donateLinkValue", "settings.license", "attachments.openLinkFailed",
+                    "settings.checkForUpdates", "settings.checking", "settings.checkFailed", "settings.updateAvailable", "settings.later", "attachments.open",
+                    "settings.aboutMobile.tapToCheck", "settings.aboutMobile.rateOurApp", "settings.aboutMobile.upToDate",
+                    "settings.aboutMobile.appStoreUpdateAvailableWithVersions", "settings.aboutMobile.youAreUsingTheLatestAppStoreVersion",
+                    "settings.aboutMobile.couldNotOpenTheAppStoreRatingPagePleaseTry",
                     "settings.feedback.saveFailed", "settings.feedback.actionFailed",
                     "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "viewSections.updateFailed"]
         let result = try await query("strings", [try json(keys)])

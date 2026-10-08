@@ -3529,6 +3529,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 }
 
 const fakeCore = `
+export { compareAppVersions, fetchAppStoreInfo } from ${JSON.stringify(resolve(app, '../../packages/core/src/app-store-update.ts'))};
 export { SYNC_BACKEND_KEY, CLOUD_PROVIDER_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
 export { getBaseSyncUrl } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-paths.ts'))};
 import { NativeAttachmentCleanupUnconfirmedError as RealCleanupError } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};

@@ -25092,3 +25092,50 @@ extension FoundationUITests {
         task423Flow("a4f073f3-2f24-433b-8b6e-0420c638fd33", largest: true)
     }
 }
+
+// Task427's fixed unavailable fixture never contacts Apple or opens the store.
+extension FoundationUITests {
+    func testTask427AboutManualUpdateAndRatingUnavailableLargestAndCold() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments("5ed653f3-c955-45de-9710-7954e9c48f63", largest: true)
+            + ["--native-about-lookup-unavailable"]
+        app.launch(); task423Settings(app)
+        for (id, title, failure) in [
+            ("check-updates", "Check for Updates", "Failed to check for updates"),
+            ("rate", "Rate our app", "Could not open the app store rating page. Please try again later.")
+        ] {
+            boardTap(app, "settings-about"); boardEnabled(app.buttons["about-back"])
+            let scroll = app.scrollViews["about-scroll"]
+            let row = app.buttons["about-" + id]
+            revealPagedElement(app, row, in: scroll, ready: app.buttons["about-back"])
+            XCTAssertTrue(row.label.contains(title))
+            XCTAssertGreaterThanOrEqual(row.frame.height, 44 - 0.01)
+            XCTAssertFalse(app.staticTexts["about-open-error"].exists)
+            XCTAssertFalse(app.staticTexts["about-update-title"].exists)
+            row.tap()
+            let error = app.staticTexts["about-open-error"]
+            expectation(for: NSPredicate(format: "exists == true AND label == %@", failure), evaluatedWith: error)
+            waitForExpectations(timeout: 15)
+            revealPagedElement(app, error, in: scroll, ready: app.buttons["about-back"])
+            boardEnabled(app.buttons["about-check-updates"])
+            boardEnabled(app.buttons["about-rate"])
+            XCTAssertFalse(app.buttons["about-update-open"].exists)
+            XCTAssertFalse(app.staticTexts["about-update-title"].exists)
+            XCTAssertFalse(app.activityIndicators["about-progress"].exists)
+            boardTap(app, "about-back"); boardEnabled(app.buttons["settings-about"])
+        }
+        app.terminate(); app.launch(); task423Settings(app)
+        boardTap(app, "settings-about"); boardEnabled(app.buttons["about-back"])
+        XCTAssertFalse(app.staticTexts["about-open-error"].exists)
+        XCTAssertFalse(app.staticTexts["about-update-title"].exists)
+        let scroll = app.scrollViews["about-scroll"]
+        for id in ["check-updates", "rate"] {
+            let row = app.buttons["about-" + id]
+            revealPagedElement(app, row, in: scroll, ready: app.buttons["about-back"])
+            boardEnabled(row)
+        }
+        boardTap(app, "about-back"); boardEnabled(app.buttons["settings-back"])
+        boardTap(app, "settings-back"); app.terminate()
+    }
+}

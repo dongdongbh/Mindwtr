@@ -119,6 +119,16 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    public func aboutAppStoreInfo(bundleIdentifier: String, currentVersion: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.aboutAppStoreInfo(bundleIdentifier: bundleIdentifier, currentVersion: currentVersion, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
         try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
@@ -2280,6 +2290,17 @@ private final class Engine: @unchecked Sendable {
         startupSomedaySectionMoveResult = nil
         startupSomedaySectionUndoResult = nil
         return encoded
+    }
+
+    func aboutAppStoreInfo(bundleIdentifier: String, currentVersion: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try cancellation.check()
+        guard started, !closed, !recoveryActivationPending, pending == nil, lockFD >= 0,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil else {
+            throw HostFailure("App Store lookup is unavailable")
+        }
+        try requireNoAttachmentDraft()
+        return try invoke("iosAboutAppStoreInfo", arguments: [bundleIdentifier, currentVersion], localCancellation: cancellation)
     }
 
     func call(_ method: String, argumentsJSON: String) throws -> String {
