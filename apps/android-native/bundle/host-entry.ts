@@ -3864,7 +3864,7 @@ globalThis.MindwtrHost = {
                 || operation === 'availability-save' && ['domainSaved', 'settled'].includes(outcome)
                 || operation === 'availability-discard' && outcome === 'settled'
                 || operation === 'availability-checkpoint' && outcome === 'confirmed';
-            const projectDownload = operation === 'selfhosted-project-download' && ['saved', 'abandoned', 'refused', 'cleanup-pending'].includes(outcome);
+            const projectDownload = operation === 'selfhosted-project-download' && ['saved', 'abandoned', 'refused', 'cleanup-pending', 'decrypted'].includes(outcome);
             const selfHostedAvailability = ['selfhosted-task-availability', 'selfhosted-project-availability'].includes(operation) && outcome === 'confirmed';
             const preexistingReplay = operation === 'preexisting-journal-replay' && outcome === 'confirmed';
             const containerRecovery = operation === 'container-relocation' && outcome === 'confirmed';

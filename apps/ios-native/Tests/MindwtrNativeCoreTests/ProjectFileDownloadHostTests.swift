@@ -74,11 +74,11 @@ final class ProjectFileDownloadHostTests: XCTestCase {
     }
     private func json(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed, .withoutEscapingSlashes]), as: UTF8.self) }
     private func object(_ raw: String) throws -> [String: Any] { try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any]) }
-    private func host(faults supplied: HostIOFaults? = nil) -> CoreHost {
+    private func host(faults supplied: HostIOFaults? = nil, secureRead: Bool = false) -> CoreHost {
         let faults = supplied ?? HostIOFaults(), configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProjectDownloadHTTPProtocol.self]; faults.httpConfiguration = configuration
-        faults.secretService = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
-        if faults.secretStatus == nil { faults.secretStatus = { operation, _ in operation == "get" ? errSecItemNotFound : nil } }
+        if faults.secretService == nil { faults.secretService = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased() }
+        if !secureRead && faults.secretStatus == nil { faults.secretStatus = { operation, _ in operation == "get" ? errSecItemNotFound : nil } }
         let core = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults, deviceStorage: (containerURL: container, bundleIdentifier: namespace))
         addTeardownBlock { await core.close() }; return core
     }
@@ -154,6 +154,59 @@ final class ProjectFileDownloadHostTests: XCTestCase {
     private func noProgressDebt(_ core: CoreHost, expectedRows: String) async throws {
         try await selectNoAreaFilter(core)
         XCTAssertEqual(try rows(), expectedRows)
+    }
+
+    private var encryptionKey: Data { Data((0..<32).map { UInt8($0) }) }
+    private func setLegacyEncryptionKey(_ value: String?) throws {
+        var current = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        current["@mindwtr_sync_encryption_key_v1"] = value
+        try Data(json(current).utf8).write(to: manifest, options: .atomic)
+    }
+    /// Independent CryptoKit seal, not the production bridge or shared decoder.
+    private func encryptedWire(_ key: Data) throws -> Data {
+        let salt = Data((1...16).map { UInt8($0) }), nonce = Data((33...44).map { UInt8($0) })
+        var header = Data("MWENC1".utf8); header.append(contentsOf: [1, 1, 64, 0, 0, 0, 1, 0, 0, 0, 1, 1])
+        header.append(salt); header.append(nonce)
+        var length = UInt64(bytes.count + 16).littleEndian
+        withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }
+        XCTAssertEqual(header.count, 54)
+        let sealed = try AES.GCM.seal(bytes, using: SymmetricKey(data: key), nonce: AES.GCM.Nonce(data: nonce), authenticating: header)
+        return header + sealed.ciphertext + sealed.tag
+    }
+    private func seedEncryption(_ stored: String?, state: String = "enabled", wireKey: Data? = nil) throws -> Data {
+        try setKV("@mindwtr_sync_encryption_state_v1", json(["state": state,
+            "discoveredSalt": Data((1...16).map { UInt8($0) }).map { String(format: "%02x", $0) }.joined(),
+            "discoveredParams": ["mKib": 64, "t": 1, "p": 1]]))
+        try setLegacyEncryptionKey(stored)
+        let ciphertext = try encryptedWire(wireKey ?? encryptionKey)
+        XCTAssertNotEqual(ciphertext, bytes); remote.bytes = ciphertext; return ciphertext
+    }
+    private func downloadOutcomes() throws -> [String] {
+        let url = root.appendingPathComponent("logs/mindwtr.log")
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(text.contains(encryptionKey.base64EncodedString())); XCTAssertFalse(text.contains("synthetic-token-405"))
+        return try text.split(separator: "\n").compactMap { line in
+            let entry = try object(String(line)), context = entry["context"] as? [String: String]
+            guard context?["releaseCheck"] == "v1.3.5/ios-selfhosted-project-download" else { return nil }
+            XCTAssertEqual(Set(context?.keys.map { $0 } ?? []), Set(["releaseCheck", "operation", "outcome"]))
+            return context?["outcome"]
+        }
+    }
+    private func assertUnpublished(_ before: String, _ other: [String], _ configuration: Data, file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertEqual(try rows(), before, file: file, line: line); XCTAssertEqual(try others(), other, file: file, line: line)
+        XCTAssertEqual(try Data(contentsOf: manifest), configuration, file: file, line: line)
+        XCTAssertEqual(try cacheFiles(), [], file: file, line: line)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path), file: file, line: line)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path), file: file, line: line)
+        XCTAssertFalse(try downloadOutcomes().contains("decrypted"), file: file, line: line)
+        XCTAssertFalse(try downloadOutcomes().contains("saved"), file: file, line: line); try assertNoTaskOwner()
+    }
+    private func assertManagedInventory() throws {
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managed.path).sorted(), [".mindwtr-attachment-installer.lock", target.lastPathComponent].sorted())
+        var lock = stat()
+        XCTAssertEqual(lstat(managed.appendingPathComponent(".mindwtr-attachment-installer.lock").path, &lock), 0)
+        XCTAssertEqual(lock.st_mode & mode_t(S_IFMT), mode_t(S_IFREG), "The only extra entry is the regular standard installer lock")
     }
 
     func testActualBearerDownloadPublishesBeforeExactProjectMetadataAndColdOpen() async throws {
@@ -529,6 +582,240 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         XCTAssertEqual(try rows(), before); XCTAssertEqual(try cacheFiles(), []); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try await noProgressDebt(core, expectedRows: before)
         await core.close(); let cold = host(); _ = try await cold.start(); XCTAssertEqual(try rows(), before)
+    }
+
+    func testEncryptedBearerDownloadUsesActualAESAndColdFilledRetryNeedsNoGET() async throws {
+        try await seed(status: "archived")
+        let key = encryptionKey, ciphertext = try seedEncryption(encryptionKey.base64EncodedString())
+        var item = try selected()
+        let raw = try "[{" + item.keys.sorted(by: >).map { try json($0) + ":" + json(item[$0]!) }.joined(separator: ",") + "}]"
+        XCTAssertNotEqual(raw, try json([item]))
+        _ = try sql("UPDATE projects SET attachments=? WHERE id=?", [raw, projectID])
+        let before = try rows(), beforeOthers = try others(), configuration = try Data(contentsOf: manifest)
+        var operations = [String](), secureReads = 0
+        let faults = HostIOFaults()
+        faults.cryptoAfterOperation = { operations.append($0) }
+        faults.secretStatus = { operation, _ in
+            XCTAssertEqual(operation, "get", "Preparation cannot mutate secure storage")
+            secureReads += 1; return errSecItemNotFound
+        }
+        let core = host(faults: faults); _ = try await core.start(); let input = try await request(core)
+        let fired = await inject(core, .afterFilled)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        XCTAssertEqual(remote.counts, [1, 0]); XCTAssertEqual(remote.bytes, ciphertext)
+        XCTAssertGreaterThan(secureReads, 0, "Actual nil secure reads use the unchanged legacy fallback")
+        XCTAssertEqual(operations, ["aesGcmOpen"], "Only actual native decryption may produce this plaintext source")
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), beforeOthers)
+        XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        guard fired() else { return XCTFail("Encrypted preparation must reach the durable filled-stage boundary") }
+        let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String)
+        XCTAssertEqual(retained["phase"] as? String, "stageFilled")
+        XCTAssertEqual(try downloadOutcomes().filter { $0 == "decrypted" }, ["decrypted"])
+        XCTAssertFalse(try downloadOutcomes().contains("saved"))
+        let source = try sourceURL(retained), stage = try XCTUnwrap(retained["stage"] as? [String: Any])
+        let stageURL = try XCTUnwrap(URL(string: XCTUnwrap(stage["uri"] as? String)))
+        XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertEqual(try Data(contentsOf: stageURL), bytes)
+        let journalText = try String(contentsOf: journal)
+        XCTAssertFalse(journalText.contains(key.base64EncodedString()), "No encryption material is journaled")
+        XCTAssertFalse(journalText.contains("synthetic-token-405"), "No transport credential is journaled")
+        await core.close()
+        let coldFaults = HostIOFaults(); coldFaults.cryptoAfterOperation = { operations.append($0) }
+        let cold = host(faults: coldFaults); try await retainedStart(cold)
+        XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), beforeOthers)
+        let result = try object(await cold.recoverProjectFileAvailability(requestId: id))
+        XCTAssertEqual(result["status"] as? String, "available")
+        XCTAssertEqual(remote.counts, [1, 0]); XCTAssertEqual(remote.bytes, ciphertext)
+        XCTAssertEqual(operations, ["aesGcmOpen"], "Proven plaintext recovery must neither fetch nor decrypt again")
+        XCTAssertEqual(try downloadOutcomes().filter { $0 == "decrypted" }, ["decrypted"])
+        XCTAssertEqual(try downloadOutcomes().filter { $0 == "saved" }, ["saved"])
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try others(), beforeOthers)
+        XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        item["uri"] = target.absoluteString; item["localStatus"] = "available"
+        let expectedRaw = try "[{" + item.keys.sorted(by: >).map { try json($0) + ":" + json(item[$0]!) }.joined(separator: ",") + "}]"
+        var expectedRows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(before.utf8)) as? [[String: Any]])
+        let savedRows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(rows().utf8)) as? [[String: Any]])
+        let index = try XCTUnwrap(expectedRows.firstIndex { $0["id"] as? String == projectID }), saved = savedRows[index]
+        XCTAssertEqual(saved["rev"] as? Int, 4)
+        XCTAssertFalse((saved["revBy"] as? String ?? "").isEmpty); XCTAssertNotEqual(saved["updatedAt"] as? String, at)
+        expectedRows[index]["attachments"] = expectedRaw; expectedRows[index]["rev"] = 4
+        expectedRows[index]["revBy"] = saved["revBy"]; expectedRows[index]["updatedAt"] = saved["updatedAt"]
+        XCTAssertEqual(try json(savedRows), try json(expectedRows), "Only the exact selected availability patch is persisted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: stageURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try cacheFiles(), [])
+        try assertManagedInventory(); try assertNoTaskOwner()
+        let savedRowsJSON = try rows(), identity = try inode(target)
+        await cold.close(); let opened = host(); _ = try await opened.start()
+        let preview = try object(await opened.prepareProjectFileOpen(requestJSON: json(["projectId": projectID, "attachmentId": attachmentID])))
+        XCTAssertEqual((preview["open"] as? [String: Any])?["kind"] as? String, "file")
+        XCTAssertEqual(try rows(), savedRowsJSON); XCTAssertEqual(try others(), beforeOthers)
+        XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertEqual(try Data(contentsOf: manifest), configuration); XCTAssertEqual(remote.counts, [1, 0])
+    }
+
+    func testEncryptedStoredMaterialDecoderMatchesSharedFormattingWithoutMutation() async throws {
+        let canonical = encryptionKey.base64EncodedString(), zeros = Data(repeating: 0, count: 32)
+        let vectors: [(String, String, Data, String)] = [
+            ("canonical", canonical, encryptionKey, "enabled"),
+            ("whitespace", " \n" + String(canonical.prefix(20)) + "\t" + String(canonical.dropFirst(20)) + "\r ", encryptionKey, "enabled"),
+            ("unpadded", String(canonical.dropLast()), encryptionKey, "remote-plaintext"),
+            ("ignored", "文!" + String(canonical.prefix(13)) + "_-" + String(canonical.dropFirst(13)) + "?", encryptionKey, "enabled"),
+            // Shared base64ToBytes allocates 32 zero bytes, then stops at the first padding.
+            ("embedded-padding", "=" + String(repeating: "A", count: 42) + "=", zeros, "enabled")]
+        for (name, stored, decoded, posture) in vectors {
+            scenario(name); try await seed()
+            let ciphertext = try seedEncryption(stored, state: posture, wireKey: decoded)
+            let beforeOther = try others(), configuration = try Data(contentsOf: manifest), original = try selected(), count = remote.counts[0]
+            let faults = HostIOFaults(); var operations = [String]()
+            faults.cryptoAfterOperation = { operations.append($0) }
+            faults.secretStatus = { operation, _ in XCTAssertEqual(operation, "get"); return errSecItemNotFound }
+            let core = host(faults: faults); _ = try await core.start(); let input = try await request(core)
+            let result = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
+            XCTAssertEqual(result["ok"] as? Bool, true, name); XCTAssertEqual(operations, ["aesGcmOpen"], name)
+            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertEqual(remote.bytes, ciphertext); XCTAssertEqual(try Data(contentsOf: target), bytes)
+            var expected = original; expected["uri"] = target.absoluteString; expected["localStatus"] = "available"
+            XCTAssertEqual(try json(selected()), try json(expected)); XCTAssertEqual(try others(), beforeOther)
+            XCTAssertEqual(try Data(contentsOf: manifest), configuration); XCTAssertEqual(try cacheFiles(), [])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try assertManagedInventory(); try assertNoTaskOwner()
+            XCTAssertEqual(try downloadOutcomes(), ["decrypted", "saved"])
+            await core.close()
+        }
+    }
+
+    func testEncryptedMissingInvalidOrWrongMaterialCannotPublishOrQueueMetadata() async throws {
+        let vectors: [(String, String?, String, Int)] = [
+            ("missing", nil, "enabled", 0),
+            ("short", Data(repeating: 2, count: 31).base64EncodedString(), "enabled", 0),
+            ("long", Data(repeating: 2, count: 33).base64EncodedString(), "enabled", 0),
+            ("no-key-posture", encryptionKey.base64EncodedString(), "remote-encrypted-no-key", 0),
+            ("wrong", Data(repeating: 2, count: 32).base64EncodedString(), "enabled", 1)]
+        for (name, stored, posture, attempts) in vectors {
+            scenario(name); try await seed(); let ciphertext = try seedEncryption(stored, state: posture)
+            let count = remote.counts[0]
+            let faults = HostIOFaults(); var operations = [String]()
+            faults.cryptoBeforeOperation = { operations.append($0) }
+            faults.secretStatus = { operation, _ in XCTAssertEqual(operation, "get"); return errSecItemNotFound }
+            let core = host(faults: faults); _ = try await core.start(); try await selectNoAreaFilter(core)
+            let input = try await request(core), before = try rows(), other = try others(), configuration = try Data(contentsOf: manifest)
+            await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+            XCTAssertEqual(remote.counts, [count + 1, 0], name); XCTAssertEqual(remote.bytes, ciphertext)
+            XCTAssertEqual(operations, Array(repeating: "aesGcmOpen", count: attempts), name)
+            try assertUnpublished(before, other, configuration)
+            await core.close(); let cold = host(); _ = try await cold.start()
+            try assertUnpublished(before, other, configuration); XCTAssertEqual(remote.counts, [count + 1, 0])
+            // The debt probe intentionally cycles the filter; verify cold preservation first.
+            try await noProgressDebt(cold, expectedRows: before); await cold.close()
+        }
+    }
+
+    func testExactLegacyMaterialChangeAfterAESOrMintedSourceRefusesAndRetiresOnlyOwnedCache() async throws {
+        for boundary in ["aes", "source"] {
+            scenario(boundary); try await seed(); _ = try seedEncryption(encryptionKey.base64EncodedString())
+            let count = remote.counts[0]
+            let faults = HostIOFaults(); var changed = false, mutationFailed = false, operations = [String]()
+            let mutate = {
+                do { try self.setLegacyEncryptionKey("\n" + self.encryptionKey.base64EncodedString()); changed = true }
+                catch { mutationFailed = true }
+            }
+            faults.cryptoAfterOperation = { operation in operations.append(operation); if boundary == "aes" { mutate() } }
+            let core = host(faults: faults); _ = try await core.start(); try await selectNoAreaFilter(core)
+            let input = try await request(core), before = try rows(), other = try others()
+            let foreign = cache.appendingPathComponent("foreign-kept.txt"), foreignBytes = Data("Unrelated cache / 文".utf8)
+            try foreignBytes.write(to: foreign); let identity = try inode(foreign)
+            if boundary == "source" {
+                let hooks = ProjectFileDownloadHostHooks(); hooks.boundary = { if $0 == .afterSource { mutate() } }
+                await core.configureProjectFileDownloadHost(hooks)
+            }
+            await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+            XCTAssertTrue(changed); XCTAssertFalse(mutationFailed); XCTAssertEqual(operations, ["aesGcmOpen"])
+            let configuration = try Data(contentsOf: manifest)
+            XCTAssertEqual(try getKV("@mindwtr_sync_encryption_key_v1"), "\n" + encryptionKey.base64EncodedString(), "Raw observation changes refuse even when decoded AES bytes are identical")
+            XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), other)
+            XCTAssertEqual(try cacheFiles(), [foreign.lastPathComponent]); XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes); XCTAssertEqual(try inode(foreign), identity)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+            XCTAssertEqual(try downloadOutcomes(), []); XCTAssertEqual(remote.counts, [count + 1, 0]); try assertNoTaskOwner()
+            try await noProgressDebt(core, expectedRows: before); await core.close()
+            let cold = host(); _ = try await cold.start(); XCTAssertEqual(try rows(), before); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+            XCTAssertEqual(try cacheFiles(), [foreign.lastPathComponent]); XCTAssertEqual(try inode(foreign), identity); await cold.close()
+        }
+    }
+
+    func testWarmChangedMaterialRefusesButColdFilledPlaintextRetryAllowsFreshNilWithoutGET() async throws {
+        try await seed(); let ciphertext = try seedEncryption(encryptionKey.base64EncodedString())
+        let before = try rows(), other = try others(); var operations = [String](), changed = false
+        let faults = HostIOFaults(); faults.cryptoAfterOperation = { operations.append($0) }
+        let core = host(faults: faults); _ = try await core.start(); let input = try await request(core)
+        let hooks = ProjectFileDownloadHostHooks()
+        hooks.boundary = { if $0 == .afterFilled && !changed { try self.setLegacyEncryptionKey("\n" + self.encryptionKey.base64EncodedString()); changed = true } }
+        await core.configureProjectFileDownloadHost(hooks)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }; XCTAssertTrue(changed)
+        let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String), journalBytes = try Data(contentsOf: journal)
+        XCTAssertEqual(retained["phase"] as? String, "stageFilled"); XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), other)
+        let source = try sourceURL(retained); XCTAssertEqual(try Data(contentsOf: source), bytes)
+        await refused { _ = try await core.recoverProjectFileAvailability(requestId: id) }
+        XCTAssertEqual(try Data(contentsOf: journal), journalBytes); XCTAssertEqual(try rows(), before)
+        XCTAssertEqual(remote.counts, [1, 0]); XCTAssertEqual(remote.bytes, ciphertext); XCTAssertEqual(operations, ["aesGcmOpen"])
+        await core.close(); try setLegacyEncryptionKey(nil); let current = try Data(contentsOf: manifest)
+        let coldFaults = HostIOFaults(); coldFaults.cryptoBeforeOperation = { operations.append($0) }
+        let cold = host(faults: coldFaults); try await retainedStart(cold)
+        let result = try object(await cold.recoverProjectFileAvailability(requestId: id))
+        XCTAssertEqual(result["status"] as? String, "available"); XCTAssertEqual(operations, ["aesGcmOpen"])
+        XCTAssertEqual(remote.counts, [1, 0]); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try others(), other)
+        XCTAssertEqual(try Data(contentsOf: manifest), current); XCTAssertNil(try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))["@mindwtr_sync_encryption_key_v1"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try cacheFiles(), []); try assertManagedInventory(); try assertNoTaskOwner()
+        XCTAssertEqual(try downloadOutcomes().filter { $0 == "decrypted" }, ["decrypted"])
+        XCTAssertEqual(try downloadOutcomes().filter { $0 == "saved" }, ["saved"])
+    }
+
+    func testCancellationDuringActualAESDrainsAndNextEncryptedRequestCompletes() async throws {
+        try await seed(); _ = try seedEncryption(encryptionKey.base64EncodedString())
+        let faults = HostIOFaults(); var crypto: NativeCryptoJobs?, operations = [String](), fired = false, operation: Task<String, Error>?
+        faults.configureCryptoJobs = { crypto = $0 }
+        faults.cryptoBeforeOperation = { value in if value == "aesGcmOpen" && !fired { fired = true; operation?.cancel() } }
+        faults.cryptoAfterOperation = { operations.append($0) }
+        let core = host(faults: faults); _ = try await core.start(); try await selectNoAreaFilter(core)
+        let input = try await request(core), before = try rows(), other = try others(), configuration = try Data(contentsOf: manifest)
+        var release: AsyncStream<Void>.Continuation?; let admitted = AsyncStream<Void> { release = $0 }
+        operation = Task { var iterator = admitted.makeAsyncIterator(); _ = await iterator.next(); return try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        release?.yield(()); release?.finish()
+        await refused { _ = try await XCTUnwrap(operation).value }; XCTAssertTrue(fired); XCTAssertEqual(operations, ["aesGcmOpen"])
+        XCTAssertEqual(crypto?.counters.jobs, 0); XCTAssertEqual(crypto?.counters.running, 0); XCTAssertEqual(crypto?.counters.bytes, 0)
+        try assertUnpublished(before, other, configuration); try await noProgressDebt(core, expectedRows: before)
+        // This successful filter command owns its settings change, not the cancelled download.
+        let afterProbe = try others()
+        let fresh = try await request(core), reply = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: fresh))
+        XCTAssertEqual(reply["ok"] as? Bool, true); XCTAssertEqual(remote.counts, [2, 0]); XCTAssertEqual(operations, ["aesGcmOpen", "aesGcmOpen"])
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try others(), afterProbe); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        XCTAssertEqual(try downloadOutcomes(), ["decrypted", "saved"]); try assertManagedInventory()
+    }
+
+    func testPhysicalSecureMaterialValueChangeAfterActualAESRefusesBeforeSource() async throws {
+        #if os(iOS)
+        try await seed(); _ = try seedEncryption(encryptionKey.base64EncodedString())
+        let faults = HostIOFaults(), service = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
+        faults.secretService = service
+        let account = Data("mindwtr_sync_encryption_key_v1".utf8)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service + ":no-auth",
+            kSecAttrAccount as String: account, kSecAttrGeneric as String: account, kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+        var item = query; item[kSecValueData as String] = Data(encryptionKey.base64EncodedString().utf8)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        XCTAssertEqual(SecItemAdd(item as CFDictionary, nil), errSecSuccess)
+        defer { let status = SecItemDelete(query as CFDictionary); XCTAssertTrue(status == errSecSuccess || status == errSecItemNotFound) }
+        var changed = false, status = errSecSuccess, operations = [String]()
+        faults.cryptoAfterOperation = { value in
+            operations.append(value)
+            status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: Data(("\n" + self.encryptionKey.base64EncodedString()).utf8)] as CFDictionary)
+            changed = true
+        }
+        let core = host(faults: faults, secureRead: true); _ = try await core.start(); try await selectNoAreaFilter(core)
+        let input = try await request(core), before = try rows(), other = try others(), configuration = try Data(contentsOf: manifest)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        XCTAssertTrue(changed); XCTAssertEqual(status, errSecSuccess); XCTAssertEqual(operations, ["aesGcmOpen"]); XCTAssertEqual(remote.counts, [1, 0])
+        try assertUnpublished(before, other, configuration); try await noProgressDebt(core, expectedRows: before)
+        #else
+        throw XCTSkip("Actual isolated secure-material value changes require iOS; macOS exercises true nil reads and exact legacy changes")
+        #endif
     }
 
 }

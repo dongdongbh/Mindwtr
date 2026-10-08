@@ -720,6 +720,9 @@ private final class Engine: @unchecked Sendable {
         var legacy: [(String, String?)] = []
         var cloudToken: String?
         var cloudObserved = false
+        var encryptionKey: String?
+        var encryptionObserved = false
+        var decryptionAdmitted = false
         var cancellation = NativeAttachmentCancellation()
         var targetURI = ""
         var initialURL = ""
@@ -16814,9 +16817,45 @@ private final class Engine: @unchecked Sendable {
         if turn.cloudObserved {
             guard Self.taskDownloadOptionalEqual(try taskDownloadCloudToken(turn.cancellation), turn.cloudToken) else { throw Self.projectDownloadFailure }
         }
+        if turn.encryptionObserved {
+            guard let secretJobs, Self.taskDownloadOptionalEqual(
+                try secretJobs.readEncryptionKeyForAttachmentOwner(cancellation: turn.cancellation), turn.encryptionKey) else { throw Self.projectDownloadFailure }
+        }
         let row = try Self.ownedJSON(projectAvailabilityRow(turn.projectID)), device = try Self.ownedJSON([projectAvailabilityDevice()])
         guard Self.ownedEqual(row, turn.beforeJSON) || turn.allowAfter && Self.ownedEqual(row, turn.afterJSON),
               Self.ownedEqual(device, turn.deviceBeforeJSON) || turn.allowAfter && Self.ownedEqual(device, turn.deviceAfterJSON) else { throw Self.projectDownloadFailure }
+    }
+    private func observeProjectDownloadEncryption(_ turn: ProjectDownloadTurn) throws {
+        if turn.encryptionObserved { return }
+        try requireProjectDownloadTurn(strict: true)
+        guard let secretJobs else { throw Self.projectDownloadFailure }
+        let secure = try secretJobs.readEncryptionKeyForAttachmentOwner(cancellation: turn.cancellation)
+        let legacy = try turn.storage.get("@mindwtr_sync_encryption_key_v1")
+        turn.encryptionKey = secure
+        turn.legacy.append(("@mindwtr_sync_encryption_key_v1", legacy))
+        turn.encryptionObserved = true
+        try requireProjectDownloadTurn(strict: true)
+    }
+    /// Match core's base64ToBytes key-cache decoding, including tolerated legacy
+    /// formatting. Observation equality stays exact; only AES byte binding decodes.
+    private static func projectDownloadKeyBytes(_ value: String?) -> Data? {
+        guard let value else { return nil }
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".utf8)
+        let text = value.utf8.filter { alphabet.contains($0) || $0 == 61 }
+        let padding = text.suffix(2).elementsEqual([61, 61]) ? 2 : text.last == 61 ? 1 : 0
+        guard text.count * 3 / 4 - padding == 32 else { return nil }
+        var output = Data(repeating: 0, count: 32), buffer: UInt32 = 0, bits = 0, index = 0
+        for byte in text {
+            if byte == 61 { break }
+            guard let sextet = alphabet.firstIndex(of: byte) else { continue }
+            buffer = (buffer &<< 6) | UInt32(sextet); bits += 6
+            if bits >= 8 {
+                bits -= 8
+                if index < output.count { output[index] = UInt8((buffer >> bits) & 255) }
+                index += 1
+            }
+        }
+        return output
     }
     private func writeProjectDownloadState(_ state: ProjectDownloadState, turn: ProjectDownloadTurn) throws {
         try requireProjectDownloadTurn(strict: false)
@@ -16950,6 +16989,10 @@ private final class Engine: @unchecked Sendable {
                   let source = turn.source, let receipt = turn.receipt, receipt.matches(source), preparedSource["sha256"] as? String == source.sha256,
                   (preparedSource["size"] as? NSNumber)?.int64Value == source.size else { throw Self.projectDownloadFailure }
             try requireProjectDownloadTurn(strict: true)
+            if turn.decryptionAdmitted {
+                _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-project-download", "decrypted"])
+                try requireProjectDownloadTurn(strict: true)
+            }
             request["sha256"] = source.sha256; request["size"] = source.size
             let preparation = try Self.projectObject(invoke("projectFileAvailabilityWritePrepare", arguments: [Self.ownedJSON(request)], localCancellation: cancellation))
             guard Set(preparation.keys) == Set(["request", "prepared"]), let prepared = preparation["prepared"] as? [String: Any],
@@ -17019,6 +17062,9 @@ private final class Engine: @unchecked Sendable {
                       Self.ownedEqual(try Self.ownedJSON([projectAvailabilityDevice()]), turn.deviceAfterJSON) else { throw Self.projectDownloadFailure }
             }
             _ = try invoke("projectFileAvailabilityEncryptionAdmission", arguments: [state.config[4] as Any? ?? NSNull()])
+            // Retained sources are already authenticated plaintext. Observe fresh
+            // current material (including nil), never a pre-crash secret identity.
+            try observeProjectDownloadEncryption(turn)
         }
         defer { turn.strict = false; turn.preparing = false }
         return try executeProjectDownload(&state, turn: turn, cancellation: cancellation)
@@ -18307,7 +18353,7 @@ private final class Engine: @unchecked Sendable {
                     attachmentJobs?.cancelAndDrain()
                     httpJobs?.cancelAndDrain()
                     secretJobs?.drain()
-                    if selectedTurn != nil || selectedEncryption != nil { cryptoJobs?.drain() }
+                    if selectedTurn != nil || selectedEncryption != nil || selectedDownload != nil { cryptoJobs?.drain() }
                 }
             }
             if reply == nil || reply!.isNull || reply!.isUndefined {
@@ -18425,11 +18471,15 @@ private final class Engine: @unchecked Sendable {
         return deviceStorage
     }
     private func projectDownloadLegacyRead(_ names: [String]) throws -> [(String, String?)] {
-        guard let turn = projectDownloadTurn, turn.preparing, names == ["@mindwtr_cloud_token"] else { throw Self.deviceStorageUnavailable }
+        guard let turn = projectDownloadTurn, turn.preparing, !names.isEmpty, names.count <= 2,
+              Set(names).count == names.count, names.allSatisfy({ Self.taskDownloadCloudLegacyKeys.contains($0) }) else { throw Self.deviceStorageUnavailable }
+        if names.contains("@mindwtr_sync_encryption_key_v1") { try observeProjectDownloadEncryption(turn) }
         try requireProjectDownloadTurn(strict: true)
         let values = try turn.storage.multiGet(names)
-        guard values.count == 1, let prior = turn.legacy.first(where: { $0.0 == names[0] }),
-              Self.taskDownloadOptionalEqual(prior.1, values[0].1) else { throw Self.deviceStorageUnavailable }
+        guard values.count == names.count else { throw Self.deviceStorageUnavailable }
+        for (name, value) in values {
+            guard let prior = turn.legacy.first(where: { $0.0 == name }), Self.taskDownloadOptionalEqual(prior.1, value) else { throw Self.deviceStorageUnavailable }
+        }
         try requireProjectDownloadTurn(strict: true); return values
     }
     private func taskDownloadLegacyRead(_ names: [String]) throws -> [(String, String?)] {
@@ -18553,7 +18603,9 @@ private final class Engine: @unchecked Sendable {
             try requireProjectDownloadTurn(strict: true)
             guard turn.preparing, input.utf8.count <= 512 * 1024,
                   let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any], Set(raw.keys) == Set(["op", "key"]),
-                  raw["op"] as? String == "get", raw["key"] as? String == "mindwtr_cloud_token" else { throw Self.projectDownloadFailure }
+                  raw["op"] as? String == "get", let account = raw["key"] as? String,
+                  ["mindwtr_cloud_token", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.projectDownloadFailure }
+            if account == "mindwtr_sync_encryption_key_v1" { try observeProjectDownloadEncryption(turn) }
             return
         }
         if let turn = taskDownloadTurn {
@@ -18577,7 +18629,16 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
         try denyCleanupOwner()
-        guard projectDownloadTurn == nil else { throw Self.projectDownloadFailure }
+        if let turn = projectDownloadTurn {
+            try requireProjectDownloadTurn(strict: true)
+            guard turn.preparing, turn.encryptionObserved, input.utf8.count <= 12 * 1024 * 1024,
+                  let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any], raw["op"] as? String == "aesGcmOpen",
+                  let encoded = raw["key"] as? String, encoded.utf8.count == 44, let key = Data(base64Encoded: encoded),
+                  key.count == 32, key.base64EncodedString() == encoded,
+                  let observed = Self.projectDownloadKeyBytes(turn.encryptionKey ?? turn.legacy.first(where: { $0.0 == "@mindwtr_sync_encryption_key_v1" }).flatMap { $0.1 }),
+                  key == observed else { throw Self.projectDownloadFailure }
+            return
+        }
         if let turn = taskDownloadTurn {
             guard input.utf8.count <= 12 * 1024 * 1024 else { throw Self.taskDownloadFailure }
             try requireTaskDownloadTurn(before: true)
@@ -18832,7 +18893,9 @@ private final class Engine: @unchecked Sendable {
             return self.guarded {
                 try self.requireCryptoAdmission(json)
                 guard let jobs = self.cryptoJobs else { throw HostFailure("Crypto bridge is unavailable") }
-                return try jobs.submit(json)
+                let id = try jobs.submit(json)
+                self.projectDownloadTurn?.decryptionAdmitted = true
+                return id
             } ?? "!MindwtrNativeError:Crypto bridge is unavailable"
         }
         let next: @convention(block) () -> String = { [weak self] in
