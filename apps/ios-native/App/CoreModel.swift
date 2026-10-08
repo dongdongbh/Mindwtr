@@ -781,6 +781,8 @@ final class CoreModel: ObservableObject {
     @Published private(set) var projectFileAddOpening = false
     @Published private(set) var projectFileAddSummary: CoreObject = [:]
     @Published private(set) var projectFileAddError: String?
+    @Published private(set) var projectFileAvailabilitySummary: CoreObject = [:]
+    @Published private(set) var projectFileAvailabilityError: String?
     @Published var collapsedProjectAreas: Set<String> = []
     @Published var expandedProjectSections: Set<String> = []
     @Published private(set) var contexts: CoreObject = [:]
@@ -1503,6 +1505,19 @@ final class CoreModel: ObservableObject {
     private var projectFileImportClaim: ProjectFileImportClaim?
     private var projectFileImportTask: Task<Void, Never>?
     private var projectFileAddOperation: ProjectFileAddOperation?
+    private struct ProjectFileAvailabilityOperation {
+        let id: UUID
+        let host: CoreHost
+        let requestID: String
+        let projectID: String
+        let attachmentID: String
+        let session: Int?
+        let requestJSON: String?
+    }
+    private var projectFileAvailabilityOperation: ProjectFileAvailabilityOperation?
+    private var projectFileAvailabilityAcknowledged: ProjectFileAvailabilityOperation?
+    private var projectFileAvailabilityRecoveryTask: Task<Void, Never>?
+    private var projectFileAvailabilityRecoveryTaskID: UUID?
     private var projectCreateAreaFilterValue: String?
     private var pendingProjectTagFilter: String?
     private var projectCreateRequest: String?
@@ -1785,7 +1800,7 @@ final class CoreModel: ObservableObject {
     }
     private var projectActionsCurrent: Bool {
         ready && selectedSurface == .project && projectCurrent && !busy && !retryNeeded && !taskPresented
-            && !projectFileAddPending
+            && !projectFileAddPending && !projectFileAvailabilityPending
             && !projectRenameEditing && !projectTaskOrderPresented
     }
     var projectDeleteOpenEnabled: Bool {
@@ -1814,6 +1829,17 @@ final class CoreModel: ObservableObject {
     var projectFileAddRecoveryEnabled: Bool {
         !busy && !projectFileAddOpening && !appLock.concealed
             && projectFileAddOperation.map { host === $0.host } == true
+    }
+    var projectFileAvailabilityPending: Bool {
+        projectFileAvailabilityOperation != nil || !projectFileAvailabilitySummary.isEmpty
+    }
+    var projectFileAvailabilityRecoveryVisible: Bool {
+        projectFileAvailabilityPending && !appLock.concealed && !projectFileImporterPresented
+    }
+    var projectFileAvailabilityRecoveryEnabled: Bool {
+        !busy && !appLock.concealed && UIApplication.shared.applicationState == .active
+            && projectFileAvailabilityRecoveryTask == nil
+            && projectFileAvailabilityOperation.map { host === $0.host } == true
     }
     var projectFileAddOpenEnabled: Bool {
         projectAttachmentAddOpenEnabled && !projectFileAddPending
@@ -4198,6 +4224,10 @@ final class CoreModel: ObservableObject {
 
     func start() async {
         guard !busy else { return }
+        if projectFileAvailabilityPending {
+            await retryProjectFileAvailability()
+            return
+        }
         #if targetEnvironment(simulator) || (DEBUG && NATIVE_DEVICE_TEST)
         #if !targetEnvironment(simulator)
         // Device alpha builds must never open under the installed RN identity.
@@ -4211,6 +4241,7 @@ final class CoreModel: ObservableObject {
         busy = true
         error = nil
         var boardTaskOpened = false
+        var startingHost: CoreHost?
         defer {
             finishOperation()
             if boardTaskOpened { Task { await readTaskView() } }
@@ -4334,6 +4365,10 @@ final class CoreModel: ObservableObject {
                     host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
                         deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
                         isolatedTestID: identifier)
+                    if arguments.contains("--native-project-download-stop-after-filled-once") {
+                        try await host!.configureIsolatedProjectFileDownloadFilledFailureOnce()
+                        selectedSurface = .projects // Isolated recovery fixture must not prefetch through Inbox startup Sync.
+                    }
                     settingsSyncAvailable = true
                 } else if arguments.contains("--native-rn-rehearsal") {
                     // An explicitly staged copy only. Never select the live RN container.
@@ -4466,6 +4501,7 @@ final class CoreModel: ObservableObject {
                 historyParamsByTab[name] = params
             }
             let currentHost = host!
+            startingHost = currentHost
             let startup = try decode(await currentHost.start())
             guard host === currentHost else { throw CancellationError() }
             // Preserve the acknowledged domain result before any later App read.
@@ -4612,7 +4648,7 @@ final class CoreModel: ObservableObject {
             if projectLifecycleRecoveredResult != nil { selectedSurface = .projects }
             try await readSelectedSurface()
             ready = true
-            retryNeeded = projectFileAddPending
+            retryNeeded = projectFileAddPending || projectFileAvailabilityPending
             await reconcileTaskAttachmentPresentation()
             if let reply = backupDocumentRecoveredReply, let currentHost = host {
                 try await acceptBackupDocumentReply(reply, from: currentHost)
@@ -4660,6 +4696,21 @@ final class CoreModel: ObservableObject {
                 foregroundSyncIntent = recovery.isEmpty && foregroundSyncInboxClean
                     ? ForegroundSyncIntent(id: UUID(), host: currentHost, startupToken: token, reason: .startup) : nil
             }
+        } catch is CoreHostProjectFileAvailabilityRecovery {
+            guard let currentHost = startingHost, host === currentHost else { return }
+            ready = false
+            do {
+                try await readProjectFileAvailabilityInventory(currentHost)
+                guard host === currentHost else { throw CancellationError() }
+                try await readAppLock()
+                guard host === currentHost else { throw CancellationError() }
+            } catch {
+                if host === currentHost {
+                    projectFileAvailabilityError = "The pending download could not be loaded. Try again."
+                }
+            }
+            guard host === currentHost else { return }
+            self.error = "A pending Project download needs Retry or Stop download."
         } catch is CoreHostProjectFileAddRecovery {
             ready = false
             if let currentHost = host {
@@ -4689,6 +4740,10 @@ final class CoreModel: ObservableObject {
             taskRecoveryStartupCorrupt = error is EditorDraftStoreError
             self.error = taskRecoveryStartupCorrupt ? "Saved editor draft is unreadable" : error.localizedDescription
             if let currentHost = host {
+                if startingHost === currentHost {
+                    do { try await readProjectFileAvailabilityInventory(currentHost) }
+                    catch { /* Preserve any matching retained Download on a failed read. */ }
+                }
                 do { try await readProjectFileAddInventory(currentHost) }
                 catch { /* Preserve the previous bounded summary on a failed read. */ }
             }
@@ -4713,7 +4768,8 @@ final class CoreModel: ObservableObject {
             && !taskFileImporterPresented && !taskLinkSheetActive && !taskReferenceOpening && !taskAttachmentOpening
             && taskFileOpenPresentation == nil && taskAudioPlayer == nil && taskSharePayload == nil
             && taskOwnedMenuSelection == nil && taskOwnedMenuAction == nil
-            && !projectFileAddPending && projectFileImportClaim == nil && projectFileImportTask == nil
+            && !projectFileAddPending && !projectFileAvailabilityPending
+            && projectFileImportClaim == nil && projectFileImportTask == nil
             && projectFileImporterID == nil && !projectFileImporterPresented
             && projectAttachmentDownloadOwner == nil
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
@@ -6606,6 +6662,13 @@ final class CoreModel: ObservableObject {
 
     func retryAppLockRead() async {
         guard !busy else { return }
+        if projectFileAvailabilityPending {
+            busy = true
+            defer { finishOperation() }
+            do { try await readAppLock() }
+            catch { appLockError = error.localizedDescription }
+            return
+        }
         if !ready { await start(); return }
         if retryNeeded { await retry(); return }
         busy = true
@@ -17704,6 +17767,7 @@ final class CoreModel: ObservableObject {
     private func resetProjectAttachments() {
         cancelProjectFileImport()
         if !projectFileAddPending { projectFileAddError = nil }
+        if !projectFileAvailabilityPending { projectFileAvailabilityError = nil }
         projectAttachmentReadGeneration += 1
         invalidateProjectAttachmentOpen()
         projectAttachmentEditClaim = UUID()
@@ -19005,7 +19069,8 @@ final class CoreModel: ObservableObject {
             && !taskFileImporterPresented && !taskLinkSheetActive && !taskReferenceOpening && !taskAttachmentOpening
             && taskFileOpenPresentation == nil && taskAudioPlayer == nil && taskSharePayload == nil
             && taskOwnedMenuSelection == nil && taskOwnedMenuAction == nil
-            && !projectFileAddPending && !projectFileAddOpening && projectFileImportClaim == nil
+            && !projectFileAddPending && !projectFileAvailabilityPending
+            && !projectFileAddOpening && projectFileImportClaim == nil
             && projectFileImportTask == nil && projectFileImporterID == nil && !projectFileImporterPresented
             && projectAttachmentWriteRequest == nil && projectNotesWriteRequest == nil
             && projectCreateRequest == nil && projectFocusRequest == nil && projectRenameRequest == nil
@@ -19158,8 +19223,19 @@ final class CoreModel: ObservableObject {
             guard encoded.utf8.count <= 128 * 1024 else { throw CocoaError(.coderReadCorrupt) }
             reply = try validateProjectAttachmentDownloadReply(decode(encoded))
         } catch {
+            guard host === owner.host, projectAttachmentDownloadOwner?.id == owner.id else { return }
+            do {
+                if try await readProjectFileAvailabilityInventory(owner.host, initialOwner: owner, requestJSON: request) {
+                    return
+                }
+            } catch { /* Inventory failure never clears a previously adopted Download. */ }
+            guard host === owner.host, projectAttachmentDownloadOwner?.id == owner.id else { return }
+            if projectFileAvailabilityPending { return }
             requireSettingsSyncRestart(owner.host)
             return
+        }
+        if case let .resolution(status, _) = reply, status == "available" {
+            await rememberProjectFileAvailabilityAcknowledgment(owner, requestJSON: request)
         }
         guard projectAttachmentDownloadCurrent(owner) else { return }
         let message: String?
@@ -19317,6 +19393,190 @@ final class CoreModel: ObservableObject {
                 projectFileAddError = acknowledged
                     ? "The attachment operation finished, but the Project could not be refreshed. Try again."
                     : "This file could not be added. Try again."
+            }
+        }
+    }
+
+    private func parseProjectFileAvailabilitySummary(_ raw: String) throws -> CoreObject? {
+        guard raw.utf8.count <= 4_096 else { throw CocoaError(.coderReadCorrupt) }
+        let value = try NativeJSON.jsonObject(with: Data(raw.utf8), options: [.fragmentsAllowed])
+        if value is NSNull { return nil }
+        guard let summary = value as? CoreObject,
+              Set(summary.keys) == Set(["requestId", "projectId", "attachmentId", "phase"]),
+              let request = summary["requestId"] as? String,
+              UUID(uuidString: request)?.uuidString.lowercased() == request,
+              let attachment = summary["attachmentId"] as? String,
+              UUID(uuidString: attachment)?.uuidString.lowercased() == attachment,
+              let project = summary["projectId"] as? String, !project.isEmpty, project.utf16.count <= 500,
+              project.rangeOfCharacter(from: .controlCharacters) == nil,
+              ["intent", "stagePrepared", "stageFilled", "published", "domainSaved", "settled"].contains(summary.text("phase")) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return summary
+    }
+
+    private func projectFileAvailabilityOperationCurrent(_ operation: ProjectFileAvailabilityOperation) -> Bool {
+        host === operation.host && projectFileAvailabilityOperation?.id == operation.id
+            && projectFileAvailabilityOperation?.host === operation.host
+            && projectFileAvailabilityOperation?.requestID == operation.requestID
+            && projectFileAvailabilityOperation?.projectID == operation.projectID
+            && projectFileAvailabilityOperation?.attachmentID == operation.attachmentID
+            && projectFileAvailabilityOperation?.requestJSON == operation.requestJSON
+    }
+
+    @discardableResult
+    private func readProjectFileAvailabilityInventory(_ currentHost: CoreHost,
+        initialOwner: ProjectAttachmentDownloadOwner? = nil, requestJSON: String? = nil) async throws -> Bool {
+        let previous = projectFileAvailabilityOperation
+        guard host === currentHost, previous == nil || previous?.host === currentHost else { throw CancellationError() }
+        let raw = try await currentHost.projectFileAvailabilitySummary()
+        guard host === currentHost, projectFileAvailabilityOperation?.id == previous?.id else { throw CancellationError() }
+        if let initialOwner {
+            guard initialOwner.host === currentHost, projectAttachmentDownloadOwner?.id == initialOwner.id,
+                  projectAttachmentDownloadOwner?.session == initialOwner.session else { throw CancellationError() }
+        }
+        guard let summary = try parseProjectFileAvailabilitySummary(raw) else {
+            // Disappearance is not a terminal acknowledgment for an adopted UUID.
+            guard previous == nil else { throw CocoaError(.coderReadCorrupt) }
+            return false
+        }
+        if let previous {
+            guard summary.text("requestId") == previous.requestID,
+                  summary.text("projectId") == previous.projectID,
+                  summary.text("attachmentId") == previous.attachmentID else { throw CancellationError() }
+        }
+        if let initialOwner {
+            guard summary.text("projectId") == initialOwner.projectID,
+                  summary.text("attachmentId") == initialOwner.attachmentID else { throw CancellationError() }
+        }
+        if previous == nil, let acknowledged = projectFileAvailabilityAcknowledged,
+           acknowledged.host === currentHost, summary.text("phase") == "settled",
+           summary.text("requestId") == acknowledged.requestID,
+           summary.text("projectId") == acknowledged.projectID,
+           summary.text("attachmentId") == acknowledged.attachmentID { return false }
+        if previous == nil {
+            projectFileAvailabilityOperation = ProjectFileAvailabilityOperation(id: UUID(), host: currentHost,
+                requestID: summary.text("requestId"), projectID: summary.text("projectId"),
+                attachmentID: summary.text("attachmentId"), session: initialOwner?.session, requestJSON: requestJSON)
+        }
+        projectFileAvailabilitySummary = summary
+        projectFileAvailabilityError = projectFileAvailabilityError ?? "A pending Project download needs Retry or Stop download."
+        retryNeeded = true
+        return true
+    }
+
+    private func rememberProjectFileAvailabilityAcknowledgment(_ owner: ProjectAttachmentDownloadOwner,
+        requestJSON: String) async {
+        do {
+            let summary = try parseProjectFileAvailabilitySummary(await owner.host.projectFileAvailabilitySummary())
+            guard host === owner.host, projectAttachmentDownloadOwner?.id == owner.id,
+                  projectFileAvailabilityOperation == nil, let summary, summary.text("phase") == "settled",
+                  summary.text("projectId") == owner.projectID,
+                  summary.text("attachmentId") == owner.attachmentID else { return }
+            projectFileAvailabilityAcknowledged = ProjectFileAvailabilityOperation(id: UUID(), host: owner.host,
+                requestID: summary.text("requestId"), projectID: owner.projectID, attachmentID: owner.attachmentID,
+                session: owner.session, requestJSON: requestJSON)
+        } catch { /* A failed optional inventory cannot revoke the exact terminal foreground ACK. */ }
+    }
+
+    private func acknowledgeProjectFileAvailability(_ raw: String, operation: ProjectFileAvailabilityOperation,
+        stop: Bool) throws {
+        guard projectFileAvailabilityOperationCurrent(operation), raw.utf8.count <= 128 * 1_024 else {
+            throw CancellationError()
+        }
+        let result = try decode(raw)
+        let abandoned = Set(result.keys) == Set(["abandoned"])
+            && (result["abandoned"] as? NSNumber).map {
+                CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
+            } == true
+        let available = Set(result.keys) == Set(["status", "message", "update"])
+            && result.text("status") == "available" && result["message"] is NSNull && result["update"] is NSNull
+        guard abandoned || (!stop && available) else { throw CocoaError(.coderReadCorrupt) }
+        // Clear only this exact request after settlement, before ordinary refresh.
+        projectFileAvailabilityAcknowledged = operation
+        projectFileAvailabilityOperation = nil
+        projectFileAvailabilitySummary = [:]
+        projectFileAvailabilityError = nil
+        retryNeeded = projectFileAddPending
+        error = nil
+    }
+
+    private func retainProjectFileAvailabilityAfterFailure(_ operation: ProjectFileAvailabilityOperation) async {
+        guard projectFileAvailabilityOperationCurrent(operation) else { return }
+        projectFileAvailabilityError = "The download could not finish. Retry it or stop the pending download."
+        retryNeeded = true
+        do { try await readProjectFileAvailabilityInventory(operation.host) }
+        catch {
+            if projectFileAvailabilityOperationCurrent(operation) { retryNeeded = true }
+        }
+    }
+
+    func retryProjectFileAvailability() async { await resolveProjectFileAvailability(stop: false) }
+    func stopProjectFileAvailability() async { await resolveProjectFileAvailability(stop: true) }
+
+    func cancelProjectFileAvailabilityRecovery() {
+        // Keep the durable request and busy owner until the native invocation drains.
+        projectFileAvailabilityRecoveryTask?.cancel()
+    }
+
+    private func resolveProjectFileAvailability(stop: Bool) async {
+        guard projectFileAvailabilityRecoveryEnabled, !Task.isCancelled,
+              let operation = projectFileAvailabilityOperation else { return }
+        busy = true
+        let invocation = UUID()
+        projectFileAvailabilityRecoveryTaskID = invocation
+        let task = Task { await self.performProjectFileAvailabilityRecovery(operation, stop: stop, invocation: invocation) }
+        projectFileAvailabilityRecoveryTask = task
+        await task.value
+    }
+
+    private func performProjectFileAvailabilityRecovery(_ operation: ProjectFileAvailabilityOperation,
+        stop: Bool, invocation: UUID) async {
+        var restart = false
+        defer {
+            if projectFileAvailabilityRecoveryTaskID == invocation {
+                projectFileAvailabilityRecoveryTaskID = nil
+                projectFileAvailabilityRecoveryTask = nil
+                if host === operation.host {
+                    finishOperation()
+                    if restart {
+                        Task { [currentHost = operation.host] in
+                            guard self.host === currentHost, !self.appLock.concealed,
+                                  !self.projectFileAvailabilityPending else { return }
+                            await self.start()
+                        }
+                    }
+                }
+            }
+        }
+        do {
+            guard projectFileAvailabilityOperationCurrent(operation),
+                  projectFileAvailabilityRecoveryTaskID == invocation, !Task.isCancelled,
+                  !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+            let raw: String
+            if stop { raw = try await operation.host.abandonProjectFileAvailability(requestId: operation.requestID) }
+            else { raw = try await operation.host.recoverProjectFileAvailability(requestId: operation.requestID) }
+            try acknowledgeProjectFileAvailability(raw, operation: operation, stop: stop)
+            projectAttachmentsCurrent = false
+            if !ready {
+                selectedSurface = .projects
+                restart = true
+            } else if !Task.isCancelled, !appLock.concealed, let session = operation.session,
+                      selectedSurface == .project, projectFilterSession == session,
+                      projectHeader.text("id") == operation.projectID {
+                // Download recovery also refreshes archived Projects; Add's edit-only guard does not apply.
+                try await readSelectedSurface()
+                guard host === operation.host, !Task.isCancelled, !appLock.concealed,
+                      selectedSurface == .project, projectFilterSession == session,
+                      projectHeader.text("id") == operation.projectID else { return }
+                await readProjectAttachments(force: true)
+            }
+        } catch {
+            if projectFileAvailabilityOperationCurrent(operation) {
+                await retainProjectFileAvailabilityAfterFailure(operation)
+            } else if host === operation.host, projectFileAvailabilityOperation == nil,
+                      projectFileAvailabilityAcknowledged?.id == operation.id, !appLock.concealed {
+                projectFileAvailabilityError = "The download finished, but the Project could not be refreshed. Try again."
             }
         }
     }
@@ -23686,6 +23946,10 @@ final class CoreModel: ObservableObject {
     }
 
     func retry() async {
+        if projectFileAvailabilityPending {
+            await retryProjectFileAvailability()
+            return
+        }
         if projectFileAddPending {
             await retryProjectFileAdd()
             return
@@ -25929,6 +26193,7 @@ final class CoreModel: ObservableObject {
 
     private func query(_ method: String, _ args: [Any] = []) async throws -> CoreObject {
         guard !settingsSyncRestartRequired else { throw CocoaError(.userCancelled) }
+        guard !projectFileAvailabilityPending || method == "appLockOptions" else { throw CocoaError(.userCancelled) }
         guard let host else { throw CocoaError(.coderInvalidValue) }
         #if DEBUG && targetEnvironment(simulator)
         var removeTestRead: (query: String, request: String, session: String, generation: Int)?
@@ -26270,6 +26535,11 @@ final class CoreModel: ObservableObject {
     }
     private func finishOperation() {
         busy = false
+        if projectFileAvailabilityPending {
+            retryNeeded = true
+            refreshRequested = false
+            return
+        }
         if settingsSyncRestartRequired { refreshRequested = false; return }
         admitForegroundSync()
         if foregroundSyncOwner != nil { return }

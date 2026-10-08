@@ -613,7 +613,23 @@ final class NativeAttachmentFiles {
               proof.parentIdentity == proof.cacheRootIdentity else { throw NativeAttachmentFilesError.invalidRequest }
         return try retireGeneration(path: path,
             proof: .init(sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.parentIdentity),
-            retainDifferent: true, checkCancellation: checkCancellation)
+             retainDifferent: true, checkCancellation: checkCancellation)
+    }
+
+    /// Swift's exact durable Project download journal grants this adopted-source
+    /// authority. A borrowed proof or JSON file call must never reach this method.
+    func retireAdoptedProjectDownloadSource(_ proof: CacheSourceProof,
+                                           requireOwner: () throws -> Void) throws -> BaselineAttachmentRetirementOutcome {
+        try requireOwner()
+        let path = try reference(proof.sourceURI)
+        guard path.cache, path.components.count == 1,
+              UUID(uuidString: path.components[0])?.uuidString.lowercased() == path.components[0],
+              Self.validDigest(proof.sha256), proof.size >= 0, proof.size <= Int64(Self.maximumPlaintextSourceBytes),
+              proof.cacheRootIdentity == Self.token(cacheIdentity), proof.parentIdentity == proof.cacheRootIdentity,
+              Self.validToken(proof.identity) else { throw NativeAttachmentFilesError.invalidRequest }
+        return try retireGeneration(path: path,
+            proof: .init(sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.parentIdentity),
+            retainDifferent: true, checkCancellation: requireOwner)
     }
 
     func snapshotCacheSource(_ uri: String, checkCancellation: () throws -> Void = {}) throws -> CacheSourceProof {

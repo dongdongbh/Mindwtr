@@ -755,6 +755,279 @@ final class FoundationUITests: XCTestCase {
         // Root independently verifies the original seeded ID, phone SQLite and maintained server bytes/receipts.
     }
 
+    func testNativeSelfHostedProjectDownloadOpenColdAndArchived() throws {
+        let library = try task371Library("INPUT", prefix: "MINDWTR_PROJECT_DOWNLOAD_PHONE_")
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_PROJECT_DOWNLOAD_PHONE_CONFIG"] else {
+            throw XCTSkip("Private Task406 maintained-server configuration is required")
+        }
+        let prefix = "native-project-download-406-"
+        guard raw.utf8.count <= 2048,
+              let config = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String],
+              Set(config.keys) == Set(["url", "token"]), let url = config["url"], let token = config["token"],
+              let target = URLComponents(string: url), target.scheme == "https", let hostname = target.host,
+              hostname.range(of: #"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.trycloudflare\.com\z"#, options: .regularExpression) != nil,
+              target.user == nil, target.password == nil, target.query == nil, target.fragment == nil, target.port == nil,
+              target.percentEncodedPath == "/v1/data", url == "https://" + hostname + "/v1/data",
+              (20...512).contains(token.utf8.count), token.hasPrefix(prefix),
+              let namespace = UUID(uuidString: String(token.dropFirst(prefix.count))),
+              namespace.uuidString.lowercased() == String(token.dropFirst(prefix.count)) else {
+            XCTFail("Task406 requires only its exact temporary HTTPS tunnel route and generated synthetic token")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment = [:]
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app)
+        let option = app.buttons["sync-option-selfhosted"]
+        boardEnabled(option, timeout: 30); revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-selfhosted")
+        let field = app.secureTextFields["sync-token"], address = app.textFields["sync-url"]
+        boardEnabled(field, timeout: 30); boardEnabled(address, timeout: 30)
+        XCTAssertTrue(option.isSelected); XCTAssertFalse(app.textFields["sync-token"].exists)
+        revealPagedElement(app, address, in: app.scrollViews["sync-screen"])
+        address.tap(); address.typeText(url)
+        XCTAssertTrue((address.value as? String) == url, "The validated private location must reach its form")
+        revealPagedElement(app, field, in: app.scrollViews["sync-screen"])
+        field.tap(); field.typeText(token)
+        XCTAssertFalse((field.value as? String ?? "").isEmpty)
+        XCTAssertNotEqual(field.value as? String, field.placeholderValue)
+        XCTAssertFalse((field.value as? String ?? "").contains(token))
+        revealPagedElement(app, app.buttons["sync-save"], in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-save")
+        expectation(for: NSPredicate(format: "exists == true AND label == %@", "Success\nSync completed!"),
+                    evaluatedWith: app.staticTexts["sync-status"])
+        waitForExpectations(timeout: 60)
+        boardEnabled(app.buttons["sync-back"], timeout: 60)
+        XCTAssertFalse(app.staticTexts["sync-error"].exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.allElementsBoundByIndex.contains {
+            $0.label.contains(token) || ($0.value as? String ?? "").contains(token)
+        }, "No static text may expose the synthetic authority")
+        boardTap(app, "sync-back"); boardTap(app, "settings-back")
+
+        let active = "40600000-1111-4111-8111-111111111111"
+        let archived = "40600000-2222-4222-8222-222222222222"
+        let scroll = app.scrollViews["project-detail-scroll"]
+        func projects() {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30)
+            boardTap(app, "tab-menu"); boardTap(app, "menu-projects")
+            boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+        }
+        func open(_ archivedProject: Bool) {
+            if archivedProject {
+                let section = app.buttons["projects-section-archived"]
+                revealPagedElement(app, section, in: app.scrollViews["projects-scroll"])
+                boardEnabled(section)
+                if section.value as? String == "Expand" { section.tap() }
+            }
+            let row = app.buttons["project-open-project-download-406-" + (archivedProject ? "archived" : "active")]
+            revealPagedElement(app, row, in: app.scrollViews["projects-scroll"])
+            boardEnabled(row); row.tap()
+            boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+            XCTAssertEqual(app.staticTexts["project-detail-title"].label,
+                           archivedProject ? "Archived native project download406" : "Native project download406")
+            boardTap(app, "project-details-toggle")
+            let file = app.buttons["project-attachment-open-" + (archivedProject ? archived : active)]
+            revealPagedElement(app, file, in: scroll, outerEdge: true)
+            boardEnabled(file, timeout: 30)
+            XCTAssertEqual(file.label, archivedProject ? "Archived native project file406.txt" : "Native project file406.txt")
+        }
+        func ready(_ id: String) {
+            boardEnabled(app.buttons["project-back"], timeout: 30)
+            boardEnabled(app.buttons["project-attachment-open-" + id], timeout: 30)
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "project-attachment-downloading-" + id).firstMatch.exists)
+            for error in ["project-attachment-open-error", "project-attachments-error", "project-attachment-add-error",
+                          "project-notes-write-error"] {
+                XCTAssertFalse(app.staticTexts[error].exists)
+            }
+            XCTAssertFalse(app.buttons["project-attachment-write-retry"].exists)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+        }
+        func archivedControls() {
+            revealPagedElement(app, app.buttons["project-notes-toggle"], in: scroll, outerEdge: true)
+            for id in ["project-attachment-add-file", "project-attachment-add-link", "project-attachment-remove-" + archived] {
+                let button = app.buttons[id]
+                XCTAssertTrue(button.exists); XCTAssertFalse(button.isEnabled)
+                XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
+            }
+        }
+        func download(_ id: String) {
+            let button = app.buttons["project-attachment-download-" + id]
+            revealPagedElement(app, button, in: scroll, outerEdge: true)
+            boardEnabled(button, timeout: 30)
+            XCTAssertEqual(button.label, "Download")
+            button.tap()
+            // Missing becomes available only after the owned download's row refresh.
+            // A previously enabled Open/Back alone cannot prove this transition.
+            XCTAssertTrue(button.waitForNonExistence(timeout: 60))
+            ready(id)
+            XCTAssertFalse(app.buttons["Close"].firstMatch.exists, "Download must not automatically open its file")
+            XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+        }
+        func view(_ id: String) {
+            XCTAssertFalse(app.buttons["project-attachment-download-" + id].exists)
+            let file = app.buttons["project-attachment-open-" + id]
+            revealPagedElement(app, file, in: scroll, outerEdge: true)
+            boardEnabled(file, timeout: 30); file.tap()
+            // Project text documents use the existing system Share presentation.
+            let close = app.buttons["Close"].firstMatch
+            boardEnabled(close, timeout: 20)
+            var previousFrame: CGRect?
+            var stableSince: TimeInterval?
+            let closeReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                guard close.exists, close.isEnabled, close.isHittable else {
+                    previousFrame = nil; stableSince = nil; return false
+                }
+                let frame = close.frame, now = ProcessInfo.processInfo.systemUptime
+                if previousFrame == frame, let stableSince { return now - stableSince >= 0.5 }
+                previousFrame = frame; stableSince = now; return false
+            }, object: close)
+            XCTAssertEqual(XCTWaiter.wait(for: [closeReady], timeout: 10), .completed)
+            XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            close.tap(); XCTAssertTrue(close.waitForNonExistence(timeout: 15))
+            ready(id)
+            XCTAssertFalse(app.buttons["project-attachment-download-" + id].exists)
+        }
+
+        projects(); open(false); download(active); view(active)
+        boardTap(app, "project-back")
+        app.terminate(); app.launch(); projects(); open(false)
+        // No Save, token edit, Sync or Download occurs in the cold active-file phase.
+        ready(active); view(active); boardTap(app, "project-back")
+        open(true); ready(archived); archivedControls(); download(archived)
+        archivedControls(); view(archived); archivedControls(); boardTap(app, "project-back")
+        boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+        // Root independently verifies GET receipts, exact hashes/rows and cold no-GET.
+    }
+
+    func testNativeSelfHostedProjectDownloadColdRetryAndStop() throws {
+        let retryLibrary = try task371Library("RETRY", prefix: "MINDWTR_PROJECT_DOWNLOAD_RECOVERY_PHONE_")
+        let stopLibrary = try task371Library("STOP", prefix: "MINDWTR_PROJECT_DOWNLOAD_RECOVERY_PHONE_")
+        guard retryLibrary != stopLibrary else {
+            XCTFail("Task408 requires two distinct fresh isolated libraries")
+            throw CocoaError(.coderReadCorrupt)
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment = [:]
+        defer { app.terminate() }
+        let fileID = "40600000-1111-4111-8111-111111111111"
+        let scroll = app.scrollViews["project-detail-scroll"]
+        let panel = app.descendants(matching: .any).matching(identifier: "project-file-download-recovery").firstMatch
+        let gate = app.descendants(matching: .any).matching(identifier: "sync-restart-gate").firstMatch
+        func noViewer() {
+            XCTAssertFalse(app.buttons["Close"].firstMatch.exists, "Recovery must not automatically open its file")
+            XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+            XCTAssertFalse(app.otherElements["task-audio-player"].exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+        }
+        func pending() {
+            XCTAssertTrue(panel.waitForExistence(timeout: 60))
+            for id in ["project-file-download-retry", "project-file-download-stop"] {
+                let button = app.buttons[id]
+                boardEnabled(button, timeout: 30)
+                XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
+            }
+            XCTAssertFalse(gate.exists)
+            noViewer()
+        }
+        func openActiveProject() {
+            boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+            let row = app.buttons["project-open-project-download-406-active"]
+            revealPagedElement(app, row, in: app.scrollViews["projects-scroll"])
+            boardEnabled(row); row.tap()
+            boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+            XCTAssertEqual(app.staticTexts["project-detail-title"].label, "Native project download406")
+            boardTap(app, "project-details-toggle")
+            let file = app.buttons["project-attachment-open-" + fileID]
+            revealPagedElement(app, file, in: scroll, outerEdge: true)
+            boardEnabled(file, timeout: 30)
+            XCTAssertEqual(file.label, "Native project file406.txt")
+        }
+        func ready() {
+            boardEnabled(app.buttons["project-back"], timeout: 30)
+            boardEnabled(app.buttons["project-attachment-open-" + fileID], timeout: 30)
+            XCTAssertFalse(panel.exists); XCTAssertFalse(gate.exists)
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "project-attachment-downloading-" + fileID).firstMatch.exists)
+            for error in ["project-attachment-open-error", "project-attachments-error", "project-attachment-add-error",
+                          "project-notes-write-error"] {
+                XCTAssertFalse(app.staticTexts[error].exists)
+            }
+            XCTAssertFalse(app.buttons["project-attachment-write-retry"].exists)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+            noViewer()
+        }
+
+        for (library, stop) in [(retryLibrary, false), (stopLibrary, true)] {
+            let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launchArguments = arguments + ["--native-project-download-stop-after-filled-once"]
+            app.launch()
+            // Root stages only synthetic SQLite/config in this fresh library; no files or journal.
+            // The isolated filled-stage flag starts at Projects to avoid automatic Sync prefetch.
+            openActiveProject()
+            let download = app.buttons["project-attachment-download-" + fileID]
+            revealPagedElement(app, download, in: scroll, outerEdge: true)
+            boardEnabled(download, timeout: 30); XCTAssertEqual(download.label, "Download")
+            download.tap()
+            // The approved hook fails only after this invocation durably fills its real stage.
+            pending()
+            for id in ["project-back", "project-attachment-open-" + fileID] {
+                let button = app.buttons[id]
+                XCTAssertTrue(button.exists); XCTAssertFalse(button.isEnabled)
+            }
+            app.terminate()
+            app.launchArguments = arguments // Cold recovery must not rearm the filled-stage hook.
+            app.launch()
+            pending()
+            XCTAssertFalse(app.buttons["tab-menu"].exists)
+            XCTAssertFalse(app.buttons["project-back"].exists)
+            XCTAssertFalse(app.buttons["project-attachment-open-" + fileID].exists)
+            let checkpoint = XCTAttachment(screenshot: app.screenshot())
+            checkpoint.name = stop ? "Task408 cold Stop checkpoint" : "Task408 cold Retry checkpoint"
+            checkpoint.lifetime = .keepAlways; add(checkpoint)
+            boardTap(app, stop ? "project-file-download-stop" : "project-file-download-retry")
+            XCTAssertTrue(panel.waitForNonExistence(timeout: 60))
+            // This cold phase performs no Save, Sync or Download; root verifies zero GETs.
+            openActiveProject(); ready()
+            if stop {
+                let missing = app.buttons["project-attachment-download-" + fileID]
+                revealPagedElement(app, missing, in: scroll, outerEdge: true)
+                boardEnabled(missing, timeout: 30); XCTAssertEqual(missing.label, "Download")
+                noViewer() // Stop preserves the original missing attachment; no follow-up download.
+            } else {
+                XCTAssertFalse(app.buttons["project-attachment-download-" + fileID].exists)
+                let file = app.buttons["project-attachment-open-" + fileID]
+                revealPagedElement(app, file, in: scroll, outerEdge: true)
+                boardEnabled(file, timeout: 30); file.tap()
+                let close = app.buttons["Close"].firstMatch
+                boardEnabled(close, timeout: 20)
+                var previousFrame: CGRect?
+                var stableSince: TimeInterval?
+                let closeReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    guard close.exists, close.isEnabled, close.isHittable else {
+                        previousFrame = nil; stableSince = nil; return false
+                    }
+                    let frame = close.frame, now = ProcessInfo.processInfo.systemUptime
+                    if previousFrame == frame, let stableSince { return now - stableSince >= 0.5 }
+                    previousFrame = frame; stableSince = now; return false
+                }, object: close)
+                XCTAssertEqual(XCTWaiter.wait(for: [closeReady], timeout: 10), .completed)
+                XCTAssertFalse(app.buttons["project-attachment-preview-done"].exists)
+                XCTAssertFalse(app.alerts.firstMatch.exists)
+                close.tap(); XCTAssertTrue(close.waitForNonExistence(timeout: 15))
+                ready(); XCTAssertFalse(app.buttons["project-attachment-download-" + fileID].exists)
+            }
+            boardTap(app, "project-back")
+            boardEnabled(app.textFields["projects-create-title"], timeout: 30)
+            app.terminate()
+        }
+        // Root independently requires exactly two filled-source GETs and zero cold GETs.
+    }
+
     func testNativeSyncInvalidDraftDiscardsToOffAndColdReopenHasNoPlaintext() {
         continueAfterFailure = false
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()

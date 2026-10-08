@@ -6458,6 +6458,21 @@ export function createNativeSync() {
             assert.equal(absent.logText, null);
         }
     });
+    await check('cached Project private bridges refuse boot and non-iOS authority', async () => {
+        const request = JSON.stringify({ projectId: 'cached-410', attachmentId: '41000000-1111-4111-8111-111111111111',
+            revision: 'fixture', managedDirectoryURI: 'file:///documents/attachments/' });
+        for (const platform of ['ios', 'android', undefined]) {
+            const state = makeState(0, [], platform);
+            for (const [name, args] of [
+                ['projectAttachmentCachedAvailabilityPreflight', [request, null]],
+                ['projectAttachmentCachedAvailability', [request, 'file:///documents/attachments/41000000-1111-4111-8111-111111111111.txt']],
+            ]) {
+                const answer = await poll(state, state.MindwtrHost[name](...args));
+                assert.equal(answer.ok, false); assert.match(answer.error, /^NOT_READY:/);
+            }
+            assert.equal(state.logText, null);
+        }
+    });
     for (const [operation, releaseCheck, accepted = 'confirmed'] of [
         ['preexisting-journal-replay', 'v1.3.5/ios-preexisting-attachment-journal-replay'],
         ['container-relocation', 'v1.3.5/ios-attachment-container-recovery'],
@@ -6468,6 +6483,8 @@ export function createNativeSync() {
         ['project-file-remove', 'v1.3.5/ios-project-file-remove', 'saved'],
         ['project-file-add', 'v1.3.5/ios-project-file-add', 'saved'],
         ['project-file-add', 'v1.3.5/ios-project-file-add', 'abandoned'],
+        ['cached-project-availability', 'v1.3.5/ios-cached-project-availability'],
+        ...['saved', 'abandoned', 'refused', 'cleanup-pending'].map(outcome => ['selfhosted-project-download', 'v1.3.5/ios-selfhosted-project-download', outcome]),
         ['project-file-hash', 'v1.3.5/ios-project-file-hash', 'saved'],
         ['task-file-hash', 'v1.3.5/ios-task-file-hash', 'saved'],
     ]) await check(`${operation} acknowledgment is fixed, exportable and best effort`, async () => {

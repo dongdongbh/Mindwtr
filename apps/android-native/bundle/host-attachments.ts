@@ -432,6 +432,50 @@ export const prepareNativeTaskAttachmentAvailability = async (json: string,
     return echo;
 };
 
+/** Ordinary saved Project download: prepare bytes without a Task/editor or a domain write. */
+export const nativeProjectFileAvailabilityInitialURL = (attachmentJSON: string, url: string): string => {
+    const attachment = readNativeAttachments([taskDownloadObject(attachmentJSON)])?.[0];
+    if (!attachment?.cloudKey || attachment.kind !== 'file' || typeof url !== 'string' || !url) return taskDownloadInvalid();
+    return `${getCloudBaseUrl(url)}/${attachment.cloudKey}`;
+};
+
+export const prepareNativeProjectFileAvailability = async (json: string,
+    bindings: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'>, channels: NativeFileChannels, signal: AbortSignal) => {
+    const input = taskDownloadObject(json, ['version', 'requestId', 'attachmentJSON', 'targetURI', 'rawConfigJSON']);
+    const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+    if (input.version !== 1 || typeof input.requestId !== 'string' || !uuid.test(input.requestId)) return taskDownloadInvalid();
+    const text = taskDownloadText(input.attachmentJSON, 1_000_000);
+    const parsed = taskDownloadObject(text), items = readNativeAttachments([parsed]);
+    const attachment = items?.[0];
+    if (!attachment || items?.length !== 1 || JSON.stringify(attachment) !== text
+        || !uuid.test(attachment.id) || attachment.kind !== 'file' || attachment.deletedAt !== undefined
+        || !attachment.cloudKey || typeof attachment.fileHash !== 'string' || !/^[0-9a-f]{64}$/i.test(attachment.fileHash)
+        || attachment.size !== undefined && (!Number.isSafeInteger(attachment.size) || attachment.size < 0 || attachment.size > TASK_DOWNLOAD_BYTES)) return taskDownloadInvalid();
+    const config = taskDownloadText(input.rawConfigJSON, TASK_DOWNLOAD_BYTES);
+    if (taskDownloadObject(config).backend !== 'cloud') return taskDownloadInvalid();
+    const target = taskDownloadText(input.targetURI, 16 * 1024);
+    const directory = channels.directories.document;
+    if (!directory || target !== `${directory.endsWith('/') ? directory : directory + '/'}attachments/${getAttachmentDownloadFileName(attachment)}`
+        || attachment.uri === target && attachment.localStatus === 'available') return taskDownloadInvalid();
+    const selected = createNativeTaskAttachmentPreparation({ ...bindings, rawConfigJSON: config,
+        prepareSource: (metadata, base64) => {
+            const measured = taskDownloadObject(metadata);
+            if (measured.attachmentId !== attachment.id || measured.targetURI !== target
+                || measured.sha256 !== attachment.fileHash!.toLowerCase()
+                || attachment.size !== undefined && measured.size !== attachment.size) return taskDownloadInvalid();
+            return bindings.prepareSource(metadata, base64);
+        },
+    }, channels);
+    const result = await selected.prepareAttachmentAvailableDetailed(attachment, signal);
+    if (result.status !== 'prepared') return { version: 1, requestId: input.requestId, status: 'unavailable' as const };
+    if (!uuid.test(result.sourceToken) || result.sha256 !== attachment.fileHash.toLowerCase()
+        || !Number.isSafeInteger(result.size) || result.size < 0 || result.size > TASK_DOWNLOAD_BYTES
+        || attachment.size !== undefined && attachment.size !== result.size
+        || result.attachment.id !== attachment.id || result.attachment.uri !== target) return taskDownloadInvalid();
+    return { version: 1, requestId: input.requestId, status: 'prepared' as const,
+        sourceToken: result.sourceToken, sha256: result.sha256, size: result.size };
+};
+
 const LOCAL_UNAVAILABLE = 'Local attachment capability is not available on this host';
 class LocalAttachmentUnavailableError extends Error {
     constructor() { super(LOCAL_UNAVAILABLE); }

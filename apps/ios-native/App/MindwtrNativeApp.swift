@@ -227,6 +227,15 @@ private struct AppLockRoot: View {
                                 Button("Cancel pending change") { Task { await model.cancelAppLockRecovery() } }
                                     .foregroundStyle(palette.onTint)
                                     .accessibilityIdentifier("app-lock-recovery-cancel")
+                            } else if !model.ready && model.projectFileAvailabilityPending && lock.enabled != nil {
+                                if lock.concealed {
+                                    Button(model.label("appLock.unlock").isEmpty ? "Unlock" : model.label("appLock.unlock")) {
+                                        Task { await lock.unlock(label: model.label) }
+                                    }
+                                    .foregroundStyle(palette.onTint).accessibilityIdentifier("app-lock-unlock")
+                                } else {
+                                    ProjectFileAvailabilityRecoveryPanel(model: model, palette: palette)
+                                }
                             } else if !model.ready && !model.projectFileAddSummary.isEmpty && lock.enabled != nil {
                                 if lock.concealed {
                                     Button(model.label("appLock.unlock").isEmpty ? "Unlock" : model.label("appLock.unlock")) {
@@ -281,6 +290,7 @@ private struct AppLockRoot: View {
             if next != .active {
                 model.cancelForegroundSync()
                 model.cancelProjectAttachmentDownload()
+                model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
                 model.stopTaskAudioForBackground()
                 model.cancelTaskFileImport()
@@ -295,6 +305,7 @@ private struct AppLockRoot: View {
             if concealed {
                 model.cancelForegroundSync()
                 model.cancelProjectAttachmentDownload()
+                model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
                 model.cancelTaskFileImport()
                 model.cancelProjectFileImport()

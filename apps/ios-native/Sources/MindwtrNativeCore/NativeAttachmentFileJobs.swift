@@ -500,6 +500,15 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         mutationLock.lock(); defer { mutationLock.unlock() }
         return try files.retireProviderSource(receipt, checkCancellation: requireOwner)
     }
+    /// After drain, only the owning Engine's validated durable download journal
+    /// can request this retirement; it has no JSON mailbox operation.
+    func retireAdoptedProjectDownloadSource(_ proof: NativeAttachmentFiles.CacheSourceProof,
+                                           requireOwner: () throws -> Void) throws -> NativeAttachmentFiles.BaselineAttachmentRetirementOutcome {
+        lock.lock(); let ready = accepting; lock.unlock()
+        guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+        mutationLock.lock(); defer { mutationLock.unlock() }
+        return try files.retireAdoptedProjectDownloadSource(proof, requireOwner: requireOwner)
+    }
     func drain() { queue.sync {} }
     func cancelAndDrain() {
         lock.lock(); let tokens = jobs.values.map(\.token); lock.unlock()

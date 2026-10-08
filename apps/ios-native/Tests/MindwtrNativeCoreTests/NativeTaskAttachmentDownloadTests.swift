@@ -354,12 +354,12 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try files(cache), [])
     }
-    func testOrdinarySelfHostedProjectDownloadRefusesBeforeIOAndLeavesLiveAndColdPersistenceClean() async throws {
+    func testSameURIAlreadyAvailableSelfHostedProjectRefusesBeforeIOAndLeavesLiveAndColdPersistenceClean() async throws {
         try await seed(backend: "cloud"); try FileManager.default.removeItem(at: editor.url)
         let projectID = "project401-download", at = "2026-10-07T00:00:00.000Z"
-        let item: [String: Any] = ["id": attachmentID, "kind": "file", "title": "Project source.txt", "uri": "",
+        let item: [String: Any] = ["id": attachmentID, "kind": "file", "title": "Project source.txt", "uri": target.absoluteString,
             "size": bytes.count, "createdAt": at, "updatedAt": at, "cloudKey": "attachments/" + attachmentID + ".txt",
-            "fileHash": hash(bytes), "localStatus": "missing", "contentRev": 7]
+            "fileHash": hash(bytes), "localStatus": "available", "contentRev": 7]
         _ = try sql("INSERT INTO projects(id,title,status,color,supportNotes,orderNum,tagIds,isSequential,isFocused,attachments,createdAt,updatedAt,rev,revBy,viewSectionIds) VALUES (?,'Preserve Project','active','#94a3b8','Preserve notes',1,NULL,0,0,?,?,?,3,'fixture','[]')", [projectID, json([item]), at, at])
         let faults = HostIOFaults(), hooks = NativeAttachmentHostHooks()
         var fileWork = 0, installerWork = 0, secretWork = 0
@@ -391,7 +391,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         var workBefore = fileWork, installsBefore = installerWork, secretsBefore = secretWork
         func assertPreserved() throws {
             XCTAssertEqual(remote.requests, 0); XCTAssertEqual(fileWork, workBefore); XCTAssertEqual(installerWork, installsBefore)
-            XCTAssertEqual(secretWork, secretsBefore, "The gated ordinary route never reads credentials")
+            XCTAssertEqual(secretWork, secretsBefore, "The ineligible already-available route never reads credentials")
             XCTAssertEqual(try rows(), original); XCTAssertEqual(try projectRows(), projects)
             XCTAssertEqual(try Data(contentsOf: manifest), settings)
             XCTAssertEqual(try directoryInventory(managed), managedBefore); XCTAssertEqual(try directoryInventory(cache), cacheBefore)
@@ -402,10 +402,11 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
                 let text = try String(contentsOf: log, encoding: .utf8)
                 XCTAssertFalse(text.contains("v1.3.5/ios-selfhosted-file-availability"))
                 XCTAssertFalse(text.contains("v1.3.5/ios-project-file-download"))
+                XCTAssertFalse(text.contains("v1.3.5/ios-selfhosted-project-download"))
             }
         }
         for _ in 0..<2 {
-            do { _ = try await live.foregroundSync(command: "projectAttachmentDownload", requestJSON: input); XCTFail("Ordinary cloud Project download remains gated") }
+            do { _ = try await live.foregroundSync(command: "projectAttachmentDownload", requestJSON: input); XCTFail("Same-URI available Project download must refuse before IO") }
             catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
             try assertPreserved()
             // A same-current filter command retries persistence when a latch exists.
@@ -422,7 +423,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         let coldRevision = try XCTUnwrap(coldOptions["revision"] as? String)
         let coldInput = try json(["projectId": projectID, "attachmentId": attachmentID, "revision": coldRevision])
         workBefore = fileWork; installsBefore = installerWork; secretsBefore = secretWork
-        do { _ = try await cold.foregroundSync(command: "projectAttachmentDownload", requestJSON: coldInput); XCTFail("Cold ordinary cloud Project download remains gated") }
+        do { _ = try await cold.foregroundSync(command: "projectAttachmentDownload", requestJSON: coldInput); XCTFail("Cold same-URI available Project download must refuse before IO") }
         catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
         let coldFresh = try object(await cold.call("projectAttachmentEditOptions", argumentsJSON: json([json(["projectId": projectID])])))
         XCTAssertEqual(coldFresh["revision"] as? String, coldRevision)

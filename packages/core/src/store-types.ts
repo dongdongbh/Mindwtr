@@ -746,6 +746,8 @@ export interface TaskStore {
     commitPreparedProjectFileRemoveWrite: (input: PreparedProjectFileRemoveWrite & { request: { projectId: string; requestId: string; intent: ProjectFileRemoveIntent }; result: { id: string; attachmentIds: string[] } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectFileAddWrite: (input: PreparedProjectFileAddWrite & { request: { projectId: string; requestId: string; version?: 2; sourceSha256?: string }; result: { id: string; attachmentIds: string[] } }, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitSelectedProjectAvailability: (input: SelectedProjectAvailabilityWrite, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Private frozen ordinary availability; exact-after replay performs no write. */
+    commitPreparedProjectFileAvailability: (input: SelectedProjectAvailabilityWrite, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectStatus: (input: PreparedProjectStatus & { request: { projectId: string; status: 'active' | 'waiting' | 'someday' } }) => Promise<PreparedTaskEditResult>;
     commitPreparedTrashProjectRestore: (input: PreparedTrashProjectRestore) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectDelete: (input: PreparedProjectDelete) => Promise<PreparedTaskEditResult>;

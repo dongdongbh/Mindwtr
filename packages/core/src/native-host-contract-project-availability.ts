@@ -2,17 +2,18 @@ import type { NativeHostResult } from './native-host-contract';
 import { readNativeAttachments, type NativeAttachmentResolution, type NativeAttachmentsHost } from './native-host-contract-attachments';
 import { readProjectAttachmentEditOptions, projectAttachmentWriteToken } from './native-host-contract-project-attachments';
 import { readAreaDurableData, createAreaSaveGuard } from './native-host-contract-area-durable';
-import { exact, record } from './native-host-contract-project-shared';
+import { detach, exact, iso, record } from './native-host-contract-project-shared';
 import { getAttachmentDownloadFileName } from './mobile-attachment-availability';
 import { getStorageAdapter, getPersistenceStatus, useTaskStore } from './store';
-import { rawReadProjectSnapshot, rawReadRow } from './sqlite-raw-snapshot';
-import { projectToSqliteRow } from './project-sync-schema';
+import { rawReadProjectSnapshot, rawReadRow, rememberRawReadRow } from './sqlite-raw-snapshot';
+import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from './project-sync-schema';
 import { ensureDeviceId } from './store-helpers';
 import { taskEditValuesEqual as same } from './json-value-equality';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
-import { projectAvailabilityWritePlan, sameProjectAvailabilityRawRow, projectFileAddLiveRowMatches,
+import { projectAvailabilityWritePlan, projectFileAvailabilityWritePlan, sameProjectAvailabilityRawRow, projectFileAddLiveRowMatches,
     projectFileAddScalarCellsMatchWriter } from './store-projects/project-actions';
-import type { Project } from './types';
+import type { Attachment, Project } from './types';
+import type { SelectedProjectAvailabilityWrite } from './store-types';
 
 type Request = { projectId: string; attachmentId: string; revision: string; managedDirectoryURI: string };
 type Deps = { readiness: () => NativeHostResult<null>; revision: () => string;
@@ -48,7 +49,7 @@ const selectedProject = (projects: Project[], id: string): Project | undefined =
     return matches.length === 1 ? matches[0] : undefined;
 };
 
-export function createProjectAvailabilityMethods(deps: Deps) {
+export function createProjectAvailabilityMethods(deps: Deps, mode: 'relocated' | 'cached' = 'relocated') {
     const saves = createAreaSaveGuard(deps.save);
     // The filename derivation is pure; this selection reads settled durable rows,
     // preserving metadata the display codec omits (for example explicit false).
@@ -71,10 +72,13 @@ export function createProjectAvailabilityMethods(deps: Deps) {
         const attachments = before && readNativeAttachments(before.attachments);
         const matches = attachments?.filter((item) => item.id === input.attachmentId) ?? [];
         const attachment = matches.length === 1 ? matches[0] : undefined;
-        if (!before || !attachment || attachment.kind !== 'file' || attachment.deletedAt || !fileURI(attachment.uri)
+        if (!before || !attachment || attachment.kind !== 'file' || attachment.deletedAt
+            || mode === 'relocated' && !fileURI(attachment.uri)
             || typeof attachment.fileHash !== 'string' || !/^[0-9a-f]{64}$/i.test(attachment.fileHash)) return invalid();
         const targetURI = input.managedDirectoryURI + getAttachmentDownloadFileName(attachment);
-        if (!fileURI(targetURI) || targetURI.slice(input.managedDirectoryURI.length).includes('/') || targetURI === attachment.uri)
+        if (!fileURI(targetURI) || targetURI.slice(input.managedDirectoryURI.length).includes('/')
+            || (mode === 'cached' ? attachment.uri !== '' && attachment.uri !== targetURI
+                || attachment.uri === targetURI && attachment.localStatus === 'available' : targetURI === attachment.uri))
             return invalid();
         if ((read.value.authority.snapshot.settings.deviceId ?? null) !== (useTaskStore.getState().settings.deviceId ?? null)) return stale();
         const value = { revision: input.revision, project: { id: before.id, ...projectAttachmentWriteToken(before) }, targetURI };
@@ -117,10 +121,13 @@ export function createProjectAvailabilityMethods(deps: Deps) {
                 || (fresh.value.authority.snapshot.settings.deviceId ?? null) !== deviceIdBefore
                 || (useTaskStore.getState().settings.deviceId ?? null) !== deviceIdBefore) return stale();
             const device = ensureDeviceId(fresh.value.authority.snapshot.settings);
-            const plan = projectAvailabilityWritePlan(initial.before, beforeCells, input.attachmentId, currentTargetURI,
+            const plan = (mode === 'cached' ? projectFileAvailabilityWritePlan : projectAvailabilityWritePlan)(
+                initial.before, beforeCells, input.attachmentId, currentTargetURI,
                 deviceIdBefore, device.updated ? device.deviceId : null, new Date().toISOString());
             if (!plan || !saves.mayApply(plan, fresh.value.adapter) || !idle()) return savedFailure();
-            const applied = await useTaskStore.getState().commitSelectedProjectAvailability(plan, fresh.value.authority);
+            const applied = await (mode === 'cached'
+                ? useTaskStore.getState().commitPreparedProjectFileAvailability(plan, fresh.value.authority)
+                : useTaskStore.getState().commitSelectedProjectAvailability(plan, fresh.value.authority));
             if (!applied.success) return stale();
             const saved = await saves.finish(plan, fresh.value.adapter, false, fresh.value.authority.saveBoundary);
             if (!saved.ok) return savedFailure();
@@ -134,6 +141,172 @@ export function createProjectAvailabilityMethods(deps: Deps) {
                 || (after.value.authority.snapshot.settings.deviceId ?? null) !== (plan.deviceIdBefore ?? plan.deviceIdToInitialize)
                 || !idle()) return savedFailure();
             return { ok: true, value: { status: 'available', message: null, update: null } };
+        },
+    };
+}
+
+export type NativeProjectFileAvailabilitySelection = Request & { version: 1; requestId: string };
+export type NativeProjectFileAvailabilityRequest = NativeProjectFileAvailabilitySelection & { sha256: string; size: number };
+export type NativeProjectFileAvailabilityPreflight = { version: 1; requestId: string; revision: string;
+    project: Project; rawBefore: unknown[]; attachmentJSON: string; targetURI: string; deviceIdBefore: string | null };
+export type NativeProjectFileAvailabilityEnvelope = { request: NativeProjectFileAvailabilityRequest; prepared: {
+    version: 1; kind: 'project-file-availability'; attachmentJSON: string; targetURI: string;
+    expectation: { kind: 'absent' }; effect: SelectedProjectAvailabilityWrite;
+    result: { status: 'available'; message: null; update: null };
+} };
+
+const invalidFileAvailability = () => fail('INVALID_INPUT', 'A bounded prepared Project file availability envelope is required');
+const availableResult = () => ({ status: 'available' as const, message: null, update: null });
+const sourceSize = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value)
+    && value >= 0 && value <= 8_388_608;
+const sourceHash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+const selectionKeys = ['version', 'requestId', 'projectId', 'attachmentId', 'revision', 'managedDirectoryURI'];
+const readFileAvailabilityRequest = (value: unknown, measured: boolean) => {
+    const input = detach<Record<string, unknown>>(value);
+    if (!input || !exact(input, [...selectionKeys, ...(measured ? ['sha256', 'size'] : [])])
+        || input.version !== 1 || typeof input.requestId !== 'string' || !uuid.test(input.requestId)
+        || !readRequest({ projectId: input.projectId, attachmentId: input.attachmentId,
+            revision: input.revision, managedDirectoryURI: input.managedDirectoryURI })
+        || measured && (!sourceHash(input.sha256) || !sourceSize(input.size))) return null;
+    return input as NativeProjectFileAvailabilityRequest;
+};
+const fileAvailabilityTarget = (attachment: Attachment, directory: string): string | null => {
+    if (typeof attachment.fileHash !== 'string' || !/^[0-9a-f]{64}$/i.test(attachment.fileHash)
+        || attachment.size !== undefined && !sourceSize(attachment.size)) return null;
+    const target = directory + getAttachmentDownloadFileName(attachment);
+    return fileURI(target) && !target.slice(directory.length).includes('/')
+        && (attachment.uri !== target || attachment.localStatus !== 'available') ? target : null;
+};
+// Rebuild only from exact SQL cells. Object-key ordering in a native journal
+// never rewrites the opaque raw attachment string or changes its frozen plan.
+const fileAvailabilityRawBefore = (value: unknown): Project | null => {
+    if (!Array.isArray(value) || value.length !== PROJECT_SQLITE_COLUMNS.length
+        || !value.every(cell => cell === null || typeof cell === 'string' || typeof cell === 'number' && Number.isFinite(cell))) return null;
+    try {
+        const row = Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) => [column, value[index]]));
+        const project = projectFromSqliteRow(row);
+        rememberRawReadRow(project, row, PROJECT_SQLITE_COLUMNS, projectToSqliteRow(project));
+        return projectFileAddScalarCellsMatchWriter(project) && iso(project.createdAt) && iso(project.updatedAt)
+            ? rawReadProjectSnapshot(project) : null;
+    } catch { return null; }
+};
+/** Pure cold-journal validation; no readiness, clock, mutable store or byte authority. */
+const readPreparedFileAvailability = (value: unknown): NativeProjectFileAvailabilityEnvelope | null => {
+    const envelope = detach<NativeProjectFileAvailabilityEnvelope>(value);
+    if (!envelope || !record(envelope) || !exact(envelope, ['request', 'prepared'])) return null;
+    const request = readFileAvailabilityRequest(envelope.request, true), prepared = envelope.prepared;
+    if (!request || !record(prepared) || !exact(prepared, ['version', 'kind', 'attachmentJSON', 'targetURI', 'expectation', 'effect', 'result'])
+        || prepared.version !== 1 || prepared.kind !== 'project-file-availability'
+        || !record(prepared.expectation) || !exact(prepared.expectation, ['kind']) || prepared.expectation.kind !== 'absent'
+        || !record(prepared.effect) || !exact(prepared.effect, ['projectId', 'attachmentId', 'targetURI', 'before', 'after',
+            'rawBefore', 'rawAfter', 'deviceIdBefore', 'deviceIdToInitialize', 'updateAt'])
+        || !record(prepared.result) || !exact(prepared.result, ['status', 'message', 'update'])
+        || !same(prepared.result, availableResult())) return null;
+    const effect = prepared.effect, before = fileAvailabilityRawBefore(effect.rawBefore);
+    if (!before || before.id !== request.projectId || !same(effect.before, before)
+        || !(effect.deviceIdBefore === null || text(effect.deviceIdBefore, 500))
+        || (effect.deviceIdBefore === null
+            ? typeof effect.deviceIdToInitialize !== 'string' || !uuid.test(effect.deviceIdToInitialize)
+            : effect.deviceIdToInitialize !== null) || !iso(effect.updateAt)) return null;
+    const attachments = readNativeAttachments(before.attachments), selected = attachments?.find(item => item.id === request.attachmentId);
+    if (!selected || selected.kind !== 'file' || selected.deletedAt
+        || !sourceHash(request.sha256) || request.sha256 !== selected.fileHash?.toLowerCase()
+        || selected.size !== undefined && selected.size !== request.size
+        || prepared.attachmentJSON !== JSON.stringify(selected)) return null;
+    const target = fileAvailabilityTarget(selected, request.managedDirectoryURI);
+    const planned = target && projectFileAvailabilityWritePlan(before, effect.rawBefore, request.attachmentId,
+        target, effect.deviceIdBefore, effect.deviceIdToInitialize, effect.updateAt);
+    // Keep the proven raw-cell reconstruction for commit; native object-key sorting
+    // must not change the later attachment STRING serialization.
+    return planned && prepared.targetURI === target && same(effect, planned)
+        ? { ...envelope, prepared: { ...prepared, effect: planned } } : null;
+};
+
+/** Private native prerequisite, deliberately not installed on the public contract.
+ * Preparation grants metadata intent only; native must prove absence/publication. */
+export function createPreparedProjectAvailabilityMethods(deps: Pick<Deps, 'readiness' | 'revision' | 'save'>) {
+    const saves = createAreaSaveGuard(deps.save);
+    const select = async (input: NativeProjectFileAvailabilitySelection) => {
+        const ready = deps.readiness(); if (!ready.ok) return ready;
+        if (!idle()) return savedFailure();
+        const options = readProjectAttachmentEditOptions(deps, { projectId: input.projectId });
+        if (!options.ok) return options;
+        if (options.value.revision !== input.revision) return stale();
+        const read = await readAreaDurableData(false, true); if (!read.ok) return read;
+        const afterRead = deps.readiness(); if (!afterRead.ok) return afterRead;
+        if (!idle() || !('concurrentWritesGuarded' in read.value.adapter) || read.value.adapter.concurrentWritesGuarded !== true)
+            return savedFailure();
+        const current = selectedProject(read.value.authority.snapshot.projects, input.projectId);
+        const live = useTaskStore.getState()._projectsById.get(input.projectId);
+        if (!current || !live || current.deletedAt || current.purgedAt || !projectFileAddScalarCellsMatchWriter(current)
+            || !projectFileAddLiveRowMatches(live, current) || deps.revision() !== input.revision) return stale();
+        const before = rawReadProjectSnapshot(current), attachments = before && readNativeAttachments(before.attachments);
+        const attachment = attachments?.find(item => item.id === input.attachmentId);
+        if (!before || !attachment || attachment.kind !== 'file' || attachment.deletedAt) return invalidFileAvailability();
+        const targetURI = fileAvailabilityTarget(attachment, input.managedDirectoryURI);
+        if (!targetURI) return invalidFileAvailability();
+        const deviceIdBefore = read.value.authority.snapshot.settings.deviceId ?? null;
+        if (deviceIdBefore !== (useTaskStore.getState().settings.deviceId ?? null)
+            || deviceIdBefore !== null && !text(deviceIdBefore, 500)) return stale();
+        const rawBefore = [...rawReadRow(current, projectToSqliteRow(current)).row];
+        return { ok: true as const, value: { before, rawBefore, attachment, targetURI, deviceIdBefore,
+            settings: read.value.authority.snapshot.settings } };
+    };
+    return {
+        async getProjectFileAvailabilityPreflight(raw: unknown): Promise<NativeHostResult<NativeProjectFileAvailabilityPreflight>> {
+            const input = readFileAvailabilityRequest(raw, false); if (!input) return invalidFileAvailability();
+            const selected = await select(input); if (!selected.ok) return selected;
+            const initial = selected.value;
+            const result: NativeProjectFileAvailabilityPreflight = { version: 1, requestId: input.requestId, revision: input.revision,
+                project: initial.before, rawBefore: initial.rawBefore, attachmentJSON: JSON.stringify(initial.attachment),
+                targetURI: initial.targetURI, deviceIdBefore: initial.deviceIdBefore };
+            const frozen = detach<NativeProjectFileAvailabilityPreflight>(result);
+            return frozen ? { ok: true, value: frozen } : invalidFileAvailability();
+        },
+        async prepareProjectFileAvailability(raw: unknown): Promise<NativeHostResult<NativeProjectFileAvailabilityEnvelope>> {
+            const input = readFileAvailabilityRequest(raw, true); if (!input) return invalidFileAvailability();
+            const selected = await select(input); if (!selected.ok) return selected;
+            const initial = selected.value;
+            if (input.sha256 !== initial.attachment.fileHash?.toLowerCase()
+                || initial.attachment.size !== undefined && input.size !== initial.attachment.size) return invalidFileAvailability();
+            const device = ensureDeviceId(initial.settings);
+            const effect = projectFileAvailabilityWritePlan(initial.before, initial.rawBefore, input.attachmentId,
+                initial.targetURI, initial.deviceIdBefore, device.updated ? device.deviceId : null, new Date().toISOString());
+            if (!effect) return invalidFileAvailability();
+            const envelope: NativeProjectFileAvailabilityEnvelope = { request: input, prepared: { version: 1,
+                kind: 'project-file-availability', attachmentJSON: JSON.stringify(initial.attachment), targetURI: initial.targetURI,
+                expectation: { kind: 'absent' }, effect, result: availableResult() } };
+            const frozen = readPreparedFileAvailability(envelope);
+            return frozen ? { ok: true, value: frozen } : invalidFileAvailability();
+        },
+        validatePreparedProjectFileAvailability(raw: unknown): NativeHostResult<NativeAttachmentResolution> {
+            const envelope = readPreparedFileAvailability(raw);
+            return envelope ? { ok: true, value: availableResult() } : invalidFileAvailability();
+        },
+        async commitPreparedProjectFileAvailability(raw: unknown): Promise<NativeHostResult<NativeAttachmentResolution>> {
+            const envelope = readPreparedFileAvailability(raw); if (!envelope) return invalidFileAvailability();
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            if (!idle()) return savedFailure();
+            const read = await readAreaDurableData(false, true); if (!read.ok) return read;
+            const afterRead = deps.readiness(); if (!afterRead.ok) return afterRead;
+            if (!idle() || !('concurrentWritesGuarded' in read.value.adapter) || read.value.adapter.concurrentWritesGuarded !== true)
+                return savedFailure();
+            const effect = envelope.prepared.effect;
+            const applied = await useTaskStore.getState().commitPreparedProjectFileAvailability(effect, read.value.authority);
+            if (!applied.success) return stale();
+            if (applied.outcome !== 'replayed') {
+                const saved = await saves.finish(effect, read.value.adapter, false, read.value.authority.saveBoundary);
+                if (!saved.ok) return savedFailure();
+            }
+            if (getStorageAdapter() !== read.value.adapter || !idle()) return savedFailure();
+            const after = await readAreaDurableData(false, true); if (!after.ok) return after;
+            const finalReady = deps.readiness(); if (!finalReady.ok) return finalReady;
+            const current = selectedProject(after.value.authority.snapshot.projects, effect.projectId);
+            const live = useTaskStore.getState()._projectsById.get(effect.projectId);
+            return after.value.adapter === read.value.adapter && current && live && projectFileAddLiveRowMatches(live, current)
+                && sameProjectAvailabilityRawRow(current, effect.rawAfter)
+                && (after.value.authority.snapshot.settings.deviceId ?? null) === (effect.deviceIdBefore ?? effect.deviceIdToInitialize)
+                && idle() ? { ok: true, value: availableResult() } : savedFailure();
         },
     };
 }

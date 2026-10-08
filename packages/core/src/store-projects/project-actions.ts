@@ -39,7 +39,7 @@ import { actionFail, actionOk, mutateEntities, projectDeleteUndoReattachments,
     type DetachedProjectTask } from './shared';
 import { sameSectionSqliteRow, sameTaskSqliteRow } from './section-actions';
 import { buildTaskContainerMovePatch, reserveTaskContainerProjectOrder } from '../task-container-rules';
-import type { SelectedProjectAvailabilityWrite } from '../store-types';
+import type { PreparedAreaAuthority, SelectedProjectAvailabilityWrite } from '../store-types';
 import { getAttachmentAvailabilityPatch } from '../mobile-attachment-availability';
 
 const duplicateProjectAttachmentCopy = (attachment: NonNullable<Project['attachments']>[number], now: string,
@@ -190,15 +190,16 @@ export const projectFileAddLiveRowMatches = (live: Project, saved: Project): boo
 };
 
 /** One exact selected availability write, preserving every untouched raw SQL cell. */
-export const projectAvailabilityWritePlan = (before: Project, rawBefore: unknown[], attachmentId: string,
+const selectedProjectAvailabilityPlan = (before: Project, rawBefore: unknown[], attachmentId: string,
     targetURI: string, deviceIdBefore: string | null, deviceIdToInitialize: string | null,
-    updateAt: string): SelectedProjectAvailabilityWrite | null => {
+    updateAt: string, ordinary: boolean): SelectedProjectAvailabilityWrite | null => {
     if (before.deletedAt || before.purgedAt || rawBefore.length !== PROJECT_SQLITE_COLUMNS.length
         || !Number.isFinite(Date.parse(updateAt)) || new Date(updateAt).toISOString() !== updateAt
         || (deviceIdBefore === null ? !deviceIdToInitialize : deviceIdToInitialize !== null)) return null;
     const matches = before.attachments?.filter((item) => item.id === attachmentId) ?? [];
     const selected = matches.length === 1 ? matches[0] : undefined;
-    if (!selected || selected.kind !== 'file' || selected.deletedAt || !targetURI || selected.uri === targetURI) return null;
+    if (!selected || selected.kind !== 'file' || selected.deletedAt || !targetURI
+        || selected.uri === targetURI && (!ordinary || selected.localStatus === 'available')) return null;
     const rev = nextRevision(before.rev);
     if (!Number.isSafeInteger(rev) || rev <= (before.rev ?? 0)) return null;
     const patch = getAttachmentAvailabilityPatch(selected, { ...selected, uri: targetURI, localStatus: 'available' });
@@ -210,6 +211,19 @@ export const projectAvailabilityWritePlan = (before: Project, rawBefore: unknown
     return { projectId: before.id, attachmentId, targetURI, before, after, rawBefore, rawAfter,
         deviceIdBefore, deviceIdToInitialize, updateAt };
 };
+
+/** Relocated repair keeps its historical different-URI requirement. */
+export const projectAvailabilityWritePlan = (before: Project, rawBefore: unknown[], attachmentId: string,
+    targetURI: string, deviceIdBefore: string | null, deviceIdToInitialize: string | null, updateAt: string) =>
+    selectedProjectAvailabilityPlan(before, rawBefore, attachmentId, targetURI,
+        deviceIdBefore, deviceIdToInitialize, updateAt, false);
+
+/** Private ordinary availability still requires a real metadata change.
+ * The caller must independently prove owned absent-target publication or an existing verified managed generation. */
+export const projectFileAvailabilityWritePlan = (before: Project, rawBefore: unknown[], attachmentId: string,
+    targetURI: string, deviceIdBefore: string | null, deviceIdToInitialize: string | null, updateAt: string) =>
+    selectedProjectAvailabilityPlan(before, rawBefore, attachmentId, targetURI,
+        deviceIdBefore, deviceIdToInitialize, updateAt, true);
 
 export const sameProjectAvailabilityRawRow = (project: Project, cells: unknown[]): boolean =>
     projectFileAddScalarCellsMatchWriter(project)
@@ -595,6 +609,52 @@ export const buildNewProject = ({
         : undefined;
     return areaTitle === lifecycleProject.areaTitle ? lifecycleProject : { ...lifecycleProject, areaTitle };
 };
+
+const commitProjectAvailabilityWrite = async (input: SelectedProjectAvailabilityWrite, authority: PreparedAreaAuthority,
+    { set, debouncedSave, getSaveGeneration }: Pick<ProjectActionContext, 'set' | 'debouncedSave' | 'getSaveGeneration'>,
+    ordinary: boolean): Promise<PreparedTaskEditResult> => {
+    let result: PreparedTaskEditResult = { success: false, reason: 'conflict' };
+    const planned = (ordinary ? projectFileAvailabilityWritePlan : projectAvailabilityWritePlan)(input.before, input.rawBefore, input.attachmentId, input.targetURI,
+        input.deviceIdBefore, input.deviceIdToInitialize, input.updateAt);
+    if (!planned || !taskEditValuesEqual(planned, input)) return result;
+    set((state) => {
+        const bound = authority.state, durable = authority.snapshot;
+        if (state._allTasks !== bound._allTasks || state._allProjects !== bound._allProjects
+            || state._allSections !== bound._allSections || state._allAreas !== bound._allAreas
+            || state._allPeople !== bound._allPeople || state.settings !== bound.settings
+            || state.lastDataChangeAt !== bound.lastDataChangeAt || state.persistenceFailure) return state;
+        const matches = durable.projects.filter((row) => row.id === input.projectId);
+        const current = matches.length === 1 ? matches[0] : undefined;
+        const live = state._projectsById.get(input.projectId);
+        if (!current || !live || !projectFileAddLiveRowMatches(live, current)) return state;
+        if (ordinary && sameProjectAvailabilityRawRow(current, input.rawAfter)
+            && (durable.settings.deviceId ?? null) === (input.deviceIdBefore ?? input.deviceIdToInitialize)
+            && (state.settings.deviceId ?? null) === (input.deviceIdBefore ?? input.deviceIdToInitialize)) {
+            result = { success: true, id: current.id, outcome: 'replayed' }; return state;
+        }
+        if (!sameProjectAvailabilityRawRow(current, input.rawBefore)
+            || !taskEditValuesEqual(rawReadProjectSnapshot(current), input.before)
+            || (durable.settings.deviceId ?? null) !== input.deviceIdBefore
+            || (state.settings.deviceId ?? null) !== input.deviceIdBefore) return state;
+        const after = { ...planned.after };
+        rememberRawReadRow(after, Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) =>
+            [column, planned.rawAfter[index]])), PROJECT_SQLITE_COLUMNS, projectToSqliteRow(after));
+        const projects = replaceEntitiesInArray(durable.projects, [after]);
+        const settings = input.deviceIdToInitialize
+            ? { ...durable.settings, deviceId: input.deviceIdToInitialize } : durable.settings;
+        persist(set, debouncedSave, { ...state, _allTasks: durable.tasks, _allProjects: durable.projects,
+            _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings },
+        { ...durable, projects, settings });
+        const lastDataChangeAt = getNextDataChangeAt(state.lastDataChangeAt);
+        authority.saveBoundary = { taskReference: state._allTasks, lastDataChangeAt,
+            generation: getSaveGeneration(), failure: state.persistenceFailure };
+        result = { success: true, id: current.id, outcome: 'applied' };
+        return { _allProjects: replaceEntitiesInArray(state._allProjects, [after]), lastDataChangeAt,
+            ...(input.deviceIdToInitialize ? { settings: { ...state.settings, deviceId: input.deviceIdToInitialize } } : {}) };
+    });
+    return result;
+};
+
 
 export const createProjectCoreActions = ({
     set,
@@ -987,43 +1047,10 @@ export const createProjectCoreActions = ({
         return result;
     },
 
-    commitSelectedProjectAvailability: async (input, authority): Promise<PreparedTaskEditResult> => {
-        let result: PreparedTaskEditResult = { success: false, reason: 'conflict' };
-        const planned = projectAvailabilityWritePlan(input.before, input.rawBefore, input.attachmentId, input.targetURI,
-            input.deviceIdBefore, input.deviceIdToInitialize, input.updateAt);
-        if (!planned || !taskEditValuesEqual(planned, input)) return result;
-        set((state) => {
-            const bound = authority.state, durable = authority.snapshot;
-            if (state._allTasks !== bound._allTasks || state._allProjects !== bound._allProjects
-                || state._allSections !== bound._allSections || state._allAreas !== bound._allAreas
-                || state._allPeople !== bound._allPeople || state.settings !== bound.settings
-                || state.lastDataChangeAt !== bound.lastDataChangeAt || state.persistenceFailure) return state;
-            const matches = durable.projects.filter((row) => row.id === input.projectId);
-            const current = matches.length === 1 ? matches[0] : undefined;
-            const live = state._projectsById.get(input.projectId);
-            if (!current || !live || !projectFileAddLiveRowMatches(live, current)
-                || !sameProjectAvailabilityRawRow(current, input.rawBefore)
-                || !taskEditValuesEqual(rawReadProjectSnapshot(current), input.before)
-                || (durable.settings.deviceId ?? null) !== input.deviceIdBefore
-                || (state.settings.deviceId ?? null) !== input.deviceIdBefore) return state;
-            const after = { ...planned.after };
-            rememberRawReadRow(after, Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) =>
-                [column, planned.rawAfter[index]])), PROJECT_SQLITE_COLUMNS, projectToSqliteRow(after));
-            const projects = replaceEntitiesInArray(durable.projects, [after]);
-            const settings = input.deviceIdToInitialize
-                ? { ...durable.settings, deviceId: input.deviceIdToInitialize } : durable.settings;
-            persist(set, debouncedSave, { ...state, _allTasks: durable.tasks, _allProjects: durable.projects,
-                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings },
-            { ...durable, projects, settings });
-            const lastDataChangeAt = getNextDataChangeAt(state.lastDataChangeAt);
-            authority.saveBoundary = { taskReference: state._allTasks, lastDataChangeAt,
-                generation: getSaveGeneration(), failure: state.persistenceFailure };
-            result = { success: true, id: current.id, outcome: 'applied' };
-            return { _allProjects: replaceEntitiesInArray(state._allProjects, [after]), lastDataChangeAt,
-                ...(input.deviceIdToInitialize ? { settings: { ...state.settings, deviceId: input.deviceIdToInitialize } } : {}) };
-        });
-        return result;
-    },
+    commitSelectedProjectAvailability: (input, authority) =>
+        commitProjectAvailabilityWrite(input, authority, { set, debouncedSave, getSaveGeneration }, false),
+    commitPreparedProjectFileAvailability: (input, authority) =>
+        commitProjectAvailabilityWrite(input, authority, { set, debouncedSave, getSaveGeneration }, true),
 
     commitPreparedProjectStatus: async (input): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict',

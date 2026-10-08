@@ -18,6 +18,10 @@ struct ProjectsScreen: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
+                if model.projectFileAvailabilityRecoveryVisible {
+                    ProjectFileAvailabilityRecoveryPanel(model: model, palette: palette)
+                        .padding(16)
+                }
                 if model.projectFileAddRecoveryVisible {
                     ProjectFileAddRecoveryPanel(model: model, palette: palette)
                         .padding(16)
@@ -780,6 +784,43 @@ private struct AreaManagerSheet: View {
     }
 }
 
+struct ProjectFileAvailabilityRecoveryPanel: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Pending Project download").rnFont(16, .semibold)
+                .foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+            Text(model.projectFileAvailabilityError ?? "A pending Project download needs Retry or Stop download.")
+                .rnFont(14).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Stopping ends the pending download. It does not undo availability that was already saved.")
+                .rnFont(13).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if model.busy { ProgressView().frame(minHeight: 44) }
+            HStack(spacing: 12) {
+                Button { Task { await model.retryProjectFileAvailability() } } label: {
+                    Text(model.label("common.retry").isEmpty ? "Retry" : model.label("common.retry"))
+                        .rnFont(14, .semibold).frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .foregroundStyle(palette.tint).accessibilityIdentifier("project-file-download-retry")
+                Button { Task { await model.stopProjectFileAvailability() } } label: {
+                    Text("Stop download").rnFont(14, .semibold)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .foregroundStyle(palette.danger).accessibilityIdentifier("project-file-download-stop")
+            }
+            .buttonStyle(.plain).disabled(!model.projectFileAvailabilityRecoveryEnabled)
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("project-file-download-recovery")
+    }
+}
+
 struct ProjectFileAddRecoveryPanel: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -840,6 +881,10 @@ struct ProjectDetailScreen: View {
     var body: some View {
         let fileOpenID = model.projectFileOpenPresentation?.id
         VStack(spacing: 0) {
+            if model.projectFileAvailabilityRecoveryVisible {
+                ProjectFileAvailabilityRecoveryPanel(model: model, palette: palette)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+            }
             if model.projectFileAddRecoveryVisible {
                 ProjectFileAddRecoveryPanel(model: model, palette: palette)
                     .padding(.horizontal, 16).padding(.vertical, 8)
