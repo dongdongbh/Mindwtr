@@ -172,6 +172,8 @@ final class ReminderPlanHostTests: XCTestCase {
         XCTAssertEqual(schedule.filter { $0["repeat"] as? String != "once" }.compactMap { $0["calendar"] as? [String: Int] },
                        [["hour": 9, "minute": 0], ["hour": 20, "minute": 0], ["hour": 18, "minute": 0, "weekday": 0]])
         XCTAssertTrue(schedule.filter { $0["repeat"] as? String == "once" }.allSatisfy { $0["calendar"] == nil })
+        let requests = try schedule.map { try NativeReminderRequest.make(alarm: $0, namespace: namespace) }
+        XCTAssertEqual(requests.count, 63); XCTAssertEqual(Set(requests.map(\.identifier)).count, 63)
         XCTAssertGreaterThan(try XCTUnwrap(first.plan["topUpDelayMs"] as? Double), 0)
         try preserved(baseline, before); XCTAssertEqual(try markers().count, 1)
         await value.close()
