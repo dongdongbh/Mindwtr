@@ -140,7 +140,7 @@ export function TaskEditScheduleField({
                     key={showDatePicker}
                     value={getDatePickerValue(showDatePicker)}
                     mode={getDatePickerMode(showDatePicker)}
-                    display="spinner"
+                    display={getDatePickerMode(showDatePicker) === 'date' ? 'inline' : 'spinner'}
                     textColor={tc.text}
                     onChange={onDateChange}
                 />
