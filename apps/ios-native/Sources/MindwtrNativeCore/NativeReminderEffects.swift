@@ -15,25 +15,61 @@ final class NativeReminderEffects: @unchecked Sendable {
     }
     private let lock = NSLock()
     private var active: UUID?
+    private var activeCancellation: NativeAttachmentCancellation?
+    private var ordinaryReservations = 0
+    private var ordinaryBlockedReminder = false
+    private var ordinaryWaiters: [CheckedContinuation<Bool, Never>] = []
     private var closed = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    func begin() throws -> UUID {
+    func begin(cancellation: NativeAttachmentCancellation) throws -> UUID {
         lock.lock(); defer { lock.unlock() }
         guard !closed, active == nil else { throw Self.unavailable }
-        let id = UUID(); active = id; return id
+        guard ordinaryReservations == 0 else { ordinaryBlockedReminder = true; throw Self.unavailable }
+        let id = UUID(); active = id; activeCancellation = cancellation; return id
     }
     func finish(_ id: UUID) {
         lock.lock()
-        if active == id { active = nil }
+        if active == id { active = nil; activeCancellation = nil }
         let resumed = active == nil ? waiters : []
-        if active == nil { waiters.removeAll() }
+        let ordinary = active == nil ? ordinaryWaiters : []
+        if active == nil { waiters.removeAll(); ordinaryWaiters.removeAll() }
         lock.unlock()
-        resumed.forEach { $0.resume() }
+        resumed.forEach { $0.resume() }; ordinary.forEach { $0.resume(returning: true) }
     }
+    /// Reserves the existing Engine dispatcher, cancelling only asynchronous reminder work.
+    /// The reservation survives callback drain so another reminder cannot overtake the ordinary caller.
+    func reserveOrdinary(cancellation: NativeAttachmentCancellation) async -> Bool {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            guard !cancellation.isCancelled else { lock.unlock(); continuation.resume(returning: false); return }
+            ordinaryReservations += 1
+            guard active != nil else { lock.unlock(); continuation.resume(returning: true); return }
+            ordinaryBlockedReminder = true
+            ordinaryWaiters.append(continuation)
+            let token = activeCancellation
+            lock.unlock()
+            token?.cancel()
+        }
+    }
+    func finishOrdinary() {
+        lock.lock(); defer { lock.unlock() }
+        precondition(ordinaryReservations > 0)
+        ordinaryReservations -= 1
+    }
+    /// Only an actual preemption or blocked begin owes a successor wake; routine reads do not.
+    func takeOrdinaryReadyWake(ready: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed, ready, ordinaryReservations == 0, ordinaryBlockedReminder else { return false }
+        ordinaryBlockedReminder = false; return true
+    }
+    func clearOrdinaryReadyWake() {
+        lock.lock(); defer { lock.unlock() }; ordinaryBlockedReminder = false
+    }
+
     func closeAndDrain() async {
         await withCheckedContinuation { continuation in
-            lock.lock(); closed = true
+            lock.lock(); closed = true; ordinaryBlockedReminder = false
             if active == nil { lock.unlock(); continuation.resume() }
             else { waiters.append(continuation); lock.unlock() }
         }

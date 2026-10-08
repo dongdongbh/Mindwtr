@@ -80,6 +80,23 @@ describe('strict native iOS reminder ownership admission', () => {
         }, plan: async () => { throw new Error('PRIVATE_TASK_CONTENT'); }, acknowledged: async () => {} });
         methods.begin(token); await expect(methods.prepare(token, true, '[]', '[]')).rejects.toThrow(unavailable);
     });
+    it('subscribes synchronously once, tracks resolved-language changes and disposes exactly its listener', () => {
+        let subscriptions = 0, disposed = 0, ready = false, changed = () => {};
+        const methods = createIosReminderMethods({ capture: () => () => {}, read: async () => [], plan: async () => ({ ok: false }),
+            acknowledged: async () => {}, observation: { subscribe: (listener) => {
+                subscriptions += 1; changed = listener; return () => { disposed += 1; };
+            }, ready: () => ready, rescheduleDelayMs: 2500 } });
+        methods.languageResolved('en');
+        expect(methods.observe()).toEqual({ revision: 1, ready: false, rescheduleDelayMs: 2500 });
+        expect(methods.observe().revision).toBe(1); expect(subscriptions).toBe(1);
+        changed(); ready = true;
+        expect(methods.observation()).toEqual({ revision: 2, ready: true, rescheduleDelayMs: 2500 });
+        methods.languageResolved('en'); expect(methods.observation().revision).toBe(2);
+        methods.languageResolved('de'); expect(methods.observation().revision).toBe(3);
+        methods.disposeObservation(); methods.disposeObservation(); expect(disposed).toBe(1);
+        expect(() => methods.observation()).toThrow(unavailable);
+        expect(methods.observe().revision).toBe(4); expect(subscriptions).toBe(2);
+    });
 });
 
 let source: string;
@@ -90,7 +107,8 @@ beforeAll(async () => {
         globalThis.fixture = { seed: () => useTaskStore.setState({ _allTasks: [{ id:'one', title:'PRIVATE_REMINDER', status:'next',
             tags:[], contexts:[], createdAt:new Date(${now}).toISOString(), updatedAt:new Date(${now}).toISOString(),
             dueDate:new Date(${now}+3600000).toISOString() }], settings:{ notificationsEnabled:true, dueDateNotificationsEnabled:true } }),
-            save:()=>useTaskStore.getState().addTask('PRIVATE_QUEUED'), flush:flushPendingSave };`,
+            save:()=>useTaskStore.getState().addTask('PRIVATE_QUEUED'), flush:flushPendingSave,
+            bookkeeping:()=>useTaskStore.setState({settings:{...useTaskStore.getState().settings,lastSyncAt:'synthetic'}}) };`,
         resolveDir: import.meta.dir, loader: 'ts' }, bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent' });
     source = built.outputFiles[0].text;
 });
@@ -106,8 +124,10 @@ const fixture = () => {
         MindwtrHost: undefined as unknown as { boot(a: string, b: string): string; poll(id: string): string | null;
             iosReminderBegin(id: string): string; iosReminderCurrent(id: string): string; iosReminderEnd(id: string): string;
             iosReminderPrepare(id: string, grant: boolean, pending: string, delivered: string): string;
-            iosReminderAcknowledged(id: string, mode: string, scheduled: number, cancelled: number, collapsed?: number): string },
-        fixture: undefined as unknown as { seed(): void; save(): void; flush(): Promise<void> },
+            iosReminderAcknowledged(id: string, mode: string, scheduled: number, cancelled: number, collapsed?: number): string;
+            iosReminderObserve(): string; iosReminderObservation(): string; iosReminderDisposeObservation(): string;
+            language(stored: string, system: string): string },
+        fixture: undefined as unknown as { seed(): void; save(): void; flush(): Promise<void>; bookkeeping(): void },
         __mindwtrNative: {
             sqlExec: (sql: string) => { writes.push('SQL'); database.exec(sql); return null; },
             sqlRun: (sql: string, params: string) => { writes.push('SQL'); database.query(sql).run(...JSON.parse(params)); return null; },
@@ -180,5 +200,26 @@ describe('actual iOS effects planning bridge with native-owned storage/effects',
         f.failLog();
         expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 0, 0, 1))).toEqual({ ok: true, value: null });
         expect(f.writes).toEqual([]);
+    });
+    it('observes actual shared source and settlement without bookkeeping or unchanged-language loops', async () => {
+        const f = fixture(); await f.boot();
+        const initial = JSON.parse(f.state.MindwtrHost.iosReminderObserve());
+        expect(initial).toEqual({ revision: 1, ready: true, rescheduleDelayMs: 2500 });
+        expect(JSON.parse(f.state.MindwtrHost.iosReminderObserve())).toEqual(initial);
+        f.state.fixture.bookkeeping(); expect(JSON.parse(f.state.MindwtrHost.iosReminderObservation())).toEqual(initial);
+        f.state.fixture.save();
+        const pending = JSON.parse(f.state.MindwtrHost.iosReminderObservation());
+        expect(pending.revision).toBeGreaterThan(initial.revision); expect(pending.ready).toBe(false);
+        await f.state.fixture.flush();
+        const settled = JSON.parse(f.state.MindwtrHost.iosReminderObservation());
+        expect(settled).toEqual({ ...pending, ready: true });
+        await f.poll(f.state.MindwtrHost.language('de', 'en'));
+        const translated = JSON.parse(f.state.MindwtrHost.iosReminderObservation());
+        expect(translated.revision).toBe(settled.revision + 1);
+        await f.poll(f.state.MindwtrHost.language('de', 'en'));
+        expect(JSON.parse(f.state.MindwtrHost.iosReminderObservation())).toEqual(translated);
+        expect(Object.keys(translated).sort()).toEqual(['ready', 'rescheduleDelayMs', 'revision']);
+        expect(f.log()).toBe('');
+        expect(JSON.parse(f.state.MindwtrHost.iosReminderDisposeObservation())).toBeNull();
     });
 });

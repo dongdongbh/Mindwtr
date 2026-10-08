@@ -1172,6 +1172,29 @@ final class CoreModel: ObservableObject {
     private var foregroundSyncGeneration = 0
     @Published private var foregroundSyncSceneActive = false
     private var foregroundSyncBackgroundObserved = false
+    private struct ReminderLifecycleOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+        let generation: Int
+    }
+    private var reminderObservationHost: CoreHost?
+    private var reminderRegistration: NativeReminderObserverRegistration?
+    private var reminderObservationClaim = UUID()
+    private var reminderObservationToken: UUID?
+    private var reminderLifecycleOwner: ReminderLifecycleOwner?
+    private var reminderLifecycleTask: Task<Void, Never>?
+    private var reminderDebounceTask: Task<Void, Never>?
+    private var reminderTopUpTask: Task<Void, Never>?
+    private var reminderGeneration = 0
+    private var reminderSceneActive = false
+    private var reminderRevision: UInt64 = 0
+    private var reminderConfirmedRevision: UInt64 = 0
+    private var reminderWakeTicket: UInt64 = 0
+    private var reminderAttemptedTicket: UInt64 = 0
+    private var reminderDebounceReady = true
+    private var reminderDrainLease: UIBackgroundTaskIdentifier = .invalid
+    private var reminderDrainOwner: UUID?
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var startupSyncTestThrowOnce = false
     private var resumeSyncTestThrowOnce = false
@@ -1180,6 +1203,7 @@ final class CoreModel: ObservableObject {
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
+                retireReminderLifecycleHost(oldValue)
                 cancelForegroundSync()
                 foregroundSyncIntent = nil
                 startupSyncCompletedHost = nil
@@ -4810,6 +4834,191 @@ final class CoreModel: ObservableObject {
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
             && !settingsAboutPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+    }
+
+    // Independent from the Inbox-only Sync opportunity. App Lock may be enabled and authenticated.
+    func requestReminderLifecycle(token: UUID?, active: Bool) {
+        guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        guard active, UIApplication.shared.applicationState == .active, !appLock.concealed else {
+            cancelReminderLifecycle(); return
+        }
+        if !reminderSceneActive {
+            reminderSceneActive = true
+            reminderWakeTicket &+= 1; reminderDebounceReady = true
+            reminderDebounceTask?.cancel(); reminderDebounceTask = nil
+            reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        }
+        admitReminderLifecycle()
+    }
+
+    func cancelReminderLifecycle() {
+        reminderSceneActive = false; reminderGeneration += 1
+        reminderDebounceTask?.cancel(); reminderDebounceTask = nil
+        reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        reminderLifecycleTask?.cancel()
+        if let owner = reminderLifecycleOwner, reminderDrainLease == .invalid {
+            reminderDrainOwner = owner.id
+            reminderDrainLease = UIApplication.shared.beginBackgroundTask(withName: "Reminder callback drain") { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.reminderDrainOwner == owner.id else { return }
+                    self.reminderLifecycleTask?.cancel(); self.endReminderDrain(owner.id)
+                }
+            }
+        }
+    }
+
+    private func endReminderDrain(_ id: UUID) {
+        guard reminderDrainOwner == id else { return }
+        if reminderDrainLease != .invalid { UIApplication.shared.endBackgroundTask(reminderDrainLease) }
+        reminderDrainLease = .invalid; reminderDrainOwner = nil
+    }
+
+    private func retireReminderLifecycleHost(_ previous: CoreHost?) {
+        cancelReminderLifecycle()
+        let registration = reminderRegistration, observed = reminderObservationHost
+        reminderRegistration = nil; reminderObservationHost = nil
+        reminderObservationClaim = UUID(); reminderObservationToken = nil
+        reminderRevision = 0; reminderConfirmedRevision = 0
+        reminderWakeTicket &+= 1; reminderAttemptedTicket = reminderWakeTicket
+        if let previous, observed === previous, let registration {
+            Task { await previous.removeReminderObserver(registration.id) }
+        }
+        // The captured invocation remains installed until accepted callbacks drain.
+    }
+
+    func reminderClockChanged() {
+        reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        reminderWakeTicket &+= 1
+        debounceReminderLifecycle()
+    }
+
+    private func reminderSourceChanged(_ event: NativeReminderWake, host observed: CoreHost, token: UUID, claim: UUID) {
+        guard host === observed, reminderObservationHost === observed,
+              completedStartupToken == token, reminderObservationClaim == claim else { return }
+        switch event {
+        case .sourceChanged(let revision):
+            guard revision > reminderRevision else { return }
+            reminderRevision = revision; reminderWakeTicket &+= 1
+            reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+            debounceReminderLifecycle()
+        case .admissionReady(let revision):
+            reminderRevision = max(reminderRevision, revision)
+            reminderWakeTicket &+= 1
+            admitReminderLifecycle()
+        }
+    }
+
+    private func debounceReminderLifecycle() {
+        reminderDebounceTask?.cancel(); reminderDebounceTask = nil
+        reminderDebounceReady = false
+        guard reminderSceneActive, let registration = reminderRegistration,
+              let observed = reminderObservationHost, let token = completedStartupToken else { return }
+        let generation = reminderGeneration
+        reminderDebounceTask = Task { [weak self, weak observed] in
+            do { try await Task.sleep(nanoseconds: registration.rescheduleDelayMs * 1_000_000) } catch { return }
+            guard let self, let observed, self.host === observed, self.reminderObservationHost === observed,
+                  self.completedStartupToken == token, self.reminderGeneration == generation, !Task.isCancelled else { return }
+            self.reminderDebounceTask = nil; self.reminderDebounceReady = true
+            self.admitReminderLifecycle()
+        }
+    }
+
+    private func reminderLifecycleCurrent(_ owner: ReminderLifecycleOwner) -> Bool {
+        host === owner.host && startupSyncCompletedHost === owner.host && completedStartupToken == owner.token
+            && reminderGeneration == owner.generation && reminderSceneActive && ready && !retryNeeded
+            && !settingsSyncRestartRequired && !appLockRecoveryPending && !appLock.concealed && !appLock.authenticating
+            && UIApplication.shared.applicationState == .active && !Task.isCancelled
+    }
+
+    private func validateReminderLifecycleReply(_ raw: String) throws -> Double? {
+        let value = try decode(raw)
+        guard Set(value.keys) == Set(["mode", "scheduled", "cancelled", "topUpAtMs"]),
+              ["active", "inactive", "revoked"].contains(value.text("mode")) else { throw CocoaError(.coderReadCorrupt) }
+        for (name, maximum) in [("scheduled", 64), ("cancelled", 4096)] {
+            guard let count = value[name] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+                  count.doubleValue.rounded() == count.doubleValue, (0...Double(maximum)).contains(count.doubleValue) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+        }
+        if value["topUpAtMs"] is NSNull { return nil }
+        guard let deadline = value["topUpAtMs"] as? NSNumber, CFGetTypeID(deadline) != CFBooleanGetTypeID(),
+              deadline.doubleValue.isFinite, deadline.doubleValue.rounded() == deadline.doubleValue,
+              abs(deadline.doubleValue) <= 8_640_000_000_000_000 else { throw CocoaError(.coderReadCorrupt) }
+        return deadline.doubleValue
+    }
+
+    private func installReminderTopUp(_ deadline: Double?, owner: ReminderLifecycleOwner) {
+        reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        guard let deadline else { return }
+        reminderTopUpTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, (deadline - Date().timeIntervalSince1970 * 1000) / 1000))) }
+            catch { return }
+            guard let self, self.reminderLifecycleCurrent(owner), !Task.isCancelled else { return }
+            self.reminderTopUpTask = nil; self.reminderWakeTicket &+= 1
+            self.reminderDebounceReady = true
+            self.admitReminderLifecycle()
+        }
+    }
+
+    private func admitReminderLifecycle() {
+        guard reminderLifecycleTask == nil, reminderDebounceReady, reminderWakeTicket != reminderAttemptedTicket,
+              let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
+              reminderSceneActive, UIApplication.shared.applicationState == .active,
+              ready, !retryNeeded, !settingsSyncRestartRequired, !appLockRecoveryPending,
+              !appLock.concealed, !appLock.authenticating, !busy, !taskSavePending,
+              !taskRecoverySaving, !taskRecoveryHydrating, !taskRecoveryStartupCorrupt,
+              !projectFileAddPending, !projectFileAvailabilityPending, !projectNotesWritePending,
+              projectNotesFlushTask == nil, projectAttachmentDownloadOwner == nil else { return }
+        let owner = ReminderLifecycleOwner(id: UUID(), host: observed, token: token,
+            generation: reminderGeneration)
+        reminderAttemptedTicket = reminderWakeTicket
+        reminderLifecycleOwner = owner
+        reminderLifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.reminderLifecycleOwner?.id == owner.id {
+                    self.endReminderDrain(owner.id)
+                    self.reminderLifecycleTask = nil; self.reminderLifecycleOwner = nil
+                    self.admitReminderLifecycle()
+                }
+            }
+            do {
+                guard self.reminderLifecycleCurrent(owner) else { throw CancellationError() }
+                if self.reminderObservationHost !== owner.host || self.reminderRegistration == nil || self.reminderObservationToken != token {
+                    if let previous = self.reminderObservationHost, let registration = self.reminderRegistration {
+                        await previous.removeReminderObserver(registration.id)
+                    }
+                    self.reminderObservationHost = owner.host
+                    self.reminderObservationClaim = UUID(); self.reminderObservationToken = token
+                    let claim = self.reminderObservationClaim
+                    let registration = try await owner.host.observeReminders { [weak self, weak observed = owner.host] event in
+                        Task { @MainActor in
+                            guard let self, let observed else { return }
+                            self.reminderSourceChanged(event, host: observed, token: token, claim: claim)
+                        }
+                    }
+                    guard self.reminderLifecycleCurrent(owner) else {
+                        await owner.host.removeReminderObserver(registration.id); throw CancellationError()
+                    }
+                    self.reminderRegistration = registration
+                    self.reminderRevision = max(self.reminderRevision, registration.revision)
+                }
+                let revision = self.reminderRevision, ticket = self.reminderWakeTicket
+                self.reminderAttemptedTicket = ticket
+                let result = try await owner.host.reconcileReminders()
+                guard self.reminderLifecycleCurrent(owner) else { throw CancellationError() }
+                let deadline = try self.validateReminderLifecycleReply(result)
+                self.reminderConfirmedRevision = max(self.reminderConfirmedRevision, revision)
+                guard self.reminderWakeTicket == ticket else { return }
+                self.installReminderTopUp(deadline, owner: owner)
+                _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
+                    "Native iOS reminder lifecycle reconciled",
+                    #"{"releaseCheck":"v1.3.5/ios-reminder-lifecycle","outcome":"confirmed"}"#,
+                ]))
+            } catch {
+                // Retain dirty work, but only a new source/activation/foreign settlement may retry.
+            }
+        }
     }
 
     // Observe the actual scene episode before concealment clears presentation.
@@ -27075,6 +27284,7 @@ final class CoreModel: ObservableObject {
         return error is CoreHostRejection
     }
     private func finishOperation() {
+        defer { admitReminderLifecycle() }
         busy = false
         if projectFileAvailabilityPending {
             retryNeeded = true

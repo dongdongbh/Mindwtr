@@ -11,6 +11,9 @@ import {
     NATIVE_REMINDER_STATE_STORAGE_KEY,
     REMINDER_ALARM_MAP_STORAGE_KEY,
     REMINDER_NOTIFICATION_CHANNEL_NAME,
+    REMINDER_STORE_RESCHEDULE_DELAY_MS,
+    shouldRescheduleReminderAlarms,
+    nameNotifyListener,
     STATUS_COLORS_BY_THEME,
     type SqliteAdapter,
     TASK_PRIORITY_COLORS,
@@ -1362,6 +1365,20 @@ const iosReminderEffects = createIosReminderMethods({
             context: { releaseCheck: 'v1.3.5/ios-reminder-thread-collapse', count: String(collapsed) },
         }, { force: true });
     },
+    observation: {
+        subscribe: (changed) => useTaskStore.subscribe(nameNotifyListener('native-ios-reminders', (state, previous) => {
+            if (shouldRescheduleReminderAlarms(state, previous)) changed();
+        })),
+        ready: () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
+                || isSandboxMode() || isWorkspaceTransitionActive()) return false;
+            requireSaved();
+            const status = getPersistenceStatus();
+            return !status.failed && !status.queued && !status.inFlight && !status.immediate && !status.retrying
+                && contract.getDataSettings().ok;
+        },
+        rescheduleDelayMs: REMINDER_STORE_RESCHEDULE_DELAY_MS,
+    },
 });
 const requireReminderSignal = (signal: AbortSignal) => {
     if (signal.aborted) throw new Error('CANCELLED: Reminder reconciliation was cancelled');
@@ -1665,7 +1682,10 @@ globalThis.MindwtrHost = {
     /** Core's setLanguage. "" is no stored language. Labels are not stored data, so no failed save blocks them. */
     language(stored: string, system: string): string {
         storedLanguage = stored || null;
-        return submit(async () => unwrap(await contract.setLanguage({ storedLanguage: stored || null, systemLocale: system || null })));
+        return submit(async () => {
+            const resolved = unwrap(await contract.setLanguage({ storedLanguage: stored || null, systemLocale: system || null }));
+            iosReminderEffects.languageResolved(resolved.language); return resolved;
+        });
     },
     /**
      * Publishes the home-screen widgets now when what they show changed: after a CoreWork job and when the app comes to the
@@ -1687,6 +1707,7 @@ globalThis.MindwtrHost = {
             const synced = typeof raw === 'string' && isSupportedLanguage(raw) ? raw : null;
             const winner = synced ?? (stored || null);
             const resolved = unwrap(await contract.setLanguage({ storedLanguage: winner, systemLocale: system || null }));
+            iosReminderEffects.languageResolved(resolved.language);
             const after = getPersistenceStatus();
             const deviceWrites = synced !== null && synced === state.settings?.language
                 && useTaskStore.getState().settings === state.settings && after.generation === generation
@@ -4102,6 +4123,10 @@ globalThis.MindwtrHost = {
         pending.get(Number(idText))?.controller.abort(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
         return null;
     },
+    // Synchronous, read-only observation: installed before any native OS await.
+    iosReminderObserve(): string { return JSON.stringify(iosReminderEffects.observe()); },
+    iosReminderObservation(): string { return JSON.stringify(iosReminderEffects.observation()); },
+    iosReminderDisposeObservation(): string { return JSON.stringify(iosReminderEffects.disposeObservation()); },
     iosReminderBegin(token: string): string {
         return submit(async (signal) => { requireReminderSignal(signal); return iosReminderEffects.begin(token); });
     },

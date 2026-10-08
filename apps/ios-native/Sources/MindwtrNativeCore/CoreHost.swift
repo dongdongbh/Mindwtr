@@ -59,6 +59,16 @@ public struct NativeBackupImportPreview: Sendable {
     public let json: String
 }
 
+public enum NativeReminderWake: Sendable {
+    case sourceChanged(revision: UInt64)
+    case admissionReady(revision: UInt64)
+}
+public struct NativeReminderObserverRegistration: Sendable {
+    public let id: UUID
+    public let revision: UInt64
+    public let rescheduleDelayMs: UInt64
+}
+
 /// One off-main owner for the core runtime, database and pending command journal.
 /// Every result is the JSON-encoded core value, with host/core failures thrown.
 public final class CoreHost: @unchecked Sendable {
@@ -70,7 +80,7 @@ public final class CoreHost: @unchecked Sendable {
     public init(databaseURL: URL, bundleURL: URL,
                 deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL,
-                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests)
+                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
     }
 
     #if DEBUG
@@ -91,7 +101,7 @@ public final class CoreHost: @unchecked Sendable {
     init(databaseURL: URL, bundleURL: URL, faults: HostIOFaults, legacyStorage: LegacyRNStorage? = nil,
          deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL, legacyStorage: legacyStorage,
-                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests)
+                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
         engine.faults = faults
     }
     #endif
@@ -181,7 +191,8 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
-        try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
+        guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
     /// Task-local byte operations only; no project/store command or picker UI.
@@ -589,22 +600,30 @@ public final class CoreHost: @unchecked Sendable {
     public func cancelAppLockRecovery() async throws { try await perform { try $0.cancelAppLockRecovery() } }
 
     /// Explicit owned effects only. No App lifecycle, permission prompt or caller-supplied policy.
+    public func observeReminders(_ callback: @escaping @Sendable (NativeReminderWake) -> Void) async throws -> NativeReminderObserverRegistration {
+        try await perform(reminderOwned: true) { try $0.observeReminders(callback) }
+    }
+
+    public func removeReminderObserver(_ id: UUID) async {
+        _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(id) }
+    }
+
     public func reconcileReminders() async throws -> String {
         let token = NativeAttachmentCancellation(), request = UUID()
         localAttachmentRequests.register(token, id: request)
         defer { localAttachmentRequests.remove(request) }
         if Task.isCancelled { token.cancel() }
         let owner: UUID
-        do { try token.check(); owner = try reminderEffects.begin() }
+        do { try token.check(); owner = try reminderEffects.begin(cancellation: token) }
         catch { if token.isCancelled { throw CancellationError() }; throw NativeReminderEffects.unavailable }
         defer { reminderEffects.finish(owner) }
         return try await withTaskCancellationHandler {
             do {
                 let result = try await runReminderReconciliation(owner: owner, cancellation: token)
-                _ = try await perform { $0.finishReminderReconciliation(owner) }
+                _ = try await perform(reminderOwned: true) { $0.finishReminderReconciliation(owner) }
                 return result
             } catch {
-                _ = try? await perform { $0.finishReminderReconciliation(owner) }
+                _ = try? await perform(reminderOwned: true) { $0.finishReminderReconciliation(owner) }
                 if token.isCancelled || Task.isCancelled { throw CancellationError() }
                 throw NativeReminderEffects.unavailable
             }
@@ -612,17 +631,17 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     private func runReminderReconciliation(owner: UUID, cancellation: NativeAttachmentCancellation) async throws -> String {
-        let admission = try await perform { try $0.beginReminderReconciliation(owner, cancellation: cancellation) }
+        let admission = try await perform(reminderOwned: true) { try $0.beginReminderReconciliation(owner, cancellation: cancellation) }
         let port = admission.port, namespace = admission.namespace
         func current() async throws {
             try cancellation.check()
-            _ = try await perform { try $0.checkReminderReconciliation(owner) }
+            _ = try await perform(reminderOwned: true) { try $0.checkReminderReconciliation(owner) }
         }
         try await current()
         let permission = try await port.permission(); try await current()
         let pending = try await port.pending(namespace: namespace); try await current()
         let delivered = try await port.delivered(namespace: namespace); try await current()
-        let plan = try await perform {
+        let plan = try await perform(reminderOwned: true) {
             try $0.prepareReminderReconciliation(owner, permission: permission, pending: pending, delivered: delivered)
         }
         func beforeEffect() async throws {
@@ -696,13 +715,14 @@ public final class CoreHost: @unchecked Sendable {
         }
         try await beforeEffect()
         let confirmedCollapsed = collapsed
-        return try await perform { try $0.commitReminderReconciliation(owner, collapsed: confirmedCollapsed) }
+        return try await perform(reminderOwned: true) { try $0.commitReminderReconciliation(owner, collapsed: confirmedCollapsed) }
     }
 
     public func close() async {
         // This primitive flag reaches a running local invoke immediately; an
         // ordinary durable command remains governed by its existing journal.
         localAttachmentRequests.close()
+        _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(nil) }
         await reminderEffects.closeAndDrain()
         await withCheckedContinuation { continuation in
             queue.async { [engine] in
@@ -712,13 +732,28 @@ public final class CoreHost: @unchecked Sendable {
         }
     }
 
-    private func perform<T: Sendable>(_ work: @escaping @Sendable (Engine) throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async { [engine] in
-                do { continuation.resume(returning: try work(engine)) }
-                catch { continuation.resume(throwing: error) }
+    private func perform<T: Sendable>(reminderOwned: Bool = false,
+        _ work: @escaping @Sendable (Engine) throws -> T) async throws -> T {
+        let cancellation = reminderOwned ? nil : NativeAttachmentCancellation(), request = UUID()
+        if let cancellation { localAttachmentRequests.register(cancellation, id: request) }
+        defer { if cancellation != nil { localAttachmentRequests.remove(request) } }
+        if Task.isCancelled { cancellation?.cancel() }
+        return try await withTaskCancellationHandler {
+            if let cancellation, !(await reminderEffects.reserveOrdinary(cancellation: cancellation)) { throw CancellationError() }
+            return try await withCheckedThrowingContinuation { continuation in
+                queue.async { [engine, reminderEffects] in
+                    // Once Engine work starts, its existing durable/cancellation contract owns the outcome.
+                    let result: Result<T, Error>
+                    do {
+                        if cancellation?.isCancelled == true { throw CancellationError() }
+                        result = .success(try work(engine))
+                    } catch { result = .failure(error) }
+                    if cancellation != nil { reminderEffects.finishOrdinary() }
+                    engine.reminderPostOperation()
+                    continuation.resume(with: result)
+                }
             }
-        }
+        } onCancel: { cancellation?.cancel() }
     }
 
     deinit {
@@ -1132,6 +1167,7 @@ private final class Engine: @unchecked Sendable {
     private var database: SQLiteBridge?
     private var attachmentJobs: NativeAttachmentFileJobs?
     private let localRequests: NativeAttachmentLocalRequests
+    private let reminderAdmissions: NativeReminderEffects
     private var httpJobs: NativeHTTPJobs?
     private var secretJobs: NativeSecretJobs?
     private var cryptoJobs: NativeCryptoJobs?
@@ -1153,6 +1189,7 @@ private final class Engine: @unchecked Sendable {
         var mutation: (before: [String?], after: [String?])?
         var final: [String?] = []
         var plan: NativeReminderEffects.Plan?
+        var topUpAtMs: Double?
         init(id: UUID, generation: UInt64, runtime: JSContext, storage: NativeDeviceKV, dataVersion: Int64,
              namespace: String, port: any NativeReminderPort, cancellation: NativeAttachmentCancellation) {
             self.id = id; self.generation = generation; self.runtime = runtime; self.storage = storage
@@ -1163,8 +1200,25 @@ private final class Engine: @unchecked Sendable {
     private var reminderEffectsTurn: ReminderEffectsTurn?
     private var reminderOwnerAccess = false
     private var reminderSourceStale = false
+    private final class ReminderObserver {
+        let id = UUID()
+        let runtime: JSContext
+        let generation: UInt64
+        let callback: @Sendable (NativeReminderWake) -> Void
+        var revision: UInt64
+        var ready: Bool
+        var pending: NativeReminderWake?
+        var deliveryScheduled = false
+        init(runtime: JSContext, generation: UInt64, callback: @escaping @Sendable (NativeReminderWake) -> Void,
+             revision: UInt64, ready: Bool) {
+            self.runtime = runtime; self.generation = generation; self.callback = callback
+            self.revision = revision; self.ready = ready
+        }
+    }
+    private var reminderObserver: ReminderObserver?
     private static let reminderMapNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
-    private static let reminderMethods = Set(["iosReminderBegin", "iosReminderCurrent", "iosReminderPrepare", "iosReminderAcknowledged", "iosReminderEnd"])
+    fileprivate static let reminderMethods = Set(["iosReminderBegin", "iosReminderCurrent", "iosReminderPrepare", "iosReminderAcknowledged", "iosReminderEnd",
+        "iosReminderObserve", "iosReminderObservation", "iosReminderDisposeObservation"])
     private struct ProviderCopyTurn {
         var receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt?
         var photoCaptureID: UUID? = nil
@@ -1492,9 +1546,11 @@ private final class Engine: @unchecked Sendable {
     }
 
     init(queue: DispatchQueue, databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage? = nil,
-         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil, localRequests: NativeAttachmentLocalRequests) {
+         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil, localRequests: NativeAttachmentLocalRequests,
+         reminderAdmissions: NativeReminderEffects) {
         self.queue = queue
         self.localRequests = localRequests
+        self.reminderAdmissions = reminderAdmissions
         self.databaseURL = databaseURL
         self.bundleURL = bundleURL
         diagnosticsFile = NativeDiagnosticsLogFile(libraryRoot: databaseURL.deletingLastPathComponent())
@@ -2509,6 +2565,72 @@ private final class Engine: @unchecked Sendable {
               let number = rows[0]["data_version"] as? NSNumber else { throw NativeReminderEffects.unavailable }
         return number.int64Value
     }
+    private func reminderObservation(_ method: String) throws -> (revision: UInt64, ready: Bool, delay: UInt64) {
+        guard started, !closed, !invoking, let context,
+              let raw = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod(method, withArguments: [])?.toString() else {
+            throw NativeReminderEffects.unavailable
+        }
+        if context.exception != nil { context.exception = nil; throw NativeReminderEffects.unavailable }
+        guard let value = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(value.keys) == Set(["revision", "ready", "rescheduleDelayMs"]),
+              let revision = value["revision"] as? NSNumber, CFGetTypeID(revision) != CFBooleanGetTypeID(),
+              revision.doubleValue.rounded() == revision.doubleValue, (1...9_007_199_254_740_991).contains(revision.doubleValue),
+              let ready = value["ready"] as? NSNumber, CFGetTypeID(ready) == CFBooleanGetTypeID(),
+              let delay = value["rescheduleDelayMs"] as? NSNumber, CFGetTypeID(delay) != CFBooleanGetTypeID(),
+              delay.doubleValue.rounded() == delay.doubleValue, (0...86_400_000).contains(delay.doubleValue) else {
+            throw NativeReminderEffects.unavailable
+        }
+        // This read-only snapshot shares the reminder owner's admission without granting effect access.
+        // Otherwise requireNoAttachmentDraft would manufacture an own-cycle blocked→ready retry.
+        let priorAccess = reminderOwnerAccess
+        reminderOwnerAccess = true
+        defer { reminderOwnerAccess = priorAccess }
+        let nativeReady = !reminderSourceStale && (try? requireDeviceStorageAdmission()) != nil
+        return (revision.uint64Value, ready.boolValue && nativeReady, delay.uint64Value)
+    }
+    func observeReminders(_ callback: @escaping @Sendable (NativeReminderWake) -> Void) throws -> NativeReminderObserverRegistration {
+        guard reminderObserver == nil, let runtime = context else { throw NativeReminderEffects.unavailable }
+        let snapshot = try reminderObservation("iosReminderObserve")
+        let observer = ReminderObserver(runtime: runtime, generation: attachmentGeneration, callback: callback,
+            revision: snapshot.revision, ready: snapshot.ready)
+        reminderAdmissions.clearOrdinaryReadyWake()
+        reminderObserver = observer
+        return .init(id: observer.id, revision: snapshot.revision, rescheduleDelayMs: snapshot.delay)
+    }
+    func removeReminderObserver(_ id: UUID?) {
+        guard let observer = reminderObserver, id == nil || observer.id == id else { return }
+        reminderObserver = nil
+        reminderAdmissions.clearOrdinaryReadyWake()
+        if context === observer.runtime {
+            _ = observer.runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("iosReminderDisposeObservation", withArguments: [])
+            if observer.runtime.exception != nil { observer.runtime.exception = nil }
+        }
+    }
+    func reminderPostOperation() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if let observer = reminderObserver, context === observer.runtime, attachmentGeneration == observer.generation,
+           let snapshot = try? reminderObservation("iosReminderObservation") {
+            // Consume the one-shot debt even when a source change already supplies this wake.
+            let ordinaryReady = reminderAdmissions.takeOrdinaryReadyWake(ready: snapshot.ready)
+            if snapshot.revision != observer.revision {
+                observer.pending = .sourceChanged(revision: snapshot.revision)
+            } else if ((!observer.ready && snapshot.ready) || ordinaryReady), observer.pending == nil {
+                observer.pending = .admissionReady(revision: snapshot.revision)
+            }
+            observer.revision = snapshot.revision; observer.ready = snapshot.ready
+            if observer.pending != nil && !observer.deliveryScheduled {
+                observer.deliveryScheduled = true
+                queue.async { [weak self, weak observer] in
+                    guard let self, let observer, self.reminderObserver === observer,
+                          self.context === observer.runtime, self.attachmentGeneration == observer.generation, !self.closed else { return }
+                    observer.deliveryScheduled = false
+                    if let event = observer.pending { observer.pending = nil; observer.callback(event) }
+                }
+            }
+        }
+        // Only real existing JS timers are re-armed; dirty reminders never create polling work.
+        scheduleAttachmentIdle()
+    }
     private func reminderInvoke(_ method: String, _ arguments: [Any], cancellation: NativeAttachmentCancellation? = nil) throws -> String {
         guard Self.reminderMethods.contains(method), !reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
         reminderOwnerAccess = true; defer { reminderOwnerAccess = false }
@@ -2570,6 +2692,7 @@ private final class Engine: @unchecked Sendable {
         try checkReminderReconciliation(id)
         try NativeReminderEffects.checkInventory(inventory); try NativeReminderEffects.checkInventory(delivered)
         guard let turn = reminderEffectsTurn else { throw NativeReminderEffects.unavailable }
+        let planningStartedAtMs = floor(Date().timeIntervalSince1970 * 1000)
         let raw = try reminderInvoke("iosReminderPrepare", [turn.session, permission.granted,
             Self.ownedJSON(Array(Set(inventory.compactMap(\.ownedID))).sorted()), Self.ownedJSON(Array(Set(delivered.compactMap(\.ownedID))).sorted())], cancellation: turn.cancellation)
         try checkReminderReconciliation(id)
@@ -2602,6 +2725,17 @@ private final class Engine: @unchecked Sendable {
         }
         let plan = NativeReminderEffects.Plan(mode: mode, schedule: schedule, cancel: cancel, clearDelivered: clear,
             topUpDelayMs: value["topUpDelayMs"] as? Double)
+        if !(value["topUpDelayMs"] is NSNull) {
+            guard let delay = value["topUpDelayMs"] as? NSNumber, CFGetTypeID(delay) != CFBooleanGetTypeID(),
+                  delay.doubleValue.isFinite, delay.doubleValue >= 0, delay.doubleValue.rounded() == delay.doubleValue else {
+                throw NativeReminderEffects.unavailable
+            }
+            let deadline = planningStartedAtMs + delay.doubleValue
+            guard deadline.isFinite, deadline.rounded() == deadline, abs(deadline) <= 8_640_000_000_000_000 else {
+                throw NativeReminderEffects.unavailable
+            }
+            turn.topUpAtMs = deadline
+        }
         try NativeReminderEffects.projectedCapacity(plan: plan, pending: inventory)
         let affected = Set(schedule.map(\.identifier) + cancel.map(\.identifier))
         guard !(inventory + delivered).contains(where: { affected.contains($0.identifier) && $0.ownedID == nil }) else {
@@ -2629,7 +2763,8 @@ private final class Engine: @unchecked Sendable {
         try checkReminderReconciliation(id)
         _ = try? reminderInvoke("iosReminderAcknowledged", [turn.session, plan.mode, plan.schedule.count, plan.cancel.count, collapsed], cancellation: turn.cancellation)
         try checkReminderReconciliation(id)
-        return try Self.ownedJSON(["mode": plan.mode, "scheduled": plan.schedule.count, "cancelled": plan.cancel.count])
+        return try Self.ownedJSON(["mode": plan.mode, "scheduled": plan.schedule.count, "cancelled": plan.cancel.count,
+            "topUpAtMs": turn.topUpAtMs.map { $0 as Any } ?? NSNull()])
     }
     func finishReminderReconciliation(_ id: UUID) {
         guard let turn = reminderEffectsTurn, turn.id == id else { return }
@@ -19016,7 +19151,7 @@ private final class Engine: @unchecked Sendable {
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
         guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
-              !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil,
+              !cleanupOwed, reminderEffectsTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil,
               attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
@@ -19038,7 +19173,7 @@ private final class Engine: @unchecked Sendable {
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
-        scheduleAttachmentIdle()
+        reminderPostOperation()
     }
 
     private func checkException() throws {
@@ -19656,6 +19791,8 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        removeReminderObserver(nil)
+        reminderAdmissions.clearOrdinaryReadyWake()
         reminderEffectsTurn = nil
         reminderOwnerAccess = false
         reminderSourceStale = false

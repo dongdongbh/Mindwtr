@@ -287,15 +287,18 @@ private struct AppLockRoot: View {
         .onAppear {
             lock.sceneChanged(phase)
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
+            model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             observedApplicationActive = true
             guard !lock.concealed else { return }
             model.requestForegroundSync(token: model.completedStartupToken, active: true)
+            model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             observedApplicationActive = false
             model.cancelForegroundSync()
+            model.cancelReminderLifecycle()
             model.cancelProjectAttachmentDownload()
             model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
@@ -309,6 +312,7 @@ private struct AppLockRoot: View {
             model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
                 model.cancelForegroundSync()
+                model.cancelReminderLifecycle()
                 model.cancelProjectAttachmentDownload()
                 model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
@@ -321,10 +325,12 @@ private struct AppLockRoot: View {
             lock.sceneChanged(next)
             if next == .active && !lock.concealed { Task { await model.refresh() } }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
+            model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
                 model.cancelForegroundSync()
+                model.cancelReminderLifecycle()
                 model.cancelProjectAttachmentDownload()
                 model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
@@ -336,7 +342,13 @@ private struct AppLockRoot: View {
         }
         .onChange(of: foreground) { next in
             model.requestForegroundSync(token: next.token, active: next.active)
+            model.requestReminderLifecycle(token: next.token, active: next.active)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            model.reminderClockChanged()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in model.reminderClockChanged() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in model.reminderClockChanged() }
         .task(id: "\(model.ready)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard model.ready, phase == .active else { return }
             await lock.autoUnlock(label: model.label)

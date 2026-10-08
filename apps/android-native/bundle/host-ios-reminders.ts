@@ -73,11 +73,14 @@ type Dependencies = {
     read: () => Promise<[string, string | null][]>;
     plan: (input: PlanInput) => Promise<{ ok: true; value: NativeReminderAlarmPlan } | { ok: false }>;
     acknowledged: (mode: string, scheduled: number, cancelled: number, collapsed: number) => Promise<void>;
+    observation?: { subscribe: (changed: () => void) => () => void; ready: () => boolean; rescheduleDelayMs: number };
 };
 
 /** Only the native no-argument facade supplies observations and owns the map CAS/effects. */
 export function createIosReminderMethods(deps: Dependencies) {
     let owner: { token: string; current: () => void } | null = null;
+    let revision = 0, unsubscribe: (() => void) | null = null, resolvedLanguage: string | null = null;
+    const changed = () => { revision += 1; };
     const current = (token: string) => {
         if (!owner || owner.token !== token) throw unavailable();
         owner.current();
@@ -90,6 +93,21 @@ export function createIosReminderMethods(deps: Dependencies) {
         return values as number[];
     };
     return {
+        observe() {
+            if (!deps.observation) throw unavailable();
+            if (!unsubscribe) { changed(); unsubscribe = deps.observation.subscribe(changed); }
+            return this.observation();
+        },
+        observation() {
+            if (!unsubscribe || !deps.observation || !Number.isSafeInteger(revision) || revision < 1) throw unavailable();
+            let ready = false;
+            try { ready = deps.observation.ready() === true; } catch { /* A wake is never savedness authority. */ }
+            return { revision, ready, rescheduleDelayMs: deps.observation.rescheduleDelayMs };
+        },
+        disposeObservation() { const dispose = unsubscribe; unsubscribe = null; dispose?.(); return null; },
+        languageResolved(language: string) {
+            if (resolvedLanguage !== language) { resolvedLanguage = language; if (unsubscribe) changed(); }
+        },
         begin(token: string) {
             if (owner || typeof token !== 'string' || !/^[0-9a-f-]{36}$/.test(token)) throw unavailable();
             const check = deps.capture(); check(); owner = { token, current: check }; return null;

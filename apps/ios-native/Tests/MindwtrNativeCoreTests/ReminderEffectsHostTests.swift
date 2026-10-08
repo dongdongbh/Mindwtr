@@ -1,4 +1,5 @@
 import Darwin
+import CoreFoundation
 import Foundation
 import Security
 import UserNotifications
@@ -96,6 +97,48 @@ private final class ReminderMapWriteFault: @unchecked Sendable {
     }
 }
 
+private final class ReminderWakeRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [(String, UInt64)] = []
+    func record(_ event: NativeReminderWake) {
+        lock.lock(); defer { lock.unlock() }
+        switch event {
+        case .sourceChanged(let revision): values.append(("source", revision))
+        case .admissionReady(let revision): values.append(("ready", revision))
+        }
+    }
+    var events: [(String, UInt64)] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
+private final class ReminderOrdinaryWriteHold: @unchecked Sendable {
+    private let lock = NSLock()
+    private var armed = false
+    private let entered: XCTestExpectation
+    private let released = DispatchSemaphore(value: 0)
+    init(_ entered: XCTestExpectation) { self.entered = entered }
+    func arm() { lock.lock(); defer { lock.unlock() }; armed = true }
+    func before() throws {
+        lock.lock()
+        let hold = armed; armed = false
+        lock.unlock()
+        if hold {
+            entered.fulfill()
+            guard released.wait(timeout: .now() + 5) == .success else { throw HostFailure("Private ordinary write hold expired") }
+        }
+    }
+    func release() { released.signal() }
+}
+
+private final class ReminderJournalClearFault: @unchecked Sendable {
+    private let lock = NSLock()
+    private var refusing = false
+    func enable(_ value: Bool) { lock.lock(); defer { lock.unlock() }; refusing = value }
+    func before() throws {
+        lock.lock(); defer { lock.unlock() }
+        if refusing { throw HostFailure("Private reminder receipt clear refusal") }
+    }
+}
+
 final class ReminderEffectsHostTests: XCTestCase {
     private var root: URL!, bundle: URL!, namespace: String!, port: ReminderEffectsFakePort!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -122,14 +165,15 @@ final class ReminderEffectsHostTests: XCTestCase {
     private func object(_ value: String) throws -> [String: Any] { try XCTUnwrap(NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any]) }
     private func saved() throws -> [String: String] { try XCTUnwrap(NativeJSON.jsonObject(with: Data(contentsOf: manifest)) as? [String: String]) }
     private func maps() throws -> [String?] { let values = try saved(); return [values[alarmName], values[stateName]] }
-    private func host(configure: ((NativeDeviceKV) -> Void)? = nil) -> CoreHost {
+    private func host(io: ((HostIOFaults) -> Void)? = nil, coreBundle: URL? = nil, configure: ((NativeDeviceKV) -> Void)? = nil) -> CoreHost {
         let faults = HostIOFaults(), captured = port!; faults.reminderPort = captured; faults.configureDeviceStorage = configure
         faults.notificationPermissionRead = { try await captured.permission() }
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ReminderEffectsForbiddenHTTP.self]; faults.httpConfiguration = config
         faults.secretBeforeOperation = { _, _ in XCTFail("Reminder effects must not access credentials") }
         faults.secretStatus = { _, _ in errSecNotAvailable }
         faults.cryptoBeforeOperation = { _ in XCTFail("Reminder effects must not access crypto") }
-        let value = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults,
+        io?(faults)
+        let value = CoreHost(databaseURL: database, bundleURL: coreBundle ?? bundle, faults: faults,
             deviceStorage: (containerURL: container, bundleIdentifier: namespace))
         addTeardownBlock { await value.close() }; return value
     }
@@ -207,7 +251,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         let value = try await seed(), baseline = try rows(), other = try saved().filter { ![alarmName, stateName].contains($0.key) }
         let foreign = observation("foreign-pomodoro"); await port.setPending([foreign]); await port.setDelivered([foreign])
         let result = try object(try await value.reconcileReminders())
-        XCTAssertEqual(Set(result.keys), Set(["mode", "scheduled", "cancelled"])); XCTAssertEqual(result["mode"] as? String, "active")
+        XCTAssertEqual(Set(result.keys), Set(["mode", "scheduled", "cancelled", "topUpAtMs"])); XCTAssertEqual(result["mode"] as? String, "active")
         XCTAssertEqual(result["scheduled"] as? Int, 2); XCTAssertEqual(result["cancelled"] as? Int, 0)
         let mutations = await port.mutations; XCTAssertEqual(mutations.map(\.operation), ["add", "add"])
         for event in mutations {
@@ -276,10 +320,13 @@ final class ReminderEffectsHostTests: XCTestCase {
         await fulfillment(of: [entered], timeout: 5)
         await unavailable { try await value.reconcileReminders() }
         await unavailable { try await value.call("iosReminderPrepare", argumentsJSON: "[]") }
-        do { try await value.recordAboutUpdateCheck(timestamp: "1"); XCTFail("Competing storage writer was admitted") } catch {}
+        let writer = Task { try await value.recordAboutUpdateCheck(timestamp: "1") }
+        for _ in 0..<100 { await Task.yield() }
         let count = await port.addCount; XCTAssertEqual(count, 1)
-        await port.releaseAdd(); _ = try await task.value
-        let final = await port.addCount; XCTAssertEqual(final, 2)
+        await port.releaseAdd(); await cancelled { try await task.value }; try await writer.value
+        XCTAssertEqual(try saved()["mindwtr-update-last-check"], "1")
+        _ = try await value.reconcileReminders()
+        let final = await port.addCount; XCTAssertEqual(final, 3)
     }
     func testExternalTaskCommitWhileAddHeldRefusesStaleRuntimeAndColdUsesFreshRows() async throws {
         let value = try await seed(), entered = expectation(description: "Held add before external task commit")
@@ -517,7 +564,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         let before = await port.mutations.count, baseline = try rows(), other = try saved().filter { ![alarmName, stateName].contains($0.key) }
         await port.setDelivered([old, repeatEntry, newest, otherOld, otherNewest, foreign, malformed, undated])
         let result = try object(try await value.reconcileReminders())
-        XCTAssertEqual(Set(result.keys), Set(["mode", "scheduled", "cancelled"]))
+        XCTAssertEqual(Set(result.keys), Set(["mode", "scheduled", "cancelled", "topUpAtMs"]))
         XCTAssertEqual(result["scheduled"] as? Int, 0); XCTAssertEqual(result["cancelled"] as? Int, 0)
         let events = await port.mutations, actualPending = try await port.pending(namespace: namespace), tray = try await port.delivered(namespace: namespace)
         XCTAssertEqual(Array(events.dropFirst(before)).map(\.operation), ["delivered-remove"])
@@ -587,7 +634,7 @@ final class ReminderEffectsHostTests: XCTestCase {
         let entered = expectation(description: "Accepted delivered removal")
         await port.holdDeliveredRemoval(entered); let task = Task { try await value.reconcileReminders() }
         await fulfillment(of: [entered], timeout: 5)
-        await unavailable { try await value.readAboutUpdateState() }
+        await unavailable { try await value.call("iosReminderPrepare") }
         if close {
             let closing = Task { await value.close() }
             for _ in 0..<20 { await Task.yield() }
@@ -608,4 +655,267 @@ final class ReminderEffectsHostTests: XCTestCase {
     func testCloseWaitsForAcceptedThreadRemovalAndPreservesFuturePendingRequest() async throws {
         try await interruptedThreadRemoval(close: true)
     }
+
+    func testObserverUsesSharedDelayAndExactDisposalPreservesNewerRegistration() async throws {
+        let value = try await seed(), first = ReminderWakeRecorder(), next = ReminderWakeRecorder()
+        let registration = try await value.observeReminders { first.record($0) }
+        XCTAssertEqual(registration.revision, 1); XCTAssertEqual(registration.rescheduleDelayMs, 2500)
+        do { _ = try await value.observeReminders { _ in }; XCTFail("Duplicate observer admitted") } catch {}
+        for method in ["iosReminderObserve", "iosReminderObservation", "iosReminderDisposeObservation"] {
+            await unavailable { try await value.call(method) }
+        }
+        _ = try await value.call("language", argumentsJSON: json(["de", "en"]))
+        _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(first.events.map(\.0), ["source"])
+        await value.removeReminderObserver(registration.id)
+        let replacement = try await value.observeReminders { next.record($0) }
+        XCTAssertGreaterThan(replacement.revision, registration.revision)
+        await value.removeReminderObserver(registration.id)
+        _ = try await value.call("language", argumentsJSON: json(["fr", "en"]))
+        _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(first.events.count, 1); XCTAssertEqual(next.events.map(\.0), ["source"])
+        await value.removeReminderObserver(replacement.id)
+        _ = try await value.call("language", argumentsJSON: json(["en", "en"]))
+        XCTAssertEqual(next.events.count, 1)
+        let effects = await port.mutations; XCTAssertEqual(effects.count, 0)
+    }
+
+    func testObserverReportsSavedTaskMutationWithoutReadOrUnchangedLanguageNoise() async throws {
+        let value = try await seed(), recorder = ReminderWakeRecorder()
+        _ = try await value.call("language", argumentsJSON: json(["en", "en"]))
+        let registration = try await value.observeReminders { recorder.record($0) }
+        _ = try await value.call("complete", argumentsJSON: json(["task-0"]))
+        _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(recorder.events.map(\.0), ["source"])
+        XCTAssertGreaterThan(try XCTUnwrap(recorder.events.last?.1), registration.revision)
+        let selected = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("SELECT status FROM tasks WHERE id='task-0'").utf8)) as? [[String: Any]])
+        XCTAssertEqual(selected.first?["status"] as? String, "done")
+        for _ in 0..<5 {
+            _ = try await value.readAboutUpdateState()
+            _ = try await value.call("language", argumentsJSON: json(["en", "en"]))
+        }
+        XCTAssertEqual(recorder.events.count, 1)
+        let effects = await port.mutations; XCTAssertEqual(effects.count, 0)
+    }
+
+    func testObserverInstalledBeforeHeldPermissionDoesNotSpinAfterOwnAddFailure() async throws {
+        let value = try await seed(), recorder = ReminderWakeRecorder(), entered = expectation(description: "First passive permission held")
+        _ = try await value.observeReminders { recorder.record($0) }
+        await port.configure(failAdd: 1); await port.holdPermission(at: 1, entered: entered)
+        let task = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        await unavailable { try await value.call("iosReminderPrepare") }
+        XCTAssertEqual(recorder.events.count, 0)
+        await port.releasePermission(); await unavailable { try await task.value }
+        for _ in 0..<5 { _ = try await value.readAboutUpdateState() }
+        XCTAssertEqual(recorder.events.count, 0)
+        let reads = await port.permissionCount, effects = await port.addCount
+        XCTAssertGreaterThan(reads, 0); XCTAssertEqual(effects, 1)
+        _ = try await value.call("language", argumentsJSON: json(["de", "en"]))
+        _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(recorder.events.map(\.0), ["source"])
+        await port.configure(); _ = try await value.reconcileReminders()
+        _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(recorder.events.count, 1)
+    }
+
+    func testObserverWakesAfterExactReceiptRetiresFollowingItsLastJSInvocation() async throws {
+        let initial = try await seed(); await initial.close()
+        let fault = ReminderJournalClearFault(), value = host(io: { $0.journalRemove = { try fault.before() } })
+        _ = try await value.start()
+        let recorder = ReminderWakeRecorder(); _ = try await value.observeReminders { recorder.record($0) }
+        fault.enable(true)
+        do { _ = try await value.call("complete", argumentsJSON: json(["task-0"])); XCTFail("Expected retained receipt") } catch {}
+        _ = try? await value.readAboutUpdateState() // Queue barrier while the retained owner still refuses reads.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+        XCTAssertEqual(recorder.events.map(\.0), ["source"])
+        let revision = try XCTUnwrap(recorder.events.last?.1), baseline = try rows()
+        fault.enable(false)
+        let reply = try await value.retryPending(); XCTAssertNotNil(reply)
+        _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(recorder.events.map(\.0), ["source", "ready"])
+        XCTAssertEqual(recorder.events.last?.1, revision)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+        XCTAssertEqual(try rows(), baseline)
+        for _ in 0..<5 { _ = try await value.readAboutUpdateState() }
+        XCTAssertEqual(recorder.events.count, 2)
+        let effects = await port.mutations; XCTAssertEqual(effects.count, 0)
+    }
+
+    func testConfirmedTopUpDeadlineDoesNotExtendByHeldOSCallbackLatency() async throws {
+        let value = try await seed(), previewStarted = Date().timeIntervalSince1970 * 1000
+        let preview = try object(try await value.readReminderPlan()), plan = try XCTUnwrap(preview["plan"] as? [String: Any])
+        let delay = try XCTUnwrap(plan["topUpDelayMs"] as? Double)
+        let entered = expectation(description: "OS add holds confirmed result")
+        await port.holdAdd(entered); let task = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        // A real held callback spans a controlled second; the shared deadline was already planned.
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        await port.releaseAdd(); let result = try object(try await task.value)
+        let deadline = try XCTUnwrap(result["topUpAtMs"] as? NSNumber)
+        XCTAssertNotEqual(CFGetTypeID(deadline), CFBooleanGetTypeID())
+        XCTAssertTrue(deadline.doubleValue.isFinite); XCTAssertEqual(deadline.doubleValue.rounded(), deadline.doubleValue)
+        XCTAssertLessThanOrEqual(deadline.doubleValue, previewStarted + delay + 500)
+        let baseline = try rows(); await value.close()
+        let cold = host(); _ = try await cold.start(); XCTAssertEqual(try rows(), baseline)
+        let pending = try await port.pending(namespace: namespace); XCTAssertEqual(pending.count, 2)
+    }
+
+    func testObserverCloseDetachesCallbacksAndPreservesAcceptedFutureRequest() async throws {
+        let value = try await seed(), recorder = ReminderWakeRecorder(), entered = expectation(description: "Accepted add before observed close")
+        _ = try await value.observeReminders { recorder.record($0) }
+        await port.holdAdd(entered); let task = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        let closing = Task { await value.close() }
+        for _ in 0..<20 { await Task.yield() }
+        await port.releaseAdd(); await closing.value; await cancelled { try await task.value }
+        XCTAssertEqual(recorder.events.count, 0)
+        let pending = try await port.pending(namespace: namespace), effects = await port.mutations
+        XCTAssertEqual(pending.count, 1); XCTAssertEqual(effects.map(\.operation), ["add"])
+        do { _ = try await value.observeReminders { recorder.record($0) }; XCTFail("Closed observer admitted") } catch {}
+        XCTAssertEqual(recorder.events.count, 0)
+    }
+
+
+    func testPostPerformReleaseRearmsActualJSTimerAndIdlePumpDeliversSourceWithoutAnotherCall() async throws {
+        let initial = try await seed(); await initial.close()
+        // Test-local derived bundle only: the original command/production bundle are unchanged.
+        // complete's pending receipt blocks invoke's idle scheduling; its later retirement must re-arm this timer.
+        var bytes = try Data(contentsOf: bundle)
+        bytes.append(Data(#"""
+        ;(() => {
+            const complete = MindwtrHost.complete;
+            MindwtrHost.complete = function(...args) {
+                setTimeout(() => MindwtrHost.language('fr', 'en'), 1000);
+                return complete.apply(this, args);
+            };
+        })();
+        """#.utf8))
+        let privateBundle = root.appendingPathComponent("timer-observation-core-host.js")
+        try bytes.write(to: privateBundle)
+        let value = host(coreBundle: privateBundle); _ = try await value.start()
+        _ = try await value.call("language", argumentsJSON: json(["en", "en"]))
+        let recorder = ReminderWakeRecorder(), timer = expectation(description: "Actual idle JS timer source wake")
+        _ = try await value.observeReminders { event in
+            recorder.record(event)
+            if recorder.events.count == 2 { timer.fulfill() }
+        }
+        _ = try await value.call("complete", argumentsJSON: json(["task-0"]))
+        // There is intentionally no later host operation to rescue a stranded timer.
+        await fulfillment(of: [timer], timeout: 5)
+        XCTAssertEqual(recorder.events.map(\.0), ["source", "source"])
+        XCTAssertGreaterThan(try XCTUnwrap(recorder.events.last?.1), try XCTUnwrap(recorder.events.first?.1))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+        let effects = await port.mutations; XCTAssertEqual(effects.count, 0)
+        XCTAssertEqual(try markers().count, 0)
+    }
+
+
+    func testOrdinaryGeneralPreferencePreemptsHeldReminderWithoutUncertainSaveAndRetainsOneWake() async throws {
+        let value = try await seed(), options = try object(try await value.call("generalPreferenceOptions", argumentsJSON: json(["{}"])))
+        let expected = try XCTUnwrap(options["expected"] as? [String: Any])
+        let input: [String: Any] = ["requestId": UUID().uuidString.lowercased(), "edit": ["type": "dateFormat", "value": "ymd"],
+            "expected": try XCTUnwrap(expected["dateFormat"])]
+        let baseline = try rows(), other = try saved().filter { ![alarmName, stateName].contains($0.key) }
+        let recorder = ReminderWakeRecorder(), registration = try await value.observeReminders { recorder.record($0) }
+        let entered = expectation(description: "Held reminder before actual preference write")
+        await port.holdAdd(entered); let reminder = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        let writing = Task { try await value.call("generalPreference", argumentsJSON: json([json(input)])) }
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(try rows(), baseline)
+        await port.releaseAdd(); await cancelled { try await reminder.value }
+        let result = try object(try await writing.value)
+        XCTAssertEqual(result["type"] as? String, "dateFormat"); XCTAssertEqual(result["value"] as? String, "ymd")
+        XCTAssertEqual(result["changed"] as? Bool, true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+        let after = try rows(); XCTAssertEqual(after["tasks"], baseline["tasks"]); XCTAssertEqual(after["projects"], baseline["projects"])
+        XCTAssertEqual(try saved().filter { ![alarmName, stateName].contains($0.key) }, other)
+        XCTAssertEqual(try markers().count, 0)
+        for _ in 0..<5 { _ = try await value.readAboutUpdateState() }
+        XCTAssertEqual(recorder.events.map(\.0), ["source"])
+        XCTAssertGreaterThan(try XCTUnwrap(recorder.events.last?.1), registration.revision)
+        _ = try await value.reconcileReminders(); _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(recorder.events.count, 1); XCTAssertEqual(try markers().count, 1)
+    }
+
+    func testDirectReadAndAttachmentFacadesDrainReminderBeforeOriginalAdmission() async throws {
+        let value = try await seed(), baseline = try rows(), before = try Data(contentsOf: manifest)
+        for attachment in [false, true] {
+            let reads = await port.permissionCount, entered = expectation(description: "Held permission before direct facade")
+            await port.holdPermission(at: reads + 1, entered: entered)
+            let reminder = Task { try await value.reconcileReminders() }; await fulfillment(of: [entered], timeout: 5)
+            let ordinary = Task { () -> String in
+                if attachment { return try await value.prepareProjectFileOpen(requestJSON: "{}") }
+                return try await value.readAboutUpdateState()
+            }
+            for _ in 0..<100 { await Task.yield() }
+            await port.releasePermission(); await cancelled { try await reminder.value }
+            if attachment {
+                do { _ = try await ordinary.value; XCTFail("Invalid original file request admitted") }
+                catch { XCTAssertNotEqual(error.localizedDescription, "NOT_READY: Reminder reconciliation is unavailable") }
+            } else {
+                let result = try object(try await ordinary.value); XCTAssertEqual(Set(result.keys), Set(["updateAvailable", "shouldCheck"]))
+            }
+            XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try Data(contentsOf: manifest), before)
+        }
+        let effects = await port.mutations; XCTAssertEqual(effects.count, 0); XCTAssertEqual(try markers().count, 0)
+        _ = try await value.reconcileReminders() // Both reservations released after success and original admission failure.
+    }
+
+    func testCancelledOrdinaryWaiterCannotWriteAndReleasesReservationAfterReminderDrain() async throws {
+        let value = try await seed(), baseline = try rows(), entered = expectation(description: "Held add before cancelled ordinary waiter")
+        await port.holdAdd(entered); let reminder = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        let writing = Task { try await value.call("complete", argumentsJSON: json(["task-0"])) }
+        for _ in 0..<100 { await Task.yield() }
+        writing.cancel(); await port.releaseAdd(); await cancelled { try await reminder.value }
+        await cancelled { try await writing.value }
+        XCTAssertEqual(try rows(), baseline)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+        XCTAssertEqual(try markers().count, 0)
+        _ = try await value.readAboutUpdateState(); _ = try await value.reconcileReminders()
+        XCTAssertEqual(try markers().count, 1)
+    }
+
+    func testCloseCancelsUnadmittedOrdinaryWaiterWithoutWritingOrLeakingReservation() async throws {
+        let value = try await seed(), baseline = try rows(), entered = expectation(description: "Held add before closing queued ordinary work")
+        await port.holdAdd(entered); let reminder = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        let writing = Task { try await value.call("complete", argumentsJSON: json(["task-0"])) }
+        for _ in 0..<100 { await Task.yield() }
+        let closing = Task { await value.close() }
+        for _ in 0..<100 { await Task.yield() }
+        await port.releaseAdd(); await closing.value; await cancelled { try await reminder.value }; await cancelled { try await writing.value }
+        XCTAssertEqual(try rows(), baseline)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+        let pending = try await port.pending(namespace: namespace); XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(try markers().count, 0)
+    }
+
+    func testReminderBeginBlockedByHeldOrdinaryWriteReceivesOneReadyWakeAfterRelease() async throws {
+        let initial = try await seed(); await initial.close()
+        let entered = expectation(description: "Ordinary reservation held before final readiness snapshot")
+        let hold = ReminderOrdinaryWriteHold(entered)
+        let value = host(configure: { store in store.faults.beforePromotion = { try hold.before() } })
+        _ = try await value.start()
+        let recorder = ReminderWakeRecorder(), registration = try await value.observeReminders { recorder.record($0) }
+        let baseline = try rows()
+        hold.arm(); defer { hold.release() }
+        let writing = Task { try await value.recordAboutUpdateCheck(timestamp: "1") }
+        await fulfillment(of: [entered], timeout: 5)
+        // begin runs before queued Engine work; no observation has seen a transient reservation.
+        await unavailable { try await value.reconcileReminders() }
+        XCTAssertEqual(recorder.events.count, 0)
+        let effects = await port.mutations; XCTAssertEqual(effects.count, 0)
+        hold.release(); try await writing.value
+        for _ in 0..<5 { _ = try await value.readAboutUpdateState() }
+        XCTAssertEqual(recorder.events.map(\.0), ["ready"])
+        XCTAssertEqual(recorder.events.first?.1, registration.revision)
+        XCTAssertEqual(try saved()["mindwtr-update-last-check"], "1")
+        XCTAssertEqual(try rows(), baseline)
+        _ = try await value.reconcileReminders(); _ = try await value.readAboutUpdateState()
+        XCTAssertEqual(recorder.events.count, 1); XCTAssertEqual(try markers().count, 1)
+    }
+
 }
