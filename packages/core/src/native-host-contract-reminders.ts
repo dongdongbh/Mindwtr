@@ -80,6 +80,7 @@ import type { NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
 import { useTaskStore } from './store';
+import { getDigestSchedule } from './schedule-utils';
 
 export type NativeReminderAlarm = {
     key: string;
@@ -88,6 +89,8 @@ export type NativeReminderAlarm = {
     fireAtMs: number;
     /** `daily` and `weekly` alarms fire again at the same local time. */
     repeat: 'once' | 'daily' | 'weekly';
+    /** iOS recurring local wall-clock slot; Sunday is 0, independent of the first fire date's DST adjustment. */
+    calendar?: { hour: number; minute: number; weekday?: number };
     /** What the notification shows and carries (React Native's alarm details: title, message, channel, buttons, data). */
     details: Record<string, unknown>;
     /** The held alarm this one replaces goes for this reason; null when none is held. */
@@ -259,6 +262,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             // The texts first: the store and the clock are read after the last await, so a change meanwhile is judged too.
             const translations = await loadTranslations(deps.language());
             const state = useTaskStore.getState();
+            const digest = deps.reminderPlatform === 'ios' ? getDigestSchedule(state.settings) : null;
             const plan = planReminderAlarms({
                 settings: state.settings,
                 tasks: state.tasks,
@@ -320,11 +324,16 @@ export function createReminderMethods(deps: ReminderDeps) {
                 taken.add(id);
                 const fireAt = new Date(request.config.fireAt);
                 fireAt.setMilliseconds(0);
+                const slot = digest && (key === 'digest:morning' ? digest.morning
+                    : key === 'digest:evening' ? digest.evening : key === 'digest:weekly-review' ? digest.weekly : null);
+                const calendar = digest && slot ? { hour: slot.hour, minute: slot.minute,
+                    ...(key === 'digest:weekly-review' ? { weekday: digest.weekly.day } : {}) } : null;
                 schedule.push({
                     key,
                     id,
                     fireAtMs: fireAt.getTime(),
                     repeat: request.config.repeatInterval ?? 'once',
+                    ...(calendar ? { calendar } : {}),
                     details: buildReminderAlarmDetails(key, request.config),
                     replacing: heldEntry ? getReminderAlarmCancelReason(plan, key) : null,
                 });

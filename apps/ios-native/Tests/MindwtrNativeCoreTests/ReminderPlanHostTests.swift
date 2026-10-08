@@ -169,6 +169,9 @@ final class ReminderPlanHostTests: XCTestCase {
         let schedule = try XCTUnwrap(first.plan["schedule"] as? [[String: Any]])
         XCTAssertEqual(schedule.filter { $0["repeat"] as? String == "once" }.compactMap { $0["key"] as? String }, (0..<60).map { "task:cap-\($0)" })
         XCTAssertEqual(schedule.filter { $0["repeat"] as? String != "once" }.compactMap { $0["repeat"] as? String }, ["daily", "daily", "weekly"])
+        XCTAssertEqual(schedule.filter { $0["repeat"] as? String != "once" }.compactMap { $0["calendar"] as? [String: Int] },
+                       [["hour": 9, "minute": 0], ["hour": 20, "minute": 0], ["hour": 18, "minute": 0, "weekday": 0]])
+        XCTAssertTrue(schedule.filter { $0["repeat"] as? String == "once" }.allSatisfy { $0["calendar"] == nil })
         XCTAssertGreaterThan(try XCTUnwrap(first.plan["topUpDelayMs"] as? Double), 0)
         try preserved(baseline, before); XCTAssertEqual(try markers().count, 1)
         await value.close()

@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadTranslations } from './i18n/i18n-loader';
+import * as i18nLoader from './i18n/i18n-loader';
+import { getDigestSchedule } from './schedule-utils';
 import { buildReminderAlarmDetails, planReminderAlarms, readReminderAlarmMap } from './mobile-reminder-alarms';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import { openSqliteHost, requestId as newRequestId } from './screen-parity.replay';
@@ -91,6 +93,70 @@ describe('native host contract: reminders', () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(NOW));
     };
+
+    it.each([undefined, 'android' as const])('keeps all Android/default alarm fields and saved maps unchanged (%s)', async (platform) => {
+        freezeClock(); await seed({ ...SETTINGS, dailyDigestEveningEnabled: true });
+        const android = value(await (await openHost(platform)).planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        expect(android.schedule.every((alarm) => !Object.hasOwn(alarm, 'calendar'))).toBe(true);
+        const ios = value(await (await openHost('ios')).planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        expect({ ...ios, schedule: ios.schedule.map(({ calendar: _calendar, ...alarm }) => alarm) }).toEqual(android);
+        expect(ios.alarms).not.toContain('calendar'); expect(ios.writeAhead).not.toContain('calendar');
+        expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
+    });
+
+    it.each([
+        { name: 'custom', settings: { dailyDigestMorningTime: '02:30', dailyDigestEveningTime: '21:17', weeklyReviewTime: '06:45', weeklyReviewDay: 3 },
+            expected: [{ hour: 2, minute: 30 }, { hour: 21, minute: 17 }, { hour: 6, minute: 45, weekday: 3 }] },
+        { name: 'default', settings: {},
+            expected: [{ hour: 9, minute: 0 }, { hour: 20, minute: 0 }, { hour: 18, minute: 0, weekday: 0 }] },
+        { name: 'invalid-time and upper-day-clamped', settings: { dailyDigestMorningTime: '99:80', dailyDigestEveningTime: 'invalid', weeklyReviewTime: '-1:20', weeklyReviewDay: 99.5 },
+            expected: [{ hour: 9, minute: 0 }, { hour: 20, minute: 0 }, { hour: 18, minute: 0, weekday: 6 }] },
+    ])('retains the iOS $name digest wall-clock slots from shared settings policy', async ({ settings, expected }) => {
+        freezeClock(); await seed({ dailyDigestMorningEnabled: true, dailyDigestEveningEnabled: true, weeklyReviewEnabled: true, ...settings });
+        const host = await openHost('ios'), before = JSON.stringify(useTaskStore.getState().settings);
+        const plan = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        const recurring = plan.schedule.filter((alarm) => alarm.repeat !== 'once');
+        expect(recurring.map((alarm) => alarm.key)).toEqual(['digest:morning', 'digest:evening', 'digest:weekly-review']);
+        expect(recurring.map((alarm) => alarm.calendar)).toEqual(expected);
+        const shared = getDigestSchedule(useTaskStore.getState().settings);
+        expect(recurring.map((alarm) => alarm.calendar)).toEqual([
+            { hour: shared.morning.hour, minute: shared.morning.minute }, { hour: shared.evening.hour, minute: shared.evening.minute },
+            { hour: shared.weekly.hour, minute: shared.weekly.minute, weekday: shared.weekly.day },
+        ]);
+        expect(plan.schedule.filter((alarm) => alarm.repeat === 'once').every((alarm) => !Object.hasOwn(alarm, 'calendar'))).toBe(true);
+        expect(JSON.stringify(useTaskStore.getState().settings)).toBe(before); expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
+    });
+
+    it('reads iOS calendar slots from settings after the held translation await', async () => {
+        freezeClock(); await seed({ dailyDigestMorningEnabled: true, weeklyReviewEnabled: true, dailyDigestMorningTime: '02:30', weeklyReviewDay: 0 });
+        const host = await openHost('ios'), translations = await loadTranslations('en');
+        let release!: (value: Record<string, string>) => void;
+        const held = new Promise<Record<string, string>>((resolve) => { release = resolve; });
+        const loader = vi.spyOn(i18nLoader, 'loadTranslations').mockReturnValueOnce(held);
+        try {
+            const pending = host.planReminderAlarms({ storedAlarms: null, permissionGranted: true });
+            expect(loader).toHaveBeenCalledOnce();
+            useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, dailyDigestMorningTime: '04:22', weeklyReviewTime: '07:11', weeklyReviewDay: 5 } });
+            release(translations);
+            const plan = value(await pending);
+            expect(plan.schedule.find((alarm) => alarm.key === 'digest:morning')?.calendar).toEqual({ hour: 4, minute: 22 });
+            expect(plan.schedule.find((alarm) => alarm.key === 'digest:weekly-review')?.calendar).toEqual({ hour: 7, minute: 11, weekday: 5 });
+            expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
+        } finally { release(translations); loader.mockRestore(); }
+    });
+
+    it('keeps iOS ordinary reminders and new or replayed Snoozes free of calendar metadata', async () => {
+        freezeClock(); await seed(); const host = await openHost('ios');
+        const first = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        const fired = first.schedule.find((alarm) => alarm.key === 'task:t-rent')!;
+        expect(fired).toBeDefined(); expect(Object.hasOwn(fired, 'calendar')).toBe(false);
+        const snooze = value(await host.snoozeReminder({ requestId: generateUUID(), requestedAt: Date.now(), details: fired.details }));
+        expect(Object.hasOwn(snooze, 'calendar')).toBe(false);
+        const made = value(await host.planReminderSnooze({ storedState: first.state, alarm: snooze, permissionGranted: true }));
+        const replay = value(await host.planReminderAlarms({ storedAlarms: first.alarms, storedState: made.stateAhead, permissionGranted: true }));
+        const scheduled = replay.schedule.filter((alarm) => alarm.key === snooze.key);
+        expect(scheduled).toEqual([snooze]); expect(scheduled.every((alarm) => !Object.hasOwn(alarm, 'calendar'))).toBe(true);
+    });
 
     it('keeps malformed saved maps as a pure preview without logging their private parse text', async () => {
         freezeClock(); await seed(); const host = await openHost();
