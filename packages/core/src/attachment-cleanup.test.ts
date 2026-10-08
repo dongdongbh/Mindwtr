@@ -544,6 +544,33 @@ describe('remote attachment retention and batching', () => {
     });
 });
 
+describe('batched tombstone cleanup', () => {
+    it('reaches unprocessed tombstones behind a full batch of processed ones, so fresh work settles', async () => {
+        const now = '2026-07-14T12:00:00.000Z';
+        const tombstone = (id: string, overrides: Partial<Attachment> = {}): Attachment => ({
+            id, kind: 'file', title: id, uri: `/managed/${id}`, createdAt: now, updatedAt: now, deletedAt: now, ...overrides,
+        });
+        let data = buildData();
+        data.tasks.push({
+            id: 't1', title: 'Task', status: 'next', contexts: [], createdAt: now, updatedAt: now,
+            attachments: Array.from({ length: 3 }, (_, index) => tombstone(`done-${index}`, { localStatus: 'missing' })),
+        });
+        data.projects.push({
+            id: 'p1', title: 'Project', status: 'active', color: '#000000', order: 0, tagIds: [], createdAt: now, updatedAt: now,
+            attachments: [tombstone('fresh-0'), tombstone('fresh-1')],
+        } as AppData['projects'][number]);
+
+        for (let cycle = 0; cycle < 3 && hasFreshAttachmentCleanupWork(data); cycle += 1) {
+            data = (await runAttachmentCleanupLifecycle({
+                appData: data, now: () => now, maxAttachmentTargets: 2, deleteLocalAttachment: vi.fn(async () => undefined),
+            })).appData;
+        }
+
+        expect(hasFreshAttachmentCleanupWork(data)).toBe(false);
+        expect(data.projects[0].attachments?.map((attachment) => attachment.localStatus)).toEqual(['missing', 'missing']);
+    });
+});
+
 describe('legacy record removal coverage', () => {
     it('removal now reaches only purged-parent records through applyAttachmentCleanupResult', () => {
         const data: AppData = {
@@ -1256,6 +1283,6 @@ describe('runAttachmentCleanupLifecycle', () => {
         expect(result.appData.tasks[0].attachments?.map((attachment) => attachment.id)).toEqual(['second']);
         expect(result.reachedBatchLimit).toBe(true);
         expect(result.processedOrphanedIds).toEqual(new Set(['first']));
-        expect(onBatchLimitReached).toHaveBeenCalledWith({ limit: 1, total: 2 });
+        expect(onBatchLimitReached).toHaveBeenCalledWith({ limit: 1, total: 2, fresh: 2 });
     });
 });

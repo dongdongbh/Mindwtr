@@ -99,12 +99,14 @@ export const webdavDocument = (dav, folder) => {
 
 // ---- The self-hosted cloud ----
 
-/** apps/cloud under Bun on 127.0.0.1:[port], allowing only [token], its data under [dataDir]. */
+/** apps/cloud under Bun on 127.0.0.1:[port], allowing only [token], its data under [dataDir]. The body limit is raised from
+ *  the server's 2 MB default: the test phone's own library outgrew it (10-07, ~3,500 tasks), and the checks prove sync, not
+ *  that limit. */
 export const startCloud = async ({ repo, port, token, dataDir }) => {
     mkdirSync(dataDir, { recursive: true });
     const child = spawn(process.env.BUN ?? 'bun', ['run', resolve(repo, 'apps/cloud/src/server.ts'), '--port', String(port), '--host', '127.0.0.1'], {
         cwd: resolve(repo, 'apps/cloud'),
-        env: { ...process.env, MINDWTR_CLOUD_AUTH_TOKENS: token, MINDWTR_CLOUD_DATA_DIR: dataDir, NODE_ENV: 'development' },
+        env: { ...process.env, MINDWTR_CLOUD_AUTH_TOKENS: token, MINDWTR_CLOUD_DATA_DIR: dataDir, MINDWTR_CLOUD_MAX_BODY_BYTES: '64000000', NODE_ENV: 'development' },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';

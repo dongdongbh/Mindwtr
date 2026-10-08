@@ -6,6 +6,8 @@ import type { AppData, Area, Project, Section, Task } from './types';
 
 const AT = '2026-10-01T12:00:00.000Z';
 const DELETED = '2026-10-02T12:00:00.000Z';
+// A restored Done row must stay done on the cold reopen: a fixed completion date ages past auto-archive's 7 days.
+const RECENTLY_DONE = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const REQUEST_ID = '4bebf523-dd4e-40dc-9fce-37e456295d49';
 const ID = 'trash-restore-task';
 const copy = <T,>(data: T): T => JSON.parse(JSON.stringify(data)) as T;
@@ -75,7 +77,7 @@ describe('prepared single Task restore from Trash', () => {
     it.each([
         { status: 'next' as const },
         { status: 'reference' as const },
-        { status: 'done' as const, completedAt: AT },
+        { status: 'done' as const, completedAt: RECENTLY_DONE },
         { status: 'archived' as const, archivedAt: AT },
     ])('restores $status without changing saved content or lifecycle', async (lifecycle) => {
         const source = task(lifecycle);
