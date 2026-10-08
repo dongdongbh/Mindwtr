@@ -34,6 +34,7 @@ struct SettingsScreen: View {
                     if model.settingsSyncPresented { syncField = nil; Task { await model.closeSyncSettings() } }
                     else if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
                     else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
+                    else if model.settingsAboutPresented { model.closeAboutSettings() }
                     else if model.settingsGeneralPresented { model.closeGeneralSettings() }
                     else if model.settingsManagePresented { model.closeManageSettings() }
                     else { Task { await model.closeSettings() } }
@@ -50,11 +51,15 @@ struct SettingsScreen: View {
                           || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
                           || model.settingsPersonCreatePresented || model.settingsPersonEditPresented)))
                 .accessibilityLabel(model.label("common.back"))
-                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
+                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsAboutPresented ? "about-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
                 if model.settingsSyncPresented {
                     Text(model.settingsSync.text("title").isEmpty ? "Sync" : model.settingsSync.text("title"))
                         .rnFont(20, .bold).foregroundStyle(palette.text)
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                } else if model.settingsAboutPresented {
+                    Text(model.label("settings.about")).rnFont(20, .bold).foregroundStyle(palette.text)
+                        .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("about-title")
                 } else {
                 Text(model.settingsDataPresented ? model.dataSettings.text("title") : model.settingsGtdArchivePresented ? (model.gtdArchive.text("title").isEmpty ? model.label("settings.autoArchive") : model.gtdArchive.text("title")) : model.settingsGtdTaskEditorPresented ? model.gtdTaskEditor.text("title") : model.settingsGtdCapturePresented ? (model.gtdCapture.text("title").isEmpty ? model.label("settings.captureSettings") : model.gtdCapture.text("title")) : model.settingsGtdInboxPresented ? (model.gtdInbox.text("title").isEmpty ? model.label("settings.inboxProcessing") : model.gtdInbox.text("title")) : model.settingsGtdReviewPresented ? (model.gtdReview.text("title").isEmpty ? model.label("settings.reviewSettings") : model.gtdReview.text("title")) : model.settingsGtdPresented ? (model.gtdWorkflow.text("title").isEmpty ? model.label("settings.gtd") : model.gtdWorkflow.text("title")) : model.settingsGeneralPresented ? (model.generalSettings.text("title").isEmpty ? model.label("settings.general") : model.generalSettings.text("title")) : model.settingsManagePresented ? model.manageSettings.text("title") : model.settingsMenu.text("title"))
                     .rnFont(20, .bold).foregroundStyle(palette.text)
@@ -74,6 +79,7 @@ struct SettingsScreen: View {
             else if model.settingsGtdInboxPresented { gtdInboxContent }
             else if model.settingsGtdReviewPresented { gtdReviewContent }
             else if model.settingsGtdPresented { gtdContent }
+            else if model.settingsAboutPresented { AboutSettingsCard(model: model, palette: palette) }
             else if model.settingsGeneralPresented { generalContent }
             else if model.settingsManagePresented { manageContent }
             else { menuContent }
@@ -218,6 +224,7 @@ struct SettingsScreen: View {
             if model.settingsSyncPresented { syncField = nil; Task { await model.closeSyncSettings() } }
             else if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
             else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
+            else if model.settingsAboutPresented { model.closeAboutSettings() }
             else if model.settingsGeneralPresented { model.closeGeneralSettings() }
             else if model.settingsManagePresented { model.closeManageSettings() }
             else { Task { await model.closeSettings() } }
@@ -1086,6 +1093,7 @@ struct SettingsScreen: View {
                                     else if row.text("id") == "data" { Task { await model.openDataSettings() } }
                                     else if row.text("id") == "gtd" { Task { await model.openGtdSettings() } }
                                     else if row.text("id") == "sync" { Task { await model.openSyncSettings() } }
+                                    else if row.text("id") == "about" { model.openAboutSettings() }
                                 } label: {
                                     HStack(spacing: 12) {
                                         Image(systemName: settingsSymbol(row.text("icon")))
@@ -1105,8 +1113,8 @@ struct SettingsScreen: View {
                                     }
                                     .padding(.horizontal, 14).frame(minHeight: 60).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain).disabled(!["manage", "general", "gtd", "data", "sync"].contains(row.text("id")) || model.busy || model.retryNeeded)
-                                .opacity(["manage", "general", "gtd", "data", "sync"].contains(row.text("id")) ? 1 : 0.55)
+                                .buttonStyle(.plain).disabled(!["manage", "general", "gtd", "data", "sync", "about"].contains(row.text("id")) || model.busy || model.retryNeeded)
+                                .opacity(["manage", "general", "gtd", "data", "sync", "about"].contains(row.text("id")) ? 1 : 0.55)
                                 .accessibilityLabel(row.text("accessibilityLabel").isEmpty ? row.text("title") : row.text("accessibilityLabel"))
                                 .accessibilityIdentifier("settings-" + row.text("id"))
                                 if rowIndex < groups[groupIndex].count - 1 { palette.border.frame(height: 0.5) }
@@ -2446,4 +2454,85 @@ private struct DiagnosticsActivitySheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+// Static RN About rows share the existing Settings destination and OS handoff.
+private struct AboutSettingsCard: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+
+    private var appName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Mindwtr"
+    }
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    }
+    private var appIcon: UIImage? {
+        let icons = Bundle.main.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any]
+        let primary = icons?["CFBundlePrimaryIcon"] as? [String: Any]
+        guard let name = (primary?["CFBundleIconFiles"] as? [String])?.last else { return nil }
+        return UIImage(named: name)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                VStack(spacing: 10) {
+                    if let appIcon {
+                        Image(uiImage: appIcon).resizable().scaledToFit().frame(width: 80, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 18)).accessibilityHidden(true)
+                    }
+                    Text(appName).rnFont(24, .bold).foregroundStyle(palette.text)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader).accessibilityIdentifier("about-app-name")
+                    Text("v" + version).rnFont(15).foregroundStyle(palette.secondary)
+                        .accessibilityIdentifier("about-version")
+                }.frame(maxWidth: .infinity).padding(.vertical, 12)
+                VStack(spacing: 0) {
+                    link("website", label: "settings.officialWebsite", value: "Mindwtr")
+                    divider
+                    link("tutorials", label: "settings.videoTutorials", value: "YouTube")
+                    divider
+                    link("privacy", label: "settings.privacy", value: model.label("settings.privacy"))
+                    divider
+                    link("terms", label: "settings.terms", value: model.label("settings.terms"))
+                    divider
+                    link("donate", label: "settings.sponsorProject", value: model.label("settings.donateLinkValue"))
+                    divider
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(model.label("settings.license")).rnFont(15, .semibold).foregroundStyle(palette.text)
+                        Text("AGPL-3.0").rnFont(14).foregroundStyle(palette.secondary)
+                            .accessibilityIdentifier("about-license-value")
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                if model.settingsAboutOpening {
+                    ProgressView().accessibilityLabel(model.label("common.loading"))
+                }
+                if let failure = model.settingsAboutError {
+                    Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("about-open-error")
+                }
+            }.padding(16).padding(.bottom, 24)
+        }.accessibilityIdentifier("about-scroll")
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                model.invalidateAboutLinkOpening()
+            }
+            .onDisappear { model.invalidateAboutLinkOpening() }
+    }
+
+    private var divider: some View { palette.border.frame(height: 0.5).padding(.horizontal, 14) }
+
+    private func link(_ id: String, label: String, value: String) -> some View {
+        Button { model.openAboutLink(id) } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(model.label(label)).rnFont(15, .semibold).foregroundStyle(palette.text)
+                    Text(value).rnFont(14).foregroundStyle(palette.tint)
+                }.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "arrow.up.right").foregroundStyle(palette.secondary).accessibilityHidden(true)
+            }.padding(14).frame(minHeight: 52).contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(!model.settingsAboutLinksEnabled)
+            .accessibilityIdentifier("about-" + id)
+    }
 }

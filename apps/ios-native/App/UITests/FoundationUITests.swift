@@ -25007,3 +25007,88 @@ extension FoundationUITests {
     }
 
 }
+
+// Task423: static About navigation never launches an external site in UI tests.
+extension FoundationUITests {
+    private func task423Settings(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        boardTap(app, "tab-menu")
+        let settings = app.buttons["menu-settings"]
+        if !settings.isHittable {
+            revealPagedElement(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+        }
+        boardTap(app, "menu-settings")
+        boardEnabled(app.textFields["settings-search"], timeout: 30)
+    }
+
+    private func task423About(_ app: XCUIApplication) -> (name: String, version: String) {
+        let about = app.buttons["settings-about"]
+        revealPagedElement(app, about, in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-about")
+        boardEnabled(app.buttons["about-back"])
+        XCTAssertEqual(app.staticTexts["about-title"].label, "About")
+        let name = app.staticTexts["about-app-name"]
+        let version = app.staticTexts["about-version"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); XCTAssertFalse(name.label.isEmpty)
+        XCTAssertTrue(version.exists)
+        XCTAssertTrue(version.label.hasPrefix("v")); XCTAssertGreaterThan(version.label.count, 1)
+        let metadata = (name: name.label, version: version.label)
+        let scroll = app.scrollViews["about-scroll"]
+        for (id, label, value) in [
+            ("website", "Official website", "Mindwtr"),
+            ("tutorials", "Video tutorials", "YouTube"),
+            ("privacy", "Privacy", "Privacy"),
+            ("terms", "Terms of Use", "Terms of Use"),
+            ("donate", "Support development", "Donate")
+        ] {
+            let row = app.buttons["about-" + id]
+            revealPagedElement(app, row, in: scroll, ready: app.buttons["about-back"])
+            boardEnabled(row)
+            XCTAssertTrue(row.label.contains(label)); XCTAssertTrue(row.label.contains(value))
+            XCTAssertGreaterThanOrEqual(row.frame.height, 44 - 0.01)
+        }
+        let license = app.staticTexts["about-license-value"]
+        revealPagedElement(app, license, in: scroll, ready: app.buttons["about-back"])
+        XCTAssertEqual(license.label, "AGPL-3.0")
+        XCTAssertTrue(app.staticTexts["License"].exists)
+        XCTAssertFalse(app.buttons["about-license"].exists)
+        XCTAssertFalse(app.staticTexts["about-open-error"].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Static About support rows"; shot.lifetime = .keepAlways; add(shot)
+        return metadata
+    }
+
+    private func task423Flow(_ library: String, largest: Bool = false) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments(library, largest: largest)
+        app.launch(); task423Settings(app)
+        let search = app.textFields["settings-search"]
+        search.tap(); search.typeText("About")
+        boardEnabled(app.buttons["settings-about"])
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["settings-general"])
+        waitForExpectations(timeout: 10)
+        let metadata = task423About(app)
+        boardTap(app, "about-back")
+        boardEnabled(search)
+        XCTAssertEqual(search.value as? String, "About")
+        XCTAssertFalse(app.buttons["settings-general"].exists)
+        replaceProjectNotesText(search, with: "")
+        boardEnabled(app.buttons["settings-general"])
+        boardTap(app, "settings-back")
+        app.terminate(); app.launch(); task423Settings(app)
+        XCTAssertNotEqual(app.textFields["settings-search"].value as? String, "About")
+        let cold = task423About(app)
+        XCTAssertEqual(cold.name, metadata.name); XCTAssertEqual(cold.version, metadata.version)
+        boardTap(app, "about-back"); boardEnabled(app.buttons["settings-back"])
+        boardTap(app, "settings-back"); app.terminate()
+    }
+
+    func testTask423AboutStaticSupportNormalAndCold() {
+        task423Flow("3ba092bc-4d69-4ffa-9a6f-52745311b5b0")
+    }
+
+    func testTask423AboutStaticSupportLargestAndCold() {
+        task423Flow("a4f073f3-2f24-433b-8b6e-0420c638fd33", largest: true)
+    }
+}

@@ -301,6 +301,10 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsMenu: CoreObject = [:]
     @Published private(set) var settingsSearch = ""
     @Published private(set) var settingsManagePresented = false
+    @Published private(set) var settingsAboutPresented = false
+    @Published private(set) var settingsAboutOpening = false
+    @Published private(set) var settingsAboutError: String?
+    private var settingsAboutSession = UUID()
     @Published private(set) var settingsReadError: String?
     @Published private(set) var settingsSyncPresented = false
     @Published private(set) var settingsSync: CoreObject = [:]
@@ -1169,6 +1173,8 @@ final class CoreModel: ObservableObject {
                 taskOwnedMenuSelection = nil
                 clearSettingsSyncForPrivacy()
                 settingsSyncPresented = false
+                settingsAboutPresented = false
+                invalidateAboutLinkOpening()
                 invalidateDiagnostics(dropCache: true)
             }
         }
@@ -4775,7 +4781,7 @@ final class CoreModel: ObservableObject {
             && projectAttachmentDownloadOwner == nil
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
-            && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsAboutPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
     // Observe the actual scene episode before concealment clears presentation.
@@ -5053,6 +5059,8 @@ final class CoreModel: ObservableObject {
         settingsReadError = nil
         settingsSearch = ""
         settingsGeneralPresented = false
+        settingsAboutPresented = false
+        invalidateAboutLinkOpening()
         settingsDataPresented = false
         invalidateDiagnostics()
         settingsGtdPresented = false
@@ -5081,6 +5089,8 @@ final class CoreModel: ObservableObject {
         settingsSearchGeneration += 1
         settingsManagePresented = false
         settingsManageRequested = false
+        settingsAboutPresented = false
+        invalidateAboutLinkOpening()
         selectedSurface = settingsCaller
         busy = true
         defer { finishOperation() }
@@ -5089,7 +5099,7 @@ final class CoreModel: ObservableObject {
     }
 
     func setSettingsSearch(_ value: String) {
-        guard selectedSurface == .settings, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
+        guard selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
         settingsSearch = value
         settingsReadError = nil
         settingsSearchGeneration += 1
@@ -5097,7 +5107,7 @@ final class CoreModel: ObservableObject {
         settingsSearchTask?.cancel()
         settingsSearchTask = Task {
             do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
-            guard !Task.isCancelled, selectedSurface == .settings, !settingsManagePresented,
+            guard !Task.isCancelled, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented,
                   settingsSearchGeneration == generation else { return }
             do { try await readSettingsMenu(generation: generation) }
             catch { if settingsSearchGeneration == generation { settingsReadError = error.localizedDescription } }
@@ -5108,7 +5118,7 @@ final class CoreModel: ObservableObject {
         let result = try await query("menuRead", ["settingsMenu", try json(["query": settingsSearch])])
         guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
               result["searchPlaceholder"] is String else { throw CocoaError(.coderReadCorrupt) }
-        guard !settingsSyncPresented, !settingsSyncRestartRequired, selectedSurface == .settings,
+        guard !settingsAboutPresented, !settingsSyncPresented, !settingsSyncRestartRequired, selectedSurface == .settings,
               generation == nil || settingsSearchGeneration == generation else { return }
         settingsMenu = result
         settingsReadError = nil
@@ -5221,7 +5231,7 @@ final class CoreModel: ObservableObject {
 
     func openSyncSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncPresented,
-              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
               !settingsSyncRestartRequired, !appLock.concealed, settingsSyncEncryptionOwner == nil else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
@@ -5631,7 +5641,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openGtdSettings() async {
-        guard ready, selectedSurface == .settings, !settingsManagePresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
+        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGtdPresented = true
@@ -6446,7 +6456,7 @@ final class CoreModel: ObservableObject {
 
     func openDataSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !appLock.concealed,
-              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
+              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsDataPresented = true
@@ -6585,8 +6595,70 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    var settingsAboutLinksEnabled: Bool {
+        ready && selectedSurface == .settings && settingsAboutPresented && !settingsAboutOpening
+            && !busy && !retryNeeded && !settingsSyncRestartRequired && !appLock.concealed
+            && UIApplication.shared.applicationState == .active
+    }
+
+    func openAboutSettings() {
+        guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncRestartRequired,
+              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented,
+              !settingsGtdPresented, !settingsDataPresented, !settingsSyncPresented, !appLock.concealed else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        invalidateAboutLinkOpening()
+        settingsAboutPresented = true
+    }
+
+    func closeAboutSettings() {
+        guard settingsAboutPresented else { return }
+        invalidateAboutLinkOpening()
+        settingsAboutPresented = false
+    }
+
+    func invalidateAboutLinkOpening() {
+        settingsAboutSession = UUID()
+        settingsAboutOpening = false
+        settingsAboutError = nil
+    }
+
+    func openAboutLink(_ link: String) {
+        let destinations = [
+            "website": "https://mindwtr.app",
+            "tutorials": "https://youtube.com/playlist?list=PLLwV6zeTfB_k",
+            "privacy": "https://mindwtr.app/privacy",
+            "terms": "https://mindwtr.app/terms",
+            "donate": "https://mindwtr.app/donate?src=app_about"
+        ]
+        guard settingsAboutLinksEnabled, let currentHost = host,
+              let destination = destinations[link], let url = URL(string: destination) else { return }
+        let session = settingsAboutSession
+        settingsAboutOpening = true
+        settingsAboutError = nil
+        Task {
+            // Recheck the captured page before handing anything to the OS.
+            guard host === currentHost, settingsAboutSession == session, settingsAboutPresented,
+                  selectedSurface == .settings, !Task.isCancelled, ready, !busy, !retryNeeded,
+                  !settingsSyncRestartRequired, !appLock.concealed,
+                  UIApplication.shared.applicationState == .active else {
+                if settingsAboutSession == session { settingsAboutOpening = false }
+                return
+            }
+            let opened = await withCheckedContinuation { continuation in
+                UIApplication.shared.open(url, options: [:]) { continuation.resume(returning: $0) }
+            }
+            guard host === currentHost, settingsAboutSession == session,
+                  selectedSurface == .settings, settingsAboutPresented else { return }
+            settingsAboutOpening = false
+            guard !Task.isCancelled, ready, !retryNeeded, !settingsSyncRestartRequired, !appLock.concealed,
+                  UIApplication.shared.applicationState == .active else { return }
+            if !opened { settingsAboutError = label("attachments.openLinkFailed") }
+        }
+    }
+
     func openGeneralSettings() async {
-        guard ready, selectedSurface == .settings, !settingsManagePresented, !busy, !retryNeeded else { return }
+        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGeneralPresented = true
@@ -6812,6 +6884,8 @@ final class CoreModel: ObservableObject {
                     "taskEdit.locationLabel", "taskEdit.locationPlaceholder", "reference.title", "nav.history", "nav.trash",
                     "filters.matchAny", "filters.contextMatchMode", "filters.tagMatchMode",
                     "sort.label", "list.groupBy", "taskEdit.moreOptions", "dailyReview.completeDesc",
+                    "settings.about", "settings.officialWebsite", "settings.videoTutorials", "settings.privacy", "settings.terms",
+                    "settings.sponsorProject", "settings.donateLinkValue", "settings.license", "attachments.openLinkFailed",
                     "settings.feedback.saveFailed", "settings.feedback.actionFailed",
                     "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "viewSections.updateFailed"]
         let result = try await query("strings", [try json(keys)])
@@ -6926,7 +7000,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openManageSettings() async {
-        guard ready, selectedSurface == .settings, !settingsManagePresented, !busy, !retryNeeded,
+        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded,
               !somedaySectionDeleteActive, !somedaySectionOrderActive, !settingsAreaDeleteActive,
               !unassignedAreaColorActive else { return }
         settingsSearchTask?.cancel()
@@ -19096,7 +19170,7 @@ final class CoreModel: ObservableObject {
             && projectDuplicateRequest == nil && projectLifecycleRequest == nil
             && projectDeleteRequest == nil && projectDeleteUndoRequest == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsSyncChecking
-            && !settingsManagePresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsManagePresented && !settingsAboutPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
     func downloadProjectAttachment(_ attachmentID: String) {
@@ -26133,6 +26207,7 @@ final class CoreModel: ObservableObject {
 
     private func readSelectedSurface() async throws {
         guard !settingsSyncRestartRequired else { return }
+        if selectedSurface == .settings && settingsAboutPresented { return }
         if selectedSurface == .settings && settingsSyncPresented {
             if !settingsSyncNeedsReload && !settingsSyncChecking { await readSettingsSyncModel() }
             return
