@@ -1080,7 +1080,7 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     // a journal keeps its receipts in memory, as before.
     traceStep('js:receipts');
     if (journaled) await loadNativeRequestReceipts(sqlite);
-    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
+    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
     // The legacy import plans from a validated full read. Any other boot needs only the schema here: the activation's own read
     // is validated before anything saves.
     traceStep('js:schema');
@@ -2056,6 +2056,31 @@ globalThis.MindwtrHost = {
     },
     gtdWorkflowCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedGtdWorkflow(JSON.parse(json))));
+    },
+    notificationSettingOptions(json: string): string {
+        return submit(async () => unwrap(await contract.getNotificationSettingsOptions(JSON.parse(json))));
+    },
+    notificationSettingRetryOutcome(json: string): string {
+        return submit(async () => unwrap(contract.probeNotificationSettingOutcome(JSON.parse(json))));
+    },
+    notificationSettingPrepare(json: string): string {
+        return submit(async () => unwrap(await contract.prepareNotificationSetting(JSON.parse(json))));
+    },
+    notificationSettingValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedNotificationSetting(JSON.parse(json))));
+    },
+    notificationSettingCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitPreparedNotificationSetting(JSON.parse(json))));
+    },
+    notificationSettingAcknowledged(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') return null;
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS notification setting saved',
+                context: { releaseCheck: 'v1.3.5/ios-notification-setting', outcome: 'saved' },
+            }, { force: true }); } catch { /* A logging failure cannot change an acknowledged saved result. */ }
+            return null;
+        });
     },
     appLockOptions(json: string): string {
         return submit(async () => unwrap(await contract.getAppLockOptions(JSON.parse(json))));

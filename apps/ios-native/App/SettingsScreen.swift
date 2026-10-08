@@ -25,6 +25,10 @@ struct SettingsScreen: View {
     @State private var syncBackendPending: String?
     private enum SyncField: Hashable { case url, username, password, token, encryption(String) }
     @FocusState private var syncField: SyncField?
+    @State private var notificationPicker: String?
+    @State private var notificationDayDraft = 0
+    @State private var notificationTimeDraft = Date()
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,6 +40,7 @@ struct SettingsScreen: View {
                     else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
                     else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
                     else if model.settingsAboutPresented { model.closeAboutSettings() }
+                    else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
                     else if model.settingsGeneralPresented { model.closeGeneralSettings() }
                     else if model.settingsManagePresented { model.closeManageSettings() }
                     else { Task { await model.closeSettings() } }
@@ -49,10 +54,10 @@ struct SettingsScreen: View {
                           || model.somedaySectionRenameAwaitingRefresh
                           || model.somedaySectionDeletePending || model.somedaySectionDeleteAwaitingRefresh
                           || model.somedaySectionOrderActive || model.unassignedAreaColorActive
-                          || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
+                          || model.notificationSettingActive || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
                           || model.settingsPersonCreatePresented || model.settingsPersonEditPresented)))
                 .accessibilityLabel(model.label("common.back"))
-                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsFeedbackPresented ? "feedback-back" : model.settingsAboutPresented ? "about-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
+                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsFeedbackPresented ? "feedback-back" : model.settingsAboutPresented ? "about-back" : model.settingsNotificationsPresented ? "notifications-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
                 if model.settingsSyncPresented {
                     Text(model.settingsSync.text("title").isEmpty ? "Sync" : model.settingsSync.text("title"))
                         .rnFont(20, .bold).foregroundStyle(palette.text)
@@ -61,6 +66,12 @@ struct SettingsScreen: View {
                     Text(model.label(model.settingsFeedbackPresented ? "settings.feedback" : "settings.about")).rnFont(20, .bold).foregroundStyle(palette.text)
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier(model.settingsFeedbackPresented ? "feedback-title" : "about-title")
+                } else if model.settingsNotificationsPresented {
+                    Text(model.notificationSettings.text("title").isEmpty ? model.label("settings.notifications") : model.notificationSettings.text("title"))
+                        .rnFont(20, .bold).foregroundStyle(palette.text)
+                        .lineLimit(1).minimumScaleFactor(0.5)
+                        .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("notifications-title")
                 } else {
                 Text(model.settingsDataPresented ? model.dataSettings.text("title") : model.settingsGtdArchivePresented ? (model.gtdArchive.text("title").isEmpty ? model.label("settings.autoArchive") : model.gtdArchive.text("title")) : model.settingsGtdTaskEditorPresented ? model.gtdTaskEditor.text("title") : model.settingsGtdCapturePresented ? (model.gtdCapture.text("title").isEmpty ? model.label("settings.captureSettings") : model.gtdCapture.text("title")) : model.settingsGtdInboxPresented ? (model.gtdInbox.text("title").isEmpty ? model.label("settings.inboxProcessing") : model.gtdInbox.text("title")) : model.settingsGtdReviewPresented ? (model.gtdReview.text("title").isEmpty ? model.label("settings.reviewSettings") : model.gtdReview.text("title")) : model.settingsGtdPresented ? (model.gtdWorkflow.text("title").isEmpty ? model.label("settings.gtd") : model.gtdWorkflow.text("title")) : model.settingsGeneralPresented ? (model.generalSettings.text("title").isEmpty ? model.label("settings.general") : model.generalSettings.text("title")) : model.settingsManagePresented ? model.manageSettings.text("title") : model.settingsMenu.text("title"))
                     .rnFont(20, .bold).foregroundStyle(palette.text)
@@ -81,6 +92,7 @@ struct SettingsScreen: View {
             else if model.settingsGtdReviewPresented { gtdReviewContent }
             else if model.settingsGtdPresented { gtdContent }
             else if model.settingsAboutPresented { AboutSettingsCard(model: model, palette: palette) }
+            else if model.settingsNotificationsPresented { notificationsContent }
             else if model.settingsGeneralPresented { generalContent }
             else if model.settingsManagePresented { manageContent }
             else { menuContent }
@@ -210,6 +222,16 @@ struct SettingsScreen: View {
             set: { if !$0 && !model.appLock.concealed { model.cancelSettingsAreaEdit() } }
         )) { areaEditSheet }
         .sheet(isPresented: Binding(
+            get: { notificationPicker != nil && model.settingsNotificationsPresented && !model.appLock.concealed },
+            set: { if !$0 { notificationPicker = nil } }
+        )) { notificationPickerSheet }
+        .onChange(of: model.settingsNotificationsPresented) { presented in
+            if !presented { notificationPicker = nil }
+        }
+        .onChange(of: model.appLock.concealed) { concealed in
+            if concealed { notificationPicker = nil }
+        }
+        .sheet(isPresented: Binding(
             get: { model.generalPreferencePicker != nil },
             set: { if !$0 && !model.appLock.concealed { model.closeGeneralPreferencePicker() } }
         )) { generalPreferenceSheet }
@@ -227,7 +249,8 @@ struct SettingsScreen: View {
             else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
             else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
             else if model.settingsAboutPresented { model.closeAboutSettings() }
-            else if model.settingsGeneralPresented { model.closeGeneralSettings() }
+            else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
+                    else if model.settingsGeneralPresented { model.closeGeneralSettings() }
             else if model.settingsManagePresented { model.closeManageSettings() }
             else { Task { await model.closeSettings() } }
         }
@@ -1073,6 +1096,158 @@ struct SettingsScreen: View {
         .accessibilityIdentifier("general-option-" + option.text("value"))
     }
 
+    private var notificationsContent: some View {
+        let task = model.notificationSettings.object("task")
+        let weekly = model.notificationSettings.object("weekly")
+        let digest = model.notificationSettings.object("digest")
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if !model.notificationSettings.isEmpty {
+                    VStack(spacing: 0) {
+                        notificationToggle(task.object("master"))
+                        palette.border.frame(height: 0.5)
+                        notificationToggle(task.object("start"))
+                        palette.border.frame(height: 0.5)
+                        notificationToggle(task.object("due"))
+                    }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    VStack(spacing: 0) {
+                        notificationToggle(weekly.object("enabled"))
+                        palette.border.frame(height: 0.5)
+                        notificationPickerRow(weekly.object("day"), type: "weeklyReviewDay", summary: weekly.object("day").text("valueLabel"))
+                        palette.border.frame(height: 0.5)
+                        notificationPickerRow(weekly.object("time"), type: "weeklyReviewTime")
+                    }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    VStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(digest.text("title")).rnFont(15).foregroundStyle(palette.text)
+                            Text(digest.text("description")).rnFont(12).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                        ForEach(["morning", "evening"], id: \.self) { slot in
+                            let row = digest.object(slot)
+                            palette.border.frame(height: 0.5)
+                            notificationToggle(row.object("enabled"))
+                            palette.border.frame(height: 0.5)
+                            notificationPickerRow(row.object("time"), type: slot == "morning" ? "dailyDigestMorningTime" : "dailyDigestEveningTime")
+                        }
+                    }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                }
+                if let failure = model.notificationSettingReadError ?? model.notificationSettingError {
+                    Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("notifications-error")
+                    if model.retryNeeded || model.notificationSettingReadError != nil {
+                        Button { model.retryNotificationSettings() } label: {
+                            Text(model.label("common.retry")).rnFont(15, .semibold)
+                                .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                        }
+                        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                        .disabled(model.busy).accessibilityIdentifier("notifications-retry")
+                    }
+                }
+            }.padding(16)
+        }.accessibilityIdentifier("notifications-scroll")
+    }
+
+    private func notificationToggle(_ row: CoreObject) -> some View {
+        Toggle(isOn: Binding(get: { row.flag("value") }, set: { value in
+            var edit = row.object("edit")
+            edit["value"] = value
+            model.saveNotificationSetting(edit)
+        })) { generalSettingLabel(row, description: "description") }
+        .tint(palette.tint).padding(14).frame(minHeight: 48)
+        .disabled(row.flag("disabled") || !model.notificationSettingEnabled)
+        .opacity(row.flag("disabled") ? 0.55 : 1)
+        .accessibilityIdentifier("notifications-" + row.object("edit").text("type"))
+    }
+
+    private func notificationPickerRow(_ row: CoreObject, type: String, summary: String? = nil) -> some View {
+        Button { openNotificationPicker(type, row: row) } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.text("label")).rnFont(15).foregroundStyle(palette.text)
+                    Text(summary ?? row.text("value")).rnFont(12).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.down").foregroundStyle(palette.secondary).accessibilityHidden(true)
+            }.padding(14).frame(minHeight: 48).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(row.flag("disabled") || !model.notificationSettingEnabled)
+        .opacity(row.flag("disabled") ? 0.55 : 1)
+        .accessibilityIdentifier("notifications-" + type)
+    }
+
+    private func openNotificationPicker(_ type: String, row: CoreObject) {
+        guard model.notificationSettingEnabled, !row.flag("disabled") else { return }
+        if type == "weeklyReviewDay" { notificationDayDraft = row.number("value") }
+        else {
+            let time = row.text("value").split(separator: ":").compactMap { Int($0) }
+            guard time.count == 2, let date = Calendar.current.date(bySettingHour: time[0], minute: time[1], second: 0, of: Date()) else { return }
+            notificationTimeDraft = date
+        }
+        notificationPicker = type
+    }
+
+    private var notificationPickerSheet: some View {
+        let type = notificationPicker ?? ""
+        let weekly = model.notificationSettings.object("weekly")
+        let row = type == "weeklyReviewDay" ? weekly.object("day") : type == "weeklyReviewTime" ? weekly.object("time")
+            : model.notificationSettings.object("digest").object(type == "dailyDigestMorningTime" ? "morning" : "evening").object("time")
+        return VStack(spacing: 12) {
+            Text(row.text("label")).rnFont(20, .bold).foregroundStyle(palette.text)
+                .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 20)
+            ScrollView {
+                if type == "weeklyReviewDay" {
+                    VStack(spacing: 8) {
+                        ForEach(Array((row["options"] as? [CoreObject] ?? []).enumerated()), id: \.offset) { _, option in
+                            Button { notificationDayDraft = option.number("value") } label: {
+                                HStack(spacing: 12) {
+                                    Text(option.text("label")).rnFont(16).foregroundStyle(palette.text)
+                                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                                    if notificationDayDraft == option.number("value") {
+                                        Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true)
+                                    }
+                                }.padding(14).frame(minHeight: 48).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityAddTraits(notificationDayDraft == option.number("value") ? .isSelected : [])
+                            .accessibilityIdentifier("notifications-day-" + String(option.number("value")))
+                        }
+                    }.padding(.horizontal, 16)
+                } else {
+                    DatePicker(row.text("label"), selection: $notificationTimeDraft, displayedComponents: .hourAndMinute)
+                        .datePickerStyle(.wheel).labelsHidden().padding(.horizontal, 16)
+                        .accessibilityLabel(row.text("label")).accessibilityIdentifier("notifications-time-wheel")
+                }
+            }.accessibilityIdentifier("notifications-picker-scroll")
+            HStack(spacing: 12) {
+                Button { notificationPicker = nil } label: {
+                    Text(model.notificationSettings.object("text").text("cancel")).rnFont(15)
+                        .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                }.accessibilityIdentifier("notifications-picker-cancel")
+                Button { finishNotificationPicker() } label: {
+                    Text(model.notificationSettings.object("text").text("done")).rnFont(15, .semibold)
+                        .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                }.disabled(!model.notificationSettingEnabled).accessibilityIdentifier("notifications-picker-done")
+            }.buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 16)
+        }
+        .background(palette.bg).presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func finishNotificationPicker() {
+        guard model.notificationSettingEnabled, let type = notificationPicker else { return }
+        let edit: CoreObject
+        if type == "weeklyReviewDay" { edit = ["type": type, "value": notificationDayDraft] }
+        else {
+            let time = Calendar.current.dateComponents([.hour, .minute], from: notificationTimeDraft)
+            guard let hour = time.hour, let minute = time.minute else { return }
+            edit = ["type": type, "value": String(format: "%02d:%02d", hour, minute)]
+        }
+        notificationPicker = nil
+        model.saveNotificationSetting(edit)
+    }
+
     private var menuContent: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -1092,6 +1267,7 @@ struct SettingsScreen: View {
                                 Button {
                                     if row.text("id") == "manage" { Task { await model.openManageSettings() } }
                                     else if row.text("id") == "general" { Task { await model.openGeneralSettings() } }
+                                    else if row.text("id") == "notifications" { Task { await model.openNotificationSettings() } }
                                     else if row.text("id") == "data" { Task { await model.openDataSettings() } }
                                     else if row.text("id") == "gtd" { Task { await model.openGtdSettings() } }
                                     else if row.text("id") == "sync" { Task { await model.openSyncSettings() } }
@@ -1120,8 +1296,8 @@ struct SettingsScreen: View {
                                     }
                                     .padding(.horizontal, 14).frame(minHeight: 60).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain).disabled(!["manage", "general", "gtd", "data", "sync", "about"].contains(row.text("id")) || model.busy || model.retryNeeded)
-                                .opacity(["manage", "general", "gtd", "data", "sync", "about"].contains(row.text("id")) ? 1 : 0.55)
+                                .buttonStyle(.plain).disabled(!["manage", "general", "notifications", "gtd", "data", "sync", "about"].contains(row.text("id")) || model.busy || model.retryNeeded)
+                                .opacity(["manage", "general", "notifications", "gtd", "data", "sync", "about"].contains(row.text("id")) ? 1 : 0.55)
                                 .accessibilityLabel(row.text("accessibilityLabel").isEmpty ? row.text("title") : row.text("accessibilityLabel"))
                                 .accessibilityIdentifier("settings-" + row.text("id"))
                                 if rowIndex < groups[groupIndex].count - 1 { palette.border.frame(height: 0.5) }

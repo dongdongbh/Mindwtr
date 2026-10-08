@@ -783,6 +783,10 @@ export interface TaskStore {
     commitPreparedAppLock: (request: import('./native-host-contract-app-lock').AppLockRequest,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     retryPreparedAppLockSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** One device-local notification scalar, without a synced preference stamp. */
+    commitPreparedNotificationSetting: (request: import('./native-host-contract-notification-settings').NotificationSettingRequest,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    retryPreparedNotificationSettingSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     /** Update a project */
     updateProject: (id: string, updates: Partial<Project>) => Promise<StoreActionResult>;
     /** Archive a project as cancelled and cancel its unfinished child tasks */

@@ -310,6 +310,8 @@ import { createTaxonomyMethods } from './native-host-contract-taxonomy';
 import { createGeneralPreferenceMethods } from './native-host-contract-general-preference';
 import { createGtdWorkflowMethods } from './native-host-contract-gtd-workflow';
 import { createAppLockMethods } from './native-host-contract-app-lock';
+import { createNotificationSettingsMethods } from './native-host-contract-notification-settings';
+import { buildNotificationSettingsModel } from './notification-settings-model';
 import { buildNativeGeneralSettingsModel } from './native-host-contract-settings';
 import { createPersonDeleteMethods } from './native-host-contract-person-delete';
 import { createAreaColorMethods } from './native-host-contract-area-color';
@@ -1896,6 +1898,8 @@ export function createNativeHostContract(options: {
                 systemLocale: () => systemLocale, dateFormatting,
             }, deviceTheme) }),
         ...createGtdWorkflowMethods({ readiness, save, t: () => translate }),
+        ...createNotificationSettingsMethods({ readiness, save,
+            model: (settings) => buildNotificationSettingsModel({ settings, language, systemLocale, t: translate }) }),
         ...createAppLockMethods({ readiness, save,
             model: (settings) => buildNativeGeneralSettingsModel(settings, {
                 t: () => translate, language: () => language,

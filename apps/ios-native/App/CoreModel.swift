@@ -218,6 +218,7 @@ final class CoreModel: ObservableObject {
                 cancelProjectFileImport()
             }
             if oldValue == .settings && selectedSurface != .settings {
+                retireNotificationSettingsPage()
                 invalidateDiagnostics()
                 settingsDataPresented = false
             }
@@ -625,6 +626,29 @@ final class CoreModel: ObservableObject {
         ready && !appLock.concealed && settingsDataPresented && !busy && !retryNeeded
             && dataSettingRequest == nil && !dataSettingAwaitingRefresh && !diagnosticsFileBusy
             && diagnosticsCacheIsCurrent && diagnosticsReadError == nil && !backupTransferActive
+    }
+
+    @Published private(set) var settingsNotificationsPresented = false
+    @Published private(set) var notificationSettings: CoreObject = [:]
+    @Published private(set) var notificationSettingError: String?
+    @Published private(set) var notificationSettingReadError: String?
+    @Published private(set) var notificationSettingAwaitingRefresh = false
+    private var notificationSettingExpected: CoreObject = [:]
+    private var notificationSettingsSession = UUID()
+    private var notificationSettingRequest: String?
+    private var notificationSettingEdit: CoreObject = [:]
+    private var notificationSettingHost: CoreHost?
+    private var notificationSettingOwner: UUID?
+    private var notificationSettingTask: Task<Void, Never>?
+    private var notificationSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
+    private var notificationSettingsApplicationActive = false
+    var notificationSettingActive: Bool {
+        notificationSettingOwner != nil || notificationSettingRequest != nil || notificationSettingAwaitingRefresh
+    }
+    var notificationSettingEnabled: Bool {
+        ready && selectedSurface == .settings && settingsNotificationsPresented && !appLock.concealed
+            && !busy && !retryNeeded && !notificationSettingActive && notificationSettingReadError == nil
+            && !notificationSettings.isEmpty
     }
 
     @Published private(set) var settingsGeneralPresented = false
@@ -1203,6 +1227,7 @@ final class CoreModel: ObservableObject {
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
+                retireNotificationSettingsPage()
                 retireReminderLifecycleHost(oldValue)
                 cancelForegroundSync()
                 foregroundSyncIntent = nil
@@ -4681,6 +4706,9 @@ final class CoreModel: ObservableObject {
             } else if recovery.text("method") == "dataSetting" {
                 selectedSurface = .settings
                 settingsDataPresented = true
+            } else if recovery.text("method") == "notificationSettingCommit" {
+                selectedSurface = .settings
+                settingsNotificationsPresented = true
             } else if ["generalPreferenceCommit", "appLockCommit"].contains(recovery.text("method")) {
                 selectedSurface = .settings
                 settingsGeneralPresented = true
@@ -4833,7 +4861,7 @@ final class CoreModel: ObservableObject {
             && projectAttachmentDownloadOwner == nil
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
-            && !settingsAboutPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsAboutPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
     // Independent from the Inbox-only Sync opportunity. App Lock may be enabled and authenticated.
@@ -5296,6 +5324,7 @@ final class CoreModel: ObservableObject {
         settingsManageRequested = false
         settingsReadError = nil
         settingsSearch = ""
+        retireNotificationSettingsPage()
         settingsGeneralPresented = false
         settingsAboutPresented = false
         invalidateAboutLinkOpening()
@@ -5337,7 +5366,7 @@ final class CoreModel: ObservableObject {
     }
 
     func setSettingsSearch(_ value: String) {
-        guard selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
+        guard !settingsNotificationsPresented, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
         settingsSearch = value
         settingsReadError = nil
         settingsSearchGeneration += 1
@@ -5484,7 +5513,7 @@ final class CoreModel: ObservableObject {
 
     func openSyncSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncPresented,
-              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
               !settingsSyncRestartRequired, !appLock.concealed, settingsSyncEncryptionOwner == nil else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
@@ -5894,7 +5923,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openGtdSettings() async {
-        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
+        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGtdPresented = true
@@ -6709,7 +6738,7 @@ final class CoreModel: ObservableObject {
 
     func openDataSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !appLock.concealed,
-              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
+              !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsDataPresented = true
@@ -6885,7 +6914,7 @@ final class CoreModel: ObservableObject {
 
     func openAboutSettings() {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncRestartRequired,
-              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented,
               !settingsGtdPresented, !settingsDataPresented, !settingsSyncPresented, !appLock.concealed else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
@@ -7300,8 +7329,221 @@ final class CoreModel: ObservableObject {
         openOwnedAboutURL(url, host: currentHost)
     }
 
+    func openNotificationSettings() async {
+        guard ready, selectedSurface == .settings, !settingsNotificationsPresented, !settingsAboutPresented,
+              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
+              !settingsSyncPresented, !busy, !retryNeeded, !notificationSettingActive, !appLock.concealed else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        notificationSettingsSession = UUID()
+        settingsNotificationsPresented = true
+        notificationSettingsApplicationActive = UIApplication.shared.applicationState == .active
+        notificationSettingError = nil
+        notificationSettingReadError = nil
+        notificationSettings = [:]
+        notificationSettingExpected = [:]
+        busy = true
+        defer { finishOperation() }
+        do { try await readNotificationSettings() }
+        catch { notificationSettingReadError = error.localizedDescription }
+    }
+
+    func closeNotificationSettings() {
+        guard settingsNotificationsPresented, !busy, !retryNeeded, !notificationSettingActive else { return }
+        retireNotificationSettingsPage()
+    }
+
+    private func retireNotificationSettingsPage() {
+        cancelNotificationSettingsIntent()
+        settingsNotificationsPresented = false
+        notificationSettings = [:]
+        notificationSettingExpected = [:]
+        notificationSettingReadError = nil
+        notificationSettingAwaitingRefresh = false
+    }
+
+    func notificationSettingsWillResignActive() {
+        notificationSettingsApplicationActive = false
+    }
+
+    func notificationSettingsDidBecomeActive() {
+        notificationSettingsApplicationActive = true
+        guard let waiter = notificationSettingWaiter else { return }
+        notificationSettingWaiter = nil
+        let current = notificationSettingsCurrent(owner: waiter.owner)
+        waiter.continuation.resume(returning: current)
+        if !current { notificationSettingTask?.cancel() }
+    }
+
+    func cancelNotificationSettingsIntent() {
+        notificationSettingsApplicationActive = false
+        notificationSettingsSession = UUID()
+        notificationSettingTask?.cancel()
+        if let waiter = notificationSettingWaiter {
+            notificationSettingWaiter = nil
+            waiter.continuation.resume(returning: false)
+        }
+        // The accepted native callback owns busy until it drains, even after page retirement.
+    }
+
+    private func notificationSettingsCurrent(owner: UUID) -> Bool {
+        notificationSettingOwner == owner && host === notificationSettingHost && ready
+            && selectedSurface == .settings && settingsNotificationsPresented && !appLock.concealed
+            && notificationSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+
+    private func waitForNotificationSettingsReadmission(owner: UUID, session: UUID) async -> Bool {
+        guard !Task.isCancelled, notificationSettingsSession == session,
+              notificationSettingOwner == owner, host === notificationSettingHost,
+              ready, selectedSurface == .settings, settingsNotificationsPresented, !appLock.concealed else { return false }
+        if notificationSettingsCurrent(owner: owner) { return true }
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, notificationSettingsSession == session,
+                      notificationSettingOwner == owner, host === notificationSettingHost,
+                      ready, selectedSurface == .settings, settingsNotificationsPresented, !appLock.concealed else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                if notificationSettingsCurrent(owner: owner) { continuation.resume(returning: true) }
+                else { notificationSettingWaiter = (owner, continuation) }
+            }
+        }, onCancel: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.notificationSettingWaiter?.owner == owner else { return }
+                let waiter = self.notificationSettingWaiter
+                self.notificationSettingWaiter = nil
+                waiter?.continuation.resume(returning: false)
+            }
+        })
+    }
+
+    private func readNotificationSettings() async throws {
+        guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
+        let session = notificationSettingsSession
+        let options = try decode(try await currentHost.readNotificationSettingsOptions())
+        guard host === currentHost, settingsNotificationsPresented, selectedSurface == .settings,
+              session == notificationSettingsSession, !appLock.concealed else { throw CocoaError(.userCancelled) }
+        let model = options.object("model"), expected = options.object("expected")
+        let fields: Set<String> = ["notificationsEnabled", "startDateNotificationsEnabled", "dueDateNotificationsEnabled",
+            "weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled", "weeklyReviewDay",
+            "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime"]
+        guard Set(options.keys) == Set(["model", "expected"]), !model.text("title").isEmpty,
+              model["task"] is CoreObject, model["weekly"] is CoreObject, model["digest"] is CoreObject,
+              model["text"] is CoreObject, Set(expected.keys) == fields,
+              expected.values.allSatisfy({ value in
+                  guard let witness = value as? CoreObject, Set(witness.keys) == Set(["present", "value"]),
+                        let present = witness["present"] as? NSNumber, CFGetTypeID(present) == CFBooleanGetTypeID() else { return false }
+                  return present.boolValue || witness["value"] is NSNull
+              }) else { throw CocoaError(.coderReadCorrupt) }
+        notificationSettings = model
+        notificationSettingExpected = expected
+        notificationSettingReadError = nil
+        notificationSettingAwaitingRefresh = false
+    }
+
+    func saveNotificationSetting(_ edit: CoreObject) {
+        guard notificationSettingEnabled, let currentHost = host,
+              let expected = notificationSettingExpected[edit.text("type")] as? CoreObject else { return }
+        do {
+            notificationSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected])
+            notificationSettingEdit = edit
+            notificationSettingHost = currentHost
+            beginNotificationSettingOperation(retry: false)
+        } catch { notificationSettingError = error.localizedDescription }
+    }
+
+    private func beginNotificationSettingOperation(retry: Bool) {
+        guard !busy, notificationSettingOwner == nil, let request = notificationSettingRequest,
+              let currentHost = notificationSettingHost, host === currentHost, ready, !appLock.concealed else { return }
+        let owner = UUID(), session = notificationSettingsSession
+        notificationSettingOwner = owner
+        notificationSettingError = nil
+        busy = true
+        notificationSettingTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.notificationSettingOwner == owner {
+                    self.notificationSettingOwner = nil
+                    self.notificationSettingTask = nil
+                    if let waiter = self.notificationSettingWaiter, waiter.owner == owner {
+                        self.notificationSettingWaiter = nil
+                        waiter.continuation.resume(returning: false)
+                    }
+                    self.finishOperation()
+                }
+            }
+            do {
+                let reply: String
+                if retry {
+                    if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
+                    else { reply = try await currentHost.probeNotificationSettingOutcome(requestJSON: request) }
+                } else {
+                    reply = try await currentHost.setNotificationSetting(requestJSON: request, readmission: { [weak self] in
+                        guard let self else { return false }
+                        return await self.waitForNotificationSettingsReadmission(owner: owner, session: session)
+                    })
+                }
+                try self.acknowledgeNotificationSetting(self.decode(reply), request: request, from: currentHost)
+                if !Task.isCancelled { await self.refreshNotificationSettings() }
+            } catch { await self.handleNotificationSettingError(error, request: request, from: currentHost) }
+        }
+    }
+
+    private func acknowledgeNotificationSetting(_ result: CoreObject, request: String, from currentHost: CoreHost) throws {
+        guard notificationSettingRequest == request, notificationSettingHost === currentHost,
+              Set(result.keys) == Set(["type", "value", "changed"]), result.text("type") == notificationSettingEdit.text("type"),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+              try json(["value": result["value"] ?? NSNull()]) == json(["value": notificationSettingEdit["value"] ?? NSNull()]) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        notificationSettingRequest = nil
+        notificationSettingHost = nil
+        notificationSettingEdit = [:]
+        notificationSettingAwaitingRefresh = settingsNotificationsPresented
+        notificationSettingError = nil
+        retryNeeded = false
+        error = nil
+    }
+
+    private func handleNotificationSettingError(_ failure: Error, request: String, from currentHost: CoreHost) async {
+        guard notificationSettingRequest == request, notificationSettingHost === currentHost else { return }
+        notificationSettingError = failure.localizedDescription
+        if isDefiniteRejection(failure) {
+            notificationSettingRequest = nil
+            notificationSettingHost = nil
+            notificationSettingEdit = [:]
+            notificationSettingAwaitingRefresh = settingsNotificationsPresented
+            retryNeeded = false
+            error = nil
+            if !Task.isCancelled { await refreshNotificationSettings() }
+        } else {
+            retryNeeded = true
+            error = failure.localizedDescription
+        }
+    }
+
+    private func refreshNotificationSettings() async {
+        guard settingsNotificationsPresented, selectedSurface == .settings, !appLock.concealed,
+              notificationSettingRequest == nil else { return }
+        do { try await readNotificationSettings() }
+        catch { notificationSettingReadError = error.localizedDescription }
+    }
+
+    func retryNotificationSettings() {
+        guard !busy, notificationSettingOwner == nil, !appLock.concealed else { return }
+        if notificationSettingRequest != nil { beginNotificationSettingOperation(retry: true); return }
+        guard settingsNotificationsPresented else { return }
+        busy = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.finishOperation() }
+            await self.refreshNotificationSettings()
+        }
+    }
+
     func openGeneralSettings() async {
-        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded else { return }
+        guard !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGeneralPresented = true
@@ -7654,7 +7896,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openManageSettings() async {
-        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded,
+        guard !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded,
               !somedaySectionDeleteActive, !somedaySectionOrderActive, !settingsAreaDeleteActive,
               !unassignedAreaColorActive else { return }
         settingsSearchTask?.cancel()
@@ -19824,7 +20066,7 @@ final class CoreModel: ObservableObject {
             && projectDuplicateRequest == nil && projectLifecycleRequest == nil
             && projectDeleteRequest == nil && projectDeleteUndoRequest == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsSyncChecking
-            && !settingsManagePresented && !settingsAboutPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsManagePresented && !settingsAboutPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
     func downloadProjectAttachment(_ attachmentID: String) {
@@ -24695,6 +24937,7 @@ final class CoreModel: ObservableObject {
     }
 
     func retry() async {
+        if notificationSettingRequest != nil { retryNotificationSettings(); return }
         if projectFileAvailabilityPending {
             await retryProjectFileAvailability()
             return
@@ -26922,6 +27165,10 @@ final class CoreModel: ObservableObject {
                 if diagnosticsSession == nil { beginDiagnostics(owner: settingsDiagnosticsOwner) }
                 do { try await readDataSettings() }
                 catch { diagnosticsReadError = error.localizedDescription; throw error }
+            }
+            if settingsNotificationsPresented {
+                do { try await readNotificationSettings() }
+                catch { notificationSettingReadError = error.localizedDescription; throw error }
             }
             if settingsGeneralPresented {
                 do { try await readGeneralSettings() }

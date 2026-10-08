@@ -9205,6 +9205,99 @@ final class FoundationUITests: XCTestCase {
         }
     }
 
+    // This regression must also reveal disabled dependency rows without waiting for enabled state.
+    private func task442Reveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement, requireEnabled: Bool = true) {
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        func viewport() -> CGRect { scroll.frame.intersection(app.frame) }
+        func fullyVisible() -> Bool {
+            guard element.exists else { return false }
+            let frame = element.frame
+            let visible = viewport()
+            return frame.width > 0 && frame.height > 0
+                && frame.minY >= visible.minY - 0.001 && frame.maxY <= visible.maxY + 0.001
+                && (!requireEnabled || element.isHittable)
+        }
+        for _ in 0..<40 {
+            if fullyVisible() { break }
+            let visible = viewport()
+            XCTAssertGreaterThan(visible.height, 0)
+            let exists = element.exists
+            let above = exists && element.frame.minY < visible.minY
+            let startY = visible.minY + visible.height * (exists ? (above ? 0.3 : 0.7) : 0.85)
+            let needed = exists ? (above ? visible.minY - element.frame.minY : element.frame.maxY - visible.maxY) + 4 : visible.height * 0.7
+            let distance = min(max(44, needed + 24), visible.height * (exists ? 0.4 : 0.7))
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            // Keep drags off the switches and away from the trailing scroll indicator.
+            let start = origin.withOffset(CGVector(dx: visible.minX + visible.width * 0.2, dy: startY))
+            start.press(forDuration: 0.05,
+                thenDragTo: origin.withOffset(CGVector(dx: visible.minX + visible.width * 0.2, dy: startY + (above ? distance : -distance))),
+                withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(element.exists, element.identifier)
+        if requireEnabled { boardEnabled(element); XCTAssertTrue(element.isHittable, element.identifier) }
+        XCTAssertTrue(fullyVisible(), "\(element.identifier): row \(element.frame), viewport \(scroll.frame)")
+    }
+
+    // Externally stage an isolated library: task master OFF, weekly ON/day Sunday,
+    // morning/evening digest ON, App Lock OFF. These cases never enable a toggle or request permission.
+    private func task442Notifications(_ suffix: String, largest: Bool) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_NOTIFICATIONS_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"] }
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        let settings = app.buttons["menu-settings"]
+        if !settings.isHittable {
+            task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+        }
+        boardTap(app, "menu-settings")
+        task442Reveal(app, app.buttons["settings-notifications"], in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-notifications")
+        let scroll = app.scrollViews["notifications-scroll"]
+        let master = app.switches["notifications-notificationsEnabled"]
+        boardEnabled(master, timeout: 30); XCTAssertEqual(master.value as? String, "0")
+        for type in ["startDateNotificationsEnabled", "dueDateNotificationsEnabled"] {
+            let toggle = app.switches["notifications-" + type]
+            task442Reveal(app, toggle, in: scroll, requireEnabled: false); XCTAssertFalse(toggle.isEnabled)
+            XCTAssertEqual(toggle.value as? String, "0")
+        }
+        for type in ["weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled"] {
+            let toggle = app.switches["notifications-" + type]
+            task442Reveal(app, toggle, in: scroll); boardEnabled(toggle)
+            XCTAssertEqual(toggle.value as? String, "1")
+        }
+        let day = app.buttons["notifications-weeklyReviewDay"]
+        task442Reveal(app, day, in: scroll); boardTap(app, "notifications-weeklyReviewDay")
+        let saturday = app.buttons["notifications-day-6"]
+        if !largest { app.scrollViews["notifications-picker-scroll"].swipeUp() }
+        task442Reveal(app, saturday, in: app.scrollViews["notifications-picker-scroll"])
+        XCTAssertGreaterThanOrEqual(saturday.frame.height, 44 - 0.001); saturday.tap()
+        boardTap(app, "notifications-picker-cancel")
+        boardTap(app, "notifications-weeklyReviewDay")
+        XCTAssertTrue(app.buttons["notifications-day-0"].isSelected)
+        if !largest { app.scrollViews["notifications-picker-scroll"].swipeUp() }
+        task442Reveal(app, saturday, in: app.scrollViews["notifications-picker-scroll"])
+        saturday.tap(); boardTap(app, "notifications-picker-done")
+        boardEnabled(app.buttons["notifications-back"], timeout: 30)
+        boardTap(app, "notifications-weeklyReviewDay")
+        if !largest { app.scrollViews["notifications-picker-scroll"].swipeUp() }
+        task442Reveal(app, saturday, in: app.scrollViews["notifications-picker-scroll"])
+        XCTAssertTrue(saturday.isSelected); boardTap(app, "notifications-picker-cancel")
+        let time = app.buttons["notifications-weeklyReviewTime"]
+        task442Reveal(app, time, in: scroll); let before = time.label
+        boardTap(app, "notifications-weeklyReviewTime")
+        XCTAssertTrue(app.datePickers["notifications-time-wheel"].waitForExistence(timeout: 10))
+        boardTap(app, "notifications-picker-cancel"); XCTAssertEqual(time.label, before)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = largest ? "Notifications largest dark" : "Notifications normal"; shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "notifications-back"); XCTAssertTrue(app.buttons["settings-notifications"].exists)
+    }
+
+    func testNativeNotificationsSettingsNormalDrafts() throws { try task442Notifications("NORMAL", largest: false) }
+    func testNativeNotificationsSettingsLargestDrafts() throws { try task442Notifications("LARGEST", largest: true) }
+
     private func task97Normal(_ library: String) {
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]
         app.launch(); task97Open(app)

@@ -820,6 +820,9 @@ describe('canonical local reads contract', () => {
         // Requeues the raw saved snapshot owned by commitPreparedAppLock after
         // a failed save; the SQLite recovery test checks its exact contents.
         'retryPreparedAppLockSnapshot',
+        // Exact raw snapshot retry of the notification write covered below;
+        // actual failed-save and foreign-failure ownership are checked in SQLite tests.
+        'retryPreparedNotificationSettingSnapshot',
     ]);
 
     it('leaves a canonical document after every store write action', async () => {
@@ -1191,6 +1194,24 @@ describe('canonical local reads contract', () => {
                 });
                 expect(nativeValue(await host.commitPreparedAppLock({ request, prepared: planned.prepared })))
                     .toEqual({ changed: true, value: request.value });
+            },
+            commitPreparedNotificationSetting: async (control) => {
+                const host = await nativeHost(control);
+                const options = nativeValue(await host.getNotificationSettingsOptions({}));
+                const request = { requestId: '0f5deea3-9ef2-4386-bf43-27a176f98442',
+                    edit: { type: 'notificationsEnabled' as const, value: !options.model.task.master.value },
+                    expected: options.expected.notificationsEnabled };
+                const planned = nativeValue(await host.prepareNotificationSetting(request));
+                expect(planned.kind).toBe('prepared');
+                if (planned.kind !== 'prepared') return;
+                const before = useTaskStore.getState().settings;
+                control.expectPersisted((written) => {
+                    expect(written.settings).toEqual({ ...before, notificationsEnabled: request.edit.value });
+                    expect(written.tasks).toHaveLength(settled.tasks.length);
+                    expect(written.projects).toHaveLength(settled.projects.length);
+                });
+                expect(nativeValue(await host.commitPreparedNotificationSetting({ request, prepared: planned.prepared })))
+                    .toEqual({ type: request.edit.type, value: request.edit.value, changed: true });
             },
             commitPreparedArchivedTaskRestore: async (control) => {
                 const host = await nativeHost(control);

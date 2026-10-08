@@ -76,6 +76,7 @@ public final class CoreHost: @unchecked Sendable {
     private let engine: Engine
     private let localAttachmentRequests = NativeAttachmentLocalRequests()
     private let reminderEffects = NativeReminderEffects()
+    private let notificationAuthorization = NativeNotificationAuthorization()
 
     public init(databaseURL: URL, bundleURL: URL,
                 deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
@@ -192,6 +193,7 @@ public final class CoreHost: @unchecked Sendable {
 
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
         guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard !Engine.notificationSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade") }
         return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
@@ -599,7 +601,71 @@ public final class CoreHost: @unchecked Sendable {
 
     public func cancelAppLockRecovery() async throws { try await perform { try $0.cancelAppLockRecovery() } }
 
-    /// Explicit owned effects only. No App lifecycle, permission prompt or caller-supplied policy.
+    public func readNotificationSettingsOptions() async throws -> String {
+        try await perform { try $0.readNotificationSettingsOptions() }
+    }
+
+    public func probeNotificationSettingOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeNotificationSettingOutcome(requestJSON: requestJSON) }
+    }
+
+    /// The trusted App closure waits for the same active page/host intent and observes cancellation.
+    /// A temporary permission-sheet inactivity is not cancellation; real background/navigation is.
+    public func setNotificationSetting(requestJSON: String,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> String {
+        let owner = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation()
+        localAttachmentRequests.register(cancellation, id: owner)
+        defer { localAttachmentRequests.remove(owner); notificationAuthorization.finish(owner) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler {
+            let result: Result<String, Error>
+            var retryPending = false
+            do {
+                let admission = try await perform { try $0.beginNotificationSetting(owner, requestJSON: requestJSON, cancellation: cancellation) }
+                retryPending = admission.retryPending
+                if let replay = admission.replay { result = .success(replay) }
+                else {
+                    do {
+                        guard !cancellation.isCancelled,
+                              await notificationAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+                        }
+                        if admission.requiresAuthorization {
+                            do {
+                                try await admission.request(); try cancellation.check()
+                            } catch {
+                                if cancellation.isCancelled { throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current") }
+                                throw CoreHostRejection(message: "ACTION_FAILED: Notification authorization is unavailable")
+                            }
+                        }
+                        if admission.requiresAuthorization {
+                            let permission: NativeNotificationPermission
+                            do { permission = try await admission.read(); try cancellation.check() }
+                            catch {
+                                if cancellation.isCancelled { throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current") }
+                                throw CoreHostRejection(message: "ACTION_FAILED: Notification authorization is unavailable")
+                            }
+                            guard permission.granted else { throw CoreHostRejection(message: "ACTION_FAILED: Notification permission was not granted") }
+                        }
+                        guard await notificationAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+                        }
+                    } catch {
+                        if admission.retryPending { throw HostFailure("Notification save still requires exact retry") }
+                        throw error
+                    }
+                    result = .success(try await perform { try $0.commitNotificationSetting(owner) })
+                }
+            } catch is CancellationError {
+                if retryPending { result = .failure(HostFailure("Notification save still requires exact retry")) }
+                else { result = .failure(CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")) }
+            } catch { result = .failure(error) }
+            // Exact owner retirement must run even after caller cancellation; no mutation is admitted here.
+            _ = try? await perform(reminderOwned: true) { $0.finishNotificationSetting(owner) }
+            return try result.get()
+        } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(owner) }
+    }
+
     public func observeReminders(_ callback: @escaping @Sendable (NativeReminderWake) -> Void) async throws -> NativeReminderObserverRegistration {
         try await perform(reminderOwned: true) { try $0.observeReminders(callback) }
     }
@@ -724,6 +790,7 @@ public final class CoreHost: @unchecked Sendable {
         localAttachmentRequests.close()
         _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(nil) }
         await reminderEffects.closeAndDrain()
+        await notificationAuthorization.closeAndDrain()
         await withCheckedContinuation { continuation in
             queue.async { [engine] in
                 engine.shutdown()
@@ -1198,6 +1265,24 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var reminderEffectsTurn: ReminderEffectsTurn?
+    private final class NotificationSettingTurn {
+        let id: UUID
+        let runtime: JSContext
+        let generation: UInt64
+        let requestJSON: String
+        let cancellation: NativeAttachmentCancellation
+        let retryPending: Bool
+        init(id: UUID, runtime: JSContext, generation: UInt64, requestJSON: String,
+             cancellation: NativeAttachmentCancellation, retryPending: Bool) {
+            self.id = id; self.runtime = runtime; self.generation = generation; self.requestJSON = requestJSON
+            self.cancellation = cancellation; self.retryPending = retryPending
+        }
+    }
+    private var notificationSettingTurn: NotificationSettingTurn?
+    private var notificationSettingOwnerAccess = false
+    fileprivate static let notificationSettingMethods: Set<String> = ["notificationSetting", "notificationSettingOptions",
+        "notificationSettingPrepare", "notificationSettingValidate", "notificationSettingCommit", "notificationSettingRetryOutcome",
+        "notificationSettingAcknowledged"]
     private var reminderOwnerAccess = false
     private var reminderSourceStale = false
     private final class ReminderObserver {
@@ -1392,6 +1477,7 @@ private final class Engine: @unchecked Sendable {
     private var startupBackupDocumentResult: String?
     private var startupDataSettingResult: String?
     private var startupGeneralPreferenceResult: String?
+    private var startupNotificationSettingResult: String?
     private var startupTaxonomyResult: String?
     private var startupPersonEditResult: String?
     private var startupPersonDeleteResult: String?
@@ -1447,6 +1533,7 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
+        "notificationSetting": 1,
         "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
@@ -1513,7 +1600,7 @@ private final class Engine: @unchecked Sendable {
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -1862,6 +1949,10 @@ private final class Engine: @unchecked Sendable {
                 _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateGtdWorkflowAcknowledgment(command, value: value) }
             }
+            if let command = pending, command.method == "notificationSettingCommit" {
+                _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateNotificationSettingAcknowledgment(command, value: value) }
+            }
             if let command = pending, command.method == "generalPreferenceCommit" {
                 _ = try invoke("generalPreferenceValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateGeneralPreferenceAcknowledgment(command, value: value) }
@@ -2148,6 +2239,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringGtdWorkflow = pending?.method == "gtdWorkflowCommit"
         let recoveringDataSetting = pending?.method == "dataSetting"
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
+        let recoveringNotificationSetting = pending?.method == "notificationSettingCommit"
         let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
         let recoveringPersonEdit = pending?.method == "managePersonEditCommit"
         let recoveringPersonDelete = pending?.method == "managePersonDeleteCommit"
@@ -2255,6 +2347,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringGtdWorkflow, let terminal, case .success(let value) = terminal { startupGtdWorkflowResult = value }
         if recoveringDataSetting, let terminal, case .success(let value) = terminal { startupDataSettingResult = value }
         if recoveringGeneralPreference, let terminal, case .success(let value) = terminal { startupGeneralPreferenceResult = value }
+        if recoveringNotificationSetting, let terminal, case .success(let value) = terminal { startupNotificationSettingResult = value }
         if recoveringTaxonomy, let terminal, case .success(let value) = terminal { startupTaxonomyResult = value }
         if recoveringPersonEdit, let terminal, case .success(let value) = terminal { startupPersonEditResult = value }
         if recoveringPersonDelete, let terminal, case .success(let value) = terminal { startupPersonDeleteResult = value }
@@ -2310,7 +2403,9 @@ private final class Engine: @unchecked Sendable {
         let recoveredSomedaySections = startupSomedaySectionCreateResult ?? startupSomedaySectionRenameResult
             ?? startupSomedaySectionDeleteResult ?? startupSomedaySectionOrderResult
             ?? startupSomedaySectionTaskResult
-        let recoveredManage = startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
+        let recoveredSettings = startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult
+            ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupNotificationSettingResult
+        let recoveredManage = recoveredSettings ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
             ?? startupPersonDeleteResult ?? startupPersonEditResult ?? startupTaxonomyResult
         let recoveredDoneRows = startupDoneTaskCompletedAtResult ?? startupDoneTaskStatusResult
         let recoveredHistoryRows = startupArchiveTaskCompletedAtResult ?? recoveredDoneRows
@@ -2393,6 +2488,7 @@ private final class Engine: @unchecked Sendable {
                 : startupBackupDocumentResult != nil ? "backupDocumentCommit"
                 : startupDataSettingResult != nil ? "dataSetting"
                 : startupGeneralPreferenceResult != nil ? "generalPreferenceCommit"
+                : startupNotificationSettingResult != nil ? "notificationSettingCommit"
                 : startupTaxonomyResult != nil ? "manageTaxonomyCommit"
                 : startupPersonEditResult != nil ? "managePersonEditCommit"
                 : startupPersonDeleteResult != nil ? "managePersonDeleteCommit"
@@ -2497,6 +2593,7 @@ private final class Engine: @unchecked Sendable {
         startupBackupDocumentResult = nil
         startupDataSettingResult = nil
         startupGeneralPreferenceResult = nil
+        startupNotificationSettingResult = nil
         startupTaxonomyResult = nil
         startupPersonEditResult = nil
         startupPersonDeleteResult = nil
@@ -2821,6 +2918,146 @@ private final class Engine: @unchecked Sendable {
         return try invoke("iosSubmitFeedback", arguments: [requestJSON, encoded, endpoint], localCancellation: cancellation)
     }
 
+    private static let notificationSettingFields = Set(["notificationsEnabled", "startDateNotificationsEnabled",
+        "dueDateNotificationsEnabled", "weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled",
+        "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "weeklyReviewDay"])
+    private static func notificationSettingRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 8_192,
+              let input = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(input.keys) == Set(["requestId", "edit", "expected"]),
+              let id = input["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let edit = input["edit"] as? [String: Any], Set(edit.keys) == Set(["type", "value"]),
+              let type = edit["type"] as? String, notificationSettingFields.contains(type),
+              let expected = input["expected"] as? [String: Any], Set(expected.keys) == Set(["present", "value"]),
+              isBoolean(expected["present"]), expected["value"] != nil,
+              expected["present"] as? Bool == true || expected["value"] is NSNull else {
+            throw HostFailure("INVALID_INPUT: Notification setting needs a bounded typed edit, witness and lowercase UUID")
+        }
+        let valid: Bool
+        if type == "weeklyReviewDay" {
+            valid = isInteger(edit["value"]) && (edit["value"] as? NSNumber).map { (0...6).contains($0.doubleValue) } == true
+        } else if ["weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime"].contains(type) {
+            valid = (edit["value"] as? String).map { $0.range(of: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", options: .regularExpression) != nil } == true
+        } else { valid = isBoolean(edit["value"]) }
+        guard valid else { throw HostFailure("INVALID_INPUT: Notification setting value is malformed") }
+        return input
+    }
+    private func validateNotificationSettingRequest(_ raw: String) throws -> [String: Any] {
+        let request = try Self.notificationSettingRequest(raw)
+        let envelope = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["request": request, "prepared": ["version": 1, "request": request]], options: [.sortedKeys]), as: UTF8.self)
+        _ = try invoke("notificationSettingValidate", arguments: [envelope])
+        return request
+    }
+    func readNotificationSettingsOptions() throws -> String {
+        _ = try requireDeviceStorageAdmission()
+        let value = try invoke("notificationSettingOptions", arguments: ["{}"])
+        guard value.utf8.count <= 65_536, let object = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(object.keys) == Set(["model", "expected"]), object["model"] is [String: Any],
+              let expected = object["expected"] as? [String: Any], Set(expected.keys) == Self.notificationSettingFields else {
+            throw HostFailure("Malformed Notification Settings options")
+        }
+        return value
+    }
+    func probeNotificationSettingOutcome(requestJSON: String) throws -> String {
+        _ = try requireDeviceStorageAdmission()
+        do {
+            let request = try validateNotificationSettingRequest(requestJSON)
+            let value = try invoke("notificationSettingRetryOutcome", arguments: [requestJSON])
+            try validateNotificationSettingResult(try Self.projectObject(value, maximum: 1024), request: request, changed: true)
+            return value
+        } catch let error as HostFailure {
+            if error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+                throw CoreHostRejection(message: error.message)
+            }
+            throw error
+        }
+    }
+    func beginNotificationSetting(_ id: UUID, requestJSON: String,
+        cancellation: NativeAttachmentCancellation) throws -> NativeNotificationSettingAdmission {
+        guard notificationSettingTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+              let context else { throw CoreHostRejection(message: "NOT_READY: Notification edit is unavailable") }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        let request: [String: Any]
+        do { request = try validateNotificationSettingRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        let retry = pending != nil
+        if let pending {
+            guard pending.method == "notificationSettingCommit", let raw = try journalArguments(pending).first as? String,
+                  let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                  Self.equalJSON(envelope["request"], request) else { throw HostFailure("Previous changes require their exact retry") }
+        } else {
+            do {
+                let replay = try invoke("notificationSettingRetryOutcome", arguments: [requestJSON])
+                try validateNotificationSettingResult(try Self.projectObject(replay, maximum: 1024), request: request, changed: true)
+                return .init(replay: replay, requiresAuthorization: false, retryPending: false,
+                    request: { }, read: { await NativeNotificationPermission.read() })
+            } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
+            catch let error as HostFailure where error.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: error.message) }
+            let raw = try readNotificationSettingsOptions()
+            guard let options = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                  let expected = options["expected"] as? [String: Any], let edit = request["edit"] as? [String: Any],
+                  let type = edit["type"] as? String, Self.equalJSON(expected[type], request["expected"]) else {
+                throw CoreHostRejection(message: "STALE_REVISION: Notification setting changed; refresh Notifications")
+            }
+        }
+        if cancellation.isCancelled {
+            if retry { throw HostFailure("Notification save still requires exact retry") }
+            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+        }
+        notificationSettingTurn = .init(id: id, runtime: context, generation: attachmentGeneration,
+            requestJSON: requestJSON, cancellation: cancellation, retryPending: retry)
+        var requester: NativeNotificationAuthorization.Requester = { try await NativeNotificationAuthorization.request() }
+        var reader: NativeNotificationPermission.Reader = { await NativeNotificationPermission.read() }
+        #if DEBUG
+        if let injected = faults?.notificationAuthorizationRequest { requester = injected }
+        if let injected = faults?.notificationPermissionRead { reader = injected }
+        #endif
+        return .init(replay: nil, requiresAuthorization: !retry && Self.isBoolean((request["edit"] as? [String: Any])?["value"])
+            && (request["edit"] as? [String: Any])?["value"] as? Bool == true,
+            retryPending: retry, request: requester, read: reader)
+    }
+    func commitNotificationSetting(_ id: UUID) throws -> String {
+        guard let turn = notificationSettingTurn, turn.id == id, context === turn.runtime,
+              attachmentGeneration == turn.generation, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+        }
+        if turn.cancellation.isCancelled {
+            if turn.retryPending { throw HostFailure("Notification save still requires exact retry") }
+            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+        }
+        notificationSettingOwnerAccess = true; defer { notificationSettingOwnerAccess = false }
+        if turn.retryPending {
+            guard let terminal = try resolvePending() else { throw HostFailure("Notification save still requires exact retry") }
+            return try terminal.value()
+        }
+        return try call("notificationSetting", argumentsJSON: String(decoding:
+            JSONSerialization.data(withJSONObject: [turn.requestJSON]), as: UTF8.self))
+    }
+    func finishNotificationSetting(_ id: UUID) {
+        if notificationSettingTurn?.id == id { notificationSettingTurn = nil }
+    }
+    private func validateNotificationSettingResult(_ result: [String: Any], request: [String: Any], changed: Bool? = nil) throws {
+        guard Set(result.keys) == Set(["type", "value", "changed"]), let edit = request["edit"] as? [String: Any],
+              let expected = request["expected"] as? [String: Any], Self.equalJSON(result["type"], edit["type"]),
+              Self.equalJSON(result["value"], edit["value"]), Self.isBoolean(result["changed"]),
+              result["changed"] as? Bool == (changed ?? !(expected["present"] as? Bool == true && Self.equalJSON(expected["value"], edit["value"]))) else {
+            throw HostFailure("Malformed Notification setting result")
+        }
+    }
+    private func validateNotificationSettingAcknowledgment(_ command: PendingCommand, value: String) throws {
+        guard let raw = try journalArguments(command).first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed Notification setting acknowledgment") }
+        try validateNotificationSettingResult(try Self.projectObject(value, maximum: 1024), request: request, changed: true)
+    }
+    private func notificationSettingJournalRequest(_ command: PendingCommand) throws -> String {
+        guard let raw = try journalArguments(command).first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed Notification setting journal") }
+        return String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+    }
+
     func readAboutUpdateState() throws -> String {
         _ = try requireDeviceStorageAdmission()
         return try invoke("iosAboutUpdateState", arguments: [])
@@ -2844,6 +3081,7 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        guard notificationSettingTurn == nil || notificationSettingOwnerAccess else { throw HostFailure("Notification edit is still awaiting its owner") }
         guard reminderEffectsTurn == nil || reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil else { throw Self.taskDownloadFailure }
@@ -6711,6 +6949,10 @@ private final class Engine: @unchecked Sendable {
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         guard reminderEffectsTurn == nil, !Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard (notificationSettingTurn == nil || notificationSettingOwnerAccess),
+              !Self.notificationSettingMethods.contains(method) || (method == "notificationSetting" && notificationSettingOwnerAccess) else {
+            throw CoreHostRejection(message: "NOT_READY: Notification Settings require their current explicit owner")
+        }
         try denyCleanupOwner()
         guard !["projectFileAvailabilityPreflight", "projectFileAvailabilityEncryptionAdmission", "projectFileAvailabilityWritePrepare", "projectFileAvailabilityWriteValidate", "projectFileAvailabilityWriteCommit", "iosProjectFilePrepareAvailability", "projectAttachmentCachedAvailabilityPreflight", "projectAttachmentCachedAvailability"].contains(method) else { throw Self.projectDownloadFailure }
         if started, !closed, pending?.method == Self.projectDownloadMethod || projectDownloadTurn != nil {
@@ -6828,7 +7070,7 @@ private final class Engine: @unchecked Sendable {
             // Mind Sweep has no journal or write before argument validation.
             // Its UI may release an oversized draft only on a definite refusal.
             // With an older command still owed, keep every error uncertain.
-            if ["mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            if ["mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
             throw error
         }
         guard pending == nil else { throw HostFailure("SAVE_FAILED: A pending command requires exact retry") }
@@ -8128,6 +8370,37 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "gtdWorkflowCommit", argumentsJSON: encoded)
                 _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "notificationSetting" {
+            do {
+                let value = try invoke("notificationSettingPrepare", arguments: args)
+                guard notificationSettingTurn?.cancellation.isCancelled == false else {
+                    throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+                }
+                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      let kind = response["kind"] as? String,
+                      let original = args.first as? String,
+                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
+                    throw HostFailure("Malformed Notification setting write preparation")
+                }
+                if kind == "noop" {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
+                        throw HostFailure("Malformed no-write Notification setting result")
+                    }
+                    try validateNotificationSettingResult(result, request: submitted)
+                    return String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self)
+                }
+                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any],
+                      let request = prepared["request"] as? [String: Any], Self.equalJSON(request, submitted) else {
+                    throw HostFailure("Malformed prepared Notification setting write")
+                }
+                let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                guard commit.utf8.count <= 8_192 else { throw HostFailure("INVALID_INPUT: Prepared Notification setting write is too large") }
+                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
+                guard encoded.utf8.count <= 18_192 else { throw HostFailure("INVALID_INPUT: Prepared Notification setting write journal is too large") }
+                command = PendingCommand(version: 2, method: "notificationSettingCommit", argumentsJSON: encoded)
+                _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "generalPreference" {
             do {
                 let value = try invoke("generalPreferencePrepare", arguments: args)
@@ -9086,6 +9359,12 @@ private final class Engine: @unchecked Sendable {
             _ = try ordinaryJournalArguments(command)
             turn.command = command
         }
+        if method == "notificationSetting" {
+            guard let turn = notificationSettingTurn, notificationSettingOwnerAccess, context === turn.runtime,
+                  attachmentGeneration == turn.generation, !turn.cancellation.isCancelled else {
+                throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+            }
+        }
         pending = command
         try persist(command)
         let terminal: TerminalResult
@@ -9115,6 +9394,7 @@ private final class Engine: @unchecked Sendable {
 
     func retryPending() throws -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard notificationSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Notification edit is still awaiting its owner") }
         let command = pending
         let method = command?.method
         let terminal = try resolvePending()
@@ -9218,6 +9498,18 @@ private final class Engine: @unchecked Sendable {
                    recoveryActivationPending { /* Activation still owns this turn. */ }
                 else { retainedOrdinaryTurn = nil }
             }
+        }
+        if command.method == "notificationSettingCommit", recoveryActivationPending {
+            let terminal: TerminalResult
+            do {
+                let value = try invoke("notificationSettingRetryOutcome", arguments: [notificationSettingJournalRequest(command)])
+                try validateNotificationSettingAcknowledgment(command, value: value)
+                terminal = .success(value)
+            } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                // A cold intent without a receipt has no surviving permission or write authority.
+                terminal = .rejected(failure.message)
+            }
+            return try finish(command, with: terminal)
         }
         if let terminal = command.terminal {
             if command.method == "referenceTasksMoveCommit", case .success(let value) = terminal {
@@ -9473,6 +9765,18 @@ private final class Engine: @unchecked Sendable {
         if command.method == "gtdWorkflowCommit" {
             _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateGtdWorkflowAcknowledgment(command, value: value) }
+        }
+        if command.method == "notificationSettingCommit" {
+            _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal {
+                let proven = try invoke("notificationSettingRetryOutcome", arguments: [notificationSettingJournalRequest(command)])
+                try validateNotificationSettingAcknowledgment(command, value: proven)
+                try validateNotificationSettingAcknowledgment(command, value: value)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
+                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Notification setting outcome cannot be verified")
+                }
+            }
         }
         if command.method == "generalPreferenceCommit" {
             _ = try invoke("generalPreferenceValidate", arguments: journalArguments(command))
@@ -10029,6 +10333,9 @@ private final class Engine: @unchecked Sendable {
             else if reviewing { NSLog("Native iOS GTD Review saved releaseCheck=v1.3.4/ios-gtd-review outcome=confirmed") }
             else { NSLog("Native iOS GTD workflow saved releaseCheck=v1.3.4/ios-gtd-workflow outcome=confirmed") }
         }
+        if command.method == "notificationSettingCommit", case .success = terminal {
+            _ = try? invoke("notificationSettingAcknowledged", arguments: [])
+        }
         if command.method == "generalPreferenceCommit", case .success(let value) = terminal {
 #if DEBUG
             faults?.commandDiagnostic?("generalPreferenceApplied")
@@ -10299,7 +10606,7 @@ private final class Engine: @unchecked Sendable {
         return ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:"].contains(where: { message.hasPrefix($0) })
             || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "referenceTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -13392,6 +13699,23 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("gtdWorkflow", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
+        if command.method == "notificationSettingCommit" {
+            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
+            guard command.argumentsJSON.utf8.count <= 49_152,
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 8_192,
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["request", "prepared"]),
+                  let request = input["request"] as? [String: Any],
+                  let prepared = input["prepared"] as? [String: Any],
+                  Self.isInteger(prepared["version"], equalTo: 1),
+                  let original = prepared["request"] as? [String: Any], Self.equalJSON(request, original) else {
+                throw HostFailure("Malformed prepared Notification setting journal")
+            }
+            let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+            _ = try arguments("notificationSetting", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
+            return args
+        }
         if command.method == "generalPreferenceCommit" {
             guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
             guard command.argumentsJSON.utf8.count <= 49_152,
@@ -14954,7 +15278,7 @@ private final class Engine: @unchecked Sendable {
         }
         if ["inboxView", "captureView", "captureEdit", "captureSubmit", "setAreaFilter", "taskView", "taskOpenTab", "taskViewReferenceTarget", "editDraft", "destinationPicker", "search", "mindSweepGuide", "mindSweepAdd",
             "calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome",
-            "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
+            "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
             guard let json = args.first as? String,
                   (try NativeJSON.jsonObject(with: Data(json.utf8))) is [String: Any] else {
                 throw HostFailure("Core input must be a JSON object")
@@ -15529,6 +15853,10 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateSettingsAndAreaArguments(_ method: String, _ args: [Any], _ json: String, allowPreparedDates: Bool) throws {
+        if method == "notificationSetting" {
+            guard let encoded = args.first as? String else { throw HostFailure("INVALID_INPUT: Notification setting requires one request") }
+            _ = try Self.notificationSettingRequest(encoded)
+        }
         if ["appLockOptions", "appLock", "appLockRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 8_192,
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else {
@@ -19794,6 +20122,7 @@ private final class Engine: @unchecked Sendable {
         removeReminderObserver(nil)
         reminderAdmissions.clearOrdinaryReadyWake()
         reminderEffectsTurn = nil
+        notificationSettingTurn = nil; notificationSettingOwnerAccess = false
         reminderOwnerAccess = false
         reminderSourceStale = false
         foregroundCleanupCancellation = nil

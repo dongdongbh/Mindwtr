@@ -286,17 +286,20 @@ private struct AppLockRoot: View {
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         .onAppear {
             lock.sceneChanged(phase)
+            if applicationActive { model.notificationSettingsDidBecomeActive() }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             observedApplicationActive = true
+            model.notificationSettingsDidBecomeActive()
             guard !lock.concealed else { return }
             model.requestForegroundSync(token: model.completedStartupToken, active: true)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             observedApplicationActive = false
+            model.notificationSettingsWillResignActive()
             model.cancelForegroundSync()
             model.cancelReminderLifecycle()
             model.cancelProjectAttachmentDownload()
@@ -308,7 +311,11 @@ private struct AppLockRoot: View {
             if model.appLockActive && !lock.authenticating { lock.readFailed() }
             lock.concealSnapshot()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            model.cancelNotificationSettingsIntent()
+        }
         .onChange(of: phase) { next in
+            if next == .background { model.cancelNotificationSettingsIntent() }
             model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
                 model.cancelForegroundSync()
@@ -329,6 +336,7 @@ private struct AppLockRoot: View {
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
+                model.cancelNotificationSettingsIntent()
                 model.cancelForegroundSync()
                 model.cancelReminderLifecycle()
                 model.cancelProjectAttachmentDownload()
