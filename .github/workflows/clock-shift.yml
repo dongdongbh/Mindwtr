@@ -1,0 +1,49 @@
+name: Clock Shift
+
+# Runs the core and mobile suites with the system clock 60 days ahead, so a test with a fixed
+# date that will age out (auto-archive after 7 days broke main's CI on 2026-10-06) fails here
+# weeks before it breaks the normal CI. Nothing else depends on this workflow.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  clock-shift:
+    runs-on: ubuntu-latest
+    name: Core and mobile tests, clock +60 days
+    timeout-minutes: 45
+    env:
+      TZ: UTC
+      # libfaketime moves only the wall clock; timers and timeouts keep real time.
+      FAKETIME_DONT_FAKE_MONOTONIC: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          sudo apt-get update -q
+          sudo apt-get install -y -q faketime
+
+      - name: Check the shifted clock reaches the test runner
+        run: faketime -f '+60d' node -e 'const d = (Date.now() - Number(process.argv[1]) * 1000) / 86400000; console.log(`shift ${d.toFixed(2)} days`); if (d < 59 || d > 61) process.exit(1)' "$(date +%s)"
+
+      - name: Core tests, clock +60 days
+        run: faketime -f '+60d' bun run --filter @mindwtr/core test
+
+      - name: Mobile tests, clock +60 days
+        if: ${{ !cancelled() }}
+        run: faketime -f '+60d' bun run --filter mobile test
