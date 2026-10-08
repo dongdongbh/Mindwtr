@@ -966,6 +966,7 @@ final class FoundationUITests: XCTestCase {
             let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
             app.launchArguments = arguments + ["--native-project-download-stop-after-filled-once"]
             app.launch()
+            // Preflight the stopped library with scripts/check-project-download-fixture.py (README).
             // Root stages only synthetic SQLite/config in this fresh library; no files or journal.
             // The isolated filled-stage flag starts at Projects to avoid automatic Sync prefetch.
             openActiveProject()

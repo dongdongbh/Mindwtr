@@ -1189,7 +1189,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected;/);
+    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
     assert.match(hostEntry, /const result = await \(iosSelfHostedProjectAttachments \?\? iosManualSync\)\?\.prepareAttachmentAvailableDetailed\?\.\(attachment\);/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
     // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
@@ -1245,7 +1245,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         assert(sites >= 26, 'core\'s receipt payloads parsed');
         // A name is a receipt payload's, or a core write that keeps no payload at all (Settings › Sync's screen commands).
         for (const name of unjournaledCore) assert([...receiptNames.values()].flat().includes(name) || receiptNames.get(name)?.length === 0, `core's unjournaled ${name} is a core write's receipt payload, or a payload-less core write`);
-        const menuKeys = [...table('MENU_COMMANDS').matchAll(/\n    (\w+): \(input\) => contract\.(\w+)\(input\),/g)].map(([, key, write]) => ({ key, writes: [write] }));
+        const menuKeys = [...table('MENU_COMMANDS').matchAll(/\n    (\w+): \((input)?\) => contract\.(\w+)\(\2\),/g)].map(([, key, , write]) => ({ key, writes: [write] }));
         assert.equal(menuKeys.length, table('MENU_COMMANDS').match(/\n    \w+: /g).length, 'every Menu command parsed');
         const keys = [...methods.filter((m) => writes.includes(m.name) && m.name !== 'menuCommand').map((m) => ({ key: m.name, writes: called(m.body) })), ...menuKeys];
         const expected = keys.filter((key) => key.writes.some((write) => unjournaledCore.includes(write) || receiptNames.get(write).some((name) => unjournaledCore.includes(name))))
@@ -1980,7 +1980,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(menuModel, /"savedSearchDelete"\) \+ SETTINGS_KINDS/);
     const kinds = [...[...new RegExp('val MENU_KINDS = setOf\\(([^)]*)\\)').exec(menuModel)[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind),
         ...[...new RegExp('val SETTINGS_KINDS = setOf\\(([^)]*)\\)').exec(source('SettingsModel.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind)];
-    const hostKinds = [...hostEntry.slice(hostEntry.indexOf('const MENU_COMMANDS'), hostEntry.indexOf('};', hostEntry.indexOf('const MENU_COMMANDS'))).matchAll(/^\s+(\w+): \(input\) => contract\.\w+\(input\),$/gm)].map(([, kind]) => kind);
+    const hostKinds = [...hostEntry.slice(hostEntry.indexOf('const MENU_COMMANDS'), hostEntry.indexOf('};', hostEntry.indexOf('const MENU_COMMANDS'))).matchAll(/^\s+(\w+): \((input)?\) => contract\.\w+\(\2\),$/gm)].map(([, kind]) => kind);
     // Settings › Sync's screen commands are Menu commands too, sent by SyncSettings.kt through CoreHost.syncCommand, never by send().
     const syncKinds = [.../val SYNC_COMMANDS = setOf\(([^)]*)\)/.exec(source('SyncSettings.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     // Settings › AI's screen writes too (its open, a key, a base URL), sent by AISettings.kt; its controls' setAISetting is a Settings kind.
@@ -6627,6 +6627,9 @@ assert.equal((await poll(ready, ready.MindwtrHost.boot())).ok, true);
         { title: '合并备份', message: '2 added / 1 updated', undoLabel: 'settings.undoImport', doneLabel: 'common.done' });
     assert.equal((await poll(backup, backup.MindwtrHost.backupSnapshotRestoreModel(snapshotName))).value.message,
         `Restore ${snapshotName}; later edits are rolled back`);
+    assert.deepEqual(await poll(backup, backup.MindwtrHost.backupExportPrepared('json')), { ok: true, value: {} },
+        'completed export callback settles through submit\'s Promise slot');
+    assert.match(backup.logText, /v1\.3\.5\/ios-backup-export/, 'completed export records its fixed marker');
     assert.equal(JSON.stringify({ events: backup.events, saves: backup.saveCount, data: backup.fakeData }), domainBefore,
         'inspection and localized result/confirmation reads neither flush nor mutate domain state');
     let release;

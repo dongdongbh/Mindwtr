@@ -353,7 +353,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     private func lockedHost(_ faults: HostIOFaults = HostIOFaults(), fileHooks: NativeAttachmentHostHooks? = nil) async throws -> CoreHost {
         let seed = core(); try await seedAndOpen(seed)
         let host = core(faults)
-        if let fileHooks { await host.configureAttachmentHost(fileHooks) }
+        if let fileHooks { try await host.configureAttachmentHost(fileHooks) }
         _ = try await host.start()
         _ = try await command(host, "openSyncSettings")
         _ = try await command(host, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "webdav"])

@@ -93,7 +93,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
             _ = try sql("INSERT INTO tasks(id,title,description,status,contexts,tags,attachments,createdAt,updatedAt,rev,revBy) VALUES (?,?,'Saved notes','inbox','[]','[]',?,?,?,1,'fixture')",
                 [id, "Saved title", json(id == taskID ? baseline : []), at, at])
         }
-        let host = core(faults); if let jobs { await host.configureAttachmentHost(jobs) }; _ = try await host.start()
+        let host = core(faults); if let jobs { try await host.configureAttachmentHost(jobs) }; _ = try await host.start()
         let snapshot = EditorDraftSnapshot(sessionID: UUID().uuidString.lowercased(), taskID: taskID, generation: 1, payloadJSON: try payload(baseline))
         try await host.checkpointEditorDraft(snapshot)
         if adds > 0 || stopAdd != nil {
@@ -307,7 +307,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
                 await host.close()
                 try probe("const f=MindwtrHost.attachmentDraftDiscardRetire;MindwtrHost.attachmentDraftDiscardRetire=(j,k,r)=>{if(JSON.parse(j).requestId==='\(add.requestId)')throw Error('No last public query');return f(j,k,r);};")
                 let jobs = NativeAttachmentHostHooks(); jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in workCount += 1 } }
-                current = core(); await current.configureAttachmentHost(jobs); _ = try await current.start()
+                current = core(); try await current.configureAttachmentHost(jobs); _ = try await current.start()
             }
             let result = try outcomes(await finish(current, retained), retained), last = try XCTUnwrap(result.last)
             XCTAssertEqual(last["target"] as? String, stageOnly ? "untouched" : "removed")
@@ -332,7 +332,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
             let completed = try journalObject()["terminal"] != nil
             await host.close()
             if completed { try probe("MindwtrHost.attachmentDraftDiscardCandidatesV3=()=>{throw Error('No terminal candidate replay')};MindwtrHost.attachmentDraftDiscardRetire=()=>{throw Error('No terminal refs')};") }
-            let cold = core(noWrites()); if completed { await cold.configureAttachmentHost(noJobs()) }
+            let cold = core(noWrites()); if completed { try await cold.configureAttachmentHost(noJobs()) }
             _ = try await cold.start(); try released(); XCTAssertEqual(try domain(), rows); XCTAssertEqual(try Data(contentsOf: baselineTarget()), baseline)
             await cold.close()
         }
@@ -441,7 +441,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: store.url), sidecar, mode); XCTAssertNil(try editor.read()); await cold.close()
         }
         try DurableFile.write(original, to: journal, privateDraft: true)
-        let cold = core(noWrites()); await cold.configureAttachmentHost(noJobs()); _ = try await cold.start(); try released()
+        let cold = core(noWrites()); try await cold.configureAttachmentHost(noJobs()); _ = try await cold.start(); try released()
     }
 
     func testCancellationAtDurableTerminalRetainsDecisionAndColdRetryHasNoJobs() async throws {
@@ -452,7 +452,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
         let reached = await Task.detached { entered.wait(timeout: .now() + 10) == .success }.value
         XCTAssertTrue(reached); work.cancel(); release.signal(); await refused { _ = try await work.value }
         XCTAssertNotNil(try journalObject()["terminal"]); XCTAssertNotNil(try store.readMixed()); XCTAssertNil(try editor.read())
-        await host.close(); let cold = core(noWrites()); await cold.configureAttachmentHost(noJobs())
+        await host.close(); let cold = core(noWrites()); try await cold.configureAttachmentHost(noJobs())
         _ = try await cold.start(); try released(); XCTAssertEqual(try domain(), rows)
     }
 
@@ -509,7 +509,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
         XCTAssertNil(try journalObject()["terminal"]); await host.close()
         try probe("MindwtrHost.attachmentDraftDiscardRetire=()=>{throw Error('No filled-stage target query')};")
         let jobs = NativeAttachmentHostHooks(); var count = 0; jobs.configureJobs = { jobs in jobs.beforeWork = { _, _ in count += 1 } }
-        let cold = core(noWrites()); await cold.configureAttachmentHost(jobs); await boundary(.afterDiscardTerminal, host: cold)
+        let cold = core(noWrites()); try await cold.configureAttachmentHost(jobs); await boundary(.afterDiscardTerminal, host: cold)
         await refused { _ = try await cold.start() }
         let result = try outcomes(terminal(), retained)
         XCTAssertEqual(result.first?["target"] as? String, "untouched"); XCTAssertEqual(result.first?["stage"] as? String, "missing")
@@ -613,7 +613,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
         XCTAssertTrue(result.filter { $0["kind"] as? String == "remove" }.allSatisfy { $0["disposition"] as? String == "metadataOnly" })
         for add in additions { XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(URL(string: add.targetURI)).path)) }
         XCTAssertEqual(try Data(contentsOf: source()), sourceBytes); XCTAssertEqual(try domain(), rowsBefore)
-        await fresh.close(); let cold = core(noWrites()); await cold.configureAttachmentHost(noJobs()); _ = try await cold.start(); try released()
+        await fresh.close(); let cold = core(noWrites()); try await cold.configureAttachmentHost(noJobs()); _ = try await cold.start(); try released()
     }
 
     func testFoundationEscapedCapacityRefusesBeforeDecisionDetachOrFileWork() async throws {
@@ -701,7 +701,7 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
         let targets = [baselineTarget(), source(), try XCTUnwrap(URL(string: added.targetURI))]
         let targetBytes = try targets.map { try Data(contentsOf: $0) }, targetInodes = try targets.map { try inode($0) }
         let rows = try domain(), fresh = core(noWrites())
-        await fresh.configureAttachmentHost(noJobs()); _ = try await fresh.start()
+        try await fresh.configureAttachmentHost(noJobs()); _ = try await fresh.start()
         var reachedMutation = false
         let hooks = AttachmentDraftHostHooks(); hooks.boundary = { point in
             if point == .beforeDiscardDecision || point == .beforeDetach || point == .beforeDiscardFinishJournal { reachedMutation = true }

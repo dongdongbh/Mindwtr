@@ -81,7 +81,7 @@ final class NativeCachedProjectAvailabilityTests: XCTestCase {
         hooks.configureJobs = { $0.beforeWork = before; $0.afterWork = after }
         // Jobs receive hooks during start; changing attachmentHooks afterwards
         // does not reconfigure an already-created worker.
-        await core.configureAttachmentHost(hooks); _ = try await core.start(); return core
+        try await core.configureAttachmentHost(hooks); _ = try await core.start(); return core
     }
     private func sql(_ text: String, _ args: [Any] = []) throws -> String {
         let db = try SQLiteBridge(url: database); defer { db.close() }; return try db.execute(text, parametersJSON: json(args))

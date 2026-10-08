@@ -14,6 +14,19 @@ bash apps/ios-native/scripts/validate.sh
 
 This generates `Resources/core-host.js`, runs the Swift package's real JavaScriptCore/SQLite tests, and builds the simulator application without signing. Build artifacts and temporary files stay under `apps/ios-native/.build/`. The tracked `MindwtrNative.xcodeproj` and shared scheme are independent of Expo prebuild and CocoaPods.
 
+## Project download fixture preflight
+
+Before each first Download action, stop the isolated test app and capture its library after setup. Settings Save may prefetch files, so a Download button alone does not prove an absent-file fixture. Run the read-only check against that fresh capture and the server request slice since setup began:
+
+```sh
+python3 apps/ios-native/scripts/check-project-download-fixture.py \
+  --capture /absolute/path/to/capture --state absent \
+  --targets /absolute/path/to/targets.json --requests /absolute/path/to/requests.json \
+  --expected-gets 0
+```
+
+`targets.json` maps each expected path relative to `attachment-files/` to its SHA-256, for example `documents/attachments/<id>.txt`. For a cached-file case, use `--state cached` and the expected setup GET count. The check requires exact file presence/absence, cached bytes, no pending write and the expected attachment GET count. Retain the capture, scoped request evidence and successful output before launching directly into Projects; repeat if any setup action changes the library. After recovery, independently compare the database, files and request counts with that baseline.
+
 ## Architecture and scope
 
 One application-owned host serializes JavaScriptCore and SQLite work away from the main thread. Swift executes SQL requested by the existing core adapter; task rules and persistence acknowledgments remain in `packages/core`. The foundation reuses the Android host's JavaScript entry and runtime shims. JavaScriptCore supplies real `Intl`; it does not use a substitute collator.

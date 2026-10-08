@@ -554,7 +554,7 @@ final class RetainedAttachmentOrdinaryHostTests: XCTestCase {
         try (String(contentsOf: originalBundle, encoding: .utf8) + suffix).write(to: bundle, atomically: true, encoding: .utf8)
         let host = core(), hooks = NativeAttachmentHostHooks(); var jobs = 0
         hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let before = try domainRows(), result = try object(await host.call("captureOpen"))
         let answers = try XCTUnwrap(result["rawBridgeAnswers"] as? [String]); XCTAssertEqual(answers.count, requests.count + 2)
         XCTAssertTrue(answers.allSatisfy { $0.hasPrefix("!MindwtrNativeError:") }, "raw mutations must fail synchronously before queueing")

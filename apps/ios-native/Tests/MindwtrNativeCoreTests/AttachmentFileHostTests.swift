@@ -182,7 +182,7 @@ final class AttachmentFileHostTests: XCTestCase {
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), pumped = DispatchSemaphore(value: 0)
         hooks.configureJobs = { jobs in jobs.beforeWork = { id, _ in if id == "1" { entered.signal(); release.wait() } } }
         hooks.pump = { if entered.wait(timeout: .now()) == .success { entered.signal(); pumped.signal() } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let source = cache.appendingPathComponent("source.txt"); try Data([9]).write(to: source)
         let id = UUID().uuidString.lowercased(), input = try json(add(id, source: source))
         let task = Task { try await host.localAttachmentRequest(name: "draftAddFile", requestJSON: input) }
@@ -205,7 +205,7 @@ final class AttachmentFileHostTests: XCTestCase {
         let host = core(), hooks = NativeAttachmentHostHooks()
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
         hooks.configureJobs = { jobs in jobs.beforeWork = { id, _ in if id == "1" { entered.signal(); release.wait() } } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let source = cache.appendingPathComponent("source.txt"); try Data([3]).write(to: source)
         let input = try json(add(UUID().uuidString.lowercased(), source: source))
         let task = Task { try await host.localAttachmentRequest(name: "draftAddFile", requestJSON: input) }
@@ -214,6 +214,49 @@ final class AttachmentFileHostTests: XCTestCase {
         let next = try await request(host, "draftAddFile", add(UUID().uuidString.lowercased(), source: source))
         XCTAssertEqual(next["kind"] as? String, "saved")
         await host.close()
+    }
+    func testLateStartupJobHooksThrowWithoutReplacingExistingHooksAndLatePumpStillRuns() async throws {
+        try await seed()
+        let host = core(), hooks = NativeAttachmentHostHooks()
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        let originalPumped = DispatchSemaphore(value: 0), dynamicPumped = DispatchSemaphore(value: 0)
+        var configured = 0, work = 0, holdNext = true, lateConfigured = false, latePump = false
+        hooks.configureJobs = { jobs in
+            configured += 1
+            jobs.beforeWork = { _, _ in
+                work += 1
+                if holdNext { holdNext = false; entered.signal(); release.wait() }
+            }
+        }
+        hooks.pump = { if entered.wait(timeout: .now()) == .success { entered.signal(); originalPumped.signal() } }
+        try await host.configureAttachmentHost(hooks); _ = try await host.start(); XCTAssertEqual(configured, 1)
+        let invalid = NativeAttachmentHostHooks()
+        invalid.configureJobs = { _ in lateConfigured = true }; invalid.pump = { latePump = true }
+        do { try await host.configureAttachmentHost(invalid); XCTFail("Late startup-only hooks must throw") }
+        catch { XCTAssertEqual(error.localizedDescription, "Attachment file job hooks require an unstarted host") }
+        XCTAssertFalse(lateConfigured)
+        let source = cache.appendingPathComponent("startup-hook.txt"), bytes = Data([7, 8, 9]); try bytes.write(to: source)
+        let first = try json(add(UUID().uuidString.lowercased(), source: source))
+        let cancelled = Task { try await host.localAttachmentRequest(name: "draftAddFile", requestJSON: first) }
+        XCTAssertEqual(originalPumped.wait(timeout: .now() + 5), .success, "Refusal must preserve the original dynamic pump")
+        cancelled.cancel(); release.signal()
+        do { _ = try await cancelled.value; XCTFail("The held request must cancel") } catch {}
+        XCTAssertGreaterThan(work, 0, "The original installed worker hook must run"); XCTAssertFalse(latePump)
+
+        while entered.wait(timeout: .now()) == .success {}
+        let dynamic = NativeAttachmentHostHooks()
+        dynamic.pump = { if entered.wait(timeout: .now()) == .success { entered.signal(); dynamicPumped.signal() } }
+        try await host.configureAttachmentHost(dynamic)
+        let before = work, id = UUID().uuidString.lowercased(); holdNext = true
+        let next = try json(add(id, source: source))
+        let operation = Task { try await host.localAttachmentRequest(name: "draftAddFile", requestJSON: next) }
+        XCTAssertEqual(dynamicPumped.wait(timeout: .now() + 5), .success, "A pump-only hook remains dynamically replaceable")
+        release.signal(); let answer = try object(await operation.value)
+        XCTAssertEqual(answer["kind"] as? String, "saved"); XCTAssertGreaterThan(work, before)
+        XCTAssertEqual(configured, 1); XCTAssertFalse(lateConfigured); XCTAssertFalse(latePump)
+        XCTAssertEqual(try Data(contentsOf: managed.appendingPathComponent(id + ".txt")), bytes)
+        XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertEqual(try storedAttachments(), "[]")
+        try await host.configureAttachmentHost(NativeAttachmentHostHooks()); await host.close()
     }
     func testCorruptJournalAndOptionalCapabilityFailurePreserveLibrary() async throws {
         try await seed()
@@ -286,7 +329,7 @@ final class AttachmentFileHostTests: XCTestCase {
             jobs.beforeWork = { id, _ in if id == "7" { entered.signal(); release.wait() } }
             jobs.afterWork = { id, _ in if id == "7" { completed.signal() } }
         }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let result = try await request(host, "openAttachment", ["owner": owner(), "attachmentId": "probe"])
         XCTAssertEqual(result["empty"] as? Int, 0); XCTAssertEqual(result["status"] as? String, "installed")
         XCTAssertEqual(result["size"] as? Int, 0)
@@ -317,7 +360,7 @@ final class AttachmentFileHostTests: XCTestCase {
         let probe = try probeBundle(expression), host = core(bundleURL: probe), hooks = NativeAttachmentHostHooks()
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), closed = DispatchSemaphore(value: 0)
         hooks.configureJobs = { jobs in jobs.afterWork = { _, installer in if installer { entered.signal(); release.wait() } } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let input = try json(["owner": owner(), "attachmentId": "probe"])
         let task = Task { try await host.localAttachmentRequest(name: "openAttachment", requestJSON: input) }
         XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
@@ -399,7 +442,7 @@ final class AttachmentFileHostTests: XCTestCase {
         let host = core(bundleURL: instrumented), hooks = NativeAttachmentHostHooks()
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
         hooks.configureJobs = { jobs in jobs.beforeWork = { ticket, _ in if ticket == "2" { entered.signal(); release.wait() } } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let view = try object(await host.call("taskView", argumentsJSON: json([json(["id": taskID])])))
         let input = try json(["taskId": taskID, "taskRevision": view["taskRevision"]!,
                               "baseline": [] as [[String: Any]], "draft": [row], "committed": [] as [[String: Any]]])

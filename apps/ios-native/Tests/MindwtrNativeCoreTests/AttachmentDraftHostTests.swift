@@ -515,7 +515,7 @@ final class AttachmentDraftHostTests: XCTestCase {
         // Jobs already exist after start, so configure through a boundary before
         // first reservation via the existing hook on a new owner.
         await host.close()
-        let writing = core(); await writing.configureAttachmentHost(hooks); _ = try await writing.start()
+        let writing = core(); try await writing.configureAttachmentHost(hooks); _ = try await writing.start()
         let operation = Task { try await writing.addAttachmentDraft(requestJSON: request) }
         XCTAssertEqual(entered.wait(timeout: .now() + 10), .success)
         let closeDone = DispatchSemaphore(value: 0)

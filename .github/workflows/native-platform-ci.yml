@@ -568,6 +568,9 @@ jobs:
 
       # The iOS host runs the same bundle and edits host-entry.ts too: the boot gates catch an
       # edit that breaks an Android guarantee (journaled writes, reads after a failed save, pins).
+      - name: Typecheck the shared native host and iOS fixture entries
+        run: bun run typecheck:native-host
+
       - name: Build the native core bundle
         run: node apps/android-native/scripts/build-bundle.mjs
 
@@ -613,6 +616,8 @@ jobs:
           bun-version-file: ".bun-version"
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Typecheck the shared native host and iOS fixture entries
+        run: bun run typecheck:native-host
       - name: Test the embedded core and build the isolated SwiftUI client
         run: |
           set -o pipefail

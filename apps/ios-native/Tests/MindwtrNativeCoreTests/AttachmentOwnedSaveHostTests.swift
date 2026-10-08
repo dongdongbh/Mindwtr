@@ -487,7 +487,7 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
             let cold = core(noTaskWrites())
             if mode == "capability" {
                 let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in throw NativeAttachmentFileJobsError.unavailable } }
-                await cold.configureAttachmentHost(hooks)
+                try await cold.configureAttachmentHost(hooks)
             }
             let retryFailure = await failure({ _ = try await cold.start() }, confirmed: true)
             let retried = try XCTUnwrap(retryFailure)
@@ -511,7 +511,7 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
         let before = try saved(); await host.close(); try FileManager.default.removeItem(at: store.url)
         let cold = core(noTaskWrites()), hooks = NativeAttachmentHostHooks(); var jobs = 0
         hooks.configureJobs = { worker in worker.beforeWork = { _, _ in jobs += 1; throw HostFailure("Absent sidecar grants no file job") } }
-        await cold.configureAttachmentHost(hooks); _ = try await cold.start()
+        try await cold.configureAttachmentHost(hooks); _ = try await cold.start()
         XCTAssertEqual(jobs, 0); try released(); XCTAssertEqual(try saved(), before); try sameFiles(sentinels)
     }
 

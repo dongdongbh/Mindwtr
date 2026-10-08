@@ -189,7 +189,7 @@ final class NativeAttachmentCleanupFreshnessTests: XCTestCase {
         let value = try host(save: save), barrier = CleanupBarrier(expectation(description: "Native cleanup file barrier entered"))
         let hooks = NativeAttachmentHostHooks()
         hooks.configureJobs = { jobs in jobs.beforeWork = { _, installer in barrier.holdFirstFileJob(installer) } }
-        await value.configureAttachmentHost(hooks); _ = try await value.start(); barrier.arm()
+        try await value.configureAttachmentHost(hooks); _ = try await value.start(); barrier.arm()
         defer { barrier.release.signal() }
         let cleanup = Task { try await self.probe(value) }
         await fulfillment(of: [barrier.entered], timeout: 5)

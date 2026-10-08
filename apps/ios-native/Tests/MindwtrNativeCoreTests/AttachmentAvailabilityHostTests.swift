@@ -317,7 +317,7 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
         let fileHooks = NativeAttachmentHostHooks(); fileHooks.configureJobs = { jobs in
             jobs.beforeWork = { _, _ in physicalJobs += 1 }
         }
-        let live = host(); await live.configureAttachmentHost(fileHooks)
+        let live = host(); try await live.configureAttachmentHost(fileHooks)
         _ = try await live.start(); await boundary(.afterSaveTerminal, host: live)
         await refused { _ = try await self.save(live) }
         let wrapper = try pendingWrapper(), candidates = try XCTUnwrap(wrapper["candidates"] as? [[String: Any]])
@@ -383,7 +383,7 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
             do { _ = try writer.execute("UPDATE tasks SET attachments=? WHERE id='other'", parametersJSON: self.json([try self.json([reference])])) }
             catch { blocked = true }
         } }
-        let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         _ = try await discard(live, requestId: id); _ = try await finishDiscard(live, session: seeded.session.sessionID, requestId: id)
         XCTAssertTrue(attempted); XCTAssertTrue(blocked); XCTAssertEqual(try rows(), beforeRows)
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertNil(try store.readAvailability())
@@ -504,7 +504,7 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
     func testAlreadyCancelledSelectedSaveLeavesAllEvidenceAndRowsUntouched() async throws {
         _ = try await seed(); let checkpoint = try latest(), beforeRows = try rows(), sidecar = try Data(contentsOf: store.url), sidecarIdentity = try inode(store.url), editorIdentity = try inode(editor.url)
         var jobs = 0; let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { queue in queue.beforeWork = { _, _ in jobs += 1 } }
-        let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         let operation = Task { withUnsafeCurrentTask { $0?.cancel() }; return try await self.save(live) }
         await refused { _ = try await operation.value }
         XCTAssertEqual(jobs, 0); XCTAssertEqual(try rows(), beforeRows); XCTAssertEqual(try latest(), checkpoint)

@@ -10,6 +10,7 @@ node apps/ios-native/scripts/build-bundle.mjs
 node apps/ios-native/scripts/build-bundle.mjs --crypto-test
 node apps/ios-native/scripts/build-bundle.mjs --attachment-upload-test
 node apps/ios-native/scripts/check-task-date-codec.mjs
+python3 apps/ios-native/scripts/check-project-download-fixture.test.py
 export MINDWTR_CORE_BUNDLE="$app/Resources/core-host.js"
 export MINDWTR_CRYPTO_TEST_BUNDLE="$app/.build/crypto-test-host.js"
 export MINDWTR_ATTACHMENT_UPLOAD_TEST_BUNDLE="$app/.build/attachment-upload-test-host.js"

@@ -367,7 +367,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             if installer { installerWork += 1 } else { fileWork += 1 }
         } }
         faults.secretAfterOperation = { _, _ in secretWork += 1 }
-        let live = host(faults: faults); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         // Warm intentional settings persistence before taking exact domain/config baselines.
         let filter = try object(await live.call("areaFilter"))
         let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
@@ -418,7 +418,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             try assertPreserved()
         }
         await live.close()
-        let cold = host(faults: faults); await cold.configureAttachmentHost(hooks); _ = try await cold.start()
+        let cold = host(faults: faults); try await cold.configureAttachmentHost(hooks); _ = try await cold.start()
         let coldOptions = try object(await cold.call("projectAttachmentEditOptions", argumentsJSON: json([json(["projectId": projectID])])))
         let coldRevision = try XCTUnwrap(coldOptions["revision"] as? String)
         let coldInput = try json(["projectId": projectID, "attachmentId": attachmentID, "revision": coldRevision])
@@ -488,7 +488,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         """)
         let hooks = NativeAttachmentHostHooks(); var sourceCreated = 0
         hooks.configureJobs = { $0.beforeStageSync = { sourceCreated += 1 } }
-        let live = host(probe); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(probe); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
         XCTAssertEqual(remote.requests, 1); XCTAssertEqual(sourceCreated, 1, "Refusal must follow the actual native source creation boundary")
         XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try files(cache), [])
@@ -502,7 +502,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         """)
         let hooks = NativeAttachmentHostHooks(); var sourceCreated = 0
         hooks.configureJobs = { $0.beforeStageSync = { sourceCreated += 1 } }
-        let live = host(probe); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(probe); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
         XCTAssertEqual(remote.requests, 1); XCTAssertEqual(sourceCreated, 1, "Refusal must follow the actual native source creation boundary")
         XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try files(cache), [])
@@ -530,7 +530,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         hooks.configureJobs = { fileJobs = $0; $0.beforeStageSync = { fileSyncs += 1 } }
         var replacement: String?, mutationFailed = false
         remote.duringGET = { self.remote.duringGET = nil; do { replacement = try self.exactEditorReplacement() } catch { mutationFailed = true } }
-        let live = host(try trackedPreparationBundle(), faults: faults); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(try trackedPreparationBundle(), faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
         XCTAssertFalse(mutationFailed); XCTAssertNotNil(replacement); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(fileSyncs, 0)
         XCTAssertEqual(http?.counters.jobs, 0); XCTAssertEqual(http?.counters.running, 0); XCTAssertEqual(secrets?.counters.jobs, 0)
@@ -556,7 +556,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         }
         let hooks = NativeAttachmentHostHooks(); var sources = 0
         hooks.configureJobs = { fileJobs = $0; $0.beforeStageSync = { sources += 1 } }
-        let live = host(try trackedPreparationBundle(), faults: faults); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(try trackedPreparationBundle(), faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
         XCTAssertFalse(mutationFailed); XCTAssertNotNil(replacement); XCTAssertEqual(operations, 1); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(sources, 0)
         XCTAssertEqual(http?.counters.jobs, 0); XCTAssertEqual(secrets?.counters.jobs, 0)
@@ -574,7 +574,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         try await seed(); let original = try rows(), checkpoint = try Data(contentsOf: editor.url)
         let hooks = NativeAttachmentHostHooks(); var sources = 0
         hooks.configureJobs = { $0.beforeStageSync = { sources += 1 } }
-        let live = host(try trackedPreparationBundle(malformedTerminal: true)); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(try trackedPreparationBundle(malformedTerminal: true)); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
         XCTAssertEqual(remote.requests, 1); XCTAssertEqual(sources, 1)
         let probe = try object(await live.call("menuRead", argumentsJSON: json(["dataSettings", "{}"]))); XCTAssertEqual(probe["pending"] as? Int, 0); XCTAssertEqual(probe["settled"] as? Int, 1)
@@ -592,7 +592,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         hooks.configureJobs = { fileJobs = $0; $0.beforeStageSync = { fileSyncs += 1 } }
         let accepted = expectation(description: "Actual authenticated GET accepted but body not delivered")
         remote.holdResponse = true; remote.duringGET = { accepted.fulfill() }
-        let live = host(try trackedPreparationBundle(), faults: faults); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(try trackedPreparationBundle(), faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         let requestJSON = try request(), operation = Task { try await live.downloadTaskAttachmentV5(requestJSON: requestJSON) }
         await fulfillment(of: [accepted], timeout: 5)
         XCTAssertEqual(http?.counters.jobs, 1); XCTAssertEqual(http?.counters.running, 1)
@@ -617,7 +617,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         hooks.configureJobs = { fileJobs = $0; $0.beforeStageSync = { sources += 1 } }
         let accepted = expectation(description: "Close observes an accepted GET before any response body")
         remote.holdResponse = true; remote.duringGET = { accepted.fulfill() }
-        let live = host(try trackedPreparationBundle(), faults: faults); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(try trackedPreparationBundle(), faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         let requestJSON = try request(), operation = Task { try await live.downloadTaskAttachmentV5(requestJSON: requestJSON) }
         await fulfillment(of: [accepted], timeout: 5)
         XCTAssertEqual(http?.counters.jobs, 1); XCTAssertEqual(http?.counters.running, 1)
@@ -766,7 +766,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         """)
         let hooks = NativeAttachmentHostHooks(); var syncs = 0
         hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
-        let live = host(probe); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(probe); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         for attempt in 1...3 {
             await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request(UUID().uuidString.lowercased())) }
             let answer = try object(await live.call("menuRead", argumentsJSON: json(["dataSettings", "{}"]))); XCTAssertEqual(answer["calls"] as? Int, attempt)
@@ -791,7 +791,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
                 }
             } catch { observationFailed = true }
         }
-        let live = host(try trackedPreparationBundle()); await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let live = host(try trackedPreparationBundle()); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         let requestJSON = try request(); operation = Task { try await live.downloadTaskAttachmentV5(requestJSON: requestJSON) }
         await refusal { _ = try await XCTUnwrap(operation).value }
         XCTAssertFalse(observationFailed); XCTAssertTrue(cancelledAfterReceipt); XCTAssertEqual(syncs, 1); XCTAssertEqual(remote.requests, 1)
@@ -893,7 +893,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         for _ in 0..<2 {
             let hooks = NativeAttachmentHostHooks(); var fileWork = 0
             hooks.configureJobs = { $0.beforeWork = { _, _ in fileWork += 1 } }
-            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start(); let beforeWork = fileWork
+            let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start(); let beforeWork = fileWork
             await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
             XCTAssertEqual(fileWork, beforeWork, "Incomplete selfhosted state refuses before the first local byte-proof job")
             XCTAssertEqual(remote.requests, 0); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), settings)
@@ -1026,7 +1026,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             }
             let identity = try inode(target), hooks = NativeAttachmentHostHooks(); var work = 0
             hooks.configureJobs = { $0.beforeWork = { _, _ in work += 1 } }
-            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start()
             let initialWork = work
             try await assertRelocatedRefused367(live)
             XCTAssertEqual(work, initialWork, "Malformed mapping must refuse before observing any file")
@@ -1098,7 +1098,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
                     replacementIdentity = try self.inode(self.target)
                 } catch { mutationFailed = true }
             } }
-            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start()
             await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
             XCTAssertFalse(mutationFailed); XCTAssertNotNil(replacementIdentity); XCTAssertNotEqual(replacementIdentity, originalIdentity)
             // Admission may already have created an empty V5 owner; the changed
@@ -1125,7 +1125,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
                     else { editorIdentity = try self.exactEditorReplacement(); mutatedRows = try self.rows() }
                 } catch { mutationFailed = true }
             } }
-            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start()
             await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
             XCTAssertTrue(hit); XCTAssertFalse(mutationFailed); XCTAssertNil(try store.readVersioned())
             XCTAssertEqual(try rows(), mutatedRows); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint)
@@ -1188,7 +1188,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
                 guard !held else { return }; held = true; accepted.fulfill()
                 guard release.wait(timeout: .now() + 10) == .success else { throw HostFailure("Synthetic proof barrier timed out") }
             } }
-            let live = host(); await live.configureAttachmentHost(hooks); _ = try await live.start()
+            let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start()
             let raw = try request(), operation = Task { try await live.downloadTaskAttachmentV5(requestJSON: raw) }
             await fulfillment(of: [accepted], timeout: 5); XCTAssertTrue(held); XCTAssertEqual(jobs?.counters.jobs, 1)
             operation.cancel()

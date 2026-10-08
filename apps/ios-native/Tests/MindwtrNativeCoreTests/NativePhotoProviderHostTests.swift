@@ -205,7 +205,7 @@ final class NativePhotoProviderHostTests: XCTestCase {
     private func seed(hooks: NativeAttachmentHostHooks? = nil) async throws -> (CoreHost, [String: Any]) {
         let boot = try core(); _ = try await boot.start(); await boot.close()
         _ = try sql("INSERT INTO tasks(id,title,status,contexts,tags,attachments,checklist,createdAt,updatedAt,rev,revBy) VALUES (?,'Photo task','inbox','[]','[]',NULL,NULL,?,?,1,'fixture')", [taskID, at, at])
-        let host = try core(); if let hooks { await host.configureAttachmentHost(hooks) }; _ = try await host.start()
+        let host = try core(); if let hooks { try await host.configureAttachmentHost(hooks) }; _ = try await host.start()
         let opening = try object(await host.call("editorModel", argumentsJSON: json([taskID])))
         let raw: [String: Any] = ["title": "", "note": "", "location": "", "estimate": "", "estimateResolved": "", "timeSpent": "", "timeSpentResolved": "", "tokens": [:], "tokenCanonical": [:], "tokenResolved": [:], "tokenEdited": [], "checklistInputs": [:], "checklistAppend": "", "relativeAmount": "", "relativeUnit": "", "relativeOwned": false, "relativeCommitRequested": false, "recurrenceInputs": [:], "recurrenceOwned": [], "recurrenceCommitRequested": []]
         let payload = try json(["version": 2, "taskID": taskID, "tab": "task", "touchedBase": [:], "edited": [:], "raw": raw,

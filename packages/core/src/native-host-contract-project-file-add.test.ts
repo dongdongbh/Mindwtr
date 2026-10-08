@@ -199,8 +199,8 @@ describe('prepared Project-owned file Add foundation', () => {
         expect(env.saves()).toBe(0);
     });
 
-    it.each(['notes', 'inPlace', 'archive', 'delete', 'purge', 'device'] as const)
-    ('rechecks exact detached before row and device after awaited policy: %s', async (change) => {
+    it.each(['notes', 'inPlace', 'archive', 'delete', 'purge', 'device'] as const)(
+    'rechecks exact detached before row and device after awaited policy: %s', async (change) => {
         const env = await open();
         let release!: (value: uploadPolicy.ValidationResult) => void;
         const policy = vi.spyOn(uploadPolicy, 'validateAttachmentForUpload').mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
@@ -397,30 +397,55 @@ describe('prepared Project-owned file Add foundation', () => {
         expect(second.saves()).toBe(0);
     });
 
-    it('persists through actual SQLite close/reopen and replays only the complete saved after row', async () => {
+    it.each([
+        ['compact', false], ['reversed', false], ['whitespace', false],
+        ['compact', true], ['reversed', true], ['whitespace', true],
+    ] as const)(
+    'recovers a %s raw Project file Add (hash=%s) through SQLite restart and refuses a real stale value', async (encoding, hashed) => {
         const env = await openSqliteHost({ projects: [project(), project('other')], tasks: [task], sections: [section], settings: { deviceId: 'files-device' } });
         try {
+            const raw = encoding === 'reversed'
+                ? JSON.stringify([file, link].map(item => Object.fromEntries(Object.entries(item).reverse())))
+                : encoding === 'whitespace' ? '\n ' + JSON.stringify([file, link], null, 2) + ' ' : JSON.stringify([file, link]);
+            const rawSettings = '\n' + JSON.stringify({ ...useTaskStore.getState().settings,
+                futureUnknown: { zeta: '保留 / 🌿', alpha: [false, null, '文'] } }, null, 2) + ' ';
+            await env.client().run('UPDATE projects SET attachments=?', [raw]);
+            await env.client().run('UPDATE settings SET data=? WHERE id=1', [rawSettings]);
+            await env.restart(undefined, { recoveryLoad: true });
+            const unrelated = () => Promise.all([env.sql('SELECT * FROM projects WHERE id<>?', ['target']),
+                env.sql('SELECT * FROM tasks'), env.sql('SELECT * FROM sections'), env.sql('SELECT * FROM settings')]);
+            const untouched = await unrelated();
             const options = env.host.getProjectAttachmentEditOptions({ projectId: 'target' });
             if (!options.ok) throw new Error(options.error.code);
             const { id: _id, ...expected } = options.value.project;
             const request: NativeProjectFileAddWriteRequest = json({ requestId, projectId: 'target', expected,
                 picked: { uri: 'file:///provider/Picked.PDF', name: 'Picked.PDF', mimeType: 'application/pdf', size: null },
-                measuredSize: 27, managedDirectoryURI: directory });
+                measuredSize: 27, managedDirectoryURI: directory, ...(hashed ? { version: 2, sourceSha256: 'b'.repeat(64) } : {}) });
             const plan = await env.host.prepareProjectFileAddWrite(request);
             if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(plan.ok ? plan.value.kind : `${plan.error.code}: ${plan.error.message}`);
-            const frozen = { request, prepared: plan.value.prepared };
+            const original = { request, prepared: plan.value.prepared };
+            const frozen = JSON.parse(JSON.stringify(original, (_name, item: unknown) => item && typeof item === 'object'
+                && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item)) as typeof original;
+            expect(Object.keys(frozen.prepared.effect.project.before.attachments![0]))
+                .not.toEqual(Object.keys(original.prepared.effect.project.before.attachments![0]));
+            expect((await env.sql<{ attachments: string }>('SELECT attachments FROM projects WHERE id=?', ['target']))[0].attachments).toBe(raw);
+            await env.restart(undefined, { recoveryLoad: true });
             expect(await env.host.commitPreparedProjectFileAddWrite(frozen)).toEqual({ ok: true, value: frozen.prepared.result });
             const saved = await env.sql<{ rev: number; attachments: string }>('SELECT rev, attachments FROM projects WHERE id = ?', ['target']);
             expect(saved[0].rev).toBe(frozen.prepared.effect.project.after.rev);
             expect(JSON.parse(saved[0].attachments)).toEqual(frozen.prepared.effect.project.after.attachments);
+            expect(await unrelated()).toEqual(untouched);
+            expect((await env.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'))[0].data).toBe(rawSettings);
             expect(await env.replay((host) => host.commitPreparedProjectFileAddWrite(frozen)))
                 .toEqual({ result: { ok: true, value: frozen.prepared.result }, wrote: false, receipts: false });
             expect((await useTaskStore.getState().updateProject('target', { supportNotes: 'Later notes' })).success).toBe(true);
             await flushPendingSave();
+            const staleRows = await env.sql('SELECT * FROM projects ORDER BY id'), staleOthers = await unrelated();
             const changed = await env.replay((host) => host.commitPreparedProjectFileAddWrite(frozen));
             expect(changed.result).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             expect(changed.wrote).toBe(false);
             expect(changed.receipts).toBe(false);
+            expect(await env.sql('SELECT * FROM projects ORDER BY id')).toEqual(staleRows); expect(await unrelated()).toEqual(staleOthers);
         } finally { await env.close(); }
     });
 

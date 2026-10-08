@@ -115,7 +115,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         return try String(contentsOf: log, encoding: .utf8).components(separatedBy: receipt).count - 1
     }
     private func host(_ faults: HostIOFaults = HostIOFaults(), mutation: ((Int) -> Void)? = nil,
-                      before: ((Int) throws -> Void)? = nil) async -> CoreHost {
+                      before: ((Int) throws -> Void)? = nil) async throws -> CoreHost {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ProjectRelocationNoHTTP.self]; faults.httpConfiguration = config
         let cloud = cloudSecretReads
         if cloud { faults.secretService = cloudService }
@@ -131,13 +131,13 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
             if let before { jobs.beforeWork = { _, installer in try before(installer ? -1 : (state?.counts[3] ?? 0) + 1) } }
             jobs.afterWork = { _, installer in let count = state?.fileWork(installer) ?? 0; mutation?(count) }
         }
-        await live.configureAttachmentHost(hooks); addTeardownBlock { await live.close() }; return live
+        try await live.configureAttachmentHost(hooks); addTeardownBlock { await live.close() }; return live
     }
     private func seed(status: String = "active") async throws {
         try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(json(["@mindwtr_sync_backend": "webdav", "@mindwtr_webdav_url": "https://" + hostname + "/data.json",
             "@mindwtr_webdav_username": "synthetic", "@mindwtr_webdav_allow_insecure_http": "false", "unknown": "preserve"]).utf8).write(to: manifest)
-        let boot = await host(); _ = try await boot.start(); await boot.close()
+        let boot = try await host(); _ = try await boot.start(); await boot.close()
         let item: [String: Any] = ["id": attachmentID, "kind": "file", "title": "Original.txt", "uri": target.absoluteString,
             "cloudKey": "attachments/" + attachmentID + ".txt", "fileHash": hash(bytes).uppercased(), "size": bytes.count,
             "contentRev": 4, "contentMtimeMs": 123, "contentSize": bytes.count, "pendingContentUpload": false,
@@ -145,7 +145,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         _ = try sql("INSERT INTO projects(id,title,status,color,supportNotes,orderNum,tagIds,isSequential,isFocused,attachments,createdAt,updatedAt,rev,revBy,viewSectionIds) VALUES (?,'Preserve Project',?,'#94a3b8','Original notes',1,NULL,0,0,?,?,?,3,'fixture','[]')", [projectID, status, json([item]), at, at])
         _ = try sql("INSERT INTO projects(id,title,status,color,supportNotes,orderNum,tagIds,isSequential,isFocused,attachments,createdAt,updatedAt,rev,revBy) VALUES ('other','Other Project','waiting','#123456','Unchanged',2,'[]',0,0,NULL,?,?,2,'fixture')", [at, at])
         _ = try sql("INSERT INTO tasks(id,title,status,contexts,tags,createdAt,updatedAt,rev,revBy,isFocusedToday,pushCount,showFutureRecurrence,suppressMindwtrReminders) VALUES ('other-task','Unchanged','inbox','[]','[]',?,?,1,'fixture',0,0,0,0)", [at, at])
-        let setup = await host(); _ = try await setup.start()
+        let setup = try await host(); _ = try await setup.start()
         let filter = try object(await setup.call("areaFilter"))
         let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
         XCTAssertEqual(option["state"] as? String, "none")
@@ -206,7 +206,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         let old = try relocate(copy: true)
         let oldBytes = Data("Coexisting old bytes must remain unmanaged".utf8); try oldBytes.write(to: old)
         let oldIdentity = try inode(old), currentIdentity = try inode(target), preferences = try Data(contentsOf: manifest)
-        let live = await host(); _ = try await live.start(); let before = try row(), others = try rows().dropFirst(), original = try selected()
+        let live = try await host(); _ = try await live.start(); let before = try row(), others = try rows().dropFirst(), original = try selected()
         XCTAssertEqual(original["pendingContentUpload"] as? Bool, false); XCTAssertTrue(before["tagIds"] is NSNull); XCTAssertEqual(before["viewSectionIds"] as? String, "[]")
         let answer = try object(await live.foregroundSync(command: "projectAttachmentDownload", requestJSON: input(live)))
         XCTAssertEqual(answer["ok"] as? Bool, true); let result = try XCTUnwrap(answer["value"] as? [String: Any])
@@ -220,7 +220,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertNil(try NativeAttachmentDraftStore(databaseURL: database).readVersioned())
         await live.close(); XCTAssertEqual(try markers(), 1)
         if cloudProvider != nil { XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 1) }
-        let cold = await host(); _ = try await cold.start()
+        let cold = try await host(); _ = try await cold.start()
         XCTAssertEqual(try json(row()), try json(after), "A fresh CoreHost must not normalize the acknowledged raw AFTER")
         XCTAssertEqual(try selected()["pendingContentUpload"] as? Bool, false)
         let open = try object(await cold.prepareProjectFileOpen(requestJSON: json(["projectId": projectID, "attachmentId": attachmentID])))
@@ -242,7 +242,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         let oldIdentity = try inode(old), currentIdentity = try inode(target), config = try Data(contentsOf: manifest)
         for field in ["@mindwtr_cloud_url", "@mindwtr_cloud_provider", "@mindwtr_cloud_token"] {
             var armed = false, changed = false, failed = false, holdAt = Int.max, changedConfig: Data?
-            let live = await host(mutation: { count in
+            let live = try await host(mutation: { count in
                 guard armed && !changed && count == holdAt else { return }; changed = true
                 do {
                     var value = try self.object(String(decoding: config, as: UTF8.self))
@@ -266,7 +266,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
             XCTAssertEqual(try markers(), 0); XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 0)
             XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertNil(try NativeAttachmentDraftStore(databaseURL: database).readVersioned())
             await live.close()
-            let cold = await host(); _ = try await cold.start()
+            let cold = try await host(); _ = try await cold.start()
             XCTAssertEqual(try rows(), before); XCTAssertEqual(try json(row()), selectedRow); XCTAssertEqual(try Data(contentsOf: manifest), preservedConfig)
             XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), currentIdentity)
             XCTAssertEqual(try Data(contentsOf: old), oldBytes); XCTAssertEqual(try inode(old), oldIdentity)
@@ -286,7 +286,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         let baseline = try rows(), selectedRow = try json(row())
         for _ in 0..<2 {
             var armed = false, proofAttempts = 0
-            let live = await host(before: { _ in if armed { proofAttempts += 1 } })
+            let live = try await host(before: { _ in if armed { proofAttempts += 1 } })
             _ = try await live.start(); let request = try await input(live), work = state.counts[3]; armed = true
             await refused(live, request: request); armed = false
             XCTAssertEqual(proofAttempts, 0, "Incomplete cloud state must reject before the first native file worker")
@@ -315,7 +315,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
             }
             // Wrong generation metadata must already be in this fresh host's
             // captured selection, rather than merely disagreeing with memory.
-            let live = await host(); _ = try await live.start()
+            let live = try await host(); _ = try await live.start()
             if mode == "null" { try replaceSelected { $0["pendingContentUpload"] = NSNull() } }
             let before = try rows(), request = try await input(live)
             await refused(live, request: request); XCTAssertEqual(try rows(), before, mode); XCTAssertEqual(try Data(contentsOf: manifest), settings)
@@ -324,7 +324,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         }
     }
     func testForeignExtraContainerAnchorLibraryAndUnsafeURIRefuseBeforeFileWork() async throws {
-        try await seed(); let old = try relocate(); let live = await host(); _ = try await live.start(); let original = try selected()
+        try await seed(); let old = try relocate(); let live = try await host(); _ = try await live.start(); let original = try selected()
         let foreign = old.absoluteString.replacingOccurrences(of: "/Application/", with: "/Foreign/")
         let changedLibrary = old.absoluteString.replacingOccurrences(of: root.lastPathComponent, with: UUID().uuidString.lowercased())
         for uri in [foreign, changedLibrary, old.absoluteString.replacingOccurrences(of: "/Library/", with: "/Application/" + UUID().uuidString.lowercased() + "/Library/"), old.absoluteString + "?query=1", old.absoluteString.replacingOccurrences(of: "/attachments/", with: "/attachments/../attachments/")] {
@@ -335,7 +335,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         await live.close()
     }
     func testSymlinkHardlinkAndDirectoryTargetsCannotBecomeAvailable() async throws {
-        try await seed(); _ = try relocate(); let live = await host(); _ = try await live.start()
+        try await seed(); _ = try relocate(); let live = try await host(); _ = try await live.start()
         for mode in ["symlink", "hardlink", "directory"] {
             try FileManager.default.removeItem(at: target)
             let elsewhere = root.appendingPathComponent("outside.txt"); try bytes.write(to: elsewhere)
@@ -352,7 +352,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         for mode in ["title", "order", "revision", "revBy", "attachment", "false", "device", "config", "editor", "sidecar", "rowid"] {
             let baseline = try row(), settings = try sql("SELECT data FROM settings WHERE id=1"), config = try Data(contentsOf: manifest)
             var changed = false, failed = false
-            let live = await host(mutation: { _ in
+            let live = try await host(mutation: { _ in
                 guard !changed else { return }; changed = true
                 do {
                     switch mode {
@@ -386,7 +386,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         try await seed(); _ = try relocate()
         for mode in ["entry", "parent"] {
             let baseline = try row(); var changed = false, failed = false
-            let live = await host(mutation: { _ in
+            let live = try await host(mutation: { _ in
                 guard !changed else { return }; changed = true
                 do {
                     if mode == "entry" { try self.bytes.write(to: self.target, options: .atomic) }
@@ -404,12 +404,12 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         faults.afterSQL = { sql in if armed && sql == "COMMIT", try self.selected()["uri"] as? String == self.target.absoluteString {
             acknowledgments += 1; throw HostFailure("Synthetic lost Project acknowledgment")
         } }
-        let live = await host(faults); _ = try await live.start(); let request = try await input(live); armed = true
+        let live = try await host(faults); _ = try await live.start(); let request = try await input(live); armed = true
         await refused(live, request: request); XCTAssertGreaterThan(acknowledgments, 0, "The real final COMMIT hook must fire"); XCTAssertEqual(try markers(), 0); await live.close()
-        let cold = await host(); _ = try await cold.start(); XCTAssertEqual(state.counts[0], 0); await cold.close()
+        let cold = try await host(); _ = try await cold.start(); XCTAssertEqual(state.counts[0], 0); await cold.close()
     }
     func testPendingJournalEditorAndOwnerEvidenceRefuseBeforeCurrentFileProof() async throws {
-        try await seed(); _ = try relocate(); let live = await host(); _ = try await live.start(); let request = try await input(live), baseline = try rows()
+        try await seed(); _ = try relocate(); let live = try await host(); _ = try await live.start(); let request = try await input(live), baseline = try rows()
         for url in [journal, EditorDraftStore(databaseURL: database).url, NativeAttachmentDraftStore(databaseURL: database).url] {
             let evidence = Data("Preserve pending authority".utf8); try evidence.write(to: url); let identity = try inode(url), work = state.counts[3]
             await refused(live, request: request); XCTAssertEqual(try rows(), baseline); XCTAssertEqual(try Data(contentsOf: url), evidence); XCTAssertEqual(try inode(url), identity); XCTAssertEqual(state.counts[3], work); XCTAssertEqual(try markers(), 0)
@@ -423,7 +423,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
     private func cancelOrClose(close: Bool, selectedRead: Bool = false) async throws {
         try await seed(); _ = try relocate(); let reached = expectation(description: "Proof worker accepted"), release = DispatchSemaphore(value: 0)
         var entered = false, holdAt = Int.max
-        let live = await host(before: { count in if !entered && count == holdAt { entered = true; reached.fulfill(); release.wait() } })
+        let live = try await host(before: { count in if !entered && count == holdAt { entered = true; reached.fulfill(); release.wait() } })
         _ = try await live.start(); let request = try await input(live), baseline = try rows()
         // The first work item is the typed baseline proof. The second is the
         // shared resolver's getInfo, inside its admitted selected-JSC ticket.

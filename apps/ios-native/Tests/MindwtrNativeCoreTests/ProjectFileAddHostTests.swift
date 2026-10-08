@@ -260,7 +260,7 @@ final class ProjectFileAddHostTests: XCTestCase {
     func testReadonlyStaleUnknownAndMalformedRequestsRefuseBeforeProviderCopy() async throws {
         let picked = try await seed(status: "archived"), hooks = NativeAttachmentHostHooks(); var work = 0
         hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in work += 1 } }
-        let host = core(); await host.configureAttachmentHost(hooks); _ = try await host.start()
+        let host = core(); try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let valid = try await request(host), before = try projectRows(), sourceIdentity = try inode(picked)
         var wrong = valid; wrong["projectId"] = "unknown"
         var malformed = valid; malformed["requestId"] = "BAD"
@@ -409,7 +409,7 @@ final class ProjectFileAddHostTests: XCTestCase {
         let captured = try state(), file = try target(captured), borrowed = try source(captured), rows = try projectRows()
         await host.close(); let hooks = NativeAttachmentHostHooks(); var removed = false
         hooks.configureJobs = { jobs in jobs.afterRetirementUnlink = { if !removed { removed = true; throw Injected.boundary } } }
-        let stopped = core(); await stopped.configureAttachmentHost(hooks); try await retainedStart(stopped)
+        let stopped = core(); try await stopped.configureAttachmentHost(hooks); try await retainedStart(stopped)
         await refused { _ = try await stopped.abandonProjectFileAdd(requestId: id) }
         XCTAssertTrue(removed); XCTAssertFalse(FileManager.default.fileExists(atPath: file.path)); XCTAssertEqual(try state()["abandoned"] as? Bool, true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path)); await stopped.close()
@@ -433,7 +433,7 @@ final class ProjectFileAddHostTests: XCTestCase {
                 } catch { XCTFail("Directory replacement fixture could not run") }
             }
         } }
-        let host = core(); await host.configureAttachmentHost(hooks); _ = try await host.start()
+        let host = core(); try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let input = try await request(host)
         await refused { _ = try await host.addProviderProjectAttachment(selectedURL: picked, requestJSON: self.json(input)) }
         XCTAssertTrue(swapped); XCTAssertEqual(completed, 2); XCTAssertNotEqual(try inode(managed), originalIdentity)
@@ -476,7 +476,7 @@ final class ProjectFileAddHostTests: XCTestCase {
             do { _ = try writer.execute("UPDATE tasks SET attachments=? WHERE id='sibling-task'", parametersJSON: self.json([attachmentJSON])) }
             catch { blocked = true }
         } }
-        let host = core(); await host.configureAttachmentHost(hooks); _ = try await host.start()
+        let host = core(); try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let input = try await request(host), id = try XCTUnwrap(input["requestId"] as? String), fired = await inject(host, .afterPublicationProof)
         await refused { _ = try await host.addProviderProjectAttachment(selectedURL: picked, requestJSON: self.json(input)) }; XCTAssertTrue(fired())
         let captured = try state(), file = try target(captured)
@@ -539,7 +539,7 @@ final class ProjectFileAddHostTests: XCTestCase {
             try self.changeOnlyCtime(XCTUnwrap(entries.first))
             changed = true
         } }
-        let host = core(); await host.configureAttachmentHost(hooks); _ = try await host.start()
+        let host = core(); try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let input = try await request(host), id = try XCTUnwrap(input["requestId"] as? String)
         let before = try otherRows(), originalIdentity = try inode(picked)
         let reply = try object(await host.addProviderProjectAttachment(selectedURL: picked, requestJSON: json(input)))
@@ -565,7 +565,7 @@ final class ProjectFileAddHostTests: XCTestCase {
             try self.changeOnlyCtime(XCTUnwrap(entries.first))
             changed = true
         } }
-        let host = core(); await host.configureAttachmentHost(hooks); _ = try await host.start()
+        let host = core(); try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let input = try await request(host), before = try projectRows(), other = try otherRows(), originalIdentity = try inode(picked)
         let failure = await refused { _ = try await host.addProviderProjectAttachment(selectedURL: picked, requestJSON: self.json(input)) }
         XCTAssertTrue(changed); XCTAssertTrue(failure is NativeAttachmentFilesError)

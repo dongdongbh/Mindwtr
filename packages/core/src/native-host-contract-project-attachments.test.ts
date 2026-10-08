@@ -51,9 +51,22 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Project URL attachment edits', () => {
-    it('persists one Project row through SQLite restart and replays only the exact saved row', async () => {
-        const env = await openSqliteHost({ projects: [project()], settings: { deviceId: 'links-device' } });
+    it.each(['compact', 'reversed', 'whitespace'] as const)(
+    'recovers a %s raw Project URL write through SQLite restart and refuses a real stale value', async (encoding) => {
+        const env = await openSqliteHost({ projects: [project(), project('other')], tasks: [task], sections: [section],
+            settings: { deviceId: 'links-device' } });
         try {
+            const raw = encoding === 'reversed'
+                ? JSON.stringify([file, link].map(item => Object.fromEntries(Object.entries(item).reverse())))
+                : encoding === 'whitespace' ? '\n ' + JSON.stringify([file, link], null, 2) + ' ' : JSON.stringify([file, link]);
+            const rawSettings = '\n' + JSON.stringify({ ...useTaskStore.getState().settings,
+                futureUnknown: { zeta: '保留 / 🌿', alpha: [false, null, '文'] } }, null, 2) + ' ';
+            await env.client().run('UPDATE projects SET attachments=?', [raw]);
+            await env.client().run('UPDATE settings SET data=? WHERE id=1', [rawSettings]);
+            await env.restart(undefined, { recoveryLoad: true });
+            const unrelated = () => Promise.all([env.sql<{ attachments: string }>('SELECT * FROM projects WHERE id<>?', ['target']),
+                env.sql('SELECT * FROM tasks'), env.sql('SELECT * FROM sections'), env.sql<{ data: string }>('SELECT * FROM settings')]);
+            const untouched = await unrelated();
             const options = env.host.getProjectAttachmentEditOptions({ projectId: 'target' });
             if (!options.ok) throw new Error(options.error.code);
             const { id: _id, ...expected } = options.value.project;
@@ -61,21 +74,41 @@ describe('prepared native Project URL attachment edits', () => {
                 intent: { kind: 'add', text: 'SQLite | https://example.org/sqlite' } })) as NativeProjectAttachmentWriteRequest;
             const plan = env.host.prepareProjectAttachmentWrite(request);
             if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(plan.ok ? plan.value.kind : `${plan.error.code}: ${plan.error.message}`);
-            const frozen = { request, prepared: plan.value.prepared };
+            const original = { request, prepared: plan.value.prepared };
+            // Foundation sorts structured object keys; opaque SQL strings are untouched.
+            const frozen = JSON.parse(JSON.stringify(original, (_name, item: unknown) => item && typeof item === 'object'
+                && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item)) as typeof original;
+            expect(Object.keys(frozen.prepared.effect.project.before.attachments![0]))
+                .not.toEqual(Object.keys(original.prepared.effect.project.before.attachments![0]));
+            expect((await env.sql<{ attachments: string }>('SELECT attachments FROM projects WHERE id=?', ['target']))[0].attachments).toBe(raw);
+            await env.restart(undefined, { recoveryLoad: true });
             expect(await env.host.commitPreparedProjectAttachmentWrite(frozen)).toEqual({ ok: true,
                 value: plan.value.prepared.result });
             const saved = await env.sql<{ rev: number; attachments: string }>('SELECT rev, attachments FROM projects WHERE id = ?', ['target']);
             expect(saved[0].rev).toBe(plan.value.prepared.effect.project.after.rev);
             expect(JSON.parse(saved[0].attachments)).toEqual(plan.value.prepared.effect.project.after.attachments);
+            // Historical URL v1 performs a full save, which may canonicalize
+            // JSON encoding. Every unrelated value must still survive exactly.
+            const firstSave = await unrelated();
+            expect(firstSave[0].map(row => ({ ...row, attachments: JSON.parse(row.attachments) })))
+                .toEqual(untouched[0].map(row => ({ ...row, attachments: JSON.parse(row.attachments) })));
+            expect(firstSave.slice(1, 3)).toEqual(untouched.slice(1, 3));
+            expect(firstSave[3].map(row => ({ ...row, data: JSON.parse(row.data) })))
+                .toEqual(untouched[3].map(row => ({ ...row, data: JSON.parse(row.data) })));
             const replay = await env.replay((host) => host.commitPreparedProjectAttachmentWrite(frozen));
             expect(replay.result).toEqual({ ok: true, value: plan.value.prepared.result });
             expect(replay.wrote).toBe(false);
             expect(replay.receipts).toBe(false);
+            expect(await unrelated()).toEqual(firstSave);
+            expect(await env.sql('SELECT rev, attachments FROM projects WHERE id=?', ['target'])).toEqual(saved);
             expect((await useTaskStore.getState().updateProject('target', { title: 'Later title' })).success).toBe(true);
             await flushPendingSave();
+            const staleRows = await env.sql('SELECT * FROM projects ORDER BY id'), staleOthers = await unrelated();
             const changed = await env.replay((host) => host.commitPreparedProjectAttachmentWrite(frozen));
             expect(changed.result).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             expect(changed.wrote).toBe(false);
+            expect(changed.receipts).toBe(false);
+            expect(await env.sql('SELECT * FROM projects ORDER BY id')).toEqual(staleRows); expect(await unrelated()).toEqual(staleOthers);
         } finally { await env.close(); }
     });
 

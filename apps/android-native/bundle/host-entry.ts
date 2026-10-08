@@ -405,7 +405,7 @@ const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contrac
 const contract = createNativeHostContract({ get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
     get attachments() {
         const selected = iosProjectAttachmentDownload ? iosSelfHostedProjectAttachments?.contractHost ?? iosManualSync?.attachmentsHost : attachmentsHost;
-        if (!iosRelocatedProjectAvailability || !selected) return selected;
+        if (!iosRelocatedProjectAvailability || !selected) return selected ?? undefined;
         return { ...selected, ensureAttachmentAvailableDetailed: async (attachment: import('../../../packages/core/src/types').Attachment) => {
             const result = await (iosSelfHostedProjectAttachments ?? iosManualSync)?.prepareAttachmentAvailableDetailed?.(attachment);
             if (result?.status === 'available') return { status: 'available' as const, attachment: result.attachment };
@@ -458,6 +458,8 @@ const editorJson = (json: string): unknown => {
     catch { /* Never expose a parser's excerpt of a credential-bearing URL. */ }
     throw new Error('Invalid bounded editor request');
 };
+// Typed bridge assertions only select each contract method's request type.
+// Its readRequest/readPrepared parser still validates the untrusted JSON value.
 const completionJson = (json: string, limit: number): unknown => {
     try { if (json.length <= limit) return JSON.parse(json); }
     catch { /* Do not expose a parser excerpt of task text or a link. */ }
@@ -912,7 +914,7 @@ const AI_REQUESTS: Record<string, (input: never, signal: AbortSignal) => Promise
     requestWeeklyReviewAnalysis: (_input, signal) => contract.requestWeeklyReviewAnalysis({ signal }),
 };
 /** The Menu tab's commands, by their diagnostic operation: each passes Kotlin's input (its request or capture UUID included) unchanged. */
-const MENU_COMMANDS: Record<MenuCommand, (input: never) => Promise<Reply>> = {
+const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply>> = {
     activateProject: (input) => contract.activateProject(input),
     somedayMove: (input) => contract.moveSomedayTasksToSection(input),
     somedayUndo: (input) => contract.undoSomedaySectionMove(input),
@@ -953,8 +955,8 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Promise<Reply>> = {
     dataSetting: (input) => contract.setDataSetting(input),
     // Settings › Sync: a sync option (journaled), and the screen's commands (never journaled: CoreHost.syncCommand).
     syncPreference: (input) => contract.setSyncPreference(input),
-    openSyncSettings: (input) => contract.openSyncSettings(input),
-    closeSyncSettings: (input) => contract.closeSyncSettings(input),
+    openSyncSettings: () => contract.openSyncSettings(),
+    closeSyncSettings: () => contract.closeSyncSettings(),
     selectSyncBackend: (input) => contract.selectSyncBackend(input),
     saveSyncBackend: (input) => contract.saveSyncBackend(input),
     syncNow: (input) => contract.syncNow(input),
@@ -1478,7 +1480,7 @@ globalThis.MindwtrHost = {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof available !== 'boolean') throw new Error('INVALID_INPUT');
             const { projectId, attachmentId } = projectAttachmentInput(json, true);
             const { project } = unwrap(contract.getProjectAttachmentEditOptions({ projectId }));
-            const matches = project.attachments.filter((item) => item.id === attachmentId);
+            const matches = (project.attachments ?? []).filter((item) => item.id === attachmentId);
             const selected = matches[0];
             if (matches.length !== 1 || selected.kind !== 'file' || selected.deletedAt || !selected.uri) throw new Error('INVALID_INPUT');
             const t = (key: string): string => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key;
@@ -2583,39 +2585,39 @@ globalThis.MindwtrHost = {
     projectAttachmentWriteRetryOutcome(json: string): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(contract.probeProjectAttachmentWriteOutcome(editorJson(json)));
+            return unwrap(contract.probeProjectAttachmentWriteOutcome(editorJson(json) as Parameters<typeof contract.probeProjectAttachmentWriteOutcome>[0]));
         });
     },
     /** Private iOS preparation and commit; Swift owns the durable journal. */
     projectAttachmentWritePrepare(json: string): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(contract.prepareProjectAttachmentWrite(editorJson(json)));
+            return unwrap(contract.prepareProjectAttachmentWrite(editorJson(json) as Parameters<typeof contract.prepareProjectAttachmentWrite>[0]));
         });
     },
     projectAttachmentWriteValidate(json: string): string {
-        return submit(async () => unwrap(contract.validatePreparedProjectAttachmentWrite(editorJson(json))));
+        return submit(async () => unwrap(contract.validatePreparedProjectAttachmentWrite(editorJson(json) as Parameters<typeof contract.validatePreparedProjectAttachmentWrite>[0])));
     },
     projectAttachmentWriteCommit(json: string): string {
-        return submit(async () => unwrap(await contract.commitPreparedProjectAttachmentWrite(editorJson(json))));
+        return submit(async () => unwrap(await contract.commitPreparedProjectAttachmentWrite(editorJson(json) as Parameters<typeof contract.commitPreparedProjectAttachmentWrite>[0])));
     },
     projectFileRemoveWriteRetryOutcome(json: string): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(contract.probeProjectFileRemoveWriteOutcome(editorJson(json)));
+            return unwrap(contract.probeProjectFileRemoveWriteOutcome(editorJson(json) as Parameters<typeof contract.probeProjectFileRemoveWriteOutcome>[0]));
         });
     },
     projectFileRemoveWritePrepare(json: string): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(contract.prepareProjectFileRemoveWrite(editorJson(json)));
+            return unwrap(contract.prepareProjectFileRemoveWrite(editorJson(json) as Parameters<typeof contract.prepareProjectFileRemoveWrite>[0]));
         });
     },
     projectFileRemoveWriteValidate(json: string): string {
-        return submit(async () => unwrap(contract.validatePreparedProjectFileRemoveWrite(editorJson(json))));
+        return submit(async () => unwrap(contract.validatePreparedProjectFileRemoveWrite(editorJson(json) as Parameters<typeof contract.validatePreparedProjectFileRemoveWrite>[0])));
     },
     projectFileRemoveWriteCommit(json: string): string {
-        return submit(async () => unwrap(await contract.commitPreparedProjectFileRemoveWrite(editorJson(json))));
+        return submit(async () => unwrap(await contract.commitPreparedProjectFileRemoveWrite(editorJson(json) as Parameters<typeof contract.commitPreparedProjectFileRemoveWrite>[0])));
     },
     // Private native publisher calls; these are not ordinary CoreHost query mutations.
     projectFileAvailabilityPreflight(json: string, encryptionStateJSON: unknown, cloudURL: string): string {
@@ -2664,14 +2666,14 @@ globalThis.MindwtrHost = {
     projectFileAddWritePrepare(json: string): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(await contract.prepareProjectFileAddWrite(editorJson(json)));
+            return unwrap(await contract.prepareProjectFileAddWrite(editorJson(json) as Parameters<typeof contract.prepareProjectFileAddWrite>[0]));
         });
     },
     projectFileAddWriteValidate(json: string): string {
-        return submit(async () => unwrap(contract.validatePreparedProjectFileAddWrite(editorJson(json))));
+        return submit(async () => unwrap(contract.validatePreparedProjectFileAddWrite(editorJson(json) as Parameters<typeof contract.validatePreparedProjectFileAddWrite>[0])));
     },
     projectFileAddWriteCommit(json: string): string {
-        return submit(async () => unwrap(await contract.commitPreparedProjectFileAddWrite(editorJson(json))));
+        return submit(async () => unwrap(await contract.commitPreparedProjectFileAddWrite(editorJson(json) as Parameters<typeof contract.commitPreparedProjectFileAddWrite>[0])));
     },
     projectStatusOptions(json: string): string {
         return submit(async () => {
@@ -3409,12 +3411,12 @@ globalThis.MindwtrHost = {
     },
     /** Called by iOS only after the immutable JSON file has been written and closed. */
     backupExportPrepared(format: string): string {
-        return submit(() => {
+        return submit(async () => {
             if (globalThis.__mindwtrHostPlatform === 'ios' && (format === 'json' || format === 'csv' || format === 'tasknotes')) {
                 try {
                     logInfo('Native iOS backup file prepared', {
                         scope: 'native-ios', force: true,
-                        context: { releaseCheck: 'v1.3.4/ios-backup-export', outcome: 'prepared', format },
+                        context: { releaseCheck: 'v1.3.5/ios-backup-export', outcome: 'prepared', format },
                     });
                 } catch { /* Optional diagnostics cannot prevent sharing a completed file. */ }
             }
@@ -3825,7 +3827,8 @@ globalThis.MindwtrHost = {
     attachmentFileEditSaveValidate(json: string): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Attachment draft capability is unavailable');
-            return unwrap(validateAttachmentFileEditSave(attachmentDraftJson(json) as AttachmentFileEditSaveEnvelope));
+            return unwrap<Extract<ReturnType<typeof validateAttachmentFileEditSave>, { ok: true }>['value']>(
+                validateAttachmentFileEditSave(attachmentDraftJson(json) as AttachmentFileEditSaveEnvelope));
         });
     },
     attachmentFileEditSaveCommit(json: string): string {

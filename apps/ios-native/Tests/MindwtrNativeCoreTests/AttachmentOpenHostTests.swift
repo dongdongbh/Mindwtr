@@ -187,7 +187,7 @@ final class AttachmentOpenHostTests: XCTestCase {
             item("live", uri: "file:///private/var/mobile/Containers/Data/Application/00000000-0000-0000-0000-000000000000/Library/attachments/live.txt")]
         let host = core(), hooks = NativeAttachmentHostHooks(); var work = 0
         hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in work += 1 } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let before = try rows(), identities = try [file, outside, cached].map(inode), names = try FileManager.default.contentsOfDirectory(atPath: managed.path).sorted(), cachedNames = try FileManager.default.contentsOfDirectory(atPath: cache.path).sorted()
         for attachment in prefixRefusals {
             let count = work
@@ -289,7 +289,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         hooks.configureJobs = { jobs in jobs.afterWork = { id, _ in
             if id == "1" { fired = true; do { try Data("after changed".utf8).write(to: file, options: .atomic) } catch { mutationError = error } }
         } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let before = try rows(), identity = try inode(file)
         await refused { _ = try await self.opened(host, [attachment], id: "live") }
         XCTAssertTrue(fired); XCTAssertNil(mutationError); XCTAssertNotEqual(try inode(file), identity)
@@ -301,7 +301,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         try await seed([attachment]); try bytes.write(to: file)
         let host = core(), hooks = NativeAttachmentHostHooks(), entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
         hooks.configureJobs = { jobs in jobs.beforeWork = { id, _ in if id == "1" { entered.signal(); release.wait() } } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let before = try rows(), identity = try inode(file), input = try request([attachment], id: "live")
         let operation = Task { try await host.prepareTaskFileOpen(requestJSON: input) }
         defer { release.signal() }
@@ -389,7 +389,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         try seedProject([live, removed, link]); try bytes.write(to: file)
         let host = core(), hooks = NativeAttachmentHostHooks(); var work = 0
         hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in work += 1 } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let tasks = try rows(), projects = try projectRows(), identity = try inode(file)
         let inputs = try [json(["projectId": "unknown", "attachmentId": "live"]), json(["projectId": projectID, "attachmentId": "unknown"]),
             json(["projectId": projectID, "attachmentId": "removed"]), json(["projectId": projectID, "attachmentId": "link"]),
@@ -401,7 +401,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         await host.close()
         for column in ["deletedAt", "purgedAt"] {
             _ = try sql("UPDATE projects SET deletedAt=NULL,purgedAt=NULL"); _ = try sql("UPDATE projects SET \(column)=? WHERE id=?", [at, projectID])
-            let cold = core(); await cold.configureAttachmentHost(hooks); _ = try await cold.start(); let retained = try projectRows()
+            let cold = core(); try await cold.configureAttachmentHost(hooks); _ = try await cold.start(); let retained = try projectRows()
             await refused { _ = try await self.projectOpened(cold, id: "live") }
             XCTAssertEqual(work, 0); XCTAssertEqual(try projectRows(), retained); XCTAssertEqual(try rows(), tasks)
             XCTAssertEqual(try Data(contentsOf: file), bytes); XCTAssertEqual(try inode(file), identity); await cold.close()
@@ -422,7 +422,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         try seedProject(attachments)
         let host = core(), hooks = NativeAttachmentHostHooks(); var work = 0
         hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in work += 1 } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let tasks = try rows(), projects = try projectRows(), paths = [file, outside, cached, symlink, hardlink, directory], identities = try paths.map(inode)
         let managedNames = try FileManager.default.contentsOfDirectory(atPath: managed.path).sorted(), cacheNames = try FileManager.default.contentsOfDirectory(atPath: cache.path).sorted()
         for (index, row) in attachments.enumerated() {
@@ -502,7 +502,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         try seedProject([attachment]); try bytes.write(to: file)
         let host = core(), hooks = NativeAttachmentHostHooks(), entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
         hooks.configureJobs = { jobs in jobs.beforeWork = { id, _ in if id == "1" { entered.signal(); release.wait() } } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let tasks = try rows(), projects = try projectRows(), identity = try inode(file), input = try json(["projectId": projectID, "attachmentId": "live"])
         let operation = Task { try await host.prepareProjectFileOpen(requestJSON: input) }; defer { release.signal() }
         let enteredResult = entered.wait(timeout: .now() + 5); XCTAssertEqual(enteredResult, .success)
@@ -686,7 +686,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         let current = managed.appendingPathComponent(id + ".txt"), identity = try inode(current)
         let host = core(), hooks = NativeAttachmentHostHooks(); var work = 0
         hooks.configureJobs = { jobs in jobs.beforeWork = { _, _ in work += 1 } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         let original = try rows()
         for uri in uris {
             var invalid = selected; invalid["uri"] = uri
@@ -778,7 +778,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         hooks.configureJobs = { jobs in jobs.afterWork = { _, _ in
             if armed && !fired { fired = true; do { try Data(contentsOf: editor).write(to: editor, options: .atomic) } catch { mutationError = error } }
         } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start()
         _ = try await checkpoint285(host, attachments: [selected])
         let accepted = try await opened(host, [selected], id: id); XCTAssertEqual(accepted["status"] as? String, "available")
         let retained = try Data(contentsOf: editor), editorIdentity = try inode(editor), before = try rows(), markers = try relocatedMarkers285()
@@ -807,7 +807,7 @@ final class AttachmentOpenHostTests: XCTestCase {
                     try bytes.write(to: file, options: .atomic)
                 } catch { mutationError = error } }
             } }
-            await host.configureAttachmentHost(hooks); _ = try await host.start(); let before = try rows()
+            try await host.configureAttachmentHost(hooks); _ = try await host.start(); let before = try rows()
             await refused { _ = try await self.opened(host, [selected], id: id) }
             XCTAssertTrue(fired); XCTAssertNil(mutationError); XCTAssertNotEqual(try inode(file), identity)
             if parent { XCTAssertNotEqual(try inode(managed), directoryIdentity); XCTAssertEqual(try Data(contentsOf: held.appendingPathComponent(id + ".txt")), bytes) }
@@ -828,7 +828,7 @@ final class AttachmentOpenHostTests: XCTestCase {
             hooks.configureJobs = { jobs in jobs.afterWork = { token, _ in
                 if token == "1" { fired = true; do { _ = try self.sql("UPDATE \(table) SET attachments=? WHERE id=?", [self.json([changed]), targetID]) } catch { mutationError = error } }
             } }
-            await host.configureAttachmentHost(hooks); _ = try await host.start()
+            try await host.configureAttachmentHost(hooks); _ = try await host.start()
             if table == "tasks" { await refused { _ = try await self.opened(host, [selected], id: id) } }
             else { await refused { _ = try await self.projectOpened(host, id: id) } }
             XCTAssertTrue(fired); XCTAssertNil(mutationError)
@@ -864,7 +864,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         let file = managed.appendingPathComponent(id + ".txt"), identity = try inode(file), host = core()
         let hooks = NativeAttachmentHostHooks(), entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
         hooks.configureJobs = { jobs in jobs.beforeWork = { token, _ in if token == "1" { entered.signal(); release.wait() } } }
-        await host.configureAttachmentHost(hooks); _ = try await host.start(); let before = try rows()
+        try await host.configureAttachmentHost(hooks); _ = try await host.start(); let before = try rows()
         let operation = Task { try await self.opened(host, [selected], id: id) }; defer { release.signal() }
         let result = entered.wait(timeout: .now() + 5); XCTAssertEqual(result, .success)
         guard result == .success else { operation.cancel(); release.signal(); _ = try? await operation.value; return }

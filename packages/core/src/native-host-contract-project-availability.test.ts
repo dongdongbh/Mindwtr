@@ -632,9 +632,14 @@ describe('private cached Project availability durable authority', () => {
 
 
 describe('native journal key ordering during prepared availability commit', () => {
-    it('commits and cold-replays the exact raw effect while retaining untouched nested Unicode settings', async () => {
+    it.each(['compact', 'reversed', 'whitespace'] as const)(
+    'commits and cold-replays the exact %s raw effect while retaining untouched nested Unicode settings', async (encoding) => {
         const selected = { ...file, uri: '', title: 'Original 文 🌿.txt' };
-        const rawAttachments = '\n ' + JSON.stringify([selected, sibling], null, 2) + ' ';
+        const rawAttachments = encoding === 'reversed'
+            ? JSON.stringify([selected, sibling].map(item => Object.fromEntries(Object.entries(item).reverse())))
+            : encoding === 'whitespace' ? '\n ' + JSON.stringify([selected, sibling], null, 2) + ' '
+                : JSON.stringify([selected, sibling]);
+        const ordered = JSON.parse(rawAttachments) as Attachment[];
         const { env, ensure } = await open(undefined, project('target', { attachments: [selected, sibling] }));
         try {
             const rawSettings = JSON.stringify({ ...useTaskStore.getState().settings, futureUnknown: { zeta: '保留 / 🌿',
@@ -649,7 +654,7 @@ describe('native journal key ordering during prepared availability commit', () =
             // NativeJSON sorts structured object keys but leaves every opaque SQL STRING intact.
             const wire = sortedObjects(JSON.parse(JSON.stringify(envelope))) as typeof envelope;
             expect(Object.keys(wire.prepared.effect.before.attachments![0]))
-                .not.toEqual(Object.keys(selected));
+                .not.toEqual(Object.keys(ordered[0]));
             expect(wire.prepared.effect.rawBefore).toEqual(envelope.prepared.effect.rawBefore);
             expect(wire.prepared.effect.rawAfter).toEqual(envelope.prepared.effect.rawAfter);
             const before = await allRows(env), savedBefore = (before.projects as Record<string, unknown>[]).find(row => row.id === 'target')!;
@@ -660,7 +665,8 @@ describe('native journal key ordering during prepared availability commit', () =
             expect(await privateMethods(env).commitPreparedProjectFileAvailability(wire)).toEqual({ ok: true,
                 value: { status: 'available', message: null, update: null } });
             const after = await allRows(env);
-            const rawAfter = JSON.stringify([{ ...selected, uri: target, localStatus: 'available' }, sibling]);
+            const rawAfter = JSON.stringify(ordered.map(item => item.id === selected.id
+                ? { ...item, uri: target, localStatus: 'available' } : item));
             expect(after.projects).toEqual((before.projects as Record<string, unknown>[]).map(row => row.id === 'target'
                 ? { ...row, attachments: rawAfter, rev: 4, revBy: 'device', updatedAt: envelope.prepared.effect.updateAt } : row));
             expect(after.tasks).toEqual(before.tasks); expect(after.settings).toEqual(before.settings);

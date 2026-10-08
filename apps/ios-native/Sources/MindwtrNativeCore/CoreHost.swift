@@ -439,8 +439,8 @@ public final class CoreHost: @unchecked Sendable {
     #endif
 
     #if DEBUG
-    func configureAttachmentHost(_ hooks: NativeAttachmentHostHooks) async {
-        _ = try? await perform { $0.attachmentHooks = hooks }
+    func configureAttachmentHost(_ hooks: NativeAttachmentHostHooks) async throws {
+        try await perform { try $0.configureAttachmentHost(hooks) }
     }
     #endif
 
@@ -1013,6 +1013,14 @@ private final class Engine: @unchecked Sendable {
     #if DEBUG
     var attachmentHooks: NativeAttachmentHostHooks?
     var attachmentDraftHooks: AttachmentDraftHostHooks?
+    func configureAttachmentHost(_ hooks: NativeAttachmentHostHooks) throws {
+        if hooks.configureJobs != nil {
+            guard !started, !closed, context == nil, attachmentJobs == nil else {
+                throw HostFailure("Attachment file job hooks require an unstarted host")
+            }
+        }
+        attachmentHooks = hooks
+    }
     #endif
     private var lockFD: Int32 = -1
     private var started = false

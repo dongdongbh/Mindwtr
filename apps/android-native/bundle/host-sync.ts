@@ -174,7 +174,7 @@ export const isNativeIosSelfHostedProvider = (value: string | null | undefined):
 };
 
 export const createNativeSync = (bindings: NativeSyncBindings) => {
-    const platform = globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android';
+    const platform = (globalThis as typeof globalThis & { __mindwtrHostPlatform?: unknown }).__mindwtrHostPlatform === 'ios' ? 'ios' : 'android';
     if (platform === 'ios' && typeof bindings.retireLocalAttachment !== 'function') {
         throw new Error('Foreground sync requires owned attachment cleanup on this iOS build');
     }
