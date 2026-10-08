@@ -218,7 +218,7 @@ describe('TaskListBulkOrganizeModal', () => {
     act(() => { tree.root.findByProps({ accessibilityLabel: 'Due: Calendar' }).props.onPress(); });
     let picker = tree.root.findByType('DateTimePicker' as any);
     expect(picker.props.mode).toBe('date');
-    expect(picker.props.display).toBe(os === 'ios' ? 'spinner' : 'default');
+    expect(picker.props.display).toBe(os === 'ios' ? 'inline' : 'default');
     act(() => { picker.props.onChange({ type: 'set' }, new Date(2026, 9, 5, 23, 30)); });
     expect(onApply).not.toHaveBeenCalled();
     const dueInput = tree.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'Due');
