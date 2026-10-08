@@ -3,7 +3,14 @@ import Foundation
 /// One explicit asynchronous cycle. The Engine owns policy/storage; this latch only drains accepted callbacks.
 final class NativeReminderEffects: @unchecked Sendable {
     static var unavailable: HostFailure { HostFailure("NOT_READY: Reminder reconciliation is unavailable") }
-    struct Alarm: Sendable { let id: Int; let identifier: String; let json: String; let withdrawn: Bool }
+    struct Alarm: Sendable {
+        let id: Int
+        let identifier: String
+        let json: String
+        let withdrawn: Bool
+        /// Only recovery of an already armed durable Snooze owes fresh future/absence admission.
+        let armedSnoozeDeadline: Double?
+    }
     struct Cancellation: Sendable { let id: Int; let identifier: String; let withdrawn: Bool }
     struct Admission: Sendable { let namespace: String; let port: any NativeReminderPort }
     struct Plan: Sendable {

@@ -557,6 +557,53 @@ describe('native host contract: reminders', () => {
         expect(JSON.parse(done.state)[snooze.key]).toBeUndefined();
     });
 
+    it('selectively remakes only a selected future armed Snooze with its exact original alarm', async () => {
+        freezeClock();
+        await seed({ notificationsEnabled: false, dailyDigestMorningEnabled: false, weeklyReviewEnabled: false });
+        const host = await openHost('ios');
+        const details = { title: 'Original Snooze', message: 'Original message', tag: 'task:t-rent', play_sound: true,
+            snooze_interval: 10, data: { alarmKey: 'task:t-rent' }, schedule_type: 'once' };
+        const selected = 'snooze:11111111-1111-4111-8111-111111111111';
+        const unrelated = 'snooze:22222222-2222-4222-8222-222222222222';
+        const storedState = JSON.stringify({
+            [selected]: { kind: 'snooze', id: 1073741831, fireAtMs: Date.parse('2026-09-28T10:10:00.000Z'), details, armed: true },
+            [unrelated]: { kind: 'snooze', id: 1073741832, fireAtMs: Date.parse('2026-09-28T10:20:00.000Z'), details, armed: true },
+        });
+        const result = value(await host.planReminderAlarms({ storedAlarms: null, storedState, permissionGranted: true,
+            remake: [selected], fired: [], shown: [] }));
+        expect(result.schedule).toEqual([{ key: selected, id: 1073741831, fireAtMs: Date.parse('2026-09-28T10:10:00.000Z'),
+            details, repeat: 'once', replacing: null }]);
+        expect(result.cancel).toEqual([]);
+        expect(JSON.parse(result.state)).toEqual(JSON.parse(storedState));
+        expect(result.writeAhead).toBeNull();
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { name: 'equal deadline', offset: 0, armed: true, granted: true, done: false, delivered: false, scheduled: false, reason: null },
+        { name: 'recent past', offset: -1, armed: true, granted: true, done: false, delivered: false, scheduled: false, reason: null },
+        { name: 'too late', offset: -86_400_001, armed: true, granted: true, done: false, delivered: false, scheduled: false, reason: 'expired' },
+        { name: 'already delivered', offset: 600_000, armed: true, granted: true, done: false, delivered: true, scheduled: false, reason: null },
+        { name: 'owner done', offset: 600_000, armed: true, granted: true, done: true, delivered: false, scheduled: false, reason: 'withdrawn' },
+        { name: 'permission revoked', offset: 600_000, armed: true, granted: false, done: false, delivered: false, scheduled: false, reason: 'withdrawn' },
+        { name: 'unarmed recent past', offset: -60_000, armed: false, granted: true, done: false, delivered: false, scheduled: true, reason: null },
+    ])('preserves $name precedence over selective Snooze remake', async ({ offset, armed, granted, done, delivered, scheduled, reason }) => {
+        freezeClock();
+        await seed({ notificationsEnabled: false }, [task({ id: 't-rent', status: done ? 'done' : 'next' })]);
+        const host = await openHost('ios');
+        const key = 'snooze:11111111-1111-4111-8111-111111111111', id = 1073741831;
+        const fireAtMs = Date.parse(NOW) + offset;
+        const details = { title: 'Snooze', message: 'Message', tag: 'task:t-rent', play_sound: true, data: { alarmKey: 'task:t-rent' } };
+        const entry = { kind: 'snooze', id, fireAtMs, details, armed };
+        const result = value(await host.planReminderAlarms({ storedAlarms: null, storedState: JSON.stringify({ [key]: entry }),
+            permissionGranted: granted, remake: [key], fired: delivered ? [id] : [], shown: delivered ? [id] : [] }));
+        expect(result.schedule).toEqual(scheduled ? [{ key, id, fireAtMs, details, repeat: 'once', replacing: null }] : []);
+        expect(result.cancel).toEqual(reason ? [{ key, id, reason }] : []);
+        expect(JSON.parse(result.state)[key]).toEqual(reason ? undefined : { ...entry, armed: true });
+        expect(result.writeAhead).toBeNull();
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
     it('never makes a replayed Snooze again once a plan withdrew it: no permission, or its task done', async () => {
         freezeClock();
         await seed();

@@ -1354,7 +1354,7 @@ const iosReminderEffects = createIosReminderMethods({
     },
     read: () => keyValue.multiGet([REMINDER_ALARM_MAP_STORAGE_KEY, NATIVE_REMINDER_STATE_STORAGE_KEY]),
     plan: (input) => contract.planReminderAlarms(input),
-    acknowledged: async (mode, scheduled, cancelled, collapsed) => {
+    acknowledged: async (mode, scheduled, cancelled, collapsed, rearmed) => {
         await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
             message: 'Native iOS reminders reconciled',
             context: { releaseCheck: 'v1.3.5/ios-reminder-apply', outcome: 'confirmed', mode,
@@ -1363,6 +1363,10 @@ const iosReminderEffects = createIosReminderMethods({
         if (collapsed > 0) await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
             message: 'Native iOS reminder threads collapsed',
             context: { releaseCheck: 'v1.3.5/ios-reminder-thread-collapse', count: String(collapsed) },
+        }, { force: true });
+        if (rearmed > 0) await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+            message: 'Native iOS missing Snoozes recovered',
+            context: { releaseCheck: 'v1.3.5/ios-reminder-snooze-recovery', count: String(rearmed) },
         }, { force: true });
     },
     observation: {
@@ -4168,10 +4172,10 @@ globalThis.MindwtrHost = {
             requireReminderSignal(signal); return result;
         });
     },
-    iosReminderAcknowledged(token: string, mode: string, scheduled: number, cancelled: number, collapsed = 0): string {
+    iosReminderAcknowledged(token: string, mode: string, scheduled: number, cancelled: number, collapsed = 0, rearmed = 0): string {
         return submit(async (signal) => {
             requireReminderSignal(signal);
-            return iosReminderEffects.acknowledge(token, mode, scheduled, cancelled, collapsed);
+            return iosReminderEffects.acknowledge(token, mode, scheduled, cancelled, collapsed, rearmed);
         });
     },
     /** Pure preview only: no alarm bridge, ownership-map write or permission request. */

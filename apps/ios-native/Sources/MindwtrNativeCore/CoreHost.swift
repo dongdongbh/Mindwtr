@@ -763,6 +763,14 @@ public final class CoreHost: @unchecked Sendable {
             try NativeReminderEffects.checkInventory(actual)
             guard !actual.contains(where: { $0.identifier == alarm.identifier && $0.ownedID != alarm.id }),
                   Set(actual.map(\.identifier)).union([alarm.identifier]).count <= 64 else { throw NativeReminderEffects.unavailable }
+            if let deadline = alarm.armedSnoozeDeadline {
+                let tray = try await port.delivered(namespace: namespace); try await current()
+                try NativeReminderEffects.checkInventory(tray)
+                guard !actual.contains(where: { $0.identifier == alarm.identifier || $0.ownedID == alarm.id }),
+                      !tray.contains(where: { $0.identifier == alarm.identifier || $0.ownedID == alarm.id }),
+                      deadline > Date().timeIntervalSince1970 * 1000 else { throw NativeReminderEffects.unavailable }
+            }
+            // No await separates the final deadline check from accepting the OS add callback.
             try await port.add(alarm, namespace: namespace); try await current()
         }
         // Pending requests stay distinct. Collapse only actual, freshly observed delivered owners.
@@ -2807,11 +2815,36 @@ private final class Engine: @unchecked Sendable {
             guard let text = value as? String else { throw NativeReminderEffects.unavailable }; return text
         }
         let before = try [optional(envelope["storedAlarms"]), optional(envelope["storedState"])]
+        let originalState: [String: Any]
+        if let raw = before[1] {
+            guard let parsed = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+                throw NativeReminderEffects.unavailable
+            }
+            originalState = parsed
+        } else { originalState = [:] }
         let schedule = try scheduled.map { alarm -> NativeReminderEffects.Alarm in
             let request = try NativeReminderRequest.make(alarm: alarm, namespace: turn.namespace)
             guard let id = NativeReminderRequest.ownedID(identifier: request.identifier,
                 metadata: request.content.userInfo["mindwtrNativeReminder"], namespace: turn.namespace) else { throw NativeReminderEffects.unavailable }
-            return .init(id: id, identifier: request.identifier, json: try Self.ownedJSON(alarm), withdrawn: alarm["replacing"] as? String == "withdrawn")
+            var armedSnoozeDeadline: Double?
+            if let key = alarm["key"] as? String, key.hasPrefix("snooze:") {
+                guard let entry = originalState[key] as? [String: Any], entry["kind"] as? String == "snooze",
+                      let armed = entry["armed"] as? NSNumber, CFGetTypeID(armed) == CFBooleanGetTypeID() else {
+                    throw NativeReminderEffects.unavailable
+                }
+                if armed.boolValue {
+                    guard let storedID = entry["id"] as? NSNumber, CFGetTypeID(storedID) != CFBooleanGetTypeID(),
+                          storedID.doubleValue == Double(id),
+                          let deadline = entry["fireAtMs"] as? NSNumber, CFGetTypeID(deadline) != CFBooleanGetTypeID(),
+                          deadline.doubleValue.isFinite, deadline.doubleValue.rounded() == deadline.doubleValue,
+                          abs(deadline.doubleValue) <= 8_640_000_000_000_000,
+                          let fireAt = alarm["fireAtMs"] as? NSNumber, CFGetTypeID(fireAt) != CFBooleanGetTypeID(),
+                          fireAt.doubleValue == deadline.doubleValue else { throw NativeReminderEffects.unavailable }
+                    armedSnoozeDeadline = deadline.doubleValue
+                }
+            }
+            return .init(id: id, identifier: request.identifier, json: try Self.ownedJSON(alarm),
+                withdrawn: alarm["replacing"] as? String == "withdrawn", armedSnoozeDeadline: armedSnoozeDeadline)
         }
         let cancel = try cancelled.map { item -> NativeReminderEffects.Cancellation in
             guard Set(item.keys) == Set(["key", "id", "reason"]), let number = item["id"] as? NSNumber,
@@ -2858,7 +2891,8 @@ private final class Engine: @unchecked Sendable {
               (0...4096).contains(collapsed) else { throw NativeReminderEffects.unavailable }
         try writeReminderMaps(turn, next: turn.final)
         try checkReminderReconciliation(id)
-        _ = try? reminderInvoke("iosReminderAcknowledged", [turn.session, plan.mode, plan.schedule.count, plan.cancel.count, collapsed], cancellation: turn.cancellation)
+        let rearmed = plan.schedule.filter { $0.armedSnoozeDeadline != nil }.count
+        _ = try? reminderInvoke("iosReminderAcknowledged", [turn.session, plan.mode, plan.schedule.count, plan.cancel.count, collapsed, rearmed], cancellation: turn.cancellation)
         try checkReminderReconciliation(id)
         return try Self.ownedJSON(["mode": plan.mode, "scheduled": plan.schedule.count, "cancelled": plan.cancel.count,
             "topUpAtMs": turn.topUpAtMs.map { $0 as Any } ?? NSNull()])

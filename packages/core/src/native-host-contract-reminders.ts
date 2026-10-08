@@ -303,7 +303,8 @@ export function createReminderMethods(deps: ReminderDeps) {
                         // Made now: one never made; at a process start, one ahead (a reboot dropped it) or one the phone missed while
                         // off (made but not shown; it shows once, now). Only a host with a ledger knows one was not shown.
                         const missed = Boolean(input.fired) && entry.fireAtMs <= nowMs;
-                        if (!entry.armed || (remakeAll && (entry.fireAtMs > nowMs || missed))) snoozes.push(snoozeAlarm(key, entry));
+                        if (!entry.armed || (remakeAll && (entry.fireAtMs > nowMs || missed))
+                            || (remake.has(key) && entry.fireAtMs > nowMs)) snoozes.push(snoozeAlarm(key, entry));
                         remembered.set(key, { ...entry, armed: true });
                     }
                     continue;

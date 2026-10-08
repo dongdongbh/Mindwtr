@@ -22,6 +22,7 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
     private var heldRemoval: CheckedContinuation<Void, Never>?
     private(set) var mutations: [Mutation] = []
     private(set) var addCount = 0
+    private(set) var addedAlarms: [String] = []
     private(set) var permissionCount = 0
     let manifest: URL
     init(manifest: URL) { self.manifest = manifest }
@@ -52,7 +53,7 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
             maps: [object?["mindwtr:local:alarms:v1"], object?["mindwtr:native:reminders:v1"]]))
     }
     func add(_ alarm: NativeReminderEffects.Alarm, namespace: String) async throws {
-        addCount += 1; try record("add", [alarm.identifier])
+        addCount += 1; addedAlarms.append(alarm.json); try record("add", [alarm.identifier])
         if failAdd == addCount { throw HostFailure("Private synthetic add refusal") }
         guard let value = try NativeJSON.jsonObject(with: Data(alarm.json.utf8)) as? [String: Any] else { throw NativeReminderEffects.unavailable }
         let request = try NativeReminderRequest.make(alarm: value, namespace: namespace)
@@ -91,9 +92,11 @@ private final class ReminderMapWriteFault: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
     var enabled = true
+    private var failures = 0
+    var counts: (promotions: Int, failures: Int) { lock.lock(); defer { lock.unlock() }; return (count, failures) }
     func before() throws {
         lock.lock(); defer { lock.unlock() }; count += 1
-        if count == 2 && enabled { throw HostFailure("Private final map refusal") }
+        if count == 2 && enabled { failures += 1; throw HostFailure("Private final map refusal") }
     }
 }
 
@@ -451,6 +454,150 @@ final class ReminderEffectsHostTests: XCTestCase {
         let tray = try await port.delivered(namespace: namespace); XCTAssertEqual(tray, [first])
         let remembered = try object(try XCTUnwrap(maps()[1])); XCTAssertEqual((remembered["task:task-0"] as? [String: Any])?["kind"] as? String, "delivered")
         XCTAssertEqual(try rows(), baseline)
+    }
+
+    private let snoozeKey = "snooze:11111111-1111-4111-8111-111111111111"
+    private let snoozeID = 1_073_741_831
+    private func snoozeEntry(fireAtMs: Double, armed: Bool = true) -> [String: Any] {
+        ["kind": "snooze", "id": snoozeID, "fireAtMs": fireAtMs, "armed": armed,
+         "details": ["title": "PRIVATE_REMINDER_SNOOZE", "message": "PRIVATE_REMINDER_BODY", "tag": "task:task-0",
+                     "play_sound": true, "data": ["alarmKey": "task:task-0", "taskId": "task-0"]] as [String: Any]]
+    }
+    /// A real durable armed receipt; the ordinary master switch is off to isolate independent Snooze policy.
+    private func seedSnooze(fireAtMs: Double? = nil, armed: Bool = true, ordinary: Bool = false) async throws -> CoreHost {
+        let initial = try await seed(count: 1); await initial.close()
+        if !ordinary { try settings { $0["notificationsEnabled"] = false } }
+        var values = try saved()
+        values[stateName] = try json([snoozeKey: snoozeEntry(fireAtMs: fireAtMs ?? floor(Date().timeIntervalSince1970 * 1000) + 3_600_000, armed: armed)])
+        try Data(json(values).utf8).write(to: manifest, options: .atomic)
+        let value = host(); _ = try await value.start(); return value
+    }
+    private func snoozeMarkers() throws -> [[String: Any]] {
+        let text = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
+        XCTAssertFalse(text.contains("PRIVATE_REMINDER")); XCTAssertFalse(text.contains("task:task-")); XCTAssertFalse(text.contains(namespace))
+        let entries = try text.split(separator: "\n").filter { $0.contains("v1.3.5/ios-reminder-snooze-recovery") }.map { try object(String($0)) }
+        for entry in entries {
+            let context = try XCTUnwrap(entry["context"] as? [String: String])
+            XCTAssertEqual(Set(context.keys), Set(["releaseCheck", "count"]))
+            XCTAssertEqual(context["releaseCheck"], "v1.3.5/ios-reminder-snooze-recovery")
+            XCTAssertEqual(context["count"], "1")
+        }
+        return entries
+    }
+    func testArmedSnoozeRecoveryExactFutureMissingThenWarmAndColdNoop() async throws {
+        let value = try await seedSnooze(), baseline = try rows(), before = try maps()
+        let original = try XCTUnwrap(try object(try XCTUnwrap(before[1]))[snoozeKey] as? [String: Any])
+        let foreign = observation("foreign-snooze"); await port.setPending([foreign]); await port.setDelivered([foreign])
+        let result = try object(try await value.reconcileReminders())
+        XCTAssertEqual(result["mode"] as? String, "inactive"); XCTAssertEqual(result["scheduled"] as? Int, 1)
+        let alarms = await port.addedAlarms, events = await port.mutations
+        XCTAssertEqual(events.map(\.operation), ["add"]); XCTAssertEqual(events.first?.maps[1], before[1])
+        let alarm = try object(try XCTUnwrap(alarms.first))
+        XCTAssertEqual(alarm["key"] as? String, snoozeKey); XCTAssertEqual(alarm["id"] as? Int, snoozeID)
+        XCTAssertEqual(alarm["fireAtMs"] as? Double, original["fireAtMs"] as? Double)
+        XCTAssertEqual(alarm["repeat"] as? String, "once")
+        XCTAssertEqual(try XCTUnwrap(alarm["details"] as? NSDictionary), try XCTUnwrap(original["details"] as? NSDictionary))
+        XCTAssertEqual(try snoozeMarkers().count, 1)
+        let warm = try object(try await value.reconcileReminders()); XCTAssertEqual(warm["scheduled"] as? Int, 0)
+        await value.close(); let cold = host(); _ = try await cold.start()
+        let replay = try object(try await cold.reconcileReminders()); XCTAssertEqual(replay["scheduled"] as? Int, 0)
+        let pending = try await port.pending(namespace: namespace), delivered = try await port.delivered(namespace: namespace)
+        XCTAssertEqual(pending.filter { $0.ownedID == snoozeID }.count, 1); XCTAssertTrue(pending.contains(foreign)); XCTAssertEqual(delivered, [foreign])
+        let count = await port.addCount; XCTAssertEqual(count, 1); XCTAssertEqual(try snoozeMarkers().count, 1); XCTAssertEqual(try rows(), baseline)
+    }
+    func testArmedSnoozeRecoveryPendingAndDeliveredEvidenceNeverRemakes() async throws {
+        let value = try await seedSnooze(), identifier = "mindwtr-native:\(namespace!):\(snoozeID)"
+        let owned = observation(identifier, id: snoozeID), baseline = try rows()
+        await port.setPending([owned]); let pending = try object(try await value.reconcileReminders())
+        XCTAssertEqual(pending["scheduled"] as? Int, 0)
+        await port.setPending([]); await port.setDelivered([owned])
+        let delivered = try object(try await value.reconcileReminders()); XCTAssertEqual(delivered["scheduled"] as? Int, 0)
+        let count = await port.addCount; XCTAssertEqual(count, 0); XCTAssertEqual(try snoozeMarkers().count, 0); XCTAssertEqual(try rows(), baseline)
+    }
+    func testArmedSnoozeRecoveryPastMissingDoesNotInferFiringOrSchedule() async throws {
+        let value = try await seedSnooze(fireAtMs: floor(Date().timeIntervalSince1970 * 1000) - 60_000), baseline = try rows()
+        let result = try object(try await value.reconcileReminders()); XCTAssertEqual(result["scheduled"] as? Int, 0)
+        let state = try object(try XCTUnwrap(maps()[1])), entry = try XCTUnwrap(state[snoozeKey] as? [String: Any])
+        XCTAssertEqual(entry["kind"] as? String, "snooze"); XCTAssertEqual(entry["armed"] as? Bool, true)
+        let count = await port.addCount; XCTAssertEqual(count, 0); XCTAssertEqual(try snoozeMarkers().count, 0); XCTAssertEqual(try rows(), baseline)
+    }
+    func testArmedSnoozeRecoveryDoesNotChangeRecentPastUnarmedBehavior() async throws {
+        let value = try await seedSnooze(fireAtMs: floor(Date().timeIntervalSince1970 * 1000) - 60_000, armed: false)
+        let result = try object(try await value.reconcileReminders()); XCTAssertEqual(result["scheduled"] as? Int, 1)
+        let count = await port.addCount; XCTAssertEqual(count, 1); XCTAssertEqual(try snoozeMarkers().count, 0)
+    }
+    func testArmedSnoozeRecoveryPermissionWaitCannotCrossDeadline() async throws {
+        let deadline = floor(Date().timeIntervalSince1970 * 1000) + 3_000
+        let value = try await seedSnooze(fireAtMs: deadline), before = try maps(), baseline = try rows()
+        let entered = expectation(description: "Future armed recovery waits on permission"), reads = await port.permissionCount
+        await port.holdPermission(at: reads + 2, entered: entered)
+        let task = Task { try await value.reconcileReminders() }; await fulfillment(of: [entered], timeout: 5)
+        let remaining = max(0, deadline - Date().timeIntervalSince1970 * 1000 + 30)
+        try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000))
+        await port.releasePermission(); await unavailable { try await task.value }
+        let count = await port.addCount; XCTAssertEqual(count, 0); XCTAssertEqual(try maps(), before)
+        XCTAssertEqual(try markers().count, 0); XCTAssertEqual(try snoozeMarkers().count, 0); XCTAssertEqual(try rows(), baseline)
+        // An existing fresh cycle is safe and leaves this now-past armed receipt alone.
+        let retry = try object(try await value.reconcileReminders()); XCTAssertEqual(retry["scheduled"] as? Int, 0)
+    }
+    private func refuseSnoozeArrivalDuringPermissionWait(delivered: Bool, foreign: Bool = false) async throws {
+        let value = try await seedSnooze(), before = try maps(), baseline = try rows()
+        let entered = expectation(description: "Inventory changes during recovery permission wait"), reads = await port.permissionCount
+        await port.holdPermission(at: reads + 2, entered: entered)
+        let task = Task { try await value.reconcileReminders() }; await fulfillment(of: [entered], timeout: 5)
+        let observed = observation("mindwtr-native:\(namespace!):\(snoozeID)", id: snoozeID, invalid: foreign)
+        if delivered { await port.setDelivered([observed]) } else { await port.setPending([observed]) }
+        await port.releasePermission(); await unavailable { try await task.value }
+        let count = await port.addCount; XCTAssertEqual(count, 0); XCTAssertEqual(try maps(), before)
+        XCTAssertEqual(try markers().count, 0); XCTAssertEqual(try snoozeMarkers().count, 0); XCTAssertEqual(try rows(), baseline)
+        if !foreign {
+            let retry = try object(try await value.reconcileReminders()); XCTAssertEqual(retry["scheduled"] as? Int, 0)
+        }
+    }
+    func testArmedSnoozeRecoveryFreshDeliveredArrivalRefusesBeforeAdd() async throws {
+        try await refuseSnoozeArrivalDuringPermissionWait(delivered: true)
+    }
+    func testArmedSnoozeRecoveryFreshPendingArrivalRefusesDuplicateAdd() async throws {
+        try await refuseSnoozeArrivalDuringPermissionWait(delivered: false)
+    }
+    func testArmedSnoozeRecoveryFreshForeignDeliveredCollisionRefusesBeforeAdd() async throws {
+        try await refuseSnoozeArrivalDuringPermissionWait(delivered: true, foreign: true)
+    }
+    func testArmedSnoozeRecoveryCancelledAcceptedAddDrainsThenRetryDoesNotDuplicate() async throws {
+        let value = try await seedSnooze(), before = try maps(), entered = expectation(description: "Accepted recovered Snooze")
+        await port.holdAdd(entered); let task = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5); task.cancel()
+        let countWhileHeld = await port.addCount; XCTAssertEqual(countWhileHeld, 1); XCTAssertEqual(try snoozeMarkers().count, 0)
+        await port.releaseAdd(); await cancelled { try await task.value }
+        XCTAssertEqual(try maps(), before); XCTAssertEqual(try markers().count, 0)
+        let retry = try object(try await value.reconcileReminders()); XCTAssertEqual(retry["scheduled"] as? Int, 0)
+        let count = await port.addCount; XCTAssertEqual(count, 1); XCTAssertEqual(try snoozeMarkers().count, 0)
+    }
+    func testArmedSnoozeRecoveryCloseDrainsAcceptedAddAndColdRetryDoesNotDuplicate() async throws {
+        let value = try await seedSnooze(), before = try maps(), entered = expectation(description: "Close drains recovered Snooze")
+        await port.holdAdd(entered); let task = Task { try await value.reconcileReminders() }; await fulfillment(of: [entered], timeout: 5)
+        let closing = Task { await value.close() }; for _ in 0..<50 { await Task.yield() }
+        XCTAssertEqual(try snoozeMarkers().count, 0); await port.releaseAdd(); await closing.value
+        await cancelled { try await task.value }; XCTAssertEqual(try maps(), before); XCTAssertEqual(try markers().count, 0)
+        let cold = host(); _ = try await cold.start(); let retry = try object(try await cold.reconcileReminders())
+        XCTAssertEqual(retry["scheduled"] as? Int, 0); let count = await port.addCount; XCTAssertEqual(count, 1)
+        XCTAssertEqual(try snoozeMarkers().count, 0)
+    }
+    func testArmedSnoozeRecoveryUncertainFinalCASHasPositiveFaultAndNoPrematureMarker() async throws {
+        let initial = try await seedSnooze(ordinary: true); await initial.close()
+        let fault = ReminderMapWriteFault(), value = host { store in store.faults.beforePromotion = { try fault.before() } }
+        _ = try await value.start(); let baseline = try rows()
+        await unavailable { try await value.reconcileReminders() }
+        XCTAssertEqual(fault.counts.promotions, 2); XCTAssertEqual(fault.counts.failures, 1)
+        let count = await port.addCount; XCTAssertEqual(count, 2)
+        let ahead = try object(try XCTUnwrap(maps()[0])); XCTAssertTrue(ahead.values.allSatisfy { ($0 as? [String: Any])?["pending"] as? Bool == true })
+        XCTAssertEqual(try markers().count, 0); XCTAssertEqual(try snoozeMarkers().count, 0)
+        await unavailable { try await value.reconcileReminders() }
+        XCTAssertEqual(fault.counts.promotions, 3); XCTAssertEqual(try markers().count, 0); XCTAssertEqual(try snoozeMarkers().count, 0)
+        let retry = try object(try await value.reconcileReminders()); XCTAssertEqual(retry["scheduled"] as? Int, 0)
+        let after = await port.addCount; XCTAssertEqual(after, count); XCTAssertEqual(try snoozeMarkers().count, 0); XCTAssertEqual(try rows(), baseline)
+        await value.close(); let cold = host(); _ = try await cold.start()
+        let replay = try object(try await cold.reconcileReminders()); XCTAssertEqual(replay["scheduled"] as? Int, 0)
     }
 
     private func refuseReplacementDuringPermissionAwait(delivered: Bool) async throws {

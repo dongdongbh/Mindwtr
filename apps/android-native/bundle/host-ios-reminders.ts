@@ -72,7 +72,7 @@ type Dependencies = {
     capture: () => () => void;
     read: () => Promise<[string, string | null][]>;
     plan: (input: PlanInput) => Promise<{ ok: true; value: NativeReminderAlarmPlan } | { ok: false }>;
-    acknowledged: (mode: string, scheduled: number, cancelled: number, collapsed: number) => Promise<void>;
+    acknowledged: (mode: string, scheduled: number, cancelled: number, collapsed: number, rearmed: number) => Promise<void>;
     observation?: { subscribe: (changed: () => void) => () => void; ready: () => boolean; rescheduleDelayMs: number };
 };
 
@@ -126,9 +126,11 @@ export function createIosReminderMethods(deps: Dependencies) {
             // Repeating UN requests persist. Remake only ordinary IDs proved missing, never infer that they fired.
             const remake = Object.entries(owned.map).filter(([, entry]) => record(entry)
                 && !pending.has(Number(entry.id))).map(([name]) => name);
-            // The current shared API cannot selectively rearm a missing future armed Snooze.
-            if (granted && Object.values(owned.state).some((entry) => record(entry) && entry.kind === 'snooze' && entry.armed === true
-                && Number(entry.fireAtMs) > Date.now() && !pending.has(Number(entry.id)) && !shown.has(Number(entry.id)))) throw unavailable();
+            // Restore only an armed future Snooze proved absent from both inventories; keep its original identity/time.
+            const nowMs = Date.now();
+            if (granted) remake.push(...Object.entries(owned.state).filter(([, entry]) => record(entry)
+                && entry.kind === 'snooze' && entry.armed === true && Number(entry.fireAtMs) > nowMs
+                && !pending.has(Number(entry.id)) && !shown.has(Number(entry.id))).map(([name]) => name));
             const result = await deps.plan({ storedAlarms, storedState, permissionGranted: granted, remake, fired: delivered, shown: delivered })
                 .catch(() => { throw unavailable(); });
             current(token);
@@ -137,12 +139,13 @@ export function createIosReminderMethods(deps: Dependencies) {
             if (result.value.writeAhead !== null) readOwnedIosReminderMaps(result.value.writeAhead, storedState);
             return { storedAlarms, storedState, plan: result.value };
         },
-        async acknowledge(token: string, mode: string, scheduled: number, cancelled: number, collapsed = 0) {
+        async acknowledge(token: string, mode: string, scheduled: number, cancelled: number, collapsed = 0, rearmed = 0) {
             current(token);
             if (!['active', 'inactive', 'revoked'].includes(mode) || !Number.isInteger(scheduled) || scheduled < 0 || scheduled > 64
                 || !Number.isInteger(cancelled) || cancelled < 0 || cancelled > 4096
-                || !Number.isInteger(collapsed) || collapsed < 0 || collapsed > 4096) throw unavailable();
-            try { await deps.acknowledged(mode, scheduled, cancelled, collapsed); } catch { /* Confirmed persistence survives logging failure. */ }
+                || !Number.isInteger(collapsed) || collapsed < 0 || collapsed > 4096
+                || !Number.isInteger(rearmed) || rearmed < 0 || rearmed > scheduled || rearmed > 64) throw unavailable();
+            try { await deps.acknowledged(mode, scheduled, cancelled, collapsed, rearmed); } catch { /* Confirmed persistence survives logging failure. */ }
             return null;
         },
     };
