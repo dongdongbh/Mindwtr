@@ -54,7 +54,8 @@ final class ProjectFileDownloadHostTests: XCTestCase {
     private var manifest: URL { container.appendingPathComponent("Library/Application Support/" + namespace + "/RCTAsyncLocalStorage_V1/manifest.json") }
     private enum Injected: Error { case boundary }
     override func setUpWithError() throws {
-        guard let path = ProcessInfo.processInfo.environment["MINDWTR_CORE_BUNDLE"] else { throw XCTSkip("Set actual iOS MINDWTR_CORE_BUNDLE") }
+        guard let path = ProcessInfo.processInfo.environment["MINDWTR_CORE_BUNDLE"]
+            ?? Bundle.main.url(forResource: "core-host", withExtension: "js")?.path else { throw XCTSkip("Set actual iOS MINDWTR_CORE_BUNDLE") }
         bundle = URL(fileURLWithPath: path)
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let candidate = base.appendingPathComponent("ProjectFileDownloadHostTests/" + UUID().uuidString, isDirectory: true)

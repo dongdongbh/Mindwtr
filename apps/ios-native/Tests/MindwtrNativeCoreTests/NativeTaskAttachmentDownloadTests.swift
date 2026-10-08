@@ -664,7 +664,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         let live = host(faults: faults, secureRead: true); _ = try await live.start()
         let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
         XCTAssertEqual(reply["status"] as? String, "draftAvailable")
-        XCTAssertEqual(reads, ["no-auth", "no-auth"], "Both isolated accounts are secure hits on their first alias"); XCTAssertEqual(reads.count, 2)
+        XCTAssertGreaterThan(reads.count, 2, "Material owner checks must repeat secure observations")
+        XCTAssertTrue(reads.allSatisfy { $0 == "no-auth" }, "Both isolated accounts and repeated owner reads remain secure hits on their first alias")
         XCTAssertEqual(try Data(contentsOf: manifest), savedSettings); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: target), bytes)
         #else
         throw XCTSkip("Actual isolated Keychain writes are iOS-only; macOS uses true-null legacy controls")
@@ -1244,6 +1245,246 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), checkpointIdentity)
         XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), identity)
         XCTAssertEqual(remote.requests, 0); await live.close(); XCTAssertEqual(try relocatedMarkers367(), 0)
+    }
+
+    func testNativeMaterialReadFailureAfterActualAESRefusesBeforeSourceAndFreshRequestCompletes() async throws {
+        try await seed(encrypted: true)
+        let faults = HostIOFaults()
+        var http: NativeHTTPJobs?, secrets: NativeSecretJobs?, crypto: NativeCryptoJobs?, fileJobs: NativeAttachmentFileJobs?
+        faults.configureHTTPJobs = { http = $0 }; faults.configureSecretJobs = { secrets = $0 }; faults.configureCryptoJobs = { crypto = $0 }
+        var reject = false, flipped = false, postAESReads = 0, operations = [String](), sourceSyncs = 0
+        faults.secretStatus = { operation, _ in
+            guard operation == "get" else { XCTFail("Selected preparation cannot mutate secure storage"); return errSecInteractionNotAllowed }
+            if reject { postAESReads += 1; return errSecNotAvailable }
+            return errSecItemNotFound // Actual nil secure reads retain the existing legacy fallback.
+        }
+        faults.cryptoAfterOperation = { operation in
+            operations.append(operation)
+            if operation == "aesGcmOpen" && !flipped { flipped = true; reject = true }
+        }
+        let hooks = NativeAttachmentHostHooks()
+        hooks.configureJobs = { fileJobs = $0; $0.beforeStageSync = { sourceSyncs += 1 } }
+        let live = host(faults: faults, secureRead: true)
+        try await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let original = try rows(), settings = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url)
+        let checkpointIdentity = try inode(editor.url), ciphertext = remote.bytes
+        var didRefuse = false
+        do { _ = try await live.downloadTaskAttachmentV5(requestJSON: request()) }
+        catch { didRefuse = true }
+        XCTAssertTrue(flipped, "The fault must follow successful actual native AES, not substitute decryption")
+        XCTAssertEqual(operations, ["aesGcmOpen"]); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(remote.bytes, ciphertext)
+        XCTAssertGreaterThan(postAESReads, 0, "The selected owner must re-read native material after AES")
+        XCTAssertTrue(didRefuse, "Loss of native material authority must refuse before plaintext source creation")
+        XCTAssertEqual(sourceSyncs, 0); XCTAssertEqual(try files(cache), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0, "An empty availability session may remain; no operation or checkpoint may advance")
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), checkpointIdentity)
+        XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), settings)
+        XCTAssertEqual(http?.counters.jobs, 0); XCTAssertEqual(http?.counters.running, 0); XCTAssertEqual(secrets?.counters.jobs, 0)
+        XCTAssertEqual(crypto?.counters.jobs, 0); XCTAssertEqual(crypto?.counters.running, 0); XCTAssertEqual(crypto?.counters.bytes, 0)
+        XCTAssertEqual(fileJobs?.counters.jobs, 0); XCTAssertEqual(fileJobs?.counters.bytes, 0)
+        // The RED's unexpected success already failed the safety assertions above.
+        // A successor is meaningful only after that first operation actually refused.
+        guard didRefuse else { return }
+        reject = false
+        let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
+        XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(remote.requests, 2)
+        XCTAssertEqual(operations, ["aesGcmOpen", "aesGcmOpen"]); XCTAssertEqual(sourceSyncs, 2, "Only the valid successor syncs its source and installer stage")
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), settings)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 1); XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
+        XCTAssertEqual(try files(cache), []); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    }
+
+    private func materialOutcomes415() throws -> [String] {
+        let log = root.appendingPathComponent("logs/mindwtr.log")
+        guard FileManager.default.fileExists(atPath: log.path) else { return [] }
+        let text = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertFalse(text.contains(Data(count: 32).base64EncodedString()))
+        XCTAssertFalse(text.contains("synthetic-cloud-token-401"))
+        return try text.split(separator: "\n").compactMap { line in
+            let entry = try object(String(line)), context = entry["context"] as? [String: String]
+            guard context?["releaseCheck"] == "v1.3.5/ios-task-download-material" else { return nil }
+            XCTAssertEqual(Set(context?.keys.map { $0 } ?? []), Set(["releaseCheck", "operation", "outcome"]))
+            XCTAssertEqual(context?["operation"], "task-download-material")
+            return context?["outcome"]
+        }
+    }
+    func testEncryptedSelfHostedTaskAcceptsSharedFormattedMaterialAndEmitsBoundedDiagnostic() async throws {
+        try await seed(backend: "cloud", encrypted: true)
+        var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        // RN's decoder ignores whitespace/invalid characters and permits omitted padding.
+        settings["@mindwtr_sync_encryption_key_v1"] = "\n!" + String(Data(count: 32).base64EncodedString().dropLast()) + " \n"
+        try Data(json(settings).utf8).write(to: manifest)
+        let faults = HostIOFaults(); var operations = [String](), readsAfterAES = 0, opened = false
+        faults.cryptoAfterOperation = { operations.append($0); if $0 == "aesGcmOpen" { opened = true } }
+        faults.secretStatus = { operation, _ in
+            guard operation == "get" else { XCTFail("Selected download cannot mutate secrets"); return errSecInteractionNotAllowed }
+            if opened { readsAfterAES += 1 }; return errSecItemNotFound
+        }
+        let live = host(faults: faults, secureRead: true); _ = try await live.start()
+        let original = try rows(), configuration = try Data(contentsOf: manifest), wire = remote.bytes
+        let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
+        XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(operations, ["aesGcmOpen"])
+        XCTAssertGreaterThan(readsAfterAES, 0); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(remote.unexpected, 0)
+        XCTAssertEqual(remote.bytes, wire); XCTAssertNotEqual(wire, bytes); XCTAssertEqual(try Data(contentsOf: target), bytes)
+        XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
+        XCTAssertEqual(try materialOutcomes415(), ["decrypted"]); XCTAssertEqual(try files(cache), [])
+    }
+    func testAESRequestWithDifferentValidKeyRefusesBeforeNativeCryptoOrSource() async throws {
+        try await seed(encrypted: true)
+        let other = Data(repeating: 1, count: 32)
+        var header = Data("MWENC1".utf8); header.append(contentsOf: [1,1,64,0,0,0,1,0,0,0,1,1])
+        header.append(Data(count: 16)); header.append(Data(count: 12))
+        var length = UInt64(bytes.count + 16).littleEndian
+        withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }
+        let box = try AES.GCM.seal(bytes, using: SymmetricKey(data: other), nonce: AES.GCM.Nonce(data: Data(count: 12)), authenticating: header)
+        remote.bytes = header + box.ciphertext + box.tag
+        let selected = try suffix("""
+        ;(() => { const native=__mindwtrNative,call=native.cryptoCall;
+          native.cryptoCall=raw=>{const request=JSON.parse(raw);if(request.op==='aesGcmOpen')request.key='\(other.base64EncodedString())';return call(JSON.stringify(request));};
+        })();
+        """)
+        let faults = HostIOFaults(); var attempts = [String](), syncs = 0
+        faults.cryptoBeforeOperation = { attempts.append($0) }
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
+        let live = host(selected, faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let original = try rows(), configuration = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
+        // Shared on-demand decryption failures map to the exact unavailable
+        // result; they do not grant source creation or availability authority.
+        let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
+        XCTAssertEqual(Set(reply.keys), Set(["version", "status", "requestId", "sessionID", "generation", "attachmentId"]))
+        XCTAssertEqual(reply["version"] as? Int, 1); XCTAssertEqual(reply["status"] as? String, "unavailable")
+        XCTAssertEqual(reply["requestId"] as? String, requestID); XCTAssertEqual(reply["sessionID"] as? String, before.sessionID)
+        XCTAssertEqual(reply["generation"] as? Int, before.generation); XCTAssertEqual(reply["attachmentId"] as? String, attachmentID)
+        XCTAssertEqual(remote.requests, 1); XCTAssertEqual(attempts, [], "A valid but unobserved key never reaches native AES")
+        XCTAssertEqual(syncs, 0); XCTAssertEqual(try files(cache), []); XCTAssertEqual(try materialOutcomes415(), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0)
+        XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
+    }
+    func testExactLegacyMaterialChangeAfterAESRefusesDespiteEqualDecodedBytes() async throws {
+        try await seed(encrypted: true)
+        let faults = HostIOFaults(); var opened = false, syncs = 0, externallyWritten: Data?
+        faults.cryptoAfterOperation = { operation in
+            guard operation == "aesGcmOpen" else { return }; opened = true
+            do {
+                var settings = try self.object(String(decoding: Data(contentsOf: self.manifest), as: UTF8.self))
+                settings["@mindwtr_sync_encryption_key_v1"] = "\n" + Data(count: 32).base64EncodedString()
+                let value = Data(try self.json(settings).utf8); try value.write(to: self.manifest, options: .atomic); externallyWritten = value
+            } catch { XCTFail("Synthetic legacy edit failed") }
+        }
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
+        let live = host(faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let original = try rows(), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
+        await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+        XCTAssertTrue(opened); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(syncs, 0)
+        XCTAssertEqual(try Data(contentsOf: manifest), try XCTUnwrap(externallyWritten)); XCTAssertEqual(try rows(), original)
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try files(cache), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertEqual(try materialOutcomes415(), [])
+        // Namespace freshness is deliberately conservative. No cleanup bypass
+        // or warm retry is claimed after an external shared-manifest edit.
+    }
+    func testNativeMaterialRevocationAfterSourceRetiresOnlyExactUnadoptedReceipt() async throws {
+        try await seed(encrypted: true)
+        let faults = HostIOFaults(); var reject = false, revoked = false, readFailures = 0, syncs = 0, opened = 0
+        faults.secretStatus = { operation, _ in
+            guard operation == "get" else { XCTFail("Selected download cannot mutate secrets"); return errSecInteractionNotAllowed }
+            if reject { readFailures += 1; return errSecNotAvailable }; return errSecItemNotFound
+        }
+        faults.cryptoAfterOperation = { if $0 == "aesGcmOpen" { opened += 1 } }
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
+        let boundary = AttachmentDraftHostHooks()
+        boundary.boundary = { if $0 == .beforeIntent && !revoked { revoked = true; reject = true } }
+        let live = host(faults: faults, secureRead: true); try await live.configureAttachmentHost(hooks)
+        await live.configureAttachmentDraftHost(boundary); _ = try await live.start()
+        let foreign = cache.appendingPathComponent("foreign-415.txt"), foreignBytes = Data("Foreign cache bytes / 文".utf8)
+        try foreignBytes.write(to: foreign); let foreignIdentity = try inode(foreign)
+        let original = try rows(), configuration = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
+        await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+        XCTAssertTrue(revoked); XCTAssertGreaterThan(readFailures, 0); XCTAssertEqual(opened, 1); XCTAssertEqual(syncs, 1)
+        XCTAssertEqual(try files(cache), [foreign.lastPathComponent]); XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes); XCTAssertEqual(try inode(foreign), foreignIdentity)
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try rows(), original)
+        XCTAssertEqual(try Data(contentsOf: manifest), configuration); XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
+        XCTAssertEqual(try materialOutcomes415(), ["decrypted"], "Authenticated preparation is distinct from checkpoint admission")
+        reject = false
+        let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
+        XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(opened, 2); XCTAssertEqual(syncs, 3); XCTAssertEqual(remote.requests, 2)
+        XCTAssertEqual(try files(cache), [foreign.lastPathComponent]); XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes); XCTAssertEqual(try inode(foreign), foreignIdentity)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        await live.close(); let cold = host(); _ = try await cold.start()
+        XCTAssertEqual(try files(cache), [foreign.lastPathComponent]); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(remote.requests, 2)
+    }
+    func testEncryptedFilledProofRetainsSourceOnRevocationAndColdReplayNeedsNoMaterialOrGET() async throws {
+        try await seed(encrypted: true)
+        let faults = HostIOFaults(); var reject = false, filled = false, opened = 0, readFailures = 0
+        faults.secretStatus = { operation, _ in
+            guard operation == "get" else { XCTFail("Selected download cannot mutate secrets"); return errSecInteractionNotAllowed }
+            if reject { readFailures += 1; return errSecNotAvailable }; return errSecItemNotFound
+        }
+        faults.cryptoAfterOperation = { if $0 == "aesGcmOpen" { opened += 1 } }
+        let hooks = AttachmentDraftHostHooks(); hooks.boundary = { if $0 == .afterFilled && !filled { filled = true; reject = true } }
+        let live = host(faults: faults, secureRead: true); _ = try await live.start(); await live.configureAttachmentDraftHost(hooks)
+        let original = try rows(), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
+        await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+        XCTAssertTrue(filled); XCTAssertGreaterThan(readFailures, 0); XCTAssertEqual(opened, 1); XCTAssertEqual(remote.requests, 1)
+        let operation = try XCTUnwrap(store.readAvailability()?.operations.last); XCTAssertEqual(operation.phase, .stageFilled)
+        guard case .owned(let source, _, let proof?, _) = operation.resource else { return XCTFail("Exact adopted plaintext proof must remain recoverable") }
+        let sourceURL = try XCTUnwrap(URL(string: source.sourceURI)), sourceIdentity = try inode(sourceURL)
+        XCTAssertEqual(try Data(contentsOf: sourceURL), bytes); XCTAssertEqual(source.sha256, hash(bytes)); XCTAssertEqual(proof.size, Int64(bytes.count))
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity); XCTAssertEqual(try rows(), original)
+        let retained = try String(contentsOf: store.url, encoding: .utf8)
+        XCTAssertFalse(retained.contains(Data(count: 32).base64EncodedString())); XCTAssertFalse(retained.contains("fixture-only"))
+        await live.close()
+        var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self)); settings.removeValue(forKey: "@mindwtr_sync_encryption_key_v1")
+        try Data(json(settings).utf8).write(to: manifest)
+        let freshSettings = try Data(contentsOf: manifest), coldFaults = HostIOFaults(); var coldAES = 0
+        coldFaults.cryptoAfterOperation = { if $0 == "aesGcmOpen" { coldAES += 1 } }
+        let cold = host(faults: coldFaults); _ = try await cold.start()
+        let reply = try object(await cold.downloadTaskAttachmentV5(requestJSON: request()))
+        XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(coldAES, 0)
+        XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), freshSettings)
+        XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
+        // Existing early durable replay owns recovery; it does not claim the
+        // cold process observed or retained the pre-crash encryption secret.
+        if FileManager.default.fileExists(atPath: sourceURL.path) { XCTAssertEqual(try inode(sourceURL), sourceIdentity) }
+    }
+
+    func testPhysicalSecureMaterialValueChangeAfterAESRefusesBeforeSource() async throws {
+        #if os(iOS)
+        try await seed(encrypted: true)
+        var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
+        settings.removeValue(forKey: "@mindwtr_sync_encryption_key_v1"); try Data(json(settings).utf8).write(to: manifest)
+        let faults = HostIOFaults(), service = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
+        faults.secretService = service
+        let account = Data("mindwtr_sync_encryption_key_v1".utf8)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service + ":no-auth",
+            kSecAttrAccount as String: account, kSecAttrGeneric as String: account, kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+        defer { let status = SecItemDelete(query as CFDictionary); XCTAssertTrue(status == errSecSuccess || status == errSecItemNotFound) }
+        var input = query; input[kSecValueData as String] = Data(Data(count: 32).base64EncodedString().utf8)
+        input[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        XCTAssertEqual(SecItemAdd(input as CFDictionary, nil), errSecSuccess)
+        var changed = false, opened = 0, syncs = 0
+        faults.cryptoAfterOperation = { operation in
+            guard operation == "aesGcmOpen" else { return }; opened += 1
+            let replacement = Data(Data(repeating: 1, count: 32).base64EncodedString().utf8)
+            XCTAssertEqual(SecItemUpdate(query as CFDictionary, [kSecValueData as String: replacement] as CFDictionary), errSecSuccess); changed = true
+        }
+        let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
+        let live = host(faults: faults, secureRead: true); try await live.configureAttachmentHost(hooks); _ = try await live.start()
+        let original = try rows(), configuration = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
+        await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
+        XCTAssertTrue(changed); XCTAssertEqual(opened, 1); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(syncs, 0)
+        XCTAssertEqual(try files(cache), []); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try materialOutcomes415(), [])
+        XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), configuration)
+        XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
+        #else
+        throw XCTSkip("Actual isolated Keychain value changes are iOS-only; macOS exercises secure read failures")
+        #endif
     }
 
 }
