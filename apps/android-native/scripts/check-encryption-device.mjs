@@ -216,18 +216,41 @@ const abandonIfStranded = async () => {
     return true;
 };
 
+/** The encryption card's state on the Sync screen: 'locked' (asks for a passphrase), 'on', 'off', or null (no card). */
+const cardState = async () => {
+    const locked = en['settings.syncEncryptionLockedTitle'];
+    const on = en['settings.syncEncryptionStatusOn'];
+    try {
+        const node = await reveal((current) => withText(current, locked) ?? withText(current, on) ?? action(en['settings.syncEncryptionEnable'])(current), 'the encryption card');
+        return node.text === locked ? 'locked' : node.text === on ? 'on' : 'off';
+    } catch { return null; }
+};
+/** Disable at the current folder (the key is on the phone, so no passphrase): the folder is plaintext again. */
+const disableHere = async (description) => {
+    await tapThenFind(action(en['settings.syncEncryptionDisable']), (current) => tagged(current, 'sync-encryption-submit'), description);
+    await tapNode((current) => tagged(current, 'sync-encryption-submit'), flowClosed, description, 120_000);
+};
 /**
- * A failed earlier run can leave the phone asking for its folder's passphrase (a no-key discovery that run's folder made; each
- * run uses a new folder). Take RN's stale-lock exit, as a user would: Enter passphrase at this plaintext folder answers "no
- * encrypted files here" and turns encryption off. True when it did.
+ * A failed earlier run can leave encryption on the phone, as a user would find it, at a folder that is gone (each run uses a
+ * new one): asking for that folder's passphrase, or on with its key. Clear it the way a user would. Asking: RN's stale-lock
+ * exit (Enter passphrase here answers "no encrypted files here" and turns encryption off). On: the Save just sealed this
+ * folder with the old key, so Disable here. Returns what it cleared, or null.
  */
-const clearStaleLock = async () => {
+const clearLeftoverEncryption = async () => {
     await openSync();
-    try { await reveal((current) => withText(current, en['settings.syncEncryptionLockedTitle']), 'the locked card'); } catch { return false; }
-    await tapThenFind((current) => tagged(current, 'sync-encryption-open'), (current) => tagged(current, 'sync-passphrase-current'), 'the unlock flow (stale)');
-    await fillTag('sync-passphrase-current', PASSPHRASE);
-    await tapThenFind((current) => tagged(current, 'sync-encryption-submit'), (current) => withText(current, en['settings.syncEncryptionNoEncryptedRemote']), 'the stale-lock exit', 60_000);
-    return true;
+    const state = await cardState();
+    if (state === 'locked') {
+        await tapThenFind((current) => tagged(current, 'sync-encryption-open'), (current) => tagged(current, 'sync-passphrase-current'), 'the unlock flow (stale)');
+        await fillTag('sync-passphrase-current', PASSPHRASE);
+        await tapThenFind((current) => tagged(current, 'sync-encryption-submit'), (current) => withText(current, en['settings.syncEncryptionNoEncryptedRemote']), 'the stale-lock exit', 60_000);
+        return 'a passphrase request, through RN\'s stale-lock exit ("no encrypted files here")';
+    }
+    if (state === 'on') {
+        await disableHere('Disable (an earlier run\'s key)');
+        await until('the folder plaintext again', () => remoteArtifacts(dav, FOLDER).encrypted.length === 0, 120_000);
+        return 'encryption with an earlier run\'s key, through Disable';
+    }
+    return null;
 };
 
 /** How many times the Sync screen's [operation] answered, whatever its outcome. */
@@ -294,9 +317,10 @@ try {
         await tapNode((current) => tagged(current, 'sync-backend-off'), (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off');
     }
     await saveWebdav(WEBDAV_PORT);
+    const leftover = await clearLeftoverEncryption();
+    if (leftover) console.log(`info - an earlier run left ${leftover}`);
     await until('the phone\'s plaintext document in the folder', () => remoteArtifacts(dav, FOLDER).plain.some((file) => file.path.endsWith('/data.json') && file.text.includes(titles.phone)), 60_000);
     check(true, '(1) WebDAV saved; the first sync uploaded the phone\'s capture in plaintext');
-    if (await clearStaleLock()) console.log('info - an earlier run\'s passphrase request was cleared through RN\'s stale-lock exit ("no encrypted files here")');
 
     // (2) Enable, with a tap answered during the Argon2id derivation.
     await tapThenFind(action(en['settings.syncEncryptionEnable']), (current) => tagged(current, 'sync-passphrase-next'), 'the Enable flow');
@@ -526,6 +550,11 @@ try {
     if (process.exitCode) {
         try {
             if (await abandonIfStranded()) console.log('info - the unfinished change was abandoned after the failure');
+            // Left on, the key would seal the next check's folder: Disable while this run's server is still up.
+            if (await cardState() === 'on') {
+                await disableHere('Disable after a failure');
+                console.log('info - encryption turned off after the failure (Disable), so the next check starts plaintext');
+            }
             await openSync();
             await tapNode((current) => tagged(current, 'sync-backend-off'), (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off after a failure');
             console.log('info - Sync set Off after the failure');
