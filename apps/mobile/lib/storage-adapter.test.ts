@@ -393,14 +393,14 @@ describe('mobile storage adapter', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
       updatedAt: '2026-06-15T00:00:00.000Z',
     });
-    const hugeSnapshot: AppData = {
+    const hugeSnapshot = {
       tasks: Array.from({ length: 6_000 }, (_, index) => makeTask(`task-${index}`)),
       projects: [],
       sections: [],
       areas: [],
       people: [],
       settings: {},
-    };
+    } satisfies AppData;
 
     const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
     if (!mobileStorage.saveTask) {
