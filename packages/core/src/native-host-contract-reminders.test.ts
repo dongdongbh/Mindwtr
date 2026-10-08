@@ -5,7 +5,7 @@ import { getDigestSchedule } from './schedule-utils';
 import { buildReminderAlarmDetails, planReminderAlarms, readReminderAlarmMap } from './mobile-reminder-alarms';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import { openSqliteHost, requestId as newRequestId } from './screen-parity.replay';
-import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
+import { flushPendingSave, getStorageAdapter, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppSettings, Task } from './types';
 import { generateUUID } from './uuid';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
@@ -463,6 +463,85 @@ describe('native host contract: reminders', () => {
         expect(useTaskStore.getState()._allTasks.map((entry) => [entry.id, entry.rev])).toEqual(tasksAfter);
     });
 
+    it('strict Complete commits a recurring task once and probes or retries its original outcome', async () => {
+        freezeClock(); await seed(); const host = await openHost('ios');
+        const input = { requestId: generateUUID(), taskId: 't-standup' };
+        const first = { ok: true, value: { changed: true, outcome: 'completed' } };
+        expect(await host.commitReminderCompletion(input)).toEqual(first);
+        expect(host.probeReminderCompletionOutcome(input)).toEqual(first);
+        expect(await host.retryReminderCompletion(input)).toEqual(first);
+        expect(updates).toEqual([['t-standup', { status: 'done', isFocusedToday: false }]]);
+        expect(openFollowUps('t-standup')).toHaveLength(1);
+    });
+
+    it('strict unknown Complete probe and retry neither write nor save or reserve the UUID', async () => {
+        freezeClock(); await seed(); const host = await openHost('ios');
+        const input = { requestId: generateUUID(), taskId: 't-standup' };
+        expect(host.probeReminderCompletionOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await host.retryReminderCompletion(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(updates).toEqual([]); expect(saveData).not.toHaveBeenCalled(); expect(openFollowUps('t-standup')).toHaveLength(0);
+        expect(await host.commitReminderCompletion({ ...input, taskId: 't-rent' }))
+            .toEqual({ ok: true, value: { changed: true, outcome: 'completed' } });
+    });
+
+    it('strict Complete retries only its failed save and keeps the original recurrence outcome', async () => {
+        freezeClock(); await seed(); const host = await openHost('ios');
+        const input = { requestId: generateUUID(), taskId: 't-standup' };
+        saveData.mockRejectedValue(new Error('disk unavailable'));
+        expect(await host.commitReminderCompletion(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(host.probeReminderCompletionOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        saveData.mockResolvedValue(undefined);
+        expect(await host.retryReminderCompletion(input)).toEqual({ ok: true, value: { changed: true, outcome: 'completed' } });
+        expect(updates).toEqual([['t-standup', { status: 'done', isFocusedToday: false }]]);
+        expect(openFollowUps('t-standup')).toHaveLength(1);
+    });
+
+    it('strict Complete joins an in-flight completion without another writer', async () => {
+        freezeClock(); await seed(); const host = await openHost('ios');
+        const input = { requestId: generateUUID(), taskId: 't-standup' };
+        let entered!: () => void, release!: () => void;
+        const started = new Promise<void>((resolve) => { entered = resolve; });
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        saveData.mockImplementationOnce(async () => { entered(); await gate; });
+        const committing = host.commitReminderCompletion(input); await started;
+        const retrying = host.retryReminderCompletion(input); release();
+        const first = await committing;
+        expect(first).toEqual({ ok: true, value: { changed: true, outcome: 'completed' } });
+        expect(await retrying).toEqual(first); expect(updates).toHaveLength(1); expect(openFollowUps('t-standup')).toHaveLength(1);
+    });
+
+    it('strict Complete checks closed requests and UTF16 bounds without changing legacy Android acceptance', async () => {
+        freezeClock(); await seed(); const host = await openHost('ios');
+        const input = { requestId: 'abcdefab-cdef-4abc-8abc-abcdefabcdef', taskId: 't-rent' };
+        for (const bad of [null, [], {}, { ...input, extra: true }, { ...input, requestId: input.requestId.toUpperCase() },
+            { ...input, requestId: 'not-a-uuid' }, { ...input, taskId: '' }, { ...input, taskId: 'x'.repeat(501) },
+            { ...input, taskId: '😀'.repeat(251) }, { ...input, taskId: 42 }]) {
+            expect(await host.commitReminderCompletion(bad)).toMatchObject(invalid);
+            expect(host.probeReminderCompletionOutcome(bad)).toMatchObject(invalid);
+            expect(await host.retryReminderCompletion(bad)).toMatchObject(invalid);
+        }
+        expect(updates).toEqual([]); expect(saveData).not.toHaveBeenCalled();
+        for (const taskId of ['x'.repeat(500), '😀'.repeat(250), '  exact task ID  ']) {
+            expect(await host.commitReminderCompletion({ requestId: generateUUID(), taskId }))
+                .toEqual({ ok: true, value: { changed: false, outcome: 'task-not-found' } });
+        }
+        expect(await host.completeReminderTask({ ...input, requestId: input.requestId.toUpperCase(), extra: true } as never))
+            .toEqual({ ok: true, value: { changed: true, outcome: 'completed' } });
+    });
+
+    it('strict Complete rejects a UUID owned by another task or command without writing', async () => {
+        freezeClock(); await seed(); const host = await openHost('ios');
+        const input = { requestId: generateUUID(), taskId: 't-rent' };
+        expect(await host.commitReminderCompletion(input)).toMatchObject({ ok: true });
+        const changed = { ...input, taskId: 't-standup' };
+        expect(await host.commitReminderCompletion(changed)).toMatchObject(invalid);
+        expect(host.probeReminderCompletionOutcome(changed)).toMatchObject(invalid);
+        expect(await host.retryReminderCompletion(changed)).toMatchObject(invalid);
+        const snooze = { requestId: input.requestId, requestedAt: Date.parse(NOW), details: { title: 'Private', snooze_interval: 10 } };
+        expect(await host.snoozeReminder(snooze)).toMatchObject(invalid);
+        expect(updates).toHaveLength(1); expect(openFollowUps('t-standup')).toHaveLength(0);
+    });
+
     it('finishes a Done whose save failed on retry, without a second write', async () => {
         freezeClock();
         await seed();
@@ -758,6 +837,91 @@ describe('native host contract: reminders over SQLite, after process death', () 
         expect(standups()).toHaveLength(2);
         expect(useTaskStore.getState()._tasksById.get('t-standup')?.status).toBe('next');
         expect(await env.receiptIds()).toEqual([input.requestId]);
+    });
+
+    it('strict Complete proves the original SQLite receipt after a later recurring task reopen and edit', async () => {
+        env = await openSqliteHost({ tasks: TASKS }, undefined, { reminderPlatform: 'ios' });
+        const input = { requestId: newRequestId(), taskId: 't-standup' };
+        const first = await env.host.commitReminderCompletion(input);
+        expect(first).toEqual({ ok: true, value: { changed: true, outcome: 'completed' } });
+        await later(() => useTaskStore.getState().updateTask('t-standup', { status: 'next', description: 'Later edit' }));
+        const before = await env.sql('SELECT * FROM tasks ORDER BY id');
+        const replay = await env.replay(async (host) => host.probeReminderCompletionOutcome(input));
+        expect(replay).toEqual({ result: first, wrote: false, receipts: false });
+        expect(await env.host.retryReminderCompletion(input)).toEqual(first);
+        expect(await env.host.commitReminderCompletion(input)).toEqual(first);
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
+        expect(standups()).toHaveLength(2);
+    });
+
+    it.each([
+        ['t-missing', 'task-not-found'], ['t-deleted', 'task-deleted'], ['t-done', 'not-actionable'],
+    ])('strict Complete retains the SQLite %s no-op after the task becomes actionable', async (taskId, outcome) => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        env = await openSqliteHost({ tasks: TASKS }, undefined, { reminderPlatform: 'ios' });
+        const input = { requestId: newRequestId(), taskId };
+        const first = await env.host.commitReminderCompletion(input);
+        expect(first).toEqual({ ok: true, value: { changed: false, outcome } });
+        expect(await env.receiptIds()).toEqual([input.requestId]);
+        if (taskId === 't-missing') {
+            // A later import/sync can introduce the exact previously absent target ID.
+            const adapter = getStorageAdapter(), data = await adapter.getData();
+            await adapter.saveData({ ...data, tasks: [...data.tasks, task({ id: taskId })] });
+            await useTaskStore.getState().fetchData({ throwOnError: true }); await flushPendingSave();
+        }
+        else if (taskId === 't-deleted') await later(() => useTaskStore.getState().restoreTask(taskId));
+        else await later(() => useTaskStore.getState().updateTask(taskId, { status: 'next' }));
+        expect(useTaskStore.getState()._tasksById.get(taskId)?.status).toBe('next');
+        const before = await env.sql('SELECT * FROM tasks ORDER BY id');
+        const replay = await env.replay(async (host) => host.probeReminderCompletionOutcome(input));
+        expect(replay).toEqual({ result: first, wrote: false, receipts: false });
+        expect(await env.host.retryReminderCompletion(input)).toEqual(first);
+        expect(await env.host.commitReminderCompletion(input)).toEqual(first);
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
+    });
+
+    it('strict Complete warm SQLite save recovery does not repeat the recurrence writer', async () => {
+        let failures = 0;
+        env = await openSqliteHost({ tasks: TASKS }, (client) => ({ ...client, run: async (sql, params) => {
+            if (sql === 'COMMIT' && failures > 0) { failures -= 1; throw new Error('injected Complete commit failure'); }
+            await client.run(sql, params);
+        } }), { reminderPlatform: 'ios' });
+        const input = { requestId: newRequestId(), taskId: 't-standup' };
+        failures = 20;
+        expect(await env.host.commitReminderCompletion(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(env.host.probeReminderCompletionOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.receiptIds()).toEqual([]); expect(standups()).toHaveLength(2);
+        failures = 0;
+        expect(await env.host.retryReminderCompletion(input)).toEqual({ ok: true, value: { changed: true, outcome: 'completed' } });
+        expect(standups()).toHaveLength(2); expect(await env.receiptIds()).toEqual([input.requestId]);
+        const replay = await env.replay(async (host) => host.probeReminderCompletionOutcome(input));
+        expect(replay).toEqual({ result: { ok: true, value: { changed: true, outcome: 'completed' } }, wrote: false, receipts: false });
+    });
+
+    it('strict cold SQLite unknown probe and retry preserve an actionable task and create no receipt', async () => {
+        env = await openSqliteHost({ tasks: TASKS }, undefined, { reminderPlatform: 'ios' });
+        const input = { requestId: newRequestId(), taskId: 't-standup' };
+        await env.restart(); const before = await env.sql('SELECT * FROM tasks ORDER BY id');
+        expect(env.host.probeReminderCompletionOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.host.retryReminderCompletion(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
+        expect(await env.receiptIds()).toEqual([]); expect(standups()).toHaveLength(1);
+    });
+
+    it.each([null, [], {}, { changed: 1, outcome: 'completed' }, { changed: true, outcome: 'not-actionable' },
+        { changed: false, outcome: 'completed' }, { changed: false, outcome: 'unknown' },
+        { changed: true, outcome: 'completed', extra: true }])('strict Complete refuses malformed saved SQLite receipt %# before any writer', async (reply) => {
+        env = await openSqliteHost({ tasks: TASKS }, undefined, { reminderPlatform: 'ios' });
+        const input = { requestId: newRequestId(), taskId: 't-rent' };
+        expect(await env.host.commitReminderCompletion(input)).toMatchObject({ ok: true });
+        await later(() => useTaskStore.getState().updateTask('t-rent', { status: 'next' }));
+        await env.client().run('UPDATE native_request_receipts SET reply = ? WHERE request_id = ?', [JSON.stringify(reply), input.requestId]);
+        await env.restart(); const before = await env.sql('SELECT * FROM tasks ORDER BY id');
+        expect(env.host.probeReminderCompletionOutcome(input)).toMatchObject(invalid);
+        expect(await env.host.retryReminderCompletion(input)).toMatchObject(invalid);
+        expect(await env.host.commitReminderCompletion(input)).toMatchObject(invalid);
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
+        expect(await env.sql<{ reply: string }>('SELECT reply FROM native_request_receipts')).toEqual([{ reply: JSON.stringify(reply) }]);
     });
 
     it('keeps a Snooze\'s first reply on disk: a replay after a restart gets it, and its request ID stays its own', async () => {

@@ -1080,7 +1080,7 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     // a journal keeps its receipts in memory, as before.
     traceStep('js:receipts');
     if (journaled) await loadNativeRequestReceipts(sqlite);
-    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
+    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'reminderComplete', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
     // The legacy import plans from a validated full read. Any other boot needs only the schema here: the activation's own read
     // is validated before anything saves.
     traceStep('js:schema');
@@ -1386,6 +1386,14 @@ const iosReminderEffects = createIosReminderMethods({
 });
 const requireReminderSignal = (signal: AbortSignal) => {
     if (signal.aborted) throw new Error('CANCELLED: Reminder reconciliation was cancelled');
+};
+
+const reminderCompletionRequest = (json: string): unknown => {
+    if (typeof json !== 'string' || json.length > 4096 || new TextEncoder().encode(json).byteLength > 4096) {
+        throw new Error('INVALID_INPUT: A bounded reminder completion request is required');
+    }
+    try { return JSON.parse(json); }
+    catch { throw new Error('INVALID_INPUT: A bounded reminder completion request is required'); }
 };
 
 globalThis.MindwtrHost = {
@@ -2060,6 +2068,25 @@ globalThis.MindwtrHost = {
     },
     gtdWorkflowCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedGtdWorkflow(JSON.parse(json))));
+    },
+    reminderCompletionCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitReminderCompletion(reminderCompletionRequest(json))));
+    },
+    reminderCompletionProbe(json: string): string {
+        return submit(async () => unwrap(contract.probeReminderCompletionOutcome(reminderCompletionRequest(json))));
+    },
+    reminderCompletionRetry(json: string): string {
+        return submit(async () => unwrap(await contract.retryReminderCompletion(reminderCompletionRequest(json))));
+    },
+    reminderCompletionAcknowledged(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') return null;
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS reminder completion acknowledged',
+                context: { releaseCheck: 'v1.3.5/ios-reminder-complete', outcome: 'confirmed' },
+            }, { force: true }); } catch { /* Logging cannot change an acknowledged durable command result. */ }
+            return null;
+        });
     },
     notificationSettingOptions(json: string): string {
         return submit(async () => unwrap(await contract.getNotificationSettingsOptions(JSON.parse(json))));

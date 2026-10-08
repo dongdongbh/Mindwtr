@@ -191,7 +191,18 @@ public final class CoreHost: @unchecked Sendable {
         try await perform { try $0.storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt) }
     }
 
+    public func completeReminderTask(requestJSON: String) async throws -> String {
+        try await perform { try $0.completeReminderTask(requestJSON: requestJSON) }
+    }
+
+    public func probeReminderCompletionOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeReminderCompletionOutcome(requestJSON: requestJSON) }
+    }
+
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
+        guard !Engine.reminderCompletionMethods.contains(method) else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
+        }
         guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         guard !Engine.notificationSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade") }
         return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
@@ -1291,6 +1302,8 @@ private final class Engine: @unchecked Sendable {
     fileprivate static let notificationSettingMethods: Set<String> = ["notificationSetting", "notificationSettingOptions",
         "notificationSettingPrepare", "notificationSettingValidate", "notificationSettingCommit", "notificationSettingRetryOutcome",
         "notificationSettingAcknowledged"]
+    fileprivate static let reminderCompletionMethods: Set<String> = ["reminderCompletionCommit", "reminderCompletionProbe",
+        "reminderCompletionRetry", "reminderCompletionAcknowledged"]
     private var reminderOwnerAccess = false
     private var reminderSourceStale = false
     private final class ReminderObserver {
@@ -1486,6 +1499,7 @@ private final class Engine: @unchecked Sendable {
     private var startupDataSettingResult: String?
     private var startupGeneralPreferenceResult: String?
     private var startupNotificationSettingResult: String?
+    private var startupReminderCompletionResult: String?
     private var startupTaxonomyResult: String?
     private var startupPersonEditResult: String?
     private var startupPersonDeleteResult: String?
@@ -1541,7 +1555,7 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "notificationSetting": 1,
+        "notificationSetting": 1, "reminderCompletionCommit": 1,
         "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
@@ -1608,7 +1622,7 @@ private final class Engine: @unchecked Sendable {
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -1698,6 +1712,7 @@ private final class Engine: @unchecked Sendable {
         case .success(let value):
             _ = try NativeJSON.jsonObject(with: Data(value.utf8), options: [.fragmentsAllowed])
             if saved.method == "dataSetting" { try validateDataSettingAcknowledgment(value) }
+            if saved.method == "reminderCompletionCommit" { try validateReminderCompletionResult(value) }
         case .rejected(let message):
             guard isDefiniteRejection(message, method: saved.method) else { throw HostFailure("Invalid terminal command journal") }
         case nil: break
@@ -2248,6 +2263,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringDataSetting = pending?.method == "dataSetting"
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
         let recoveringNotificationSetting = pending?.method == "notificationSettingCommit"
+        let recoveringReminderCompletion = pending?.method == "reminderCompletionCommit"
         let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
         let recoveringPersonEdit = pending?.method == "managePersonEditCommit"
         let recoveringPersonDelete = pending?.method == "managePersonDeleteCommit"
@@ -2296,6 +2312,7 @@ private final class Engine: @unchecked Sendable {
                 actual?["cancellation"] is [String: Any] ? recoveringAttachmentCancelRequestId : nil)
         }
         if recoveringBackupDocument, let terminal, case .success(let value) = terminal { startupBackupDocumentResult = value }
+        if recoveringReminderCompletion, let terminal, case .success(let value) = terminal { startupReminderCompletionResult = value }
         if let recoveringTaskDeleteCommand, let terminal, case .success = terminal {
             rememberConfirmedTaskDelete(recoveringTaskDeleteCommand)
         }
@@ -2418,7 +2435,8 @@ private final class Engine: @unchecked Sendable {
         let recoveredDoneRows = startupDoneTaskCompletedAtResult ?? startupDoneTaskStatusResult
         let recoveredHistoryRows = startupArchiveTaskCompletedAtResult ?? recoveredDoneRows
         let recoveredReference = startupReferenceProjectNextActionResult ?? startupReferenceTaskDestinationResult ?? startupReferenceTaskBackdateResult ?? startupTaskCompletionResult ?? startupTaskCompletionUndoResult
-        let recoveredCompletion = recoveredHistoryRows ?? recoveredReference
+        let recoveredTaskCompletion = recoveredHistoryRows ?? recoveredReference
+        let recoveredCompletion = recoveredTaskCompletion ?? startupReminderCompletionResult
         let recoveredLists = recoveredCompletion
             ?? startupInboxResult ?? startupChecklistResult ?? startupTaskListSortResult
             ?? recoveredManage ?? recoveredSomedaySections
@@ -2466,7 +2484,8 @@ private final class Engine: @unchecked Sendable {
             : startupReferenceTaskDestinationResult != nil ? "referenceTaskDestinationCommit"
             : startupReferenceTaskBackdateResult != nil ? "referenceTaskBackdateCommit"
             : startupTaskCompletionResult != nil ? "taskCompletionCommit"
-            : startupTaskCompletionUndoResult != nil ? "taskCompletionUndoCommit" : nil
+            : startupTaskCompletionUndoResult != nil ? "taskCompletionUndoCommit"
+            : startupReminderCompletionResult != nil ? "reminderCompletionCommit" : nil
         let archiveMutationRecoveryMethod = startupArchivedTasksDeleteResult != nil ? "archivedTasksDeleteCommit"
             : startupArchivedTasksDeleteUndoResult != nil ? "archivedTasksDeleteUndoCommit" : nil
         let historyRecoveryMethod = startupReferenceTasksRemoveTagResult != nil ? "referenceTasksRemoveTagCommit" : startupReferenceTasksAddTagResult != nil ? "referenceTasksAddTagCommit" : startupReferenceTasksMoveResult != nil ? "referenceTasksMoveCommit" : archiveMutationRecoveryMethod ?? (startupArchivedTasksRestoreResult != nil ? "archivedTasksRestoreCommit" : completionRecoveryMethod)
@@ -2602,6 +2621,7 @@ private final class Engine: @unchecked Sendable {
         startupDataSettingResult = nil
         startupGeneralPreferenceResult = nil
         startupNotificationSettingResult = nil
+        startupReminderCompletionResult = nil
         startupTaxonomyResult = nil
         startupPersonEditResult = nil
         startupPersonDeleteResult = nil
@@ -2950,6 +2970,77 @@ private final class Engine: @unchecked Sendable {
         if let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String { metadata["build"] = value }
         let encoded = String(decoding: try JSONSerialization.data(withJSONObject: metadata), as: UTF8.self)
         return try invoke("iosSubmitFeedback", arguments: [requestJSON, encoded, endpoint], localCancellation: cancellation)
+    }
+
+    private func reminderCompletionRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 4_096,
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["requestId", "taskId"]),
+              let id = request["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let task = request["taskId"] as? String, !task.isEmpty, task.utf16.count <= 500,
+              try dataSettingHasExactKeyTokens(raw, expected: ["requestId", "taskId"]) else {
+            throw HostFailure("INVALID_INPUT: Reminder completion needs an exact lowercase UUID and bounded task ID")
+        }
+        return request
+    }
+    private func validateReminderCompletionResult(_ raw: String) throws {
+        guard raw.utf8.count <= 1_024,
+              let result = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(result.keys) == Set(["changed", "outcome"]), Self.isBoolean(result["changed"]),
+              let changed = result["changed"] as? Bool, let outcome = result["outcome"] as? String,
+              changed ? outcome == "completed" : ["task-not-found", "task-deleted", "not-actionable"].contains(outcome),
+              try dataSettingHasExactKeyTokens(raw, expected: ["changed", "outcome"]) else {
+            throw HostFailure("INVALID_INPUT: Saved reminder completion result is malformed")
+        }
+    }
+    private func reminderCompletionJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        guard command.version == 2, command.method == "reminderCompletionCommit", command.editorDraft == nil,
+              command.argumentsJSON.utf8.count <= 24_586,
+              let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else {
+            throw HostFailure("INVALID_INPUT: Reminder completion journal is malformed")
+        }
+        _ = try reminderCompletionRequest(args[0])
+        return args
+    }
+    private func savedReminderCompletion(_ raw: String) throws -> String {
+        let value = try invoke("reminderCompletionProbe", arguments: [raw])
+        try validateReminderCompletionResult(value)
+        return value
+    }
+    func probeReminderCompletionOutcome(requestJSON: String) throws -> String {
+        guard started, !closed, !recoveryActivationPending, pending == nil, lockFD >= 0 else {
+            throw HostFailure("NOT_READY: Reminder completion probe is unavailable")
+        }
+        try requireNoAttachmentDraft()
+        do {
+            _ = try reminderCompletionRequest(requestJSON)
+            return try savedReminderCompletion(requestJSON)
+        } catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") || failure.message.hasPrefix("STALE_REVISION:") {
+            throw CoreHostRejection(message: failure.message)
+        }
+    }
+    func completeReminderTask(requestJSON: String) throws -> String {
+        guard started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+            throw HostFailure("NOT_READY: Reminder completion is unavailable")
+        }
+        try requireNoAttachmentDraft()
+        let request: [String: Any]
+        do { request = try reminderCompletionRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let command = pending {
+            guard command.method == "reminderCompletionCommit" else { throw HostFailure("SAVE_FAILED: Previous changes require their exact retry") }
+            let args = try reminderCompletionJournalArguments(command)
+            guard let raw = args.first as? String, Self.equalJSON(try reminderCompletionRequest(raw), request) else {
+                throw HostFailure("SAVE_FAILED: Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw HostFailure("SAVE_FAILED: Reminder completion still requires exact retry") }
+            return try terminal.value()
+        }
+        do { return try savedReminderCompletion(requestJSON) }
+        catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") { }
+        catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: failure.message) }
+        let args = String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self)
+        return try call("reminderCompletionCommit", argumentsJSON: args, editorAttempt: nil, reminderCompletionOwned: true)
     }
 
     private static let notificationSettingFields = Set(["notificationsEnabled", "startDateNotificationsEnabled",
@@ -6980,8 +7071,12 @@ private final class Engine: @unchecked Sendable {
         return [try backupEncoded(reference), operation.planJSON, operation.snapshot.name]
     }
 
-    private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?) throws -> String {
+    private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
+        reminderCompletionOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard !Self.reminderCompletionMethods.contains(method) || method == "reminderCompletionCommit" && reminderCompletionOwned else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
+        }
         guard reminderEffectsTurn == nil, !Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         guard (notificationSettingTurn == nil || notificationSettingOwnerAccess),
               !Self.notificationSettingMethods.contains(method) || (method == "notificationSetting" && notificationSettingOwnerAccess) else {
@@ -9533,6 +9628,29 @@ private final class Engine: @unchecked Sendable {
                 else { retainedOrdinaryTurn = nil }
             }
         }
+        if command.method == "reminderCompletionCommit" {
+            let args = try reminderCompletionJournalArguments(command)
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Reminder completion journal is malformed") }
+            if recoveryActivationPending {
+                let terminal: TerminalResult
+                do { terminal = .success(try savedReminderCompletion(raw)) }
+                catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                    terminal = .rejected(failure.message)
+                }
+                return try finish(command, with: terminal)
+            }
+            if let terminal = command.terminal { return try finish(command, with: terminal) }
+            try persist(command)
+            // Unknown warm work must refuse: only the original running/owed/saved receipt may advance.
+            let value: String
+            do { value = try invoke("reminderCompletionRetry", arguments: args) }
+            catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                // Retire definite no-write refusal only after its terminal journal and clear succeed.
+                return try finish(command, with: .rejected(failure.message))
+            }
+            try validateReminderCompletionResult(value)
+            return try finish(command, with: .success(value))
+        }
         if command.method == "notificationSettingCommit", recoveryActivationPending {
             let terminal: TerminalResult
             do {
@@ -9658,6 +9776,18 @@ private final class Engine: @unchecked Sendable {
         }
         if command.method == "dataSetting", case .success(let value) = terminal {
             try validateDataSettingAcknowledgment(value)
+        }
+        if command.method == "reminderCompletionCommit" {
+            let args = try reminderCompletionJournalArguments(command)
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Reminder completion journal is malformed") }
+            if case .success(let value) = terminal {
+                try validateReminderCompletionResult(value)
+                let proven = try savedReminderCompletion(raw)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
+                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Reminder completion outcome cannot be verified")
+                }
+            }
         }
         if command.method == "referenceTasksMoveCommit" {
             _ = try invoke("referenceTasksMoveValidate", arguments: referenceTasksMoveJournalArguments(command))
@@ -10370,6 +10500,9 @@ private final class Engine: @unchecked Sendable {
         if command.method == "notificationSettingCommit", case .success = terminal {
             _ = try? invoke("notificationSettingAcknowledged", arguments: [])
         }
+        if command.method == "reminderCompletionCommit", case .success = terminal {
+            _ = try? invoke("reminderCompletionAcknowledged", arguments: [])
+        }
         if command.method == "generalPreferenceCommit", case .success(let value) = terminal {
 #if DEBUG
             faults?.commandDiagnostic?("generalPreferenceApplied")
@@ -10638,6 +10771,7 @@ private final class Engine: @unchecked Sendable {
                 && ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:", "STALE_REVISION:"].contains(where: { message.hasPrefix($0) })
         }
         return ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:"].contains(where: { message.hasPrefix($0) })
+            || (method == "reminderCompletionCommit" && message.hasPrefix("STALE_REVISION:"))
             || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "referenceTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -13534,6 +13668,10 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func journalArguments(_ command: PendingCommand, checkingEditorSnapshot: Bool = true, retainedOrdinary: Bool = false) throws -> [Any] {
+        if command.method == "reminderCompletionCommit" {
+            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
+            return try reminderCompletionJournalArguments(command)
+        }
         if command.method == Self.mixedSaveMethod { guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }; return [try mixedSaveJournal(command).envelopeJSON] }
         if command.method == Self.ownedSaveMethod { guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }; return [try ownedSaveJournal(command).envelopeJSON] }
         if command.method == "backupDocumentCommit" {
@@ -14756,6 +14894,7 @@ private final class Engine: @unchecked Sendable {
             } else if !(argument is String) { throw HostFailure("Core arguments must be strings") }
         }
         if method == "dataSetting" { try validateDataSettingArguments(args, json) }
+        if method == "reminderCompletionCommit", let raw = args.first as? String { _ = try reminderCompletionRequest(raw) }
         try validateTaskReadArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateListAndInboxArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateProjectCollectionArguments(method, args, json, allowPreparedDates: allowPreparedDates)

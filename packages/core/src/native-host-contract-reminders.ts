@@ -79,6 +79,8 @@ import {
 import type { NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
+import { exact, record } from './native-host-contract-project-shared';
+import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { useTaskStore } from './store';
 import { getDigestSchedule } from './schedule-utils';
 
@@ -129,6 +131,27 @@ const ID_SPAN = 2 ** 30 - 1;
 const REMINDER_ID_BASE = 1;
 const SNOOZE_ID_BASE = 2 ** 30;
 const TASK_ID_LIMIT = 500;
+type ReminderCompletionRequest = { requestId: string; taskId: string };
+const COMPLETION_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const completionRequest = (input: unknown): ReminderCompletionRequest | null => {
+    if (!isNativeJsonWithinBytes(input, 4096) || !record(input) || !exact(input, ['requestId', 'taskId'])
+        || typeof input.requestId !== 'string' || !COMPLETION_UUID.test(input.requestId)
+        || !isText(input.taskId, TASK_ID_LIMIT) || !input.taskId) return null;
+    return { requestId: input.requestId, taskId: input.taskId };
+};
+const completionPayload = (request: ReminderCompletionRequest) => JSON.stringify(['reminderComplete', request.taskId]);
+const completionResult = (result: NativeHostResult<unknown>): NativeHostResult<ReminderCompletion> => {
+    if (!result.ok) return result;
+    const value = result.value;
+    if (!record(value) || !exact(value, ['changed', 'outcome'])
+        || !(value.changed === true && value.outcome === 'completed'
+            || value.changed === false && (value.outcome === 'task-not-found'
+                || value.outcome === 'task-deleted' || value.outcome === 'not-actionable'))) {
+        return fail('INVALID_INPUT', 'Saved reminder completion receipt is malformed');
+    }
+    return { ok: true, value: value as ReminderCompletion };
+};
+const unknownCompletion = () => fail('STALE_REVISION', 'Reminder completion is unconfirmed; no changes were replayed');
 
 /**
  * Marks each signature in the stored map as the native host's. React Native's planner keeps a
@@ -226,7 +249,7 @@ export function createReminderMethods(deps: ReminderDeps) {
     });
     let taskOpenSequence = 0;
 
-    return {
+    const methods = {
         /** The alarms to cancel and make now, from the stored alarm map (see the file comment for the order). */
         async planReminderAlarms(input: {
             storedAlarms: string | null;
@@ -445,6 +468,35 @@ export function createReminderMethods(deps: ReminderDeps) {
                     },
                 }),
             };
+        },
+    };
+    const savedCompletion = (request: ReminderCompletionRequest): NativeHostResult<ReminderCompletion> | null => {
+        const saved = receipts.saved<unknown>(request.requestId, completionPayload(request));
+        return saved ? completionResult(saved) : null;
+    };
+    return {
+        ...methods,
+        /** A newly admitted typed action; the legacy method remains the single task writer. */
+        async commitReminderCompletion(input: unknown): Promise<NativeHostResult<ReminderCompletion>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const request = completionRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
+            return savedCompletion(request) ?? completionResult(await methods.completeReminderTask(request));
+        },
+        /** Cold recovery only reads the exact original receipt, never the current task state. */
+        probeReminderCompletionOutcome(input: unknown): NativeHostResult<ReminderCompletion> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const request = completionRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
+            return savedCompletion(request) ?? unknownCompletion();
+        },
+        /** Warm recovery joins an existing run or finishes its owed save; an unknown request cannot write. */
+        async retryReminderCompletion(input: unknown): Promise<NativeHostResult<ReminderCompletion>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const request = completionRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
+            return savedCompletion(request) ?? completionResult(await receipts.run<ReminderCompletion>(
+                request.requestId, completionPayload(request), async () => unknownCompletion()));
         },
     };
 }
