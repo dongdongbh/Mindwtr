@@ -25141,3 +25141,114 @@ extension FoundationUITests {
         boardTap(app, "settings-back"); app.terminate()
     }
 }
+
+// Blank endpoint reaches the actual fail-closed configuration API; this case sends no feedback.
+extension FoundationUITests {
+    private func task433OpenFeedback(_ app: XCUIApplication) {
+        if !app.buttons["about-back"].exists {
+            revealPagedElement(app, app.buttons["settings-about"], in: app.scrollViews["settings-scroll"])
+            boardTap(app, "settings-about")
+        }
+        let row = app.buttons["about-feedback"]
+        revealPagedElement(app, row, in: app.scrollViews["about-scroll"], ready: app.buttons["about-back"])
+        boardEnabled(row, timeout: 20); row.tap()
+        boardEnabled(app.buttons["feedback-back"])
+        let unavailable = app.staticTexts["feedback-unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 15))
+        revealPagedElement(app, unavailable, in: app.scrollViews["feedback-scroll"], ready: app.buttons["feedback-back"])
+        XCTAssertEqual(unavailable.label, "Feedback is not configured in this build.")
+        XCTAssertFalse(app.buttons["feedback-submit"].isEnabled)
+        XCTAssertFalse(app.staticTexts["feedback-sent"].exists)
+    }
+
+    private func task433Reveal(_ app: XCUIApplication, _ element: XCUIElement) {
+        let scroll = app.scrollViews["feedback-scroll"]
+        // Lazy locations lose their AX element offscreen; the non-lazy heading
+        // supplies an existing frame so the shared helper can first scroll up.
+        let whereHeading = app.staticTexts["Where did this happen?"]
+        if element.exists && element.identifier == "feedback-message" && element.frame.isEmpty {
+            revealPagedElement(app, app.staticTexts["Message"], in: scroll, ready: app.buttons["feedback-back"], outerEdge: true)
+        } else if !element.exists && whereHeading.exists {
+            revealPagedElement(app, whereHeading, in: scroll, ready: app.buttons["feedback-back"], outerEdge: true)
+        }
+        revealPagedElement(app, element, in: scroll, ready: app.buttons["feedback-back"], outerEdge: true)
+    }
+
+    private func task433FinishTyping(_ app: XCUIApplication) {
+        let done = app.buttons["feedback-keyboard-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5)); done.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.keyboards.firstMatch)
+        waitForExpectations(timeout: 5)
+    }
+
+    func testTask433FeedbackOfflineFormLargestDraftAndCold() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments("f0b23309-ff5b-4695-8c30-4a62118ec91a", largest: true)
+            + ["--native-about-lookup-unavailable", "--native-feedback-unavailable"]
+        app.launch(); task423Settings(app); task433OpenFeedback(app)
+        XCTAssertEqual(app.staticTexts["feedback-title"].label, "Send feedback")
+        let diagnostics = app.switches["feedback-diagnostics"]
+        task433Reveal(app, diagnostics); boardEnabled(diagnostics)
+        XCTAssertEqual(diagnostics.value as? String, "0")
+        for (id, text) in [("inbox", "Inbox"), ("focus", "Focus"), ("projects", "Projects"), ("review", "Review"),
+                           ("settings", "Settings"), ("sync", "Sync"), ("importExport", "Import or export"),
+                           ("notifications", "Notifications"), ("other", "Other")] {
+            let location = app.buttons["feedback-location-" + id]
+            task433Reveal(app, location)
+            XCTAssertEqual(location.label, text); XCTAssertGreaterThanOrEqual(location.frame.height, 44 - 0.01)
+        }
+        let sync = app.buttons["feedback-location-sync"]
+        task433Reveal(app, sync); sync.tap(); XCTAssertTrue(sync.isSelected)
+        let message = app.textViews["feedback-message"], email = app.textFields["feedback-email"]
+        let draft = "Offline feedback draft 433"
+        task433Reveal(app, message); message.tap(); message.typeText(draft); task433FinishTyping(app)
+        let count = app.staticTexts["feedback-message-count"]
+        task433Reveal(app, count)
+        XCTAssertEqual(count.label, "Message: \(("Where: Sync\n\n" + draft).utf16.count)/4000")
+        task433Reveal(app, email); email.tap(); email.typeText("invalid-email"); task433FinishTyping(app)
+        task433Reveal(app, app.staticTexts["feedback-error"])
+        XCTAssertEqual(app.staticTexts["feedback-error"].label, "Enter a valid email or leave it blank.")
+        task433Reveal(app, email); replaceProjectNotesText(email, with: "fixture@example.invalid"); task433FinishTyping(app)
+        XCTAssertFalse(app.staticTexts["feedback-error"].exists)
+        task433Reveal(app, diagnostics); diagnostics.tap(); XCTAssertEqual(diagnostics.value as? String, "1")
+        XCUIDevice.shared.press(.home); app.activate(); boardEnabled(app.buttons["feedback-back"], timeout: 20)
+        task433Reveal(app, message); XCTAssertEqual(message.value as? String, draft)
+        task433Reveal(app, email); XCTAssertEqual(email.value as? String, "fixture@example.invalid")
+        task433Reveal(app, diagnostics); XCTAssertEqual(diagnostics.value as? String, "1")
+        boardTap(app, "feedback-back"); task433OpenFeedback(app)
+        task433Reveal(app, message); XCTAssertEqual(message.value as? String, draft)
+        task433Reveal(app, email); XCTAssertEqual(email.value as? String, "fixture@example.invalid")
+        task433Reveal(app, diagnostics); XCTAssertEqual(diagnostics.value as? String, "1")
+        let feature = app.buttons["feedback-category-feature"]
+        task433Reveal(app, feature); feature.tap(); XCTAssertTrue(feature.isSelected)
+        XCTAssertFalse(diagnostics.exists); XCTAssertFalse(sync.exists)
+        let other = app.buttons["feedback-category-other"]
+        task433Reveal(app, other); other.tap()
+        task433Reveal(app, app.buttons["feedback-github"])
+        XCTAssertTrue(app.buttons["feedback-github"].label.contains("GitHub Discussions"))
+        let bug = app.buttons["feedback-category-bug"]
+        task433Reveal(app, bug); bug.tap()
+        task433Reveal(app, diagnostics); XCTAssertEqual(diagnostics.value as? String, "0")
+        task433Reveal(app, sync); XCTAssertFalse(sync.isSelected)
+        task433Reveal(app, count); XCTAssertEqual(count.label, "Message: \(draft.utf16.count)/4000")
+        task433Reveal(app, app.buttons["feedback-cancel"])
+        XCTAssertTrue(app.scrollViews["feedback-scroll"].frame.contains(app.buttons["feedback-submit"].frame))
+        XCTAssertFalse(app.buttons["feedback-submit"].isEnabled)
+        XCTAssertGreaterThanOrEqual(app.buttons["feedback-submit"].frame.height, 44 - 0.01)
+        task433Reveal(app, email); replaceProjectNotesText(email, with: String(repeating: "x", count: 255) + "@example.invalid"); task433FinishTyping(app)
+        task433Reveal(app, app.staticTexts["feedback-error"])
+        XCTAssertEqual(app.staticTexts["feedback-error"].label, "Enter a valid email or leave it blank.")
+        task433Reveal(app, app.buttons["feedback-cancel"]); boardTap(app, "feedback-cancel")
+        boardTap(app, "about-back"); boardEnabled(app.buttons["settings-about"])
+        task433OpenFeedback(app)
+        task433Reveal(app, message); XCTAssertTrue((message.value as? String ?? "").isEmpty)
+        task433Reveal(app, email); XCTAssertTrue((email.value as? String ?? "").isEmpty || email.value as? String == email.placeholderValue)
+        boardTap(app, "feedback-back"); boardTap(app, "about-back"); boardTap(app, "settings-back")
+        app.terminate(); app.launch(); task423Settings(app); task433OpenFeedback(app)
+        task433Reveal(app, message); XCTAssertTrue((message.value as? String ?? "").isEmpty)
+        task433Reveal(app, diagnostics); XCTAssertEqual(diagnostics.value as? String, "0")
+        XCTAssertFalse(app.staticTexts["feedback-error"].exists); XCTAssertFalse(app.staticTexts["feedback-sent"].exists)
+        boardTap(app, "feedback-back"); boardTap(app, "about-back"); boardTap(app, "settings-back"); app.terminate()
+    }
+}

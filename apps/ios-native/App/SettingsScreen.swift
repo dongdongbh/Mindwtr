@@ -34,6 +34,7 @@ struct SettingsScreen: View {
                     if model.settingsSyncPresented { syncField = nil; Task { await model.closeSyncSettings() } }
                     else if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
                     else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
+                    else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
                     else if model.settingsAboutPresented { model.closeAboutSettings() }
                     else if model.settingsGeneralPresented { model.closeGeneralSettings() }
                     else if model.settingsManagePresented { model.closeManageSettings() }
@@ -51,15 +52,15 @@ struct SettingsScreen: View {
                           || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
                           || model.settingsPersonCreatePresented || model.settingsPersonEditPresented)))
                 .accessibilityLabel(model.label("common.back"))
-                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsAboutPresented ? "about-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
+                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsFeedbackPresented ? "feedback-back" : model.settingsAboutPresented ? "about-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
                 if model.settingsSyncPresented {
                     Text(model.settingsSync.text("title").isEmpty ? "Sync" : model.settingsSync.text("title"))
                         .rnFont(20, .bold).foregroundStyle(palette.text)
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
                 } else if model.settingsAboutPresented {
-                    Text(model.label("settings.about")).rnFont(20, .bold).foregroundStyle(palette.text)
+                    Text(model.label(model.settingsFeedbackPresented ? "settings.feedback" : "settings.about")).rnFont(20, .bold).foregroundStyle(palette.text)
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("about-title")
+                        .accessibilityIdentifier(model.settingsFeedbackPresented ? "feedback-title" : "about-title")
                 } else {
                 Text(model.settingsDataPresented ? model.dataSettings.text("title") : model.settingsGtdArchivePresented ? (model.gtdArchive.text("title").isEmpty ? model.label("settings.autoArchive") : model.gtdArchive.text("title")) : model.settingsGtdTaskEditorPresented ? model.gtdTaskEditor.text("title") : model.settingsGtdCapturePresented ? (model.gtdCapture.text("title").isEmpty ? model.label("settings.captureSettings") : model.gtdCapture.text("title")) : model.settingsGtdInboxPresented ? (model.gtdInbox.text("title").isEmpty ? model.label("settings.inboxProcessing") : model.gtdInbox.text("title")) : model.settingsGtdReviewPresented ? (model.gtdReview.text("title").isEmpty ? model.label("settings.reviewSettings") : model.gtdReview.text("title")) : model.settingsGtdPresented ? (model.gtdWorkflow.text("title").isEmpty ? model.label("settings.gtd") : model.gtdWorkflow.text("title")) : model.settingsGeneralPresented ? (model.generalSettings.text("title").isEmpty ? model.label("settings.general") : model.generalSettings.text("title")) : model.settingsManagePresented ? model.manageSettings.text("title") : model.settingsMenu.text("title"))
                     .rnFont(20, .bold).foregroundStyle(palette.text)
@@ -224,6 +225,7 @@ struct SettingsScreen: View {
             if model.settingsSyncPresented { syncField = nil; Task { await model.closeSyncSettings() } }
             else if model.settingsDataPresented { model.closeDiagnostics(owner: model.settingsDiagnosticsOwner) }
             else if model.settingsGtdPresented { Task { await model.closeGtdSettings(); gtdTimeFocused = false } }
+            else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
             else if model.settingsAboutPresented { model.closeAboutSettings() }
             else if model.settingsGeneralPresented { model.closeGeneralSettings() }
             else if model.settingsManagePresented { model.closeManageSettings() }
@@ -2482,6 +2484,9 @@ private struct AboutSettingsCard: View {
 
     var body: some View {
         ScrollView {
+            if model.settingsFeedbackPresented {
+                FeedbackSettingsForm(model: model, palette: palette)
+            } else {
             VStack(spacing: 20) {
                 VStack(spacing: 10) {
                     if let appIcon {
@@ -2499,6 +2504,8 @@ private struct AboutSettingsCard: View {
                         ? "settings.checking" : "settings.aboutMobile.tapToCheck")) { model.checkAboutUpdates() }
                     divider
                     action("rate", label: "settings.aboutMobile.rateOurApp", value: "App Store") { model.rateAboutApp() }
+                    divider
+                    action("feedback", label: "settings.feedback", value: model.label("settings.feedbackDesc")) { model.openFeedbackSettings() }
                 }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                 if model.settingsAboutChecking || model.settingsAboutOpening {
                     ProgressView().accessibilityLabel(model.label(model.settingsAboutChecking ? "settings.checking" : "common.loading"))
@@ -2540,7 +2547,9 @@ private struct AboutSettingsCard: View {
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
             }.padding(16).padding(.bottom, 24)
-        }.accessibilityIdentifier("about-scroll")
+            }
+        }.accessibilityIdentifier(model.settingsFeedbackPresented ? "feedback-scroll" : "about-scroll")
+            .scrollDismissesKeyboard(.interactively)
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
                 model.invalidateAboutLinkOpening()
             }
@@ -2586,5 +2595,135 @@ private struct AboutSettingsCard: View {
             }.padding(14).frame(minHeight: 52).contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(!model.settingsAboutLinksEnabled)
             .accessibilityIdentifier("about-" + id)
+    }
+}
+
+private struct FeedbackSettingsForm: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @FocusState private var field: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if model.settingsFeedbackSent {
+                Text(model.label("settings.feedbackSent")).rnFont(16, .semibold).foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("feedback-sent")
+                Button(model.label("common.close")) { model.closeFeedbackSettings() }
+                    .buttonStyle(.plain).rnFont(16, .semibold).foregroundStyle(palette.tint)
+                    .frame(minHeight: 44).accessibilityIdentifier("feedback-close")
+            } else {
+                Text(model.label("settings.feedbackGitHubDesc").replacingOccurrences(of: "{channel}", with:
+                    model.label(model.settingsFeedbackCategory == "other" ? "settings.feedbackOpenGitHubDiscussion" : "settings.feedbackOpenGitHubIssue")))
+                    .rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                Button { field = nil; model.openFeedbackGitHub() } label: {
+                    Label(model.label(model.settingsFeedbackCategory == "other" ? "settings.feedbackOpenGitHubDiscussion" : "settings.feedbackOpenGitHubIssue"), systemImage: "arrow.up.right")
+                        .rnFont(15, .semibold).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }.buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.settingsFeedbackEditable)
+                    .accessibilityIdentifier("feedback-github")
+                heading("settings.feedbackCategory")
+                VStack(spacing: 0) {
+                    ForEach(CoreModel.feedbackCategories, id: \.self) { category in
+                        choice(model.feedbackCategoryLabel(category), selected: model.settingsFeedbackCategory == category,
+                               id: "feedback-category-" + category) { field = nil; model.setFeedbackCategory(category) }
+                    }
+                }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                if model.settingsFeedbackCategory == "bug" {
+                    heading("settings.feedbackWhere")
+                    Text(model.label("settings.feedbackWherePlaceholder")).rnFont(14).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 8) {
+                        ForEach(CoreModel.feedbackLocations, id: \.self) { location in
+                            choice(model.feedbackLocationLabel(location), selected: model.settingsFeedbackLocation == location,
+                                   id: "feedback-location-" + location) { field = nil; model.setFeedbackLocation(location) }
+                        }
+                    }
+                }
+                heading("settings.feedbackMessage")
+                Text(model.settingsFeedbackPlaceholder).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextEditor(text: Binding(get: { model.settingsFeedbackMessage }, set: { model.setFeedbackMessage($0) }))
+                    .rnFont(16).foregroundStyle(palette.text).scrollContentBackground(.hidden)
+                    .frame(minHeight: 160, maxHeight: 220).padding(8)
+                    .background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+                    .focused($field, equals: "message").disabled(!model.settingsFeedbackEditable)
+                    .accessibilityLabel(model.label("settings.feedbackMessage")).accessibilityIdentifier("feedback-message")
+                Text("\(model.settingsFeedbackMessageCount)/4000").rnFont(13)
+                    .foregroundStyle(model.settingsFeedbackMessageCount > 4_000 ? palette.danger : palette.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityLabel(model.label("settings.feedbackMessage") + ": \(model.settingsFeedbackMessageCount)/4000")
+                    .accessibilityIdentifier("feedback-message-count")
+                heading("settings.feedbackEmail")
+                TextField(model.label("settings.feedbackEmailPlaceholder"), text: Binding(get: { model.settingsFeedbackEmail }, set: { model.setFeedbackEmail($0) }))
+                    .rnFont(16).foregroundStyle(palette.text).keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.emailAddress)
+                    .padding(12).frame(minHeight: 44).background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+                    .focused($field, equals: "email").disabled(!model.settingsFeedbackEditable)
+                    .accessibilityLabel(model.label("settings.feedbackEmail")).accessibilityIdentifier("feedback-email")
+                if model.settingsFeedbackCategory == "bug" {
+                    Toggle(isOn: Binding(get: { model.settingsFeedbackIncludeDiagnostics }, set: { model.setFeedbackIncludeDiagnostics($0) })) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(model.label("settings.feedbackIncludeDiagnostics")).rnFont(15, .semibold).foregroundStyle(palette.text)
+                            Text(model.label("settings.feedbackIncludeDiagnosticsDesc")).rnFont(14).foregroundStyle(palette.secondary)
+                        }.fixedSize(horizontal: false, vertical: true)
+                    }.tint(palette.tint).padding(12).frame(minHeight: 44)
+                        .background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+                        .disabled(!model.settingsFeedbackEditable).accessibilityIdentifier("feedback-diagnostics")
+                }
+                Text(model.label("settings.feedbackPrivacy")).rnFont(14).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("feedback-privacy")
+                if model.settingsFeedbackLoading || model.settingsFeedbackSending || model.settingsAboutOpening {
+                    ProgressView(model.label(model.settingsFeedbackSending ? "settings.feedbackSending" : "common.loading"))
+                        .accessibilityIdentifier("feedback-progress")
+                }
+                if model.settingsFeedbackConfigured == false {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(model.label("settings.feedbackUnavailable")).rnFont(15, .semibold)
+                            .accessibilityIdentifier("feedback-unavailable")
+                        Text(model.label("settings.feedbackUnavailableDesc")).rnFont(14)
+                    }.foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                }
+                if let error = model.settingsFeedbackVisibleError {
+                    Text(error).rnFont(14).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("feedback-error")
+                }
+                if model.settingsFeedbackConfigured == nil && !model.settingsFeedbackLoading {
+                    Button(model.label("common.retry")) { model.loadFeedbackConfiguration() }
+                        .buttonStyle(.plain).rnFont(15, .semibold).foregroundStyle(palette.tint)
+                        .frame(minHeight: 44).disabled(!model.settingsFeedbackEditable).accessibilityIdentifier("feedback-retry")
+                }
+                VStack(spacing: 8) {
+                    Button { field = nil; model.submitFeedbackSettings() } label: {
+                        Text(model.label(model.settingsFeedbackSending ? "settings.feedbackSending" : "settings.feedbackSubmit"))
+                            .rnFont(16, .semibold).frame(maxWidth: .infinity, minHeight: 44)
+                    }.buttonStyle(.plain).foregroundStyle(palette.tint)
+                        .background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+                        .disabled(!model.settingsFeedbackCanSubmit).accessibilityIdentifier("feedback-submit")
+                    Button(model.label("common.cancel")) { field = nil; model.closeFeedbackSettings() }
+                        .buttonStyle(.plain).rnFont(15).foregroundStyle(palette.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44).accessibilityIdentifier("feedback-cancel")
+                }
+            }
+        }.padding(16).padding(.bottom, 24)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(model.label("common.done")) { field = nil }.accessibilityIdentifier("feedback-keyboard-done")
+                }
+            }
+    }
+
+    private func heading(_ key: String) -> some View {
+        Text(model.label(key)).rnFont(15, .semibold).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+    }
+    private func choice(_ text: String, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(text).rnFont(15).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                if selected { Image(systemName: "checkmark").accessibilityHidden(true) }
+            }.foregroundStyle(selected ? palette.tint : palette.text).padding(12).frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(!model.settingsFeedbackEditable)
+            .accessibilityAddTraits(selected ? .isSelected : []).accessibilityIdentifier(id)
     }
 }

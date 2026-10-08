@@ -316,8 +316,20 @@ final class CoreModel: ObservableObject {
     private var settingsAboutSession = UUID()
     @Published private var settingsAboutTask: Task<Void, Never>?
     private var settingsAboutBusySession: UUID?
+    @Published private(set) var settingsFeedbackPresented = false
+    @Published private(set) var settingsFeedbackConfigured: Bool?
+    @Published private(set) var settingsFeedbackLoading = false
+    @Published private(set) var settingsFeedbackSending = false
+    @Published private(set) var settingsFeedbackSent = false
+    @Published private(set) var settingsFeedbackError: String?
+    @Published private(set) var settingsFeedbackCategory = "bug"
+    @Published private(set) var settingsFeedbackLocation = ""
+    @Published private(set) var settingsFeedbackMessage = ""
+    @Published private(set) var settingsFeedbackEmail = ""
+    @Published private(set) var settingsFeedbackIncludeDiagnostics = false
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var settingsAboutTestUnavailable = false
+    private var settingsFeedbackTestUnavailable = false
     #endif
     @Published private(set) var settingsReadError: String?
     @Published private(set) var settingsSyncPresented = false
@@ -4372,6 +4384,7 @@ final class CoreModel: ObservableObject {
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
                     settingsAboutTestUnavailable = arguments.contains("--native-about-lookup-unavailable")
+                    settingsFeedbackTestUnavailable = arguments.contains("--native-feedback-unavailable")
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
                     settingsSyncEncryptionTypedThrowOnce = arguments.contains("--native-encryption-typed-throw-once")
                     settingsSyncEncryptionTypedDelayOnce = arguments.contains("--native-encryption-typed-delay-once")
@@ -4839,6 +4852,7 @@ final class CoreModel: ObservableObject {
                 ]))
             }
         }
+        if resumeFeedbackConfigurationIfNeeded() { return }
         guard foregroundSyncIntent != nil else { return }
         foregroundSyncIntent?.foregroundRequested = true
         admitForegroundSync()
@@ -6638,7 +6652,7 @@ final class CoreModel: ObservableObject {
     var settingsAboutLinksEnabled: Bool {
         guard let currentHost = host else { return false }
         return settingsAboutCurrent(host: currentHost, session: settingsAboutSession)
-            && settingsAboutTask == nil && !settingsAboutChecking && !settingsAboutOpening
+            && !settingsFeedbackPresented && settingsAboutTask == nil && !settingsAboutChecking && !settingsAboutOpening
     }
 
     var settingsAboutUpdateTitle: String {
@@ -6673,14 +6687,14 @@ final class CoreModel: ObservableObject {
 
     func closeAboutSettings() {
         guard settingsAboutPresented else { return }
-        invalidateAboutLinkOpening()
+        invalidateAboutLinkOpening(retireFeedback: true)
         settingsAboutPresented = false
         // A canceled owner must drain before menu reads can observe stored state.
         if settingsAboutTask != nil || busy { refreshRequested = true }
         else { setSettingsSearch(settingsSearch) }
     }
 
-    func invalidateAboutLinkOpening() {
+    func invalidateAboutLinkOpening(retireFeedback: Bool = false) {
         settingsAboutSession = UUID()
         settingsAboutTask?.cancel()
         // Keep the task until it drains so reopening cannot overlap an old lookup.
@@ -6688,6 +6702,208 @@ final class CoreModel: ObservableObject {
         settingsAboutOpening = false
         settingsAboutError = nil
         settingsAboutUpdate = nil
+        settingsFeedbackLoading = false
+        settingsFeedbackSending = false
+        if retireFeedback || !settingsAboutPresented || selectedSurface != .settings {
+            settingsFeedbackPresented = false
+            settingsFeedbackConfigured = nil
+            clearFeedbackDraft()
+        }
+        if !settingsFeedbackPresented { settingsFeedbackSent = false; settingsFeedbackError = nil }
+    }
+
+    static let feedbackCategories = ["bug", "feature", "other"]
+    static let feedbackLocations = ["inbox", "focus", "projects", "review", "settings", "sync", "importExport", "notifications", "other"]
+
+    func feedbackCategoryLabel(_ value: String) -> String {
+        label(["bug": "settings.feedbackCategoryBug", "feature": "settings.feedbackCategoryFeature", "other": "settings.feedbackCategoryOther"][value] ?? "settings.feedbackCategoryOther")
+    }
+
+    func feedbackLocationLabel(_ value: String) -> String {
+        label(["inbox": "settings.feedbackWhereInbox", "focus": "settings.feedbackWhereFocus", "projects": "settings.feedbackWhereProjects",
+               "review": "settings.feedbackWhereReview", "settings": "settings.feedbackWhereSettings", "sync": "settings.feedbackWhereSync",
+               "importExport": "settings.feedbackWhereImportExport", "notifications": "settings.feedbackWhereNotifications", "other": "settings.feedbackWhereOther"][value] ?? "settings.feedbackWherePlaceholder")
+    }
+
+    var settingsFeedbackPlaceholder: String {
+        label(["bug": "settings.feedbackMessagePlaceholderBug", "feature": "settings.feedbackMessagePlaceholderFeature", "other": "settings.feedbackMessagePlaceholderOther"][settingsFeedbackCategory] ?? "settings.feedbackMessagePlaceholder")
+    }
+
+    // Match JavaScript trim/\s rather than Foundation's broader whitespace set.
+    private static let feedbackWhitespace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+    private var feedbackSubmittedMessage: String {
+        let message = settingsFeedbackMessage.trimmingCharacters(in: Self.feedbackWhitespace)
+        return settingsFeedbackCategory == "bug" && !settingsFeedbackLocation.isEmpty
+            ? label("settings.feedbackWhereMessagePrefix") + ": " + feedbackLocationLabel(settingsFeedbackLocation) + "\n\n" + message : message
+    }
+    var settingsFeedbackMessageCount: Int { feedbackSubmittedMessage.utf16.count }
+    var settingsFeedbackEmailValid: Bool {
+        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.feedbackWhitespace)
+        if email.isEmpty { return true }
+        let parts = email.components(separatedBy: "@")
+        guard email.utf16.count <= 254, parts.count == 2, !parts[0].isEmpty,
+              !email.unicodeScalars.contains(where: { Self.feedbackWhitespace.contains($0) }),
+              !parts[1].isEmpty else { return false }
+        let domain = Array(parts[1].unicodeScalars)
+        return domain.enumerated().contains { index, scalar in
+            scalar.value == 46 && index > 0 && index < domain.count - 1
+        }
+    }
+    var settingsFeedbackEditable: Bool {
+        guard let currentHost = host else { return false }
+        return settingsAboutCurrent(host: currentHost, session: settingsAboutSession) && settingsFeedbackPresented
+            && settingsAboutTask == nil && !settingsFeedbackSent
+    }
+    var settingsFeedbackCanSubmit: Bool {
+        settingsFeedbackEditable && settingsFeedbackConfigured == true && settingsFeedbackEmailValid
+            && !settingsFeedbackMessage.trimmingCharacters(in: Self.feedbackWhitespace).isEmpty && settingsFeedbackMessageCount <= 4_000
+    }
+    var settingsFeedbackVisibleError: String? {
+        settingsFeedbackError ?? (!settingsFeedbackEmailValid ? label("settings.feedbackInvalidEmail") : nil)
+    }
+
+    private var feedbackEndpointURL: String {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsFeedbackTestUnavailable { return "" }
+        #endif
+        return (Bundle.main.object(forInfoDictionaryKey: "MindwtrFeedbackEndpointURL") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func openFeedbackSettings() {
+        guard settingsAboutLinksEnabled else { return }
+        settingsAboutError = nil
+        settingsAboutUpdate = nil
+        settingsFeedbackPresented = true
+        settingsFeedbackConfigured = nil
+        settingsFeedbackError = nil
+        settingsFeedbackSent = false
+        loadFeedbackConfiguration()
+    }
+
+    func closeFeedbackSettings() {
+        guard settingsFeedbackPresented else { return }
+        // Canceling an in-flight POST cannot undo a request already received.
+        settingsFeedbackPresented = false
+        invalidateAboutLinkOpening()
+        settingsFeedbackConfigured = nil
+    }
+
+    private func clearFeedbackDraft(resetCategory: Bool = true) {
+        if resetCategory { settingsFeedbackCategory = "bug" }
+        settingsFeedbackLocation = ""
+        settingsFeedbackMessage = ""
+        settingsFeedbackEmail = ""
+        settingsFeedbackIncludeDiagnostics = false
+    }
+
+    func setFeedbackCategory(_ value: String) {
+        guard settingsFeedbackEditable, Self.feedbackCategories.contains(value) else { return }
+        settingsFeedbackCategory = value
+        if value != "bug" { settingsFeedbackLocation = ""; settingsFeedbackIncludeDiagnostics = false }
+        settingsFeedbackError = nil
+    }
+    func setFeedbackLocation(_ value: String) {
+        guard settingsFeedbackEditable, settingsFeedbackCategory == "bug", Self.feedbackLocations.contains(value) else { return }
+        settingsFeedbackLocation = settingsFeedbackLocation == value ? "" : value
+        settingsFeedbackError = nil
+    }
+    func setFeedbackMessage(_ value: String) {
+        guard settingsFeedbackEditable else { return }
+        var bounded = "", count = 0
+        for character in value {
+            let size = String(character).utf16.count
+            if count + size > 4_000 { break }
+            bounded.append(character); count += size
+        }
+        settingsFeedbackMessage = bounded
+        settingsFeedbackError = nil
+    }
+    func setFeedbackEmail(_ value: String) {
+        guard settingsFeedbackEditable else { return }
+        settingsFeedbackEmail = value
+        settingsFeedbackError = nil
+    }
+    func setFeedbackIncludeDiagnostics(_ value: Bool) {
+        guard settingsFeedbackEditable, settingsFeedbackCategory == "bug" else { return }
+        settingsFeedbackIncludeDiagnostics = value
+    }
+
+    @discardableResult private func resumeFeedbackConfigurationIfNeeded() -> Bool {
+        guard settingsFeedbackPresented, settingsFeedbackConfigured == nil, settingsFeedbackError == nil,
+              settingsFeedbackEditable else { return false }
+        loadFeedbackConfiguration()
+        return settingsFeedbackLoading
+    }
+
+    func loadFeedbackConfiguration() {
+        guard settingsFeedbackEditable, let currentHost = host else { return }
+        let session = settingsAboutSession, endpoint = feedbackEndpointURL
+        settingsFeedbackLoading = true
+        settingsFeedbackError = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer { finishFeedbackOperation(session: session) }
+            do {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                let result = try decode(await currentHost.feedbackConfiguration(endpointURL: endpoint))
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                guard Set(result.keys) == Set(["configured", "categories"]),
+                      let configured = result["configured"] as? NSNumber, CFGetTypeID(configured) == CFBooleanGetTypeID(),
+                      let categories = result["categories"] as? [String], categories == Self.feedbackCategories else { throw CocoaError(.coderReadCorrupt) }
+                settingsFeedbackConfigured = configured.boolValue
+            } catch {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                settingsFeedbackError = label("settings.feedback.actionFailed")
+            }
+        }
+    }
+
+    private func finishFeedbackOperation(session: UUID) {
+        settingsAboutTask = nil
+        if settingsAboutSession == session { settingsFeedbackLoading = false; settingsFeedbackSending = false }
+        if settingsAboutBusySession == session { settingsAboutBusySession = nil; finishOperation() }
+    }
+
+    func submitFeedbackSettings() {
+        guard settingsFeedbackCanSubmit, let currentHost = host else { return }
+        let session = settingsAboutSession, endpoint = feedbackEndpointURL
+        var input: CoreObject = ["category": settingsFeedbackCategory, "message": feedbackSubmittedMessage,
+                                 "includeDiagnostics": settingsFeedbackCategory == "bug" && settingsFeedbackIncludeDiagnostics]
+        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.feedbackWhitespace)
+        if !email.isEmpty { input["email"] = email }
+        guard let request = try? json(input) else { settingsFeedbackError = label("settings.feedbackFailed"); return }
+        settingsFeedbackSending = true
+        settingsFeedbackError = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer { finishFeedbackOperation(session: session) }
+            do {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                let result = try decode(await currentHost.submitFeedback(requestJSON: request, endpointURL: endpoint))
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                guard Set(result.keys) == Set(["status"]), result["status"] as? String == "sent" else { throw CocoaError(.coderReadCorrupt) }
+                clearFeedbackDraft(resetCategory: false)
+                settingsFeedbackSent = true
+            } catch {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                switch (error as? CoreHostRejection)?.message ?? error.localizedDescription {
+                case "message_required": settingsFeedbackError = label("settings.feedbackRequired")
+                case "invalid_email": settingsFeedbackError = label("settings.feedbackInvalidEmail")
+                case "feedback_not_configured": settingsFeedbackConfigured = false
+                default: settingsFeedbackError = label("settings.feedbackFailed")
+                }
+            }
+        }
+    }
+
+    func openFeedbackGitHub() {
+        guard settingsFeedbackEditable, let currentHost = host,
+              let url = URL(string: settingsFeedbackCategory == "other"
+                ? "https://github.com/dongdongbh/Mindwtr/discussions/new"
+                : "https://github.com/dongdongbh/Mindwtr/issues/new/choose") else { return }
+        openOwnedAboutURL(url, host: currentHost)
     }
 
     func dismissAboutUpdate() { settingsAboutUpdate = nil }
@@ -6855,7 +7071,8 @@ final class CoreModel: ObservableObject {
             do { try await handoffAboutURL(url, host: currentHost, session: session) }
             catch {
                 if settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled {
-                    settingsAboutError = label("attachments.openLinkFailed")
+                    if settingsFeedbackPresented { settingsFeedbackError = label("attachments.openLinkFailed") }
+                    else { settingsAboutError = label("attachments.openLinkFailed") }
                 }
             }
         }
@@ -7108,6 +7325,13 @@ final class CoreModel: ObservableObject {
                     "settings.aboutMobile.appStoreUpdateAvailableWithVersions", "settings.aboutMobile.youAreUsingTheLatestAppStoreVersion",
                     "settings.aboutMobile.couldNotOpenTheAppStoreRatingPagePleaseTry",
                     "settings.feedback.saveFailed", "settings.feedback.actionFailed",
+                    "settings.feedback", "settings.feedbackDesc", "settings.feedbackCategory", "settings.feedbackCategoryBug", "settings.feedbackCategoryFeature", "settings.feedbackCategoryOther",
+                    "settings.feedbackMessage", "settings.feedbackMessagePlaceholder", "settings.feedbackMessagePlaceholderBug", "settings.feedbackMessagePlaceholderFeature", "settings.feedbackMessagePlaceholderOther",
+                    "settings.feedbackWhere", "settings.feedbackWherePlaceholder", "settings.feedbackWhereMessagePrefix", "settings.feedbackWhereInbox", "settings.feedbackWhereFocus", "settings.feedbackWhereProjects",
+                    "settings.feedbackWhereReview", "settings.feedbackWhereSettings", "settings.feedbackWhereSync", "settings.feedbackWhereImportExport", "settings.feedbackWhereNotifications", "settings.feedbackWhereOther",
+                    "settings.feedbackEmail", "settings.feedbackEmailPlaceholder", "settings.feedbackIncludeDiagnostics", "settings.feedbackIncludeDiagnosticsDesc", "settings.feedbackPrivacy",
+                    "settings.feedbackSubmit", "settings.feedbackSending", "settings.feedbackSent", "settings.feedbackFailed", "settings.feedbackUnavailable", "settings.feedbackUnavailableDesc",
+                    "settings.feedbackOpenGitHubIssue", "settings.feedbackGitHubDesc", "settings.feedbackOpenGitHubDiscussion", "settings.feedbackRequired", "settings.feedbackInvalidEmail",
                     "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "viewSections.updateFailed"]
         let result = try await query("strings", [try json(keys)])
         guard let translated = result["strings"] as? CoreObject, translated.values.allSatisfy({ $0 is String }) else {
@@ -26858,6 +27082,7 @@ final class CoreModel: ObservableObject {
             return
         }
         if settingsSyncRestartRequired { refreshRequested = false; return }
+        if resumeFeedbackConfigurationIfNeeded() { return }
         admitForegroundSync()
         if foregroundSyncOwner != nil { return }
         presentQueuedReferenceProjectNextAction()
