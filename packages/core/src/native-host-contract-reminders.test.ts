@@ -25,6 +25,10 @@ const TASKS: Task[] = [
     task({ id: 't-deleted', title: 'Gone', dueDate: '2026-09-28T13:00:00.000Z', deletedAt: T0 }),
 ];
 const SETTINGS: Partial<AppSettings> = { dailyDigestMorningEnabled: true, weeklyReviewEnabled: true };
+const snoozeRequest = (requestId = 'abcdefab-cdef-4abc-8abc-abcdefabcdef') => ({ requestId,
+    requestedAt: Date.parse(NOW), details: buildReminderAlarmDetails('task:t-rent', {
+        title: 'Pay rent', message: 'Due date reminders', hasSnoozeAction: true, data: { taskId: 't-rent' },
+    }) });
 
 type Host = ReturnType<typeof createNativeHostContract>;
 const saveData = vi.fn(async (_data: unknown) => undefined);
@@ -93,6 +97,85 @@ describe('native host contract: reminders', () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(NOW));
     };
+
+    it('strict Snooze refuses a noncanonical UUID before creating a receipt', async () => {
+        await seed(); const host = await openHost('ios'), input = snoozeRequest();
+        expect(await host.commitReminderSnooze({ ...input, requestId: input.requestId.toUpperCase() })).toMatchObject(invalid);
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('strict Snooze refuses extra request fields and native detail shape violations before saving', async () => {
+        await seed(); const host = await openHost('ios'), input = snoozeRequest();
+        for (const bad of [{ ...input, extra: true }, { ...input, details: { ...input.details, data: { alarmKey: 'PRIVATE_INVALID' } } },
+            { ...input, details: { ...input.details, play_sound: 'true' } }]) {
+            expect(await host.commitReminderSnooze(bad)).toMatchObject(invalid);
+        }
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('strict Snooze rejects fractional, out-of-Date-range and overflowing alarm instants', async () => {
+        await seed(); const host = await openHost('ios'), input = snoozeRequest();
+        for (const bad of [{ ...input, requestedAt: input.requestedAt + 0.5 }, { ...input, requestedAt: 8.64e15 + 1 },
+            { ...input, details: { ...input.details, snooze_interval: Number.MAX_VALUE } }]) {
+            expect(await host.commitReminderSnooze(bad)).toMatchObject(invalid);
+        }
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('strict Snooze preview is pure before activation and preserves every shared platform detail', async () => {
+        await seed(); const host = createNativeHostContract({ reminderPlatform: 'ios' }), input = snoozeRequest();
+        const preview = host.previewReminderSnooze(input);
+        expect(preview).toMatchObject({ ok: true, value: { key: `snooze:${input.requestId}`, repeat: 'once', replacing: null } });
+        expect(value(preview).details).toEqual({ ...input.details, schedule_type: 'once', data: input.details.data });
+        expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
+        const active = await openHost('ios');
+        expect(await active.commitReminderSnooze(input)).toEqual(preview);
+        expect(await active.snoozeReminder(input)).toEqual(preview);
+        expect(active.probeReminderSnoozeOutcome(input)).toEqual(preview);
+        expect(await active.retryReminderSnooze(input)).toEqual(preview);
+    });
+
+    it('strict Snooze validates all APIs, byte bounds and UTF16 title bounds without narrowing legacy Android', async () => {
+        await seed(); const host = await openHost('ios'), input = snoozeRequest();
+        const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
+        const bad = [null, [], {}, { ...input, extra: true }, { ...input, requestId: 'bad' },
+            { ...input, requestedAt: NaN }, { ...input, requestedAt: Infinity }, { ...input, requestedAt: 8.64e15 },
+            ...[0, -1, Infinity, '10'].map((snooze_interval) => ({ ...input, details: { ...input.details, snooze_interval } })),
+            { ...input, details: { ...input.details, title: '😀'.repeat(5001) } },
+            { ...input, details: { ...input.details, data: { alarmKey: 'task:t-rent', count: 1 } } },
+            ...[undefined, NaN, new Date(), cyclic].map((extra) => ({ ...input, details: { ...input.details, extra } })),
+            { ...input, details: { ...input.details, extra: '漢'.repeat(22_000) } }];
+        for (const entry of bad) {
+            expect(host.previewReminderSnooze(entry)).toMatchObject(invalid);
+            expect(await host.commitReminderSnooze(entry)).toMatchObject(invalid);
+            expect(host.probeReminderSnoozeOutcome(entry)).toMatchObject(invalid);
+            expect(await host.retryReminderSnooze(entry)).toMatchObject(invalid);
+        }
+        expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
+        const bounded = { ...input, details: { ...input.details, title: '😀'.repeat(5000), extra: '' } };
+        bounded.details.extra = 'x'.repeat(65_536 - new TextEncoder().encode(JSON.stringify(bounded)).byteLength);
+        expect(new TextEncoder().encode(JSON.stringify(bounded)).byteLength).toBe(65_536);
+        expect(host.previewReminderSnooze(bounded)).toMatchObject({ ok: true });
+        expect(host.previewReminderSnooze({ ...bounded, details: { ...bounded.details, extra: bounded.details.extra + 'x' } })).toMatchObject(invalid);
+        expect(await host.snoozeReminder({ ...input, requestId: input.requestId.toUpperCase(), extra: true } as never)).toMatchObject({ ok: true });
+    });
+
+    it('strict unknown Snooze probe/retry never save or reserve a UUID; collisions retain the original fingerprint', async () => {
+        await seed(); const host = await openHost('ios'), input = snoozeRequest();
+        expect(host.probeReminderSnoozeOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await host.retryReminderSnooze(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
+        const first = await host.commitReminderSnooze({ ...input, requestedAt: input.requestedAt + 60_000 });
+        expect(first).toMatchObject({ ok: true });
+        for (const changed of [input, { ...input, requestedAt: input.requestedAt + 60_000,
+            details: { ...input.details, title: 'Changed' } }]) {
+            expect(await host.commitReminderSnooze(changed)).toMatchObject(invalid);
+            expect(host.probeReminderSnoozeOutcome(changed)).toMatchObject(invalid);
+            expect(await host.retryReminderSnooze(changed)).toMatchObject(invalid);
+        }
+        expect(await host.commitReminderCompletion({ requestId: input.requestId, taskId: 't-rent' })).toMatchObject(invalid);
+        expect(updates).toEqual([]);
+    });
 
     it.each([undefined, 'android' as const])('keeps all Android/default alarm fields and saved maps unchanged (%s)', async (platform) => {
         freezeClock(); await seed({ ...SETTINGS, dailyDigestEveningEnabled: true });
@@ -934,5 +1017,95 @@ describe('native host contract: reminders over SQLite, after process death', () 
         expect(replay.result).toEqual({ ok: true, value: first });
         const reused = await env.host.snoozeReminder({ ...input, details: { ...details, title: 'Another reminder' } });
         expect(reused).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('strict Snooze proves its original SQLite receipt after later owner completion and process reopen', async () => {
+        env = await openSqliteHost({ tasks: TASKS }, undefined, { reminderPlatform: 'ios' });
+        const input = snoozeRequest(newRequestId()), first = await env.host.commitReminderSnooze(input);
+        expect(first).toEqual(env.host.previewReminderSnooze(input));
+        await later(() => useTaskStore.getState().updateTask('t-rent', { status: 'done', description: 'Later edit' }));
+        const before = await env.sql('SELECT * FROM tasks ORDER BY id');
+        expect(await env.replay(async (host) => host.probeReminderSnoozeOutcome(input))).toEqual({ result: first, wrote: false, receipts: false });
+        expect(await env.host.retryReminderSnooze(input)).toEqual(first);
+        expect(await env.host.commitReminderSnooze(input)).toEqual(first);
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
+        expect(await env.receiptIds()).toEqual([input.requestId]);
+    });
+
+    it('strict Snooze cold unknown probe and retry leave SQLite and owner unchanged', async () => {
+        env = await openSqliteHost({ tasks: TASKS }, undefined, { reminderPlatform: 'ios' });
+        const input = snoozeRequest(newRequestId()); await env.restart();
+        const before = await env.sql('SELECT * FROM tasks ORDER BY id');
+        expect(env.host.probeReminderSnoozeOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.host.retryReminderSnooze(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before); expect(await env.receiptIds()).toEqual([]);
+    });
+
+    it('strict Snooze warm retry joins the original in-flight SQLite receipt transaction', async () => {
+        let hold = false, heldCommits = 0, entered!: () => void, release!: () => void;
+        const started = new Promise<void>((resolve) => { entered = resolve; }), gate = new Promise<void>((resolve) => { release = resolve; });
+        env = await openSqliteHost({ tasks: TASKS }, (client) => ({ ...client, run: async (sql, params) => {
+            if (sql === 'COMMIT' && hold) { heldCommits += 1; entered(); await gate; }
+            await client.run(sql, params);
+        } }), { reminderPlatform: 'ios' });
+        const input = snoozeRequest(newRequestId()), expected = env.host.previewReminderSnooze(input);
+        hold = true; const committing = env.host.commitReminderSnooze(input); await started;
+        const retrying = env.host.retryReminderSnooze(input); release();
+        expect(await committing).toEqual(expected); expect(await retrying).toEqual(expected);
+        expect(heldCommits).toBe(1); expect(await env.receiptIds()).toEqual([input.requestId]);
+    });
+
+    it('strict Snooze warm SQLite uncertainty finishes only its owed original receipt save', async () => {
+        let failures = 0;
+        env = await openSqliteHost({ tasks: TASKS }, (client) => ({ ...client, run: async (sql, params) => {
+            if (sql === 'COMMIT' && failures > 0) { failures -= 1; throw new Error('injected Snooze commit failure'); }
+            await client.run(sql, params);
+        } }), { reminderPlatform: 'ios' });
+        const input = snoozeRequest(newRequestId()), expected = env.host.previewReminderSnooze(input);
+        failures = 20;
+        expect(await env.host.commitReminderSnooze(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(env.host.probeReminderSnoozeOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.receiptIds()).toEqual([]);
+        failures = 0;
+        expect(await env.host.retryReminderSnooze(input)).toEqual(expected);
+        expect(await env.receiptIds()).toEqual([input.requestId]);
+        expect(await env.replay(async (host) => host.probeReminderSnoozeOutcome(input))).toEqual({ result: expected, wrote: false, receipts: false });
+    });
+
+    it.each(['probeReminderSnoozeOutcome', 'retryReminderSnooze', 'commitReminderSnooze'] as const)('strict Snooze %s refuses nonfinite saved SQLite details that stringify as the valid request null', async (method) => {
+        const writes: string[] = []; let tracking = false;
+        env = await openSqliteHost({ tasks: TASKS }, (client) => ({ ...client, run: async (sql, params) => {
+            if (tracking && /^(INSERT|UPDATE|DELETE)\b/i.test(sql.trimStart())) writes.push(sql);
+            await client.run(sql, params);
+        } }), { reminderPlatform: 'ios' });
+        const original = snoozeRequest(newRequestId()), input = { ...original, details: { ...original.details, extra: null } };
+        const alarm = value(await env.host.commitReminderSnooze(input));
+        const reply = JSON.stringify(alarm).replace('"extra":null', '"extra":1e309');
+        expect(JSON.parse(reply).details.extra).toBe(Infinity);
+        expect(JSON.stringify(JSON.parse(reply))).toBe(JSON.stringify(alarm));
+        await env.client().run('UPDATE native_request_receipts SET reply = ? WHERE request_id = ?', [reply, input.requestId]);
+        await env.restart(); const before = await env.sql('SELECT * FROM tasks ORDER BY id'); tracking = true;
+        expect(await env.host[method](input)).toMatchObject(invalid);
+        expect(writes).toEqual([]);
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
+        expect(await env.sql<{ request_id: string; reply: string }>('SELECT request_id, reply FROM native_request_receipts'))
+            .toEqual([{ request_id: input.requestId, reply }]);
+    });
+
+    it.each(['null', 'array', 'id', 'time', 'details', 'key', 'repeat', 'replacing', 'extra'])('strict Snooze refuses malformed saved SQLite %s result without a new writer', async (kind) => {
+        env = await openSqliteHost({ tasks: TASKS }, undefined, { reminderPlatform: 'ios' });
+        const input = snoozeRequest(newRequestId()), alarm = value(await env.host.commitReminderSnooze(input));
+        const replies: Record<string, unknown> = { null: null, array: [], id: { ...alarm, id: alarm.id + 1 },
+            time: { ...alarm, fireAtMs: alarm.fireAtMs + 60_000 }, details: { ...alarm, details: { ...alarm.details, title: 'Changed' } },
+            key: { ...alarm, key: 'snooze:00000000-0000-0000-0000-000000000000' }, repeat: { ...alarm, repeat: 'daily' },
+            replacing: { ...alarm, replacing: 'expired' }, extra: { ...alarm, extra: true } };
+        const reply = JSON.stringify(replies[kind]);
+        await env.client().run('UPDATE native_request_receipts SET reply = ? WHERE request_id = ?', [reply, input.requestId]);
+        await env.restart(); const before = await env.sql('SELECT * FROM tasks ORDER BY id');
+        expect(env.host.probeReminderSnoozeOutcome(input)).toMatchObject(invalid);
+        expect(await env.host.retryReminderSnooze(input)).toMatchObject(invalid);
+        expect(await env.host.commitReminderSnooze(input)).toMatchObject(invalid);
+        expect(await env.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
+        expect(await env.sql<{ reply: string }>('SELECT reply FROM native_request_receipts')).toEqual([{ reply }]);
     });
 });

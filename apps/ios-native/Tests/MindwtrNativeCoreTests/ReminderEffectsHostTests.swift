@@ -15,6 +15,10 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
     private var ignoreRemoval = false
     private var entered: XCTestExpectation?
     private var held: CheckedContinuation<Void, Never>?
+    private var pendingHoldAt: Int?
+    private var pendingEntered: XCTestExpectation?
+    private var heldPending: CheckedContinuation<Void, Never>?
+    private(set) var pendingCount = 0
     private var permissionHoldAt: Int?
     private var permissionEntered: XCTestExpectation?
     private var heldPermission: CheckedContinuation<Void, Never>?
@@ -34,7 +38,14 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
         }
         return .observed(status: grant ? .authorized : .denied, alertEnabled: grant)
     }
-    func pending(namespace: String) async throws -> [NativeReminderObservation] { pendingValues }
+    func pending(namespace: String) async throws -> [NativeReminderObservation] {
+        pendingCount += 1
+        if pendingHoldAt == pendingCount, let pendingEntered {
+            self.pendingEntered = nil; pendingHoldAt = nil
+            await withCheckedContinuation { continuation in heldPending = continuation; pendingEntered.fulfill() }
+        }
+        return pendingValues
+    }
     func delivered(namespace: String) async throws -> [NativeReminderObservation] { deliveredValues }
     func configure(granted: Bool = true, failAdd: Int? = nil, ignoreRemoval: Bool = false) {
         grant = granted; self.failAdd = failAdd; self.ignoreRemoval = ignoreRemoval
@@ -45,6 +56,8 @@ private actor ReminderEffectsFakePort: NativeReminderPort {
     func releaseAdd() { held?.resume(); held = nil }
     func holdPermission(at count: Int, entered: XCTestExpectation) { permissionHoldAt = count; permissionEntered = entered }
     func releasePermission() { heldPermission?.resume(); heldPermission = nil }
+    func holdPending(at count: Int, entered: XCTestExpectation) { pendingHoldAt = count; pendingEntered = entered }
+    func releasePending() { heldPending?.resume(); heldPending = nil }
     func holdDeliveredRemoval(_ expectation: XCTestExpectation) { removalEntered = expectation }
     func releaseDeliveredRemoval() { heldRemoval?.resume(); heldRemoval = nil }
     private func record(_ operation: String, _ identifiers: [String]) throws {
@@ -525,6 +538,29 @@ final class ReminderEffectsHostTests: XCTestCase {
         let value = try await seedSnooze(fireAtMs: floor(Date().timeIntervalSince1970 * 1000) - 60_000, armed: false)
         let result = try object(try await value.reconcileReminders()); XCTAssertEqual(result["scheduled"] as? Int, 1)
         let count = await port.addCount; XCTAssertEqual(count, 1); XCTAssertEqual(try snoozeMarkers().count, 0)
+    }
+    func testUnarmedSnoozePermissionWaitCannotCrossTwentyFourHourExpiry() async throws {
+        try await refuseUnarmedSnoozeExpiryDuringAwait(permission: true)
+    }
+    func testUnarmedSnoozeInventoryWaitCannotCrossTwentyFourHourExpiry() async throws {
+        try await refuseUnarmedSnoozeExpiryDuringAwait(permission: false)
+    }
+    private func refuseUnarmedSnoozeExpiryDuringAwait(permission: Bool) async throws {
+        let deadline = floor(Date().timeIntervalSince1970 * 1000) + 3_000
+        let value = try await seedSnooze(fireAtMs: deadline - 86_400_000, armed: false)
+        let before = try maps(), baseline = try rows()
+        let entered = expectation(description: "Admitted unarmed Snooze holds final callback before expiry")
+        if permission { let count = await port.permissionCount; await port.holdPermission(at: count + 2, entered: entered) }
+        else { let count = await port.pendingCount; await port.holdPending(at: count + 2, entered: entered) }
+        let task = Task { try await value.reconcileReminders() }; await fulfillment(of: [entered], timeout: 5)
+        let remaining = max(0, deadline - Date().timeIntervalSince1970 * 1000 + 30)
+        try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000))
+        if permission { await port.releasePermission() } else { await port.releasePending() }
+        await unavailable { try await task.value }
+        let count = await port.addCount; XCTAssertEqual(count, 0); XCTAssertEqual(try maps(), before)
+        XCTAssertEqual(try markers().count, 0); XCTAssertEqual(try snoozeMarkers().count, 0); XCTAssertEqual(try rows(), baseline)
+        let fresh = try object(try await value.reconcileReminders()); XCTAssertEqual(fresh["scheduled"] as? Int, 0)
+        XCTAssertNil(try object(try XCTUnwrap(maps()[1]))[snoozeKey])
     }
     func testArmedSnoozeRecoveryPermissionWaitCannotCrossDeadline() async throws {
         let deadline = floor(Date().timeIntervalSince1970 * 1000) + 3_000

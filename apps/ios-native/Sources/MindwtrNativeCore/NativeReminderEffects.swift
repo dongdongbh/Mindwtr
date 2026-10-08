@@ -10,6 +10,8 @@ final class NativeReminderEffects: @unchecked Sendable {
         let withdrawn: Bool
         /// Only recovery of an already armed durable Snooze owes fresh future/absence admission.
         let armedSnoozeDeadline: Double?
+        /// Unarmed Snoozes retain the shared inclusive24h late allowance after awaited callbacks.
+        let unarmedSnoozeExpiry: Double?
     }
     struct Cancellation: Sendable { let id: Int; let identifier: String; let withdrawn: Bool }
     struct Admission: Sendable { let namespace: String; let port: any NativeReminderPort }

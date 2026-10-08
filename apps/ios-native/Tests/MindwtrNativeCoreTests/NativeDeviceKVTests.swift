@@ -146,6 +146,40 @@ final class NativeDeviceKVTests: XCTestCase {
         }
     }
 
+    func testReminderUnchangedConfirmationForcesDurablePublicationAndRetainsExactLostAck() throws {
+        let names = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
+        let values = ["mindwtr:local:alarms:v1": "  {} \n", "mindwtr:native:reminders:v1": "{}", "unknown": "PRIVATE_DISJOINT"]
+        try seed(String(decoding: JSONSerialization.data(withJSONObject: values), as: UTF8.self))
+        let store = try open(), before = try store.multiGet(names).map(\.1)
+        var promotions = 0; store.faults.beforePromotion = { promotions += 1 }
+        try store.compareAndSetReminderMaps(expected: before, next: before)
+        XCTAssertEqual(promotions, 0)
+        store.faults.afterPromotion = { throw Injected.failure }
+        XCTAssertThrowsError(try store.compareAndSetReminderMaps(expected: before, next: before, confirmUnchanged: true))
+        XCTAssertEqual(promotions, 1); XCTAssertTrue(store.hasPendingReminderMutation)
+        let promoted = try Data(contentsOf: manifest), promotedInode = try inode(manifest)
+        XCTAssertThrowsError(try store.multiGet(names))
+        XCTAssertThrowsError(try store.compareAndSetReminderMaps(expected: before, next: [before[0], "{\"foreign\":true}"], confirmUnchanged: true))
+        store.faults.afterPromotion = nil
+        try store.compareAndSetReminderMaps(expected: before, next: before, confirmUnchanged: true)
+        XCTAssertFalse(store.hasPendingReminderMutation); XCTAssertEqual(promotions, 1)
+        XCTAssertEqual(try inode(manifest), promotedInode); XCTAssertEqual(try Data(contentsOf: manifest), promoted)
+        XCTAssertEqual(try store.multiGet(names).map(\.1), before); XCTAssertEqual(try store.get("unknown"), "PRIVATE_DISJOINT")
+        store.close(); current = nil
+        let cold = try open(); XCTAssertEqual(try cold.multiGet(names).map(\.1), before)
+    }
+    func testReminderUnchangedConfirmationRejectsSameByteForeignLostAck() throws {
+        let names = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
+        try seed("{\"mindwtr:local:alarms:v1\":\"{}\",\"mindwtr:native:reminders:v1\":\"{}\"}")
+        let store = try open(), before = try store.multiGet(names).map(\.1)
+        store.faults.afterPromotion = { throw Injected.failure }
+        XCTAssertThrowsError(try store.compareAndSetReminderMaps(expected: before, next: before, confirmUnchanged: true))
+        try sameByteReplacement(manifest); let foreign = try Data(contentsOf: manifest)
+        store.faults.afterPromotion = nil
+        XCTAssertThrowsError(try store.compareAndSetReminderMaps(expected: before, next: before, confirmUnchanged: true))
+        XCTAssertEqual(try Data(contentsOf: manifest), foreign)
+    }
+
     func testLostPromotionAcknowledgmentRetainsExactOperationAndColdRows() throws {
         try seed("{\"@mindwtr_sync_backend\":\"off\",\"unknown\":\"keep\"}")
         let store = try open()

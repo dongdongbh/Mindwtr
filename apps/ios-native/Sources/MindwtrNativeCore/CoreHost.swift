@@ -191,6 +191,23 @@ public final class CoreHost: @unchecked Sendable {
         try await perform { try $0.storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt) }
     }
 
+    public func snoozeReminder(requestJSON: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            if let replay = try await perform({ try $0.reminderSnoozeReplay(requestJSON: requestJSON) }) { return replay }
+            let admission = try await perform { try $0.admitReminderPlanRead(cancellation: token) }
+            let permission = try await admission.read()
+            try token.check()
+            return try await perform {
+                try $0.snoozeReminder(requestJSON: requestJSON, permission: permission,
+                    generation: admission.generation, cancellation: token)
+            }
+        }, onCancel: { token.cancel() })
+    }
+
     public func completeReminderTask(requestJSON: String) async throws -> String {
         try await perform { try $0.completeReminderTask(requestJSON: requestJSON) }
     }
@@ -200,6 +217,9 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
+        guard !Engine.reminderSnoozeMethods.contains(method) else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
+        }
         guard !Engine.reminderCompletionMethods.contains(method) else {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
         }
@@ -781,6 +801,9 @@ public final class CoreHost: @unchecked Sendable {
                       !tray.contains(where: { $0.identifier == alarm.identifier || $0.ownedID == alarm.id }),
                       deadline > Date().timeIntervalSince1970 * 1000 else { throw NativeReminderEffects.unavailable }
             }
+            if let expiry = alarm.unarmedSnoozeExpiry {
+                guard Date().timeIntervalSince1970 * 1000 <= expiry else { throw NativeReminderEffects.unavailable }
+            }
             // No await separates the final deadline check from accepting the OS add callback.
             try await port.add(alarm, namespace: namespace); try await current()
         }
@@ -1304,6 +1327,10 @@ private final class Engine: @unchecked Sendable {
         "notificationSettingAcknowledged"]
     fileprivate static let reminderCompletionMethods: Set<String> = ["reminderCompletionCommit", "reminderCompletionProbe",
         "reminderCompletionRetry", "reminderCompletionAcknowledged"]
+    fileprivate static let reminderSnoozeMethods: Set<String> = ["reminderSnoozePrepare", "reminderSnoozeValidate",
+        "reminderSnoozeCommit", "reminderSnoozeProbe", "reminderSnoozeRetry", "reminderSnoozeAcknowledged"]
+    private var reminderSnoozeMutation: (arguments: String, storage: NativeDeviceKV, runtime: JSContext,
+        generation: UInt64, before: [String?], after: [String?], confirm: Bool)?
     private var reminderOwnerAccess = false
     private var reminderSourceStale = false
     private final class ReminderObserver {
@@ -1500,6 +1527,7 @@ private final class Engine: @unchecked Sendable {
     private var startupGeneralPreferenceResult: String?
     private var startupNotificationSettingResult: String?
     private var startupReminderCompletionResult: String?
+    private var startupReminderSnoozeResult: String?
     private var startupTaxonomyResult: String?
     private var startupPersonEditResult: String?
     private var startupPersonDeleteResult: String?
@@ -1555,7 +1583,7 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "notificationSetting": 1, "reminderCompletionCommit": 1,
+        "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
         "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
@@ -1622,7 +1650,7 @@ private final class Engine: @unchecked Sendable {
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -1713,6 +1741,11 @@ private final class Engine: @unchecked Sendable {
             _ = try NativeJSON.jsonObject(with: Data(value.utf8), options: [.fragmentsAllowed])
             if saved.method == "dataSetting" { try validateDataSettingAcknowledgment(value) }
             if saved.method == "reminderCompletionCommit" { try validateReminderCompletionResult(value) }
+            if saved.method == "reminderSnoozeCommit" {
+                let args = try reminderSnoozeJournalArguments(saved)
+                guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+                try validateReminderSnoozeAlarm(value, request: raw)
+            }
         case .rejected(let message):
             guard isDefiniteRejection(message, method: saved.method) else { throw HostFailure("Invalid terminal command journal") }
         case nil: break
@@ -2264,6 +2297,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
         let recoveringNotificationSetting = pending?.method == "notificationSettingCommit"
         let recoveringReminderCompletion = pending?.method == "reminderCompletionCommit"
+        let recoveringReminderSnooze = pending?.method == "reminderSnoozeCommit"
         let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
         let recoveringPersonEdit = pending?.method == "managePersonEditCommit"
         let recoveringPersonDelete = pending?.method == "managePersonDeleteCommit"
@@ -2313,6 +2347,7 @@ private final class Engine: @unchecked Sendable {
         }
         if recoveringBackupDocument, let terminal, case .success(let value) = terminal { startupBackupDocumentResult = value }
         if recoveringReminderCompletion, let terminal, case .success(let value) = terminal { startupReminderCompletionResult = value }
+        if recoveringReminderSnooze, let terminal, case .success(let value) = terminal { startupReminderSnoozeResult = value }
         if let recoveringTaskDeleteCommand, let terminal, case .success = terminal {
             rememberConfirmedTaskDelete(recoveringTaskDeleteCommand)
         }
@@ -2436,7 +2471,8 @@ private final class Engine: @unchecked Sendable {
         let recoveredHistoryRows = startupArchiveTaskCompletedAtResult ?? recoveredDoneRows
         let recoveredReference = startupReferenceProjectNextActionResult ?? startupReferenceTaskDestinationResult ?? startupReferenceTaskBackdateResult ?? startupTaskCompletionResult ?? startupTaskCompletionUndoResult
         let recoveredTaskCompletion = recoveredHistoryRows ?? recoveredReference
-        let recoveredCompletion = recoveredTaskCompletion ?? startupReminderCompletionResult
+        let recoveredReminderCommands = startupReminderCompletionResult ?? startupReminderSnoozeResult
+        let recoveredCompletion = recoveredTaskCompletion ?? recoveredReminderCommands
         let recoveredLists = recoveredCompletion
             ?? startupInboxResult ?? startupChecklistResult ?? startupTaskListSortResult
             ?? recoveredManage ?? recoveredSomedaySections
@@ -2485,7 +2521,8 @@ private final class Engine: @unchecked Sendable {
             : startupReferenceTaskBackdateResult != nil ? "referenceTaskBackdateCommit"
             : startupTaskCompletionResult != nil ? "taskCompletionCommit"
             : startupTaskCompletionUndoResult != nil ? "taskCompletionUndoCommit"
-            : startupReminderCompletionResult != nil ? "reminderCompletionCommit" : nil
+            : startupReminderCompletionResult != nil ? "reminderCompletionCommit"
+            : startupReminderSnoozeResult != nil ? "reminderSnoozeCommit" : nil
         let archiveMutationRecoveryMethod = startupArchivedTasksDeleteResult != nil ? "archivedTasksDeleteCommit"
             : startupArchivedTasksDeleteUndoResult != nil ? "archivedTasksDeleteUndoCommit" : nil
         let historyRecoveryMethod = startupReferenceTasksRemoveTagResult != nil ? "referenceTasksRemoveTagCommit" : startupReferenceTasksAddTagResult != nil ? "referenceTasksAddTagCommit" : startupReferenceTasksMoveResult != nil ? "referenceTasksMoveCommit" : archiveMutationRecoveryMethod ?? (startupArchivedTasksRestoreResult != nil ? "archivedTasksRestoreCommit" : completionRecoveryMethod)
@@ -2622,6 +2659,7 @@ private final class Engine: @unchecked Sendable {
         startupGeneralPreferenceResult = nil
         startupNotificationSettingResult = nil
         startupReminderCompletionResult = nil
+        startupReminderSnoozeResult = nil
         startupTaxonomyResult = nil
         startupPersonEditResult = nil
         startupPersonDeleteResult = nil
@@ -2847,6 +2885,7 @@ private final class Engine: @unchecked Sendable {
             guard let id = NativeReminderRequest.ownedID(identifier: request.identifier,
                 metadata: request.content.userInfo["mindwtrNativeReminder"], namespace: turn.namespace) else { throw NativeReminderEffects.unavailable }
             var armedSnoozeDeadline: Double?
+            var unarmedSnoozeExpiry: Double?
             if let key = alarm["key"] as? String, key.hasPrefix("snooze:") {
                 guard let entry = originalState[key] as? [String: Any], entry["kind"] as? String == "snooze",
                       let armed = entry["armed"] as? NSNumber, CFGetTypeID(armed) == CFBooleanGetTypeID() else {
@@ -2861,10 +2900,19 @@ private final class Engine: @unchecked Sendable {
                           let fireAt = alarm["fireAtMs"] as? NSNumber, CFGetTypeID(fireAt) != CFBooleanGetTypeID(),
                           fireAt.doubleValue == deadline.doubleValue else { throw NativeReminderEffects.unavailable }
                     armedSnoozeDeadline = deadline.doubleValue
+                } else {
+                    guard let storedID = entry["id"] as? NSNumber, !Self.isBoolean(storedID), storedID.doubleValue == Double(id),
+                          let fireAt = entry["fireAtMs"] as? NSNumber, !Self.isBoolean(fireAt),
+                          fireAt.doubleValue.isFinite, fireAt.doubleValue.rounded() == fireAt.doubleValue,
+                          abs(fireAt.doubleValue) <= 8_640_000_000_000_000,
+                          let planned = alarm["fireAtMs"] as? NSNumber, !Self.isBoolean(planned),
+                          planned.doubleValue == fireAt.doubleValue else { throw NativeReminderEffects.unavailable }
+                    unarmedSnoozeExpiry = fireAt.doubleValue + 86_400_000
                 }
             }
             return .init(id: id, identifier: request.identifier, json: try Self.ownedJSON(alarm),
-                withdrawn: alarm["replacing"] as? String == "withdrawn", armedSnoozeDeadline: armedSnoozeDeadline)
+                withdrawn: alarm["replacing"] as? String == "withdrawn", armedSnoozeDeadline: armedSnoozeDeadline,
+                unarmedSnoozeExpiry: unarmedSnoozeExpiry)
         }
         let cancel = try cancelled.map { item -> NativeReminderEffects.Cancellation in
             guard Set(item.keys) == Set(["key", "id", "reason"]), let number = item["id"] as? NSNumber,
@@ -2970,6 +3018,197 @@ private final class Engine: @unchecked Sendable {
         if let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String { metadata["build"] = value }
         let encoded = String(decoding: try JSONSerialization.data(withJSONObject: metadata), as: UTF8.self)
         return try invoke("iosSubmitFeedback", arguments: [requestJSON, encoded, endpoint], localCancellation: cancellation)
+    }
+
+    private static var reminderSnoozeInvalid: HostFailure { HostFailure("INVALID_INPUT: Reminder Snooze request or publication is malformed") }
+    private func reminderSnoozeRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 65_536,
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["requestId", "requestedAt", "details"]),
+              try Self.cleanupUniqueKeys(raw),
+              let id = request["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let instant = request["requestedAt"] as? NSNumber, Self.isInteger(instant),
+              abs(instant.doubleValue) <= 8_640_000_000_000_000,
+              let details = request["details"] as? [String: Any],
+              let title = details["title"] as? String, title.utf16.count <= 10_000,
+              details["message"] is String, details["tag"] is String, Self.isBoolean(details["play_sound"]),
+              let data = details["data"] as? [String: String], let owner = data["alarmKey"],
+              owner.range(of: #"\A(task|project):.+\z"#, options: .regularExpression) != nil
+                || ["digest:morning", "digest:evening", "digest:weekly-review"].contains(owner),
+              let interval = details["snooze_interval"] as? NSNumber, !Self.isBoolean(interval),
+              interval.doubleValue.isFinite, interval.doubleValue > 0 else { throw Self.reminderSnoozeInvalid }
+        let fireAt = floor((instant.doubleValue + interval.doubleValue * 60_000) / 1_000) * 1_000
+        guard fireAt.isFinite, abs(fireAt) <= 8_640_000_000_000_000 else { throw Self.reminderSnoozeInvalid }
+        return request
+    }
+    private func reminderSnoozeMap(_ raw: Any, required: Bool = false) throws -> String? {
+        if raw is NSNull, !required { return nil }
+        guard let value = raw as? String, value.utf8.count <= 1_048_576 else { throw Self.reminderSnoozeInvalid }
+        return value
+    }
+    private func reminderSnoozeState(_ raw: String?) throws -> [String: Any] {
+        guard let raw else { return [:] }
+        guard raw.utf8.count <= 1_048_576,
+              let state = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { throw Self.reminderSnoozeInvalid }
+        return state
+    }
+    private func validateReminderSnoozeAlarm(_ raw: String, request: String) throws {
+        let input = try reminderSnoozeRequest(request)
+        guard raw.utf8.count <= 1_048_576,
+              let alarm = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(alarm.keys) == Set(["key", "id", "fireAtMs", "repeat", "details", "replacing"]),
+              try Self.cleanupUniqueKeys(raw),
+              let requestID = input["requestId"] as? String, alarm["key"] as? String == "snooze:" + requestID,
+              let id = alarm["id"] as? NSNumber, Self.isInteger(id), (1_073_741_824...2_147_483_647).contains(id.intValue),
+              let at = alarm["fireAtMs"] as? NSNumber, Self.isInteger(at), abs(at.doubleValue) <= 8_640_000_000_000_000,
+              alarm["repeat"] as? String == "once", alarm["replacing"] is NSNull,
+              let actual = alarm["details"] as? [String: Any], var expected = input["details"] as? [String: Any],
+              let tap = input["requestedAt"] as? NSNumber, let interval = expected["snooze_interval"] as? NSNumber else {
+            throw Self.reminderSnoozeInvalid
+        }
+        expected["schedule_type"] = "once"
+        guard Self.equalJSON(actual, expected), at.doubleValue == floor((tap.doubleValue + interval.doubleValue * 60_000) / 1_000) * 1_000 else {
+            throw Self.reminderSnoozeInvalid
+        }
+    }
+    private func reminderSnoozeJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        guard command.version == 2, command.method == "reminderSnoozeCommit", command.editorDraft == nil,
+              command.argumentsJSON.utf8.count <= 20 * 1_024 * 1_024,
+              let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [Any], args.count == 4,
+              let raw = args[0] as? String else { throw Self.reminderSnoozeInvalid }
+        let request = try reminderSnoozeRequest(raw)
+        _ = try reminderSnoozeMap(args[1]); let beforeRaw = try reminderSnoozeMap(args[2])
+        guard let afterRaw = try reminderSnoozeMap(args[3], required: true), let id = request["requestId"] as? String else { throw Self.reminderSnoozeInvalid }
+        let before = try reminderSnoozeState(beforeRaw), after = try reminderSnoozeState(afterRaw)
+        let key = "snooze:" + id
+        guard before[key] == nil, Set(after.keys) == Set(before.keys).union([key]),
+              before.allSatisfy({ Self.equalJSON($0.value, after[$0.key]) }),
+              let entry = after[key] as? [String: Any], Set(entry.keys) == Set(["kind", "id", "fireAtMs", "details", "armed"]),
+              entry["kind"] as? String == "snooze", Self.isBoolean(entry["armed"]), entry["armed"] as? Bool == false else {
+            throw Self.reminderSnoozeInvalid
+        }
+        let alarm: [String: Any] = ["key": key, "id": entry["id"] ?? NSNull(), "fireAtMs": entry["fireAtMs"] ?? NSNull(),
+            "details": entry["details"] ?? NSNull(), "repeat": "once", "replacing": NSNull()]
+        try validateReminderSnoozeAlarm(Self.ownedJSON(alarm), request: raw)
+        return args
+    }
+    private func frozenReminderSnooze(_ command: PendingCommand) throws -> String {
+        let args = try reminderSnoozeJournalArguments(command)
+        let value = try invoke("reminderSnoozeValidate", arguments: args)
+        guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+        try validateReminderSnoozeAlarm(value, request: raw)
+        return value
+    }
+    private func savedReminderSnooze(_ raw: String) throws -> String {
+        let value = try invoke("reminderSnoozeProbe", arguments: [raw])
+        try validateReminderSnoozeAlarm(value, request: raw)
+        return value
+    }
+    private func reminderSnoozeStorage(_ command: PendingCommand) throws -> NativeDeviceKV {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try requireNoAttachmentDraft()
+        guard started, !closed, context != nil, lockFD >= 0, retainedOrdinaryTurn == nil,
+              projectFileAddTurn == nil, let current = pending, current.version == command.version,
+              Self.ownedEqual(current.method, command.method), Self.ownedEqual(current.argumentsJSON, command.argumentsJSON),
+              let storage = deviceStorage else { throw HostFailure("SAVE_FAILED: Reminder Snooze publication owner is unavailable") }
+        _ = try reminderSnoozeJournalArguments(command)
+        return storage
+    }
+    private func publishReminderSnooze(_ command: PendingCommand, value: String) throws {
+        let expected = try frozenReminderSnooze(command)
+        guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(expected.utf8)), try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+            throw HostFailure("SAVE_FAILED: Reminder Snooze alarm does not match its frozen publication")
+        }
+        let args = try reminderSnoozeJournalArguments(command)
+        let before = try [reminderSnoozeMap(args[1]), reminderSnoozeMap(args[2])]
+        let after = try [reminderSnoozeMap(args[1]), reminderSnoozeMap(args[3], required: true)]
+        let storage = try reminderSnoozeStorage(command)
+        if let mutation = reminderSnoozeMutation {
+            guard Self.ownedEqual(mutation.arguments, command.argumentsJSON), mutation.storage === storage,
+                  context === mutation.runtime, attachmentGeneration == mutation.generation else {
+                throw HostFailure("SAVE_FAILED: Reminder Snooze map mutation requires its exact owner")
+            }
+            try storage.compareAndSetReminderMaps(expected: mutation.before, next: mutation.after, confirmUnchanged: mutation.confirm)
+            reminderSnoozeMutation = nil
+            return
+        }
+        guard !storage.hasPendingReminderMutation else { throw HostFailure("SAVE_FAILED: Another reminder map mutation requires recovery") }
+        let current = try storage.multiGet(Self.reminderMapNames).map(\.1)
+        func matches(_ values: [String?]) -> Bool {
+            zip(current, values).allSatisfy { Self.taskDownloadOptionalEqual($0.0, $0.1) }
+        }
+        let selectedBefore: [String?], confirm: Bool
+        if matches(before) { selectedBefore = before; confirm = false }
+        else if matches(after) { selectedBefore = after; confirm = true }
+        else { throw HostFailure("SAVE_FAILED: Reminder Snooze maps changed; retain the exact publication") }
+        guard let runtime = context else { throw HostFailure("SAVE_FAILED: Reminder Snooze runtime is unavailable") }
+        reminderSnoozeMutation = (command.argumentsJSON, storage, runtime, attachmentGeneration, selectedBefore, after, confirm)
+        try storage.compareAndSetReminderMaps(expected: selectedBefore, next: after, confirmUnchanged: confirm)
+        reminderSnoozeMutation = nil
+    }
+    func reminderSnoozeReplay(requestJSON: String) throws -> String? {
+        guard started, !closed, !recoveryActivationPending, lockFD >= 0 else { throw HostFailure("NOT_READY: Reminder Snooze is unavailable") }
+        try requireNoAttachmentDraft()
+        let request: [String: Any]
+        do { request = try reminderSnoozeRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let command = pending {
+            let args = try reminderSnoozeJournalArguments(command)
+            guard let raw = args.first as? String, Self.ownedEqual(raw, requestJSON) else {
+                throw HostFailure("SAVE_FAILED: Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw HostFailure("SAVE_FAILED: Reminder Snooze still requires exact retry") }
+            return try terminal.value()
+        }
+        let storage = try requireDeviceStorageAdmission()
+        let saved: String?
+        do { saved = try savedReminderSnooze(requestJSON) }
+        catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") { saved = nil }
+        catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: failure.message) }
+        let values = try storage.multiGet(Self.reminderMapNames).map(\.1)
+        guard let id = request["requestId"] as? String else { throw Self.reminderSnoozeInvalid }
+        let state: [String: Any]
+        do {
+            _ = try reminderSnoozeMap(values[0].map { $0 as Any } ?? NSNull())
+            state = try reminderSnoozeState(values[1])
+        } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        if let saved {
+            guard state["snooze:" + id] != nil else { throw CoreHostRejection(message: "STALE_REVISION: Reminder Snooze was already consumed or withdrawn") }
+            do {
+                let expected = try invoke("reminderSnoozeValidate", arguments: [requestJSON, values[0].map { $0 as Any } ?? NSNull(),
+                    values[1].map { $0 as Any } ?? NSNull(), values[1].map { $0 as Any } ?? NSNull()])
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(saved.utf8)), try NativeJSON.jsonObject(with: Data(expected.utf8))) else { throw Self.reminderSnoozeInvalid }
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+            return saved
+        }
+        guard state["snooze:" + id] == nil else { throw CoreHostRejection(message: "STALE_REVISION: Reminder Snooze already has native ownership") }
+        return nil
+    }
+    func snoozeReminder(requestJSON: String, permission: NativeNotificationPermission, generation: UInt64,
+        cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        guard generation == attachmentGeneration else { throw HostFailure("NOT_READY: Reminder Snooze is unavailable") }
+        if let replay = try reminderSnoozeReplay(requestJSON: requestJSON) { return replay }
+        let storage = try requireDeviceStorageAdmission(), values = try storage.multiGet(Self.reminderMapNames).map(\.1)
+        let command: PendingCommand
+        do {
+            let prepared = try invoke("reminderSnoozePrepare", arguments: [requestJSON, values[0].map { $0 as Any } ?? NSNull(),
+                values[1].map { $0 as Any } ?? NSNull(), permission.granted])
+            guard prepared.utf8.count <= 6 * 1_048_576 + 64,
+                  let plan = try NativeJSON.jsonObject(with: Data(prepared.utf8)) as? [String: Any],
+                  Set(plan.keys) == Set(["stateAhead"]), let after = plan["stateAhead"] as? String else { throw Self.reminderSnoozeInvalid }
+            let args: [Any] = [requestJSON, values[0].map { $0 as Any } ?? NSNull(), values[1].map { $0 as Any } ?? NSNull(), after]
+            command = PendingCommand(version: 2, method: "reminderSnoozeCommit", argumentsJSON: try Self.ownedJSON(args))
+            _ = try frozenReminderSnooze(command)
+            try cancellation.check()
+            guard deviceStorage === storage, generation == attachmentGeneration else { throw Self.reminderSnoozeInvalid }
+        } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        ordinaryMutationDepth += 1; defer { ordinaryMutationDepth -= 1 }
+        pending = command
+        try persist(command)
+        let value = try invoke("reminderSnoozeCommit", arguments: [requestJSON])
+        try publishReminderSnooze(command, value: value)
+        return try finish(command, with: .success(value)).value()
     }
 
     private func reminderCompletionRequest(_ raw: String) throws -> [String: Any] {
@@ -7074,6 +7313,9 @@ private final class Engine: @unchecked Sendable {
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
         reminderCompletionOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard !Self.reminderSnoozeMethods.contains(method) else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
+        }
         guard !Self.reminderCompletionMethods.contains(method) || method == "reminderCompletionCommit" && reminderCompletionOwned else {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
         }
@@ -9628,6 +9870,27 @@ private final class Engine: @unchecked Sendable {
                 else { retainedOrdinaryTurn = nil }
             }
         }
+        if command.method == "reminderSnoozeCommit" {
+            let args = try reminderSnoozeJournalArguments(command)
+            guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+            _ = try frozenReminderSnooze(command)
+            if let terminal = command.terminal { return try finish(command, with: terminal) }
+            let value: String
+            if recoveryActivationPending {
+                do { value = try savedReminderSnooze(raw) }
+                catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                    return try finish(command, with: .rejected(failure.message))
+                }
+            } else {
+                try persist(command)
+                do { value = try invoke("reminderSnoozeRetry", arguments: [raw]) }
+                catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                    return try finish(command, with: .rejected(failure.message))
+                }
+            }
+            try publishReminderSnooze(command, value: value)
+            return try finish(command, with: .success(value))
+        }
         if command.method == "reminderCompletionCommit" {
             let args = try reminderCompletionJournalArguments(command)
             guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Reminder completion journal is malformed") }
@@ -9776,6 +10039,19 @@ private final class Engine: @unchecked Sendable {
         }
         if command.method == "dataSetting", case .success(let value) = terminal {
             try validateDataSettingAcknowledgment(value)
+        }
+        if command.method == "reminderSnoozeCommit" {
+            let expected = try frozenReminderSnooze(command)
+            if case .success(let value) = terminal {
+                let args = try reminderSnoozeJournalArguments(command)
+                guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+                try validateReminderSnoozeAlarm(value, request: raw)
+                let proven = try savedReminderSnooze(raw)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(value.utf8)), try NativeJSON.jsonObject(with: Data(expected.utf8))),
+                      Self.equalJSON(try NativeJSON.jsonObject(with: Data(value.utf8)), try NativeJSON.jsonObject(with: Data(proven.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Reminder Snooze receipt does not match its frozen publication")
+                }
+            }
         }
         if command.method == "reminderCompletionCommit" {
             let args = try reminderCompletionJournalArguments(command)
@@ -10500,6 +10776,9 @@ private final class Engine: @unchecked Sendable {
         if command.method == "notificationSettingCommit", case .success = terminal {
             _ = try? invoke("notificationSettingAcknowledged", arguments: [])
         }
+        if command.method == "reminderSnoozeCommit", case .success = terminal {
+            _ = try? invoke("reminderSnoozeAcknowledged", arguments: [])
+        }
         if command.method == "reminderCompletionCommit", case .success = terminal {
             _ = try? invoke("reminderCompletionAcknowledged", arguments: [])
         }
@@ -10771,7 +11050,7 @@ private final class Engine: @unchecked Sendable {
                 && ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:", "STALE_REVISION:"].contains(where: { message.hasPrefix($0) })
         }
         return ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:"].contains(where: { message.hasPrefix($0) })
-            || (method == "reminderCompletionCommit" && message.hasPrefix("STALE_REVISION:"))
+            || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "referenceTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -13668,6 +13947,10 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func journalArguments(_ command: PendingCommand, checkingEditorSnapshot: Bool = true, retainedOrdinary: Bool = false) throws -> [Any] {
+        if command.method == "reminderSnoozeCommit" {
+            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
+            return try reminderSnoozeJournalArguments(command)
+        }
         if command.method == "reminderCompletionCommit" {
             guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
             return try reminderCompletionJournalArguments(command)
@@ -20311,6 +20594,7 @@ private final class Engine: @unchecked Sendable {
         httpJobs?.shutdown(); httpJobs = nil
         secretJobs?.shutdown(); secretJobs = nil
         cryptoJobs?.shutdown(); cryptoJobs = nil
+        reminderSnoozeMutation = nil
         deviceStorage?.close(); deviceStorage = nil
         ioBodySource = nil
         attachmentJobs?.shutdown(); attachmentJobs = nil

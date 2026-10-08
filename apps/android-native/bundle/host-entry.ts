@@ -119,7 +119,7 @@ import { PROJECT_SQLITE_COLUMNS } from '../../../packages/core/src/project-sync-
 import { createPreparedProjectAvailabilityMethods, createProjectAvailabilityMethods } from '../../../packages/core/src/native-host-contract-project-availability';
 import { SYNC_ENCRYPTION_STATE_KEY } from '../../../packages/core/src/sync-storage-keys';
 import { createNativeReminders } from './host-reminders';
-import { createIosReminderMethods } from './host-ios-reminders';
+import { createIosReminderMethods, createIosReminderSnoozeMethods } from './host-ios-reminders';
 import { createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
@@ -1080,7 +1080,7 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     // a journal keeps its receipts in memory, as before.
     traceStep('js:receipts');
     if (journaled) await loadNativeRequestReceipts(sqlite);
-    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'reminderComplete', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
+    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
     // The legacy import plans from a validated full read. Any other boot needs only the schema here: the activation's own read
     // is validated before anything saves.
     traceStep('js:schema');
@@ -1386,6 +1386,18 @@ const iosReminderEffects = createIosReminderMethods({
 });
 const requireReminderSignal = (signal: AbortSignal) => {
     if (signal.aborted) throw new Error('CANCELLED: Reminder reconciliation was cancelled');
+};
+
+const iosReminderSnooze = createIosReminderSnoozeMethods({
+    preview: (input) => contract.previewReminderSnooze(input),
+    plan: (input) => contract.planReminderSnooze(input),
+});
+const reminderSnoozeRequest = (json: string): unknown => {
+    if (typeof json !== 'string' || json.length > 65_536 || new TextEncoder().encode(json).byteLength > 65_536) {
+        throw new Error('INVALID_INPUT: A bounded reminder Snooze request is required');
+    }
+    try { return JSON.parse(json); }
+    catch { throw new Error('INVALID_INPUT: A bounded reminder Snooze request is required'); }
 };
 
 const reminderCompletionRequest = (json: string): unknown => {
@@ -2068,6 +2080,32 @@ globalThis.MindwtrHost = {
     },
     gtdWorkflowCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedGtdWorkflow(JSON.parse(json))));
+    },
+    reminderSnoozePrepare(raw: string, storedAlarms: string | null, storedState: string | null, granted: boolean): string {
+        return submit(async () => iosReminderSnooze.prepare(raw, storedAlarms, storedState, granted));
+    },
+    reminderSnoozeValidate(raw: string, storedAlarms: string | null, storedState: string | null, stateAhead: string): string {
+        return submit(async () => iosReminderSnooze.validate(raw, storedAlarms, storedState, stateAhead));
+    },
+    reminderSnoozeCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitReminderSnooze(reminderSnoozeRequest(json))));
+    },
+    reminderSnoozeProbe(json: string): string {
+        return submit(async () => unwrap(contract.probeReminderSnoozeOutcome(reminderSnoozeRequest(json))));
+    },
+    reminderSnoozeRetry(json: string): string {
+        return submit(async () => unwrap(await contract.retryReminderSnooze(reminderSnoozeRequest(json))));
+    },
+    reminderSnoozeAcknowledged(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') return null;
+            iosReminderEffects.published();
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS reminder Snooze acknowledged',
+                context: { releaseCheck: 'v1.3.5/ios-reminder-snooze', outcome: 'confirmed' },
+            }, { force: true }); } catch { /* Logging cannot lose the durable acknowledgment or its observer wake. */ }
+            return null;
+        });
     },
     reminderCompletionCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitReminderCompletion(reminderCompletionRequest(json))));

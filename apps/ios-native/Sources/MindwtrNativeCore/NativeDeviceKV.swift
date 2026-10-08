@@ -200,7 +200,7 @@ final class NativeDeviceKV {
         pending.map { $0.changes.map(\.key) == Self.reminderNames } ?? false
     }
     /// Fixed private two-cell CAS; reminder keys remain absent from the generic writable allowlist.
-    func compareAndSetReminderMaps(expected: [String?], next: [String?]) throws {
+    func compareAndSetReminderMaps(expected: [String?], next: [String?], confirmUnchanged: Bool = false) throws {
         guard expected.count == 2, next.count == 2,
               (expected + next).allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.invalid }
         try requireUsable()
@@ -213,7 +213,7 @@ final class NativeDeviceKV {
         guard zip(Self.reminderNames, expected).allSatisfy({ name, value in
             before.values[Data(name.utf8)].map { Data($0.utf8) } == value.map { Data($0.utf8) }
         }) else { throw Self.failure }
-        try mutate(changes, skipUnchanged: true)
+        try mutate(changes, skipUnchanged: !confirmUnchanged)
     }
 
     private static func validateAboutTimestamp(_ timestamp: String) throws {
