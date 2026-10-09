@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,7 +46,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -68,6 +66,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.core.net.toUri
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
@@ -392,9 +399,11 @@ internal fun AboutOverlays(model: InboxViewModel, view: JSONObject) {
 }
 
 /**
- * RN's FeedbackSettingsModal (feedback-settings-modal.tsx, settings.styles.ts feedback*): the card over a 42% black backdrop, the
- * title with core's GitHub line and its link, the category buttons, a bug's places, the message, the reply email, a bug's
- * diagnostics switch, core's notices, Cancel and Send; after a send, core's thanks and Close.
+ * RN's FeedbackSettingsModal (feedback-settings-modal.tsx, settings.styles.ts feedback*): RN's Modal is a window over the whole
+ * screen, the status bar and the top bar included, so this is a dialog whose own 42% black backdrop (no platform dim) holds the
+ * card, centered on the screen. In it: the title with core's GitHub line and its link, the category buttons, a bug's places, the
+ * message, the reply email, a bug's diagnostics switch, core's notices, Cancel and Send; after a send, core's thanks and Close.
+ * Texts without a line height keep RN's Android font padding ([padded]).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -409,118 +418,125 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
     val check = about.feedbackCheck
     val canSend = check?.optBoolean("canSubmit") == true && draft.status != "sending"
     val sent = draft.status == "sent"
-    BackHandler { about.closeFeedback() }
-    Box(Modifier.fillMaxSize().background(theme.feedbackScrim).pointerInput(Unit) { detectTapGestures { about.closeFeedback() } }
-        .imePadding().padding(18.dp), contentAlignment = Alignment.Center) {
-        val shape = RoundedCornerShape(18.dp)
-        Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.88f).dp).clip(shape).background(c.cardBg)
-            .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("feedback-modal")) {
-            // The header: the title, core's GitHub line (not after a send), and the close X.
-            Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text(text.getString("title"), style = rnText(17, 700), color = c.text, modifier = Modifier.semantics { heading() })
-                    if (!sent) {
-                        val line = text.getJSONObject("gitHub").getJSONObject(draft.category)
-                        val linkLabel = line.getString("link")
-                        Text(buildAnnotatedString {
-                            append(line.getString("before"))
-                            withStyle(SpanStyle(color = c.tint, textDecoration = TextDecoration.Underline)) { append(linkLabel) }
-                            append(line.getString("after"))
-                        }, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 3.dp)
-                            .semantics { role = Role.Button; contentDescription = "${line.getString("before")}$linkLabel${line.getString("after")}"; testTag = "feedback-github" }
-                            .clickable { about.open(context, line.getString("url")) })
-                    }
-                }
-                Box(Modifier.size(34.dp).clip(CircleShape).clearAndSetSemantics { contentDescription = text.getString("close"); role = Role.Button; onClick { about.closeFeedback(); true } }
-                    .clickable { about.closeFeedback() }, contentAlignment = Alignment.Center) {
-                    Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
-                }
-            }
-            if (sent) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Notice(text.getString("sent"), null, c.success, wash = 0x22)
-                    PrimaryButton(text.getString("close"), true, false, Modifier.fillMaxWidth()) { about.closeFeedback() }
-                }
-                return@Column
-            }
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FieldLabel(text.getString("category"))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (category in view.getJSONArray("categories").let { list -> List(list.length()) { list.getString(it) } }) {
-                        val on = category == draft.category
-                        val label = text.getJSONObject("categories").getString(category)
-                        val tone = if (on) c.tint else c.secondaryText
-                        val buttonShape = RoundedCornerShape(12.dp)
-                        Row(Modifier.weight(1f).heightIn(min = 42.dp).clip(buttonShape).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg)
-                            .border(1.dp, if (on) c.tint else c.border, buttonShape)
-                            .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-category-$category"; onClick { about.edit { copy(category = category) }; true } }
-                            .clickable { about.edit { copy(category = category) } }.padding(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(when (category) { "bug" -> Lucide.Bug; "feature" -> Lucide.Lightbulb; else -> Lucide.MessageSquare }, null, tint = tone, modifier = Modifier.size(17.dp))
-                            Text(label, style = rnText(12, 700), color = tone, maxLines = 2)
+    Dialog(onDismissRequest = { about.closeFeedback() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { window?.setDimAmount(0f) }
+        BoxWithConstraints(Modifier.fillMaxSize().background(theme.feedbackScrim).semantics { testTagsAsResourceId = true }
+            .pointerInput(Unit) { detectTapGestures { about.closeFeedback() } }.imePadding().padding(18.dp), contentAlignment = Alignment.Center) {
+            val shape = RoundedCornerShape(18.dp)
+            Column(Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.88f).clip(shape).background(c.cardBg)
+                .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("feedback-modal")) {
+                // The header: the title, core's GitHub line (not after a send), and the close X.
+                Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(text.getString("title"), style = padded(rnText(17, 700)), color = c.text, modifier = Modifier.semantics { heading() })
+                        if (!sent) {
+                            val line = text.getJSONObject("gitHub").getJSONObject(draft.category)
+                            val linkLabel = line.getString("link")
+                            Text(buildAnnotatedString {
+                                append(line.getString("before"))
+                                withStyle(SpanStyle(color = c.tint, textDecoration = TextDecoration.Underline)) { append(linkLabel) }
+                                append(line.getString("after"))
+                            }, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 3.dp)
+                                .semantics { role = Role.Button; contentDescription = "${line.getString("before")}$linkLabel${line.getString("after")}"; testTag = "feedback-github" }
+                                .clickable { about.open(context, line.getString("url")) })
                         }
                     }
+                    Box(Modifier.size(34.dp).clip(CircleShape).clearAndSetSemantics { contentDescription = text.getString("close"); role = Role.Button; onClick { about.closeFeedback(); true } }
+                        .clickable { about.closeFeedback() }, contentAlignment = Alignment.Center) {
+                        Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
+                    }
                 }
-                if (draft.category == "bug") {
-                    FieldLabel(text.getString("where"))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (place in view.getJSONArray("locations").let { list -> List(list.length()) { list.getString(it) } }) {
-                            val on = place == draft.location
-                            val label = text.getJSONObject("locations").getString(place)
-                            val chip = RoundedCornerShape(18.dp)
-                            Box(Modifier.heightIn(min = 36.dp).clip(chip).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg).border(1.dp, if (on) c.tint else c.border, chip)
-                                .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-place-$place"
-                                    onClick { about.edit { copy(location = if (on) "" else place) }; true } }
-                                .clickable { about.edit { copy(location = if (on) "" else place) } }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                                Text(label, style = rnText(12, 700), color = if (on) c.tint else c.secondaryText)
+                if (sent) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Notice(text.getString("sent"), null, c.success, wash = 0x22)
+                        PrimaryButton(text.getString("close"), true, false, Modifier.fillMaxWidth()) { about.closeFeedback() }
+                    }
+                    return@Column
+                }
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FieldLabel(text.getString("category"))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (category in view.getJSONArray("categories").let { list -> List(list.length()) { list.getString(it) } }) {
+                            val on = category == draft.category
+                            val label = text.getJSONObject("categories").getString(category)
+                            val tone = if (on) c.tint else c.secondaryText
+                            val buttonShape = RoundedCornerShape(12.dp)
+                            Row(Modifier.weight(1f).heightIn(min = 42.dp).clip(buttonShape).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg)
+                                .border(1.dp, if (on) c.tint else c.border, buttonShape)
+                                .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-category-$category"; onClick { about.edit { copy(category = category) }; true } }
+                                .clickable { about.edit { copy(category = category) } }.padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(when (category) { "bug" -> Lucide.Bug; "feature" -> Lucide.Lightbulb; else -> Lucide.MessageSquare }, null, tint = tone, modifier = Modifier.size(17.dp))
+                                Text(label, style = padded(rnText(12, 700)), color = tone, maxLines = 2)
                             }
                         }
                     }
-                }
-                FieldLabel(text.getString("message"))
-                val limit = check?.optInt("messageMaxLength", 4000) ?: 4000
-                FeedbackField(draft.message, text.getString("message"), text.getJSONObject("messagePlaceholders").getString(draft.category), multiline = true,
-                    tag = "feedback-message") { typed -> about.edit { copy(message = typed.take(limit)) } }
-                FieldLabel(text.getString("email"))
-                FeedbackField(draft.email, text.getString("email"), text.getString("emailPlaceholder"), multiline = false, tag = "feedback-email") { typed ->
-                    about.edit { copy(email = typed) }
-                }
-                if (draft.category == "bug") {
-                    val rowShape = RoundedCornerShape(12.dp)
-                    Row(Modifier.fillMaxWidth().clip(rowShape).background(c.bg).border(1.dp, c.border, rowShape).padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(text.getString("includeDiagnostics"), style = rnText(14, 700), color = c.text)
-                            Text(text.getString("includeDiagnosticsDescription"), style = rnText(12, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
-                        }
-                        RnSwitch(draft.includeDiagnostics, true, text.getString("includeDiagnostics"),
-                            theme.feedbackSwitch) {
-                            about.edit { copy(includeDiagnostics = !includeDiagnostics) }
+                    if (draft.category == "bug") {
+                        FieldLabel(text.getString("where"))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (place in view.getJSONArray("locations").let { list -> List(list.length()) { list.getString(it) } }) {
+                                val on = place == draft.location
+                                val label = text.getJSONObject("locations").getString(place)
+                                val chip = RoundedCornerShape(18.dp)
+                                Box(Modifier.heightIn(min = 36.dp).clip(chip).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg).border(1.dp, if (on) c.tint else c.border, chip)
+                                    .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-place-$place"
+                                        onClick { about.edit { copy(location = if (on) "" else place) }; true } }
+                                    .clickable { about.edit { copy(location = if (on) "" else place) } }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                                    Text(label, style = padded(rnText(12, 700)), color = if (on) c.tint else c.secondaryText)
+                                }
+                            }
                         }
                     }
+                    FieldLabel(text.getString("message"))
+                    val limit = check?.optInt("messageMaxLength", 4000) ?: 4000
+                    FeedbackField(draft.message, text.getString("message"), text.getJSONObject("messagePlaceholders").getString(draft.category), multiline = true,
+                        tag = "feedback-message") { typed -> about.edit { copy(message = typed.take(limit)) } }
+                    FieldLabel(text.getString("email"))
+                    FeedbackField(draft.email, text.getString("email"), text.getString("emailPlaceholder"), multiline = false, tag = "feedback-email") { typed ->
+                        about.edit { copy(email = typed) }
+                    }
+                    if (draft.category == "bug") {
+                        val rowShape = RoundedCornerShape(12.dp)
+                        Row(Modifier.fillMaxWidth().clip(rowShape).background(c.bg).border(1.dp, c.border, rowShape).padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(text.getString("includeDiagnostics"), style = padded(rnText(14, 700)), color = c.text)
+                                Text(text.getString("includeDiagnosticsDescription"), style = rnText(12, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
+                            }
+                            RnSwitch(draft.includeDiagnostics, true, text.getString("includeDiagnostics"),
+                                theme.feedbackSwitch) {
+                                about.edit { copy(includeDiagnostics = !includeDiagnostics) }
+                            }
+                        }
+                    }
+                    if (!configured) Notice(text.getString("unavailable"), text.getString("unavailableDescription"), c.danger, wash = 0x18)
+                    check?.menuText("visibleError")?.let { Notice(it, null, c.danger, wash = 0x18) }
                 }
-                if (!configured) Notice(text.getString("unavailable"), text.getString("unavailableDescription"), c.danger, wash = 0x18)
-                check?.menuText("visibleError")?.let { Notice(it, null, c.danger, wash = 0x18) }
-            }
-            Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
-                val secondary = RoundedCornerShape(12.dp)
-                val cancel = text.getString("cancel")
-                Box(Modifier.widthIn(min = 92.dp).heightIn(min = 44.dp).clip(secondary).border(1.dp, c.border, secondary)
-                    .clearAndSetSemantics { contentDescription = cancel; role = Role.Button; onClick { about.closeFeedback(); true } }
-                    .clickable { about.closeFeedback() }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-                    Text(cancel, style = rnText(14, 700), color = c.secondaryText)
+                Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+                    val secondary = RoundedCornerShape(12.dp)
+                    val cancel = text.getString("cancel")
+                    Box(Modifier.widthIn(min = 92.dp).heightIn(min = 44.dp).clip(secondary).border(1.dp, c.border, secondary)
+                        .clearAndSetSemantics { contentDescription = cancel; role = Role.Button; onClick { about.closeFeedback(); true } }
+                        .clickable { about.closeFeedback() }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                        Text(cancel, style = padded(rnText(14, 700)), color = c.secondaryText)
+                    }
+                    PrimaryButton(if (draft.status == "sending") text.getString("sending") else text.getString("submit"), canSend, draft.status == "sending",
+                        Modifier.widthIn(min = 126.dp).testTag("feedback-send")) { about.send() }
                 }
-                PrimaryButton(if (draft.status == "sending") text.getString("sending") else text.getString("submit"), canSend, draft.status == "sending",
-                    Modifier.widthIn(min = 126.dp).testTag("feedback-send")) { about.send() }
             }
         }
     }
 }
 
+/** RN's Android Text keeps its font padding (includeFontPadding) when it has no line height: the same heights as RN's. */
+@Suppress("DEPRECATION")
+private fun padded(style: TextStyle) = style.copy(platformStyle = PlatformTextStyle(includeFontPadding = true))
+
 @Composable
-private fun FieldLabel(label: String) = Text(label.uppercase(), style = rnText(12, 700), color = LocalTheme.current.colors.secondaryText)
+private fun FieldLabel(label: String) = Text(label.uppercase(), style = padded(rnText(12, 700)), color = LocalTheme.current.colors.secondaryText)
 
 /** RN's feedbackNotice: [color] text on its wash (`${color}${wash}`) inside a `${color}55` border. */
 @Composable
@@ -543,7 +559,7 @@ private fun PrimaryButton(label: String, enabled: Boolean, spinning: Boolean, mo
         .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
         if (spinning) CircularProgressIndicator(Modifier.size(20.dp), color = theme.filledText, strokeWidth = 2.dp)
-        Text(label, style = rnText(14, 700), color = theme.filledText)
+        Text(label, style = padded(rnText(14, 700)), color = theme.filledText)
     }
 }
 
@@ -559,7 +575,8 @@ private fun FeedbackField(value: String, label: String, placeholder: String, mul
             .semantics { contentDescription = label }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = if (multiline) 10.dp else 12.dp), contentAlignment = if (multiline) Alignment.TopStart else Alignment.CenterStart) {
-                if (value.isEmpty()) Text(placeholder, style = if (multiline) rnText(14, 400, 20) else rnText(14, 400), color = c.secondaryText)
+                // RN's Android placeholder takes no line height (only typed text does) and keeps the font padding.
+                if (value.isEmpty()) Text(placeholder, style = padded(rnText(14, 400)), color = c.secondaryText)
                 inner()
             }
         })
