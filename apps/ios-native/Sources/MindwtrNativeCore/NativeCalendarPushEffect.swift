@@ -59,15 +59,17 @@ struct NativeCalendarPushEffect: Sendable {
     let request: NativeCalendarWriteRequest
     let taskID: String?
     let beforeMapping: NativeCalendarPushMapping?
+    let beforeCalendarState: [String?]?
     let phase: Phase
     let result: Result?
     let afterMapping: NativeCalendarPushMapping?
 
     init(id: UUID = UUID(), libraryID: String, requestJSON: String, taskID: String? = nil,
-         beforeMapping: NativeCalendarPushMapping? = nil) throws {
+         beforeMapping: NativeCalendarPushMapping? = nil, beforeCalendarState: [String?]? = nil) throws {
         try self.init(id: id, libraryID: libraryID, requestJSON: requestJSON,
                       request: NativeCalendarWriteRequest(json: requestJSON), taskID: taskID,
-                      beforeMapping: beforeMapping, phase: .prepared, result: nil, afterMapping: nil)
+                      beforeMapping: beforeMapping, beforeCalendarState: beforeCalendarState,
+                      phase: .prepared, result: nil, afterMapping: nil)
     }
 
     init(json: String) throws {
@@ -76,7 +78,7 @@ struct NativeCalendarPushEffect: Sendable {
                   let value = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
                 throw NativeCalendarWriteError.invalid
             }
-            try Self.fields(value, ["version", "id", "libraryId", "requestJSON", "taskId", "beforeMapping", "phase", "result", "afterMapping"])
+            try Self.fields(value, ["version", "id", "libraryId", "requestJSON", "taskId", "beforeMapping", "beforeCalendarState", "phase", "result", "afterMapping"])
             guard let version = value["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
                   version.doubleValue == 1,
                   let idText = value["id"] as? String, let id = UUID(uuidString: idText),
@@ -85,16 +87,18 @@ struct NativeCalendarPushEffect: Sendable {
             let raw = try Self.text(value, "requestJSON")
             try self.init(id: id, libraryID: Self.text(value, "libraryId"), requestJSON: raw,
                           request: NativeCalendarWriteRequest(json: raw), taskID: Self.optionalText(value, "taskId"),
-                          beforeMapping: Self.mapping(value["beforeMapping"]), phase: phase,
+                          beforeMapping: Self.mapping(value["beforeMapping"]),
+                          beforeCalendarState: Self.calendarState(value["beforeCalendarState"]), phase: phase,
                           result: Self.result(value["result"]), afterMapping: Self.mapping(value["afterMapping"]))
         } catch { throw NativeCalendarWriteError.invalid }
     }
 
     private init(id: UUID, libraryID: String, requestJSON: String, request: NativeCalendarWriteRequest,
-                 taskID: String?, beforeMapping: NativeCalendarPushMapping?, phase: Phase,
+                 taskID: String?, beforeMapping: NativeCalendarPushMapping?, beforeCalendarState: [String?]?, phase: Phase,
                  result: Result?, afterMapping: NativeCalendarPushMapping?) throws {
         self.id = id; self.libraryID = libraryID; self.requestJSON = requestJSON; self.request = request
         self.taskID = taskID; self.beforeMapping = beforeMapping; self.phase = phase
+        self.beforeCalendarState = beforeCalendarState
         self.result = result; self.afterMapping = afterMapping
         _ = try encoded()
     }
@@ -116,7 +120,8 @@ struct NativeCalendarPushEffect: Sendable {
 
     private func transitioned(to phase: Phase, result: Result?, mapping: NativeCalendarPushMapping?) throws -> Self {
         try Self(id: id, libraryID: libraryID, requestJSON: requestJSON, request: request, taskID: taskID,
-                 beforeMapping: beforeMapping, phase: phase, result: result, afterMapping: mapping)
+                 beforeMapping: beforeMapping, beforeCalendarState: beforeCalendarState,
+                 phase: phase, result: result, afterMapping: mapping)
     }
 
     func encoded() throws -> String {
@@ -124,6 +129,7 @@ struct NativeCalendarPushEffect: Sendable {
         let value: [String: Any] = [
             "version": 1, "id": id.uuidString.lowercased(), "libraryId": libraryID, "requestJSON": requestJSON,
             "taskId": taskID as Any? ?? NSNull(), "beforeMapping": beforeMapping?.json as Any? ?? NSNull(),
+            "beforeCalendarState": beforeCalendarState?.map { $0 as Any? ?? NSNull() } as Any? ?? NSNull(),
             "phase": phase.rawValue, "result": result?.json as Any? ?? NSNull(),
             "afterMapping": afterMapping?.json as Any? ?? NSNull(),
         ]
@@ -138,11 +144,14 @@ struct NativeCalendarPushEffect: Sendable {
         switch request {
         case .sources: throw NativeCalendarWriteError.invalid
         case .createCalendar, .updateCalendar, .deleteCalendar:
-            guard taskID == nil, beforeMapping == nil else { throw NativeCalendarWriteError.invalid }
+            guard taskID == nil, beforeMapping == nil, let beforeCalendarState, beforeCalendarState.count == 5,
+                  beforeCalendarState.allSatisfy({ ($0?.utf8.count ?? 0) <= NativeCalendarJobs.maximumRequestBytes }) else {
+                throw NativeCalendarWriteError.invalid
+            }
         case .createEvent:
-            guard taskID != nil, beforeMapping == nil else { throw NativeCalendarWriteError.invalid }
+            guard taskID != nil, beforeMapping == nil, beforeCalendarState == nil else { throw NativeCalendarWriteError.invalid }
         case .updateEvent(let event, let calendar, _), .deleteEvent(let event, let calendar):
-            guard let taskID, let beforeMapping,
+            guard beforeCalendarState == nil, let taskID, let beforeMapping,
                   Self.matches(beforeMapping, task: taskID, calendar: calendar, event: event) else {
                 throw NativeCalendarWriteError.invalid
             }
@@ -206,6 +215,15 @@ struct NativeCalendarPushEffect: Sendable {
         return try NativeCalendarPushMapping(taskId: text(row, "taskId"), calendarEventId: text(row, "calendarEventId"),
                                              calendarId: text(row, "calendarId"), platform: text(row, "platform"),
                                              lastSyncedAt: text(row, "lastSyncedAt"))
+    }
+    private static func calendarState(_ value: Any?) throws -> [String?]? {
+        if value is NSNull { return nil }
+        guard let cells = value as? [Any], cells.count == 5 else { throw NativeCalendarWriteError.invalid }
+        return try cells.map {
+            if $0 is NSNull { return nil }
+            guard let text = $0 as? String else { throw NativeCalendarWriteError.invalid }
+            return text
+        }
     }
     private static func result(_ value: Any?) throws -> Result? {
         if value is NSNull { return nil }

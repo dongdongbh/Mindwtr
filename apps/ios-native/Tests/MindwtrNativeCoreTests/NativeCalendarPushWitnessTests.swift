@@ -37,7 +37,8 @@ final class NativeCalendarPushWitnessTests: XCTestCase {
                                 color: String = "#aabbcc") throws -> NativeCalendarPushEffect {
         let raw = try json(["op": "createCalendar", "details": ["title": title ?? "Mindwtr (\(temporaryID))",
                             "color": color, "entityType": "event", "sourceId": source]])
-        return try NativeCalendarPushEffect(id: id, libraryID: "library", requestJSON: raw).markingStarted()
+        return try NativeCalendarPushEffect(id: id, libraryID: "library", requestJSON: raw,
+                                            beforeCalendarState: Array(repeating: nil, count: 5)).markingStarted()
     }
     private func calendarRow(_ effect: NativeCalendarPushEffect) throws -> [String: Any] {
         guard case .createCalendar(let details) = effect.request else { throw NativeCalendarWriteError.invalid }
@@ -216,7 +217,8 @@ final class NativeCalendarPushWitnessTests: XCTestCase {
 
     func testCalendarRecoveryRequiresStartedCreateAndCanonicalUniqueTemporaryTitle() throws {
         let effect = try calendarEffect(), row = try calendarRow(effect)
-        let prepared = try NativeCalendarPushEffect(id: id, libraryID: "library", requestJSON: effect.requestJSON)
+        let prepared = try NativeCalendarPushEffect(id: id, libraryID: "library", requestJSON: effect.requestJSON,
+                                                    beforeCalendarState: effect.beforeCalendarState)
         fixed(.invalid) { try NativeCalendarPushWitness.createdCalendar(effect: prepared, calendars: [row]) }
         let saved = try effect.recording(result: .identifier("calendar"))
         fixed(.invalid) { try NativeCalendarPushWitness.createdCalendar(effect: saved, calendars: [row]) }

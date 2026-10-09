@@ -32,7 +32,8 @@ final class NativeCalendarPushEffectTests: XCTestCase {
         let eventOperation = operation.hasSuffix("Event")
         return try NativeCalendarPushEffect(id: operationID, libraryID: "library", requestJSON: raw ?? request(operation),
                                             taskID: eventOperation ? "task" : nil,
-                                            beforeMapping: eventOperation && operation != "createEvent" ? mapping() : nil)
+                                            beforeMapping: eventOperation && operation != "createEvent" ? mapping() : nil,
+                                            beforeCalendarState: eventOperation ? nil : [nil, "calendar", nil, "#3B82F6", nil])
     }
     private func object(_ effect: NativeCalendarPushEffect) throws -> [String: Any] {
         try XCTUnwrap(NativeJSON.jsonObject(with: Data(effect.encoded().utf8)) as? [String: Any])
@@ -50,6 +51,8 @@ final class NativeCalendarPushEffectTests: XCTestCase {
         XCTAssertEqual(Data(restored.requestJSON.utf8), Data(effect.requestJSON.utf8))
         XCTAssertEqual(restored.taskID.map { Data($0.utf8) }, effect.taskID.map { Data($0.utf8) })
         XCTAssertEqual(restored.beforeMapping, effect.beforeMapping)
+        XCTAssertEqual(restored.beforeCalendarState?.map { $0.map { Data($0.utf8) } },
+                       effect.beforeCalendarState?.map { $0.map { Data($0.utf8) } })
         XCTAssertEqual(restored.phase, effect.phase); XCTAssertEqual(restored.result, effect.result)
         XCTAssertEqual(restored.afterMapping, effect.afterMapping)
         XCTAssertLessThanOrEqual(try effect.encoded().utf8.count, NativeCalendarJobs.maximumRequestBytes)
@@ -80,7 +83,7 @@ final class NativeCalendarPushEffectTests: XCTestCase {
             invalid { try acknowledging.acknowledging(mapping: after) }
             for effect in [first, started, saved, acknowledging] { try roundtrip(effect) }
             let frame = try object(acknowledging)
-            XCTAssertEqual(Set(frame.keys), ["version", "id", "libraryId", "requestJSON", "taskId", "beforeMapping", "phase", "result", "afterMapping"])
+            XCTAssertEqual(Set(frame.keys), ["version", "id", "libraryId", "requestJSON", "taskId", "beforeMapping", "beforeCalendarState", "phase", "result", "afterMapping"])
             XCTAssertEqual(frame["id"] as? String, operationID.uuidString.lowercased())
             XCTAssertTrue(frame["taskId"] is NSNull || frame["taskId"] is String)
         }
@@ -280,5 +283,33 @@ final class NativeCalendarPushEffectTests: XCTestCase {
         let fullSaved = try prepared("updateEvent", raw: savedRaw).markingStarted().recording(result: .completed)
         XCTAssertEqual(try fullSaved.encoded().utf8.count, limit)
         invalid { try fullSaved.acknowledging(mapping: mapping(stamp: "after")) }
+    }
+
+    func testCalendarStateRequiresExactlyFiveRawStringOrNullCellsOnlyForCalendarOperations() throws {
+        let raw: [String?] = ["legacy-boolean", "calendar-e\u{301}", nil, "", "\u{FEFF}legacy"]
+        for operation in ["createCalendar", "updateCalendar", "deleteCalendar"] {
+            invalid { try NativeCalendarPushEffect(libraryID: "library", requestJSON: request(operation)) }
+            for state in [[], [nil], Array(repeating: nil, count: 6)] as [[String?]] {
+                invalid { try NativeCalendarPushEffect(libraryID: "library", requestJSON: request(operation), beforeCalendarState: state) }
+            }
+            let effect = try NativeCalendarPushEffect(libraryID: "library", requestJSON: request(operation), beforeCalendarState: raw)
+            let result: NativeCalendarPushEffect.Result = operation == "createCalendar" ? .identifier("created") : .completed
+            for phase in [effect, try effect.markingStarted(), try effect.markingStarted().recording(result: result)] {
+                XCTAssertEqual(phase.beforeCalendarState?.map { $0.map { Data($0.utf8) } }, raw.map { $0.map { Data($0.utf8) } })
+                try roundtrip(phase)
+            }
+        }
+        invalid { try NativeCalendarPushEffect(libraryID: "library", requestJSON: request("createEvent"), taskID: "task", beforeCalendarState: raw) }
+        var value = try object(prepared("deleteCalendar"))
+        let wrongCellTypes: [Any] = [true, NSNull(), NSNull(), NSNull(), NSNull()]
+        let malformedStates: [Any] = [NSNull(), "bad", wrongCellTypes, [NSNull()]]
+        for malformed in malformedStates {
+            value["beforeCalendarState"] = malformed
+            invalid { try NativeCalendarPushEffect(json: json(value)) }
+        }
+        value.removeValue(forKey: "beforeCalendarState")
+        invalid { try NativeCalendarPushEffect(json: json(value)) }
+        let oversized: [String?] = [String(repeating: "\n", count: 600_000), nil, nil, nil, nil]
+        invalid { try NativeCalendarPushEffect(libraryID: "library", requestJSON: request("deleteCalendar"), beforeCalendarState: oversized) }
     }
 }
