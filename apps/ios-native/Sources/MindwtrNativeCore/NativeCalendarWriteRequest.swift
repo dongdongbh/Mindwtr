@@ -2,7 +2,7 @@ import CoreFoundation
 import Foundation
 
 /// Parsing proves the closed value grammar; the retained CoreHost owner must authorize effects separately.
-enum NativeCalendarWriteRequest {
+enum NativeCalendarWriteRequest: Sendable {
     case sources
     case createCalendar(NativeCalendarCreateDetails)
     case updateCalendar(String, NativeCalendarUpdateDetails)

@@ -1,7 +1,15 @@
 import Foundation
 import CoreFoundation
 
-/// EventKit reads are synchronous: cancellation drains them, never interrupts them.
+enum NativeCalendarWriteValue: Sendable {
+    case sources([NativeCalendarSource]), identifier(String), completed
+}
+
+enum NativeCalendarWriteOutcome: Sendable {
+    case notStarted, succeeded(NativeCalendarWriteValue), failed(NativeCalendarWriteError)
+}
+
+/// EventKit operations are synchronous: cancellation drains them, never interrupts them.
 final class NativeCalendarJobs: @unchecked Sendable {
     static let maximumRequestBytes = 1024 * 1024
     static let maximumReplyBytes = 8 * 1024 * 1024
@@ -17,6 +25,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
     private var jobs: [String: Job] = [:]
     private var ready: [String] = []
     private var taken: Job?
+    private var writeSlot: WriteJob?
     private var wake: (() -> Void)?
 
     private enum Request {
@@ -30,6 +39,13 @@ final class NativeCalendarJobs: @unchecked Sendable {
         var answer = ""
         var bytes: Data?
         init(id: String, registryID: UUID, token: NativeAttachmentCancellation, request: Request) {
+            self.id = id; self.registryID = registryID; self.token = token; self.request = request
+        }
+    }
+    private final class WriteJob {
+        let id: UUID, registryID: UUID, token: NativeAttachmentCancellation, request: NativeCalendarWriteRequest
+        var outcome: NativeCalendarWriteOutcome?
+        init(id: UUID, registryID: UUID, token: NativeAttachmentCancellation, request: NativeCalendarWriteRequest) {
             self.id = id; self.registryID = registryID; self.token = token; self.request = request
         }
     }
@@ -81,7 +97,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
         let request = try parse(json), token = NativeAttachmentCancellation(), registryID = UUID()
         registry.register(token, id: registryID)
         condition.lock()
-        guard accepting, !token.isCancelled, !registry.isClosing, jobs.count < 2, sequence < UInt64.max else {
+        guard accepting, !token.isCancelled, !registry.isClosing, writeSlot == nil, jobs.count < 2, sequence < UInt64.max else {
             condition.unlock(); registry.remove(registryID)
             throw HostFailure("Calendar bridge is unavailable or at capacity")
         }
@@ -93,6 +109,92 @@ final class NativeCalendarJobs: @unchecked Sendable {
         worker.async { [self] in execute(job) }
         condition.unlock()
         return id
+    }
+
+    /// Caller retains exact ownership and persists started effects before mutations.
+    /// Drain, persist immutable mutation completion, then retire before library/KV
+    /// release. Sources needs ownership but no durable effect record.
+    func submitWrite(_ request: NativeCalendarWriteRequest, operationID: UUID) throws {
+        let token = NativeAttachmentCancellation(), registryID = UUID()
+        registry.register(token, id: registryID)
+        condition.lock()
+        guard accepting, !token.isCancelled, !registry.isClosing, jobs.isEmpty, taken == nil, writeSlot == nil else {
+            condition.unlock(); registry.remove(registryID); throw NativeCalendarWriteError.unavailable
+        }
+        let job = WriteJob(id: operationID, registryID: registryID, token: token, request: request)
+        writeSlot = job
+        worker.async { [self] in executeWrite(job) }
+        condition.unlock()
+    }
+
+    func cancelWrite(operationID: UUID) {
+        condition.lock(); let token = writeSlot.flatMap { $0.id == operationID ? $0.token : nil }; condition.unlock()
+        token?.cancel()
+    }
+
+    func writeOutcome(operationID: UUID) -> NativeCalendarWriteOutcome? {
+        condition.lock(); defer { condition.unlock() }
+        return writeSlot.flatMap { $0.id == operationID ? $0.outcome : nil }
+    }
+
+    func retireWrite(operationID: UUID) throws {
+        condition.lock(); defer { condition.unlock() }
+        guard let job = writeSlot, job.id == operationID, job.outcome != nil else { throw NativeCalendarWriteError.unavailable }
+        writeSlot = nil
+    }
+
+    private func executeWrite(_ job: WriteJob) {
+        #if DEBUG
+        beforeWriteEntry?()
+        #endif
+        let outcome: NativeCalendarWriteOutcome
+        if job.token.isCancelled || registry.isClosing { outcome = .notStarted }
+        else {
+            do {
+                let provider: any NativeCalendarReading
+                if let reader { provider = reader }
+                else { provider = readerFactory(); reader = provider }
+                guard let writer = provider as? any NativeCalendarWriting else { throw NativeCalendarWriteError.unavailable }
+                if job.token.isCancelled || registry.isClosing { outcome = .notStarted }
+                else {
+                    // Once entered, retain the actual provider result even if close
+                    // or cancellation happens before its synchronous return.
+                    let value: NativeCalendarWriteValue
+                    switch job.request {
+                    case .sources:
+                        let sources = try writer.sources()
+                        guard sources.allSatisfy({ NativeCalendarWriteValidation.id($0.id) }) else { throw NativeCalendarWriteError.failed }
+                        value = .sources(sources)
+                    case .createCalendar(let details):
+                        let id = try writer.createCalendar(details)
+                        guard NativeCalendarWriteValidation.id(id) else { throw NativeCalendarWriteError.failed }
+                        value = .identifier(id)
+                    case .updateCalendar(let id, let details):
+                        try writer.updateCalendar(calendarID: id, details: details); value = .completed
+                    case .deleteCalendar(let id):
+                        try writer.deleteCalendar(calendarID: id); value = .completed
+                    case .createEvent(let calendarID, let details):
+                        let id = try writer.createEvent(calendarID: calendarID, details: details)
+                        guard NativeCalendarWriteValidation.id(id) else { throw NativeCalendarWriteError.failed }
+                        value = .identifier(id)
+                    case .updateEvent(let eventID, let calendarID, let details):
+                        try writer.updateEvent(eventID: eventID, calendarID: calendarID, details: details); value = .completed
+                    case .deleteEvent(let eventID, let calendarID):
+                        try writer.deleteEvent(eventID: eventID, calendarID: calendarID); value = .completed
+                    }
+                    outcome = .succeeded(value)
+                }
+            } catch let error as NativeCalendarWriteError { outcome = .failed(error) }
+            catch NativeCalendarReadError.denied { outcome = .failed(.denied) }
+            catch NativeCalendarReadError.unavailable { outcome = .failed(.unavailable) }
+            catch { outcome = .failed(.failed) }
+        }
+        condition.lock()
+        job.outcome = outcome
+        let callback = accepting && !registry.isClosing ? wake : nil
+        condition.broadcast(); condition.unlock()
+        registry.remove(job.registryID)
+        callback?()
     }
 
     func abort(_ id: String) {
@@ -194,8 +296,9 @@ final class NativeCalendarJobs: @unchecked Sendable {
     func drain() { worker.sync {} }
 
     func shutdown() {
-        condition.lock(); accepting = false; wake = nil; let current = Array(jobs.values); condition.unlock()
+        condition.lock(); accepting = false; wake = nil; let current = Array(jobs.values); let write = writeSlot; condition.unlock()
         current.forEach { $0.token.cancel() }
+        write?.token.cancel()
         worker.sync { reader = nil }
         current.forEach { registry.remove($0.registryID) }
         condition.lock(); jobs.removeAll(); ready.removeAll(); taken = nil; condition.unlock()
@@ -203,6 +306,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
 
     #if DEBUG
     var beforeFileRead: (() throws -> Void)?
+    var beforeWriteEntry: (() -> Void)?
     var counters: (jobs: Int, running: Int) {
         condition.lock(); defer { condition.unlock() }
         return (jobs.count, jobs.values.filter { !$0.finished }.count)
