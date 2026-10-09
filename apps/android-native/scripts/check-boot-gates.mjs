@@ -7948,4 +7948,37 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(historical.attachmentInputs.length, 0, 'private mixed candidates do not enter generic attachment commands');
     console.log('Task261: real pure mixed Discard candidates retain iOS-only historical routing, sealed grammar and no generic file-command admission (NodeVM)');
 }
+// Android's MindwtrHost table (android-host-table.mjs): exactly the methods Android calls. Every name Kotlin calls, and every
+// name the Node harness calls on the shipped bundle, is in it; every name in it is a host-entry.ts method; and the shipped
+// bundle exposes exactly those names, while host-entry.ts as iOS builds it keeps every method.
+{
+    const { ANDROID_HOST_METHODS, hostTable } = await import('./android-host-table.mjs');
+    const kotlinFiles = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
+        ? (entry.name === 'build' ? [] : kotlinFiles(resolve(dir, entry.name))) : entry.name.endsWith('.kt') ? [resolve(dir, entry.name)] : []));
+    const named = (files, pattern) => [...new Set(files.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(pattern)].map((match) => match[1])))].sort();
+    const kotlin = named(kotlinFiles(resolve(app, 'android')), /\b(?:call|callAsync|callLong|answer)\(\s*"([A-Za-z0-9_]+)"/g);
+    const scripts = readdirSync(resolve(app, 'scripts')).filter((name) => name === 'sync-harness.mjs' || /^check-[\w-]+-(device|dry-run)\.mjs$/.test(name));
+    const harness = named(scripts.map((name) => resolve(app, 'scripts', name)), /\bcall\(\s*'([A-Za-z0-9_]+)'/g);
+    assert(kotlin.length > 50 && kotlin.includes('boot') && harness.includes('window'), 'the call sites were found');
+    assert.deepEqual(kotlin.filter((name) => !ANDROID_HOST_METHODS.includes(name)), [], 'Kotlin calls only methods in Android\'s host table (android-host-table.mjs)');
+    assert.deepEqual(harness.filter((name) => !ANDROID_HOST_METHODS.includes(name)), [], 'the harness calls only methods in Android\'s host table');
+    assert.equal(new Set(ANDROID_HOST_METHODS).size, ANDROID_HOST_METHODS.length, 'each Android host method is named once');
+    const { names } = hostTable(readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8'));
+    assert.deepEqual(ANDROID_HOST_METHODS.filter((name) => !names.includes(name)), [], 'every Android host method is a host-entry.ts method');
+    const { hostDevice } = await import('./sync-harness.mjs');
+    const filesRoot = mkdtempSync(resolve(tmpdir(), 'android-host-table-'));
+    try {
+        const shipped = await hostDevice({ bundle: resolve(app, 'android/app/src/main/assets/core-host.js'), name: 'table', filesRoot });
+        try {
+            assert.deepEqual([...shipped.methods].sort(), [...ANDROID_HOST_METHODS].sort(), 'the shipped bundle\'s MindwtrHost is Android\'s table');
+        } finally {
+            shipped.stop();
+        }
+    } finally {
+        rmSync(filesRoot, { recursive: true, force: true });
+    }
+    assert.deepEqual(Object.keys(makeState(0, [], 'ios').MindwtrHost), names, 'host-entry.ts as iOS builds it exposes every method of its table');
+    assert(names.length > ANDROID_HOST_METHODS.length * 4, 'host-entry.ts keeps every platform\'s methods');
+    console.log(`Android host table: ${ANDROID_HOST_METHODS.length} of host-entry.ts's ${names.length} methods, every Kotlin and harness call among them`);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { androidHostEntry } from './android-host-table.mjs';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // node build-bundle.mjs [--trace-modules] [--out <file>]. --trace-modules is for startup measurement only (Gradle's
@@ -20,6 +21,16 @@ if (traceModules && (!option('--out') || !relative(mainAssets, outfile).startsWi
     process.exit(1);
 }
 const repo = resolve(app, '../..');
+// host-entry.ts with only the MindwtrHost methods Android calls (android-host-table.mjs); every other file as it is.
+const hostEntry = resolve(app, 'bundle/host-entry.ts');
+const source = (path) => (path === hostEntry ? androidHostEntry(readFileSync(path, 'utf8')) : readFileSync(path, 'utf8'));
+const androidHostTable = {
+    name: 'android-host-table',
+    setup(build) {
+        build.onLoad({ filter: /bundle[\\/]host-entry\.ts$/ }, (args) => (args.path === hostEntry
+            ? { contents: source(args.path), loader: 'ts', resolveDir: dirname(args.path) } : undefined));
+    },
+};
 const moduleTrace = {
     name: 'module-trace',
     setup(build) {
@@ -30,7 +41,7 @@ const moduleTrace = {
             const loader = args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.ts') ? 'ts' : 'js';
             // host-entry.ts closes the bundle init's section last; after it, the step function ends and turns itself off.
             const end = args.path.endsWith('bundle/host-entry.ts') ? "\nglobalThis.__mwTraceModule && globalThis.__mwTraceModule('');\n" : '';
-            return { contents: marker + readFileSync(args.path, 'utf8') + end, loader, resolveDir: dirname(args.path) };
+            return { contents: marker + source(args.path) + end, loader, resolveDir: dirname(args.path) };
         });
     },
 };
@@ -57,7 +68,9 @@ const result = await build({
     minify: true,
     legalComments: 'none',
     banner: { js: readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8') + (traceModules ? traceBanner : '') },
-    plugins: traceModules ? [moduleTrace] : [],
+    // Android never sets the host platform: its iOS-only branches fold away, and the modules only they import with them.
+    define: { 'globalThis.__mindwtrHostPlatform': '"android"' },
+    plugins: [traceModules ? moduleTrace : androidHostTable],
 });
 // The bundle's first line is the SHA-256 of the rest: the key of the app's bytecode cache (BytecodeCache.kt). Both go in one
 // file, written under a name of its own and renamed into place, so a bundle and a hash from two builds can never pair up
