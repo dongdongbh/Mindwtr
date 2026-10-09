@@ -24,6 +24,7 @@ final class NativeAttachmentLocalRequests: @unchecked Sendable {
     private let lock = NSLock()
     private var tokens: [UUID: NativeAttachmentCancellation] = [:]
     private var closing = false
+    var isClosing: Bool { lock.lock(); defer { lock.unlock() }; return closing }
     func register(_ token: NativeAttachmentCancellation, id: UUID) {
         lock.lock(); let shouldCancel = closing; tokens[id] = token; lock.unlock()
         if shouldCancel { token.cancel() }

@@ -36379,8 +36379,11 @@ extension CoreHostTests {
         let otherRoot = directory.appendingPathComponent("isolated-second-library")
         let other = CoreHost(databaseURL: otherRoot.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle)
         _ = try await other.start()
+        let otherLog = otherRoot.appendingPathComponent("logs/mindwtr.log")
+        let otherBefore = try Data(contentsOf: otherLog)
+        XCTAssertTrue(String(decoding: otherBefore, as: UTF8.self).contains("v1.3.5/ios-reminder-receipt-retention"))
         await expectFailure { _ = try await other.validatedDiagnosticsShareURL(path) }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: otherRoot.appendingPathComponent("logs/mindwtr.log").path))
+        XCTAssertEqual(try Data(contentsOf: otherLog), otherBefore, "Refused sharing cannot append another library's log")
         await other.close()
         let cleared = try object(await core.diagnosticsFileAction("logClearChecked"))
         XCTAssertEqual(cleared["outcome"] as? String, "cleared")

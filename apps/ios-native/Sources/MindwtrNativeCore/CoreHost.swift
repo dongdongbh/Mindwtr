@@ -20101,7 +20101,7 @@ private final class Engine: @unchecked Sendable {
             let generation = attachmentGeneration
             queue.async { [weak self, weak runtime] in
                 guard let self, let runtime, self.attachmentGeneration == generation,
-                      self.context === runtime, self.started, !self.closed, !self.invoking else { return }
+                      self.context === runtime, self.started, !self.closed, !self.localRequests.isClosing, !self.invoking else { return }
                 _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeDeviceStorageDelivered", withArguments: [])
                 runtime.exception = nil
                 if retiredSecret {
@@ -20240,7 +20240,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
+                          !self.localRequests.isClosing, !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeSecretDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -20282,7 +20282,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
+                          !self.localRequests.isClosing, !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeHTTPDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -20299,7 +20299,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
+                          !self.localRequests.isClosing, !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeCryptoDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)

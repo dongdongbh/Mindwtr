@@ -362,7 +362,7 @@ final class FeedbackHostTests: XCTestCase {
             return try await value.submitFeedback(requestJSON: raw, endpointURL: endpoint)
         }
         do { _ = try await pending.value; XCTFail("Precancelled feedback never submits") }
-        catch NativeAttachmentFileJobsError.cancelled {} catch { XCTFail("Expected exact primitive cancellation") }
+        catch is CancellationError {} catch { XCTFail("Expected cancellation before dispatcher admission") }
         XCTAssertEqual(state.recorded.count, 0); try assertPreserved(baseline, settings); try assertDiagnostics(0); await value.close()
     }
 }
