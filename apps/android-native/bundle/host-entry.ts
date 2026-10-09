@@ -1009,6 +1009,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     somedaySections: (input) => contract.getSomedaySections(input),
     dataSettings: () => contract.getDataSettings(),
     // Settings › About (native-host-contract-about.ts): the screen, and the feedback modal's state for the draft as typed.
+    aboutInstallerSource: (input) => contract.getAboutInstallerSource(input),
     aboutSettings: (input) => contract.getAboutSettings(input),
     aboutFeedbackCheck: (input) => contract.checkAboutFeedback(input),
     dataBackup: () => contract.getDataBackup(),
@@ -1090,6 +1091,7 @@ const AI_REQUESTS: Record<string, (input: never, signal: AbortSignal) => Promise
  * (a replay would send feedback or a heartbeat again); CoreHost.aboutRequest waits for them without holding the engine.
  */
 const ABOUT_REQUESTS: Record<string, (input: never) => Promise<Reply>> = {
+    isAboutUpdateCheckDue: (input) => contract.isAboutUpdateCheckDue(input),
     runAboutUpdateCheck: (input) => contract.runAboutUpdateCheck(input),
     submitAboutFeedback: (input) => contract.submitAboutFeedback(input),
     sendAboutHeartbeat: () => contract.sendAboutHeartbeat(),

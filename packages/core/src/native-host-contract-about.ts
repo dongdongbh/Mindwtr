@@ -9,12 +9,13 @@
  * prompt state, all under RN's keys, so an upgraded RN user keeps them), the fetch, and the recent diagnostics. Without it the
  * screen and the requests answer ACTION_FAILED.
  *
- * - getAboutSettings is the screen: the header, the rows, the feedback modal's words. `installerSource` is what the host read
- *   from Google Play's install referrer (RN's resolveAndroidInstallerSource; 'unknown' while unread or when the read failed;
- *   a FOSS build sends 'sideload', as RN does).
- * - runAboutUpdateCheck is the silent check when About opens (`silent`) and Check for updates (`manual`). The host asks
- *   Google Play first on a Play build installed from Play and sends its answer as `play` (null when the build has no Play
- *   update API: a FOSS build), and says whether a market link opens (`marketAvailable`). The answer is the update dot to show
+ * - getAboutInstallerSource is how the app was installed (resolveAndroidInstallerSource), from what the host read: Google
+ *   Play's install referrer (null when the read failed) and the installing package. The other requests take its answer.
+ * - getAboutSettings is the screen: the header, the rows, the feedback modal's words, for `installerSource`.
+ * - isAboutUpdateCheckDue says whether a check would ask the channel now (the silent check: once a day); only then does the
+ *   host ask Google Play. runAboutUpdateCheck is the silent check when About opens (`silent`) and Check for updates
+ *   (`manual`): the host sends Play's answer as `play` on a Play install when the check was due (else null), and says
+ *   whether a market link opens (`marketAvailable`). The answer is the update dot to show
  *   (null: unchanged) and RN's alert or toast; an alert button with a `url` opens it.
  * - checkAboutFeedback is the modal's state for the draft as typed (Send on or off, the error line); submitAboutFeedback
  *   sends it to the build's feedback endpoint. Neither is a store write.
@@ -37,6 +38,7 @@ import {
     getFeedbackMessageMaxLength,
     isFeedbackLocation,
     planFeedbackSubmit,
+    resolveAndroidInstallerSource,
     type AboutAlertButton,
     type AboutSettingsModel,
     type AboutToast,
@@ -51,6 +53,7 @@ import {
     type MobileAnalyticsHeartbeatConfig,
     type MobileHeartbeatDevice,
 } from './analytics-heartbeat';
+import { shouldCheckForAppUpdate, UPDATE_BADGE_LAST_CHECK_KEY } from './app-store-update';
 import { FEEDBACK_CATEGORIES, isFeedbackCategory, submitFeedbackSubmission } from './feedback';
 import { resolveI18nText } from './i18n';
 import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-host-contract';
@@ -170,6 +173,30 @@ export function createAboutMethods(deps: Deps) {
     const readSource = (value: unknown): AndroidInstallerSource | null => (INSTALLER_SOURCES.has(value as string) ? value as AndroidInstallerSource : null);
 
     return {
+        /** How the app was installed (see the module doc); a FOSS build is a sideload, as RN's is. */
+        getAboutInstallerSource(input: { referrer: string | null; installerPackageName: string | null }): NativeHostResult<{ source: AndroidInstallerSource }> {
+            const host = deps.host();
+            if (!host) return unavailable();
+            if (!isObjectRecord(input) || !(input.referrer === null || isText(input.referrer, 10_000))
+                || !(input.installerPackageName === null || isText(input.installerPackageName, 500))) {
+                return fail('INVALID_INPUT', 'The install referrer (or null) and the installing package (or null) are required');
+            }
+            if (host.app.isFossBuild) return { ok: true, value: { source: 'sideload' } };
+            const source = resolveAndroidInstallerSource(input.referrer, input.installerPackageName);
+            // RN's rejected referrer read is 'unknown', unless Play's installer already says Play.
+            return { ok: true, value: { source: input.referrer === null && source !== 'play-store' ? 'unknown' : source } };
+        },
+
+        /** Whether an update check in `mode` would ask the channel now: the host asks Google Play only then. */
+        async isAboutUpdateCheckDue(input: { mode: 'silent' | 'manual' }): Promise<NativeHostResult<{ due: boolean }>> {
+            const host = deps.host();
+            if (!host) return unavailable();
+            if (!isObjectRecord(input) || (input.mode !== 'silent' && input.mode !== 'manual')) return fail('INVALID_INPUT', 'A mode is required');
+            if (host.app.isFossBuild) return { ok: true, value: { due: false } };
+            if (input.mode === 'manual') return { ok: true, value: { due: true } };
+            return { ok: true, value: { due: shouldCheckForAppUpdate(await host.storage.getItem(UPDATE_BADGE_LAST_CHECK_KEY), Date.now()) } };
+        },
+
         /** Settings › About for `installerSource` (see the module doc). */
         getAboutSettings(input: { installerSource: AndroidInstallerSource }): NativeHostResult<NativeAboutSettings> {
             const ready = deps.readiness();

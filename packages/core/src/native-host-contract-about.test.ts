@@ -174,6 +174,35 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(foss.events).toEqual([]);
     });
 
+    it('says whether a check is due before the host asks Google Play, so Play is asked only when core checks', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(NOW);
+        const within = device({ storage: { 'mindwtr-update-last-check': String(NOW - 60_000) } });
+        let contract = await openContract(within);
+        expect(value(await contract.isAboutUpdateCheckDue({ mode: 'silent' }))).toEqual({ due: false });
+        expect(value(await contract.isAboutUpdateCheckDue({ mode: 'manual' }))).toEqual({ due: true });
+        expect(within.events).toEqual([]);
+        contract = await openContract(device({ storage: { 'mindwtr-update-last-check': String(NOW - 25 * 60 * 60 * 1000) } }));
+        expect(value(await contract.isAboutUpdateCheckDue({ mode: 'silent' }))).toEqual({ due: true });
+        contract = await openContract(device({ foss: true }));
+        expect(value(await contract.isAboutUpdateCheckDue({ mode: 'manual' }))).toEqual({ due: false });
+        expect(await contract.isAboutUpdateCheckDue({ mode: 'later' as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('reads the install from Play\'s installer and the referrer, as RN does', async () => {
+        let contract = await openContract(device());
+        const source = (referrer: string | null, installerPackageName: string | null) => value(contract.getAboutInstallerSource({ referrer, installerPackageName })).source;
+        expect(source('', 'com.android.vending')).toBe('play-store');
+        expect(source(null, 'com.android.vending')).toBe('play-store');
+        expect(source('utm_source=google-play', null)).toBe('play-store');
+        expect(source('', null)).toBe('sideload');
+        // An unreadable referrer, and no Play installer: RN's 'unknown'.
+        expect(source(null, null)).toBe('unknown');
+        contract = await openContract(device({ foss: true }));
+        expect(source('utm_source=google-play', 'com.android.vending')).toBe('sideload');
+        expect(contract.getAboutInstallerSource({ referrer: 1 as never, installerPackageName: null })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('a FOSS build\'s Check for updates is RN\'s info toast', async () => {
         const contract = await openContract(device({ foss: true }));
         const t = getTranslator('en');

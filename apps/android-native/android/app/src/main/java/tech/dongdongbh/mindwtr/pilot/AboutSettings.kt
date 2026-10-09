@@ -132,10 +132,16 @@ class AboutSettingsModel(private val menu: MenuModel) {
     private val app get() = shell.getApplication<Application>()
 
     /**
-     * How the app was installed (RN's androidInstallerSource): a FOSS build is sideloaded; a Play build asks Google Play's install
-     * referrer once per process (core's resolveAndroidInstallerSource: non-empty is a Play install; unreadable is 'unknown').
+     * How the app was installed (RN's androidInstallerSource), read once per process: core's getAboutInstallerSource from Google
+     * Play's install referrer and the installing package (a FOSS build is a sideload).
      */
     @Volatile private var installer: String? = null
+    /**
+     * A device check's stub (debug builds, `about_stub`): Google Play is never called. The referrer and the installing package
+     * come from `debug.mindwtr.native.about_referrer` and `about_installer` (both empty by default: a sideload), and Play's
+     * update answer is a failure.
+     */
+    private val stubbed by lazy { aboutStub(debugProperty("about_stub")) != null }
     /** The silent check ran for this visit (RN's effect runs when the screen mounts). */
     @Volatile private var silentRan = false
     /** Check for updates is running (RN's spinner on its row). */
@@ -161,17 +167,22 @@ class AboutSettingsModel(private val menu: MenuModel) {
         val visit: Int = 0,
     )
 
-    private fun installerSource(): String = installer ?: when {
-        BuildConfig.FOSS -> "sideload"
-        else -> when (val referrer = PlayServices.installReferrer(app)) {
-            null -> "unknown"
-            else -> if (referrer.trim().isEmpty()) "sideload" else "play-store"
-        }
+    private fun installerSource(runtime: CoreHost): String = installer ?: run {
+        val referrer = if (stubbed) debugProperty("about_referrer") else PlayServices.installReferrer(app)
+        val installing = if (stubbed) debugProperty("about_installer").ifEmpty { null } else installingPackage()
+        runtime.menuRead("aboutInstallerSource", JSONObject().put("referrer", referrer ?: JSONObject.NULL)
+            .put("installerPackageName", installing ?: JSONObject.NULL).toString()).getString("source")
     }.also { installer = it }
+
+    /** PackageManager's installing package (com.android.vending for every Google Play install), or null. */
+    private fun installingPackage(): String? = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) app.packageManager.getInstallSourceInfo(app.packageName).installingPackageName
+        else @Suppress("DEPRECATION") app.packageManager.getInstallerPackageName(app.packageName)
+    }.getOrNull()
 
     /** Settings' read of this screen: core's view for the install. */
     fun read(runtime: CoreHost): JSONObject =
-        runtime.menuRead("aboutSettings", JSONObject().put("installerSource", installerSource()).toString())
+        runtime.menuRead("aboutSettings", JSONObject().put("installerSource", installerSource(runtime)).toString())
 
     /** The screen on show: the silent check, once per visit. */
     fun follow(view: JSONObject) {
@@ -186,14 +197,24 @@ class AboutSettingsModel(private val menu: MenuModel) {
         if (feedback.open) closeFeedback()
     }
 
-    /** Core's update check with Google Play's answer on a Play install (none on FOSS or a sideload), and whether market links open. */
+    /**
+     * Core's update check with Google Play's answer on a Play install when core says the check is due (none on FOSS, a sideload,
+     * or a silent check within the day), and whether market links open.
+     */
     private fun updateCheck(mode: String) {
         val runtime = shell.coreHost() ?: return
         if (mode == "manual") checking = true
         Thread({
             val answer = runCatching {
-                val source = installerSource()
-                val play = if (source == "sideload") null else PlayServices.updateInfo(app)
+                val source = installerSource(runtime)
+                // A failed answer reads as not due: Play is asked only after core says so.
+                val due = runCatching { runtime.aboutRequest("isAboutUpdateCheckDue", JSONObject().put("mode", mode).toString()).optBoolean("due") }
+                    .getOrDefault(false)
+                val play = when {
+                    source == "sideload" || !due -> null
+                    stubbed -> JSONObject().put("error", "Google Play is stubbed in a device check")
+                    else -> PlayServices.updateInfo(app)
+                }
                 val market = Intent(Intent.ACTION_VIEW, "market://details?id=${BuildConfig.RN_PACKAGE}".toUri()).resolveActivity(app.packageManager) != null
                 runtime.aboutRequest("runAboutUpdateCheck", JSONObject().put("mode", mode).put("installerSource", source)
                     .put("play", play ?: JSONObject.NULL).put("marketAvailable", market).toString())
@@ -275,7 +296,7 @@ class AboutSettingsModel(private val menu: MenuModel) {
         check()
         Thread({
             val answer = runCatching {
-                runtime.aboutRequest("submitAboutFeedback", JSONObject().put("installerSource", installerSource()).put("draft", JSONObject()
+                runtime.aboutRequest("submitAboutFeedback", JSONObject().put("installerSource", installerSource(runtime)).put("draft", JSONObject()
                     .put("category", draft.category).put("message", draft.message).put("email", draft.email)
                     .put("location", draft.location).put("includeDiagnostics", draft.includeDiagnostics)).toString())
             }
