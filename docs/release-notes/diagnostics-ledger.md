@@ -129,6 +129,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 - **`v1.3.5/native-analytics-opt-out`** — `packages/core/src/native-host-contract-settings.ts`, after native Android's Data › Diagnostics analytics switch saved. Message: `Native analytics opt-out changed`; `optedOut` is true or false. Opting out must show `optedOut=true` once.
 
+- **`v1.3.5/native-prompt-activity`** — `packages/core/src/native-host-contract-about.ts`, after native Android's first screen in a process counts today as an active day for the prompts (RN's prompt state, which the store review gate reads). Message: `Native prompt activity recorded`; `outcome` is `stored` once the write is on disk, or `failed`. The tester's log must show one `outcome=stored` line per app start. No dates or prompt state are logged.
+
 - **`v1.3.5/native-store-review`** — `packages/core/src/native-host-contract-about.ts`, after a finished Weekly Review on native Android asks core's store review gate. Message: `Native store review prompt`; `request` is true when the Play review sheet was asked for. A FOSS build always shows `request=false`.
 
 - **`v1.3.5/sync-encryption-off-guard`** — `packages/core/src/sync-settings-transport.ts`, when the serialized Sync Off action refuses an unfinished encryption transition before changing its saved backend. Fixed fields: `operation=select-off`, `outcome=refused`. The tester's Diagnostics must show this marker while the original backend remains selected, so Retry or Abandon still addresses that location. It does not prove conversion completion or remote rollback. No locations, credentials, passphrases or artifact contents are logged.

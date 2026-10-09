@@ -354,6 +354,25 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(useTaskStore.getState().settings.analytics?.heartbeatEnabled).toBe(true);
     });
 
+    it('counts today for the prompts and logs it after the write, or the failure', async () => {
+        const bound = device({ storage: { 'mindwtr:local-user-prompts:v1': JSON.stringify({ firstSeenAt: '2026-01-02T00:00:00.000Z', firstSeenDayKey: '2026-01-02', activeDayKeys: ['2026-01-02'] }) } });
+        const lines: unknown[][] = [];
+        bound.host.logInfo = (message, context) => { lines.push([message, context]); bound.events.push(['log', message]); };
+        let contract = await openContract(bound);
+        expect(value(await contract.recordAboutPromptActivity())).toBeNull();
+        const stored = JSON.parse(bound.storage.get('mindwtr:local-user-prompts:v1')!);
+        expect(stored.activeDayKeys.length).toBe(2);
+        expect(bound.events.map((event) => event[0])).toEqual(['storage.set', 'log']);
+        expect(lines).toEqual([['Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome: 'stored' }]]);
+        const failing = device();
+        failing.host.storage.setItem = async () => { throw new Error('disk full'); };
+        const failed: unknown[][] = [];
+        failing.host.logInfo = (message, context) => { failed.push([message, context]); };
+        contract = await openContract(failing);
+        expect(value(await contract.recordAboutPromptActivity())).toBeNull();
+        expect(failed).toEqual([['Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome: 'failed' }]]);
+    });
+
     it('answers ACTION_FAILED without an About host', async () => {
         const contract = await openContract(null);
         expect(contract.getAboutSettings({ installerSource: 'sideload' })).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });

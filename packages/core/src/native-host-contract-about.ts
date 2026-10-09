@@ -384,11 +384,15 @@ export function createAboutMethods(deps: Deps) {
         async recordAboutPromptActivity(): Promise<NativeHostResult<null>> {
             const host = deps.host();
             if (!host) return unavailable();
+            let outcome = 'stored';
             try {
                 await recordLocalPromptActivity(host.storage);
             } catch (error) {
+                outcome = 'failed';
                 host.logWarn('Failed to record local prompt activity', error);
             }
+            // Once per process (the host's first screen), after the write is on disk.
+            try { host.logInfo('Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome }); } catch { /* best effort */ }
             return { ok: true, value: null };
         },
 
