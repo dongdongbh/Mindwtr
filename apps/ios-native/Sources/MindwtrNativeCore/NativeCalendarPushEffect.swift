@@ -24,7 +24,7 @@ struct NativeCalendarPushMapping: Equatable, Sendable {
         NativeCalendarWriteValidation.equalID(lhs.lastSyncedAt, rhs.lastSyncedAt)
     }
 
-    fileprivate var json: [String: Any] {
+    var json: [String: Any] {
         ["taskId": taskId, "calendarEventId": calendarEventId, "calendarId": calendarId,
          "platform": platform, "lastSyncedAt": lastSyncedAt]
     }

@@ -102,7 +102,7 @@ enum NativeCalendarPushRequest: Sendable {
         }
         return value
     }
-    private static func mapping(_ value: Any?) throws -> NativeCalendarPushMapping {
+    static func mapping(_ value: Any?) throws -> NativeCalendarPushMapping {
         let row = try nestedObject(value)
         try fields(row, ["taskId", "calendarEventId", "calendarId", "platform", "lastSyncedAt"])
         return try NativeCalendarPushMapping(taskId: text(row, "taskId"), calendarEventId: text(row, "calendarEventId"),

@@ -73,6 +73,7 @@ public struct NativeCalendarFileAddResult: Sendable {
     public let requestJSON: String
     public let resultJSON: String
 }
+public enum NativeCalendarPushOperation: String, Sendable { case start, stop, run, setting }
 public struct NativeCalendarFileAddFailure: LocalizedError, Sendable {
     /// Private accepted input for typed App recovery only; never log it.
     public let requestJSON: String?
@@ -186,6 +187,24 @@ public final class CoreHost: @unchecked Sendable {
         return try await withTaskCancellationHandler(operation: {
             try await perform { try $0.calendarRead(requestJSON: requestJSON, cancellation: token) }
         }, onCancel: { token.cancel() })
+    }
+
+    public func calendarPush(_ operation: NativeCalendarPushOperation, argumentsJSON: String = "{}") async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.calendarPush(operation, argumentsJSON: argumentsJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    public func observeCalendarPush(_ callback: @escaping @Sendable ([String]?) -> Void) async throws -> UUID {
+        try await perform { try $0.observeCalendarPush(callback) }
+    }
+
+    public func removeCalendarPushObserver(_ id: UUID) async throws {
+        try await perform { $0.removeCalendarPushObserver(id) }
     }
 
     public func getCalendarSubscriptionOptions() async throws -> String {
@@ -1429,6 +1448,7 @@ private final class Engine: @unchecked Sendable {
     private let backupOperationFiles: NativeBackupOperationFiles
     private var backupSelections: [UUID: (selection: NativeBackupImportSelection, action: NativeBackupImportAction)] = [:]
     private var backupReplayReadOnly = false
+    private var calendarPushDatabaseBinding: OwnedDiscardIdentity?
     private let journalURL: URL
     private let editorDrafts: EditorDraftStore
     private let legacyStorage: LegacyRNStorage?
@@ -1524,6 +1544,39 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var calendarSubscriptionSettingTurn: CalendarSubscriptionSettingTurn?
+    private final class CalendarPushTurn {
+        let parent: CalendarSubscriptionSettingTurn
+        let storage: NativeDeviceKV
+        let database: SQLiteBridge
+        let libraryID: String
+        let effects: NativeCalendarPushEffects
+        let cancellation: NativeAttachmentCancellation
+        let operation: NativeCalendarPushOperation
+        let edit: [String: Any]?
+        var writes: NativeCalendarPushWrites?
+        var calendarReads: Set<String> = []
+        var writeRequests: [String: NativeCalendarWriteRequest] = [:]
+        var calendars: [[String: Any]]?
+        var deletedIDs: Set<Data> = []
+        var statePublication: (before: [String?], next: [String?])?
+        var diagnostics: [(operation: String, outcome: String)] = []
+        init(parent: CalendarSubscriptionSettingTurn, storage: NativeDeviceKV, database: SQLiteBridge,
+             libraryID: String, effects: NativeCalendarPushEffects, cancellation: NativeAttachmentCancellation,
+             operation: NativeCalendarPushOperation, edit: [String: Any]?) {
+            self.parent = parent; self.storage = storage; self.database = database; self.libraryID = libraryID
+            self.effects = effects; self.cancellation = cancellation; self.operation = operation; self.edit = edit
+        }
+    }
+    private var calendarPushTurn: CalendarPushTurn?
+    private var retainedCalendarPushTurn: CalendarPushTurn?
+    private var calendarPushReady: [String] = []
+    private let calendarPushReplyGeneration = UUID().uuidString.lowercased()
+    private var calendarPushReplySequence: UInt64 = 0
+    private static let calendarPushMethods: Set<String> = ["iosCalendarPushStart", "iosCalendarPushStop",
+        "iosCalendarPushRun", "iosCalendarPushSetting", "iosCalendarPushDiagnostic"]
+    private static let calendarPushStateNames = ["enabled", "calendar-id", "target-calendar-id", "color", "creation-intent"]
+        .map { "mindwtr:calendar-push-sync:" + $0 }
+    private var calendarPushObserver: (id: UUID, generation: UInt64, callback: @Sendable ([String]?) -> Void)?
     private struct CalendarFileCaptureTurn {
         let id: UUID
         let owner: CalendarSubscriptionSettingTurn
@@ -2495,6 +2548,7 @@ private final class Engine: @unchecked Sendable {
             }
             let sqlite = try SQLiteBridge(url: databaseURL)
             database = sqlite
+            calendarPushDatabaseBinding = try? Self.bindingIdentity(databaseURL)
             #if DEBUG
             let guardedFaults = HostIOFaults()
             guardedFaults.beforeSQL = { [unowned self] sql in
@@ -3070,6 +3124,413 @@ private final class Engine: @unchecked Sendable {
         }
         return try invoke("iosCalendarRead", arguments: [requestJSON], localCancellation: cancellation,
                           drainCalendarTest: Set(input.keys) == Set(["op"]) && input["op"] as? String == "testSettings")
+    }
+
+    private func calendarPushLibraryID() throws -> String {
+        guard let binding = calendarPushDatabaseBinding, let namespace = deviceStorageLocation?.bundleIdentifier,
+              try Self.bindingIdentity(databaseURL) == binding else { throw NativeCalendarWriteError.unavailable }
+        return try Self.ownedJSON([namespace, Self.mixedSaveCanonicalPath(databaseURL.absoluteString, directory: false),
+                                  String(binding.device), String(binding.inode)])
+    }
+
+    func observeCalendarPush(_ callback: @escaping @Sendable ([String]?) -> Void) throws -> UUID {
+        try requireCalendarAdmission()
+        guard calendarPushObserver == nil else { throw NativeCalendarWriteError.unavailable }
+        let id = UUID()
+        calendarPushObserver = (id, attachmentGeneration, callback)
+        return id
+    }
+
+    func removeCalendarPushObserver(_ id: UUID) {
+        if calendarPushObserver?.id == id { calendarPushObserver = nil }
+    }
+
+    private func requireCalendarPushSettlement(_ turn: CalendarPushTurn) throws {
+        guard context === turn.parent.runtime, deviceStorage === turn.storage, database === turn.database,
+              attachmentGeneration == turn.parent.generation, lockFD >= 0,
+              Self.ownedEqual(try calendarPushLibraryID(), turn.libraryID) else {
+            throw NativeCalendarWriteError.unavailable
+        }
+    }
+
+    @discardableResult private func requireCalendarPushTurn() throws -> CalendarPushTurn {
+        guard let turn = calendarPushTurn, calendarSubscriptionSettingTurn === turn.parent, pending == nil else {
+            throw NativeCalendarWriteError.unavailable
+        }
+        try turn.cancellation.check()
+        try requireCalendarSubscriptionSettingTurn()
+        try requireCalendarPushSettlement(turn)
+        return turn
+    }
+
+    private static func calendarPushIDs(_ value: Any?) throws -> [String] {
+        guard let ids = value as? [String], ids.count <= 10_000,
+              Set(ids.map { Data($0.utf8) }).count == ids.count,
+              ids.allSatisfy({ NativeCalendarWriteValidation.id($0) && $0.utf16.count <= 500
+                  && !$0.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{feff}"))).isEmpty }) else {
+            throw NativeCalendarWriteError.invalid
+        }
+        return ids
+    }
+
+    func calendarPush(_ operation: NativeCalendarPushOperation, argumentsJSON: String,
+                      cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try cancellation.check()
+        let input = try Self.deviceCalendarSettingObject(argumentsJSON, maximum: NativeCalendarJobs.maximumRequestBytes)
+        var edit: [String: Any]?
+        switch operation {
+        case .start, .stop:
+            guard input.isEmpty else { throw NativeCalendarWriteError.invalid }
+        case .run:
+            guard Set(input.keys) == ["ids"] else { throw NativeCalendarWriteError.invalid }
+            if !(input["ids"] is NSNull) { _ = try Self.calendarPushIDs(input["ids"]) }
+        case .setting:
+            guard Set(input.keys) == ["requestId", "edit"], let value = input["edit"] as? [String: Any],
+                  let type = value["type"] as? String,
+                  ["push", "pushTarget", "pushColor", "deleteMindwtrCalendar"].contains(type) else {
+                throw NativeCalendarWriteError.invalid
+            }
+            edit = value
+        }
+        if operation == .stop {
+            guard started, !closed, context != nil else { throw NativeCalendarWriteError.unavailable }
+            return try invoke("iosCalendarPushStop", arguments: [], localCancellation: cancellation)
+        }
+        try requireCalendarAdmission()
+        if let retained = retainedCalendarPushTurn {
+            try requireCalendarPushSettlement(retained)
+            try retryCalendarPushState(retained)
+            try retained.effects.retryPublication()
+            try retained.writes?.cancelAndDrain()
+            retainedCalendarPushTurn = nil
+        }
+        return try withCalendarSubscriptionSettingOwner {
+            guard pending == nil, let parent = calendarSubscriptionSettingTurn, let storage = parent.storage,
+                  let database, let jobs = calendarJobs, jobs.writeAdmissionAvailable else {
+                throw NativeCalendarWriteError.unavailable
+            }
+            let libraryID = try calendarPushLibraryID()
+            let effects = try NativeCalendarPushEffects(storage: storage, database: database, libraryID: libraryID)
+            let turn = CalendarPushTurn(parent: parent, storage: storage, database: database, libraryID: libraryID,
+                effects: effects, cancellation: cancellation, operation: operation, edit: edit)
+            calendarPushTurn = turn
+            defer { calendarPushTurn = nil }
+            do {
+                try recoverCalendarPush(turn)
+                turn.writes = NativeCalendarPushWrites(jobs: jobs, effects: effects,
+                    authorize: { [weak self, weak turn] request in
+                        guard let self, let turn, try self.requireCalendarPushTurn() === turn else {
+                            throw NativeCalendarWriteError.unavailable
+                        }
+                        if case .createCalendar? = request {
+                            let state = try turn.storage.readCalendarPushState()
+                            let calendars = try self.readCalendarPushCalendars(turn)
+                            if let saved = state[1], calendars.contains(where: { ($0["id"] as? String).map {
+                                NativeCalendarWriteValidation.equalID($0, saved)
+                            } ?? false }) { throw NativeCalendarWriteError.unavailable }
+                        }
+                    }, settleAuthority: { [weak self, weak turn] in
+                        guard let self, let turn else { throw NativeCalendarWriteError.unavailable }
+                        try self.requireCalendarPushSettlement(turn)
+                    })
+                let method: String
+                switch operation {
+                case .start: method = "iosCalendarPushStart"
+                case .run: method = "iosCalendarPushRun"
+                case .setting: method = "iosCalendarPushSetting"
+                case .stop: throw NativeCalendarWriteError.invalid
+                }
+                let result = try invoke(method, arguments: operation == .start ? [] : [argumentsJSON],
+                    localCancellation: cancellation, drainCalendarTest: true)
+                try turn.writes?.cancelAndDrain()
+                guard try effects.current() == nil else { throw NativeCalendarWriteError.unavailable }
+                calendarPushDiagnostics(turn)
+                return result
+            } catch {
+                retainedCalendarPushTurn = turn
+                do { try turn.writes?.cancelAndDrain() }
+                catch { retainedCalendarPushTurn = turn }
+                if let effect = try? effects.current() {
+                    turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "blocked"))
+                }
+                calendarPushDiagnostics(turn)
+                throw error
+            }
+        }
+    }
+
+    private func calendarPushReply(_ value: Any) throws -> String {
+        guard calendarPushReady.count < 32, calendarPushReplySequence < UInt64.max else {
+            throw NativeCalendarWriteError.unavailable
+        }
+        calendarPushReplySequence += 1
+        let id = "calendar-push-\(calendarPushReplyGeneration)-\(calendarPushReplySequence)"
+        let raw = try Self.ownedJSON(["id": id, "value": value])
+        guard raw.utf8.count <= NativeCalendarJobs.maximumReplyBytes else { throw NativeCalendarWriteError.invalid }
+        calendarPushReady.append(raw)
+        return id
+    }
+
+    private func calendarPushCall(_ raw: String) throws -> String {
+        let request = try NativeCalendarPushRequest(json: raw)
+        if calendarPushTurn != nil { _ = try requireCalendarPushTurn() }
+        else { try requireCalendarAdmission() }
+        switch request {
+        case .read(let read, let json):
+            guard let jobs = calendarJobs else { throw NativeCalendarWriteError.unavailable }
+            let id = try jobs.submit(json)
+            if case .calendars = read { calendarPushTurn?.calendarReads.insert(id) }
+            return id
+        case .readState:
+            guard let storage = deviceStorage else { throw NativeCalendarWriteError.unavailable }
+            return try calendarPushReply(try storage.readCalendarPushState().prefix(5).map { $0 as Any? ?? NSNull() })
+        case .mapping(let taskID):
+            return try calendarPushReply(try requireDatabase().readCalendarPushMapping(taskID: taskID)?.json as Any? ?? NSNull())
+        case .mappings:
+            let raw = try requireDatabase().execute("SELECT task_id AS taskId, calendar_event_id AS calendarEventId, calendar_id AS calendarId, platform, last_synced_at AS lastSyncedAt FROM calendar_sync WHERE platform = 'ios'")
+            guard let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]] else {
+                throw NativeCalendarWriteError.invalid
+            }
+            return try calendarPushReply(try rows.map { try NativeCalendarPushRequest.mapping($0).json })
+        case .sources:
+            guard let writes = try requireCalendarPushTurn().writes else { throw NativeCalendarWriteError.unavailable }
+            return try writes.submitSources()
+        case .write(let request, let json, let taskID):
+            let turn = try requireCalendarPushTurn()
+            guard let writes = turn.writes else { throw NativeCalendarWriteError.unavailable }
+            let id = try writes.submit(requestJSON: json, taskID: taskID)
+            turn.writeRequests[id] = request
+            return id
+        case .ackMapping(let id, let entry):
+            let turn = try requireCalendarPushTurn()
+            guard let writes = turn.writes else { throw NativeCalendarWriteError.unavailable }
+            let effect = try turn.effects.current()
+            try writes.acknowledge(operationID: id, entry: entry)
+            if let effect { turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "saved")) }
+            return try calendarPushReply(NSNull())
+        case .deleteMapping(let expected):
+            let turn = try requireCalendarPushTurn()
+            try calendarPushConfirmDeleted(turn)
+            guard turn.deletedIDs.contains(Data(expected.calendarId.utf8)), try turn.effects.current() == nil else {
+                throw NativeCalendarWriteError.unavailable
+            }
+            try turn.database.compareAndSetCalendarPushMapping(taskID: expected.taskId, expected: expected, next: nil)
+            return try calendarPushReply(NSNull())
+        case .setState(let name, let value):
+            try calendarPushSetState(name: name, value: value)
+            return try calendarPushReply(NSNull())
+        }
+    }
+
+    private func readCalendarPushValue(_ turn: CalendarPushTurn, request: String? = nil,
+                                       event: (String, String)? = nil) throws -> Any {
+        try requireCalendarPushTurn()
+        guard let jobs = calendarJobs, jobs.writeAdmissionAvailable else { throw NativeCalendarWriteError.unavailable }
+        let id: String
+        if let event { id = try jobs.submitRecoveryEvent(eventID: event.0, calendarID: event.1) }
+        else if let request { id = try jobs.submit(request) }
+        else { throw NativeCalendarWriteError.invalid }
+        jobs.drain()
+        guard let answer = try jobs.next(),
+              let object = try NativeJSON.jsonObject(with: Data(answer.json.utf8)) as? [String: Any],
+              object["id"] as? String == id, object["error"] == nil, let value = object["value"] else {
+            throw NativeCalendarWriteError.unavailable
+        }
+        try requireCalendarPushTurn()
+        return value
+    }
+
+    private func readCalendarPushCalendars(_ turn: CalendarPushTurn) throws -> [[String: Any]] {
+        guard let calendars = try readCalendarPushValue(turn, request: "{\"op\":\"calendars\"}") as? [[String: Any]],
+              calendars.count <= 10_000 else { throw NativeCalendarWriteError.invalid }
+        turn.calendars = calendars
+        return calendars
+    }
+
+    private func recoverCalendarPush(_ turn: CalendarPushTurn) throws {
+        try turn.effects.retryPublication()
+        // Each iteration advances one durable phase; no recovery path issues a provider mutation.
+        for _ in 0..<4 {
+            try requireCalendarPushTurn()
+            guard let effect = try turn.effects.current() else { return }
+            switch effect.phase {
+            case .prepared:
+                try turn.effects.discardPrepared(id: effect.id)
+            case .acknowledging:
+                try turn.effects.acknowledgeMapping(id: effect.id, mapping: effect.afterMapping)
+                turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "recovered"))
+            case .saved:
+                if let taskID = effect.taskID {
+                    let mapping: NativeCalendarPushMapping?
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    switch (effect.request, effect.result) {
+                    case (.createEvent(let calendar, _), .identifier(let event)?),
+                         (.updateEvent(let event, let calendar, _), .completed?):
+                        mapping = try NativeCalendarPushMapping(taskId: taskID, calendarEventId: event,
+                            calendarId: calendar, platform: "ios", lastSyncedAt: formatter.string(from: Date()))
+                    default: mapping = nil
+                    }
+                    try turn.effects.acknowledgeMapping(id: effect.id, mapping: mapping)
+                } else {
+                    if case .deleteCalendar(let id) = effect.request {
+                        guard try !readCalendarPushCalendars(turn).contains(where: {
+                            ($0["id"] as? String).map { NativeCalendarWriteValidation.equalID($0, id) } ?? false
+                        }) else { throw NativeCalendarWriteError.unavailable }
+                        turn.deletedIDs.insert(Data(id.utf8))
+                    }
+                    try turn.effects.acknowledgeCalendar(id: effect.id)
+                }
+                turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "recovered"))
+            case .started:
+                let outcome: NativeCalendarWriteOutcome
+                switch effect.request {
+                case .createCalendar:
+                    outcome = .succeeded(.identifier(try NativeCalendarPushWitness.createdCalendar(effect: effect,
+                        calendars: readCalendarPushCalendars(turn))))
+                case .updateCalendar:
+                    try NativeCalendarPushWitness.updatedCalendar(effect: effect, calendars: readCalendarPushCalendars(turn))
+                    outcome = .succeeded(.completed)
+                case .deleteCalendar(let id):
+                    guard try !readCalendarPushCalendars(turn).contains(where: {
+                        ($0["id"] as? String).map { NativeCalendarWriteValidation.equalID($0, id) } ?? false
+                    }) else { throw NativeCalendarWriteError.unavailable }
+                    outcome = .succeeded(.completed)
+                case .createEvent(let calendar, let details):
+                    let instant = (details.start.timeIntervalSince1970 * 1000).rounded()
+                    let start = max(NativeCalendarEventOpenRequest.minimumSeconds * 1000, instant - 1000)
+                    let end = min((NativeCalendarEventOpenRequest.maximumSeconds * 1000).rounded(), instant + 1000)
+                    let request = try Self.ownedJSON(["op": "events", "calendarIds": [calendar], "startMs": start, "endMs": end])
+                    guard let events = try readCalendarPushValue(turn, request: request) as? [[String: Any]] else {
+                        throw NativeCalendarWriteError.invalid
+                    }
+                    outcome = .succeeded(.identifier(try NativeCalendarPushWitness.createdEvent(effect: effect, events: events)))
+                case .updateEvent(let event, let calendar, _), .deleteEvent(let event, let calendar):
+                    let value = try readCalendarPushValue(turn, event: (event, calendar))
+                    if value is NSNull { outcome = .confirmedMissingEvent }
+                    else if case .updateEvent = effect.request, let row = value as? [String: Any] {
+                        try NativeCalendarPushWitness.updatedEvent(effect: effect, event: row)
+                        outcome = .succeeded(.completed)
+                    } else { throw NativeCalendarWriteError.unavailable }
+                case .sources: throw NativeCalendarWriteError.invalid
+                }
+                try turn.effects.acceptCompletion(id: effect.id, outcome: outcome)
+            }
+        }
+        guard try turn.effects.current() == nil else { throw NativeCalendarWriteError.unavailable }
+    }
+
+    private func calendarPushConfirmDeleted(_ turn: CalendarPushTurn) throws {
+        guard turn.edit?["type"] as? String == "deleteMindwtrCalendar", let calendars = turn.calendars else { return }
+        let state = try turn.storage.readCalendarPushState()
+        let intent = try NativeCalendarPushEffects.calendarIntent(state[4])
+        for id in [state[1], intent?.deletionRevision == nil ? nil : intent?.calendarID].compactMap({ $0 }) {
+            if !calendars.contains(where: { ($0["id"] as? String).map {
+                NativeCalendarWriteValidation.equalID($0, id)
+            } ?? false }) { turn.deletedIDs.insert(Data(id.utf8)) }
+        }
+    }
+
+    private func calendarPushSetState(name: String, value: String?) throws {
+        let turn = try requireCalendarPushTurn()
+        guard let index = Self.calendarPushStateNames.firstIndex(of: name) else { throw NativeCalendarWriteError.invalid }
+        let before = try turn.storage.readCalendarPushState()
+        if before[index].map({ Data($0.utf8) }) == value.map({ Data($0.utf8) }) { return }
+        guard try turn.effects.current() == nil else { throw NativeCalendarWriteError.unavailable }
+        let edit = turn.edit, type = edit?["type"] as? String
+        var allowed = false
+        switch index {
+        case 0:
+            allowed = type == "push" && Self.isBoolean(edit?["enabled"])
+                && value == ((edit?["enabled"] as? Bool == true) ? "1" : "0")
+                || type == "deleteMindwtrCalendar" && value == "0"
+        case 2:
+            if type == "pushTarget" {
+                let target = (edit?["calendarId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                allowed = value == (target?.isEmpty == true ? nil : target)
+            } else if type == "deleteMindwtrCalendar", value == nil, let prior = before[2] {
+                try calendarPushConfirmDeleted(turn)
+                allowed = turn.deletedIDs.contains(Data(prior.utf8))
+            }
+        case 3:
+            allowed = type == "pushColor" && value?.uppercased() == (edit?["color"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                && value.map(NativeCalendarWriteValidation.color) == true
+        case 1, 4:
+            let prior = try NativeCalendarPushEffects.calendarIntent(before[4])
+            let next = index == 4 ? try NativeCalendarPushEffects.calendarIntent(value) : nil
+            let calendars = turn.calendars ?? []
+            func bound(_ id: String, title: String) -> Bool {
+                let matches = calendars.filter { ($0["id"] as? String).map {
+                    NativeCalendarWriteValidation.equalID($0, id)
+                } ?? false }
+                return matches.count == 1 && (matches[0]["title"] as? String).map {
+                    NativeCalendarWriteValidation.equalID($0, title)
+                } == true && matches[0]["allowsModifications"] as? Bool == true
+            }
+            if index == 1, let value, let prior, let id = prior.calendarID,
+               NativeCalendarWriteValidation.equalID(value, id) {
+                allowed = bound(id, title: prior.title) || bound(id, title: "Mindwtr")
+            } else if index == 4, let next {
+                if let prior {
+                    let sameTitle = NativeCalendarWriteValidation.equalID(prior.title, next.title)
+                    if let id = next.calendarID, prior.calendarID == nil, next.deletionRevision == nil {
+                        allowed = sameTitle && bound(id, title: prior.title)
+                            && calendars.filter { ($0["title"] as? String).map {
+                                NativeCalendarWriteValidation.equalID($0, prior.title)
+                            } ?? false }.count == 1
+                    } else if type == "deleteMindwtrCalendar", let id = next.calendarID, next.deletionRevision != nil {
+                        allowed = sameTitle && prior.deletionRevision == nil
+                            && (prior.calendarID == nil || prior.calendarID.map { NativeCalendarWriteValidation.equalID($0, id) } == true)
+                            && (bound(id, title: prior.title) || prior.calendarID != nil && bound(id, title: "Mindwtr"))
+                    }
+                } else {
+                    allowed = next.calendarID == nil && next.deletionRevision == nil && type != "deleteMindwtrCalendar"
+                }
+            } else if value == nil {
+                if type == "deleteMindwtrCalendar" {
+                    try calendarPushConfirmDeleted(turn)
+                    let id = index == 1 ? before[1] : prior?.calendarID
+                    allowed = id.map { turn.deletedIDs.contains(Data($0.utf8)) } ?? false
+                } else if index == 4, let prior, let id = prior.calendarID {
+                    allowed = before[1].map { NativeCalendarWriteValidation.equalID($0, id) } == true
+                        && prior.deletionRevision == nil && bound(id, title: "Mindwtr")
+                }
+            }
+        default: break
+        }
+        guard allowed else { throw NativeCalendarWriteError.unavailable }
+        var next = before; next[index] = value
+        turn.statePublication = (before, next)
+        try retryCalendarPushState(turn)
+    }
+
+    private func retryCalendarPushState(_ turn: CalendarPushTurn) throws {
+        guard let publication = turn.statePublication else { return }
+        try requireCalendarPushSettlement(turn)
+        try turn.storage.compareAndSetCalendarPushState(expected: publication.before, next: publication.next)
+        turn.statePublication = nil
+    }
+
+    private static func calendarPushOperationName(_ request: NativeCalendarWriteRequest) -> String {
+        switch request {
+        case .createCalendar: return "createCalendar"
+        case .updateCalendar: return "updateCalendar"
+        case .deleteCalendar: return "deleteCalendar"
+        case .createEvent: return "createEvent"
+        case .updateEvent: return "updateEvent"
+        case .deleteEvent: return "deleteEvent"
+        case .sources: return "restore"
+        }
+    }
+
+    private func calendarPushDiagnostics(_ turn: CalendarPushTurn) {
+        for diagnostic in turn.diagnostics {
+            if let json = try? Self.ownedJSON(["operation": diagnostic.operation, "outcome": diagnostic.outcome]) {
+                _ = try? invoke("iosCalendarPushDiagnostic", arguments: [json])
+            }
+        }
+        turn.diagnostics.removeAll()
     }
 
     func admitReminderPlanRead(cancellation: NativeAttachmentCancellation) throws -> NativeReminderPlanReadAdmission {
@@ -8287,6 +8748,7 @@ private final class Engine: @unchecked Sendable {
     private func requireBackupDocumentMutationAllowed(_ command: PendingCommand, arguments: [Any]) throws {
         let mode = try backupDocumentPlanMode(command, arguments: arguments)
         guard !["restore", "replace"].contains(mode) || !calendarPushEffectConstrainsBackup() else {
+            _ = try? invoke("iosCalendarPushDiagnostic", arguments: ["{\"operation\":\"restore\",\"outcome\":\"blocked\"}"])
             throw HostFailure("NOT_READY: Finish pending Calendar effects before restoring or replacing data")
         }
     }
@@ -8309,6 +8771,9 @@ private final class Engine: @unchecked Sendable {
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
         reminderCompletionOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard calendarPushTurn == nil, !Self.calendarPushMethods.contains(method) else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar push requires its current explicit owner")
+        }
         guard calendarAccessTurn == nil, !Self.calendarAccessMethods.contains(method) else {
             throw CoreHostRejection(message: "NOT_READY: Calendar access requires its current explicit owner")
         }
@@ -16424,6 +16889,8 @@ private final class Engine: @unchecked Sendable {
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-event-open"
                 && ["cancelled", "saved", "deleted"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS calendar push lifecycle completed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-calendar-push-lifecycle", "outcome": "confirmed"])
         case "Native iOS calendar feed view published":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-feed"
@@ -21390,6 +21857,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
+        guard calendarPushTurn == nil else { throw NativeCalendarWriteError.unavailable }
         try requireCalendarSubscriptionSettingTurn(publication: calendarSubscriptionSQLPublication(sql))
         guard reminderEffectsTurn == nil else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
@@ -21676,9 +22144,40 @@ private final class Engine: @unchecked Sendable {
             return answer.json
         }
         func calendar() throws -> String? {
+            if let turn = calendarPushTurn, let reply = turn.writes?.next() {
+                if let object = try? NativeJSON.jsonObject(with: Data(reply.utf8)) as? [String: Any],
+                   let id = object["id"] as? String, let request = turn.writeRequests.removeValue(forKey: id) {
+                    if object["error"] == nil {
+                        switch request {
+                        case .deleteCalendar(let calendarID):
+                            turn.deletedIDs.insert(Data(calendarID.utf8))
+                            turn.diagnostics.append(("deleteCalendar", "saved"))
+                        case .createCalendar, .updateCalendar:
+                            turn.diagnostics.append((Self.calendarPushOperationName(request), "saved"))
+                        default: break
+                        }
+                    } else {
+                        do {
+                            if try turn.effects.current() == nil {
+                                turn.diagnostics.append((Self.calendarPushOperationName(request), "rejected"))
+                            }
+                        } catch { }
+                    }
+                }
+                preferredIO = 0
+                return reply
+            }
+            if !calendarPushReady.isEmpty {
+                preferredIO = 0
+                return calendarPushReady.removeFirst()
+            }
             guard let answer = try calendarJobs?.next() else { return nil }
-            if let header = try? NativeJSON.jsonObject(with: Data(answer.json.utf8)) as? [String: Any], header["body"] as? Bool == true {
-                ioBodySource = .calendar
+            if let header = try? NativeJSON.jsonObject(with: Data(answer.json.utf8)) as? [String: Any] {
+                if header["body"] as? Bool == true { ioBodySource = .calendar }
+                if let turn = calendarPushTurn, let id = header["id"] as? String,
+                   turn.calendarReads.remove(id) != nil {
+                    turn.calendars = header["error"] == nil ? header["value"] as? [[String: Any]] : nil
+                }
             }
             preferredIO = 0
             return answer.json
@@ -21904,6 +22403,30 @@ private final class Engine: @unchecked Sendable {
             guard request.isString, let id = request.toString() else { return }
             self?.calendarJobs?.abort(id)
         }
+        let calendarPushCall: @convention(block) (JSValue) -> String = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
+            return self.guarded { try self.calendarPushCall(json) } ?? "!MindwtrNativeError:Calendar push is unavailable"
+        }
+        let calendarPushAbort: @convention(block) (JSValue) -> Void = { [weak self] request in
+            guard let self, request.isString, let id = request.toString() else { return }
+            self.calendarPushTurn?.writes?.cancel(id)
+            self.calendarJobs?.abort(id)
+        }
+        let calendarPushDue: @convention(block) (JSValue) -> String? = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
+            return self.guarded {
+                guard self.started, !self.closed, !self.localRequests.isClosing,
+                      let observer = self.calendarPushObserver, observer.generation == self.attachmentGeneration else {
+                    throw NativeCalendarWriteError.unavailable
+                }
+                // A large dirty batch invalidates the full projection; dropping it would strand saved changes.
+                if json.utf8.count > NativeCalendarJobs.maximumRequestBytes { observer.callback(nil); return nil }
+                let value = try NativeJSON.jsonObject(with: Data(json.utf8))
+                if let ids = value as? [Any], ids.count > 10_000 { observer.callback(nil); return nil }
+                observer.callback(try Self.calendarPushIDs(value))
+                return nil
+            }
+        }
         let next: @convention(block) () -> String = { [weak self] in
             self?.guarded { try self?.nextIO() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
@@ -21914,6 +22437,11 @@ private final class Engine: @unchecked Sendable {
                               "cryptoCall": cryptoCall as Any, "calendarCall": calendarCall as Any,
                               "calendarAbort": calendarAbort as Any, "ioNext": next as Any, "ioBody": body as Any] {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
+        }
+        if deviceStorageLocation != nil {
+            bridge.setObject(calendarPushCall, forKeyedSubscript: "calendarPushCall" as NSString)
+            bridge.setObject(calendarPushAbort, forKeyedSubscript: "calendarPushAbort" as NSString)
+            bridge.setObject(calendarPushDue, forKeyedSubscript: "calendarPushDue" as NSString)
         }
         if deviceStorageLocation != nil {
             let calendarSubscriptionRead: @convention(block) () -> String = { [weak self] in
@@ -21955,7 +22483,13 @@ private final class Engine: @unchecked Sendable {
                     guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key)
                     let value: String?
-                    if self.projectDownloadTurn != nil {
+                    if self.calendarPushTurn != nil {
+                        let turn = try self.requireCalendarPushTurn()
+                        guard ["mindwtr-system-calendar-settings", "mindwtr-external-calendars"].contains(key) else {
+                            throw Self.deviceStorageUnavailable
+                        }
+                        value = try turn.storage.get(key)
+                    } else if self.projectDownloadTurn != nil {
                         value = try self.projectDownloadLegacyRead([key])[0].1
                     } else if let turn = self.projectAvailabilityTurn {
                         try self.requireProjectAvailabilityTurn(); value = try turn.readStorage([key])[0].1
@@ -21989,7 +22523,13 @@ private final class Engine: @unchecked Sendable {
                 return self.deviceStorageResult {
                     let keys = try Self.deviceStorageKeys(keys)
                     let pairs: [(String, String?)]
-                    if let turn = self.reminderEffectsTurn {
+                    if self.calendarPushTurn != nil {
+                        let turn = try self.requireCalendarPushTurn()
+                        guard keys.allSatisfy({ ["mindwtr-system-calendar-settings", "mindwtr-external-calendars"].contains($0) }) else {
+                            throw Self.deviceStorageUnavailable
+                        }
+                        pairs = try turn.storage.multiGet(keys)
+                    } else if let turn = self.reminderEffectsTurn {
                         guard self.reminderOwnerAccess, keys == Self.reminderMapNames else { throw Self.deviceStorageUnavailable }
                         pairs = try turn.storage.multiGet(keys)
                     } else if self.projectDownloadTurn != nil {
@@ -22072,6 +22612,15 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        // Drain accepted writes while their original storage, database and file lease still exist.
+        if let turn = calendarPushTurn ?? retainedCalendarPushTurn {
+            try? retryCalendarPushState(turn)
+            try? turn.effects.retryPublication()
+            try? turn.writes?.cancelAndDrain()
+        }
+        calendarPushTurn = nil; retainedCalendarPushTurn = nil
+        calendarPushReady.removeAll(); calendarPushObserver = nil
+        calendarPushDatabaseBinding = nil
         if let capture = calendarFileCaptureTurn { abortCalendarFileCapture(capture.id) }
         removeReminderObserver(nil)
         searchObserver = nil
