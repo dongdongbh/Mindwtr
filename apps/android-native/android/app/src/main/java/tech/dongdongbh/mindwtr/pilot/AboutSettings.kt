@@ -85,11 +85,12 @@ import java.util.concurrent.Executors
 /**
  * The build as About, feedback and the heartbeat report it (host-about.ts's NativeAppInfo): RN's app.json version, build number
  * and package, the release tag, this channel, and the endpoints it was built with. A development build (RN's __DEV__) never
- * sends a heartbeat. Debug builds only: `debug.mindwtr.native.about_stub=<port>` points the feedback endpoint, the heartbeat and
- * GitHub's release API at check-about-device.mjs's stub on 127.0.0.1:<port> (adb reverse) and lets the heartbeat send there.
+ * sends a heartbeat, and only a release build sends feedback ([aboutFeedbackEndpoint]). Debug builds only:
+ * `debug.mindwtr.native.about_stub=<port>` points the feedback endpoint, the heartbeat and GitHub's release API at
+ * check-about-device.mjs's stub on 127.0.0.1:<port> (adb reverse) and lets the heartbeat send there.
  */
 fun aboutAppInfo(): String {
-    val stub = debugProperty("about_stub").toIntOrNull()?.let { "http://127.0.0.1:$it" }
+    val stub = aboutStub(debugProperty("about_stub"))
     return JSONObject()
         .put("appName", BuildConfig.RN_NAME)
         .put("version", BuildConfig.RN_VERSION)
@@ -101,11 +102,24 @@ fun aboutAppInfo(): String {
         .put("platform", "android")
         .put("platformVersion", Build.VERSION.SDK_INT)
         .put("osRelease", Build.VERSION.RELEASE ?: "")
-        .put("feedbackEndpointUrl", stub?.let { "$it/feedback" } ?: BuildConfig.FEEDBACK_ENDPOINT_URL)
+        .put("feedbackEndpointUrl", aboutFeedbackEndpoint(BuildConfig.BUILD_TYPE, BuildConfig.FEEDBACK_ENDPOINT_URL, stub))
         .put("analyticsHeartbeatUrl", stub?.let { "$it/heartbeat" } ?: BuildConfig.ANALYTICS_HEARTBEAT_URL)
         .put("analyticsHeartbeatChannel", BuildConfig.ANALYTICS_HEARTBEAT_CHANNEL)
         .apply { stub?.let { put("githubReleasesApi", "$it/github/releases/latest") } }
         .toString()
+}
+
+/** check-about-device.mjs's stub on 127.0.0.1:<[port]> (adb reverse), or null when [port] is not one. */
+internal fun aboutStub(port: String): String? = port.trim().toIntOrNull()?.takeIf { it in 1..65535 }?.let { "http://127.0.0.1:$it" }
+
+/**
+ * Where feedback goes: a release build to the endpoint it was built with; every other build (debug, the upgrade check, the
+ * benchmarks) only to a check's [stub], else nowhere (the modal says feedback is not configured), so a test build never sends
+ * real feedback.
+ */
+internal fun aboutFeedbackEndpoint(buildType: String, builtEndpoint: String, stub: String?): String = when {
+    buildType == "release" -> builtEndpoint
+    else -> stub?.let { "$it/feedback" } ?: ""
 }
 
 /** Settings › About's state and requests: the screen, its update checks, the alert, Rate, the links and the feedback modal. */
