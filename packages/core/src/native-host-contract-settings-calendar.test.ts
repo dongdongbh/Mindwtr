@@ -525,6 +525,96 @@ describe('native host contract: Settings › Calendar', () => {
         }
     });
 
+    describe('Task488 private calendar lifecycle', () => {
+        it('starts from saved enabled state without opening Settings and shares its watcher and queue', async () => {
+            await seed({});
+            await useTaskStore.getState().addTask('Due task', { status: 'next', dueDate: '2026-10-10' });
+            await flushPendingSave();
+            const task = useTaskStore.getState()._allTasks[0]!;
+            const handset = phone({ os: 'ios', calendars: ['primary'],
+                storage: { [KEYS.pushEnabled]: '1', [KEYS.pushTarget]: 'g-primary' } });
+            handset.host.syncEntries!.upsert = async (entry) => {
+                handset.host.syncEntries!.get = async (taskId, platform) => taskId === entry.taskId && platform === entry.platform ? entry : null;
+                handset.host.syncEntries!.getAll = async (platform) => platform === entry.platform ? [entry] : [];
+            };
+            const due = vi.fn();
+            let lifecycle!: Parameters<NonNullable<NativeCalendarHost['bindPushLifecycle']>>[0];
+            handset.host.requestPartialSync = due;
+            handset.host.bindPushLifecycle = (value) => { lifecycle = value; };
+            const contract = await openHost(handset.host);
+            expect(lifecycle).toBeDefined();
+            expect(await lifecycle.start()).toBe(true);
+            expect(handset.state.calendarWrites).toEqual([]);
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            try {
+                await lifecycle.start();
+                value(await contract.openCalendarSettings());
+                await useTaskStore.getState().updateTask(task.id, { title: 'Changed' });
+                await vi.advanceTimersByTimeAsync(2500);
+                expect(due.mock.calls).toEqual([[[task.id]]]);
+                expect(handset.state.calendarWrites).toEqual([]);
+                await lifecycle.run([task.id]);
+                expect(handset.state.calendarWrites).toEqual([['createEvent', 'g-primary', 'Changed']]);
+                await lifecycle.run();
+                expect(handset.state.calendarWrites[1]?.[0]).toBe('updateEvent');
+                await useTaskStore.getState().updateTask(task.id, { title: 'Cancelled wake' });
+                lifecycle.stop();
+                await vi.advanceTimersByTimeAsync(2500);
+                expect(due).toHaveBeenCalledTimes(1);
+            } finally { lifecycle.stop(); value(contract.closeCalendarSettings()); }
+        });
+
+        it('keeps disabled startup idle and requires readiness before installing a watcher', async () => {
+            await seed({});
+            const handset = phone({ os: 'ios', calendars: ['primary'] });
+            let lifecycle!: Parameters<NonNullable<NativeCalendarHost['bindPushLifecycle']>>[0];
+            handset.host.requestPartialSync = vi.fn();
+            handset.host.bindPushLifecycle = (value) => { lifecycle = value; };
+            const contract = createNativeHostContract({ calendar: handset.host });
+            await expect(lifecycle.start()).rejects.toThrow('NOT_READY');
+            value(await contract.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' }));
+            value(await contract.activate({ writeSafetyReady: true }));
+            expect(await lifecycle.start()).toBe(false);
+            await lifecycle.run();
+            expect(handset.state.calendarWrites).toEqual([]);
+            lifecycle.stop();
+        });
+
+        it('does not install a late watcher after stop wins a held enabled read', async () => {
+            await seed({});
+            const handset = phone({ os: 'ios', calendars: ['primary'], storage: { [KEYS.pushEnabled]: '1' } });
+            let lifecycle!: Parameters<NonNullable<NativeCalendarHost['bindPushLifecycle']>>[0];
+            handset.host.requestPartialSync = vi.fn();
+            handset.host.bindPushLifecycle = (value) => { lifecycle = value; };
+            await openHost(handset.host);
+            let entered!: () => void, release!: () => void;
+            const entry = new Promise<void>((resolve) => { entered = resolve; });
+            const held = new Promise<void>((resolve) => { release = resolve; });
+            const get = handset.host.storage.getItem;
+            handset.host.storage.getItem = async (name) => {
+                if (name === KEYS.pushEnabled) { entered(); await held; }
+                return get(name);
+            };
+            const starting = lifecycle.start();
+            await entry;
+            lifecycle.stop();
+            release();
+            try { await expect(starting).rejects.toThrow('NOT_READY'); }
+            finally { lifecycle.stop(); }
+            expect(handset.state.calendarWrites).toEqual([]);
+        });
+
+        it.each(['ios', 'android'] as const)('does not bind lifecycle without iOS admission capability: %s', async (os) => {
+            await seed({});
+            const handset = phone({ os, calendars: ['primary'] });
+            const bind = vi.fn();
+            handset.host.bindPushLifecycle = bind;
+            if (os === 'android') handset.host.requestPartialSync = vi.fn();
+            await openHost(handset.host);
+            expect(bind).not.toHaveBeenCalled();
+        });
+    });
+
     describe('Task483 owned calendar push', () => {
         const deferred = () => {
             let release!: () => void;

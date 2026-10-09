@@ -123,6 +123,12 @@ import { deterministicHash128Hex } from './uuid';
 
 type Translate = (key: string) => string;
 
+export type NativeCalendarPushLifecycle = {
+    start(): Promise<boolean>;
+    stop(): void;
+    run(ids?: readonly string[]): Promise<void>;
+};
+
 function boundedFeedError(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
     return message.length <= 2000 ? message : 'Calendar events could not be read';
@@ -147,6 +153,8 @@ export type NativeCalendarHost = {
     syncEntries?: CalendarPushServiceHost['syncEntries'];
     /** Synchronous native owner-admission notification for debounced push work. */
     requestPartialSync?: CalendarPushServiceHost['requestPartialSync'];
+    /** Private native lifecycle access to this contract's single cached push service. */
+    bindPushLifecycle?: (lifecycle: NativeCalendarPushLifecycle) => void;
     /** The app log; no line carries a URL or an event title. */
     log: CalendarPushServiceHost['log'];
 };
@@ -974,6 +982,37 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
                 : { ok: true, value: { status: 'error', message: boundedFeedError(error) } }));
     };
+
+    const lifecycleHost = deps.host();
+    if (lifecycleHost?.platform.os === 'ios' && lifecycleHost.requestPartialSync && lifecycleHost.bindPushLifecycle) {
+        let generation = 0;
+        const push = () => {
+            if (deps.host() !== lifecycleHost || !deps.readiness().ok || !hasCalendarPush(lifecycleHost) || isSandboxMode()) {
+                throw new Error('NOT_READY: Calendar push lifecycle is unavailable');
+            }
+            return device(lifecycleHost).push;
+        };
+        lifecycleHost.bindPushLifecycle({
+            async start() {
+                const selected = ++generation;
+                const service = push();
+                const enabled = await service.getCalendarPushEnabled();
+                if (selected !== generation || push() !== service) throw new Error('NOT_READY: Calendar push lifecycle changed');
+                if (enabled) service.startCalendarPushSync();
+                else service.stopCalendarPushSync();
+                return enabled;
+            },
+            stop() {
+                generation += 1;
+                if (bound?.host === lifecycleHost) bound.push.stopCalendarPushSync();
+            },
+            async run(ids) {
+                const service = push();
+                if (ids === undefined) await service.runFullCalendarSync();
+                else await service.runPartialCalendarSync(ids);
+            },
+        });
+    }
 
     return {
         /** Opens Settings › Calendar: reads the device as React Native's screen does on mount. */
