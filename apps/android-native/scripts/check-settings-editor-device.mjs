@@ -109,7 +109,7 @@ const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e'
             const tiles = Object.fromEntries([...more.primary, ...more.utilities].map((item) => [item.id, item.label]));
             const menu = value(host.getSettingsMenu({}));
             // The app passes its sync badge: the Sync row's words then end with the badge's (RN's MenuItem label).
-            // The About row's words end with RN's update dot once an update was found (RN's stored `mindwtr-update-available`).
+            // The About row's words end with RN's update dot once an update was found (RN's stored mindwtr-update-available).
             const badged = [...['syncing', 'healthy', 'attention'].map((syncBadge) => value(host.getSettingsMenu({ syncBadge })).groups.flat()),
                 value(host.getSettingsMenu({ updateAvailable: true })).groups.flat()];
             const general = value(host.getGeneralSettings({}));
