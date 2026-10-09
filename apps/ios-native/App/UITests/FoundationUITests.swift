@@ -9791,11 +9791,150 @@ final class FoundationUITests: XCTestCase {
 
     private func task465Tap(_ app: XCUIApplication, _ identifier: String) {
         let target = app.buttons[identifier], layout = app.scrollViews["calendar-layout-scroll"]
+        if identifier.hasPrefix("calendar-day-") {
+            let grid = app.scrollViews["calendar-month-grid"]
+            if layout.exists { task467Reveal(app, grid, in: layout, requireHittable: false) }
+            if !target.exists { task467Reveal(app, target, in: grid, requireHittable: false) }
+            let columns = app.scrollViews["calendar-month-columns"]
+            if columns.exists { task467Reveal(app, target, in: columns, horizontal: true, requireHittable: false) }
+            if !target.isHittable { task467Reveal(app, target, in: grid) }
+        }
         if !target.isHittable {
             let scroll = layout.exists ? layout : app.scrollViews["calendar-month-grid"]
-            task442Reveal(app, target, in: scroll)
+            task467Reveal(app, target, in: scroll)
         }
         boardTap(app, identifier)
+    }
+
+    private func task467Viewport(_ app: XCUIApplication, _ scroll: XCUIElement) -> CGRect {
+        var frame = scroll.frame.intersection(app.frame)
+        if ["calendar-month-grid", "calendar-month-columns", "calendar-details"].contains(scroll.identifier) {
+            let layout = app.scrollViews["calendar-layout-scroll"]
+            if layout.exists { frame = frame.intersection(layout.frame) }
+            let columns = app.scrollViews["calendar-month-columns"]
+            if scroll.identifier == "calendar-month-grid", columns.exists { frame = frame.intersection(columns.frame) }
+        }
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.exists && keyboard.frame.intersects(frame) { frame.size.height = max(0, keyboard.frame.minY - frame.minY) }
+        return frame
+    }
+
+    // Geometry-only reveal also works for intentionally disabled external rows. It never
+    // taps/enables them, and keeps the established keyboard-aware viewport calculation.
+    private func task467Reveal(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement,
+                               horizontal: Bool = false, requireHittable: Bool = true) {
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        func visible() -> Bool {
+            guard element.exists, element.frame.width > 0, element.frame.height > 0 else { return false }
+            let viewport = task467Viewport(app, scroll), row = element.frame
+            let contained = horizontal ? row.minX >= viewport.minX - 0.001 && row.maxX <= viewport.maxX + 0.001
+                : row.minY >= viewport.minY - 0.001 && row.maxY <= viewport.maxY + 0.001
+            return contained && (!requireHittable || element.isHittable)
+        }
+        var containedQueryFrame: CGRect?
+        var containedQueryRepeats = 0
+        for _ in 0..<60 {
+            if visible() { break }
+            let viewport = task467Viewport(app, scroll), row = element.frame
+            if requireHittable, element.identifier == "calendar-query", element.exists,
+               row.minX >= viewport.minX, row.maxX <= viewport.maxX,
+               row.minY >= viewport.minY, row.maxY <= viewport.maxY {
+                let sameFrame = containedQueryFrame.map {
+                    abs($0.minX - row.minX) < 0.5 && abs($0.minY - row.minY) < 0.5 &&
+                    abs($0.width - row.width) < 0.5 && abs($0.height - row.height) < 0.5
+                } ?? false
+                containedQueryRepeats = sameFrame ? containedQueryRepeats + 1 : 1
+                containedQueryFrame = row
+                if containedQueryRepeats >= 3 {
+                    let state = "query enabled=\(element.isEnabled), hittable=\(element.isHittable), frame=\(row), viewport=\(viewport)"
+                    let tree = XCTAttachment(string: state + "\n" + app.debugDescription)
+                    tree.name = "Calendar contained query hit-test hierarchy"; tree.lifetime = .keepAlways; add(tree)
+                    let shot = XCTAttachment(screenshot: app.screenshot())
+                    shot.name = "Calendar contained query hit-test failure"; shot.lifetime = .keepAlways; add(shot)
+                    XCTFail(state)
+                    return
+                }
+                // Geometry already fits. Wait for settling without repeatedly dragging a
+                // different owner; the real focus/edit assertions remain required below.
+                let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
+                _ = XCTWaiter.wait(for: [hittable], timeout: 1)
+                continue
+            }
+            containedQueryFrame = nil
+            containedQueryRepeats = 0
+            let extent = horizontal ? viewport.width : viewport.height
+            XCTAssertGreaterThan(extent, 0)
+            let before = element.exists && (horizontal ? row.minX < viewport.minX : row.minY < viewport.minY)
+            let needed = element.exists ? (horizontal
+                ? before ? viewport.minX - row.minX : row.maxX - viewport.maxX
+                : before ? viewport.minY - row.minY : row.maxY - viewport.maxY) + 4 : extent * 0.7
+            var gestureViewport = viewport
+            if scroll.identifier == "calendar-layout-scroll" {
+                // A drag that starts in a nested grid/list belongs to that child. The
+                // exposed header gutter is owned by the outer layout, even after it moves.
+                let childIDs = ["calendar-month-grid", "calendar-month-columns", "calendar-details",
+                    "calendar-week-columns", "calendar-week-timeline", "calendar-day-timeline", "calendar-schedule"]
+                let starts = childIDs.compactMap { id -> CGFloat? in
+                    let child = app.scrollViews[id]
+                    return child.exists ? child.frame.minY : nil
+                }
+                if let childTop = starts.min() {
+                    gestureViewport.size.height = min(viewport.height, max(0, childTop - viewport.minY - 2))
+                }
+                XCTAssertGreaterThan(gestureViewport.height, 8, "Outer Calendar reveal needs an exposed owner region")
+            }
+            let gestureExtent = horizontal ? gestureViewport.width : gestureViewport.height
+            let distance = min(max(44, needed + 24), gestureExtent * 0.6)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = horizontal
+                ? CGPoint(x: viewport.minX + viewport.width * (before ? 0.3 : 0.7), y: viewport.minY + min(20, viewport.height / 2))
+                : CGPoint(x: gestureViewport.minX + 4, y: gestureViewport.minY + gestureViewport.height * (before ? 0.3 : 0.7))
+            let end = horizontal ? CGPoint(x: start.x + (before ? distance : -distance), y: start.y)
+                : CGPoint(x: start.x, y: start.y + (before ? distance : -distance))
+            origin.withOffset(CGVector(dx: start.x, dy: start.y)).press(forDuration: 0.05,
+                thenDragTo: origin.withOffset(CGVector(dx: end.x, dy: end.y)),
+                withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(visible(), "\(element.identifier): row \(element.frame), viewport \(task467Viewport(app, scroll))")
+    }
+
+    private func task467Contained(_ app: XCUIApplication, _ element: XCUIElement, in scroll: XCUIElement) {
+        let viewport = task467Viewport(app, scroll), row = element.frame
+        XCTAssertGreaterThan(row.width, 0); XCTAssertGreaterThan(row.height, 0)
+        XCTAssertGreaterThanOrEqual(row.minX, viewport.minX - 0.001)
+        XCTAssertLessThanOrEqual(row.maxX, viewport.maxX + 0.001)
+        XCTAssertGreaterThanOrEqual(row.minY, viewport.minY - 0.001)
+        XCTAssertLessThanOrEqual(row.maxY, viewport.maxY + 0.001)
+    }
+
+    private func task467Weekdays(_ app: XCUIApplication, largest: Bool) {
+        let grid = app.scrollViews["calendar-month-grid"], layout = app.scrollViews["calendar-layout-scroll"]
+        if layout.exists { task467Reveal(app, grid, in: layout, requireHittable: false) }
+        let columns = app.scrollViews["calendar-month-columns"]
+        if largest { XCTAssertTrue(columns.waitForExistence(timeout: 10)) }
+        else { XCTAssertFalse(columns.exists, "Normal text retains the full-width seven-column grid") }
+        var heights: [CGFloat] = []
+        for (index, name) in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].enumerated() {
+            let label = app.staticTexts["calendar-weekday-" + String(index)]
+            XCTAssertTrue(label.waitForExistence(timeout: 10)); XCTAssertEqual(label.label, name)
+            if columns.exists { task467Reveal(app, label, in: columns, horizontal: true, requireHittable: false) }
+            task467Contained(app, label, in: columns.exists ? columns : grid)
+            heights.append(label.frame.height)
+            if index == 0 || index == 6 {
+                let shot = XCTAttachment(screenshot: app.screenshot())
+                shot.name = "Calendar " + (largest ? "largest" : "normal") + " weekday " + name
+                shot.lifetime = .keepAlways; add(shot)
+            }
+        }
+        XCTAssertLessThanOrEqual((heights.max() ?? 0) - (heights.min() ?? 0), 1, "All shared weekday labels occupy one text row")
+        let first = app.buttons["calendar-day-2026-10-01"], second = app.buttons["calendar-day-2026-10-02"], third = app.buttons["calendar-day-2026-10-03"]
+        for (index, cell) in [(4, first), (5, second), (6, third)] {
+            XCTAssertTrue(cell.exists)
+            XCTAssertEqual(cell.frame.midX, app.staticTexts["calendar-weekday-" + String(index)].frame.midX, accuracy: 1)
+        }
+        XCTAssertEqual(first.frame.width, second.frame.width, accuracy: 1)
+        XCTAssertEqual(second.frame.width, third.frame.width, accuracy: 1)
+        XCTAssertEqual(second.frame.midX - first.frame.midX, first.frame.width, accuracy: 1)
     }
 
     // Root stages isolated shared storage and actual HTTPS ICS fixtures; device calendars stay OFF.
@@ -9804,7 +9943,7 @@ final class FoundationUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", largest ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
         app.launch(); defer { app.terminate() }
         boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
         let calendar = app.buttons["menu-calendar"]
@@ -9813,6 +9952,7 @@ final class FoundationUITests: XCTestCase {
         }
         boardTap(app, "menu-calendar")
         task465Tap(app, "calendar-mode-month")
+        task467Weekdays(app, largest: largest)
         task465Tap(app, "calendar-day-2026-10-09")
         let events = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "calendar-item-", "Task465 timed event"))
@@ -9842,20 +9982,36 @@ final class FoundationUITests: XCTestCase {
             boardTap(app, "calendar-feed-retry")
             expectEvent("month after partial-feed retry")
         }
+        let details = app.scrollViews["calendar-details"], layout = app.scrollViews["calendar-layout-scroll"]
+        if layout.exists { task467Reveal(app, details, in: layout, requireHittable: false) }
+        task467Reveal(app, event, in: details, requireHittable: false)
+        task467Contained(app, event, in: details)
+        XCTAssertFalse(event.isEnabled)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = partial ? "Calendar partial feed retains successful event" : largest ? "Calendar external event largest text" : "Calendar external event normal"
         shot.lifetime = .keepAlways; add(shot)
         // The rejected preparation checks the actual external busy interval without writing a task.
         let query = app.textFields["calendar-query"]
+        task467Reveal(app, query, in: details, requireHittable: false)
+        task467Contained(app, query, in: details)
+        boardEnabled(query)
         if !query.isHittable {
-            task442Reveal(app, query, in: app.scrollViews["calendar-layout-scroll"])
+            // On an isolated synthetic library, retain the actual hierarchy before a
+            // standard element tap. Typed value and real filtering prove interaction.
+            print("Calendar query interaction probe: enabled=\(query.isEnabled), hittable=\(query.isHittable), frame=\(query.frame), viewport=\(task467Viewport(app, details))")
+            print(app.debugDescription)
         }
-        boardEnabled(query); query.tap(); query.typeText("Task465 schedulable")
+        query.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        query.typeText("Task465 schedulable")
+        expectation(for: NSPredicate(format: "value == %@", "Task465 schedulable"), evaluatedWith: query)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(query.value as? String, "Task465 schedulable")
         let returnKey = app.keyboards.buttons["Return"]
         if returnKey.exists && returnKey.isHittable { returnKey.tap() }
         let candidate = app.buttons["calendar-candidate-task465-schedulable"]
         if !candidate.isHittable {
-            task442Reveal(app, candidate, in: app.scrollViews["calendar-details"])
+            task467Reveal(app, candidate, in: details)
         }
         boardEnabled(candidate, timeout: 30); candidate.tap()
         XCTAssertTrue(app.staticTexts["calendar-composer-title"].waitForExistence(timeout: 10))
@@ -9875,6 +10031,10 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["calendar-composer-error"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["calendar-composer-title"].exists)
         XCTAssertEqual(app.staticTexts["calendar-composer-error"].label, "That time overlaps with an event. Please choose a free slot.")
+        let conflictError = app.staticTexts["calendar-composer-error"]
+        task467Reveal(app, conflictError, in: composerScroll, requireHittable: false)
+        revealPagedElement(app, app.buttons["calendar-composer-cancel"], in: composerScroll)
+        task467Contained(app, conflictError, in: composerScroll)
         let conflict = XCTAttachment(screenshot: app.screenshot())
         conflict.name = "Calendar frozen feed refuses occupied task slot"; conflict.lifetime = .keepAlways; add(conflict)
         composerTap("calendar-composer-cancel")
