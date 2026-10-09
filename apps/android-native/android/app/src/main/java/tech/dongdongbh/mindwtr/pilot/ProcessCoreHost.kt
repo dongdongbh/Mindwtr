@@ -106,8 +106,8 @@ internal object ProcessCoreHost {
     }
 
     private fun start(app: Application, language: String?): CoreHost {
-        // Nothing opens the RN database until the guard passes; it returns files/SQLite/mindwtr.db
-        // and what RN left in AsyncStorage, which the JS host imports as RN's next launch would.
+        // Nothing opens the RN database or RN's RKStorage until the guard passes (and has copied RKStorage); it returns
+        // files/SQLite/mindwtr.db and what RN left in AsyncStorage, which the JS host imports as RN's next launch would.
         val legacy = if (BuildConfig.RN_STORAGE) {
             LegacyRnStoreGuard.requireClear(app.dataDir, File(app.cacheDir, "legacy-rn-guard"))
         } else {
@@ -120,8 +120,7 @@ internal object ProcessCoreHost {
             keyValue, HostFiles(app.filesDir, app.cacheDir, content = AndroidContentSource(app)), installer,
             ReminderAlarms(app, keyValue, checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) }),
             HostWidgets(app) { appState },
-            scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
-            checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) })
+            scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo())
         try {
             runtime.start(coreBundle(app), legacy?.bootState ?: "", legacy?.backup ?: "")
             setLanguage(runtime, language ?: legacy?.language)
