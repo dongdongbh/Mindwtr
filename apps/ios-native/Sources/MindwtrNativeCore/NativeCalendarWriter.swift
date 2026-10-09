@@ -119,6 +119,13 @@ protocol NativeCalendarWriting: NativeCalendarReading {
     func deleteEvent(eventID: String, calendarID: String) throws
 }
 
+/// Per-call proof on the serial worker, before mutable provider handles or stores are changed.
+/// Unrefined writers remain uncertain on every error; callbacks cannot escape or authorize a write.
+protocol NativeCalendarWriteWitnessing: NativeCalendarWriting {
+    func writeWitnessed(_ request: NativeCalendarWriteRequest, beforeProviderMutation: () -> Void,
+                        confirmedMissingEvent: () -> Void) throws -> NativeCalendarWriteValue
+}
+
 enum NativeCalendarWriteValidation {
     static func id(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 1024 && value.unicodeScalars.contains {
@@ -193,7 +200,8 @@ enum NativeCalendarWritePolicy {
             return values
         }
     }
-    static func createCalendar<P: NativeCalendarWriteProviding>(_ details: NativeCalendarCreateDetails, using provider: P) throws -> String {
+    static func createCalendar<P: NativeCalendarWriteProviding>(_ details: NativeCalendarCreateDetails, using provider: P,
+                                                               beforeProviderMutation: () -> Void = {}) throws -> String {
         try fixedErrors {
             try requireAccess(provider)
             let matches = try provider.sources().filter { NativeCalendarWriteValidation.equalID(provider.source($0).id, details.sourceID) }
@@ -204,50 +212,83 @@ enum NativeCalendarWritePolicy {
             guard NativeCalendarWriteValidation.equalID(current.id, details.sourceID), current.type.supportsCreation else {
                 throw NativeCalendarWriteError.invalid
             }
+            beforeProviderMutation()
             return try resultID(provider.createCalendar(details, source: source))
         }
     }
-    static func updateCalendar<P: NativeCalendarWriteProviding>(calendarID: String, details: NativeCalendarUpdateDetails, using provider: P) throws {
+    static func updateCalendar<P: NativeCalendarWriteProviding>(calendarID: String, details: NativeCalendarUpdateDetails, using provider: P,
+                                                               beforeProviderMutation: () -> Void = {}) throws {
         try request(calendarID: calendarID, operation: "updateCalendar", details: details.json)
         try fixedErrors {
             let calendar = try target(calendarID, provider: provider)
             try requireAccess(provider); try writable(calendar, id: calendarID, provider: provider, mutableCalendar: true)
+            beforeProviderMutation()
             try provider.updateCalendar(details, calendar: calendar)
         }
     }
-    static func deleteCalendar<P: NativeCalendarWriteProviding>(calendarID: String, using provider: P) throws {
+    static func deleteCalendar<P: NativeCalendarWriteProviding>(calendarID: String, using provider: P,
+                                                               beforeProviderMutation: () -> Void = {}) throws {
         try request(calendarID: calendarID, operation: "deleteCalendar")
         try fixedErrors {
             let calendar = try target(calendarID, provider: provider)
             try requireAccess(provider); try writable(calendar, id: calendarID, provider: provider, mutableCalendar: true)
+            beforeProviderMutation()
             try provider.deleteCalendar(calendar)
         }
     }
-    static func createEvent<P: NativeCalendarWriteProviding>(calendarID: String, details: NativeCalendarEventDetails, using provider: P) throws -> String {
+    static func createEvent<P: NativeCalendarWriteProviding>(calendarID: String, details: NativeCalendarEventDetails, using provider: P,
+                                                            beforeProviderMutation: () -> Void = {}) throws -> String {
         try request(calendarID: calendarID, operation: "createEvent", details: details.json)
         return try fixedErrors {
             let calendar = try target(calendarID, provider: provider)
             try requireAccess(provider); try writable(calendar, id: calendarID, provider: provider)
+            beforeProviderMutation()
             return try resultID(provider.createEvent(details, calendar: calendar))
         }
     }
-    static func updateEvent<P: NativeCalendarWriteProviding>(eventID: String, calendarID: String, details: NativeCalendarEventDetails, using provider: P) throws {
+    static func updateEvent<P: NativeCalendarWriteProviding>(eventID: String, calendarID: String, details: NativeCalendarEventDetails, using provider: P,
+                                                            beforeProviderMutation: () -> Void = {}, confirmedMissingEvent: () -> Void = {}) throws {
         try request(calendarID: calendarID, eventID: eventID, operation: "updateEvent", details: details.json)
         try fixedErrors {
-            let (calendar, event) = try exactEvent(eventID, calendarID: calendarID, provider: provider)
+            let (calendar, event) = try exactEvent(eventID, calendarID: calendarID, provider: provider, confirmedMissingEvent: confirmedMissingEvent)
             try requireAccess(provider); try writable(calendar, id: calendarID, provider: provider)
             try checkIdentity(event, eventID: eventID, calendarID: calendarID, provider: provider)
+            beforeProviderMutation()
             try provider.updateEvent(details, event: event)
         }
     }
-    static func deleteEvent<P: NativeCalendarWriteProviding>(eventID: String, calendarID: String, using provider: P) throws {
+    static func deleteEvent<P: NativeCalendarWriteProviding>(eventID: String, calendarID: String, using provider: P,
+                                                            beforeProviderMutation: () -> Void = {}, confirmedMissingEvent: () -> Void = {}) throws {
         try request(calendarID: calendarID, eventID: eventID, operation: "deleteEvent")
         try fixedErrors {
-            let (calendar, event) = try exactEvent(eventID, calendarID: calendarID, provider: provider)
+            let (calendar, event) = try exactEvent(eventID, calendarID: calendarID, provider: provider, confirmedMissingEvent: confirmedMissingEvent)
             try requireAccess(provider); try writable(calendar, id: calendarID, provider: provider)
             try checkIdentity(event, eventID: eventID, calendarID: calendarID, provider: provider)
+            beforeProviderMutation()
             try provider.deleteEvent(event)
         }
+    }
+
+    static func write<P: NativeCalendarWriteProviding>(_ request: NativeCalendarWriteRequest, using provider: P,
+        beforeProviderMutation: () -> Void, confirmedMissingEvent: () -> Void) throws -> NativeCalendarWriteValue {
+        switch request {
+        case .sources: return .sources(try sources(provider))
+        case .createCalendar(let details):
+            return .identifier(try createCalendar(details, using: provider, beforeProviderMutation: beforeProviderMutation))
+        case .updateCalendar(let id, let details):
+            try updateCalendar(calendarID: id, details: details, using: provider, beforeProviderMutation: beforeProviderMutation)
+        case .deleteCalendar(let id):
+            try deleteCalendar(calendarID: id, using: provider, beforeProviderMutation: beforeProviderMutation)
+        case .createEvent(let id, let details):
+            return .identifier(try createEvent(calendarID: id, details: details, using: provider, beforeProviderMutation: beforeProviderMutation))
+        case .updateEvent(let event, let calendar, let details):
+            try updateEvent(eventID: event, calendarID: calendar, details: details, using: provider,
+                beforeProviderMutation: beforeProviderMutation, confirmedMissingEvent: confirmedMissingEvent)
+        case .deleteEvent(let event, let calendar):
+            try deleteEvent(eventID: event, calendarID: calendar, using: provider,
+                beforeProviderMutation: beforeProviderMutation, confirmedMissingEvent: confirmedMissingEvent)
+        }
+        return .completed
     }
 
     static func existingEvent<P: NativeCalendarWriteProviding>(eventID: String, calendarID: String, using provider: P) throws -> P.EventValue? {
@@ -284,8 +325,12 @@ enum NativeCalendarWritePolicy {
         guard NativeCalendarWriteValidation.equalID(value.id, id), value.allowsEvents else { throw NativeCalendarWriteError.invalid }
         guard value.allowsModifications, !mutableCalendar || !value.immutable else { throw NativeCalendarWriteError.readOnly }
     }
-    private static func exactEvent<P: NativeCalendarWriteProviding>(_ id: String, calendarID: String, provider: P) throws -> (P.CalendarValue, P.EventValue) {
-        guard let result = try findEvent(id, calendarID: calendarID, provider: provider) else { throw NativeCalendarWriteError.missingEvent }
+    private static func exactEvent<P: NativeCalendarWriteProviding>(_ id: String, calendarID: String, provider: P,
+        confirmedMissingEvent: () -> Void = {}) throws -> (P.CalendarValue, P.EventValue) {
+        guard let result = try findEvent(id, calendarID: calendarID, provider: provider) else {
+            confirmedMissingEvent()
+            throw NativeCalendarWriteError.missingEvent
+        }
         return result
     }
     private static func findEvent<P: NativeCalendarWriteProviding>(_ id: String, calendarID: String, provider: P) throws -> (P.CalendarValue, P.EventValue)? {

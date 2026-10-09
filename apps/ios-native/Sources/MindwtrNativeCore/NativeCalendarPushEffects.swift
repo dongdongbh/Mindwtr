@@ -55,6 +55,15 @@ final class NativeCalendarPushEffects {
         return started
     }
 
+    /// The exact owner drains old jobs first; confirmed started publication always precedes worker admission.
+    func discardPrepared(id: UUID) throws {
+        let snapshot = try read()
+        guard let effect = snapshot.effect, effect.id == id, effect.phase == .prepared else {
+            throw NativeCalendarWriteError.invalid
+        }
+        _ = try publish(nil, replacing: snapshot.state)
+    }
+
     /// The caller retains the actual worker outcome until this publication succeeds, then retires it.
     func acceptCompletion(id: UUID, outcome: NativeCalendarWriteOutcome) throws {
         let snapshot = try read()
@@ -63,11 +72,11 @@ final class NativeCalendarPushEffects {
         }
         let next: NativeCalendarPushEffect?
         switch outcome {
-        case .notStarted: next = nil
+        case .notStarted, .failedBeforeMutation: next = nil
         case .succeeded(.identifier(let identifier)): next = try effect.recording(result: .identifier(identifier))
         case .succeeded(.completed): next = try effect.recording(result: .completed)
         case .succeeded(.sources(_)): throw NativeCalendarWriteError.invalid
-        case .failed(.missingEvent): next = try effect.recording(result: .missingEvent)
+        case .confirmedMissingEvent: next = try effect.recording(result: .missingEvent)
         case .failed: return
         }
         _ = try publish(next, replacing: snapshot.state)
@@ -160,7 +169,7 @@ final class NativeCalendarPushEffects {
         guard state.count == 5, state[1].map(NativeCalendarWriteValidation.id) ?? true else {
             throw NativeCalendarWriteError.invalid
         }
-        let intent = try calendarIntent(state[4])
+        let intent = try Self.calendarIntent(state[4])
         switch request {
         case .createCalendar(let details):
             // The exact owner separately proves a stale saved ID absent before admitting this unbound create.
@@ -188,7 +197,7 @@ final class NativeCalendarPushEffects {
         return intent
     }
 
-    private func calendarIntent(_ raw: String?) throws -> (title: String, calendarID: String?, deletionRevision: String?)? {
+    static func calendarIntent(_ raw: String?) throws -> (title: String, calendarID: String?, deletionRevision: String?)? {
         guard let raw else { return nil }
         do {
             guard try NativeJSON.hasUniqueObjectKeys(raw),

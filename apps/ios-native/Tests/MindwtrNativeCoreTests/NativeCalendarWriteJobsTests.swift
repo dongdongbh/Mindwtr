@@ -350,11 +350,37 @@ final class NativeCalendarWriteJobsTests: XCTestCase {
         let jobs = NativeCalendarJobs(registry: NativeAttachmentLocalRequests()) { factories += 1; return provider }
         defer { jobs.shutdown() }
         let id = UUID(); try jobs.submitWrite(.sources, operationID: id); jobs.drain()
-        try assertFailure(jobs, id, .unavailable); XCTAssertEqual(factories, 1); XCTAssertTrue(provider.operations.isEmpty)
+        guard case .failedBeforeMutation(.unavailable) = try XCTUnwrap(jobs.writeOutcome(operationID: id)) else {
+            return XCTFail("Read-only provider cannot enter a mutation")
+        }
+        XCTAssertEqual(factories, 1); XCTAssertTrue(provider.operations.isEmpty)
         try jobs.retireWrite(operationID: id)
         _ = try jobs.submit("{\"op\":\"permissions\"}"); jobs.drain()
         XCTAssertTrue(try XCTUnwrap(jobs.next()).completed); XCTAssertEqual(provider.operations, ["permissions"])
         XCTAssertEqual(factories, 1)
+    }
+
+    func testWriteReadinessIsAdvisoryAndRefusesReadTakenBodyActiveSlotAndClosedRegistry() throws {
+        let registry = NativeAttachmentLocalRequests(), provider = CalendarWriteJobsProvider()
+        let jobs = NativeCalendarJobs(registry: registry, readFile: { _, _ in Data("synthetic".utf8) }) { provider }
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        defer { release.signal(); jobs.shutdown() }
+        XCTAssertTrue(jobs.writeAdmissionAvailable)
+        _ = try jobs.submit("{\"op\":\"permissions\"}")
+        XCTAssertFalse(jobs.writeAdmissionAvailable); jobs.drain()
+        XCTAssertFalse(jobs.writeAdmissionAvailable)
+        _ = try jobs.next(); XCTAssertTrue(jobs.writeAdmissionAvailable)
+        _ = try jobs.submit("{\"op\":\"readFile\",\"uri\":\"synthetic\"}"); jobs.drain()
+        _ = try jobs.next(); XCTAssertFalse(jobs.writeAdmissionAvailable)
+        _ = try jobs.body(); XCTAssertTrue(jobs.writeAdmissionAvailable)
+        provider.beforeWrite = { _ in entered.signal(); XCTAssertEqual(release.wait(timeout: .now() + 5), .success) }
+        let id = UUID(); try jobs.submitWrite(.sources, operationID: id)
+        XCTAssertEqual(entered.wait(timeout: .now() + 2), .success)
+        XCTAssertFalse(jobs.writeAdmissionAvailable)
+        release.signal(); jobs.drain(); XCTAssertFalse(jobs.writeAdmissionAvailable)
+        try jobs.retireWrite(operationID: id); XCTAssertTrue(jobs.writeAdmissionAvailable)
+        registry.close(); XCTAssertFalse(jobs.writeAdmissionAvailable)
+        jobs.shutdown(); XCTAssertFalse(jobs.writeAdmissionAvailable)
     }
 
     func testWakeRunsOutsideSlotLockAndCanPeekWithoutConsumingCompletion() throws {

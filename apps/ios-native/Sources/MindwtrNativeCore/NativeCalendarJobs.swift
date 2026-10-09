@@ -7,6 +7,16 @@ enum NativeCalendarWriteValue: Sendable {
 
 enum NativeCalendarWriteOutcome: Sendable {
     case notStarted, succeeded(NativeCalendarWriteValue), failed(NativeCalendarWriteError)
+    case failedBeforeMutation(NativeCalendarWriteError), confirmedMissingEvent
+
+    /// Shared policy may remove mappings only for the explicit successful absence observation.
+    var replyError: NativeCalendarWriteError? {
+        switch self {
+        case .failed(let error), .failedBeforeMutation(let error): return error == .missingEvent ? .failed : error
+        case .confirmedMissingEvent: return .missingEvent
+        case .notStarted, .succeeded: return nil
+        }
+    }
 }
 
 /// EventKit operations are synchronous: cancellation drains them, never interrupts them.
@@ -148,6 +158,12 @@ final class NativeCalendarJobs: @unchecked Sendable {
         return writeSlot.flatMap { $0.id == operationID ? $0.outcome : nil }
     }
 
+    /// Advisory only; submitWrite retains the authoritative atomic admission check.
+    var writeAdmissionAvailable: Bool {
+        condition.lock(); defer { condition.unlock() }
+        return accepting && !registry.isClosing && jobs.isEmpty && taken == nil && writeSlot == nil
+    }
+
     func retireWrite(operationID: UUID) throws {
         condition.lock(); defer { condition.unlock() }
         guard let job = writeSlot, job.id == operationID, job.outcome != nil else { throw NativeCalendarWriteError.unavailable }
@@ -161,6 +177,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
         let outcome: NativeCalendarWriteOutcome
         if job.token.isCancelled || registry.isClosing { outcome = .notStarted }
         else {
+            var mutationEntered = false, absenceConfirmed = false
             do {
                 let provider: any NativeCalendarReading
                 if let reader { provider = reader }
@@ -171,34 +188,59 @@ final class NativeCalendarJobs: @unchecked Sendable {
                     // Once entered, retain the actual provider result even if close
                     // or cancellation happens before its synchronous return.
                     let value: NativeCalendarWriteValue
-                    switch job.request {
-                    case .sources:
-                        let sources = try writer.sources()
-                        guard sources.allSatisfy({ NativeCalendarWriteValidation.id($0.id) }) else { throw NativeCalendarWriteError.failed }
-                        value = .sources(sources)
-                    case .createCalendar(let details):
-                        let id = try writer.createCalendar(details)
-                        guard NativeCalendarWriteValidation.id(id) else { throw NativeCalendarWriteError.failed }
-                        value = .identifier(id)
-                    case .updateCalendar(let id, let details):
-                        try writer.updateCalendar(calendarID: id, details: details); value = .completed
-                    case .deleteCalendar(let id):
-                        try writer.deleteCalendar(calendarID: id); value = .completed
-                    case .createEvent(let calendarID, let details):
-                        let id = try writer.createEvent(calendarID: calendarID, details: details)
-                        guard NativeCalendarWriteValidation.id(id) else { throw NativeCalendarWriteError.failed }
-                        value = .identifier(id)
-                    case .updateEvent(let eventID, let calendarID, let details):
-                        try writer.updateEvent(eventID: eventID, calendarID: calendarID, details: details); value = .completed
-                    case .deleteEvent(let eventID, let calendarID):
-                        try writer.deleteEvent(eventID: eventID, calendarID: calendarID); value = .completed
+                    if let witnessed = writer as? any NativeCalendarWriteWitnessing {
+                        value = try witnessed.writeWitnessed(job.request, beforeProviderMutation: {
+                            mutationEntered = true; absenceConfirmed = false
+                        }, confirmedMissingEvent: {
+                            if !mutationEntered { absenceConfirmed = true }
+                        })
+                        switch job.request {
+                        case .sources: break
+                        default:
+                            guard mutationEntered, !absenceConfirmed else {
+                                // A claimed mutation success without entry proof is uncertain, never safe to clear.
+                                mutationEntered = true
+                                throw NativeCalendarWriteError.failed
+                            }
+                        }
+                    } else {
+                        // Old writers combine preflight and effects; every throw after this point is uncertain.
+                        mutationEntered = true
+                        switch job.request {
+                        case .sources: value = .sources(try writer.sources())
+                        case .createCalendar(let details): value = .identifier(try writer.createCalendar(details))
+                        case .updateCalendar(let id, let details):
+                            try writer.updateCalendar(calendarID: id, details: details); value = .completed
+                        case .deleteCalendar(let id):
+                            try writer.deleteCalendar(calendarID: id); value = .completed
+                        case .createEvent(let calendarID, let details):
+                            value = .identifier(try writer.createEvent(calendarID: calendarID, details: details))
+                        case .updateEvent(let eventID, let calendarID, let details):
+                            try writer.updateEvent(eventID: eventID, calendarID: calendarID, details: details); value = .completed
+                        case .deleteEvent(let eventID, let calendarID):
+                            try writer.deleteEvent(eventID: eventID, calendarID: calendarID); value = .completed
+                        }
                     }
+                    try validateWriteValue(value, request: job.request)
                     outcome = .succeeded(value)
                 }
-            } catch let error as NativeCalendarWriteError { outcome = .failed(error) }
-            catch NativeCalendarReadError.denied { outcome = .failed(.denied) }
-            catch NativeCalendarReadError.unavailable { outcome = .failed(.unavailable) }
-            catch { outcome = .failed(.failed) }
+            } catch {
+                let fixed: NativeCalendarWriteError
+                if let value = error as? NativeCalendarWriteError { fixed = value }
+                else if let value = error as? NativeCalendarReadError {
+                    switch value {
+                    case .denied: fixed = .denied
+                    case .unavailable: fixed = .unavailable
+                    }
+                } else { fixed = .failed }
+                if mutationEntered { outcome = .failed(fixed) }
+                else if absenceConfirmed, fixed == .missingEvent {
+                    switch job.request {
+                    case .updateEvent, .deleteEvent: outcome = .confirmedMissingEvent
+                    default: outcome = .failedBeforeMutation(fixed)
+                    }
+                } else { outcome = .failedBeforeMutation(fixed) }
+            }
         }
         condition.lock()
         job.outcome = outcome
@@ -206,6 +248,17 @@ final class NativeCalendarJobs: @unchecked Sendable {
         condition.broadcast(); condition.unlock()
         registry.remove(job.registryID)
         callback?()
+    }
+
+    private func validateWriteValue(_ value: NativeCalendarWriteValue, request: NativeCalendarWriteRequest) throws {
+        switch (request, value) {
+        case (.sources, .sources(let sources)):
+            guard sources.allSatisfy({ NativeCalendarWriteValidation.id($0.id) }) else { throw NativeCalendarWriteError.failed }
+        case (.createCalendar, .identifier(let id)), (.createEvent, .identifier(let id)):
+            guard NativeCalendarWriteValidation.id(id) else { throw NativeCalendarWriteError.failed }
+        case (.updateCalendar, .completed), (.deleteCalendar, .completed), (.updateEvent, .completed), (.deleteEvent, .completed): break
+        default: throw NativeCalendarWriteError.failed
+        }
     }
 
     func abort(_ id: String) {

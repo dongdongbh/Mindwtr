@@ -31,7 +31,7 @@ import EventKit
 import CoreGraphics
 
 /// Created, used and released by NativeCalendarJobs' one serial worker.
-final class NativeCalendarReader: NativeCalendarWriting, NativeCalendarRecoveryReading {
+final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarRecoveryReading {
     private var ownedStore: EKEventStore?
     private let formatter: DateFormatter = {
         let value = DateFormatter()
@@ -158,6 +158,11 @@ final class NativeCalendarReader: NativeCalendarWriting, NativeCalendarRecoveryR
     private func writeProvider() -> EventKitCalendarWriteProvider {
         EventKitCalendarWriteProvider(store: { self.store })
     }
+    func writeWitnessed(_ request: NativeCalendarWriteRequest, beforeProviderMutation: () -> Void,
+                        confirmedMissingEvent: () -> Void) throws -> NativeCalendarWriteValue {
+        try NativeCalendarWritePolicy.write(request, using: writeProvider(), beforeProviderMutation: beforeProviderMutation,
+                                           confirmedMissingEvent: confirmedMissingEvent)
+    }
     func sources() throws -> [NativeCalendarSource] {
         try NativeCalendarWritePolicy.sources(writeProvider())
     }
@@ -270,7 +275,9 @@ private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding 
     func deleteEvent(_ event: EKEvent) throws { try store.remove(event, span: .thisEvent, commit: true) }
 }
 #else
-final class NativeCalendarReader: NativeCalendarWriting, NativeCalendarRecoveryReading {
+final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarRecoveryReading {
+    func writeWitnessed(_ request: NativeCalendarWriteRequest, beforeProviderMutation: () -> Void,
+                        confirmedMissingEvent: () -> Void) throws -> NativeCalendarWriteValue { throw NativeCalendarWriteError.unavailable }
     func permissions() throws -> NativeCalendarPermission { throw NativeCalendarReadError.unavailable }
     func calendars() throws -> [[String: Any]] { throw NativeCalendarReadError.unavailable }
     func events(calendarIds: [String], start: Date, end: Date) throws -> [[String: Any]] {

@@ -206,18 +206,24 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
         var bytes = try Data(contentsOf: manifest)
         fixed(.invalid) { try effects.markStarted(id: wrong) }
         fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .notStarted) }
+        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .failedBeforeMutation(.denied)) }
+        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .confirmedMissingEvent) }
         fixed(.invalid) { try effects.acknowledgeMapping(id: id, mapping: nil) }
         XCTAssertEqual(try Data(contentsOf: manifest), bytes)
         _ = try effects.markStarted(id: id); bytes = try Data(contentsOf: manifest)
         fixed(.invalid) { try effects.markStarted(id: id) }
         fixed(.invalid) { try effects.acceptCompletion(id: wrong, outcome: .notStarted) }
+        fixed(.invalid) { try effects.acceptCompletion(id: wrong, outcome: .failedBeforeMutation(.denied)) }
+        fixed(.invalid) { try effects.acceptCompletion(id: wrong, outcome: .confirmedMissingEvent) }
         fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .succeeded(.sources([]))) }
         fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .succeeded(.completed)) }
-        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .failed(.missingEvent)) }
+        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .confirmedMissingEvent) }
         XCTAssertEqual(try Data(contentsOf: manifest), bytes)
         try effects.acceptCompletion(id: id, outcome: .succeeded(.identifier("created")))
         bytes = try Data(contentsOf: manifest)
         fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .notStarted) }
+        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .failedBeforeMutation(.denied)) }
+        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .confirmedMissingEvent) }
         fixed(.invalid) { try effects.acknowledgeMapping(id: wrong, mapping: mapping(event: "created")) }
         fixed(.invalid) { try effects.acknowledgeMapping(id: id, mapping: nil) }
         fixed(.invalid) { try effects.acknowledgeMapping(id: id, mapping: mapping(task: "other", event: "created")) }
@@ -245,7 +251,7 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
         _ = try effects.markStarted(id: id)
         let bytes = try Data(contentsOf: manifest)
         for error in [NativeCalendarWriteError.denied, .unavailable, .missingCalendar, .missingSource,
-                      .invalid, .readOnly, .ambiguous, .recurring, .failed] {
+                      .missingEvent, .invalid, .readOnly, .ambiguous, .recurring, .failed] {
             try effects.acceptCompletion(id: id, outcome: .failed(error))
             XCTAssertEqual(try Data(contentsOf: manifest), bytes); XCTAssertEqual(try effects.current()?.phase, .started)
         }
@@ -262,7 +268,7 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
                 try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
                 _ = try effects.prepare(id: id, requestJSON: request(op), taskID: "task")
                 _ = try effects.markStarted(id: id)
-                try effects.acceptCompletion(id: id, outcome: missing ? .failed(.missingEvent) : .succeeded(.completed))
+                try effects.acceptCompletion(id: id, outcome: missing ? .confirmedMissingEvent : .succeeded(.completed))
                 XCTAssertEqual(try effects.current()?.result, missing ? .missingEvent : .completed)
                 let intended = !missing && op == "updateEvent" ? next : nil
                 try effects.acknowledgeMapping(id: id, mapping: intended)
@@ -270,6 +276,203 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
                 if let intended { try database.compareAndSetCalendarPushMapping(taskID: "task", expected: intended, next: nil) }
             }
         }
+        try assertUnrelatedPreserved()
+    }
+
+    func testFailedBeforeMutationClearsOnlyStartedEffectPreservingCompleteRowsAndRawState() throws {
+        let effects = try coordinator(), before = try mapping(stamp: "exact-e\u{301}"), other = try mapping(task: "other")
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
+        try database.compareAndSetCalendarPushMapping(taskID: "other", expected: nil, next: other)
+        _ = try database.execute("INSERT INTO calendar_sync VALUES ('task','android-event','android-calendar','android','original')")
+        for error in [NativeCalendarWriteError.denied, .missingSource, .readOnly, .invalid, .failed, .missingEvent] {
+            _ = try effects.prepare(id: id, requestJSON: request("updateEvent"), taskID: "task")
+            _ = try effects.markStarted(id: id)
+            let forbid = HostIOFaults(); forbid.beforeSQL = { _ in throw Injected.failure }; database.faults = forbid
+            try effects.acceptCompletion(id: id, outcome: .failedBeforeMutation(error))
+            XCTAssertNil(try effects.current()); database.faults = nil
+            XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
+            XCTAssertEqual(try database.readCalendarPushMapping(taskID: "other"), other)
+            XCTAssertTrue(try database.execute("SELECT * FROM calendar_sync WHERE platform = 'android'").contains("android-event"))
+            try assertUnrelatedPreserved()
+        }
+        try reopen(); XCTAssertNil(try coordinator().current())
+        XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
+    }
+
+    func testColdPreparedDiscardClearsExactEffectPreservingCurrentChangedCellsAndMapping() throws {
+        let before = try mapping()
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
+        for calendar in [false, true] {
+            let cells = calendar ? calendarState(intent: try intent()) : firstFive.map { Optional($0) }
+            try setCalendarState(cells)
+            let effects = try coordinator()
+            let raw = calendar ? try calendarRequest("createCalendar") : try request("updateEvent")
+            _ = try effects.prepare(id: id, requestJSON: raw, taskID: calendar ? nil : "task")
+            let changed: [String?] = ["external-enabled", nil, "selected-e\u{301}", "\u{FEFF}legacy-color", "external-invalid-intent"]
+            try setCalendarState(changed); try reopen()
+            let cold = try coordinator(), bytes = try Data(contentsOf: manifest)
+            XCTAssertEqual(try cold.current()?.phase, .prepared)
+            fixed(.invalid) { try cold.discardPrepared(id: UUID()) }
+            XCTAssertEqual(try Data(contentsOf: manifest), bytes)
+            let forbid = HostIOFaults(); forbid.beforeSQL = { _ in throw Injected.failure }; database.faults = forbid
+            var promotions = 0; storage.faults.beforePromotion = { promotions += 1 }
+            try cold.discardPrepared(id: id)
+            XCTAssertEqual(promotions, 1); XCTAssertNil(try cold.current())
+            fixed(.invalid) { try cold.discardPrepared(id: id) }
+            try assertUnrelatedPreserved(changed)
+            storage.faults.beforePromotion = nil; database.faults = nil
+            XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
+            try reopen(); XCTAssertNil(try coordinator().current()); try assertUnrelatedPreserved(changed)
+        }
+    }
+
+    func testUnprovenMissingEventKeepsStartedAndCompleteMappingWithoutSQLIncludingColdRead() throws {
+        let before = try mapping(stamp: "unchanged-e\u{301}"), effects = try coordinator()
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
+        _ = try effects.prepare(id: id, requestJSON: request("updateEvent"), taskID: "task")
+        _ = try effects.markStarted(id: id)
+        let bytes = try Data(contentsOf: manifest)
+        let forbid = HostIOFaults(); forbid.beforeSQL = { _ in throw Injected.failure }; database.faults = forbid
+        try effects.acceptCompletion(id: id, outcome: .failed(.missingEvent))
+        XCTAssertEqual(try Data(contentsOf: manifest), bytes); XCTAssertEqual(try effects.current()?.phase, .started)
+        fixed(.invalid) { try effects.acknowledgeMapping(id: id, mapping: nil) }
+        fixed(.invalid) { try effects.discardPrepared(id: id) }
+        fixed(.unavailable) { try effects.prepare(id: UUID(), requestJSON: request(), taskID: "other") }
+        try reopen(); let cold = try coordinator()
+        XCTAssertEqual(try cold.current()?.phase, .started); XCTAssertNil(try cold.current()?.result)
+        XCTAssertEqual(try Data(contentsOf: manifest), bytes)
+        XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
+        try assertUnrelatedPreserved()
+    }
+
+    func testConfirmedAbsenceColdAcknowledgmentStillRequiresExactFullMappingCAS() throws {
+        let before = try mapping(), conflict = try mapping(event: "foreign", stamp: "different"), effects = try coordinator()
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
+        _ = try effects.prepare(id: id, requestJSON: request("deleteEvent"), taskID: "task")
+        _ = try effects.markStarted(id: id)
+        let forbid = HostIOFaults(); forbid.beforeSQL = { _ in throw Injected.failure }; database.faults = forbid
+        try effects.acceptCompletion(id: id, outcome: .confirmedMissingEvent)
+        XCTAssertEqual(try effects.current()?.result, .missingEvent); XCTAssertEqual(try effects.current()?.phase, .saved)
+        database.faults = nil
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: before, next: conflict)
+        try reopen(); let cold = try coordinator()
+        XCTAssertThrowsError(try cold.acknowledgeMapping(id: id, mapping: nil))
+        XCTAssertEqual(try cold.current()?.phase, .acknowledging); XCTAssertEqual(try cold.current()?.result, .missingEvent)
+        XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), conflict)
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: conflict, next: before)
+        try cold.acknowledgeMapping(id: id, mapping: nil)
+        XCTAssertNil(try cold.current()); XCTAssertNil(try database.readCalendarPushMapping(taskID: "task"))
+        try assertUnrelatedPreserved()
+    }
+
+    func testCalendarConfirmedAbsenceRefusesWhileNoMutationFailurePreservesOwnedCells() throws {
+        for operation in ["createCalendar", "updateCalendar", "deleteCalendar"] {
+            let cells = operation == "createCalendar" ? calendarState(intent: try intent()) : calendarState(saved: "calendar")
+            try setCalendarState(cells); let effects = try coordinator()
+            _ = try effects.prepare(id: id, requestJSON: calendarRequest(operation), taskID: nil)
+            _ = try effects.markStarted(id: id)
+            let bytes = try Data(contentsOf: manifest)
+            let forbid = HostIOFaults(); forbid.beforeSQL = { _ in throw Injected.failure }; database.faults = forbid
+            fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .confirmedMissingEvent) }
+            XCTAssertEqual(try Data(contentsOf: manifest), bytes)
+            try effects.acceptCompletion(id: id, outcome: .failedBeforeMutation(.denied))
+            XCTAssertNil(try effects.current()); try assertUnrelatedPreserved(cells); database.faults = nil
+        }
+    }
+
+    func testPreparedDiscardRejectsEveryLaterPhaseAndNewOutcomesCannotClearAcknowledging() throws {
+        let effects = try coordinator()
+        fixed(.invalid) { try effects.discardPrepared(id: id) }
+        _ = try effects.prepare(id: id, requestJSON: request(), taskID: "task")
+        let bytes = try Data(contentsOf: manifest)
+        fixed(.invalid) { try effects.discardPrepared(id: UUID()) }
+        XCTAssertEqual(try Data(contentsOf: manifest), bytes)
+        _ = try effects.markStarted(id: id)
+        fixed(.invalid) { try effects.discardPrepared(id: id) }
+        try effects.acceptCompletion(id: id, outcome: .succeeded(.identifier("created")))
+        fixed(.invalid) { try effects.discardPrepared(id: id) }
+        let intended = try mapping(event: "created")
+        let forbid = HostIOFaults(); forbid.beforeSQL = { _ in throw Injected.failure }; database.faults = forbid
+        XCTAssertThrowsError(try effects.acknowledgeMapping(id: id, mapping: intended))
+        let acknowledging = try Data(contentsOf: manifest)
+        XCTAssertEqual(try effects.current()?.phase, .acknowledging)
+        fixed(.invalid) { try effects.discardPrepared(id: id) }
+        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .failedBeforeMutation(.denied)) }
+        fixed(.invalid) { try effects.acceptCompletion(id: id, outcome: .confirmedMissingEvent) }
+        XCTAssertEqual(try Data(contentsOf: manifest), acknowledging)
+        database.faults = nil; try effects.acknowledgeMapping(id: id, mapping: intended)
+    }
+
+    func testNoMutationClearAndPreparedDiscardRetryOnlyIdenticalSixCellPairAcrossFaultCuts() throws {
+        let before = try mapping()
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
+        for discard in [false, true] {
+            for cut in ["before", "after", "readback"] {
+                let effects = try coordinator()
+                _ = try effects.prepare(id: id, requestJSON: request("updateEvent"), taskID: "task")
+                if !discard { _ = try effects.markStarted(id: id) }
+                let forbid = HostIOFaults(); forbid.beforeSQL = { _ in throw Injected.failure }; database.faults = forbid
+                var promotions = 0
+                storage.faults.beforePromotion = { promotions += 1; if cut == "before" { throw Injected.failure } }
+                if cut == "after" { storage.faults.afterPromotion = { throw Injected.failure } }
+                if cut == "readback" { storage.faults.beforeReadback = { throw Injected.failure } }
+                if discard { XCTAssertThrowsError(try effects.discardPrepared(id: id)) }
+                else { XCTAssertThrowsError(try effects.acceptCompletion(id: id, outcome: .failedBeforeMutation(.missingEvent))) }
+                XCTAssertTrue(storage.hasPendingCalendarPushMutation)
+                let bytes = try Data(contentsOf: manifest)
+                fixed(.unavailable) { try effects.current() }
+                fixed(.unavailable) { try effects.discardPrepared(id: id) }
+                fixed(.unavailable) { try effects.discardPrepared(id: UUID()) }
+                fixed(.unavailable) { try effects.acceptCompletion(id: id, outcome: .confirmedMissingEvent) }
+                fixed(.unavailable) { try effects.prepare(id: UUID(), requestJSON: request(), taskID: "other") }
+                XCTAssertEqual(try Data(contentsOf: manifest), bytes)
+                storage.faults.beforePromotion = { promotions += 1 }; storage.faults.afterPromotion = nil; storage.faults.beforeReadback = nil
+                try effects.retryPublication()
+                XCTAssertEqual(promotions, cut == "before" ? 2 : 1)
+                XCTAssertFalse(storage.hasPendingCalendarPushMutation); XCTAssertNil(try effects.current())
+                if cut != "before" { XCTAssertEqual(try Data(contentsOf: manifest), bytes) }
+                try assertUnrelatedPreserved(); database.faults = nil; storage.faults.beforePromotion = nil
+                XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
+                try reopen(); XCTAssertNil(try coordinator().current())
+                XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
+            }
+        }
+    }
+
+    func testColdPreparedDiscardAfterLostReplySettlesOnlyPreparedOrObservesCommittedClear() throws {
+        let before = try mapping()
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
+        for committed in [false, true] {
+            let effects = try coordinator()
+            _ = try effects.prepare(id: id, requestJSON: request("updateEvent"), taskID: "task")
+            if committed { storage.faults.afterPromotion = { throw Injected.failure } }
+            else { storage.faults.beforePromotion = { throw Injected.failure } }
+            XCTAssertThrowsError(try effects.discardPrepared(id: id))
+            try reopen(); let cold = try coordinator()
+            if committed { XCTAssertNil(try cold.current()) }
+            else {
+                XCTAssertEqual(try cold.current()?.phase, .prepared)
+                try cold.discardPrepared(id: id); XCTAssertNil(try cold.current())
+            }
+            XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
+            try assertUnrelatedPreserved()
+        }
+    }
+
+    func testColdUncommittedNoMutationClearRetainsStartedWithoutItsVolatileProof() throws {
+        let before = try mapping(), effects = try coordinator()
+        try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
+        _ = try effects.prepare(id: id, requestJSON: request("updateEvent"), taskID: "task")
+        _ = try effects.markStarted(id: id)
+        let bytes = try Data(contentsOf: manifest)
+        storage.faults.beforePromotion = { throw Injected.failure }
+        XCTAssertThrowsError(try effects.acceptCompletion(id: id, outcome: .failedBeforeMutation(.denied)))
+        try reopen(); let cold = try coordinator()
+        XCTAssertEqual(try cold.current()?.phase, .started)
+        fixed(.invalid) { try cold.discardPrepared(id: id) }
+        fixed(.unavailable) { try cold.prepare(id: UUID(), requestJSON: request(), taskID: "other") }
+        XCTAssertEqual(try Data(contentsOf: manifest), bytes)
+        XCTAssertEqual(try database.readCalendarPushMapping(taskID: "task"), before)
         try assertUnrelatedPreserved()
     }
 
@@ -345,6 +548,7 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
         fixed(.unavailable) { try effects.current() }
         fixed(.unavailable) { try effects.prepare(id: UUID(), requestJSON: request(), taskID: "other") }
         fixed(.unavailable) { try effects.markStarted(id: id) }
+        fixed(.unavailable) { try effects.discardPrepared(id: id) }
         fixed(.unavailable) { try effects.acceptCompletion(id: id, outcome: .notStarted) }
         fixed(.unavailable) { try effects.acknowledgeMapping(id: id, mapping: intended) }
         XCTAssertEqual(try Data(contentsOf: manifest), bytes)
@@ -430,12 +634,14 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
             let bytes = try Data(contentsOf: manifest)
             fixed(.invalid) { try effects.current() }
             fixed(.invalid) { try coordinator() }
+            fixed(.invalid) { try effects.discardPrepared(id: id) }
             XCTAssertEqual(try Data(contentsOf: manifest), bytes)
         }
         let foreign = try NativeCalendarPushEffect(id: id, libraryID: "library-\u{e9}", requestJSON: request(), taskID: "task")
         try replaceEffect(foreign.encoded())
         let bytes = try Data(contentsOf: manifest)
         fixed(.invalid) { try effects.current() }; fixed(.invalid) { try coordinator() }
+        fixed(.invalid) { try effects.discardPrepared(id: id) }
         XCTAssertEqual(try Data(contentsOf: manifest), bytes)
         try replaceEffect(nil); XCTAssertNil(try effects.current())
         var changed = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])
@@ -718,7 +924,7 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
         XCTAssertLessThan(try tooLarge.recording(result: .completed).acknowledging(mapping: nil).encoded().utf8.count, limit)
         let savedMissing = try tooLarge.recording(result: .missingEvent)
         fixed(.invalid) { try savedMissing.acknowledging(mapping: nil) }
-        let outcomes: [NativeCalendarWriteOutcome] = [.succeeded(.completed), .failed(.missingEvent)]
+        let outcomes: [NativeCalendarWriteOutcome] = [.succeeded(.completed), .confirmedMissingEvent]
         for outcome in outcomes {
             try database.compareAndSetCalendarPushMapping(taskID: "task", expected: nil, next: before)
             let effects = try coordinator()
