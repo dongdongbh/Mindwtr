@@ -6,6 +6,7 @@ import {
     CALENDAR_PUSH_PENDING_KEY,
     CALENDAR_PUSH_ENABLED_KEY,
     CALENDAR_PUSH_TARGET_ID_KEY,
+    CalendarPushOwnershipChangedError,
     createCalendarPushService,
     type CalendarPushServiceHost,
 } from './calendar-push-service';
@@ -13,6 +14,7 @@ import { planCalendarPushColor } from './calendar-settings-model';
 import type { DeviceCalendar } from './external-calendar-feeds';
 import type { CalendarSyncEntry } from './sqlite-adapter';
 import type { Task } from './types';
+import { deterministicHash128Hex } from './uuid';
 
 /**
  * The push's device side as a native host binds it. React Native's own suite
@@ -240,6 +242,10 @@ describe('calendar push behind the host ports', () => {
             { intent: JSON.stringify({ title }), calendars: [PRIMARY, { id: 'a', title }, { id: 'b', title }] },
             { intent: JSON.stringify({ title, calendarId: 'a' }), calendars: [PRIMARY, { id: 'a', title }, { id: 'b', title }] },
             { intent: JSON.stringify({ title, calendarId: 'a' }), calendars: [PRIMARY, { id: 'a', title }, { id: 'saved', title: 'Mindwtr' }], stored: 'saved' },
+            { intent: JSON.stringify({ title, deletionRevision: 'a'.repeat(32) }), calendars: [PRIMARY] },
+            { intent: JSON.stringify({ title, calendarId: '', deletionRevision: 'a'.repeat(32) }), calendars: [PRIMARY] },
+            { intent: JSON.stringify({ title, calendarId: 'a', deletionRevision: 'A'.repeat(32) }), calendars: [PRIMARY, { id: 'a', title }] },
+            { intent: JSON.stringify({ title, calendarId: 'a', deletionRevision: 42 }), calendars: [PRIMARY, { id: 'a', title }] },
         ];
         for (const item of cases) {
             const phone = device({ os: 'ios', calendars: item.calendars, storage: {
@@ -291,6 +297,114 @@ describe('calendar push behind the host ports', () => {
         expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
         expect(phone.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
         expect(phone.writes.filter((write) => write[0] === 'createCalendar')).toHaveLength(1);
+    });
+
+    it('checks expected ownership after an in-flight iOS creation finishes', async () => {
+        const phone = device({ os: 'ios' });
+        const create = phone.host.calendars.createCalendar;
+        let finishCreate: (() => void) | undefined;
+        phone.host.calendars.createCalendar = async (details) => {
+            await new Promise<void>((resolve) => { finishCreate = resolve; });
+            return create(details);
+        };
+        const service = createCalendarPushService(phone.host);
+        const ensuring = service.ensureMindwtrCalendar();
+        await vi.waitFor(() => expect(finishCreate).toBeTypeOf('function'));
+        const deleting = service.deleteMindwtrCalendar({
+            calendarId: null,
+            creationIntentRevision: deterministicHash128Hex(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)!),
+        });
+        const refused = expect(deleting).rejects.toThrow('changed before deletion');
+        finishCreate!();
+        expect(await ensuring).toBe('created-1');
+        await refused;
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'created-1']);
+        expect(phone.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('created-1');
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([]);
+    });
+
+    it('queues a different Delete expectation after a stale request instead of sharing its result', async () => {
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'saved', title: 'Mindwtr' }], storage: {
+            [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved',
+        } });
+        const service = createCalendarPushService(phone.host);
+        const stale = service.deleteMindwtrCalendar({ calendarId: 'old', creationIntentRevision: null });
+        const current = service.deleteMindwtrCalendar({ calendarId: 'saved', creationIntentRevision: null });
+        await expect(stale).rejects.toThrow('changed before deletion');
+        await current;
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary']);
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'saved']]);
+    });
+
+    it('guards the raw iOS intent revision and permits completion once that intent is gone', async () => {
+        const title = 'Mindwtr (12345678-1234-4234-8234-123456789abc)';
+        const intent = JSON.stringify({ title }, null, 2);
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'personal', title: 'Mindwtr' }, { id: 'pending', title }], storage: {
+            [CALENDAR_PUSH_CREATION_INTENT_KEY]: intent,
+        } });
+        const service = createCalendarPushService(phone.host);
+        await expect(service.deleteMindwtrCalendar({ calendarId: null, creationIntentRevision: deterministicHash128Hex('older intent') }))
+            .rejects.toBeInstanceOf(CalendarPushOwnershipChangedError);
+        expect(phone.writes).toEqual([]);
+        expect(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(intent);
+        const expected = { calendarId: null, creationIntentRevision: deterministicHash128Hex(intent) };
+        await service.deleteMindwtrCalendar(expected);
+        await service.deleteMindwtrCalendar(expected);
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'personal']);
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'pending']]);
+        expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+    });
+
+    it('saves durable iOS deletion progress before provider removal and keeps the original expectation retryable', async () => {
+        const title = 'Mindwtr (12345678-1234-4234-8234-123456789abc)';
+        const intent = JSON.stringify({ title });
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'pending', title }], storage: {
+            [CALENDAR_PUSH_CREATION_INTENT_KEY]: intent,
+        } });
+        const expected = { calendarId: null, creationIntentRevision: deterministicHash128Hex(intent) };
+        const deleting = vi.spyOn(phone.host.calendars, 'deleteCalendar');
+        phone.life.dieAt = 1;
+        await expect(createCalendarPushService(phone.host).deleteMindwtrCalendar(expected)).rejects.toThrow();
+        expect(phone.writes).toEqual([]);
+        expect(deleting).not.toHaveBeenCalled();
+        expect(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(intent);
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'pending']);
+        phone.life.dieAt = Infinity;
+        phone.life.died = false;
+        const remove = phone.host.calendars.deleteCalendar;
+        phone.host.calendars.deleteCalendar = async (id) => {
+            expect(JSON.parse(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)!)).toEqual({
+                title, calendarId: 'pending', deletionRevision: expected.creationIntentRevision,
+            });
+            await remove(id);
+            phone.life.failList = true;
+            throw new Error('Native delete response lost');
+        };
+        await expect(createCalendarPushService(phone.host).deleteMindwtrCalendar(expected)).rejects.toThrow('response lost');
+        phone.life.failList = false;
+        await createCalendarPushService(phone.host).deleteMindwtrCalendar(expected);
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary']);
+        expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'pending']]);
+    });
+
+    it.each([false, true])('iOS ensure preserves deletion-phase ownership and cleanup clears its mapping (visible: %s)', async (visible) => {
+        const title = 'Mindwtr (12345678-1234-4234-8234-123456789abc)';
+        const revision = deterministicHash128Hex(JSON.stringify({ title }));
+        const intent = JSON.stringify({ title, calendarId: 'pending', deletionRevision: revision });
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'personal', title: 'Mindwtr' }, ...(visible ? [{ id: 'pending', title }] : [])], storage: {
+            [CALENDAR_PUSH_CREATION_INTENT_KEY]: intent,
+        }, entries: [
+            { taskId: 'owned', calendarId: 'pending', calendarEventId: 'event', platform: 'android', lastSyncedAt: '' },
+            { taskId: 'other', calendarId: 'primary', calendarEventId: 'other-event', platform: 'android', lastSyncedAt: '' },
+        ] });
+        expect(await createCalendarPushService(phone.host).ensureMindwtrCalendar()).toBeNull();
+        expect(phone.writes).toEqual([]);
+        expect(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(intent);
+        await createCalendarPushService(phone.host).deleteMindwtrCalendar({ calendarId: null, creationIntentRevision: revision });
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'personal']);
+        expect([...phone.entries.keys()]).toEqual(['other']);
+        expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
     });
 
     it('does not create a second iOS calendar while recolor is recovering an unfinished creation', async () => {

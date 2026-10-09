@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CALENDAR_PUSH_CREATION_INTENT_KEY, CALENDAR_PUSH_PENDING_KEY } from './calendar-push-service';
 import type { DeviceCalendar } from './external-calendar-feeds';
 import { loadTranslations } from './i18n/i18n-loader';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
@@ -11,7 +12,7 @@ import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter } from './sqlite-adapter';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppSettings, Area } from './types';
-import { generateUUID } from './uuid';
+import { deterministicHash128Hex, generateUUID } from './uuid';
 
 /**
  * The frozen React Native Calendar settings screen
@@ -24,6 +25,7 @@ import { generateUUID } from './uuid';
  * the same calendars, feeds, storage and recorded writes.
  */
 type Device = {
+    os?: 'android' | 'ios';
     language?: string;
     storage?: Record<string, string>;
     permission?: string;
@@ -123,7 +125,7 @@ function phone(device: Device) {
         return feed;
     };
     const host: NativeCalendarHost = {
-        platform: { os: 'android' },
+        platform: { os: device.os ?? 'android' },
         storage: {
             getItem: async (key) => state.storage.get(key) ?? null,
             setItem: async (key, entry) => { tick(); state.storage.set(key, entry); },
@@ -580,6 +582,200 @@ describe('native host contract: Settings › Calendar', () => {
             const later = await replay(handset, requestId, change);
             expect(later.answer).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             expect(later.after).toEqual(later.before);
+        });
+
+        const lostIOSCreation = async (bound = false) => {
+            const { handset, contract, view } = await boot({ os: 'ios', calendars: ['primary', 'managed'] });
+            handset.host.calendars.getSources = async () => [{ id: 'local', type: 'local', name: 'Local' }];
+            const create = handset.host.calendars.createCalendar!;
+            handset.host.calendars.createCalendar = async (details) => {
+                await create(details);
+                throw new Error('Native create response lost');
+            };
+            expect(value(await edit(contract, view().push.toggle)).changed).toBe(true);
+            let intent = handset.state.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)!;
+            expect(JSON.parse(intent)).toEqual({ title: handset.state.calendars.find((calendar) => calendar.id === 'created-1')!.title });
+            expect(handset.state.storage.has(KEYS.pushCalendar)).toBe(false);
+            expect(handset.state.storage.has(CALENDAR_PUSH_PENDING_KEY)).toBe(false);
+            if (bound) {
+                intent = JSON.stringify({ ...JSON.parse(intent), calendarId: 'created-1' });
+                await handset.host.storage.setItem(CALENDAR_PUSH_CREATION_INTENT_KEY, intent);
+                await handset.host.storage.setItem(KEYS.pushCalendar, 'created-1');
+            }
+            const restarted = await restart(handset, true);
+            const change = value(restarted.getCalendarSettings()).push.target!.delete.edit;
+            expect(value(await edit(restarted, value(restarted.getCalendarSettings()).push.toggle)).changed).toBe(true);
+            expect(handset.state.storage.get(KEYS.pushEnabled)).toBe('0');
+            return { handset, contract: restarted, change, intent };
+        };
+
+        it('Delete recovers an unbound iOS creation after a lost create response with push off', async () => {
+            const { handset, contract, change } = await lostIOSCreation();
+            const requestId = generateUUID();
+            const info = vi.spyOn(handset.host.log, 'info');
+            expect(value(await edit(contract, change, requestId)).changed).toBe(true);
+            expect(handset.state.calendarWrites.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'created-1']]);
+            expect(handset.state.calendars.map((calendar) => calendar.id)).toEqual(['g-primary', 'g-mindwtr']);
+            expect(handset.state.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+            expect(info).toHaveBeenCalledWith('Deleted Mindwtr calendar', {
+                scope: 'calendar-push', extra: { releaseCheck: 'v1.3.4/calendar-push-owned-only', outcome: 'deleted' },
+            });
+            expect(info).toHaveBeenCalledWith('Native iOS calendar cleanup completed', {
+                scope: 'calendar-settings', extra: { releaseCheck: 'v1.3.5/ios-calendar-cleanup', outcome: 'completed' },
+            });
+            const replayed = await replay(handset, requestId, change);
+            expect(value(replayed.answer).changed).toBe(false);
+            expect(replayed.after).toEqual(replayed.before);
+        });
+
+        it('a diagnostic failure does not revoke completed iOS cleanup', async () => {
+            const { handset, contract, change } = await lostIOSCreation();
+            vi.spyOn(handset.host.log, 'info').mockImplementation(async (message) => {
+                if (message === 'Native iOS calendar cleanup completed') throw new Error('Log unavailable');
+            });
+            expect(value(await edit(contract, change)).changed).toBe(true);
+            expect(handset.state.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+            expect(handset.state.calendars.map((calendar) => calendar.id)).toEqual(['g-primary', 'g-mindwtr']);
+        });
+
+        it.each([false, true])('exact iOS Delete cold replay completes after every cleanup write cut (bound: %s)', async (bound) => {
+            for (let cut = 1; cut < 20; cut += 1) {
+                const { handset, contract, change } = await lostIOSCreation(bound);
+                const requestId = generateUUID();
+                const entries = new Map([
+                    ['owned', { taskId: 'owned', calendarId: 'created-1', calendarEventId: 'event', platform: 'ios', lastSyncedAt: '' }],
+                    ['other', { taskId: 'other', calendarId: 'g-primary', calendarEventId: 'other-event', platform: 'ios', lastSyncedAt: '' }],
+                ]);
+                const removeEntry = handset.host.syncEntries!.delete;
+                handset.host.syncEntries!.getAll = async () => [...entries.values()];
+                handset.host.syncEntries!.delete = async (taskId, platform) => {
+                    await removeEntry(taskId, platform);
+                    entries.delete(taskId);
+                };
+                handset.state.storage.set(KEYS.pushTarget, 'created-1');
+                handset.life.dieAt = handset.life.step + cut;
+                await edit(contract, change, requestId).catch(() => undefined);
+                const died = handset.life.died;
+                handset.life.dieAt = Infinity;
+                handset.life.died = false;
+                if (died) {
+                    const answer = await edit(await restart(handset), change, requestId);
+                    expect({ cut, ok: answer.ok }).toEqual({ cut, ok: true });
+                }
+                expect({ cut, calendars: handset.state.calendars.map((calendar) => calendar.id), entries: [...entries.keys()] })
+                    .toEqual({ cut, calendars: ['g-primary', 'g-mindwtr'], entries: ['other'] });
+                expect(handset.state.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+                expect(handset.state.storage.has(KEYS.pushTarget)).toBe(false);
+                expect(handset.state.calendarWrites.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'created-1']]);
+                if (!died) return;
+            }
+            throw new Error('iOS cleanup never completed within the write-cut bound');
+        });
+
+        it.each([false, true])('exact iOS Delete cold replay finishes after a lost provider-delete response and failed verification (bound: %s)', async (bound) => {
+            const { handset, contract, change, intent } = await lostIOSCreation(bound);
+            const requestId = generateUUID();
+            const remove = handset.host.calendars.deleteCalendar!;
+            const list = handset.host.calendars.getCalendars;
+            handset.host.calendars.deleteCalendar = async (id) => {
+                await remove(id);
+                handset.host.calendars.getCalendars = async () => { throw new Error('Provider temporarily unavailable'); };
+                throw new Error('Native delete response lost');
+            };
+            expect(await edit(contract, change, requestId)).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            expect(JSON.parse(handset.state.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)!)).toMatchObject({
+                calendarId: 'created-1', deletionRevision: deterministicHash128Hex(intent),
+            });
+            handset.host.calendars.getCalendars = list;
+            expect(value(await edit(await restart(handset), change, requestId)).changed).toBe(true);
+            expect(handset.state.calendarWrites.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'created-1']]);
+            expect(handset.state.calendars.map((calendar) => calendar.id)).toEqual(['g-primary', 'g-mindwtr']);
+            expect(handset.state.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+        });
+
+        it('Delete retains bound iOS deletion progress when refused, then retries the same request', async () => {
+            const { handset, contract, change, intent } = await lostIOSCreation();
+            const requestId = generateUUID();
+            handset.life.refuse.add('deleteCalendar');
+            expect(await edit(contract, change, requestId)).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            expect(JSON.parse(handset.state.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)!)).toEqual({
+                ...JSON.parse(intent), calendarId: 'created-1', deletionRevision: deterministicHash128Hex(intent),
+            });
+            expect(handset.state.calendars.map((calendar) => calendar.id)).toEqual(['g-primary', 'g-mindwtr', 'created-1']);
+            handset.life.refuse.clear();
+            const restarted = await restart(handset);
+            expect(value(await edit(restarted, change, requestId)).changed).toBe(true);
+            expect(handset.state.calendars.map((calendar) => calendar.id)).toEqual(['g-primary', 'g-mindwtr']);
+            expect(handset.state.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+        });
+
+        it('Delete requires an intent revision for pending iOS cleanup and permits legacy completion once gone', async () => {
+            const { handset, contract, change } = await lostIOSCreation();
+            const legacy = { type: 'deleteMindwtrCalendar', calendarId: null } as const;
+            const before = { storage: Object.fromEntries(handset.state.storage), writes: handset.life.step };
+            expect(await edit(contract, legacy)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect({ storage: Object.fromEntries(handset.state.storage), writes: handset.life.step }).toEqual(before);
+            expect(value(await edit(contract, change)).changed).toBe(true);
+            expect(value(await edit(await restart(handset), legacy)).changed).toBe(false);
+        });
+
+        it('Delete rejects malformed intent revisions before device writes', async () => {
+            const { handset, contract } = await lostIOSCreation();
+            const before = { storage: Object.fromEntries(handset.state.storage), writes: handset.life.step };
+            for (const creationIntentRevision of ['a'.repeat(31), 'g'.repeat(32), 42]) {
+                expect(await edit(contract, { type: 'deleteMindwtrCalendar', calendarId: null, creationIntentRevision } as never))
+                    .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            }
+            expect({ storage: Object.fromEntries(handset.state.storage), writes: handset.life.step }).toEqual(before);
+        });
+
+        it.each([false, true])('Delete refuses a changed unbound iOS intent before any effects (restart: %s)', async (cold) => {
+            const { handset, contract, change } = await lostIOSCreation();
+            const title = `Mindwtr (${generateUUID()})`;
+            handset.state.storage.set(CALENDAR_PUSH_CREATION_INTENT_KEY, JSON.stringify({ title }));
+            handset.state.storage.set(KEYS.pushEnabled, '1');
+            handset.state.calendars.push({ id: 'replacement', title, allowsModifications: true });
+            const info = vi.spyOn(handset.host.log, 'info');
+            const active = cold ? await restart(handset) : contract;
+            const before = { state: everything(handset), storage: Object.fromEntries(handset.state.storage), steps: handset.life.step };
+            expect(await edit(active, change)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect({ state: everything(handset), storage: Object.fromEntries(handset.state.storage), steps: handset.life.step }).toEqual(before);
+            expect(info).not.toHaveBeenCalledWith('Native iOS calendar cleanup completed', expect.anything());
+        });
+
+        it('Delete refuses a creation that binds its ID after the contract checks the displayed intent', async () => {
+            const { handset, contract, view } = await boot({ os: 'ios', calendars: ['primary', 'managed'] });
+            handset.host.calendars.getSources = async () => [{ id: 'local', type: 'local', name: 'Local' }];
+            const create = handset.host.calendars.createCalendar!;
+            let finishCreate: (() => void) | undefined;
+            handset.host.calendars.createCalendar = async (details) => {
+                await new Promise<void>((resolve) => { finishCreate = resolve; });
+                return create(details);
+            };
+            value(await edit(contract, view().push.toggle));
+            await vi.waitFor(() => expect(finishCreate).toBeTypeOf('function'));
+            value(await contract.refreshCalendarPushTargets());
+            const change = view().push.target!.delete.edit;
+            const setItem = handset.host.storage.setItem;
+            const info = vi.spyOn(handset.host.log, 'info');
+            let finishDisable: (() => void) | undefined;
+            handset.host.storage.setItem = async (key, entry) => {
+                if (key === KEYS.pushEnabled && entry === '0') {
+                    await new Promise<void>((resolve) => { finishDisable = resolve; });
+                }
+                await setItem(key, entry);
+            };
+            const deleting = contract.setCalendarSetting({ requestId: generateUUID(), edit: change });
+            await vi.waitFor(() => expect(finishDisable).toBeTypeOf('function'));
+            finishCreate!();
+            await vi.waitFor(() => expect(handset.state.storage.get(KEYS.pushCalendar)).toBe('created-1'));
+            finishDisable!();
+            expect(await deleting).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(handset.state.calendars.map((calendar) => calendar.id)).toEqual(['g-primary', 'g-mindwtr', 'created-1']);
+            expect(handset.state.calendarWrites.filter(([name]) => name === 'deleteCalendar')).toEqual([]);
+            expect(handset.state.storage.get(KEYS.pushCalendar)).toBe('created-1');
+            expect(handset.state.storage.get(KEYS.pushEnabled)).toBe('0');
+            expect(info).not.toHaveBeenCalledWith('Native iOS calendar cleanup completed', expect.anything());
         });
 
         it('Delete Mindwtr calendar finishes on a replay after a death between any two of its steps', async () => {
