@@ -463,6 +463,25 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             return try files.copyProviderSource(url, checkCancellation: cancellation.check)
         }
     }
+    /// Native-only Calendar capture. Provider coordination runs on the owned
+    /// file queue while Engine remains available to cancel/close the owner.
+    func copyCalendarProviderSource(_ url: URL, cancellation: NativeAttachmentCancellation) async throws -> NativeAttachmentFiles.CalendarFileSelection {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                do {
+                    lock.lock(); let ready = accepting; lock.unlock()
+                    guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+                    try cancellation.check()
+                    mutationLock.lock(); defer { mutationLock.unlock() }
+                    let selection = try files.copyCalendarProviderSource(url, checkCancellation: cancellation.check)
+                    // A helper-returned immutable snapshot is retained even
+                    // when the caller becomes stale before Add admission.
+                    try cancellation.check()
+                    continuation.resume(returning: selection)
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
     func createPlaintextDownloadSource(bytes: Data, cancellation: NativeAttachmentCancellation) throws
         -> (receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt, source: NativeAttachmentFiles.CacheSourceProof) {
         guard bytes.count <= NativeAttachmentFiles.maximumPlaintextSourceBytes else { throw NativeAttachmentFilesError.tooLarge }

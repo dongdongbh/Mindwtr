@@ -18,11 +18,32 @@ export function createIOSCalendarHost(deps: {
         return value as T;
     };
     const permissions = () => read<{ status: unknown }>({ op: 'permissions' });
+    let localReadTail: Promise<unknown> = Promise.resolve();
     return {
         platform: { os: 'ios' }, storage: deps.storage, fetch: deps.fetch, log: deps.log,
         repairFeedDeviceCopyOnOpen: false,
-        // A legacy provider URL cannot be opened through the app-private attachment port.
-        readLocalFile: async () => { throw new Error('Local calendar subscription is unavailable'); },
+        // Native accepts only digest-checked calendar copies in the current library.
+        readLocalFile: (uri, signal) => {
+            const adapter = deps.adapter();
+            // The native queue reserves two jobs; one local read leaves room for EventKit.
+            const pending = localReadTail.then(async () => {
+                const current = () => {
+                    if (signal?.aborted) throw new Error('Local calendar read cancelled');
+                    if (deps.adapter() !== adapter) throw new Error('NOT_READY: Calendar library changed');
+                };
+                current();
+                const bytes = await read<Uint8Array>({ op: 'readFile', uri });
+                current();
+                if (Object.prototype.toString.call(bytes) !== '[object Uint8Array]' || bytes.byteLength > 8 * 1024 * 1024)
+                    throw new Error('Local calendar byte reply is invalid');
+                const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+                void deps.log.info('Native iOS local calendar file read', { scope: 'native-ios',
+                    extra: { releaseCheck: 'v1.3.5/ios-calendar-local-read', outcome: 'decoded' } });
+                return text;
+            });
+            localReadTail = pending.catch(() => {});
+            return pending;
+        },
         calendars: {
             getPermissions: permissions,
             // The explicit Swift Settings owner requests access outside JSC, then reads again.

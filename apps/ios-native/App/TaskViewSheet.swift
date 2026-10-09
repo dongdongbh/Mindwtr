@@ -1523,12 +1523,19 @@ struct NativeDocumentPickerClaim: Identifiable {
 
 struct NativeDocumentPicker: UIViewControllerRepresentable {
     let pickerID: UUID
+    let asCopy: Bool
     let completion: (Result<[URL], Error>, UUID) -> Void
+
+    init(pickerID: UUID, asCopy: Bool = false, completion: @escaping (Result<[URL], Error>, UUID) -> Void) {
+        self.pickerID = pickerID
+        self.asCopy = asCopy
+        self.completion = completion
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(pickerID: pickerID, completion: completion) }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: asCopy)
         picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
         return picker

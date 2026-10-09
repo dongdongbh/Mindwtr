@@ -5,7 +5,7 @@ import { readAreaDurableData } from './native-host-contract-area-durable';
 import { detach, exact, iso, record } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import type { NativeHostResult } from './native-host-contract';
-import { addCalendarFeed } from './calendar-settings-model';
+import { addCalendarFeed, addCalendarFile } from './calendar-settings-model';
 import type { CalendarSubscriptionSourceStorage } from './native-host-contract-calendar-subscription-settings';
 import { createNativeRequestReceipts, isNativeRequestReceiptDurable, NativeReceiptSqliteAdapter } from './native-request-receipts';
 import { taskEditValuesEqual } from './json-value-equality';
@@ -178,6 +178,22 @@ export function createCalendarSubscriptionAddMethods(deps: {
             : fail('INVALID_INPUT', 'Saved calendar subscriptions are malformed or exceed the source bound');
     };
     return {
+        createCalendarSubscriptionFileAddRequest(input: unknown): NativeHostResult<CalendarSubscriptionAddRequest> {
+            const invalid = () => fail('INVALID_INPUT', 'A bounded native calendar file selection is required');
+            if (!isNativeJsonWithinBytes(input, CALENDAR_SUBSCRIPTION_REQUEST_BYTES)) return invalid();
+            const value = detach<Record<string, unknown>>(input);
+            if (!value || !exact(value, ['request', 'uri', 'fileName']) || !record(value.request)
+                || !exact(value.request, ['requestId', 'name', 'defaultName', 'expected'])
+                || typeof value.uri !== 'string' || !value.uri.startsWith('file:///')
+                || typeof value.fileName !== 'string' || value.fileName.length > 500) return invalid();
+            const request = requestOf({ ...value.request, url: value.uri });
+            if (!request) return invalid();
+            // Native owns the copied file; shared RN code owns its display name.
+            const row = addCalendarFile([], { id: request.requestId, name: request.name,
+                fileName: value.fileName, uri: value.uri, defaultName: request.defaultName })[0];
+            const frozen = requestOf({ ...request, name: row.name });
+            return frozen ? { ok: true, value: frozen } : invalid();
+        },
         async probeCalendarSubscriptionAddOutcome(input: unknown): Promise<NativeHostResult<CalendarSubscriptionAddResult>> {
             const request = requestOf(input); if (!request) return fail('INVALID_INPUT', 'A bounded calendar subscription request is required');
             const admitted = ready(); if (!admitted.ok) return admitted;

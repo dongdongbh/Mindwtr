@@ -8,6 +8,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
     private let condition = NSCondition()
     private let worker = DispatchQueue(label: "tech.dongdongbh.mindwtr.native-calendar")
     private let registry: NativeAttachmentLocalRequests
+    private let readFile: ((String, NativeAttachmentCancellation) throws -> Data)?
     private let readerFactory: () -> any NativeCalendarReading
     private var reader: (any NativeCalendarReading)?
     private let generation = UUID().uuidString.lowercased()
@@ -15,24 +16,28 @@ final class NativeCalendarJobs: @unchecked Sendable {
     private var accepting = true
     private var jobs: [String: Job] = [:]
     private var ready: [String] = []
+    private var taken: Job?
     private var wake: (() -> Void)?
 
     private enum Request {
         case permissions, calendars
         case events([String], Date, Date)
+        case readFile(String)
     }
     private final class Job {
         let id: String, registryID: UUID, token: NativeAttachmentCancellation, request: Request
         var finished = false, succeeded = false
         var answer = ""
+        var bytes: Data?
         init(id: String, registryID: UUID, token: NativeAttachmentCancellation, request: Request) {
             self.id = id; self.registryID = registryID; self.token = token; self.request = request
         }
     }
 
     init(registry: NativeAttachmentLocalRequests,
+         readFile: ((String, NativeAttachmentCancellation) throws -> Data)? = nil,
          readerFactory: @escaping () -> any NativeCalendarReading = { NativeCalendarReader() }) {
-        self.registry = registry; self.readerFactory = readerFactory
+        self.registry = registry; self.readFile = readFile; self.readerFactory = readerFactory
     }
 
     func setWake(_ callback: (() -> Void)?) {
@@ -64,6 +69,10 @@ final class NativeCalendarJobs: @unchecked Sendable {
             let start = try milliseconds(input["startMs"]), end = try milliseconds(input["endMs"])
             guard end > start, end - start <= 366 * 86_400_000 else { throw invalid() }
             return .events(ids, Date(timeIntervalSince1970: start / 1000), Date(timeIntervalSince1970: end / 1000))
+        case "readFile":
+            guard Set(input.keys) == Set(["op", "uri"]), let uri = input["uri"] as? String,
+                  !uri.isEmpty, uri.utf16.count <= 4000 else { throw invalid() }
+            return .readFile(uri)
         default: throw invalid()
         }
     }
@@ -102,24 +111,38 @@ final class NativeCalendarJobs: @unchecked Sendable {
 
     private func execute(_ job: Job) {
         var answer: String, succeeded = false
+        var bytes: Data?
         do {
             guard !job.token.isCancelled, !registry.isClosing else { throw NativeAttachmentFileJobsError.cancelled }
-            let provider: any NativeCalendarReading
-            if let reader { provider = reader }
-            else { provider = readerFactory(); reader = provider }
-            let permission = try provider.permissions()
-            guard !job.token.isCancelled, !registry.isClosing else { throw NativeAttachmentFileJobsError.cancelled }
-            let value: Any
-            switch job.request {
-            case .permissions: value = ["status": permission.rawValue]
-            case .calendars:
-                guard permission == .granted else { throw NativeCalendarReadError.denied }
-                value = try provider.calendars()
-            case .events(let ids, let start, let end):
-                guard permission == .granted else { throw NativeCalendarReadError.denied }
-                value = ids.isEmpty ? [[String: Any]]() : try provider.events(calendarIds: ids, start: start, end: end)
+            if case .readFile(let uri) = job.request {
+                guard let readFile else { throw NativeCalendarReadError.unavailable }
+                #if DEBUG
+                try beforeFileRead?()
+                #endif
+                let body = try readFile(uri, job.token)
+                guard body.count <= Self.maximumReplyBytes else { throw HostFailure("Calendar reply exceeds the limit") }
+                guard !job.token.isCancelled, !registry.isClosing else { throw NativeAttachmentFileJobsError.cancelled }
+                bytes = body
+                answer = try encode(["id": job.id, "body": true]); succeeded = true
+            } else {
+                let provider: any NativeCalendarReading
+                if let reader { provider = reader }
+                else { provider = readerFactory(); reader = provider }
+                let permission = try provider.permissions()
+                guard !job.token.isCancelled, !registry.isClosing else { throw NativeAttachmentFileJobsError.cancelled }
+                let value: Any
+                switch job.request {
+                case .permissions: value = ["status": permission.rawValue]
+                case .calendars:
+                    guard permission == .granted else { throw NativeCalendarReadError.denied }
+                    value = try provider.calendars()
+                case .events(let ids, let start, let end):
+                    guard permission == .granted else { throw NativeCalendarReadError.denied }
+                    value = ids.isEmpty ? [[String: Any]]() : try provider.events(calendarIds: ids, start: start, end: end)
+                case .readFile: throw invalid()
+                }
+                answer = try encode(["id": job.id, "value": value]); succeeded = true
             }
-            answer = try encode(["id": job.id, "value": value]); succeeded = true
         } catch NativeCalendarReadError.denied {
             answer = error("Calendar access is denied", id: job.id)
         } catch NativeCalendarReadError.unavailable {
@@ -131,9 +154,9 @@ final class NativeCalendarJobs: @unchecked Sendable {
         }
         condition.lock()
         if !accepting || job.token.isCancelled || registry.isClosing {
-            answer = error("Calendar request cancelled", id: job.id); succeeded = false
+            answer = error("Calendar request cancelled", id: job.id); succeeded = false; bytes = nil
         }
-        job.answer = answer; job.succeeded = succeeded; job.finished = true; ready.append(job.id)
+        job.answer = answer; job.bytes = bytes; job.succeeded = succeeded; job.finished = true; ready.append(job.id)
         let callback = accepting && !registry.isClosing ? wake : nil
         condition.broadcast(); condition.unlock()
         callback?()
@@ -141,12 +164,31 @@ final class NativeCalendarJobs: @unchecked Sendable {
 
     func next() throws -> (json: String, completed: Bool)? {
         condition.lock()
-        guard !ready.isEmpty, let job = jobs.removeValue(forKey: ready.removeFirst()) else { condition.unlock(); return nil }
+        guard taken == nil, !ready.isEmpty, let job = jobs[ready.removeFirst()] else { condition.unlock(); return nil }
         let completed = accepting && !job.token.isCancelled && !registry.isClosing && job.succeeded
-        let answer = job.token.isCancelled || registry.isClosing
+        let answer = !accepting || job.token.isCancelled || registry.isClosing
             ? error("Calendar request cancelled", id: job.id) : job.answer
-        condition.unlock(); registry.remove(job.registryID)
+        let body = completed && job.bytes != nil
+        if body { taken = job }
+        else { jobs.removeValue(forKey: job.id); job.bytes = nil }
+        condition.unlock()
+        if !body { registry.remove(job.registryID) }
         return (answer, completed)
+    }
+
+    /// Metadata transfers only this exact job's body; cancellation stays owned
+    /// until the bytes have been consumed or refused, then releases once.
+    func body() throws -> String {
+        condition.lock()
+        guard let job = taken else { condition.unlock(); throw HostFailure("Calendar body is unavailable") }
+        taken = nil; jobs.removeValue(forKey: job.id)
+        let bytes = job.bytes; job.bytes = nil
+        let current = accepting && !job.token.isCancelled && !registry.isClosing
+        condition.unlock(); registry.remove(job.registryID)
+        guard current, let bytes else { throw HostFailure("Calendar body is unavailable") }
+        let encoded = bytes.base64EncodedString()
+        guard !job.token.isCancelled, !registry.isClosing else { throw HostFailure("Calendar body is unavailable") }
+        return encoded
     }
 
     func drain() { worker.sync {} }
@@ -156,10 +198,11 @@ final class NativeCalendarJobs: @unchecked Sendable {
         current.forEach { $0.token.cancel() }
         worker.sync { reader = nil }
         current.forEach { registry.remove($0.registryID) }
-        condition.lock(); jobs.removeAll(); ready.removeAll(); condition.unlock()
+        condition.lock(); jobs.removeAll(); ready.removeAll(); taken = nil; condition.unlock()
     }
 
     #if DEBUG
+    var beforeFileRead: (() throws -> Void)?
     var counters: (jobs: Int, running: Int) {
         condition.lock(); defer { condition.unlock() }
         return (jobs.count, jobs.values.filter { !$0.finished }.count)

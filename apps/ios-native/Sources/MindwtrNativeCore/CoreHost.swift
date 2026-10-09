@@ -69,6 +69,27 @@ public struct NativeReminderObserverRegistration: Sendable {
     public let rescheduleDelayMs: UInt64
 }
 
+public struct NativeCalendarFileAddResult: Sendable {
+    public let requestJSON: String
+    public let resultJSON: String
+}
+public struct NativeCalendarFileAddFailure: LocalizedError, Sendable {
+    /// Private accepted input for typed App recovery only; never log it.
+    public let requestJSON: String?
+    private let freshRuntimeRequired: Bool
+    init(requestJSON: String?, freshRuntimeRequired: Bool = false) {
+        self.requestJSON = requestJSON; self.freshRuntimeRequired = freshRuntimeRequired
+    }
+    public var errorDescription: String? {
+        freshRuntimeRequired ? "SAVE_FAILED: Calendar subscription save requires fresh runtime recovery"
+            : "Local calendar subscription could not be added"
+    }
+}
+private struct NativeCalendarFileCaptureAdmission: Sendable {
+    let id: UUID
+    let jobs: NativeAttachmentFileJobs
+}
+
 /// One off-main owner for the core runtime, database and pending command journal.
 /// Every result is the JSON-encoded core value, with host/core failures thrown.
 public final class CoreHost: @unchecked Sendable {
@@ -187,6 +208,26 @@ public final class CoreHost: @unchecked Sendable {
     }
     public func probeCalendarSubscriptionAddOutcome(requestJSON: String) async throws -> String {
         try await perform { try $0.probeCalendarSubscriptionAddOutcome(requestJSON: requestJSON) }
+    }
+    public func addLocalCalendarSubscription(selectedURL: URL, requestJSON: String) async throws -> NativeCalendarFileAddResult {
+        let id = UUID(), cancellation = NativeAttachmentCancellation()
+        localAttachmentRequests.register(cancellation, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            var capture: NativeCalendarFileCaptureAdmission?
+            do {
+                let admitted = try await perform { try $0.beginCalendarFileCapture(requestJSON: requestJSON, cancellation: cancellation) }
+                capture = admitted
+                let selection = try await admitted.jobs.copyCalendarProviderSource(selectedURL, cancellation: cancellation)
+                return try await perform { try $0.finishCalendarFileCapture(admitted.id, selection: selection, cancellation: cancellation) }
+            } catch {
+                // Exact capture retirement must drain and release its owner even after Task cancellation.
+                if let capture { _ = try? await perform(reminderOwned: true) { $0.abortCalendarFileCapture(capture.id) } }
+                if let failure = error as? NativeCalendarFileAddFailure { throw failure }
+                throw NativeCalendarFileAddFailure(requestJSON: nil)
+            }
+        }, onCancel: { cancellation.cancel() })
     }
 
     public func setDeviceCalendarSetting(requestJSON: String) async throws -> String {
@@ -1401,7 +1442,7 @@ private final class Engine: @unchecked Sendable {
     private var secretJobs: NativeSecretJobs?
     private var calendarJobs: NativeCalendarJobs?
     private var cryptoJobs: NativeCryptoJobs?
-    private enum IOBodySource { case file, http, crypto }
+    private enum IOBodySource { case file, http, crypto, calendar }
     private var ioBodySource: IOBodySource?
     private var preferredIO = 1
     private var attachmentGeneration: UInt64 = 0
@@ -1482,11 +1523,20 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var calendarSubscriptionSettingTurn: CalendarSubscriptionSettingTurn?
+    private struct CalendarFileCaptureTurn {
+        let id: UUID
+        let owner: CalendarSubscriptionSettingTurn
+        let jobs: NativeAttachmentFileJobs
+        let requestJSON: String
+        let cancellation: NativeAttachmentCancellation
+    }
+    private var calendarFileCaptureTurn: CalendarFileCaptureTurn?
     fileprivate static let calendarSubscriptionSettingMethods: Set<String> = ["calendarSubscriptionSetting",
         "calendarSubscriptionSettingOptions", "calendarSubscriptionSettingPrepare", "calendarSubscriptionSettingValidate",
         "calendarSubscriptionSettingCommit", "calendarSubscriptionSettingRetryOutcome", "calendarSubscriptionSettingAcknowledged",
         "calendarSubscriptionAdd", "calendarSubscriptionAddPrepare", "calendarSubscriptionAddValidate",
-        "calendarSubscriptionAddCommit", "calendarSubscriptionAddRetryOutcome", "calendarSubscriptionAddAcknowledged"]
+        "calendarSubscriptionAddCommit", "calendarSubscriptionAddRetryOutcome", "calendarSubscriptionAddAcknowledged",
+        "calendarSubscriptionFileAddRequest"]
     private static let calendarSubscriptionSettingRequestLimit = 1_048_576
     private static let calendarSubscriptionSettingEnvelopeLimit = 4_194_304
     private static let calendarSubscriptionSettingOptionsLimit = 2_000_000
@@ -2037,6 +2087,11 @@ private final class Engine: @unchecked Sendable {
             // Optional platform capability: failure leaves attachments unbound,
             // never prevents database recovery or leaks the exclusive lock.
             attachmentJobs = try? NativeAttachmentFileJobs(libraryRoot: databaseURL.deletingLastPathComponent())
+            let calendarFiles = try? NativeAttachmentFiles(libraryRoot: databaseURL.deletingLastPathComponent())
+            let readCalendarFile: (String, NativeAttachmentCancellation) throws -> Data = { uri, cancellation in
+                guard let calendarFiles else { throw NativeCalendarReadError.unavailable }
+                return try calendarFiles.readCalendarFile(uri, checkCancellation: cancellation.check)
+            }
             attachmentGeneration &+= 1
             #if DEBUG
             httpJobs = NativeHTTPJobs(registry: localRequests, faults: faults)
@@ -2044,6 +2099,7 @@ private final class Engine: @unchecked Sendable {
             secretJobs = try NativeSecretJobs(registry: localRequests, faults: faults)
             if let secretJobs { faults?.configureSecretJobs?(secretJobs) }
             calendarJobs = NativeCalendarJobs(registry: localRequests,
+                readFile: readCalendarFile,
                 readerFactory: faults?.calendarReaderFactory ?? { NativeCalendarReader() })
             if let calendarJobs { faults?.configureCalendarJobs?(calendarJobs) }
             cryptoJobs = NativeCryptoJobs(registry: localRequests, faults: faults)
@@ -2051,7 +2107,7 @@ private final class Engine: @unchecked Sendable {
             #else
             httpJobs = NativeHTTPJobs(registry: localRequests)
             secretJobs = NativeSecretJobs(registry: localRequests)
-            calendarJobs = NativeCalendarJobs(registry: localRequests)
+            calendarJobs = NativeCalendarJobs(registry: localRequests, readFile: readCalendarFile)
             cryptoJobs = NativeCryptoJobs(registry: localRequests)
             #endif
             let httpGeneration = attachmentGeneration
@@ -4076,6 +4132,64 @@ private final class Engine: @unchecked Sendable {
             }
         } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
             throw CoreHostRejection(message: error.message)
+        }
+    }
+    private static func calendarFileAddRequest(_ raw: String) throws -> [String: Any] {
+        var request = try deviceCalendarSettingObject(raw, maximum: calendarSubscriptionSettingRequestLimit)
+        guard Set(request.keys) == Set(["requestId", "name", "defaultName", "expected"]) else { throw deviceStorageInvalid }
+        request["url"] = "native-owned-local-calendar"
+        _ = try calendarSubscriptionAddRequest(ownedJSON(request))
+        request.removeValue(forKey: "url")
+        return request
+    }
+    func beginCalendarFileCapture(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> NativeCalendarFileCaptureAdmission {
+        try cancellation.check()
+        _ = try Self.calendarFileAddRequest(requestJSON)
+        var captured: CalendarSubscriptionSettingTurn?
+        let jobs = try withCalendarSubscriptionSettingOwner(operation: .add) {
+            guard pending == nil, calendarFileCaptureTurn == nil, let jobs = attachmentJobs else { throw Self.deviceStorageUnavailable }
+            captured = calendarSubscriptionSettingTurn
+            return jobs
+        }
+        guard let captured else { throw Self.deviceStorageUnavailable }
+        // The synchronous owner helper has completed; restore only this exact
+        // admission before yielding Engine to the off-queue provider copy.
+        calendarSubscriptionSettingTurn = captured
+        let id = UUID()
+        calendarFileCaptureTurn = .init(id: id, owner: captured, jobs: jobs, requestJSON: requestJSON, cancellation: cancellation)
+        return .init(id: id, jobs: jobs)
+    }
+    func abortCalendarFileCapture(_ id: UUID) {
+        guard let capture = calendarFileCaptureTurn, capture.id == id else { return }
+        capture.cancellation.cancel(); capture.jobs.drain()
+        if calendarSubscriptionSettingTurn === capture.owner { calendarSubscriptionSettingTurn = nil }
+        calendarFileCaptureTurn = nil
+    }
+    func finishCalendarFileCapture(_ id: UUID, selection: NativeAttachmentFiles.CalendarFileSelection,
+                                   cancellation: NativeAttachmentCancellation) throws -> NativeCalendarFileAddResult {
+        var frozen: String?
+        do {
+            guard let capture = calendarFileCaptureTurn, capture.id == id,
+                  capture.cancellation === cancellation, calendarSubscriptionSettingTurn === capture.owner,
+                  attachmentJobs === capture.jobs else { throw Self.deviceStorageUnavailable }
+            try requireCalendarSubscriptionSettingTurn(); try cancellation.check()
+            let request = try Self.calendarFileAddRequest(capture.requestJSON)
+            let derived = try invoke("calendarSubscriptionFileAddRequest", arguments: [Self.ownedJSON([
+                "request": request, "uri": selection.uri, "fileName": selection.fileName])])
+            let complete = try Self.calendarSubscriptionAddRequest(derived)
+            guard Self.equalJSON(complete["requestId"], request["requestId"]),
+                  Self.equalJSON(complete["defaultName"], request["defaultName"]), Self.equalJSON(complete["expected"], request["expected"]),
+                  Self.ownedEqual(complete["url"] as? String ?? "", selection.uri) else { throw Self.deviceStorageInvalid }
+            frozen = derived
+            try requireCalendarSubscriptionSettingTurn(); try cancellation.check()
+            // No queue yield between releasing capture authority and admitting
+            // the unchanged durable Add under its normal selected owner.
+            calendarFileCaptureTurn = nil; calendarSubscriptionSettingTurn = nil
+            let value = try addCalendarSubscription(requestJSON: derived)
+            return .init(requestJSON: derived, resultJSON: value)
+        } catch {
+            throw NativeCalendarFileAddFailure(requestJSON: frozen,
+                freshRuntimeRequired: (error as? HostFailure)?.message == Self.calendarSubscriptionFreshRuntime.message)
         }
     }
     private func calendarSubscriptionSettingJournalRequest(_ command: PendingCommand) throws -> String {
@@ -21510,6 +21624,9 @@ private final class Engine: @unchecked Sendable {
         }
         func calendar() throws -> String? {
             guard let answer = try calendarJobs?.next() else { return nil }
+            if let header = try? NativeJSON.jsonObject(with: Data(answer.json.utf8)) as? [String: Any], header["body"] as? Bool == true {
+                ioBodySource = .calendar
+            }
             preferredIO = 0
             return answer.json
         }
@@ -21527,6 +21644,9 @@ private final class Engine: @unchecked Sendable {
         guard let source = ioBodySource else { throw HostFailure("I/O response body is unavailable") }
         ioBodySource = nil
         switch source {
+        case .calendar:
+            guard let jobs = calendarJobs else { throw HostFailure("I/O response body is unavailable") }
+            return try jobs.body()
         case .file:
             guard let jobs = attachmentJobs else { throw HostFailure("I/O response body is unavailable") }
             return jobs.body()
@@ -21899,6 +22019,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        if let capture = calendarFileCaptureTurn { abortCalendarFileCapture(capture.id) }
         removeReminderObserver(nil)
         searchObserver = nil
         reminderAdmissions.clearOrdinaryReadyWake()

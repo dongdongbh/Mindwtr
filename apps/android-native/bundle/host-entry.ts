@@ -2421,6 +2421,9 @@ globalThis.MindwtrHost = {
             return null;
         });
     },
+    calendarSubscriptionFileAddRequest(json: string): string {
+        return submit(async () => unwrap(calendarSubscriptionAdd.createCalendarSubscriptionFileAddRequest(completionJson(json, 1_048_576))));
+    },
     calendarSubscriptionAddPrepare(json: string): string {
         return submit(async () => unwrap(await calendarSubscriptionAdd.prepareCalendarSubscriptionAdd(completionJson(json, 1_048_576))));
     },

@@ -44,6 +44,7 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
         selectedCalendarIds: selected, areaIdsByCalendar: {} })]]);
     const timerDelays: number[] = [];
     let logText = '', events = [event('external')];
+    const localFiles = new Map<string, Uint8Array>();
     let nextHold: { op: string; entered: () => void; promise: Promise<void> } | null = null;
     const call = async (input: Record<string, any>) => {
         calls.push(structuredClone(input));
@@ -56,6 +57,11 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
             return selected.map((id) => ({ id, title: 'PRIVATE CALENDAR', color: '#123456', allowsModifications: true }));
         }
         if (input.op === 'events') return structuredClone(events);
+        if (input.op === 'readFile') {
+            const bytes = localFiles.get(input.uri);
+            if (!bytes) throw new Error('PRIVATE local source unavailable');
+            return bytes.slice();
+        }
         throw new Error('Unexpected permission mutation or calendar operation');
     };
     const state: Record<string, any> = {
@@ -114,6 +120,7 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
     };
     const f = { state, database, writes, calls, reads, kv, lines, poll, cellReads, cellWrites, logText: () => logText, timerDelays,
         setEvents: (value: typeof events) => { events = value; },
+        setLocalFile: (uri: string, bytes: Uint8Array) => { localFiles.set(uri, bytes); },
         read: (value: unknown = request()) => poll(state.MindwtrHost.iosCalendarRead(JSON.stringify(value))),
         boot: async () => {
             expect(await poll(state.MindwtrHost.boot('', ''))).toMatchObject({ ok: true });
@@ -433,4 +440,77 @@ describe('iOS Calendar Settings Test-fetch', () => {
         await assertReadonly(f, before, kv);
     });
 
+});
+
+
+describe('iOS owned local calendar read binding', () => {
+    const uri = 'file:///PRIVATE/library/attachment-files/documents/calendar-files/11111111-1111-4111-8111-111111111111-' + 'a'.repeat(64) + '.ics';
+    const calendar = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:local-private',
+        'DTSTART:20261009T100000Z', 'DTEND:20261009T110000Z', 'SUMMARY:PRIVATE LOCAL EVENT',
+        'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const install = (f: ReturnType<typeof fixture>, loggingEnabled = false) => {
+        f.state.fixture.install({ ...structuredClone(data), settings: { diagnostics: { loggingEnabled }, externalCalendars: [
+            { id: 'local', name: 'PRIVATE LOCAL NAME', url: uri, enabled: true },
+        ] } });
+    };
+
+    it.each([true, false])('reads native byte bodies without writes or EventKit access and respects logging %s', async (loggingEnabled) => {
+        const f = fixture({ permission: 'denied' }); await f.boot(); install(f, loggingEnabled);
+        f.setLocalFile(uri, new TextEncoder().encode(calendar));
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv);
+        const result = await f.read();
+        expect(result).toMatchObject({ ok: true, value: { status: 'ready', events: [expect.objectContaining({ title: 'PRIVATE LOCAL EVENT' })] } });
+        expect(f.calls.filter((call) => call.op === 'readFile')).toEqual([{ op: 'readFile', uri }]);
+        expect(f.calls.some((call) => call.op === 'events')).toBe(false);
+        await assertReadonly(f, before, kv);
+        expect(f.logText()).not.toContain('PRIVATE');
+        expect(f.logText()).not.toContain(uri);
+        expect(f.logText().includes('v1.3.5/ios-calendar-local-read')).toBe(loggingEnabled);
+    });
+
+    it.each(['missing', 'invalid-utf8'])('retains %s local rows and returns a generic partial warning', async (kind) => {
+        const f = fixture({ permission: 'denied' }); await f.boot(); install(f);
+        if (kind === 'invalid-utf8') f.setLocalFile(uri, new Uint8Array([0xff]));
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv);
+        const result = await f.read();
+        expect(result).toMatchObject({ ok: true, value: { events: [] } });
+        expect(result.value.warning).toBeTruthy();
+        expect(f.state.fixture.canonical().settings.externalCalendars).toHaveLength(1);
+        await assertReadonly(f, before, kv);
+        expect(f.logText()).not.toContain('PRIVATE');
+    });
+
+    it('rejects a byte body delivered after adapter replacement', async () => {
+        const f = fixture({ permission: 'denied' }); await f.boot(); install(f);
+        f.setLocalFile(uri, new TextEncoder().encode(calendar));
+        const gate = f.hold('readFile');
+        const ticket = f.state.MindwtrHost.iosCalendarRead(JSON.stringify(request()));
+        await gate.accepted;
+        f.state.fixture.replaceAdapter({}); gate.release();
+        expect(await f.poll(ticket)).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
+        expect(f.writes).toEqual([]);
+        expect(f.logText()).not.toContain('v1.3.5/ios-calendar-read');
+    });
+
+    it('serializes three local reads and starts no queued read after cancellation', async () => {
+        const f = fixture({ permission: 'denied' }); await f.boot();
+        const urls = [uri, uri.replace('11111111-', '22222222-'), uri.replace('11111111-', '33333333-')];
+        f.state.fixture.install({ ...structuredClone(data), settings: { externalCalendars: urls.map((url, index) =>
+            ({ id: 'local-' + index, name: 'PRIVATE', url, enabled: true })) } });
+        urls.forEach((url) => f.setLocalFile(url, new TextEncoder().encode(calendar)));
+        const gate = f.hold('readFile');
+        const ticket = f.state.MindwtrHost.iosCalendarRead(JSON.stringify(request()));
+        await gate.accepted;
+        try {
+            expect(f.calls.filter((call) => call.op === 'readFile')).toHaveLength(1);
+            f.state.MindwtrHost.cancel(ticket);
+        } finally { gate.release(); }
+        expect(await f.poll(ticket)).toMatchObject({ ok: false, error: expect.stringContaining('CANCELLED:') });
+        expect(f.calls.filter((call) => call.op === 'readFile')).toHaveLength(1);
+        expect(f.logText()).not.toContain('v1.3.5/ios-calendar-local-read');
+        expect(f.writes).toEqual([]);
+        const fresh = await f.read();
+        expect(fresh.ok).toBe(true);
+        expect(fresh.value.events).toHaveLength(3);
+    });
 });

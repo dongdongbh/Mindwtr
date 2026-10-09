@@ -453,3 +453,25 @@ describe('actual private iOS calendar subscription URL Add bundle', () => {
         f.failLog(); expect(await f.call('calendarSubscriptionAddAcknowledged')).toEqual({ ok: true, value: null });
     });
 });
+
+
+describe('native local calendar Add request binding', () => {
+    it('freezes RN filename naming without I/O, then saves through the existing durable Add', async () => {
+        const f = fixture(); await f.boot(canonicalSettings());
+        const options = await f.call('calendarSubscriptionSettingOptions', {});
+        const request = { requestId, name: ' \uFEFF', defaultName: 'Calendar', expected: options.value.expected };
+        const uri = 'file:///PRIVATE/library/attachment-files/documents/calendar-files/' + requestId + '-' + 'a'.repeat(64) + '.ics';
+        const before = f.savedSettings(), writes = f.writes.length;
+        const frozen = await f.call('calendarSubscriptionFileAddRequest', { request, uri, fileName: 'PRIVATE Picked.ICS' });
+        expect(frozen).toEqual({ ok: true, value: { ...request, name: 'PRIVATE Picked', url: uri } });
+        expect(f.savedSettings()).toEqual(before); expect(f.writes).toHaveLength(writes);
+        expect(f.providers).toEqual([]); expect(f.deviceWrites).toEqual([]);
+        const prepared = await f.call('calendarSubscriptionAddPrepare', frozen.value);
+        expect(prepared.ok).toBe(true);
+        expect(await f.call('calendarSubscriptionAddCommit', { request: frozen.value, prepared: prepared.value.prepared }))
+            .toEqual({ ok: true, value: { changed: true, toasts: [], open: null, clearDraft: true } });
+        expect(f.savedSettings().externalCalendars.at(-1)).toEqual({ id: requestId, name: 'PRIVATE Picked', url: uri, enabled: true });
+        expect(f.providers).toEqual([]); expect(f.deviceWrites).toEqual([]);
+        expect(f.log()).not.toContain('PRIVATE');
+    });
+});

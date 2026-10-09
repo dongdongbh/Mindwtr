@@ -244,6 +244,21 @@ struct SettingsScreen: View {
             get: { notificationPicker != nil && model.settingsNotificationsPresented && !model.appLock.concealed },
             set: { if !$0 { notificationPicker = nil } }
         )) { notificationPickerSheet }
+        .sheet(item: Binding(
+            get: {
+                guard model.settingsCalendarPresented, !model.appLock.concealed,
+                      model.calendarFileImporterPresented, let pickerID = model.calendarFileImporterID else { return nil }
+                return NativeDocumentPickerClaim(id: pickerID)
+            },
+            set: { (claim: NativeDocumentPickerClaim?) in
+                if claim == nil { model.setCalendarFileImporterPresented(false, pickerID: model.calendarFileImporterID) }
+            })) { claim in
+                NativeDocumentPicker(pickerID: claim.id, asCopy: true) { result, capturedID in
+                    Task { await model.completeCalendarFileImport(result, pickerID: capturedID) }
+                }
+                .id(claim.id)
+                .interactiveDismissDisabled()
+            }
         .onChange(of: model.settingsNotificationsPresented) { presented in
             if !presented { notificationPicker = nil }
         }
@@ -1270,6 +1285,14 @@ struct SettingsScreen: View {
                     .disabled(!model.calendarSubscriptionAddEnabled)
                     .accessibilityIdentifier("calendar-subscription-add")
                 }
+            }
+            if !model.calendarSettings.object("feeds").object("chooseFile").text("label").isEmpty {
+                Button { calendarSubscriptionField = nil; model.prepareCalendarFileImport() } label: {
+                    Text(model.calendarSettings.object("feeds").object("chooseFile").text("label")).rnFont(15, .semibold)
+                        .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                }
+                .disabled(!model.calendarSubscriptionChooseFileEnabled)
+                .accessibilityIdentifier("calendar-subscription-choose-file")
             }
             if !model.calendarSettings.object("feeds").object("test").text("label").isEmpty {
                 Button { Task { await model.testCalendarSettings() } } label: {

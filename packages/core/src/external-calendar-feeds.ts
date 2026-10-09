@@ -118,7 +118,7 @@ export type ExternalCalendarFeedsHost = {
     storage: { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<void> };
     fetch: typeof fetch;
     /** Reads a local feed: a `file://` or a `content://` URL. */
-    readLocalFile(url: string): Promise<string>;
+    readLocalFile(url: string, signal?: AbortSignal): Promise<string>;
     calendars: DeviceCalendarReader;
     /** This device's pushed-event map (the calendar_sync table) for `platform`. */
     getAllCalendarSyncEntries(platform: string): Promise<Array<{ calendarId?: unknown; calendarEventId?: unknown }>>;
@@ -436,7 +436,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
     const fetchTextWithTimeout = async (url: string, timeoutMs: number, signal?: AbortSignal): Promise<string> => {
         if (isLocalCalendarSourceUrl(url)) {
             throwIfAborted(signal);
-            const text = await host.readLocalFile(url);
+            const text = await host.readLocalFile(url, signal);
             throwIfAborted(signal);
             return text;
         }

@@ -9942,6 +9942,114 @@ final class FoundationUITests: XCTestCase {
     func testNativeCalendarSubscriptionAddLargest() throws { try task472CalendarSubscriptionAdd("LARGEST", largest: true) }
     func testNativeCalendarSubscriptionAddRecovery() throws { try task472CalendarSubscriptionAdd("RECOVERY", recovery: true) }
 
+    private func task473CalendarLocalFileAdd(_ suffix: String, named: Bool = false,
+                                            largest: Bool = false, recovery: Bool = false, cancel: Bool = false) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_LOCAL_FILE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        // Isolated seeded selection exercises the real callback/capture/Add, not the system Files picker.
+        app.launchArguments = ["--native-ui-test-library", library, "--native-calendar-local-file-picker-fixture",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if cancel { app.launchArguments += ["--native-calendar-local-file-picker-cancel-once"] }
+        if recovery { app.launchArguments += ["--native-calendar-subscription-commit-reply-failure-once"] }
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        let scroll = app.scrollViews["calendar-settings-scroll"]
+        let name = app.textFields["calendar-subscription-name"]
+        let url = app.textFields["calendar-subscription-url"]
+        let choose = app.buttons["calendar-subscription-choose-file"]
+        let rawName = "  Synthetic imported calendar  "
+        let rawURL = "  https://example.invalid/unused-draft.ics  "
+        func openSettings() {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+            let advanced = app.buttons["settings-advanced"]
+            task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"])
+            boardEnabled(advanced, timeout: 30); advanced.tap()
+            let calendar = app.buttons["settings-calendar"]
+            task442Reveal(app, calendar, in: app.scrollViews["advanced-scroll"])
+            boardEnabled(calendar, timeout: 30); calendar.tap()
+            XCTAssertEqual(app.switches["calendar-device-enabled"].value as? String, "0")
+            XCTAssertFalse(app.buttons["calendar-device-grant"].exists)
+            task442Reveal(app, url, in: scroll); boardEnabled(url, timeout: 30)
+        }
+        func expectEmpty(_ field: XCUIElement) {
+            expectation(for: NSPredicate(format: "value == %@ OR value == ''", field.placeholderValue ?? ""), evaluatedWith: field)
+            waitForExpectations(timeout: 30)
+        }
+        func assertAdded() {
+            let row = app.switches["calendar-feed-enabled-1"]
+            task442Reveal(app, row, in: scroll); boardEnabled(row, timeout: 30)
+            XCTAssertEqual(row.value as? String, "1")
+            XCTAssertTrue(row.label.contains(named ? "Synthetic imported calendar" : "Synthetic local calendar"))
+            XCTAssertTrue(row.label.contains("file://"))
+            XCTAssertFalse(app.switches["calendar-feed-enabled-2"].exists)
+            XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+        }
+        openSettings()
+        if named || cancel {
+            task442Reveal(app, name, in: scroll); boardEnabled(name, timeout: 30)
+            name.tap(); name.typeText(rawName)
+        }
+        task442Reveal(app, url, in: scroll); boardEnabled(url, timeout: 30)
+        url.tap(); url.typeText(rawURL + "\n")
+        XCTAssertEqual(url.value as? String, rawURL)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        task442Reveal(app, choose, in: scroll); boardEnabled(choose, timeout: 30)
+        XCTAssertGreaterThanOrEqual(choose.frame.height, 44 - 0.001)
+        choose.tap()
+        if cancel {
+            boardEnabled(choose, timeout: 30)
+            XCTAssertEqual(name.value as? String, rawName)
+            XCTAssertEqual(url.value as? String, rawURL)
+            XCTAssertFalse(app.switches["calendar-feed-enabled-1"].exists)
+            XCTAssertFalse(app.buttons["calendar-settings-retry"].exists)
+            XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+        } else {
+            if recovery {
+                let retry = app.buttons["calendar-settings-retry"]
+                task442Reveal(app, retry, in: scroll); boardEnabled(retry, timeout: 30)
+                XCTAssertEqual(name.value as? String, rawName)
+                XCTAssertEqual(url.value as? String, rawURL)
+                retry.tap()
+            }
+            expectEmpty(name); expectEmpty(url)
+            assertAdded()
+            if suffix == "NAMED" {
+                let test = app.buttons["calendar-settings-test"]
+                task442Reveal(app, test, in: scroll); boardEnabled(test, timeout: 30); test.tap()
+                let result = app.descendants(matching: .any).matching(identifier: "calendar-settings-test-result").firstMatch
+                expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", "Loaded 1 events"), evaluatedWith: result)
+                waitForExpectations(timeout: 30)
+                boardEnabled(test, timeout: 30)
+                task442Reveal(app, result, in: scroll, requireEnabled: false)
+                XCTAssertFalse(app.buttons["calendar-settings-retry"].exists)
+                XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+            }
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Calendar local file seeded selection " + suffix; shot.lifetime = .keepAlways; add(shot)
+        app.terminate()
+        app.launchArguments.removeAll { ["--native-calendar-local-file-picker-cancel-once",
+            "--native-calendar-subscription-commit-reply-failure-once"].contains($0) }
+        app.launch(); openSettings()
+        expectEmpty(name); expectEmpty(url)
+        XCTAssertEqual(app.switches["calendar-feed-enabled-0"].value as? String, "0")
+        if cancel { XCTAssertFalse(app.switches["calendar-feed-enabled-1"].exists) }
+        else { assertAdded() }
+        XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+    }
+
+    func testNativeCalendarLocalFileAddNamed() throws { try task473CalendarLocalFileAdd("NAMED", named: true) }
+    func testNativeCalendarLocalFileAddFilename() throws { try task473CalendarLocalFileAdd("FILENAME") }
+    func testNativeCalendarLocalFileAddLargest() throws { try task473CalendarLocalFileAdd("LARGEST", largest: true) }
+    func testNativeCalendarLocalFileAddRecovery() throws { try task473CalendarLocalFileAdd("RECOVERY", named: true, recovery: true) }
+    func testNativeCalendarLocalFilePickerCancel() throws { try task473CalendarLocalFileAdd("CANCEL", cancel: true) }
+
     private func task471CalendarSettingsTest(_ suffix: String, largest: Bool = false) throws {
         let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_SETTINGS_TEST_UI_")
         let held = ["TIMEOUT", "CANCEL", "BACKGROUND"].contains(suffix)

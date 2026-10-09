@@ -140,7 +140,7 @@ export type NativeCalendarHost = {
     repairFeedDeviceCopyOnOpen?: boolean;
     fetch: typeof fetch;
     /** Reads a local subscription: a `file://` or `content://` URL the document picker gave. */
-    readLocalFile(url: string): Promise<string>;
+    readLocalFile(url: string, signal?: AbortSignal): Promise<string>;
     /** The device calendar reads; the writes once the host has calendar push. */
     calendars: DeviceCalendarReader & Partial<Omit<DeviceCalendarWriter, keyof DeviceCalendarReader>>;
     /** This device's pushed-event map (the calendar_sync table); absent until the host has calendar push. */
@@ -472,7 +472,7 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 platform: () => host.platform.os,
                 storage: host.storage,
                 fetch: host.fetch,
-                readLocalFile: (url) => host.readLocalFile(url),
+                readLocalFile: (url, signal) => host.readLocalFile(url, signal),
                 calendars,
                 getAllCalendarSyncEntries: (platform) => syncEntries.getAll(platform),
                 logInfo: (message, context) => host.log.info(message, context),

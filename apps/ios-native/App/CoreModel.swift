@@ -671,6 +671,21 @@ final class CoreModel: ObservableObject {
     }
     private var calendarSubscriptionDraftID = UUID()
     private var calendarSubscriptionAddDraft: (request: String, draft: UUID)?
+    private struct CalendarFileImportClaim {
+        let id: UUID
+        let host: CoreHost
+        let session: UUID
+        let draft: UUID
+        let name: String
+        let defaultName: String
+    }
+    @Published private(set) var calendarFileImporterID: UUID?
+    @Published private(set) var calendarFileImporterPresented = false
+    private var calendarFileImportClaim: CalendarFileImportClaim?
+    #if DEBUG && targetEnvironment(simulator)
+    private var calendarFileImportTestSource: URL?
+    private var calendarFileImportTestCancelOnce = false
+    #endif
     private enum CalendarSettingKind { case device, subscription, subscriptionAdd }
     private var calendarSettingKind: CalendarSettingKind = .device
     private var calendarSubscriptionRuntimeRecovery: (host: CoreHost, request: String, kind: CalendarSettingKind)?
@@ -694,7 +709,7 @@ final class CoreModel: ObservableObject {
     private var calendarSettingsApplicationActive = false
     var calendarSettingActive: Bool {
         calendarSettingOwner != nil || calendarSettingRequest != nil || calendarSettingAwaitingRefresh
-            || calendarSettingsCloseTask != nil
+            || calendarSettingsCloseTask != nil || calendarFileImportClaim != nil
     }
     var calendarSettingEnabled: Bool {
         ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
@@ -705,7 +720,7 @@ final class CoreModel: ObservableObject {
         ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
             && !busy && !retryNeeded && calendarSettingOwner == nil && calendarSettingRequest == nil
             && calendarSettingsCloseTask == nil && calendarSubscriptionReadError == nil
-            && !calendarSubscriptions.isEmpty && !calendarSubscriptionExpected.isEmpty
+            && calendarFileImportClaim == nil && !calendarSubscriptions.isEmpty && !calendarSubscriptionExpected.isEmpty
     }
     var settingsCalendarCanCancel: Bool {
         settingsCalendarPresented && calendarSettingRequest == nil && !retryNeeded
@@ -715,6 +730,11 @@ final class CoreModel: ObservableObject {
             && UIApplication.shared.applicationState == .active
             && !calendarSubscriptionURL.trimmingCharacters(in: Self.ecmaScriptWhitespace).isEmpty
             && !calendarSettings.object("feeds").object("add").text("label").isEmpty
+    }
+    var calendarSubscriptionChooseFileEnabled: Bool {
+        calendarSubscriptionEnabled && calendarSettingsApplicationActive
+            && UIApplication.shared.applicationState == .active
+            && !calendarSettings.object("feeds").object("chooseFile").text("label").isEmpty
     }
     var calendarSettingsTestEnabled: Bool {
         calendarSettingEnabled && calendarSettingsReadTask == nil && calendarSettingsApplicationActive
@@ -4745,6 +4765,9 @@ final class CoreModel: ObservableObject {
                     startupInventoryReadTestFailureOnce = arguments.contains("--native-startup-inventory-read-failure-once")
                     calendarEventTaskPredispatchTestHoldOnce = arguments.contains("--native-calendar-event-task-predispatch-hold-once")
                     calendarEventTaskDispatchTestState = ""
+                    calendarFileImportTestSource = arguments.contains("--native-calendar-local-file-picker-fixture")
+                        ? directory.appendingPathComponent("Synthetic local calendar.ICS") : nil
+                    calendarFileImportTestCancelOnce = arguments.contains("--native-calendar-local-file-picker-cancel-once")
                     if arguments.contains("--native-calendar-subscription-commit-reply-failure-once") {
                         try await host!.configureIsolatedCalendarSubscriptionCommitReplyFailureOnce()
                     }
@@ -8549,6 +8572,7 @@ final class CoreModel: ObservableObject {
 
     func calendarSettingsWillResignActive() {
         calendarSettingsApplicationActive = false
+        cancelCalendarFileImport()
         if calendarSettingsTesting {
             calendarSettingsReadTask?.cancel()
             calendarSettingsTestResult = [:]
@@ -8567,6 +8591,7 @@ final class CoreModel: ObservableObject {
     func cancelCalendarSettingsIntent() {
         calendarSettingsApplicationActive = false
         calendarSettingsSession = UUID()
+        cancelCalendarFileImport()
         calendarSettingsTestResult = [:]
         calendarSettingTask?.cancel()
         calendarSettingsReadTask?.cancel()
@@ -8749,24 +8774,107 @@ final class CoreModel: ObservableObject {
         } catch { calendarSettingError = error.localizedDescription }
     }
 
+    private func calendarFileImportCurrent(_ claim: CalendarFileImportClaim) -> Bool {
+        calendarFileImportClaim?.id == claim.id && calendarFileImporterID == claim.id
+            && calendarSubscriptionDraftID == claim.draft && !Task.isCancelled
+            && calendarSettingsPageCurrent(claim.host, session: claim.session)
+            && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+
+    func prepareCalendarFileImport() {
+        guard calendarSubscriptionChooseFileEnabled, !Task.isCancelled, let currentHost = host,
+              calendarSettingsPageHost === currentHost else { return }
+        let claim = CalendarFileImportClaim(id: UUID(), host: currentHost, session: calendarSettingsSession,
+            draft: calendarSubscriptionDraftID, name: calendarSubscriptionName, defaultName: label("nav.calendar"))
+        calendarFileImportClaim = claim
+        calendarFileImporterID = claim.id
+        calendarSettingError = nil
+        #if DEBUG && targetEnvironment(simulator)
+        if let source = calendarFileImportTestSource {
+            // An isolated simulator fixture exercises the same callback and native capture, not Files UI.
+            let cancelled = calendarFileImportTestCancelOnce
+            calendarFileImportTestCancelOnce = false
+            Task { await self.completeCalendarFileImport(cancelled ? .failure(CocoaError(.userCancelled))
+                : .success([source]), pickerID: claim.id) }
+            return
+        }
+        #endif
+        calendarFileImporterPresented = true
+    }
+
+    func setCalendarFileImporterPresented(_ value: Bool, pickerID: UUID?) {
+        guard pickerID == calendarFileImporterID else { return }
+        if !value { calendarFileImporterPresented = false }
+    }
+
+    private func cancelCalendarFileImport() {
+        guard calendarFileImportClaim != nil else { return }
+        calendarFileImportClaim = nil
+        calendarFileImporterID = nil
+        calendarFileImporterPresented = false
+        // The shared Calendar operation stays owned until native capture has physically drained.
+        calendarSettingTask?.cancel()
+    }
+
+    func completeCalendarFileImport(_ result: Result<[URL], Error>, pickerID: UUID) async {
+        guard let claim = calendarFileImportClaim, claim.id == pickerID, calendarSettingOwner == nil else { return }
+        guard calendarFileImportCurrent(claim), !busy, !retryNeeded, calendarSettingRequest == nil else {
+            cancelCalendarFileImport()
+            return
+        }
+        calendarFileImporterPresented = false
+        let selectedURL: URL
+        switch result {
+        case .success(let urls):
+            guard urls.count == 1, let selected = urls.first else { cancelCalendarFileImport(); return }
+            selectedURL = selected
+        case .failure(let failure):
+            let failure = failure as NSError
+            if failure.domain != NSCocoaErrorDomain || failure.code != NSUserCancelledError {
+                calendarSettingError = label("settings.calendarMobile.failedToLoadSavedCalendars")
+            }
+            cancelCalendarFileImport()
+            return
+        }
+        calendarSettingsTestResult = [:]
+        beginCalendarSettingOperation(retry: false, localFile: (selectedURL, claim))
+    }
+
+    private func retainCalendarFileAddRequest(_ request: String, claim: CalendarFileImportClaim) {
+        guard host === claim.host else { return }
+        calendarSettingRequest = request
+        calendarSettingHost = claim.host
+        calendarSettingKind = .subscriptionAdd
+        calendarSubscriptionAddDraft = (request, claim.draft)
+    }
+
     func grantDeviceCalendarAccess() {
         guard calendarSettingEnabled, !calendarSettings.object("device").object("access").isEmpty else { return }
         beginCalendarSettingOperation(retry: false, grantOnly: true)
     }
 
-    private func beginCalendarSettingOperation(retry: Bool, grantOnly: Bool = false) {
+    private func beginCalendarSettingOperation(retry: Bool, grantOnly: Bool = false,
+                                               localFile: (url: URL, claim: CalendarFileImportClaim)? = nil) {
         guard !busy, calendarSettingOwner == nil, ready, !appLock.concealed,
-              let currentHost = grantOnly ? calendarSettingsPageHost : calendarSettingHost,
-              host === currentHost, grantOnly || calendarSettingRequest != nil else { return }
-        let request = calendarSettingRequest, kind = calendarSettingKind, owner = UUID(), session = calendarSettingsSession
+              let currentHost = localFile?.claim.host ?? (grantOnly ? calendarSettingsPageHost : calendarSettingHost),
+              host === currentHost, grantOnly || localFile != nil || calendarSettingRequest != nil else { return }
+        let capturedRequest = calendarSettingRequest
+        let kind: CalendarSettingKind = localFile == nil ? calendarSettingKind : .subscriptionAdd
+        let owner = UUID(), session = calendarSettingsSession
         calendarSettingOwner = owner
         calendarSettingOwnerHost = currentHost
         calendarSettingError = nil
         busy = true
         calendarSettingTask = Task { [weak self] in
             guard let self else { return }
+            var request = capturedRequest
             defer {
                 if self.calendarSettingOwner == owner {
+                    if let localFile, self.calendarFileImportClaim?.id == localFile.claim.id {
+                        self.calendarFileImportClaim = nil
+                        self.calendarFileImporterID = nil
+                        self.calendarFileImporterPresented = false
+                    }
                     self.calendarSettingOwner = nil
                     self.calendarSettingOwnerHost = nil
                     self.calendarSettingTask = nil
@@ -8787,8 +8895,32 @@ final class CoreModel: ObservableObject {
             }
             do {
                 var grant = grantOnly
-                if let request, !grantOnly {
-                    let reply: String
+                var reply: String?
+                if let localFile {
+                    // A picker may stay open across an external edit. Refresh the actual saved witness now.
+                    try await self.readCalendarSettings()
+                    guard self.calendarFileImportCurrent(localFile.claim), self.calendarSettingOwner == owner,
+                          self.calendarSubscriptionReadError == nil, !self.calendarSubscriptionExpected.isEmpty else {
+                        throw CancellationError()
+                    }
+                    let input = try self.json(["requestId": UUID().uuidString.lowercased(), "name": localFile.claim.name,
+                        "defaultName": localFile.claim.defaultName, "expected": self.calendarSubscriptionExpected])
+                    do {
+                        let added = try await currentHost.addLocalCalendarSubscription(selectedURL: localFile.url, requestJSON: input)
+                        request = added.requestJSON
+                        self.retainCalendarFileAddRequest(added.requestJSON, claim: localFile.claim)
+                        guard self.calendarFileImportCurrent(localFile.claim), self.calendarSettingOwner == owner else {
+                            throw CancellationError()
+                        }
+                        reply = added.resultJSON
+                    } catch let failure as NativeCalendarFileAddFailure {
+                        if let frozen = failure.requestJSON {
+                            request = frozen
+                            self.retainCalendarFileAddRequest(frozen, claim: localFile.claim)
+                        }
+                        throw failure
+                    }
+                } else if let request, !grantOnly {
                     if retry {
                         if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
                         else if kind == .subscriptionAdd { reply = try await currentHost.probeCalendarSubscriptionAddOutcome(requestJSON: request) }
@@ -8797,6 +8929,8 @@ final class CoreModel: ObservableObject {
                     } else if kind == .subscriptionAdd { reply = try await currentHost.addCalendarSubscription(requestJSON: request) }
                     else if kind == .subscription { reply = try await currentHost.setCalendarSubscriptionSetting(requestJSON: request) }
                     else { reply = try await currentHost.setDeviceCalendarSetting(requestJSON: request) }
+                }
+                if let reply, let request, !grantOnly {
                     let result = try self.decode(reply)
                     try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session, kind: kind)
                     grant = kind == .device && !retry && result.text("open") == "device"

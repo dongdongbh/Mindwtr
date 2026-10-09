@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCalendarSubscriptionAddMethods, type CalendarSubscriptionAddRequest,
     type CalendarSubscriptionAddEnvelope } from './native-host-contract-calendar-subscription-add';
 import { calendarSubscriptionSettingSource, CALENDAR_SUBSCRIPTION_SOURCE_BYTES } from './calendar-subscription-settings-witness';
-import { addCalendarFeed } from './calendar-settings-model';
+import { addCalendarFeed, addCalendarFile } from './calendar-settings-model';
 import { loadNativeRequestReceipts, NativeReceiptSqliteAdapter, resetNativeRequestReceipts } from './native-request-receipts';
 import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
@@ -397,3 +397,36 @@ describe('prepared Calendar subscription URL Add with real SQLite receipts', () 
     });
 });
 
+
+
+describe('native picked-calendar request naming', () => {
+    const methods = createCalendarSubscriptionAddMethods({
+        readiness: () => { throw new Error('Pure file naming must not access storage'); },
+        save: async () => { throw new Error('Pure file naming must not write'); },
+        storage: () => { throw new Error('Pure file naming must not read device storage'); },
+    });
+    const expected = calendarSubscriptionSettingSource(initial().settings, null)!.witness;
+    const uri = 'file:///private/calendar-files/native.ics';
+    it.each([
+        { name: '  Typed  ', fileName: 'picked.ics', defaultName: 'Calendar' },
+        { name: ' \uFEFF', fileName: '  Work.ICS  ', defaultName: 'Calendar' },
+        { name: '', fileName: '.ics', defaultName: '日历' },
+        { name: '', fileName: 'PRIVATE café.ics', defaultName: 'Calendar' },
+        { name: '', fileName: '', defaultName: 'Calendar' },
+    ])('freezes the existing RN file naming: %j', (input) => {
+        const request = { requestId: ID, name: input.name, defaultName: input.defaultName, expected };
+        const result = value(methods.createCalendarSubscriptionFileAddRequest({ request, uri, fileName: input.fileName }));
+        const row = addCalendarFile([], { id: ID, ...input, uri })[0];
+        expect(result).toEqual({ ...request, name: row.name, url: uri });
+    });
+    it('refuses unsupported fields, paths and oversized names before touching storage', () => {
+        const request = { requestId: ID, name: '', defaultName: 'Calendar', expected };
+        const good = { request, uri, fileName: 'picked.ics' };
+        for (const input of [null, { ...good, extra: true }, { ...good, request: { ...request, url: uri } },
+            { ...good, uri: 'https://example.invalid/feed' }, { ...good, uri: 'content://provider/file' },
+            { ...good, fileName: 'x'.repeat(501) }, { ...good, fileName: null },
+            { ...good, request: { ...request, name: 'x'.repeat(501) } }]) {
+            expect(methods.createCalendarSubscriptionFileAddRequest(input)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+    });
+});
