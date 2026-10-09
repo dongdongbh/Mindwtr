@@ -1209,16 +1209,17 @@ struct SettingsScreen: View {
                                 .opacity(calendar.object("edit").isEmpty ? 0.55 : 1)
                                 .accessibilityIdentifier("calendar-device-selection-" + String(index))
                                 if !calendar.object("areas").isEmpty {
-                                    calendarAreaChoices(calendar.object("areas"), row: index)
+                                    calendarAreaChoices(calendar.object("areas"), row: index, subscription: false)
                                 }
                             }.padding(14)
                         }
                     }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                 } else if model.busy { ProgressView().frame(maxWidth: .infinity).padding(14) }
-                if let failure = model.calendarSettingReadError ?? model.calendarSettingError {
+                if !model.calendarSubscriptions.isEmpty { calendarSubscriptionContent }
+                if let failure = model.calendarSettingError ?? model.calendarSubscriptionReadError ?? model.calendarSettingReadError {
                     Text(failure).rnFont(14).foregroundStyle(palette.danger)
                         .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("calendar-settings-error")
-                    if model.retryNeeded || model.calendarSettingReadError != nil || model.calendarSettingAwaitingRefresh {
+                    if model.retryNeeded || model.calendarSettingReadError != nil || model.calendarSubscriptionReadError != nil || model.calendarSettingAwaitingRefresh {
                         Button { model.retryCalendarSettings() } label: {
                             Text(model.label("common.retry")).rnFont(15, .semibold)
                                 .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
@@ -1231,8 +1232,88 @@ struct SettingsScreen: View {
         }.accessibilityIdentifier("calendar-settings-scroll")
     }
 
-    private func calendarAreaChoices(_ choice: CoreObject, row: Int) -> some View {
-        let identity = Data(choice.text("key").utf8)
+    private var calendarSubscriptionContent: some View {
+        let feeds = model.calendarSubscriptions
+        let items = feeds.objects("items")
+        return VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(feeds.text("title")).rnFont(16, .semibold).foregroundStyle(palette.text)
+                Text(feeds.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(items.indices, id: \.self) { index in
+                let feed = items[index]
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: Binding(get: { feed.flag("enabled") }, set: { _ in
+                        model.saveCalendarSubscriptionSetting(feed.object("toggle"))
+                    })) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(feed.text("name")).rnFont(15).foregroundStyle(palette.text)
+                            Text(feed.text("url")).rnFont(12).foregroundStyle(palette.secondary)
+                        }.fixedSize(horizontal: false, vertical: true)
+                            .frame(minHeight: 48, alignment: .leading)
+                    }
+                    .tint(palette.tint).frame(minHeight: 48).contentShape(Rectangle()).disabled(!model.calendarSubscriptionEnabled)
+                    .accessibilityIdentifier("calendar-feed-enabled-" + String(index))
+                    calendarSubscriptionColors(feed.objects("colors"), row: index)
+                    if !feed.object("areas").isEmpty {
+                        calendarAreaChoices(feed.object("areas"), row: index, subscription: true)
+                    }
+                    Button(role: .destructive) {
+                        model.saveCalendarSubscriptionSetting(feed.object("remove").object("edit"))
+                    } label: {
+                        Text(feed.object("remove").text("label")).rnFont(14)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .disabled(!model.calendarSubscriptionEnabled)
+                    .accessibilityIdentifier("calendar-feed-remove-" + String(index))
+                }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    private func calendarSubscriptionColors(_ colors: [CoreObject], row: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let automatic = colors.first, automatic["color"] is NSNull {
+                Button { model.saveCalendarSubscriptionSetting(automatic.object("edit")) } label: {
+                    HStack(spacing: 8) {
+                        Text(model.label("taskEdit.textDirection.auto")).rnFont(14)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if automatic.flag("selected") { Image(systemName: "checkmark").accessibilityHidden(true) }
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .disabled(!model.calendarSubscriptionEnabled || automatic.object("edit").isEmpty)
+                .accessibilityLabel(automatic.text("accessibilityLabel"))
+                .accessibilityAddTraits(automatic.flag("selected") ? .isSelected : [])
+                .accessibilityIdentifier("calendar-feed-color-" + String(row) + "-0")
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 8)], spacing: 8) {
+                ForEach(colors.indices.filter { !(colors[$0]["color"] is NSNull) }, id: \.self) { index in
+                    let color = colors[index]
+                    Button { model.saveCalendarSubscriptionSetting(color.object("edit")) } label: {
+                        RoundedRectangle(cornerRadius: 8).fill(Color(hex: color.text("fill")))
+                            .frame(minHeight: 48)
+                            .overlay {
+                                if color.flag("selected") {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(palette.text, palette.card).accessibilityHidden(true)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain).disabled(!model.calendarSubscriptionEnabled || color.object("edit").isEmpty)
+                    .accessibilityLabel(color.text("accessibilityLabel"))
+                    .accessibilityAddTraits(color.flag("selected") ? .isSelected : [])
+                    .accessibilityIdentifier("calendar-feed-color-" + String(row) + "-" + String(index))
+                }
+            }
+        }
+    }
+
+    private func calendarAreaChoices(_ choice: CoreObject, row: Int, subscription: Bool) -> some View {
+        let prefix = subscription ? "calendar-feed" : "calendar-device"
+        let enabled = subscription ? model.calendarSubscriptionEnabled : model.calendarSettingEnabled
+        let identity = Data((prefix + ":" + choice.text("key")).utf8)
         let options = choice.objects("options")
         return VStack(alignment: .leading, spacing: 0) {
             Button { calendarAreaPicker = calendarAreaPicker == identity ? nil : identity } label: {
@@ -1243,19 +1324,20 @@ struct SettingsScreen: View {
                         .foregroundStyle(palette.secondary).accessibilityHidden(true)
                 }.frame(minHeight: 44).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(!model.calendarSettingEnabled)
-            .accessibilityIdentifier("calendar-device-areas-" + String(row))
+            .buttonStyle(.plain).disabled(!enabled)
+            .accessibilityIdentifier(prefix + "-areas-" + String(row))
             if calendarAreaPicker == identity {
                 ForEach(options.indices, id: \.self) { index in
                     let option = options[index]
                     Toggle(isOn: Binding(get: { option.flag("checked") }, set: { _ in
-                        model.saveDeviceCalendarSetting(option.object("edit"))
+                        if subscription { model.saveCalendarSubscriptionSetting(option.object("edit")) }
+                        else { model.saveDeviceCalendarSetting(option.object("edit")) }
                     })) {
                         Text(option.text("label")).rnFont(13).foregroundStyle(palette.text)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .fixedSize(horizontal: false, vertical: true).frame(minHeight: 44, alignment: .leading)
                     }
-                    .tint(palette.tint).frame(minHeight: 44).disabled(!model.calendarSettingEnabled)
-                    .accessibilityIdentifier("calendar-device-area-" + String(row) + "-" + String(index))
+                    .tint(palette.tint).frame(minHeight: 44).contentShape(Rectangle()).disabled(!enabled)
+                    .accessibilityIdentifier(prefix + "-area-" + String(row) + "-" + String(index))
                 }
             }
         }

@@ -111,6 +111,7 @@ import { resolveI18nText, type I18nTemplateValues } from './i18n';
 import type { Language } from './i18n/i18n-types';
 import { taskEditValuesEqual } from './json-value-equality';
 import type { ExternalCalendarSubscription } from './ics';
+import type { AppSettings, Area } from './types';
 import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-host-contract';
 import type { NativeCalendarFeed } from './native-host-contract-calendar';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
@@ -171,6 +172,34 @@ export type NativeCalendarSettingsEdit =
     | { type: 'feed'; feedId: string; field: 'color'; value: string | null; revision: string }
     | { type: 'feed'; feedId: string; field: 'areaIds'; value: string[]; revision: string }
     | { type: 'removeFeed'; feedId: string; revision: string };
+
+export type CalendarSubscriptionSettingsModel = Pick<NativeCalendarSettings['feeds'],
+    'title' | 'description' | 'revision' | 'listTitle' | 'items'>;
+
+/** The same subscription rows RN/shared Settings use, without device/provider reads. */
+export function buildCalendarSubscriptionSettingsModel(feeds: readonly ExternalCalendarSubscription[], revision: string,
+    options: { t: Translate; areas: readonly Area[]; theme?: AppSettings['theme'] }): CalendarSubscriptionSettingsModel {
+    const { t, areas } = options;
+    const themePreset = themeDescriptor(options.theme)?.statusPreset ?? 'default';
+    return {
+        title: resolveI18nText(t, 'settings.calendarMobile.icsSubscriptions'),
+        description: t('settings.calendarDesc'), revision,
+        listTitle: feeds.length > 0 ? t('settings.externalCalendars') : null,
+        items: feeds.map((feed) => {
+            const area = buildCalendarAreaChoice(feed.areaIds ?? [], areas, t);
+            return {
+                id: feed.id, name: feed.name, url: maskCalendarFeedUrl(feed.url), enabled: feed.enabled,
+                toggle: { type: 'feed', feedId: feed.id, field: 'enabled', value: !feed.enabled, revision },
+                areas: area && { key: feed.id, label: area.label, options: area.options.map((option) => ({ ...option,
+                    edit: { type: 'feed', feedId: feed.id, field: 'areaIds', value: toggleCalendarAreaId(feed.areaIds ?? [], option.areaId), revision } as NativeCalendarSettingsEdit })) },
+                colors: getCalendarFeedColorOptions(feed, t, themePreset).map((option) => ({ ...option,
+                    edit: setCalendarFeedColor([feed], feed.id, option.color ?? undefined)
+                        ? { type: 'feed', feedId: feed.id, field: 'color', value: option.color, revision } as NativeCalendarSettingsEdit : null })),
+                remove: { label: t('settings.externalCalendarRemove'), edit: { type: 'removeFeed', feedId: feed.id, revision } },
+            };
+        }),
+    };
+}
 
 /** addCalendarFeed's input: a subscription URL, or a local .ics file the picker gave. */
 export type NativeCalendarFeedAdd =
@@ -591,7 +620,6 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
         const { t, tr } = translators();
         const settings = useTaskStore.getState().settings;
         const areas = useTaskStore.getState().areas;
-        const themePreset = themeDescriptor(settings.theme)?.statusPreset ?? 'default';
         const { push } = current;
         const choices = buildCalendarPushTargetChoices({ targets: push.targets, targetId: push.targetId, color: push.color, tr, platform: current.host.platform.os });
         const deviceSettings = current.device.settings;
@@ -697,8 +725,7 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                     : [],
             },
             feeds: {
-                title: tr('settings.calendarMobile.icsSubscriptions'),
-                description: t('settings.calendarDesc'),
+                ...buildCalendarSubscriptionSettingsModel(feedsShown, revision, { t, areas, theme: settings.theme }),
                 guide: {
                     title: t('settings.calendarIntegrationGuideTitle'),
                     description: t('settings.calendarIntegrationGuideDesc'),
@@ -709,26 +736,6 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 add: { label: t('settings.externalCalendarAdd'), enabled: url.trim().length > 0 },
                 test: { label: tr('settings.calendarMobile.test') },
                 chooseFile: { label: tr('settings.calendarMobile.chooseLocalIcsFile') },
-                revision,
-                listTitle: feedsShown.length > 0 ? t('settings.externalCalendars') : null,
-                items: feedsShown.map((feed) => ({
-                    id: feed.id,
-                    name: feed.name,
-                    url: maskCalendarFeedUrl(feed.url),
-                    enabled: feed.enabled,
-                    toggle: { type: 'feed', feedId: feed.id, field: 'enabled', value: !feed.enabled, revision },
-                    areas: areaChoice(feed.id, feed.areaIds ?? [], (areaId) => ({
-                        type: 'feed', feedId: feed.id, field: 'areaIds', value: toggleCalendarAreaId(feed.areaIds ?? [], areaId), revision,
-                    })),
-                    colors: getCalendarFeedColorOptions(feed, t, themePreset).map((option) => ({
-                        ...option,
-                        // Picking the color it has writes nothing (setCalendarFeedColor).
-                        edit: setCalendarFeedColor([feed], feed.id, option.color ?? undefined)
-                            ? { type: 'feed', feedId: feed.id, field: 'color', value: option.color, revision }
-                            : null,
-                    })),
-                    remove: { label: t('settings.externalCalendarRemove'), edit: { type: 'removeFeed', feedId: feed.id, revision } },
-                })),
             },
         };
     };

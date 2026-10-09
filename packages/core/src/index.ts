@@ -333,6 +333,9 @@ export * from './native-host-contract-person-edit';
 export * from './native-host-contract-taxonomy';
 export * from './native-host-contract-general-preference';
 export * from './native-host-contract-device-calendar-settings';
+export * from './calendar-subscription-settings-witness';
+export * from './native-host-contract-calendar-subscription-settings';
+export { buildCalendarSubscriptionSettingsModel } from './native-host-contract-settings-calendar';
 export * from './taxonomy-policy';
 
 export type { NativeReferenceTasksMoveRequest, NativeReferenceTasksMovePrepared, NativeReferenceTasksMoveEnvelope,

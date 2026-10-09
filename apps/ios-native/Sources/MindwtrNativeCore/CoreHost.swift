@@ -167,6 +167,22 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    public func getCalendarSubscriptionOptions() async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.getCalendarSubscriptionOptions(cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+    public func setCalendarSubscriptionSetting(requestJSON: String) async throws -> String {
+        try await perform { try $0.setCalendarSubscriptionSetting(requestJSON: requestJSON) }
+    }
+    public func probeCalendarSubscriptionSettingOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeCalendarSubscriptionSettingOutcome(requestJSON: requestJSON) }
+    }
+
     public func setDeviceCalendarSetting(requestJSON: String) async throws -> String {
         try await perform { try $0.setDeviceCalendarSetting(requestJSON: requestJSON) }
     }
@@ -311,6 +327,7 @@ public final class CoreHost: @unchecked Sendable {
         guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         guard !Engine.notificationSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade") }
         guard !Engine.deviceCalendarSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Device Calendar Settings require their explicit facade") }
+        guard !Engine.calendarSubscriptionSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Calendar subscription settings require their explicit facade") }
         guard !Engine.calendarAccessMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Calendar access requires its explicit facade") }
         return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
@@ -412,6 +429,9 @@ public final class CoreHost: @unchecked Sendable {
     #if DEBUG && os(iOS) && targetEnvironment(simulator)
     public func configureIsolatedCalendarEventTaskTerminalFailureOnce() async throws {
         try await perform { try $0.configureIsolatedCalendarEventTaskTerminalFailureOnce() }
+    }
+    public func configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() async throws {
+        try await perform { try $0.configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() }
     }
     #endif
 
@@ -1429,6 +1449,32 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var deviceCalendarSettingTurn: DeviceCalendarSettingTurn?
+    private final class CalendarSubscriptionSettingTurn {
+        let runtime: JSContext
+        let storage: NativeDeviceKV?
+        let generation: UInt64
+        var envelopeJSON: String?
+        var journal: Data?
+        var legacyObserved = false
+        var legacyRaw: String?
+        var committing = false
+        var freshRuntimeRequired = false
+        init(runtime: JSContext, storage: NativeDeviceKV?, generation: UInt64, journal: Data?) {
+            self.runtime = runtime; self.storage = storage; self.generation = generation; self.journal = journal
+        }
+    }
+    private var calendarSubscriptionSettingTurn: CalendarSubscriptionSettingTurn?
+    fileprivate static let calendarSubscriptionSettingMethods: Set<String> = ["calendarSubscriptionSetting",
+        "calendarSubscriptionSettingOptions", "calendarSubscriptionSettingPrepare", "calendarSubscriptionSettingValidate",
+        "calendarSubscriptionSettingCommit", "calendarSubscriptionSettingRetryOutcome", "calendarSubscriptionSettingAcknowledged"]
+    private static let calendarSubscriptionSettingRequestLimit = 1_048_576
+    private static let calendarSubscriptionSettingEnvelopeLimit = 4_194_304
+    private static let calendarSubscriptionSettingOptionsLimit = 2_000_000
+    private static let calendarSubscriptionSettingArgumentsLimit = 12_000_000
+    private static let calendarSubscriptionSettingJournalLimit = 24_000_000
+    private static var calendarSubscriptionFreshRuntime: HostFailure {
+        HostFailure("SAVE_FAILED: Calendar subscription save requires fresh runtime recovery")
+    }
     private final class CalendarAccessTurn {
         let id: UUID
         let runtime: JSContext
@@ -1668,6 +1714,7 @@ private final class Engine: @unchecked Sendable {
     private var startupGeneralPreferenceResult: String?
     private var startupNotificationSettingResult: String?
     private var startupDeviceCalendarSettingResult: String?
+    private var startupCalendarSubscriptionSettingResult: String?
     private var startupReminderCompletionResult: String?
     private var startupReminderSnoozeResult: String?
     private var startupTaxonomyResult: String?
@@ -1727,7 +1774,7 @@ private final class Engine: @unchecked Sendable {
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
         "iosEntityOpen": 1, "iosSearchSnapshot": 0, "iosSearchObservation": 0, "iosSearchOpen": 1, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
-        "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1, "deviceCalendarSetting": 1,
+        "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1, "deviceCalendarSetting": 1, "calendarSubscriptionSetting": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
         "managePersonDeleteOptions": 1, "managePersonDelete": 1, "managePersonDeleteRetryOutcome": 1,
@@ -1793,7 +1840,7 @@ private final class Engine: @unchecked Sendable {
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "calendarEventTaskCreate", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["calendarSubscriptionSetting", "deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "calendarEventTaskCreate", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -1861,6 +1908,28 @@ private final class Engine: @unchecked Sendable {
         if saved.method == "calendarEventTaskCommit" || raw["method"] as? String == "calendarEventTaskCommit" {
             guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
                 throw HostFailure("INVALID_INPUT: Malformed prepared Calendar event task journal")
+            }
+        }
+        if saved.method == "calendarSubscriptionSettingCommit" || String(decoding: journalData, as: UTF8.self).contains("calendarSubscriptionSettingCommit") {
+            guard journalData.count <= Self.calendarSubscriptionSettingJournalLimit,
+                  try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared calendar subscription journal")
+            }
+        }
+        if saved.method == "calendarSubscriptionSettingCommit" {
+            guard Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
+                || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription journal has unknown members")
+            }
+            if let terminal = raw["terminal"] {
+                guard let encoded = terminal as? [String: Any], encoded.count == 1,
+                      let name = encoded.keys.first, ["success", "rejected"].contains(name),
+                      let payload = encoded[name] as? [String: Any], Set(payload.keys) == Set(["_0"]),
+                      let value = payload["_0"] as? String, value.utf8.count <= 1024 else {
+                    throw HostFailure("INVALID_INPUT: Calendar subscription terminal is malformed")
+                }
+                if name == "success" { _ = try Self.calendarSubscriptionSettingResult(value, changed: true) }
+                else { guard isDefiniteRejection(value, method: saved.method) else { throw Self.deviceStorageInvalid } }
             }
         }
         if saved.method == "deviceCalendarSettingCommit" {
@@ -2186,6 +2255,10 @@ private final class Engine: @unchecked Sendable {
                 _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateNotificationSettingAcknowledgment(command, value: value) }
             }
+            if let command = pending, command.method == "calendarSubscriptionSettingCommit" {
+                _ = try invoke("calendarSubscriptionSettingValidate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateCalendarSubscriptionSettingAcknowledgment(command, value: value) }
+            }
             if let command = pending, command.method == "deviceCalendarSettingCommit" {
                 _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateDeviceCalendarSettingAcknowledgment(command, value: value) }
@@ -2345,11 +2418,13 @@ private final class Engine: @unchecked Sendable {
             #if DEBUG
             let guardedFaults = HostIOFaults()
             guardedFaults.beforeSQL = { [unowned self] sql in
+                try self.requireCalendarSubscriptionSettingTurn(publication: self.calendarSubscriptionSQLPublication(sql))
                 try self.requireCleanupTurn()
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
                 try self.requireProjectDownloadTurn()
                 try self.faults?.beforeSQL?(sql)
+                try self.requireCalendarSubscriptionSettingTurn(publication: self.calendarSubscriptionSQLPublication(sql))
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
                 try self.requireProjectDownloadTurn()
@@ -2361,6 +2436,7 @@ private final class Engine: @unchecked Sendable {
                     if sql == "ROLLBACK" { turn.transaction = false }
                 }
                 try self.faults?.afterSQL?(sql)
+                try self.requireCalendarSubscriptionSettingTurn(publication: self.calendarSubscriptionSQLPublication(sql))
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
                 try self.requireProjectDownloadTurn()
@@ -2477,6 +2553,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
         let recoveringNotificationSetting = pending?.method == "notificationSettingCommit"
         let recoveringDeviceCalendarSetting = pending?.method == "deviceCalendarSettingCommit"
+        let recoveringCalendarSubscriptionSetting = pending?.method == "calendarSubscriptionSettingCommit"
         let recoveringReminderCompletion = pending?.method == "reminderCompletionCommit"
         let recoveringReminderSnooze = pending?.method == "reminderSnoozeCommit"
         let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
@@ -2590,6 +2667,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringGeneralPreference, let terminal, case .success(let value) = terminal { startupGeneralPreferenceResult = value }
         if recoveringNotificationSetting, let terminal, case .success(let value) = terminal { startupNotificationSettingResult = value }
         if recoveringDeviceCalendarSetting, let terminal, case .success(let value) = terminal { startupDeviceCalendarSettingResult = value }
+        if recoveringCalendarSubscriptionSetting, let terminal, case .success(let value) = terminal { startupCalendarSubscriptionSettingResult = value }
         if recoveringTaxonomy, let terminal, case .success(let value) = terminal { startupTaxonomyResult = value }
         if recoveringPersonEdit, let terminal, case .success(let value) = terminal { startupPersonEditResult = value }
         if recoveringPersonDelete, let terminal, case .success(let value) = terminal { startupPersonDeleteResult = value }
@@ -2646,7 +2724,7 @@ private final class Engine: @unchecked Sendable {
             ?? startupSomedaySectionDeleteResult ?? startupSomedaySectionOrderResult
             ?? startupSomedaySectionTaskResult
         let recoveredSettings = startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult
-            ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupNotificationSettingResult ?? startupDeviceCalendarSettingResult
+            ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupNotificationSettingResult ?? startupDeviceCalendarSettingResult ?? startupCalendarSubscriptionSettingResult
         let recoveredManage = recoveredSettings ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
             ?? startupPersonDeleteResult ?? startupPersonEditResult ?? startupTaxonomyResult
         let recoveredDoneRows = startupDoneTaskCompletedAtResult ?? startupDoneTaskStatusResult
@@ -2736,6 +2814,7 @@ private final class Engine: @unchecked Sendable {
                 : startupGeneralPreferenceResult != nil ? "generalPreferenceCommit"
                 : startupNotificationSettingResult != nil ? "notificationSettingCommit"
                 : startupDeviceCalendarSettingResult != nil ? "deviceCalendarSettingCommit"
+                : startupCalendarSubscriptionSettingResult != nil ? "calendarSubscriptionSettingCommit"
                 : startupTaxonomyResult != nil ? "manageTaxonomyCommit"
                 : startupPersonEditResult != nil ? "managePersonEditCommit"
                 : startupPersonDeleteResult != nil ? "managePersonDeleteCommit"
@@ -2842,6 +2921,7 @@ private final class Engine: @unchecked Sendable {
         startupGeneralPreferenceResult = nil
         startupNotificationSettingResult = nil
         startupDeviceCalendarSettingResult = nil
+        startupCalendarSubscriptionSettingResult = nil
         startupReminderCompletionResult = nil
         startupReminderSnoozeResult = nil
         startupTaxonomyResult = nil
@@ -3537,7 +3617,7 @@ private final class Engine: @unchecked Sendable {
             guard let turn = calendarAccessTurn, turn.id == id, context === turn.runtime, deviceStorage === turn.storage,
                   attachmentGeneration == turn.generation, started, !closed, !localRequests.isClosing,
                   !turn.cancellation.isCancelled, !recoveryActivationPending, pending == nil, lockFD >= 0,
-                  deviceCalendarSettingTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
+                  deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
                   retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
                   taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
                   providerCopy == nil, !cleanupOwed, !foregroundCleanupActive, !attachmentDraftEvidence else {
@@ -3712,6 +3792,214 @@ private final class Engine: @unchecked Sendable {
                 next: [after, marker])
         }
         return try invoke("deviceCalendarSettingCommit", arguments: args)
+    }
+
+    private static func calendarSubscriptionSettingRequest(_ raw: String) throws -> [String: Any] {
+        let value = try deviceCalendarSettingObject(raw, maximum: calendarSubscriptionSettingRequestLimit)
+        guard Set(value.keys) == Set(["requestId", "edit", "expected"]),
+              let id = value["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let edit = value["edit"] as? [String: Any], let expected = value["expected"] as? [String: Any],
+              Set(expected.keys) == Set(["source", "revision", "fingerprint", "stampPresent", "stamp"]),
+              let source = expected["source"] as? String, ["canonical", "legacy"].contains(source),
+              let revision = expected["revision"] as? String, revision.utf16.count <= 200,
+              let fingerprint = expected["fingerprint"] as? String,
+              fingerprint.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil,
+              isBoolean(expected["stampPresent"]),
+              (expected["stampPresent"] as? Bool == true
+                ? (expected["stamp"] as? String).map(isCanonicalReviewInstant) == true : expected["stamp"] is NSNull),
+              let feedId = edit["feedId"] as? String, feedId.utf16.count <= 200,
+              !feedId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let editedRevision = edit["revision"] as? String, ownedEqual(editedRevision, revision) else {
+            throw HostFailure("INVALID_INPUT: Calendar subscription request is malformed")
+        }
+        if source == "canonical" {
+            guard ownedEqual(revision, "synced:" + (expected["stamp"] as? String ?? "")) else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription witness is malformed")
+            }
+        } else {
+            guard revision.range(of: #"^device:[0-9a-f]{32}$"#, options: .regularExpression) != nil else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription witness is malformed")
+            }
+        }
+        if edit["type"] as? String == "removeFeed" {
+            guard Set(edit.keys) == Set(["type", "feedId", "revision"]) else { throw Self.deviceStorageInvalid }
+        } else {
+            guard edit["type"] as? String == "feed", Set(edit.keys) == Set(["type", "feedId", "field", "value", "revision"]),
+                  let field = edit["field"] as? String,
+                  field == "enabled" && isBoolean(edit["value"])
+                    || field == "color" && (edit["value"] is NSNull || (edit["value"] as? String).map { $0.utf16.count <= 20 } == true)
+                    || field == "areaIds" && (edit["value"] as? [String]).map { $0.count <= 500 && $0.allSatisfy { $0.utf16.count <= 200 } } == true else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription edit is malformed")
+            }
+        }
+        return value
+    }
+    private static func calendarSubscriptionSettingResult(_ raw: String, changed: Bool? = nil) throws -> [String: Any] {
+        let result = try deviceCalendarSettingObject(raw, maximum: 1024)
+        try deviceCalendarSettingResult(result, changed: changed)
+        guard result["open"] is NSNull else { throw HostFailure("INVALID_INPUT: Calendar subscription result is malformed") }
+        return result
+    }
+    private static func calendarSubscriptionSettingEnvelope(_ raw: String) throws -> [String: Any] {
+        let envelope = try deviceCalendarSettingObject(raw, maximum: calendarSubscriptionSettingEnvelopeLimit)
+        guard Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any],
+              Set(prepared.keys) == Set(["version", "request", "preparedAt", "deviceIdBefore", "deviceIdToInitialize", "stamp"]),
+              isInteger(prepared["version"], equalTo: 1), equalJSON(request, prepared["request"]),
+              (prepared["preparedAt"] as? String).map(isCanonicalReviewInstant) == true,
+              (prepared["stamp"] as? String).map(isCanonicalReviewInstant) == true,
+              (prepared["deviceIdBefore"] is NSNull
+                ? (prepared["deviceIdToInitialize"] as? String).map({ UUID(uuidString: $0)?.uuidString.lowercased() == $0 }) == true
+                : (prepared["deviceIdBefore"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 }) == true && prepared["deviceIdToInitialize"] is NSNull) else {
+            throw HostFailure("INVALID_INPUT: Prepared calendar subscription request is malformed")
+        }
+        _ = try calendarSubscriptionSettingRequest(ownedJSON(request))
+        return envelope
+    }
+    private func withCalendarSubscriptionSettingOwner<T>(_ work: () throws -> T) throws -> T {
+        guard calendarSubscriptionSettingTurn == nil, deviceCalendarSettingTurn == nil, calendarAccessTurn == nil,
+              started, !closed, !localRequests.isClosing, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == "calendarSubscriptionSettingCommit",
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0, let runtime = context else {
+            throw HostFailure("NOT_READY: Calendar subscription settings require their current owner")
+        }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        let turn = CalendarSubscriptionSettingTurn(runtime: runtime, storage: deviceStorage, generation: attachmentGeneration,
+            journal: try readJournalBytes(maximumBytes: Self.calendarSubscriptionSettingJournalLimit,
+                failure: Self.deviceStorageUnavailable, singleLink: true))
+        calendarSubscriptionSettingTurn = turn
+        do {
+            let result = try work()
+            if turn.freshRuntimeRequired { throw Self.calendarSubscriptionFreshRuntime }
+            calendarSubscriptionSettingTurn = nil
+            return result
+        } catch {
+            calendarSubscriptionSettingTurn = nil
+            if turn.freshRuntimeRequired || (error as? HostFailure)?.message == Self.calendarSubscriptionFreshRuntime.message {
+                // The failed queued snapshot must never re-enter ordinary work. App owns full lifecycle re-admission.
+                releaseRuntime()
+                throw Self.calendarSubscriptionFreshRuntime
+            }
+            throw error
+        }
+    }
+    @discardableResult private func requireCalendarSubscriptionSettingTurn(publication: Bool = false) throws -> CalendarSubscriptionSettingTurn? {
+        guard let turn = calendarSubscriptionSettingTurn else { return nil }
+        guard context === turn.runtime, deviceStorage === turn.storage, attachmentGeneration == turn.generation,
+              started, !closed, !localRequests.isClosing, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == "calendarSubscriptionSettingCommit",
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              deviceCalendarSettingTurn == nil, calendarAccessTurn == nil, !cleanupOwed, !foregroundCleanupActive,
+              !attachmentDraftEvidence,
+              try readJournalBytes(maximumBytes: Self.calendarSubscriptionSettingJournalLimit,
+                  failure: Self.deviceStorageUnavailable, singleLink: true) == turn.journal else { throw Self.deviceStorageUnavailable }
+        if let pending {
+            guard pending.method == "calendarSubscriptionSettingCommit", let raw = try journalArguments(pending).first as? String,
+                  let frozen = turn.envelopeJSON, Self.ownedEqual(raw, frozen) else { throw Self.deviceStorageUnavailable }
+        }
+        if publication && turn.legacyObserved {
+            do {
+                guard let storage = turn.storage,
+                      (try storage.get("mindwtr-external-calendars")).map({ Data($0.utf8) }) == turn.legacyRaw.map({ Data($0.utf8) }) else {
+                    throw Self.deviceStorageUnavailable
+                }
+            } catch {
+                turn.freshRuntimeRequired = true
+                throw Self.calendarSubscriptionFreshRuntime
+            }
+        }
+        return turn
+    }
+    private func calendarSubscriptionSQLPublication(_ sql: String) -> Bool {
+        let statement = sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        // Receipt/source reads precede material guards; only this exact owner's rollback may settle a stale transaction.
+        return statement != "ROLLBACK" && !statement.hasPrefix("SELECT") && !statement.hasPrefix("PRAGMA")
+    }
+    private func calendarSubscriptionRead() throws -> String {
+        guard let turn = try requireCalendarSubscriptionSettingTurn(), let storage = turn.storage else { throw Self.deviceStorageUnavailable }
+        let raw = try storage.get("mindwtr-external-calendars")
+        guard raw == nil || raw!.utf8.count <= Self.calendarSubscriptionSettingRequestLimit else { throw Self.deviceStorageInvalid }
+        if turn.legacyObserved && turn.legacyRaw.map({ Data($0.utf8) }) != raw.map({ Data($0.utf8) }) {
+            if turn.committing { turn.freshRuntimeRequired = true; throw Self.calendarSubscriptionFreshRuntime }
+            throw HostFailure("STALE_REVISION: Calendar subscription source changed")
+        }
+        turn.legacyObserved = true; turn.legacyRaw = raw
+        return try Self.deviceStorageJSON([raw.map { $0 as Any } ?? NSNull()], strings: raw.map { [$0] } ?? [])
+    }
+    func getCalendarSubscriptionOptions(cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        do {
+            return try withCalendarSubscriptionSettingOwner {
+                guard pending == nil else { throw Self.deviceStorageUnavailable }
+                let value = try invoke("calendarSubscriptionSettingOptions", arguments: ["{}"], localCancellation: cancellation)
+                try cancellation.check()
+                let options = try Self.deviceCalendarSettingObject(value, maximum: Self.calendarSubscriptionSettingOptionsLimit)
+                guard Set(options.keys) == Set(["model", "expected"]), options["model"] is [String: Any] else { throw Self.deviceStorageInvalid }
+                return value
+            }
+        } catch { try cancellation.check(); throw error }
+    }
+    func setCalendarSubscriptionSetting(requestJSON: String) throws -> String {
+        let request: [String: Any]
+        do { request = try Self.calendarSubscriptionSettingRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let command = pending {
+            guard command.method == "calendarSubscriptionSettingCommit", let raw = try journalArguments(command).first as? String,
+                  Self.equalJSON(try Self.calendarSubscriptionSettingEnvelope(raw)["request"], request) else {
+                throw HostFailure("Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw Self.deviceStorageUnavailable }
+            try resumeActivationIfNeeded()
+            return try publicValue(terminal, method: command.method)
+        }
+        return try withCalendarSubscriptionSettingOwner {
+            return try call("calendarSubscriptionSetting", argumentsJSON: Self.ownedJSON([requestJSON]))
+        }
+    }
+    func probeCalendarSubscriptionSettingOutcome(requestJSON: String) throws -> String {
+        do {
+            _ = try Self.calendarSubscriptionSettingRequest(requestJSON)
+            return try withCalendarSubscriptionSettingOwner {
+                if let pending {
+                    guard pending.method == "calendarSubscriptionSettingCommit", let raw = try journalArguments(pending).first as? String,
+                          Self.equalJSON(try Self.calendarSubscriptionSettingEnvelope(raw)["request"], try Self.calendarSubscriptionSettingRequest(requestJSON)) else { throw Self.deviceStorageUnavailable }
+                    calendarSubscriptionSettingTurn?.envelopeJSON = raw
+                }
+                let value = try invoke("calendarSubscriptionSettingRetryOutcome", arguments: [requestJSON])
+                _ = try Self.calendarSubscriptionSettingResult(value, changed: true)
+                return value
+            }
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+            throw CoreHostRejection(message: error.message)
+        }
+    }
+    private func calendarSubscriptionSettingJournalRequest(_ command: PendingCommand) throws -> String {
+        guard let raw = try journalArguments(command).first as? String,
+              let request = try Self.calendarSubscriptionSettingEnvelope(raw)["request"] else { throw Self.deviceStorageInvalid }
+        return try Self.ownedJSON(request)
+    }
+    private func validateCalendarSubscriptionSettingAcknowledgment(_ command: PendingCommand, value: String) throws {
+        _ = try journalArguments(command)
+        _ = try Self.calendarSubscriptionSettingResult(value, changed: true)
+    }
+    private func invokeCalendarSubscriptionSettingCommit(_ command: PendingCommand) throws -> String {
+        let args = try journalArguments(command)
+        guard let raw = args.first as? String, let turn = calendarSubscriptionSettingTurn else { throw Self.deviceStorageUnavailable }
+        turn.envelopeJSON = raw
+        _ = try invoke("calendarSubscriptionSettingValidate", arguments: args)
+        do {
+            let saved = try invoke("calendarSubscriptionSettingRetryOutcome", arguments: [calendarSubscriptionSettingJournalRequest(command)])
+            try validateCalendarSubscriptionSettingAcknowledgment(command, value: saved)
+            return saved
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
+        turn.committing = true
+        defer { turn.committing = false }
+        return try invoke("calendarSubscriptionSettingCommit", arguments: args)
     }
 
     private static let notificationSettingFields = Set(["notificationsEnabled", "startDateNotificationsEnabled",
@@ -7768,6 +8056,10 @@ private final class Engine: @unchecked Sendable {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
         }
         guard reminderEffectsTurn == nil, !Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard (calendarSubscriptionSettingTurn == nil || method == "calendarSubscriptionSetting"),
+              !Self.calendarSubscriptionSettingMethods.contains(method) || (method == "calendarSubscriptionSetting" && calendarSubscriptionSettingTurn != nil) else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar subscription settings require their current explicit owner")
+        }
         guard (deviceCalendarSettingTurn == nil || method == "deviceCalendarSetting"),
               !Self.deviceCalendarSettingMethods.contains(method) || (method == "deviceCalendarSetting" && deviceCalendarSettingTurn != nil) else {
             throw CoreHostRejection(message: "NOT_READY: Device Calendar Settings require their current explicit owner")
@@ -9229,6 +9521,25 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "notificationSettingCommit", argumentsJSON: encoded)
                 _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "calendarSubscriptionSetting" {
+            do {
+                let raw = try invoke("calendarSubscriptionSettingPrepare", arguments: args)
+                let response = try Self.deviceCalendarSettingObject(raw, maximum: Self.calendarSubscriptionSettingEnvelopeLimit)
+                guard let original = args.first as? String else { throw Self.deviceStorageInvalid }
+                if response["kind"] as? String == "noop" {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] else { throw Self.deviceStorageInvalid }
+                    let value = try Self.ownedJSON(result)
+                    _ = try Self.calendarSubscriptionSettingResult(value)
+                    return value
+                }
+                guard response["kind"] as? String == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any], let request = prepared["request"],
+                      Self.equalJSON(request, try Self.calendarSubscriptionSettingRequest(original)) else { throw Self.deviceStorageInvalid }
+                let envelope = try Self.ownedJSON(["request": request, "prepared": prepared])
+                command = PendingCommand(version: 2, method: "calendarSubscriptionSettingCommit", argumentsJSON: try Self.ownedJSON([envelope]))
+                calendarSubscriptionSettingTurn?.envelopeJSON = envelope
+                _ = try invoke("calendarSubscriptionSettingValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "deviceCalendarSetting" {
             do {
                 let value = try invoke("deviceCalendarSettingPrepare", arguments: args)
@@ -10245,8 +10556,9 @@ private final class Engine: @unchecked Sendable {
             if command.method == "backupDocumentCommit" { replay = try backupDocumentArguments(command) }
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
-            terminal = .success(try command.method == "deviceCalendarSettingCommit"
-                ? invokeDeviceCalendarSettingCommit(command) : invoke(command.method, arguments: replay))
+            if command.method == "calendarSubscriptionSettingCommit" { terminal = .success(try invokeCalendarSubscriptionSettingCommit(command)) }
+            else { terminal = .success(try command.method == "deviceCalendarSettingCommit"
+                ? invokeDeviceCalendarSettingCommit(command) : invoke(command.method, arguments: replay)) }
         } catch {
             // These codes prove the first attempt stopped before its write. A
             // replay rejection cannot prove an earlier uncertain attempt did not.
@@ -10268,7 +10580,7 @@ private final class Engine: @unchecked Sendable {
     func retryPending() throws -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
         guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
-        guard notificationSettingTurn == nil, deviceCalendarSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Settings edit is still awaiting its owner") }
+        guard notificationSettingTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Settings edit is still awaiting its owner") }
         let command = pending
         let method = command?.method
         let terminal = try resolvePending()
@@ -10360,6 +10672,21 @@ private final class Engine: @unchecked Sendable {
             try attachmentDraftHooks?.boundary?(.afterSaveCommit)
             #endif
             return try finishOwnedSave(command, with: .success(value))
+        }
+        if command.method == "calendarSubscriptionSettingCommit" {
+            return try withCalendarSubscriptionSettingOwner {
+                guard let raw = try journalArguments(command).first as? String else { throw Self.deviceStorageInvalid }
+                calendarSubscriptionSettingTurn?.envelopeJSON = raw
+                _ = try invoke("calendarSubscriptionSettingValidate", arguments: [raw])
+                if let terminal = command.terminal { return try finish(command, with: terminal) }
+                try persist(command)
+                let terminal: TerminalResult
+                do { terminal = .success(try invokeCalendarSubscriptionSettingCommit(command)) }
+                catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") && recoveryActivationPending {
+                    terminal = .rejected(error.message)
+                }
+                return try finish(command, with: terminal)
+            }
         }
         if command.method == "deviceCalendarSettingCommit" {
             return try withDeviceCalendarSettingOwner {
@@ -10733,6 +11060,15 @@ private final class Engine: @unchecked Sendable {
                                      try NativeJSON.jsonObject(with: Data(value.utf8))) else {
                     throw HostFailure("SAVE_FAILED: Notification setting outcome cannot be verified")
                 }
+            }
+        }
+        if command.method == "calendarSubscriptionSettingCommit" {
+            _ = try invoke("calendarSubscriptionSettingValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal {
+                let proven = try invoke("calendarSubscriptionSettingRetryOutcome", arguments: [calendarSubscriptionSettingJournalRequest(command)])
+                try validateCalendarSubscriptionSettingAcknowledgment(command, value: proven)
+                try validateCalendarSubscriptionSettingAcknowledgment(command, value: value)
+                guard Self.equalJSON(try Self.calendarSubscriptionSettingResult(proven), try Self.calendarSubscriptionSettingResult(value)) else { throw Self.deviceStorageUnavailable }
             }
         }
         if command.method == "deviceCalendarSettingCommit" {
@@ -11305,6 +11641,9 @@ private final class Engine: @unchecked Sendable {
         if command.method == "notificationSettingCommit", case .success = terminal {
             _ = try? invoke("notificationSettingAcknowledged", arguments: [])
         }
+        if command.method == "calendarSubscriptionSettingCommit", case .success = terminal {
+            _ = try? invoke("calendarSubscriptionSettingAcknowledged", arguments: [])
+        }
         if command.method == "deviceCalendarSettingCommit", case .success = terminal {
             _ = try? invoke("deviceCalendarSettingAcknowledged", arguments: [])
         }
@@ -11591,7 +11930,7 @@ private final class Engine: @unchecked Sendable {
             || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "referenceTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "deviceCalendarSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -14695,6 +15034,16 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("gtdWorkflow", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
+        if command.method == "calendarSubscriptionSettingCommit" {
+            guard !retainedOrdinary, command.editorDraft == nil,
+                  command.argumentsJSON.utf8.count <= Self.calendarSubscriptionSettingArgumentsLimit,
+                  try JSONEncoder().encode(command).count <= Self.calendarSubscriptionSettingJournalLimit,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else { throw Self.deviceStorageInvalid }
+            _ = try Self.calendarSubscriptionSettingEnvelope(args[0])
+            if case .success(let value) = command.terminal { _ = try Self.calendarSubscriptionSettingResult(value, changed: true) }
+            return args
+        }
         if command.method == "deviceCalendarSettingCommit" {
             guard !retainedOrdinary, command.editorDraft == nil,
                   command.argumentsJSON.utf8.count <= Self.deviceCalendarSettingArgumentsLimit,
@@ -16976,6 +17325,10 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateSettingsAndAreaArguments(_ method: String, _ args: [Any], _ json: String, allowPreparedDates: Bool) throws {
+        if method == "calendarSubscriptionSetting" {
+            guard json.utf8.count <= Self.calendarSubscriptionSettingArgumentsLimit, args.count == 1, let raw = args.first as? String else { throw Self.deviceStorageInvalid }
+            _ = try Self.calendarSubscriptionSettingRequest(raw)
+        }
         if method == "deviceCalendarSetting" {
             guard json.utf8.count <= Self.deviceCalendarSettingArgumentsLimit, let raw = args.first as? String else {
                 throw HostFailure("INVALID_INPUT: Device Calendar setting requires one bounded request")
@@ -18788,6 +19141,31 @@ private final class Engine: @unchecked Sendable {
     #endif
 
     #if DEBUG && os(iOS) && targetEnvironment(simulator)
+    func configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() throws {
+        let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
+        guard !started, !closed, !invoking, pending == nil, let faults, faults.afterSQL == nil, faults.beforeSQL == nil,
+              databaseURL.lastPathComponent == "mindwtr.sqlite", directory.deletingLastPathComponent().lastPathComponent == "NativeUITests",
+              Self.ownedDiscardUUID(identifier) == identifier,
+              faults.secretService == "mindwtr.native-keychain.fixture." + identifier,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.calendarSubscriptionSettingJournalLimit) == nil else {
+            throw HostFailure("Isolated Calendar subscription fixture is unavailable")
+        }
+        var fired = false
+        weak var interruptedRuntime: JSContext?
+        faults.beforeSQL = { [unowned self] sql in
+            guard fired, let interruptedRuntime, self.context === interruptedRuntime, sql.hasPrefix("BEGIN"),
+                  self.pending?.method == "calendarSubscriptionSettingCommit" else { return }
+            throw HostFailure("Isolated Calendar subscription retry interrupted")
+        }
+        faults.afterSQL = { [unowned self] sql in
+            guard !fired, sql == "COMMIT", self.pending?.method == "calendarSubscriptionSettingCommit",
+                  self.calendarSubscriptionSettingTurn?.committing == true else { return }
+            fired = true
+            interruptedRuntime = self.context
+            throw HostFailure("Isolated Calendar subscription COMMIT reply interrupted")
+        }
+    }
+
     func configureIsolatedCalendarEventTaskTerminalFailureOnce() throws {
         let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
         guard !started, !closed, !invoking, pending == nil, let faults, faults.journalRemove == nil,
@@ -20068,6 +20446,23 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func persist(_ command: PendingCommand, mixedGuard: (() throws -> Void)? = nil) throws {
+        if command.method == "calendarSubscriptionSettingCommit" {
+            _ = try journalArguments(command)
+            guard let turn = try requireCalendarSubscriptionSettingTurn() else { throw Self.deviceStorageUnavailable }
+            #if DEBUG
+            try faults?.journalWrite?()
+            #endif
+            try requireCalendarSubscriptionSettingTurn()
+            let bytes = try JSONEncoder().encode(command)
+            do { try DurableFile.write(bytes, to: journalURL) }
+            catch {
+                if (try? readJournalBytes(maximumBytes: Self.calendarSubscriptionSettingJournalLimit, failure: Self.deviceStorageUnavailable, singleLink: true)) == bytes { turn.journal = bytes }
+                throw error
+            }
+            turn.journal = bytes
+            try requireCalendarSubscriptionSettingTurn()
+            return
+        }
         if command.method == "deviceCalendarSettingCommit" { _ = try journalArguments(command) }
         if command.method == "taskCancellationUndoCommit", try cancellationUndoIsComplete(command) {
             // The same selected reader reserves future terminal capacity and
@@ -20153,11 +20548,13 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func clearPending() throws {
+        try requireCalendarSubscriptionSettingTurn()
         try requireRetainedOrdinaryTurn()
         #if DEBUG
         try faults?.journalRemove?()
         #endif
         if pending?.editorDraft != nil { try requireOrdinaryEditorMutation() }
+        try requireCalendarSubscriptionSettingTurn()
         try requireRetainedOrdinaryTurn()
         do { try DurableFile.remove(journalURL) }
         catch {
@@ -20169,6 +20566,7 @@ private final class Engine: @unchecked Sendable {
         }
         retainedOrdinaryTurn?.journal = nil
         retainedOrdinaryTurn?.command = nil
+        calendarSubscriptionSettingTurn?.journal = nil
         pending = nil
         try requireRetainedOrdinaryTurn()
     }
@@ -20705,6 +21103,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
+        try requireCalendarSubscriptionSettingTurn(publication: calendarSubscriptionSQLPublication(sql))
         guard reminderEffectsTurn == nil else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
         try denyCleanupOwner()
@@ -20721,6 +21120,7 @@ private final class Engine: @unchecked Sendable {
         try requireProjectFileAddTurn()
         try requireProjectDownloadTurn()
         try requireProjectAvailabilityTurn()
+        try requireCalendarSubscriptionSettingTurn(publication: calendarSubscriptionSQLPublication(sql))
         return result
     }
 
@@ -20729,7 +21129,7 @@ private final class Engine: @unchecked Sendable {
     private static let deviceStorageFrameLimit = 12 * 1024 * 1024
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
-        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil else { throw Self.deviceStorageUnavailable }
@@ -20811,7 +21211,7 @@ private final class Engine: @unchecked Sendable {
         do {
             let result = try work()
             try requireEncryptionUnlockTurn()
-            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil || reminderEffectsTurn != nil || deviceCalendarSettingTurn != nil { return result }
+            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil || reminderEffectsTurn != nil || deviceCalendarSettingTurn != nil || calendarSubscriptionSettingTurn != nil { return result }
             let retiredSecret = legacySecretRemoval()
             guard let runtime = context else { throw Self.deviceStorageUnavailable }
             let generation = attachmentGeneration
@@ -20840,7 +21240,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireHTTPAdmission(_ input: String) throws {
-        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -20869,7 +21269,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireSecretAdmission(_ input: String) throws {
-        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -20907,14 +21307,14 @@ private final class Engine: @unchecked Sendable {
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
               projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
               encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil,
-              notificationSettingTurn == nil, deviceCalendarSettingTurn == nil, !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
+              notificationSettingTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil, !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
             throw HostFailure("Calendar bridge is unavailable")
         }
         try requireNoAttachmentDraft()
     }
 
     private func requireCryptoAdmission(_ input: String) throws {
-        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -21223,6 +21623,11 @@ private final class Engine: @unchecked Sendable {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
         }
         if deviceStorageLocation != nil {
+            let calendarSubscriptionRead: @convention(block) () -> String = { [weak self] in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.guarded { try self.calendarSubscriptionRead() } ?? "!MindwtrNativeError:Device settings storage is unavailable"
+            }
+            bridge.setObject(calendarSubscriptionRead, forKeyedSubscript: "calendarSubscriptionRead" as NSString)
             let calendarSettingRead: @convention(block) () -> String = { [weak self] in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
@@ -21380,8 +21785,10 @@ private final class Engine: @unchecked Sendable {
         reminderEffectsTurn = nil
         notificationSettingTurn = nil; notificationSettingOwnerAccess = false
         deviceCalendarSettingTurn = nil
+        calendarSubscriptionSettingTurn = nil
         calendarAccessTurn = nil
         startupDeviceCalendarSettingResult = nil
+        startupCalendarSubscriptionSettingResult = nil
         reminderOwnerAccess = false
         reminderSourceStale = false
         foregroundCleanupCancellation = nil

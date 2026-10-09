@@ -221,6 +221,7 @@ final class CoreModel: ObservableObject {
             if oldValue == .settings && selectedSurface != .settings {
                 retireNotificationSettingsPage()
                 retireCalendarSettingsPage()
+                calendarSubscriptionRuntimeRecovery = nil
                 settingsAdvancedPresented = false
                 invalidateDiagnostics()
                 settingsDataPresented = false
@@ -659,6 +660,12 @@ final class CoreModel: ObservableObject {
 
     @Published private(set) var settingsCalendarPresented = false
     @Published private(set) var calendarSettings: CoreObject = [:]
+    @Published private(set) var calendarSubscriptions: CoreObject = [:]
+    @Published private(set) var calendarSubscriptionReadError: String?
+    private var calendarSubscriptionExpected: CoreObject = [:]
+    private enum CalendarSettingKind { case device, subscription }
+    private var calendarSettingKind: CalendarSettingKind = .device
+    private var calendarSubscriptionRuntimeRecovery: (host: CoreHost, request: String)?
     @Published private(set) var calendarSettingError: String?
     @Published private(set) var calendarSettingReadError: String?
     @Published private(set) var calendarSettingAwaitingRefresh = false
@@ -683,6 +690,12 @@ final class CoreModel: ObservableObject {
         ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
             && !busy && !retryNeeded && !calendarSettingActive && calendarSettingReadError == nil
             && !calendarSettings.isEmpty
+    }
+    var calendarSubscriptionEnabled: Bool {
+        ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+            && !busy && !retryNeeded && calendarSettingOwner == nil && calendarSettingRequest == nil
+            && calendarSettingsCloseTask == nil && calendarSubscriptionReadError == nil
+            && !calendarSubscriptions.isEmpty && !calendarSubscriptionExpected.isEmpty
     }
     var settingsCalendarCanCancel: Bool {
         settingsCalendarPresented && calendarSettingRequest == nil && !retryNeeded
@@ -4711,6 +4724,9 @@ final class CoreModel: ObservableObject {
                     startupInventoryReadTestFailureOnce = arguments.contains("--native-startup-inventory-read-failure-once")
                     calendarEventTaskPredispatchTestHoldOnce = arguments.contains("--native-calendar-event-task-predispatch-hold-once")
                     calendarEventTaskDispatchTestState = ""
+                    if arguments.contains("--native-calendar-subscription-commit-reply-failure-once") {
+                        try await host!.configureIsolatedCalendarSubscriptionCommitReplyFailureOnce()
+                    }
                     if arguments.contains("--native-calendar-event-task-terminal-failure-once") {
                         try await host!.configureIsolatedCalendarEventTaskTerminalFailureOnce()
                     }
@@ -4983,8 +4999,8 @@ final class CoreModel: ObservableObject {
             } else if recovery.text("method") == "dataSetting" {
                 selectedSurface = .settings
                 settingsDataPresented = true
-            } else if recovery.text("method") == "deviceCalendarSettingCommit" {
-                try validateDeviceCalendarSettingResult(recovery.object("result"))
+            } else if ["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit"].contains(recovery.text("method")) {
+                try validateDeviceCalendarSettingResult(recovery.object("result"), subscription: recovery.text("method") == "calendarSubscriptionSettingCommit")
                 selectedSurface = .settings
                 settingsAdvancedPresented = true
                 settingsCalendarPresented = true
@@ -5066,7 +5082,8 @@ final class CoreModel: ObservableObject {
             }
             mindSweepRecoveredResult = nil
             appLockRecoveryPending = false
-            if recovery.text("method") == "deviceCalendarSettingCommit", !retryNeeded, !Task.isCancelled,
+            let resumedCalendarSubscription = try await settleCalendarSubscriptionRuntimeRecovery(currentHost)
+            if (["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit"].contains(recovery.text("method")) || resumedCalendarSubscription), !retryNeeded, !Task.isCancelled,
                calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession) {
                 await refreshCalendarSettings()
             }
@@ -5126,6 +5143,10 @@ final class CoreModel: ObservableObject {
             appLockRecoveryPending = error is CoreHostAppLockRecovery
             taskRecoveryStartupCorrupt = error is EditorDraftStoreError
             self.error = taskRecoveryStartupCorrupt ? "Saved editor draft is unreadable" : error.localizedDescription
+            if let pending = calendarSubscriptionRuntimeRecovery, host === pending.host {
+                ready = false
+                retryNeeded = true
+            }
             if let currentHost = host {
                 if startingHost === currentHost {
                     do { try await readProjectFileAvailabilityInventory(currentHost) }
@@ -8452,6 +8473,9 @@ final class CoreModel: ObservableObject {
         calendarSettingError = nil
         calendarSettingReadError = nil
         calendarSettings = [:]
+        calendarSubscriptions = [:]
+        calendarSubscriptionExpected = [:]
+        calendarSubscriptionReadError = nil
         busy = true
         defer { finishOperation() }
         await refreshCalendarSettings()
@@ -8469,6 +8493,9 @@ final class CoreModel: ObservableObject {
         settingsCalendarPresented = false
         calendarSettingsPageHost = nil
         calendarSettings = [:]
+        calendarSubscriptions = [:]
+        calendarSubscriptionExpected = [:]
+        calendarSubscriptionReadError = nil
         calendarSettingReadError = nil
         calendarSettingAwaitingRefresh = false
         guard let pageHost else { return }
@@ -8554,22 +8581,51 @@ final class CoreModel: ObservableObject {
         let session = calendarSettingsSession, readID = UUID()
         guard calendarSettingsPageCurrent(currentHost, session: session), !Task.isCancelled else { throw CancellationError() }
         calendarSettingsReadID = readID
-        let read = Task { try await currentHost.calendarRead(requestJSON: "{\"op\":\"openSettings\"}") }
+        let read = Task {
+            var response: CoreObject = [:]
+            do { response["calendar"] = try self.decode(await currentHost.calendarRead(requestJSON: "{\"op\":\"openSettings\"}")) }
+            catch {
+                try Task.checkCancellation()
+                response["calendarError"] = error.localizedDescription
+            }
+            try Task.checkCancellation()
+            do { response["subscriptions"] = try self.decode(await currentHost.getCalendarSubscriptionOptions()) }
+            catch {
+                try Task.checkCancellation()
+                response["subscriptionError"] = error.localizedDescription
+            }
+            try Task.checkCancellation()
+            return try self.json(response)
+        }
         calendarSettingsReadTask = read
         defer {
             if calendarSettingsReadID == readID { calendarSettingsReadTask = nil; calendarSettingsReadID = nil }
         }
-        let view = try decode(await read.value)
+        let response = try decode(await read.value)
         guard !Task.isCancelled, calendarSettingsPageCurrent(currentHost, session: session) else { throw CancellationError() }
-        guard !view.text("title").isEmpty, let device = view["device"] as? CoreObject,
-              !device.text("title").isEmpty, device["toggle"] is CoreObject, device["calendars"] is [CoreObject] else {
-            throw CocoaError(.coderReadCorrupt)
+        let view = response.object("calendar"), device = view.object("device")
+        if !view.text("title").isEmpty, !device.text("title").isEmpty,
+           device["toggle"] is CoreObject, device["calendars"] is [CoreObject] {
+            calendarSettings = view
+            let failures = view.objects("toasts").filter { $0.text("tone") == "error" }
+            let failureText = failures.map { [$0.text("title"), $0.text("message")].filter { !$0.isEmpty }.joined(separator: "\n") }.joined(separator: "\n")
+            calendarSettingReadError = failureText.isEmpty ? nil : failureText
+        } else {
+            calendarSettings = [:]
+            calendarSettingReadError = (response["calendarError"] as? String) ?? CocoaError(.coderReadCorrupt).localizedDescription
         }
-        calendarSettings = view
-        let failures = view.objects("toasts").filter { $0.text("tone") == "error" }
-        let failureText = failures.map { [$0.text("title"), $0.text("message")].filter { !$0.isEmpty }.joined(separator: "\n") }.joined(separator: "\n")
-        calendarSettingReadError = failureText.isEmpty ? nil : failureText
-        calendarSettingAwaitingRefresh = !failures.isEmpty
+        let subscriptions = response.object("subscriptions"), model = subscriptions.object("model")
+        if Set(subscriptions.keys) == Set(["model", "expected"]), !model.text("title").isEmpty,
+           model["items"] is [CoreObject], !subscriptions.object("expected").isEmpty {
+            calendarSubscriptions = model
+            calendarSubscriptionExpected = subscriptions.object("expected")
+            calendarSubscriptionReadError = nil
+        } else {
+            calendarSubscriptions = [:]
+            calendarSubscriptionExpected = [:]
+            calendarSubscriptionReadError = (response["subscriptionError"] as? String) ?? CocoaError(.coderReadCorrupt).localizedDescription
+        }
+        calendarSettingAwaitingRefresh = calendarSettingReadError != nil
     }
 
     func saveDeviceCalendarSetting(_ edit: CoreObject) {
@@ -8578,6 +8634,19 @@ final class CoreModel: ObservableObject {
             // Keep nested NSDictionary maps intact; Swift String keys merge Unicode-equivalent IDs.
             calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit])
             calendarSettingHost = currentHost
+            calendarSettingKind = .device
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    func saveCalendarSubscriptionSetting(_ edit: CoreObject) {
+        guard calendarSubscriptionEnabled, ["feed", "removeFeed"].contains(edit.text("type")),
+              let currentHost = host, calendarSettingsPageHost === currentHost else { return }
+        do {
+            calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit,
+                "expected": calendarSubscriptionExpected])
+            calendarSettingHost = currentHost
+            calendarSettingKind = .subscription
             beginCalendarSettingOperation(retry: false)
         } catch { calendarSettingError = error.localizedDescription }
     }
@@ -8591,7 +8660,7 @@ final class CoreModel: ObservableObject {
         guard !busy, calendarSettingOwner == nil, ready, !appLock.concealed,
               let currentHost = grantOnly ? calendarSettingsPageHost : calendarSettingHost,
               host === currentHost, grantOnly || calendarSettingRequest != nil else { return }
-        let request = calendarSettingRequest, owner = UUID(), session = calendarSettingsSession
+        let request = calendarSettingRequest, kind = calendarSettingKind, owner = UUID(), session = calendarSettingsSession
         calendarSettingOwner = owner
         calendarSettingOwnerHost = currentHost
         calendarSettingError = nil
@@ -8608,6 +8677,14 @@ final class CoreModel: ObservableObject {
                         waiter.continuation.resume(returning: false)
                     }
                     self.finishOperation()
+                    if let pending = self.calendarSubscriptionRuntimeRecovery,
+                       self.host === pending.host, pending.request == request {
+                        Task { [weak self] in
+                            guard let self, self.host === pending.host,
+                                  self.calendarSubscriptionRuntimeRecovery?.request == pending.request else { return }
+                            await self.start()
+                        }
+                    }
                 }
             }
             do {
@@ -8616,11 +8693,13 @@ final class CoreModel: ObservableObject {
                     let reply: String
                     if retry {
                         if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
+                        else if kind == .subscription { reply = try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: request) }
                         else { reply = try await currentHost.probeDeviceCalendarSettingOutcome(requestJSON: request) }
-                    } else { reply = try await currentHost.setDeviceCalendarSetting(requestJSON: request) }
+                    } else if kind == .subscription { reply = try await currentHost.setCalendarSubscriptionSetting(requestJSON: request) }
+                    else { reply = try await currentHost.setDeviceCalendarSetting(requestJSON: request) }
                     let result = try self.decode(reply)
-                    try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session)
-                    grant = !retry && result.text("open") == "device"
+                    try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session, subscription: kind == .subscription)
+                    grant = kind == .device && !retry && result.text("open") == "device"
                 }
                 if grant, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
                     try await currentHost.grantDeviceCalendarAccess(readmission: { [weak self] in
@@ -8633,6 +8712,12 @@ final class CoreModel: ObservableObject {
                 }
             } catch {
                 if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost, self.host === currentHost {
+                    if kind == .subscription,
+                       error.localizedDescription == "SAVE_FAILED: Calendar subscription save requires fresh runtime recovery" {
+                        await self.prepareCalendarSubscriptionRuntimeRecovery(currentHost, request: request)
+                        guard self.host === currentHost, self.calendarSettingHost === currentHost,
+                              self.calendarSettingRequest == request else { return }
+                    }
                     self.calendarSettingError = error.localizedDescription
                     if self.isDefiniteRejection(error) {
                         self.calendarSettingRequest = nil
@@ -8650,17 +8735,75 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func validateDeviceCalendarSettingResult(_ result: CoreObject) throws {
+    private func prepareCalendarSubscriptionRuntimeRecovery(_ currentHost: CoreHost, request: String) async {
+        guard host === currentHost, calendarSettingHost === currentHost, calendarSettingRequest == request else { return }
+        calendarSubscriptionRuntimeRecovery = (currentHost, request)
+        ready = false
+        retryNeeded = true
+        let reminder = reminderLifecycleTask, search = searchLifecycleTask, sync = foregroundSyncTask
+        let notifications = notificationResponseTask, links = entityLinkTask
+        // The native runtime already removed its observers. Do not enqueue a
+        // late unregister that could remove the fresh startup's registrations.
+        retireReminderLifecycleHost(nil)
+        retireSearchHost(nil)
+        notificationResponseTask?.cancel()
+        notificationResponseBusyOwner = nil
+        suspendEntityLinks()
+        entityLinkBusyOwner = nil
+        cancelForegroundSync()
+        foregroundSyncIntent = nil
+        foregroundSyncBackgroundObserved = false
+        startupSyncCompletedHost = nil
+        completedStartupToken = nil
+        retireCalendarFeed(clear: true)
+        await reminder?.value
+        await search?.value
+        await sync?.value
+        await notifications?.value
+        await links?.value
+    }
+
+    private func settleCalendarSubscriptionRuntimeRecovery(_ currentHost: CoreHost) async throws -> Bool {
+        guard let pending = calendarSubscriptionRuntimeRecovery else { return false }
+        guard host === currentHost, pending.host === currentHost, !Task.isCancelled else { throw CancellationError() }
+        if calendarSettingRequest != nil {
+            guard calendarSettingRequest == pending.request, calendarSettingHost === currentHost else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            do {
+                let reply = try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: pending.request)
+                guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
+                try acknowledgeDeviceCalendarSetting(try decode(reply), request: pending.request,
+                    from: currentHost, session: calendarSettingsSession, subscription: true)
+            } catch {
+                guard isDefiniteRejection(error), host === currentHost, !Task.isCancelled else { throw error }
+                calendarSettingRequest = nil
+                calendarSettingHost = nil
+                calendarSettingError = error.localizedDescription
+                calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession)
+                retryNeeded = false
+                self.error = nil
+            }
+        } else {
+            calendarSettingError = nil
+            retryNeeded = false
+            error = nil
+        }
+        calendarSubscriptionRuntimeRecovery = nil
+        return true
+    }
+
+    private func validateDeviceCalendarSettingResult(_ result: CoreObject, subscription: Bool = false) throws {
         guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
               let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
               let clearDraft = result["clearDraft"] as? NSNumber, CFGetTypeID(clearDraft) == CFBooleanGetTypeID(),
               !clearDraft.boolValue, let toasts = result["toasts"] as? [Any], toasts.isEmpty,
-              result["open"] is NSNull || result.text("open") == "device" else { throw CocoaError(.coderReadCorrupt) }
+              result["open"] is NSNull || (!subscription && result.text("open") == "device") else { throw CocoaError(.coderReadCorrupt) }
     }
 
-    private func acknowledgeDeviceCalendarSetting(_ result: CoreObject, request: String, from currentHost: CoreHost, session: UUID) throws {
+    private func acknowledgeDeviceCalendarSetting(_ result: CoreObject, request: String, from currentHost: CoreHost, session: UUID, subscription: Bool = false) throws {
         guard calendarSettingRequest == request, calendarSettingHost === currentHost else { throw CocoaError(.coderReadCorrupt) }
-        try validateDeviceCalendarSettingResult(result)
+        try validateDeviceCalendarSettingResult(result, subscription: subscription)
         calendarSettingRequest = nil
         calendarSettingHost = nil
         calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: session)
@@ -8685,6 +8828,10 @@ final class CoreModel: ObservableObject {
 
     func retryCalendarSettings() {
         guard !busy, calendarSettingOwner == nil, !appLock.concealed else { return }
+        if let pending = calendarSubscriptionRuntimeRecovery, host === pending.host {
+            Task { [weak self] in await self?.start() }
+            return
+        }
         if calendarSettingRequest != nil { beginCalendarSettingOperation(retry: true); return }
         guard settingsCalendarPresented else { return }
         busy = true
@@ -9108,6 +9255,7 @@ final class CoreModel: ObservableObject {
                     "common.more", "agenda.reviewDueProjects", "agenda.laterToday",
                     "calendar.eventTaskCreatedTitle", "calendar.eventTaskCreated",
                     "calendar.cannotOpenEventTitle", "calendar.openUnsupported", "calendar.openFromCalendarApp",
+                    "taskEdit.textDirection.auto",
                     "agenda.addToFocus", "agenda.removeFromFocus",
                     "agenda.collapseOtherSections", "agenda.expandOtherSections", "markdown.expand", "markdown.collapse",
                     "projects.areaFilter", "filters.excluded", "taskEdit.tab.view", "common.notSet", "status.active", "status.waiting", "status.someday",

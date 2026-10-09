@@ -9757,6 +9757,104 @@ final class FoundationUITests: XCTestCase {
     func testNativeCalendarSettingsNormalPassiveOpen() throws { try task464CalendarSettings("NORMAL", largest: false) }
     func testNativeCalendarSettingsLargestPassiveOpen() throws { try task464CalendarSettings("LARGEST", largest: true) }
 
+    // Existing subscriptions only; device access stays off and no URL is fetched.
+    private func task470CalendarSubscriptions(_ suffix: String, largest: Bool, recovery: Bool = false) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_SUBSCRIPTION_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if recovery { app.launchArguments += ["--native-calendar-subscription-commit-reply-failure-once"] }
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        func openSettings() {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+            let advanced = app.buttons["settings-advanced"]
+            task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"])
+            boardEnabled(advanced, timeout: 30); advanced.tap()
+            let calendar = app.buttons["settings-calendar"]
+            task442Reveal(app, calendar, in: app.scrollViews["advanced-scroll"])
+            boardEnabled(calendar, timeout: 30); calendar.tap()
+            XCTAssertEqual(app.switches["calendar-device-enabled"].value as? String, "0")
+            XCTAssertFalse(app.buttons["calendar-device-grant"].exists)
+            task442Reveal(app, app.switches["calendar-feed-enabled-0"], in: app.scrollViews["calendar-settings-scroll"])
+            boardEnabled(app.switches["calendar-feed-enabled-0"], timeout: 30)
+        }
+        func tap(_ element: XCUIElement) {
+            task442Reveal(app, element, in: app.scrollViews["calendar-settings-scroll"])
+            boardEnabled(element, timeout: 30)
+            XCTAssertGreaterThanOrEqual(element.frame.height, 44 - 0.001)
+            element.tap()
+        }
+        func value(_ element: XCUIElement, _ expected: String) {
+            expectation(for: NSPredicate(format: "value == %@ AND enabled == true", expected), evaluatedWith: element)
+            waitForExpectations(timeout: 30)
+        }
+        func selected(_ element: XCUIElement) {
+            task442Reveal(app, element, in: app.scrollViews["calendar-settings-scroll"], requireEnabled: false)
+            expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: element)
+            waitForExpectations(timeout: 30)
+        }
+        openSettings()
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "synthetic-secret")).firstMatch.exists)
+        let enabled = app.switches["calendar-feed-enabled-0"]
+        XCTAssertEqual(enabled.value as? String, "1")
+        tap(enabled)
+        if recovery {
+            let retry = app.buttons["calendar-settings-retry"]
+            task442Reveal(app, retry, in: app.scrollViews["calendar-settings-scroll"])
+            boardEnabled(retry, timeout: 30); retry.tap()
+        }
+        value(enabled, "0")
+        let swatch = app.buttons["calendar-feed-color-0-1"]
+        tap(swatch); selected(swatch)
+        let automatic = app.buttons["calendar-feed-color-0-0"]
+        tap(automatic); selected(automatic)
+        tap(app.buttons["calendar-feed-areas-0"])
+        let firstArea = app.switches["calendar-feed-area-0-0"]
+        let secondArea = app.switches["calendar-feed-area-0-1"]
+        tap(firstArea); value(firstArea, "1")
+        tap(secondArea); value(secondArea, "1")
+        tap(firstArea); value(firstArea, "0")
+        tap(secondArea); value(secondArea, "0")
+        task442Reveal(app, enabled, in: app.scrollViews["calendar-settings-scroll"])
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = largest ? "Calendar subscriptions largest dark" : "Calendar subscriptions normal"
+        shot.lifetime = .keepAlways; add(shot)
+        let removeSecond = app.buttons["calendar-feed-remove-1"]
+        tap(removeSecond)
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: removeSecond)
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+        boardTap(app, "calendar-settings-back")
+        let row = app.buttons["settings-calendar"]
+        task442Reveal(app, row, in: app.scrollViews["advanced-scroll"])
+        boardEnabled(row, timeout: 30); row.tap()
+        task442Reveal(app, enabled, in: app.scrollViews["calendar-settings-scroll"])
+        boardEnabled(enabled, timeout: 30); XCTAssertEqual(enabled.value as? String, "0")
+        selected(automatic)
+        XCTAssertFalse(app.switches["calendar-feed-enabled-1"].exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--native-calendar-subscription-commit-reply-failure-once" }
+        app.launch(); openSettings()
+        XCTAssertEqual(enabled.value as? String, "0")
+        selected(automatic)
+        XCTAssertFalse(app.switches["calendar-feed-enabled-1"].exists)
+        tap(app.buttons["calendar-feed-areas-0"])
+        XCTAssertEqual(firstArea.value as? String, "0")
+        XCTAssertEqual(secondArea.value as? String, "0")
+        XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+    }
+
+    func testNativeCalendarSubscriptionsNormal() throws { try task470CalendarSubscriptions("NORMAL", largest: false) }
+    func testNativeCalendarSubscriptionsLargest() throws { try task470CalendarSubscriptions("LARGEST", largest: true) }
+    func testNativeCalendarSubscriptionsRecovery() throws { try task470CalendarSubscriptions("RECOVERY", largest: false, recovery: true) }
+
     // Root stages an actual prepared turn-on journal in this isolated library; no prompt is requested.
     func testNativeCalendarSettingsStartupRecoveryPassiveOpen() throws {
         let library = try task371Library("RECOVERY", prefix: "MINDWTR_CALENDAR_SETTINGS_UI_")
