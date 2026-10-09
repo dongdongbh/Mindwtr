@@ -107,7 +107,9 @@ public final class CoreHost: @unchecked Sendable {
     }
     #endif
 
-    public func start() async throws -> String { try await perform { try $0.start() } }
+    public func start(retainingReminderResponseIDs: [String]? = nil) async throws -> String {
+        try await perform { try $0.start(retainingReminderResponseIDs: retainingReminderResponseIDs) }
+    }
 
     /// One physical cleanup decision; grants no attachment metadata authority.
     public func retireAttachmentCleanup(_ requestJSON: String) async throws -> String {
@@ -217,6 +219,9 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
+        guard method != "iosPruneReceipts" else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
+        }
         guard !Engine.reminderSnoozeMethods.contains(method) else {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
         }
@@ -1583,7 +1588,7 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
+        "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
         "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
@@ -1756,14 +1761,22 @@ private final class Engine: @unchecked Sendable {
         return saved
     }
 
-    func start() throws -> String {
+    func start(retainingReminderResponseIDs: [String]?) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        let retentionJSON: String
+        if let ids = retainingReminderResponseIDs {
+            guard ids.count <= 128, Set(ids).count == ids.count,
+                  ids.allSatisfy({ UUID(uuidString: $0)?.uuidString.lowercased() == $0 }) else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Invalid reminder receipt retention")
+            }
+            retentionJSON = String(decoding: try JSONSerialization.data(withJSONObject: ids), as: UTF8.self)
+        } else { retentionJSON = "null" }
         guard !closed else { throw HostFailure("Core host is closed") }
         guard reminderEffectsTurn == nil else { throw NativeReminderEffects.unavailable }
         do {
             if started {
                 try denyCleanupOwner()
-                return try startupWindow()
+                return try startupWindow(retentionJSON: retentionJSON)
             }
             let source = try String(contentsOf: bundleURL, encoding: .utf8)
             guard !source.isEmpty else { throw HostFailure("Core bundle is empty") }
@@ -2215,7 +2228,7 @@ private final class Engine: @unchecked Sendable {
             projectDownloadTurn?.expectedStarted = true
             // A durable no-write rejection needs only cleanup, not another failed
             // startup. The interactive retry still returns its original error.
-            return try startupWindow()
+            return try startupWindow(retentionJSON: retentionJSON)
         } catch {
             if !(error is CoreHostAppLockRecovery) && !(error is CoreHostProjectFileAddRecovery) && !(error is CoreHostProjectFileAvailabilityRecovery) { releaseRuntime() }
             throw error
@@ -2232,7 +2245,7 @@ private final class Engine: @unchecked Sendable {
         NSLog("Native iOS App lock recovery cancelled releaseCheck=v1.3.4/ios-app-lock outcome=cancelled")
     }
 
-    private func startupWindow() throws -> String {
+    private func startupWindow(retentionJSON: String) throws -> String {
         if pending?.method == Self.projectDownloadMethod || projectDownloadTurn != nil { throw CoreHostProjectFileAvailabilityRecovery() }
         if pending?.method == Self.projectFileAddMethod || projectFileAddTurn != nil { throw CoreHostProjectFileAddRecovery() }
         let recoveringAttachmentSaveMethod: String? = pending.flatMap { command in
@@ -2448,7 +2461,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringSomedaySectionMove, let terminal, case .success(let value) = terminal { startupSomedaySectionMoveResult = value }
         if recoveringSomedaySectionUndo, let terminal, case .success(let value) = terminal { startupSomedaySectionUndoResult = value }
         try resumeActivationIfNeeded()
-        _ = try invoke("pruneReceipts", arguments: [])
+        _ = try invoke("iosPruneReceipts", arguments: [retentionJSON])
         let value = try invoke("window", arguments: [0, 50, ""])
         let recoveredAreas = startupAreaCreateResult ?? startupAreaColorResult ?? startupAreaRenameResult
             ?? startupAreaOrderResult ?? startupAreaDeleteResult
@@ -7313,6 +7326,9 @@ private final class Engine: @unchecked Sendable {
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
         reminderCompletionOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard method != "iosPruneReceipts" else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
+        }
         guard !Self.reminderSnoozeMethods.contains(method) else {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
         }
@@ -15240,6 +15256,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateArgumentTransportSize(_ method: String, _ json: String) throws {
+        if method == "iosNotificationOpen", json.utf8.count > 400_000 {
+            throw HostFailure("INVALID_INPUT: Notification open request is too large")
+        }
         if method == "dataSetting", json.utf8.count > 2_048 { throw HostFailure("INVALID_INPUT: Data setting request is too large") }
         if Self.historyTaskWritePrefix(method) == "referenceProjectNextAction", json.utf8.count > 12_610_000 {
             throw HostFailure("INVALID_INPUT: Next action request is too large")
@@ -15730,6 +15749,15 @@ private final class Engine: @unchecked Sendable {
                   (input["edit"] == nil || input["edit"] is [String: Any]),
                   (input["mode"] == nil || (input["mode"] as? String).map({ $0.utf16.count <= 32 }) == true) else {
                 throw HostFailure("INVALID_INPUT: Process Inbox needs a bounded step object")
+            }
+        }
+        if method == "iosNotificationOpen" {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 65_536,
+                  (try? NativeJSON.hasUniqueObjectKeys(encoded)) == true,
+                  let input = (try? NativeJSON.jsonObject(with: Data(encoded.utf8))) as? [String: String],
+                  Set(input.keys).isSubset(of: Set(["notificationId", "actionIdentifier", "taskId", "projectId", "context", "kind"])),
+                  input["actionIdentifier"] == "open" else {
+                throw HostFailure("INVALID_INPUT: Notification open requires a bounded route payload")
             }
         }
         if ["inboxView", "captureView", "captureEdit", "captureSubmit", "setAreaFilter", "taskView", "taskOpenTab", "taskViewReferenceTarget", "editDraft", "destinationPicker", "search", "mindSweepGuide", "mindSweepAdd",
@@ -17363,31 +17391,7 @@ private final class Engine: @unchecked Sendable {
     /// collapses duplicate members, so cleanup authority checks every object
     /// separately using the existing fixed-schema key-token reader pattern.
     private static func cleanupUniqueKeys(_ text: String) throws -> Bool {
-        let bytes = Array(text.utf8)
-        var index = 0, objects: [Set<Data>] = []
-        while index < bytes.count {
-            if bytes[index] == 0x7b { objects.append([]); index += 1; continue }
-            if bytes[index] == 0x7d {
-                guard !objects.isEmpty else { return false }
-                objects.removeLast(); index += 1; continue
-            }
-            guard bytes[index] == 0x22 else { index += 1; continue }
-            let start = index; index += 1
-            while index < bytes.count {
-                if bytes[index] == 0x5c { index += 2; continue }
-                if bytes[index] == 0x22 { index += 1; break }
-                index += 1
-            }
-            let end = index
-            var next = end
-            while next < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[next]) { next += 1 }
-            if next < bytes.count, bytes[next] == 0x3a {
-                guard !objects.isEmpty,
-                      let key = try NativeJSON.jsonObject(with: Data(bytes[start..<end]), options: [.fragmentsAllowed]) as? String,
-                      objects[objects.count - 1].insert(Data(key.utf8)).inserted else { return false }
-            }
-        }
-        return objects.isEmpty
+        try NativeJSON.hasUniqueObjectKeys(text)
     }
     private static func cleanupRequest(_ text: String) throws -> CleanupRequest {
         let raw = try cleanupObject(text, maximum: 128 * 1024)

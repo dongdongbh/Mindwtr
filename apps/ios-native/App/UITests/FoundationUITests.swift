@@ -1,6 +1,124 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    func testNativeReminderResponseContextReadFailureWaitsForFreshWake() throws {
+        let library = try task371Library("CONTEXTFAIL", prefix: "MINDWTR_RESPONSE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-response-context-read-failure",
+                               "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["MINDWTR_RESPONSE_TEST_MORE"] = "context"
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardTap(app, "tab-menu")
+        let failure = app.staticTexts["contexts-error"]
+        XCTAssertFalse(failure.waitForExistence(timeout: 3))
+        boardTap(app, "menu-dismiss")
+        XCTAssertTrue(failure.waitForExistence(timeout: 40))
+        // Two injected reads fail. A self-wake would immediately succeed on the third and erase this error.
+        let disappeared = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: failure)
+        disappeared.isInverted = true
+        waitForExpectations(timeout: 3)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: failure)
+        waitForExpectations(timeout: 20)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    func testNativeReminderResponseUnsupportedTargetsDoNotBlockLaterOpen() throws {
+        continueAfterFailure = false
+        for suffix in ["LONGTASK", "LONGPROJECT", "LONGCONTEXT"] {
+            let library = try task371Library(suffix, prefix: "MINDWTR_RESPONSE_UI_")
+            let app = XCUIApplication()
+            app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+            app.launch(); defer { app.terminate() }
+            let title = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 40), suffix)
+            XCTAssertTrue(title.label.contains("Task452 response preview"), suffix)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists, suffix)
+            boardTap(app, "task-view-close")
+            boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+            app.terminate()
+        }
+    }
+
+    func testNativeReminderResponseWaitsForMoreToClose() throws {
+        let library = try task371Library("MORE", prefix: "MINDWTR_RESPONSE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["MINDWTR_RESPONSE_TEST_MORE"] = "1"
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardTap(app, "tab-menu")
+        let title = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
+        XCTAssertTrue(app.buttons["menu-dismiss"].waitForExistence(timeout: 10))
+        XCTAssertFalse(title.waitForExistence(timeout: 3))
+        boardTap(app, "menu-dismiss")
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertTrue(title.label.contains("Task452 response preview"))
+        boardTap(app, "task-view-close")
+        boardEnabled(app.buttons["tab-menu"], timeout: 15)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-dismiss")
+        XCTAssertFalse(title.waitForExistence(timeout: 2))
+    }
+
+    func testNativeReminderResponseCompleteSurvivesRestart() throws {
+        let library = try task371Library("COMPLETE", prefix: "MINDWTR_RESPONSE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-focus"], timeout: 40)
+        boardTap(app, "tab-focus")
+        XCTAssertFalse(app.buttons["task-title-task452-preview"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["tab-focus"], timeout: 40)
+        boardTap(app, "tab-focus")
+        XCTAssertFalse(app.buttons["task-title-task452-preview"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    // The harness stages only isolated libraries and durable synthetic inbox records while the app is stopped.
+    func testNativeReminderResponseColdOpenUsesPreviewAndDoesNotReplayFinishedOpen() throws {
+        let library = try task371Library("TASK", prefix: "MINDWTR_RESPONSE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        let title = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 40))
+        XCTAssertTrue(title.label.contains("Task452 response preview"))
+        XCTAssertTrue(app.buttons["task-mode-edit"].exists)
+        XCTAssertFalse(app.textFields["task-editor-title"].exists)
+        boardTap(app, "task-view-close")
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["tab-inbox"], timeout: 30)
+        XCTAssertFalse(title.exists)
+        boardTap(app, "tab-focus")
+        boardTap(app, "task-title-task452-preview")
+        let edit = app.buttons["task-mode-edit"]
+        expectation(for: NSPredicate(format: "selected == true AND enabled == true"), evaluatedWith: edit)
+        waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.textFields["task-editor-title"].exists)
+        boardTap(app, "task-view-close")
+    }
+
+    func testNativeReminderResponseReviewKindTakesPrecedenceOverTask() throws {
+        let library = try task371Library("REVIEW", prefix: "MINDWTR_RESPONSE_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["review-start"], timeout: 40)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.exists)
+        XCTAssertFalse(app.buttons["review-guide-close"].exists)
+    }
+
     // These cases require a saved-WebDAV library in the flow's state, staged externally
     // through the real settings writer. No backend address or credential lives here.
     private func task371Library(_ suffix: String, prefix: String = "MINDWTR_UNLOCK_UI_") throws -> String {

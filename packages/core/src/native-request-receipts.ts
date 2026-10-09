@@ -364,18 +364,25 @@ export async function loadNativeRequestReceipts(client: SqliteClient,
 }
 
 /** After the journal's boot replay: drops receipts older than 30 days. */
-export async function pruneNativeRequestReceipts(client: SqliteClient, now = new Date()): Promise<number> {
-    // ponytail: a fixed 30-day window; a journal entry older than that replays without its receipt (the write rules above still hold).
+export async function pruneNativeRequestReceipts(client: SqliteClient, now = new Date(), retention?: {
+    readonly retainedRequestIds?: readonly string[];
+    readonly retainedCommands?: readonly string[];
+}): Promise<number> {
+    // shortcut: default 30-day expiry, pass explicit retention when unfinished work outlives it.
     const cutoff = new Date(now.getTime() - RECEIPT_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    if (durableCommands === null) await client.run('DELETE FROM native_request_receipts WHERE saved_at < ?', [cutoff]);
+    const retainedIds = new Set(retention?.retainedRequestIds);
+    const retainedCommands = new Set(retention?.retainedCommands);
+    const expires = (id: string, receipt: StoredReceipt): boolean => receipt.savedAt < cutoff
+        && (durableCommands === null || durableCommands.has(fingerprintCommand(receipt.fingerprint)))
+        && !retainedIds.has(id) && !retainedCommands.has(fingerprintCommand(receipt.fingerprint));
+    if (durableCommands === null && retention === undefined) await client.run('DELETE FROM native_request_receipts WHERE saved_at < ?', [cutoff]);
     else for (const [id, receipt] of durableReceipts ?? []) {
-        if (receipt.savedAt < cutoff && durableCommands.has(fingerprintCommand(receipt.fingerprint)))
+        if (expires(id, receipt))
             await client.run('DELETE FROM native_request_receipts WHERE request_id = ? AND saved_at < ?', [id, cutoff]);
     }
     let pruned = 0;
     for (const [id, receipt] of durableReceipts ?? []) {
-        if (receipt.savedAt >= cutoff || durableCommands !== null
-            && !durableCommands.has(fingerprintCommand(receipt.fingerprint))) continue;
+        if (!expires(id, receipt)) continue;
         durableReceipts!.delete(id);
         pruned += 1;
     }

@@ -81,6 +81,15 @@ enum NativeReminderRequest {
             "data": data,
             "mindwtrNativeReminder": ["version": 1, "namespace": namespace, "id": id] as [String: Any],
         ]
+        // Snapshot the original Foundation object: Swift dictionary bridging can merge distinct Unicode keys.
+        if let original = alarm["details"] as? NSDictionary, JSONSerialization.isValidJSONObject(original),
+           let encoded = try? JSONSerialization.data(withJSONObject: original), encoded.count <= 60_000,
+           let json = String(data: encoded, encoding: .utf8) {
+            content.userInfo["mindwtrNativeResponse"] = [
+                "version": 1, "publication": UUID().uuidString.lowercased(), "details": json,
+            ] as [String: Any]
+            content.categoryIdentifier = NativeReminderResponse.categoryIdentifier(details: original, data: data as NSDictionary)
+        }
         return UNNotificationRequest(identifier: "mindwtr-native:\(namespace):\(id)", content: content, trigger: trigger)
     }
 

@@ -2,6 +2,7 @@ import SwiftUI
 import LocalAuthentication
 import UIKit
 import MindwtrNativeCore
+import UserNotifications
 
 /// One immutable process snapshot, shared by startup and future early native response capture.
 enum NativeAppLaunch {
@@ -42,9 +43,149 @@ enum NativeAppLaunch {
     }
 }
 
+/// One pre-host owner; a failed open is retried only by a later explicit capture or startup.
+actor NativeNotificationResponses {
+    struct Diagnostic: Sendable {
+        let action: String
+        let outcome: String
+    }
+    static let shared = NativeNotificationResponses()
+    static let changed = Notification.Name("MindwtrNativeNotificationResponsesChanged")
+    private var storage: NativeReminderInbox?
+    private var diagnostics: [Diagnostic] = []
+
+    #if DEBUG && targetEnvironment(simulator)
+    private var moreTestCaptured = false
+    func captureMoreTestResponse() async throws {
+        let mode = ProcessInfo.processInfo.environment["MINDWTR_RESPONSE_TEST_MORE"] ?? ""
+        guard !moreTestCaptured, ["1", "context"].contains(mode),
+              case let .isolated(_, _, namespace, _) = try NativeAppLaunch.selection.get() else { return }
+        moreTestCaptured = true
+        let content = UNMutableNotificationContent()
+        let data = mode == "context"
+            ? ["alarmKey": "task:task452-preview", "kind": "context-automation", "context": " @office "]
+            : ["alarmKey": "task:task452-preview", "taskId": "task452-preview"]
+        content.userInfo = ["mindwtrNativeReminder": ["version": 1, "namespace": namespace, "id": 452], "data": data]
+        let request = UNNotificationRequest(identifier: "mindwtr-native:\(namespace):452", content: content, trigger: nil)
+        let now = Date()
+        guard let response = NativeReminderResponse.capture(request, deliveredAt: now, receivedAt: now,
+            actionIdentifier: UNNotificationDefaultActionIdentifier, namespace: namespace),
+              try await capture(response) != nil else { throw CocoaError(.coderInvalidValue) }
+        record(.open, outcome: "captured")
+        await MainActor.run {
+            // The fixture must capture while More is open, rather than win a close/capture race.
+            precondition(NativeAppModel.shared.morePresented)
+            NativeAppModel.shared.requestNotificationResponses()
+        }
+    }
+    #endif
+
+    func record(_ action: NativeReminderResponse.Action, outcome: String) {
+        if diagnostics.count == 128 { diagnostics.removeFirst() }
+        diagnostics.append(.init(action: action.rawValue, outcome: outcome))
+    }
+
+    func takeDiagnostics() -> [Diagnostic] {
+        defer { diagnostics.removeAll() }
+        return diagnostics
+    }
+
+    private func inbox() throws -> NativeReminderInbox {
+        if let storage { return storage }
+        let opened = try NativeReminderInbox(selection: NativeAppLaunch.selection.get())
+        storage = opened
+        return opened
+    }
+
+    func capture(_ response: NativeReminderResponse) async throws -> NativeReminderInbox.Item? {
+        let current = try inbox()
+        do { return try await current.capture(response) }
+        catch {
+            try await current.retry()
+            return try await current.capture(response)
+        }
+    }
+
+    func pending() async throws -> [NativeReminderInbox.Item] {
+        let current = try inbox()
+        try await current.retry()
+        return try await current.pending()
+    }
+
+    func markAdmitting(_ id: String) async throws -> NativeReminderInbox.Item {
+        let current = try inbox()
+        do { return try await current.markAdmitting(id) }
+        catch {
+            try await current.retry()
+            return try await current.markAdmitting(id)
+        }
+    }
+
+    func finish(_ item: NativeReminderInbox.Item) async throws {
+        let current = try inbox()
+        do { try await current.finish(item) }
+        catch {
+            try await current.retry()
+            try await current.finish(item)
+        }
+    }
+}
+
+final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication,
+                     willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return true }
+        switch selection {
+        case .standard, .isolated:
+            let center = UNUserNotificationCenter.current()
+            center.delegate = self
+            center.setNotificationCategories(NativeReminderResponse.categories())
+        case .rehearsal: break
+        }
+        return true
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let namespace: String
+        guard let selection = try? NativeAppLaunch.selection.get() else { completionHandler(); return }
+        switch selection {
+        case let .standard(_, _, name), let .isolated(_, _, name, _): namespace = name
+        case .rehearsal: completionHandler(); return
+        }
+        guard let captured = NativeReminderResponse.capture(response.notification.request,
+            deliveredAt: response.notification.date, receivedAt: Date(),
+            actionIdentifier: response.actionIdentifier, namespace: namespace) else { completionHandler(); return }
+        Task {
+            defer { completionHandler() }
+            do {
+                if try await NativeNotificationResponses.shared.capture(captured) != nil {
+                    await NativeNotificationResponses.shared.record(captured.action, outcome: "captured")
+                    await MainActor.run {
+                        NativeAppModel.shared.requestNotificationResponses()
+                        NotificationCenter.default.post(name: NativeNotificationResponses.changed, object: nil)
+                    }
+                } else {
+                    await NativeNotificationResponses.shared.record(captured.action, outcome: "retired")
+                    await MainActor.run { NativeAppModel.shared.requestNotificationResponses() }
+                }
+            } catch {
+                await NativeNotificationResponses.shared.record(captured.action, outcome: "capture-refused")
+                await MainActor.run { NativeAppModel.shared.requestNotificationResponses() }
+            }
+        }
+    }
+}
+
+@MainActor
+enum NativeAppModel {
+    static let shared = CoreModel()
+}
+
 @main
 struct MindwtrNativeApp: App {
-    @StateObject private var model = CoreModel()
+    @UIApplicationDelegateAdaptor(NativeNotificationDelegate.self) private var notificationDelegate
+    @StateObject private var model = NativeAppModel.shared
 
     var body: some Scene {
         WindowGroup {
@@ -329,10 +470,15 @@ private struct AppLockRoot: View {
             if applicationActive { model.notificationSettingsDidBecomeActive() }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestNotificationResponses()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NativeNotificationResponses.changed)) { _ in
+            model.requestNotificationResponses()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             observedApplicationActive = true
             model.notificationSettingsDidBecomeActive()
+            model.requestNotificationResponses()
             guard !lock.concealed else { return }
             model.requestForegroundSync(token: model.completedStartupToken, active: true)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
@@ -391,7 +537,16 @@ private struct AppLockRoot: View {
         .onChange(of: foreground) { next in
             model.requestForegroundSync(token: next.token, active: next.active)
             model.requestReminderLifecycle(token: next.token, active: next.active)
+            if next.active && !next.concealed { model.requestNotificationResponses() }
         }
+        .onChange(of: model.notificationResponseContextClean) { clean in
+            if clean { model.requestNotificationResponses() }
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        .onChange(of: model.morePresented) { presented in
+            if presented { Task { try? await NativeNotificationResponses.shared.captureMoreTestResponse() } }
+        }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             model.reminderClockChanged()
         }

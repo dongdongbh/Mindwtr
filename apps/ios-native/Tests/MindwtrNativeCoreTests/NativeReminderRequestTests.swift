@@ -53,13 +53,22 @@ final class NativeReminderRequestTests: XCTestCase {
         XCTAssertEqual(first.content.body, unsafeDetails["message"] as? String)
         XCTAssertEqual(first.content.threadIdentifier, unsafeDetails["tag"] as? String)
         XCTAssertEqual(first.content.userInfo["data"] as? [String: String], unsafeDetails["data"] as? [String: String])
-        XCTAssertEqual(Set(first.content.userInfo.keys.compactMap { $0 as? String }), Set(["data", "mindwtrNativeReminder"]))
+        XCTAssertEqual(Set(first.content.userInfo.keys.compactMap { $0 as? String }), Set(["data", "mindwtrNativeReminder", "mindwtrNativeResponse"]))
         let metadata = try XCTUnwrap(first.content.userInfo["mindwtrNativeReminder"] as? [String: Any])
         XCTAssertEqual(Set(metadata.keys), Set(["version", "namespace", "id"]))
         XCTAssertEqual(metadata["version"] as? Int, 1)
         XCTAssertEqual(metadata["namespace"] as? String, namespace)
         XCTAssertEqual(metadata["id"] as? Int, 439)
-        XCTAssertEqual(first.content.categoryIdentifier, "")
+        let sidecar = try XCTUnwrap(first.content.userInfo["mindwtrNativeResponse"] as? [String: Any])
+        XCTAssertEqual(Set(sidecar.keys), Set(["version", "publication", "details"]))
+        XCTAssertEqual(sidecar["version"] as? Int, 1)
+        let publication = try XCTUnwrap(sidecar["publication"] as? String)
+        XCTAssertEqual(UUID(uuidString: publication)?.uuidString.lowercased(), publication)
+        XCTAssertNotEqual(publication, (retry.content.userInfo["mindwtrNativeResponse"] as? [String: Any])?["publication"] as? String)
+        let json = try XCTUnwrap(sidecar["details"] as? String)
+        let original = try XCTUnwrap(NativeJSON.jsonObject(with: Data(json.utf8)) as? NSDictionary)
+        XCTAssertTrue(original.isEqual(to: unsafeDetails))
+        XCTAssertEqual(first.content.categoryIdentifier, "MINDWTR_NATIVE_RESPONSE_1")
         XCTAssertTrue(first.content.attachments.isEmpty)
         XCTAssertEqual(first.content.sound, UNNotificationSound.default)
         XCTAssertNil(try NativeReminderRequest.make(alarm: details(input, changing: "play_sound", to: false), namespace: namespace).content.sound)
@@ -208,6 +217,20 @@ final class NativeReminderRequestTests: XCTestCase {
         var wrongDetails = alarm(); wrongDetails["details"] = "private-invalid-payload"; assertInvalid(wrongDetails)
     }
 
+    func testMissingActionFlagsAndUnserializableOrOversizedExtrasDoNotBreakScheduling() throws {
+        var input = alarm()
+        var original = input["details"] as! [String: Any]
+        original["has_button"] = nil; original["has_complete_action"] = nil
+        input["details"] = original
+        XCTAssertNotNil(try NativeReminderRequest.make(alarm: input, namespace: namespace).content.userInfo["mindwtrNativeResponse"])
+        for extra in [Date(), Double.nan, String(repeating: "🧭", count: 20_000)] as [Any] {
+            original["extra"] = extra; input["details"] = original
+            let request = try NativeReminderRequest.make(alarm: input, namespace: namespace)
+            XCTAssertNil(request.content.userInfo["mindwtrNativeResponse"])
+            XCTAssertEqual(NativeReminderObservation.read(request, namespace: namespace).ownedID, 439)
+        }
+    }
+
     func testFireInstantAndRepeatTypesRefuseInvalidValues() {
         for value in [true, false, Double.nan, Double.infinity, -Double.infinity, Double.greatestFiniteMagnitude, 8_640_000_000_000_001 as Int64, 1_900_000_000_123.5, "1900000000123", NSNull()] as [Any] {
             var invalid = alarm(); invalid["fireAtMs"] = value; assertInvalid(invalid)
@@ -239,4 +262,42 @@ final class NativeReminderRequestTests: XCTestCase {
             weekly["calendar"] = ["hour": 2, "minute": 30, "weekday": day]; assertInvalid(weekly)
         }
     }
+    func testActionCategoriesExposeOnlySupportedCommandsWithRNBackgroundOptions() throws {
+        let registered = Dictionary(uniqueKeysWithValues: NativeReminderResponse.categories().map { ($0.identifier, $0) })
+        XCTAssertEqual(registered.count, 3)
+        let complete = NativeReminderResponse.completeActionIdentifier
+        let snooze = NativeReminderResponse.snoozeActionIdentifier
+        let dismiss = NativeReminderResponse.dismissActionIdentifier
+        let variants: [(Bool, Int, [String])] = [
+            (true, 10, [complete, snooze, dismiss]), (true, 0, [complete, dismiss]),
+            (false, 10, [snooze, dismiss]), (false, 0, []),
+        ]
+        for (canComplete, interval, identifiers) in variants {
+            var input = details(alarm(), changing: "has_complete_action", to: canComplete)
+            input = details(input, changing: "snooze_interval", to: interval)
+            let request = try NativeReminderRequest.make(alarm: input, namespace: namespace)
+            if identifiers.isEmpty { XCTAssertEqual(request.content.categoryIdentifier, ""); continue }
+            let category = try XCTUnwrap(registered[request.content.categoryIdentifier])
+            XCTAssertEqual(category.actions.map(\.identifier), identifiers)
+            XCTAssertTrue(category.options.isEmpty)
+            for action in category.actions {
+                XCTAssertEqual(action.options, action.identifier == dismiss ? [.foreground] : [])
+                XCTAssertNotNil(NativeReminderResponse.capture(request, deliveredAt: Date(timeIntervalSince1970: 1_000),
+                    receivedAt: Date(timeIntervalSince1970: 1_001), actionIdentifier: action.identifier, namespace: namespace))
+            }
+        }
+    }
+
+    func testMissingActionAuthorityNeverPublishesActionButtons() throws {
+        var oversized = details(alarm(), changing: "extra", to: String(repeating: "x", count: 60_001))
+        oversized = details(oversized, changing: "snooze_interval", to: 10)
+        let request = try NativeReminderRequest.make(alarm: oversized, namespace: namespace)
+        XCTAssertNil(request.content.userInfo["mindwtrNativeResponse"])
+        XCTAssertEqual(request.content.categoryIdentifier, "")
+        var invalidTask = alarm()["details"] as! [String: Any]
+        invalidTask["data"] = ["alarmKey": "task:synthetic-439", "taskId": ""]
+        var input = alarm(); input["details"] = invalidTask
+        XCTAssertEqual(try NativeReminderRequest.make(alarm: input, namespace: namespace).content.categoryIdentifier, "")
+    }
+
 }

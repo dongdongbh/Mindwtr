@@ -1219,6 +1219,24 @@ final class CoreModel: ObservableObject {
     private var reminderDebounceReady = true
     private var reminderDrainLease: UIBackgroundTaskIdentifier = .invalid
     private var reminderDrainOwner: UUID?
+    private struct NotificationResponseOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+    }
+    private struct NotificationResponseRetry {
+        var item: NativeReminderInbox.Item?
+        var terminalOutcome: String?
+    }
+    private struct NotificationRouteRejection: Error {}
+    private var notificationResponseTask: Task<Void, Never>?
+    private var notificationResponseTaskID: UUID?
+    private var notificationResponseBusyOwner: UUID?
+    private var notificationResponseLease: UIBackgroundTaskIdentifier = .invalid
+    private var notificationResponseWakePending = false
+    private var notificationResponseDeferredUntilClean = false
+    private var notificationResponseRetryRequested = false
+    private var notificationResponseRetry: NotificationResponseRetry?
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var startupSyncTestThrowOnce = false
     private var resumeSyncTestThrowOnce = false
@@ -1229,6 +1247,10 @@ final class CoreModel: ObservableObject {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
                 retireNotificationSettingsPage()
                 retireReminderLifecycleHost(oldValue)
+                if oldValue != nil {
+                    notificationResponseTask?.cancel()
+                    notificationResponseBusyOwner = nil
+                }
                 cancelForegroundSync()
                 foregroundSyncIntent = nil
                 startupSyncCompletedHost = nil
@@ -1445,6 +1467,7 @@ final class CoreModel: ObservableObject {
     @Published private var focusRefusedLocationID: Int?
     #if DEBUG && targetEnvironment(simulator)
     // Response faults are enabled only for an explicitly isolated UI-test library.
+    private var notificationContextTestReadFailures = 0
     private var taskRecoveryResolverTestFailure = false
     private var projectAreaTestReadFailure = false
     private var projectAreaTestBlockedWrite = false
@@ -4343,6 +4366,7 @@ final class CoreModel: ObservableObject {
                     }
                     preferenceDefaults = isolatedDefaults
                     #if targetEnvironment(simulator)
+                    notificationContextTestReadFailures = arguments.contains("--native-response-context-read-failure") ? 2 : 0
                     taskOwnedCheckpointTestFailure = arguments.contains("--native-owned-checkpoint-failure")
                     if let position = arguments.firstIndex(of: "--native-app-lock-auth"), position + 1 < arguments.count {
                         appLock.testOutcomes = arguments[position + 1].split(separator: ",").map(String.init)
@@ -4561,7 +4585,10 @@ final class CoreModel: ObservableObject {
             }
             let currentHost = host!
             startingHost = currentHost
-            let startup = try decode(await currentHost.start())
+            let reminderResponses = try? await NativeNotificationResponses.shared.pending()
+            guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
+            let startup = try decode(await currentHost.start(
+                retainingReminderResponseIDs: reminderResponses?.map { $0.response.requestID }))
             guard host === currentHost else { throw CancellationError() }
             // Preserve the acknowledged domain result before any later App read.
             stageTaskStartupSaveReceipt(startup)
@@ -4763,6 +4790,7 @@ final class CoreModel: ObservableObject {
                 foregroundSyncIntent = recovery.isEmpty && foregroundSyncInboxClean
                     ? ForegroundSyncIntent(id: UUID(), host: currentHost, startupToken: token, reason: .startup) : nil
             }
+            requestNotificationResponses()
         } catch is CoreHostProjectFileAvailabilityRecovery {
             guard let currentHost = startingHost, host === currentHost else { return }
             ready = false
@@ -4821,7 +4849,11 @@ final class CoreModel: ObservableObject {
     }
 
     private var foregroundSyncInboxClean: Bool {
-        selectedSurface == .inbox && !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
+        selectedSurface == .inbox && operationContextClean
+    }
+
+    private var operationContextClean: Bool {
+        !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
             && !processInboxPresented && processInboxRequest == nil && !processInboxTransitioning
             && !mindSweepPresented && mindSweepRequest == nil && mindSweepDraft.isEmpty
             && !morePresented && !areaPickerPresented && !areaManagerPresented && bulkConfirm.isEmpty
@@ -4842,6 +4874,262 @@ final class CoreModel: ObservableObject {
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
             && !settingsAboutPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+    }
+
+    var notificationResponseContextClean: Bool {
+        operationContextClean && !reviewGuidePresented && !reviewPickerPresented && !reviewFinishPending
+            && !boardFiltersPresented && !calendarItemPresented && !calendarComposerPresented
+            && !focusOrderPresented && !focusSavedFilterPresented && !contextPickerPresented
+            && !projectRenameEditing && !projectTaskOrderPresented && !projectTaskSortPresented
+            && !projectViewOptionsPresented && !projectFiltersPresented && !projectStatusOpen && projectDateField == nil
+            && !projectAreaPresented && !projectAreaCreatePresented && !projectTagsPresented && !projectTagsAddPresented
+            && !projectSectionsPresented && !projectSectionEditing && !projectAttachmentLinkPresented
+            && !projectAttachmentOpening && !projectAttachmentEditOpening && !projectAttachmentWritePending
+            && projectFileOpenPresentation == nil && !projectFileAddOpening
+            && !referenceBulkTagPresented && !referenceBulkRemovePresented && !doneBulkTagPresented && !doneBulkRemovePresented
+            && !referenceProjectNextActionPresented && !taskStatusMenuPresented && somedayPanel.isEmpty
+            && !settingsFeedbackPresented && !backupImportPickerPresented && !settingsPersonCreatePresented
+            && !settingsPersonEditPresented && !settingsPersonDeleteActive && !settingsAreaCreatePresented
+            && !settingsAreaEditActive && !settingsTaxonomyActive && !generalPreferenceActive
+            && managePendingCandidate == nil && managePendingInventoryDepths == nil
+    }
+
+    func requestNotificationResponses() {
+        notificationResponseWakePending = true
+        notificationResponseDeferredUntilClean = false
+        admitNotificationResponses()
+    }
+
+    private func admitNotificationResponses() {
+        guard notificationResponseTask == nil, notificationResponseWakePending, !busy,
+              !settingsSyncRestartRequired, !appLockRecoveryPending,
+              !retryNeeded || notificationResponseRetryRequested,
+              !notificationResponseDeferredUntilClean || notificationResponseContextClean else { return }
+        let id = UUID()
+        notificationResponseWakePending = false
+        notificationResponseTaskID = id
+        notificationResponseLease = UIApplication.shared.beginBackgroundTask(withName: "Native reminder response") { [weak self] in
+            Task { @MainActor in
+                guard let self, self.notificationResponseTaskID == id else { return }
+                self.notificationResponseTask?.cancel()
+            }
+        }
+        notificationResponseTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.notificationResponseTaskID == id {
+                    self.releaseNotificationResponseBusy(id)
+                    if self.notificationResponseLease != .invalid { UIApplication.shared.endBackgroundTask(self.notificationResponseLease) }
+                    self.notificationResponseLease = .invalid
+                    self.notificationResponseTaskID = nil; self.notificationResponseTask = nil
+                    self.admitNotificationResponses()
+                }
+            }
+            if !self.ready { await self.start() }
+            guard !Task.isCancelled, self.notificationResponseTaskID == id, self.ready,
+                  let currentHost = self.host, let token = self.completedStartupToken,
+                  self.startupSyncCompletedHost === currentHost, !self.busy else { return }
+            let owner = NotificationResponseOwner(id: id, host: currentHost, token: token)
+            let retrying = self.notificationResponseRetryRequested
+            self.notificationResponseRetryRequested = false
+            guard !self.retryNeeded || retrying else { return }
+            self.busy = true; self.notificationResponseBusyOwner = id
+            if retrying { self.retryNeeded = false; self.error = nil }
+            do {
+                for diagnostic in await NativeNotificationResponses.shared.takeDiagnostics() {
+                    guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                    await self.recordNotificationResponse(owner, action: diagnostic.action, outcome: diagnostic.outcome)
+                }
+                if retrying, let original = self.notificationResponseRetry?.item {
+                    if !(try await self.drainNotificationResponse(original, owner: owner)) {
+                        self.retryNeeded = true
+                        self.error = "The notification action could not be confirmed. Try again."
+                        self.deferNotificationResponses(); return
+                    }
+                }
+                guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                let pending = try await NativeNotificationResponses.shared.pending()
+                guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                self.notificationResponseRetry = nil
+                for item in pending {
+                    guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                    if !self.busy { self.busy = true; self.notificationResponseBusyOwner = id }
+                    guard self.notificationResponseBusyOwner == id else { self.deferNotificationResponses(); return }
+                    if !(try await self.drainNotificationResponse(item, owner: owner)) {
+                        if item.response.action == .open && !self.notificationResponseForeground { continue }
+                        self.deferNotificationResponses()
+                    }
+                }
+            } catch {
+                guard self.host === owner.host, self.completedStartupToken == owner.token else { return }
+                if self.notificationResponseRetry == nil && error is CancellationError { return }
+                if self.notificationResponseRetry == nil { self.notificationResponseRetry = .init(item: nil, terminalOutcome: nil) }
+                self.retryNeeded = true
+                self.error = "The notification action could not be confirmed. Try again."
+                if Task.isCancelled, let action = self.notificationResponseRetry?.item?.response.action {
+                    await NativeNotificationResponses.shared.record(action, outcome: "uncertain")
+                } else {
+                    await self.recordNotificationResponse(owner,
+                        action: self.notificationResponseRetry?.item?.response.action.rawValue ?? "unknown", outcome: "uncertain")
+                }
+            }
+        }
+    }
+
+    private func deferNotificationResponses() {
+        notificationResponseDeferredUntilClean = true
+    }
+
+    private func releaseNotificationResponseBusy(_ id: UUID, settling: Bool = true) {
+        guard notificationResponseBusyOwner == id else { return }
+        notificationResponseBusyOwner = nil
+        if settling { finishOperation() } else { busy = false }
+    }
+
+    private func notificationResponseCurrent(_ owner: NotificationResponseOwner) -> Bool {
+        notificationResponseTaskID == owner.id && host === owner.host && startupSyncCompletedHost === owner.host
+            && completedStartupToken == owner.token && ready && !settingsSyncRestartRequired
+            && !appLockRecoveryPending && !Task.isCancelled
+    }
+
+    private var notificationResponseForeground: Bool {
+        UIApplication.shared.applicationState == .active && !appLock.concealed && !appLock.authenticating
+    }
+
+    private func recordNotificationResponse(_ owner: NotificationResponseOwner, action: String, outcome: String) async {
+        guard notificationResponseCurrent(owner) else { return }
+        _ = try? await owner.host.call("logLine", argumentsJSON: json([
+            "Native iOS reminder response",
+            try json(["releaseCheck": "v1.3.5/ios-reminder-response", "action": action, "outcome": outcome]),
+        ]))
+    }
+
+    private func drainNotificationResponse(_ captured: NativeReminderInbox.Item, owner: NotificationResponseOwner) async throws -> Bool {
+        let action = captured.response.action
+        let finishing = notificationResponseRetry?.item?.response.requestID == captured.response.requestID
+            ? notificationResponseRetry?.terminalOutcome : nil
+        if finishing == nil && action != .dismiss && !notificationResponseContextClean { return false }
+        if finishing == nil && action == .open && !notificationResponseForeground { return false }
+        if notificationResponseRetry?.item?.response.requestID != captured.response.requestID {
+            notificationResponseRetry = .init(item: captured, terminalOutcome: nil)
+        }
+        let item: NativeReminderInbox.Item
+        if let finishing {
+            item = captured
+            notificationResponseRetry?.terminalOutcome = finishing
+        } else {
+            item = try await NativeNotificationResponses.shared.markAdmitting(captured.response.requestID)
+            notificationResponseRetry?.item = item
+            guard notificationResponseCurrent(owner) else { throw CancellationError() }
+            await recordNotificationResponse(owner, action: action.rawValue, outcome: "admitting")
+            guard notificationResponseCurrent(owner) else { throw CancellationError() }
+            switch action {
+            case .dismiss: notificationResponseRetry?.terminalOutcome = "confirmed"
+            case .complete, .snooze:
+                guard notificationResponseContextClean else { notificationResponseRetry = nil; return false }
+                do {
+                    if action == .complete { _ = try await owner.host.completeReminderTask(requestJSON: item.response.payloadJSON) }
+                    else { _ = try await owner.host.snoozeReminder(requestJSON: item.response.payloadJSON) }
+                } catch is CoreHostRejection { notificationResponseRetry?.terminalOutcome = "refused" }
+                if notificationResponseRetry?.terminalOutcome == nil {
+                    guard notificationResponseCurrent(owner) else { throw CancellationError() }
+                    let reconciled = try await owner.host.reconcileReminders()
+                    guard notificationResponseCurrent(owner) else { throw CancellationError() }
+                    _ = try validateReminderLifecycleReply(reconciled)
+                    notificationResponseRetry?.terminalOutcome = "confirmed"
+                    if notificationResponseForeground { refreshRequested = true }
+                }
+            case .open:
+                guard notificationResponseForeground, notificationResponseContextClean else {
+                    notificationResponseRetry = nil; return false
+                }
+                do {
+                    let route = try await query("iosNotificationOpen", [item.response.payloadJSON])
+                    guard notificationResponseCurrent(owner), notificationResponseForeground, notificationResponseContextClean else {
+                        notificationResponseRetry = nil; return false
+                    }
+                    if !(try await presentNotificationRoute(route, owner: owner)) {
+                        notificationResponseRetry = nil; return false
+                    }
+                    notificationResponseRetry?.terminalOutcome = "confirmed"
+                } catch is CoreHostRejection {
+                    notificationResponseRetry?.terminalOutcome = "refused"
+                } catch is NotificationRouteRejection {
+                    notificationResponseRetry?.terminalOutcome = "refused"
+                }
+            }
+        }
+        guard notificationResponseCurrent(owner) else { throw CancellationError() }
+        let outcome = notificationResponseRetry?.terminalOutcome ?? "confirmed"
+        try await NativeNotificationResponses.shared.finish(item)
+        guard notificationResponseCurrent(owner) else { throw CancellationError() }
+        notificationResponseRetry = nil
+        await recordNotificationResponse(owner, action: action.rawValue, outcome: outcome)
+        return true
+    }
+
+    private func presentNotificationRoute(_ route: CoreObject, owner: NotificationResponseOwner) async throws -> Bool {
+        let type = route.text("type")
+        var fields: Set<String> = ["type"]
+        var identifierField: String?
+        switch type {
+        case "none": break
+        case "task": fields.formUnion(["taskId", "openToken"]); identifierField = "taskId"
+        case "project": fields.insert("projectId"); identifierField = "projectId"
+        case "contexts": fields.insert("token"); identifierField = "token"
+        case "review":
+            fields.insert("openToken")
+            if route["taskId"] != nil { fields.insert("taskId") }
+            if route["projectId"] != nil { fields.insert("projectId") }
+        case "daily-review", "weekly-review": fields.insert("openToken")
+        default: throw NotificationRouteRejection()
+        }
+        guard Set(route.keys) == fields, route.values.allSatisfy({ $0 is String }),
+              fields.subtracting(["type"]).allSatisfy({ !route.text($0).isEmpty && route.text($0).utf16.count <= 65_536 }) else {
+            throw NotificationRouteRejection()
+        }
+        if let identifierField, route.text(identifierField).utf16.count > 500 {
+            throw NotificationRouteRejection()
+        }
+        guard notificationResponseCurrent(owner), notificationResponseForeground, notificationResponseContextClean else { return false }
+        if type == "none" { return true }
+        releaseNotificationResponseBusy(owner.id, settling: false)
+        switch type {
+        case "task":
+            prepareTaskPresentation(route.text("taskId"), initialTab: "view")
+            taskOpeningIntent = nil
+            await readTaskView()
+        case "project": await presentProject(["id": route.text("projectId")], caller: .projects)
+        case "contexts":
+            contextsIntents.append(["kind": "focus", "value": route.text("token")])
+            contextsLoadedDepth = pageSize
+            await openContexts()
+        case "review", "daily-review", "weekly-review":
+            // RN's generic Review destination intentionally ignores notification entity parameters.
+            await openReview()
+            guard notificationResponseCurrent(owner), notificationResponseForeground,
+                  selectedSurface == .review, !busy, !retryNeeded, !reviewGuidePresented else { return false }
+            if type != "review" { await openReviewGuide(type == "daily-review" ? "daily" : "weekly") }
+        default: return false
+        }
+        guard notificationResponseCurrent(owner), notificationResponseForeground else { return false }
+        switch type {
+        case "task": return taskPresented && viewedTaskID == route.text("taskId") && taskInitialTab == "view"
+        case "project": return selectedSurface == .project && projectHeader.text("id") == route.text("projectId")
+        case "contexts": return selectedSurface == .contexts && contextsCurrent && contextsIntents.isEmpty
+        case "review": return selectedSurface == .review && !reviewGuidePresented
+        case "daily-review", "weekly-review": return selectedSurface == .review && reviewGuidePresented && reviewKind == (type == "daily-review" ? "daily" : "weekly")
+        default: return false
+        }
+    }
+
+    private func retryNotificationResponses() async {
+        guard !busy, notificationResponseTask == nil else { return }
+        notificationResponseRetryRequested = true
+        notificationResponseWakePending = true
+        notificationResponseDeferredUntilClean = false
+        admitNotificationResponses()
+        if let task = notificationResponseTask { await task.value }
     }
 
     // Independent from the Inbox-only Sync opportunity. App Lock may be enabled and authenticated.
@@ -24917,6 +25205,7 @@ final class CoreModel: ObservableObject {
     }
 
     func retry() async {
+        if notificationResponseRetry != nil { await retryNotificationResponses(); return }
         if notificationSettingRequest != nil { retryNotificationSettings(); return }
         if projectFileAvailabilityPending {
             await retryProjectFileAvailability()
@@ -27174,6 +27463,11 @@ final class CoreModel: ObservableObject {
         guard let host else { throw CocoaError(.coderInvalidValue) }
         #if DEBUG && targetEnvironment(simulator)
         var removeTestRead: (query: String, request: String, session: String, generation: Int)?
+        if method == "menuRead", args.first as? String == "contexts",
+           contextsIntents.contains(where: { $0.text("kind") == "focus" }), notificationContextTestReadFailures > 0 {
+            notificationContextTestReadFailures -= 1
+            throw CocoaError(.fileReadUnknown)
+        }
         if referenceBulkRemoveTestReadEnabled, method == "menuRead", args.first as? String == "bulk",
            let encoded = args.dropFirst().first as? String, let request = try? decode(encoded),
            request.text("list") == "reference", request.object("picker").text("kind") == "removeTag" {
@@ -27511,7 +27805,7 @@ final class CoreModel: ObservableObject {
         return error is CoreHostRejection
     }
     private func finishOperation() {
-        defer { admitReminderLifecycle() }
+        defer { admitReminderLifecycle(); admitNotificationResponses() }
         busy = false
         if projectFileAvailabilityPending {
             retryNeeded = true

@@ -2081,6 +2081,19 @@ globalThis.MindwtrHost = {
     gtdWorkflowCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedGtdWorkflow(JSON.parse(json))));
     },
+    iosNotificationOpen(rawJSON: string): string {
+        return submit(async () => {
+            const invalid = () => new Error('INVALID_INPUT: Invalid notification open payload');
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof rawJSON !== 'string'
+                || rawJSON.length > 65_536 || new TextEncoder().encode(rawJSON).byteLength > 65_536) throw invalid();
+            let payload: Record<string, unknown>;
+            try { payload = JSON.parse(rawJSON.startsWith('\uFEFF') ? rawJSON.slice(1) : rawJSON); } catch { throw invalid(); }
+            if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.actionIdentifier !== 'open'
+                || Object.entries(payload).some(([field, value]) => !['notificationId', 'actionIdentifier', 'taskId', 'projectId', 'context', 'kind'].includes(field)
+                    || typeof value !== 'string')) throw invalid();
+            return unwrap(contract.routeNotificationOpen(payload));
+        });
+    },
     reminderSnoozePrepare(raw: string, storedAlarms: string | null, storedState: string | null, granted: boolean): string {
         return submit(async () => iosReminderSnooze.prepare(raw, storedAlarms, storedState, granted));
     },
@@ -3797,6 +3810,27 @@ globalThis.MindwtrHost = {
     /** After the journal's boot replay: drops request receipts older than 30 days. */
     pruneReceipts(): string {
         return submit(async () => ({ pruned: await pruneNativeRequestReceipts(sqlite) }));
+    },
+    /** Private iOS startup: unfinished response ownership outranks receipt expiry. */
+    iosPruneReceipts(rawRetentionJSON: string): string {
+        return submit(async () => {
+            const invalid = () => new Error('INVALID_INPUT: Invalid reminder receipt retention');
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof rawRetentionJSON !== 'string'
+                || rawRetentionJSON.length > 8192 || new TextEncoder().encode(rawRetentionJSON).byteLength > 8192) throw invalid();
+            let retained: unknown;
+            try { retained = JSON.parse(rawRetentionJSON); } catch { throw invalid(); }
+            if (retained !== null && (!Array.isArray(retained) || retained.length > 128
+                || retained.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id))
+                || new Set(retained).size !== retained.length)) throw invalid();
+            const pruned = await pruneNativeRequestReceipts(sqlite, new Date(), retained === null
+                ? { retainedCommands: ['reminderComplete', 'reminderSnooze'] }
+                : { retainedRequestIds: retained as string[] });
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS reminder receipt retention applied',
+                context: { releaseCheck: 'v1.3.5/ios-reminder-receipt-retention', outcome: retained === null ? 'conservative' : 'snapshot' },
+            }, { force: true }); } catch { /* Logging cannot change an acknowledged prune. */ }
+            return { pruned };
+        });
     },
     /** `name` is one of AI_REQUESTS; `json` is that request's input. It writes nothing. */
     aiRequest(name: string, json: string): string {
