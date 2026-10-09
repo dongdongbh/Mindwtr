@@ -531,16 +531,19 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         }
 
         const settings = sources ? sources.systemSettings : await getSystemCalendarSettings();
+        throwIfAborted(signal);
         if (!settings.enabled) {
             return { calendars: [], events: [] };
         }
 
         const permission = await getSystemCalendarPermissionStatus();
+        throwIfAborted(signal);
         if (permission !== 'granted') {
             return { calendars: [], events: [] };
         }
 
         const rawCalendars = await withAbortSignal(host.calendars.getCalendars(), signal);
+        throwIfAborted(signal);
         const availableCalendars = rawCalendars
             .filter((calendar) => typeof calendar.id === 'string' && calendar.id.trim().length > 0)
             .filter((calendar) => !isMindwtrNamedCalendar(calendar));
@@ -581,6 +584,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
             ),
             signal,
         );
+        throwIfAborted(signal);
 
         // Older exports did not carry a notes marker. Match only this device's
         // persisted (calendar, native event) pair; a same-title event is unrelated.

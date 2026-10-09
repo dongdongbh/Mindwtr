@@ -36,12 +36,13 @@ afterEach(async () => {
     for (const f of fixtures.splice(0)) { await f.state.fixture.flush(); f.state.fixture.reset(); f.database.close(); }
 });
 
-const fixture = (options: { channel?: boolean; permission?: string; failCalendars?: boolean; deviceSettings?: boolean } = {}) => {
+const fixture = (options: { channel?: boolean; permission?: string; failCalendars?: boolean; deviceSettings?: boolean; deadlineMs?: number } = {}) => {
     const database = new Database(':memory:');
     const writes: string[] = [], calls: Record<string, any>[] = [], reads: { sql: string; params: unknown[] }[] = [], lines: string[] = [];
     const cellReads: unknown[] = [], cellWrites: unknown[] = [];
     const kv = new Map([['mindwtr-system-calendar-settings', JSON.stringify({ enabled: true, selectAll: false,
         selectedCalendarIds: selected, areaIdsByCalendar: {} })]]);
+    const timerDelays: number[] = [];
     let logText = '', events = [event('external')];
     let nextHold: { op: string; entered: () => void; promise: Promise<void> } | null = null;
     const call = async (input: Record<string, any>) => {
@@ -58,7 +59,11 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
         throw new Error('Unexpected permission mutation or calendar operation');
     };
     const state: Record<string, any> = {
-        AbortController, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout,
+        AbortController, URL, TextEncoder, TextDecoder, clearTimeout,
+        setTimeout: (callback: (...args: any[]) => void, delay?: number, ...args: any[]) => {
+            if (delay !== undefined) timerDelays.push(delay);
+            return setTimeout(callback, delay === 15_000 ? options.deadlineMs ?? delay : delay, ...args);
+        },
         __mindwtrHostPlatform: 'ios', console: { info() {}, warn() {}, error() {}, log() {} },
         __cancelHostCalls() {}, __resumeHostCalls() {},
         ...(options.channel === false ? {} : { __mindwtrCalendarCall: call }),
@@ -107,7 +112,7 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
         }
         throw new Error('Host operation did not settle');
     };
-    const f = { state, database, writes, calls, reads, kv, lines, poll, cellReads, cellWrites, logText: () => logText,
+    const f = { state, database, writes, calls, reads, kv, lines, poll, cellReads, cellWrites, logText: () => logText, timerDelays,
         setEvents: (value: typeof events) => { events = value; },
         read: (value: unknown = request()) => poll(state.MindwtrHost.iosCalendarRead(JSON.stringify(value))),
         boot: async () => {
@@ -315,4 +320,117 @@ describe('actual exported iOS device-calendar prepared setting', () => {
         expect(f.cellWrites).toEqual([]); expect(f.calls).toEqual([]);
         expect(f.database.query('SELECT COUNT(*) AS n FROM native_request_receipts').get()).toEqual({ n: 0 });
     });
+});
+
+
+describe('iOS Calendar Settings Test-fetch', () => {
+    it.each([true, false])('Test-fetch returns fresh shared counts without writes and respects diagnostics %s', async (loggingEnabled) => {
+        const f = fixture(); await f.boot();
+        f.state.fixture.install({ ...structuredClone(data), settings: { externalCalendars: [], diagnostics: { loggingEnabled } } });
+        const now = new Date();
+        const first = { ...event('test-event'), startDate: new Date(now.getFullYear(), now.getMonth(), 15, 8).toISOString(),
+            endDate: new Date(now.getFullYear(), now.getMonth(), 15, 9).toISOString() };
+        f.setEvents([first]);
+        expect(await f.read({ op: 'openSettings' })).toMatchObject({ ok: true });
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv);
+        const view = await f.read({ op: 'testSettings' });
+        expect(view).toEqual({ ok: true, value: { toasts: [{ title: 'Success', message: 'Loaded 1 events', tone: 'success', durationMs: null }] } });
+        f.setEvents([first, { ...first, id: 'second-test-event' }]);
+        expect(await f.read({ op: 'testSettings' })).toMatchObject({ ok: true, value: { toasts: [{ message: 'Loaded 2 events' }] } });
+        expect(f.calls.filter((call) => call.op === 'events')).toHaveLength(2);
+        await assertReadonly(f, before, kv);
+        const lines = f.logText().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        expect(lines.filter((line) => line.message === 'Native iOS calendar read delivered' && line.context?.outcome === 'testSettings'))
+            .toHaveLength(loggingEnabled ? 2 : 0);
+        expect(f.logText()).not.toContain('PRIVATE');
+        expect(f.database.query('SELECT COUNT(*) AS n FROM native_request_receipts').get()).toEqual({ n: 0 });
+    });
+
+    it('requires an existing Settings visit and accepts no caller options', async () => {
+        const f = fixture();
+        expect(await f.read({ op: 'testSettings' })).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
+        await f.boot();
+        expect(await f.read({ op: 'testSettings' })).toMatchObject({ ok: false });
+        expect(f.calls).toEqual([]);
+        await f.read({ op: 'openSettings' });
+        const calls = f.calls.length;
+        for (const extra of [{ timeoutMs: 1 }, { signal: {} }, { url: 'https://private.example' }, { start }, { slot: 'calendar' }]) {
+            expect(await f.read({ op: 'testSettings', ...extra })).toMatchObject({ ok: false, error: expect.stringContaining('INVALID_INPUT:') });
+        }
+        expect(await f.poll(f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings","op":"feed"}')))
+            .toMatchObject({ ok: false, error: expect.stringContaining('INVALID_INPUT:') });
+        expect(f.calls).toHaveLength(calls);
+        const absent = fixture({ channel: false }); await absent.boot();
+        expect(await absent.read({ op: 'testSettings' })).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
+    });
+
+    it.each(['permissions', 'events'])('keeps public cancellation precedence during held %s and permits fresh Test', async (phase) => {
+        const f = fixture(); await f.boot(); await f.read({ op: 'openSettings' });
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold(phase);
+        const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
+        await gate.accepted;
+        f.state.MindwtrHost.cancel(ticket);
+        try {
+            expect(await f.poll(ticket)).toMatchObject({ ok: false, error: expect.stringContaining('CANCELLED:') });
+            expect(f.logText()).not.toContain('"outcome":"testSettings"');
+        } finally { gate.release(); }
+        await new Promise((done) => setTimeout(done, 0));
+        expect(await f.read({ op: 'testSettings' })).toMatchObject({ ok: true });
+        await assertReadonly(f, before, kv);
+    });
+
+    it('uses the fixed native logical deadline and drops later provider phases', async () => {
+        const f = fixture({ deadlineMs: 20 }); await f.boot(); await f.read({ op: 'openSettings' });
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold('permissions');
+        const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
+        await gate.accepted;
+        const calls = f.calls.length;
+        try {
+            expect(await f.poll(ticket)).toMatchObject({ ok: true, value: { toasts: [{ tone: 'warning', durationMs: null }] } });
+            expect(f.timerDelays).toContain(15_000);
+        } finally { gate.release(); }
+        await new Promise((done) => setTimeout(done, 0));
+        expect(f.calls).toHaveLength(calls);
+        expect(await f.read({ op: 'testSettings' })).toMatchObject({ ok: true });
+        await assertReadonly(f, before, kv);
+    });
+
+    it.each(['mindwtr-system-calendar-settings', 'mindwtr-external-calendars'])('returns only a failure warning after deadline and external %s change', async (cell) => {
+        const f = fixture({ deadlineMs: 20 }); await f.boot();
+        f.state.fixture.install({ ...structuredClone(data), settings: { externalCalendars: [], diagnostics: { loggingEnabled: true } } });
+        await f.read({ op: 'openSettings' });
+        const before = f.state.fixture.canonical(), gate = f.hold('events');
+        const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
+        await gate.accepted;
+        f.kv.set(cell, cell === 'mindwtr-system-calendar-settings' ? '{"enabled":false}' : '[]');
+        const changed = new Map(f.kv);
+        try {
+            expect(await f.poll(ticket)).toEqual({ ok: true, value: { toasts: [{ title: 'Error', message: 'Failed to load events', tone: 'warning', durationMs: null }] } });
+            expect(f.timerDelays).toContain(15_000);
+        } finally { gate.release(); }
+        await new Promise((done) => setTimeout(done, 0));
+        await assertReadonly(f, before, changed);
+        const lines = f.logText().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        expect(lines.filter((line) => line.message === 'Native iOS calendar read delivered' && line.context?.outcome === 'testSettings')).toHaveLength(1);
+        expect(f.logText()).not.toContain('PRIVATE');
+        expect(f.database.query('SELECT COUNT(*) AS n FROM native_request_receipts').get()).toEqual({ n: 0 });
+    });
+
+    it('suppresses a closed visit result and does not seed the Calendar cache', async () => {
+        const f = fixture(); await f.boot(); await f.read({ op: 'openSettings' });
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold('events');
+        const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
+        await gate.accepted;
+        expect(await f.read({ op: 'closeSettings' })).toEqual({ ok: true, value: null });
+        gate.release();
+        expect(await f.poll(ticket)).toMatchObject({ ok: false, error: expect.stringContaining('STALE_REVISION:') });
+        expect(f.logText()).not.toContain('"outcome":"testSettings"');
+        await f.read({ op: 'openSettings' });
+        expect(await f.read({ op: 'testSettings' })).toMatchObject({ ok: true });
+        const calls = f.calls.filter((call) => call.op === 'events').length;
+        expect(await f.read()).toMatchObject({ ok: true });
+        expect(f.calls.filter((call) => call.op === 'events')).toHaveLength(calls + 1);
+        await assertReadonly(f, before, kv);
+    });
+
 });

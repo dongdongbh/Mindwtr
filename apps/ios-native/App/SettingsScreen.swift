@@ -1241,6 +1241,27 @@ struct SettingsScreen: View {
                 Text(feeds.text("description")).rnFont(13).foregroundStyle(palette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if !model.calendarSettings.object("feeds").object("test").text("label").isEmpty {
+                Button { Task { await model.testCalendarSettings() } } label: {
+                    HStack(spacing: 8) {
+                        Text(model.calendarSettings.object("feeds").object("test").text("label")).rnFont(15, .semibold)
+                        if model.calendarSettingsTesting { ProgressView().accessibilityHidden(true) }
+                    }.frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                }
+                .disabled(!model.calendarSettingsTestEnabled)
+                .accessibilityValue(model.calendarSettingsTesting ? model.label("common.loading") : "")
+                .accessibilityIdentifier("calendar-settings-test")
+                if !model.calendarSettingsTestResult.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.calendarSettingsTestResult.text("title")).rnFont(15, .semibold)
+                        Text(model.calendarSettingsTestResult.text("message")).rnFont(14)
+                    }
+                    .foregroundStyle(model.calendarSettingsTestResult.text("tone") == "warning" ? palette.danger : palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("calendar-settings-test-result")
+                }
+            }
             ForEach(items.indices, id: \.self) { index in
                 let feed = items[index]
                 VStack(alignment: .leading, spacing: 8) {

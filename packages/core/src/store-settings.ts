@@ -39,7 +39,6 @@ import { buildGtdSettingsUpdate, GTD_DEFAULT_AREA_ACTIVE_OPTION, isGtdSettingSto
 import { DEFAULT_TASK_EDITOR_ORDER, TASK_EDITOR_SECTION_ORDER } from './task-editor-layout';
 import { generalPreferenceWitness } from './general-preference-witness';
 import { notificationSettingWitness } from './notification-settings-model';
-import { calendarSubscriptionSettingSource, planCalendarSubscriptionSetting } from './calendar-subscription-settings-witness';
 import { taskEditValuesEqual } from './json-value-equality';
 import { backfillArchiveClocks, getArchiveRetentionPreview, isArchiveRetentionDays } from './archive-retention';
 
@@ -1219,6 +1218,8 @@ export const createSettingsActions = ({
     },
 
     commitPreparedCalendarSubscriptionSetting: async (prepared, authority, legacyRaw) => {
+        // Load native validators after store initialization; their imports otherwise cycle back into this action factory.
+        const { calendarSubscriptionSettingSource, planCalendarSubscriptionSetting } = await import('./calendar-subscription-settings-witness');
         let result: import('./store-types').PreparedTaskEditResult = { success: false,
             reason: 'conflict', error: 'Calendar subscriptions changed; refresh Settings' };
         set((memory) => {

@@ -679,6 +679,8 @@ final class CoreModel: ObservableObject {
     private var calendarSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
     private var calendarSettingsReadTask: Task<String, Error>?
     private var calendarSettingsReadID: UUID?
+    @Published private(set) var calendarSettingsTesting = false
+    @Published private(set) var calendarSettingsTestResult: CoreObject = [:]
     @Published private var calendarSettingsCloseTask: Task<Void, Never>?
     private var calendarSettingsCloseID: UUID?
     private var calendarSettingsApplicationActive = false
@@ -699,6 +701,11 @@ final class CoreModel: ObservableObject {
     }
     var settingsCalendarCanCancel: Bool {
         settingsCalendarPresented && calendarSettingRequest == nil && !retryNeeded
+    }
+    var calendarSettingsTestEnabled: Bool {
+        calendarSettingEnabled && calendarSettingsReadTask == nil && calendarSettingsApplicationActive
+            && UIApplication.shared.applicationState == .active
+            && !calendarSettings.object("feeds").object("test").text("label").isEmpty
     }
 
     @Published private(set) var settingsGeneralPresented = false
@@ -8472,6 +8479,7 @@ final class CoreModel: ObservableObject {
         calendarSettingsApplicationActive = UIApplication.shared.applicationState == .active
         calendarSettingError = nil
         calendarSettingReadError = nil
+        calendarSettingsTestResult = [:]
         calendarSettings = [:]
         calendarSubscriptions = [:]
         calendarSubscriptionExpected = [:]
@@ -8517,6 +8525,10 @@ final class CoreModel: ObservableObject {
 
     func calendarSettingsWillResignActive() {
         calendarSettingsApplicationActive = false
+        if calendarSettingsTesting {
+            calendarSettingsReadTask?.cancel()
+            calendarSettingsTestResult = [:]
+        }
     }
 
     func calendarSettingsDidBecomeActive() {
@@ -8531,6 +8543,7 @@ final class CoreModel: ObservableObject {
     func cancelCalendarSettingsIntent() {
         calendarSettingsApplicationActive = false
         calendarSettingsSession = UUID()
+        calendarSettingsTestResult = [:]
         calendarSettingTask?.cancel()
         calendarSettingsReadTask?.cancel()
         if let waiter = calendarSettingWaiter {
@@ -8626,6 +8639,51 @@ final class CoreModel: ObservableObject {
             calendarSubscriptionReadError = (response["subscriptionError"] as? String) ?? CocoaError(.coderReadCorrupt).localizedDescription
         }
         calendarSettingAwaitingRefresh = calendarSettingReadError != nil
+    }
+
+    func testCalendarSettings() async {
+        guard calendarSettingsTestEnabled, !Task.isCancelled, let currentHost = host else { return }
+        let session = calendarSettingsSession, readID = UUID()
+        calendarSettingsReadID = readID
+        calendarSettingsTestResult = [:]
+        calendarSettingsTesting = true
+        busy = true
+        let read = Task { try await currentHost.calendarRead(requestJSON: "{\"op\":\"testSettings\"}") }
+        calendarSettingsReadTask = read
+        defer {
+            if calendarSettingsReadID == readID {
+                calendarSettingsReadTask = nil
+                calendarSettingsReadID = nil
+                calendarSettingsTesting = false
+                if host === currentHost { finishOperation() }
+            }
+        }
+        func current() -> Bool {
+            calendarSettingsReadID == readID && !read.isCancelled && !Task.isCancelled
+                && calendarSettingsPageCurrent(currentHost, session: session)
+                && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+        }
+        do {
+            let result = try decode(await read.value)
+            guard current() else { return }
+            guard Set(result.keys) == Set(["toasts"]), let toasts = result["toasts"] as? [CoreObject], toasts.count == 1,
+                  let toast = toasts.first, Set(toast.keys) == Set(["title", "message", "tone", "durationMs"]),
+                  let title = toast["title"] as? String, title.utf8.count <= 4096,
+                  let message = toast["message"] as? String, message.utf8.count <= 16384,
+                  let tone = toast["tone"] as? String, ["success", "warning", "info"].contains(tone) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            if !(toast["durationMs"] is NSNull) {
+                guard let duration = toast["durationMs"] as? NSNumber, CFGetTypeID(duration) != CFBooleanGetTypeID(),
+                      duration.doubleValue.isFinite, duration.doubleValue.rounded() == duration.doubleValue,
+                      (0...60000).contains(duration.doubleValue) else { throw CocoaError(.coderReadCorrupt) }
+            }
+            calendarSettingsTestResult = toast
+        } catch {
+            guard current() else { return }
+            calendarSettingsTestResult = ["title": label("settings.syncMobile.error"),
+                "message": label("settings.calendarMobile.failedToLoadEvents"), "tone": "warning", "durationMs": NSNull()]
+        }
     }
 
     func saveDeviceCalendarSetting(_ edit: CoreObject) {

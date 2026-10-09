@@ -1082,35 +1082,74 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
         },
 
         /** Test: this month's events from every subscription and device calendar. */
-        async testCalendarFeeds(): Promise<NativeHostResult<{ toasts: NativeCalendarToast[] }>> {
+        async testCalendarFeeds(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<NativeHostResult<{ toasts: NativeCalendarToast[] }>> {
+            if (options?.signal?.aborted) return staleLoad();
             const opened = openedSession();
             if (!opened.ok) return opened;
             const { toastsOf } = translators();
             let owner: SourceOwner | null = null;
+            const controller = new AbortController();
+            const cancel = () => controller.abort(options?.signal?.reason);
+            options?.signal?.addEventListener('abort', cancel, { once: true });
+            if (options?.signal?.aborted) cancel();
+            let timedOut = false;
+            const timer = options?.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+                ? setTimeout(() => {
+                    timedOut = true;
+                    controller.abort(new Error('External calendar request timed out'));
+                }, options.timeoutMs) : null;
+            const current = () => !options?.signal?.aborted && session === opened.value
+                && (owner ? ownsSources(owner) : deps.readiness().ok && deps.host() === opened.value.host);
+            // Source reads and passive provider permission may ignore cancellation.
+            // Observe their eventual outcome, but release this logical Test immediately.
+            const read = <T,>(start: () => Promise<T>): Promise<T> => new Promise((resolve, reject) => {
+                let settled = false;
+                const finish = (publish: () => void) => {
+                    if (settled) return;
+                    settled = true;
+                    controller.signal.removeEventListener('abort', abort);
+                    publish();
+                };
+                const abort = () => finish(() => reject(controller.signal.reason));
+                if (controller.signal.aborted) { abort(); return; }
+                controller.signal.addEventListener('abort', abort, { once: true });
+                if (controller.signal.aborted) { abort(); return; }
+                try {
+                    start().then(
+                        (value) => finish(() => resolve(value)),
+                        (error: unknown) => finish(() => reject(error)),
+                    );
+                } catch (error) { finish(() => reject(error)); }
+            });
             try {
                 if (isSandboxMode()) {
                     showToast(toastsOf.testResult(0, 0, deps.language()));
                     return { ok: true, value: { toasts: takeToasts() } };
                 }
                 owner = sourceOwner(opened.value.host);
-                const cells = await readSourceCells(owner);
-                if (!ownsSources(owner) || session !== opened.value) return staleLoad();
-                const sources = freezeSources(owner, cells);
+                const capturedOwner = owner;
+                const cells = await read(() => readSourceCells(capturedOwner));
+                if (!current()) return staleLoad();
+                const sources = freezeSources(capturedOwner, cells);
                 const range = getCalendarTestRange(new Date());
                 let failedFeeds = 0;
-                const { events } = await device(opened.value.host).feeds.fetchExternalCalendarEvents(range.start, range.end, {
-                    sources,
+                const { events } = await read(() => device(opened.value.host).feeds.fetchExternalCalendarEvents(range.start, range.end, {
+                    sources, signal: controller.signal,
                     onFeedError: () => { failedFeeds += 1; },
-                });
-                if (!ownsSources(owner) || session !== opened.value) return staleLoad();
-                const after = await readSourceCells(owner);
-                if (!ownsSources(owner) || session !== opened.value || !sameCells(cells, after)) return staleLoad();
-                logSource(owner);
+                }));
+                if (!current()) return staleLoad();
+                const after = await read(() => readSourceCells(capturedOwner));
+                if (!current() || !sameCells(cells, after)) return staleLoad();
+                logSource(capturedOwner);
                 showToast(toastsOf.testResult(events.length, failedFeeds, deps.language()));
             } catch (error) {
-                if (session !== opened.value || (owner && !ownsSources(owner))) return staleLoad();
-                logError(opened.value, error);
+                if (!current()) return staleLoad();
+                // This generic warning describes the attempted Test's failure, not source freshness; success rechecks the cells above.
+                logError(opened.value, timedOut ? new Error('External calendar request timed out') : error);
                 showToast(toastsOf.testFailed());
+            } finally {
+                if (timer !== null) clearTimeout(timer);
+                options?.signal?.removeEventListener('abort', cancel);
             }
             return { ok: true, value: { toasts: takeToasts() } };
         },

@@ -180,6 +180,243 @@ final class NativeCalendarHostTests: XCTestCase {
         _ = flock(descriptor, LOCK_UN); return true
     }
 
+    private func actualTestHost(deviceEnabled: Bool = true, subscriptions: [[String: Any]] = [],
+                                configure: (HostIOFaults) -> Void = { _ in }) async throws -> (CoreHost, URL, Data) {
+        let namespace = "tech.example.mindwtr.calendar-test", container = root.appendingPathComponent("test-container")
+        let manifest = container.appendingPathComponent("Library/Application Support/\(namespace)/RCTAsyncLocalStorage_V1/manifest.json")
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = Data(try json(["mindwtr-external-calendars": json(subscriptions),
+            "mindwtr-system-calendar-settings": json(["enabled": deviceEnabled, "selectAll": false,
+                "selectedCalendarIds": ["calendar-fixture"]]), "@mindwtr_sync_backend": "off", "unknown": "preserve"]).utf8)
+        try original.write(to: manifest)
+        state.reader.calendarValues = [["id": "calendar-fixture", "title": "Fixture", "allowsModifications": true]]
+        let now = Date(), formatter = ISO8601DateFormatter()
+        state.reader.eventValues = [["id": "calendar-item", "calendarId": "calendar-fixture", "title": "Fixture event",
+            "startDate": formatter.string(from: now), "endDate": formatter.string(from: now.addingTimeInterval(3600)), "allDay": false]]
+        let faults = HostIOFaults(), state = self.state!
+        faults.calendarReaderFactory = { state.makeReader() }; faults.configureCalendarJobs = { state.capture($0) }
+        faults.calendarAuthorizationRequest = { XCTFail("Test cannot prompt for EventKit access"); throw NativeCalendarReadError.unavailable }
+        faults.secretService = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
+        faults.secretStatus = { _, _ in errSecNotAvailable }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CalendarNoNetworkProtocol.self]; faults.httpConfiguration = configuration
+        configure(faults)
+        let value = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults,
+            deviceStorage: (containerURL: container, bundleIdentifier: namespace))
+        addTeardownBlock { await value.close() }
+        try await start(value); _ = try await value.calendarRead(requestJSON: "{\"op\":\"openSettings\"}")
+        faults.journalWrite = { XCTFail("Test cannot journal a write") }
+        faults.beforeSQL = { statement in
+            if statement.range(of: #"(?i)^\s*(?:INSERT|UPDATE|DELETE|REPLACE)\b"#, options: .regularExpression) != nil {
+                XCTFail("Test cannot mutate SQLite")
+            }
+        }
+        return (value, manifest, original)
+    }
+
+    private func logicalRows() throws -> [String: String] {
+        let sqlite = try SQLiteBridge(url: database); defer { sqlite.close() }
+        let tables = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").utf8)) as? [[String: Any]])
+        var result: [String: String] = [:]
+        for table in tables {
+            let name = try XCTUnwrap(table["name"] as? String), quoted = name.replacingOccurrences(of: "\"", with: "\"\"")
+            let columns = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sqlite.execute("PRAGMA table_info(\"\(quoted)\")").utf8)) as? [[String: Any]])
+            let projection = try columns.enumerated().map { index, column -> String in
+                let field = "\"" + (try XCTUnwrap(column["name"] as? String)).replacingOccurrences(of: "\"", with: "\"\"") + "\""
+                return "typeof(\(field)) AS c\(index)type, CASE WHEN typeof(\(field)) IN ('blob','text') THEN hex(\(field)) ELSE quote(\(field)) END AS c\(index)value"
+            }.joined(separator: ",")
+            let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT \(projection) FROM \"\(quoted)\"").utf8)) as? [[String: Any]])
+            result[name] = try rows.map { try json($0) }.sorted().joined(separator: "\n")
+        }
+        return result
+    }
+
+    private func testToast(_ response: String, tone: String) throws -> [String: Any] {
+        let result = try object(response)
+        XCTAssertEqual(Set(result.keys), Set(["toasts"]))
+        let toasts = try XCTUnwrap(result["toasts"] as? [[String: Any]])
+        XCTAssertEqual(toasts.count, 1)
+        let toast = try XCTUnwrap(toasts.first)
+        XCTAssertEqual(Set(toast.keys), Set(["title", "message", "tone", "durationMs"]))
+        XCTAssertEqual(toast["tone"] as? String, tone); XCTAssertTrue(toast["durationMs"] is NSNull)
+        XCTAssertNotNil(toast["title"] as? String); XCTAssertNotNil(toast["message"] as? String)
+        return toast
+    }
+
+    private func unchangedTestStorage(_ before: [String: String], manifest: URL, bytes: Data) throws {
+        XCTAssertEqual(try logicalRows(), before)
+        XCTAssertEqual(try Data(contentsOf: manifest), bytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+    }
+
+    func testFlaggedTestSuccessWarningAndFailureSettleAcceptedWorkerAndExactTicket() async throws {
+        for outcome in ["success", "warning", "failure"] {
+            state = CalendarHostState()
+            let entered = expectation(description: "\(outcome) Test worker entered"), release = DispatchSemaphore(value: 0)
+            defer { release.signal() }
+            state.reader.beforeRead = { operation in
+                if operation == "permissions" { entered.fulfill(); _ = release.wait(timeout: .now() + 25) }
+            }
+            let terminal = outcome == "failure" ? "throw new Error('Calendar probe failure');"
+                : "return {toasts:[{title:'Test',message:'Fixture',tone:'\(outcome)',durationMs:null}]};"
+            let setup = """
+            globalThis.__calendarCancelled=[];globalThis.__calendarResumes=0;
+            const previousCancel=MindwtrHost.cancel,previousResume=globalThis.__resumeHostCalls;
+            MindwtrHost.cancel=ticket=>{__calendarCancelled.push(String(ticket));return previousCancel(ticket);};
+            globalThis.__resumeHostCalls=(...args)=>{__calendarResumes++;return previousResume(...args);};
+            """
+            let value = try host("""
+            if(JSON.parse(requestJSON).op==='permissions')return {ticket:globalThis.__calendarTicket,cancelled:__calendarCancelled,resumes:__calendarResumes};
+            globalThis.__calendarTicket=id;
+            void __mindwtrCalendarCall({op:'permissions'}).catch(()=>{});
+            \(terminal)
+            """, setup: setup)
+            try await start(value); let state = self.state!
+            let pending = Task { defer { state.markSettled() }; return try await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}") }
+            await fulfillment(of: [entered], timeout: 3)
+            try await Task.sleep(nanoseconds: 50_000_000)
+            XCTAssertFalse(state.hasSettled, "Every flagged terminal outcome drains its accepted worker")
+            XCTAssertEqual(state.counters?.running, 1); XCTAssertFalse(canAcquireLibraryLock())
+            release.signal()
+            if outcome == "failure" {
+                do { _ = try await pending.value; XCTFail("Settlement cannot replace an ordinary Test failure") }
+                catch { XCTAssertTrue(error.localizedDescription.contains("Calendar probe failure")) }
+            } else { _ = try testToast(await pending.value, tone: outcome) }
+            try await drained(); state.reader.beforeRead = nil
+            let answer = try object(await value.calendarRead(requestJSON: "{\"op\":\"permissions\"}"))
+            let ticket = try XCTUnwrap(answer["ticket"] as? String)
+            XCTAssertEqual(answer["cancelled"] as? [String], [ticket]); XCTAssertEqual(answer["resumes"] as? Int, 1)
+            await value.close(); XCTAssertTrue(canAcquireLibraryLock())
+        }
+    }
+
+    func testFlaggedTestPostSubmitPollExceptionDrainsExactTicketAndPreservesError() async throws {
+        let entered = expectation(description: "Post-submit exception worker entered"), release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        state.reader.beforeRead = { operation in
+            if operation == "permissions" { entered.fulfill(); _ = release.wait(timeout: .now() + 25) }
+        }
+        let setup = """
+        globalThis.__calendarCancelled=[];
+        const previousCancel=MindwtrHost.cancel;
+        MindwtrHost.cancel=ticket=>{__calendarCancelled.push(String(ticket));return previousCancel(ticket);};
+        """
+        let value = try host("""
+        const op=JSON.parse(requestJSON).op;
+        if(op==='permissions')return {ticket:globalThis.__calendarTicket,cancelled:__calendarCancelled};
+        if(op==='calendars')return await __mindwtrCalendarCall({op:'permissions'});
+        globalThis.__calendarTicket=id;
+        void __mindwtrCalendarCall({op:'permissions'}).catch(()=>{});
+        const previousPoll=MindwtrHost.poll;
+        Object.defineProperty(MindwtrHost,'poll',{configurable:true,get(){
+          Object.defineProperty(MindwtrHost,'poll',{configurable:true,writable:true,value:previousPoll});
+          throw new Error('Calendar post-submit poll failure');
+        }});
+        return {toasts:[{title:'Test',message:'Late',tone:'success',durationMs:null}]};
+        """, setup: setup)
+        try await start(value); let state = self.state!
+        let pending = Task { defer { state.markSettled() }; return try await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}") }
+        await fulfillment(of: [entered], timeout: 3)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(state.hasSettled); XCTAssertEqual(state.counters?.running, 1); XCTAssertFalse(canAcquireLibraryLock())
+        release.signal()
+        do { _ = try await pending.value; XCTFail("Post-submit exception cannot publish the queued success") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("Calendar post-submit poll failure")) }
+        try await drained(); state.reader.beforeRead = nil
+        let answer = try object(await value.calendarRead(requestJSON: "{\"op\":\"permissions\"}"))
+        XCTAssertEqual(answer["cancelled"] as? [String], [try XCTUnwrap(answer["ticket"] as? String)])
+        let retry = try object(await value.calendarRead(requestJSON: "{\"op\":\"calendars\"}"))
+        XCTAssertEqual(retry["status"] as? String, "granted"); try await drained()
+    }
+
+    func testActualSharedTestTimeoutDrainsHeldPermissionBeforeReturningWarningAndRetryWorks() async throws {
+        let (value, manifest, bytes) = try await actualTestHost()
+        let before = try logicalRows(), operations = state.reader.operations
+        let entered = expectation(description: "Test permission read entered"), release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        state.reader.beforeRead = { operation in
+            if operation == "permissions" { entered.fulfill(); _ = release.wait(timeout: .now() + 25) }
+        }
+        let state = self.state!
+        let pending = Task { defer { state.markSettled() }; return try await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}") }
+        await fulfillment(of: [entered], timeout: 3)
+        try await Task.sleep(nanoseconds: 15_300_000_000)
+        XCTAssertFalse(state.hasSettled, "The logical timeout warning must retain the accepted native worker")
+        XCTAssertEqual(state.counters?.running, 1); XCTAssertFalse(canAcquireLibraryLock())
+        release.signal()
+        _ = try testToast(await pending.value, tone: "warning"); try await drained()
+        XCTAssertEqual(Array(state.reader.operations.dropFirst(operations.count)), ["permissions"],
+            "A late permission result cannot start enumeration after the whole Test deadline")
+        state.reader.beforeRead = nil
+        _ = try testToast(await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}"), tone: "success")
+        _ = try await value.calendarRead(requestJSON: "{\"op\":\"closeSettings\"}")
+        _ = try await value.calendarRead(requestJSON: "{\"op\":\"openSettings\"}")
+        _ = try testToast(await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}"), tone: "success")
+        try unchangedTestStorage(before, manifest: manifest, bytes: bytes)
+        await value.close(); XCTAssertTrue(canAcquireLibraryLock())
+    }
+
+    func testActualSharedTestCancellationDrainsHeldEventsBeforeReopenAndFreshFeed() async throws {
+        let (value, manifest, bytes) = try await actualTestHost()
+        let before = try logicalRows()
+        let entered = expectation(description: "Test events read entered"), release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        state.reader.beforeRead = { operation in
+            if operation == "events" { entered.fulfill(); _ = release.wait(timeout: .now() + 25) }
+        }
+        let state = self.state!
+        let pending = Task { defer { state.markSettled() }; return try await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}") }
+        await fulfillment(of: [entered], timeout: 3); pending.cancel()
+        let retiring = Task {
+            _ = try await value.calendarRead(requestJSON: "{\"op\":\"closeSettings\"}"); state.markClosed()
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(state.hasSettled); XCTAssertFalse(state.hasClosed)
+        XCTAssertEqual(state.counters?.running, 1); XCTAssertFalse(canAcquireLibraryLock())
+        release.signal()
+        do { _ = try await pending.value; XCTFail("Canceled Test cannot publish its late event result") }
+        catch is CancellationError {} catch { XCTFail("Expected caller cancellation, got \(error)") }
+        try await retiring.value; try await drained(); state.reader.beforeRead = nil
+        _ = try await value.calendarRead(requestJSON: "{\"op\":\"openSettings\"}")
+        _ = try testToast(await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}"), tone: "success")
+        let now = Date(), formatter = ISO8601DateFormatter()
+        let feed = try object(await value.calendarRead(requestJSON: json(["op": "feed", "slot": "calendar",
+            "start": formatter.string(from: now.addingTimeInterval(-86_400)), "end": formatter.string(from: now.addingTimeInterval(86_400))])))
+        XCTAssertEqual(feed["status"] as? String, "ready")
+        XCTAssertEqual((feed["events"] as? [[String: Any]])?.count, 1)
+        try unchangedTestStorage(before, manifest: manifest, bytes: bytes)
+    }
+
+    func testActualSharedTestHTTPCancellationDrainsDelegateBeforeFreshRepeatedTests() async throws {
+        let entered = expectation(description: "Test HTTP transport entered"), stopped = expectation(description: "Test HTTP stopped")
+        let completing = expectation(description: "Test HTTP delegate completion is held")
+        let release = DispatchSemaphore(value: 0), http = CalendarHeldFeedState()
+        defer { release.signal(); CalendarHeldFeedProtocol.install(nil) }
+        http.hold(entered: entered, stopped: stopped, completion: completing, release: release)
+        CalendarHeldFeedProtocol.install(http)
+        let feeds: [[String: Any]] = [["id": "feed-test", "name": "Test fixture", "url": "https://calendar.example.invalid/calendar.ics", "enabled": true]]
+        let (value, manifest, bytes) = try await actualTestHost(deviceEnabled: false, subscriptions: feeds) { faults in
+            let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [CalendarHeldFeedProtocol.self]
+            faults.httpConfiguration = configuration
+            faults.configureHTTPJobs = { jobs in http.capture(jobs); jobs.beforeCompletion = { http.beforeCompletion() } }
+            faults.calendarAuthorizationRequest = { http.prompt(); throw NativeCalendarReadError.unavailable }
+        }
+        let before = try logicalRows(), operations = state.reader.operations
+        let pending = Task { defer { http.markSettled() }; return try await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}") }
+        await fulfillment(of: [entered], timeout: 3); pending.cancel()
+        await fulfillment(of: [stopped, completing], timeout: 3)
+        XCTAssertFalse(http.hasSettled); XCTAssertEqual(http.counters?.running, 1); XCTAssertFalse(canAcquireLibraryLock())
+        release.signal()
+        do { _ = try await pending.value; XCTFail("Canceled Test cannot publish partial HTTP success") }
+        catch is CancellationError {} catch { XCTFail("Expected caller cancellation, got \(error)") }
+        XCTAssertEqual(http.counters?.jobs, 0); XCTAssertEqual(http.counters?.running, 0)
+        _ = try testToast(await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}"), tone: "success")
+        _ = try testToast(await value.calendarRead(requestJSON: "{\"op\":\"testSettings\"}"), tone: "success")
+        XCTAssertEqual(http.counts, [3, 1, 0, 0], "Each Test refetches without a Calendar-slot throttle or permission prompt")
+        XCTAssertEqual(state.reader.operations, operations, "Disabled device calendars contribute no Test provider read")
+        try unchangedTestStorage(before, manifest: manifest, bytes: bytes)
+    }
+
     func testUnmodifiedSharedSettingsAndFeedUseNativeWorkerAndDeviceStorage() async throws {
         let container = root.appendingPathComponent("container"), namespace = "tech.dongdongbh.mindwtr.calendar-tests"
         let directory = container.appendingPathComponent("Library/Application Support/\(namespace)/RCTAsyncLocalStorage_V1")
@@ -257,7 +494,8 @@ final class NativeCalendarHostTests: XCTestCase {
 
     func testPublicBoundaryRejectsInvalidJSONAndGenericCallBeforeNativeWork() async throws {
         let value = try host(); try await start(value)
-        for input in ["[]", "null", "invalid", "{\"op\":\"permissions\",\"op\":\"permissions\"}", String(repeating: " ", count: 8193)] {
+        for input in ["[]", "null", "invalid", "{\"op\":\"permissions\",\"op\":\"permissions\"}",
+                      "{\"op\":\"testSettings\",\"op\":\"testSettings\"}", String(repeating: " ", count: 8193)] {
             do { _ = try await value.calendarRead(requestJSON: input); XCTFail("Invalid calendar facade request must refuse") }
             catch { XCTAssertEqual(error.localizedDescription, "INVALID_INPUT: Calendar request is invalid") }
         }

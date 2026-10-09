@@ -9855,6 +9855,94 @@ final class FoundationUITests: XCTestCase {
     func testNativeCalendarSubscriptionsLargest() throws { try task470CalendarSubscriptions("LARGEST", largest: true) }
     func testNativeCalendarSubscriptionsRecovery() throws { try task470CalendarSubscriptions("RECOVERY", largest: false, recovery: true) }
 
+    private func task471CalendarSettingsTest(_ suffix: String, largest: Bool = false) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_SETTINGS_TEST_UI_")
+        let held = ["TIMEOUT", "CANCEL", "BACKGROUND"].contains(suffix)
+        var control: URL?, requests = 0
+        if held {
+            guard let raw = ProcessInfo.processInfo.environment["MINDWTR_CALENDAR_FEED_UI_CONTROL_URL"],
+                  let value = URL(string: raw), value.scheme == "https" else {
+                throw XCTSkip("Requires the root-staged synthetic calendar fixture control")
+            }
+            control = value
+            _ = try task465Control(value, "reset", method: "POST")
+            requests = (try task465Control(value, "status")["requests"] as? NSNumber)?.intValue ?? 0
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            "-UIPreferredContentSizeCategoryName", largest ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
+        app.launch()
+        defer { app.terminate(); if let control { _ = try? task465Control(control, "release", method: "POST") } }
+        let test = app.buttons["calendar-settings-test"]
+        let result = app.descendants(matching: .any).matching(identifier: "calendar-settings-test-result").firstMatch
+        func revealTest() {
+            task442Reveal(app, test, in: app.scrollViews["calendar-settings-scroll"])
+            boardEnabled(test, timeout: 30)
+        }
+        func openCalendar() {
+            let row = app.buttons["settings-calendar"]
+            task442Reveal(app, row, in: app.scrollViews["advanced-scroll"])
+            boardEnabled(row, timeout: 30); row.tap()
+            XCTAssertEqual(app.switches["calendar-device-enabled"].value as? String, "0")
+            XCTAssertFalse(app.buttons["calendar-device-grant"].exists)
+            revealTest()
+        }
+        func openSettings() {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+            let advanced = app.buttons["settings-advanced"]
+            task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"])
+            boardEnabled(advanced, timeout: 30); advanced.tap(); openCalendar()
+        }
+        func startTest() {
+            revealTest(); XCTAssertGreaterThanOrEqual(test.frame.height, 48 - 0.001); test.tap()
+        }
+        func expectResult(_ text: String) {
+            expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", text), evaluatedWith: result)
+            waitForExpectations(timeout: 30)
+            boardEnabled(test, timeout: 30)
+            task442Reveal(app, result, in: app.scrollViews["calendar-settings-scroll"], requireEnabled: false)
+            XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+            XCTAssertFalse(app.buttons["calendar-settings-retry"].exists)
+        }
+        openSettings(); XCTAssertFalse(result.exists)
+        startTest()
+        if let control {
+            _ = try task465HeldRead(app, control: control, after: requests)
+            if suffix == "CANCEL" {
+                boardTap(app, "calendar-settings-back")
+                openCalendar(); XCTAssertFalse(result.exists)
+            } else if suffix == "BACKGROUND" {
+                XCUIDevice.shared.press(.home)
+                app.activate(); revealTest(); XCTAssertFalse(result.exists)
+            } else {
+                expectResult("Failed to load events")
+            }
+            _ = try task465Control(control, "release", method: "POST")
+            startTest(); expectResult("Loaded 5 events")
+        } else {
+            let expected = suffix == "WARNING" ? "Failed to load events" : "Loaded 5 events"
+            expectResult(expected); startTest(); expectResult(expected)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Calendar Test " + suffix; shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "calendar-settings-back"); openCalendar(); XCTAssertFalse(result.exists)
+        app.terminate(); app.launch(); openSettings(); XCTAssertFalse(result.exists)
+        XCTAssertFalse(app.buttons["calendar-settings-retry"].exists)
+    }
+
+    func testNativeCalendarSettingsTestNormal() throws { try task471CalendarSettingsTest("NORMAL") }
+    func testNativeCalendarSettingsTestLargest() throws { try task471CalendarSettingsTest("LARGEST", largest: true) }
+    func testNativeCalendarSettingsTestWarning() throws { try task471CalendarSettingsTest("WARNING") }
+    func testNativeCalendarSettingsTestTimeout() throws { try task471CalendarSettingsTest("TIMEOUT") }
+    func testNativeCalendarSettingsTestCancel() throws { try task471CalendarSettingsTest("CANCEL") }
+    func testNativeCalendarSettingsTestBackground() throws { try task471CalendarSettingsTest("BACKGROUND") }
+
     // Root stages an actual prepared turn-on journal in this isolated library; no prompt is requested.
     func testNativeCalendarSettingsStartupRecoveryPassiveOpen() throws {
         let library = try task371Library("RECOVERY", prefix: "MINDWTR_CALENDAR_SETTINGS_UI_")

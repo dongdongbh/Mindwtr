@@ -157,6 +157,56 @@ describe('external calendar feeds behind the host ports', () => {
         await outcome;
     });
 
+    it('Task471 does not start enumeration when held passive permission returns after cancellation', async () => {
+        const handset = device({ calendars: [{ id: 'work', title: 'Work' }] });
+        let enter!: () => void;
+        const entered = new Promise<void>((resolve) => { enter = resolve; });
+        let release!: (permission: { status: string }) => void;
+        handset.host.calendars.getPermissions = () => {
+            enter();
+            return new Promise((resolve) => { release = resolve; });
+        };
+        const controller = new AbortController();
+        const pending = handset.feeds.fetchExternalCalendarEvents(...SEPT, { signal: controller.signal, sources: {
+            subscriptions: [], systemSettings: normalizeSystemCalendarSettings({ enabled: true }),
+        } });
+        const outcome = expect(pending).rejects.toThrow('Screen closed');
+        await entered;
+        controller.abort(new Error('Screen closed'));
+        release({ status: 'granted' });
+        await outcome;
+        expect(handset.calls).toEqual([]);
+        expect(handset.logs).toEqual([]);
+    });
+
+    it('Task471 observes a late permission rejection after cancellation without enumeration, mapping reads or logs', async () => {
+        const handset = device({ calendars: [{ id: 'work', title: 'Work' }] });
+        let enter!: () => void;
+        const entered = new Promise<void>((resolve) => { enter = resolve; });
+        let rejectPermission!: (error: Error) => void;
+        handset.host.calendars.getPermissions = () => { enter(); return new Promise((_resolve, reject) => { rejectPermission = reject; }); };
+        const mapping = vi.spyOn(handset.host, 'getAllCalendarSyncEntries'), controller = new AbortController();
+        const pending = handset.feeds.fetchExternalCalendarEvents(...SEPT, { signal: controller.signal, sources: {
+            subscriptions: [], systemSettings: normalizeSystemCalendarSettings({ enabled: true }),
+        } });
+        const outcome = expect(pending).rejects.toThrow('Screen closed');
+        await entered; controller.abort(new Error('Screen closed'));
+        rejectPermission(new Error('PRIVATE provider rejected after cancellation'));
+        await outcome;
+        expect(handset.calls).toEqual([]); expect(mapping).not.toHaveBeenCalled(); expect(handset.logs).toEqual([]);
+    });
+
+    it('Task471 checks cancellation after saved settings before starting passive permission', async () => {
+        const handset = device(), controller = new AbortController();
+        const permission = vi.spyOn(handset.host.calendars, 'getPermissions');
+        handset.host.storage.getItem = async (name) => {
+            if (name === SYSTEM_CALENDAR_SETTINGS_KEY) { controller.abort(new Error('Retired settings read')); return JSON.stringify({ enabled: true }); }
+            return null;
+        };
+        await expect(handset.feeds.fetchExternalCalendarEvents(...SEPT, { signal: controller.signal })).rejects.toThrow('Retired settings read');
+        expect(permission).not.toHaveBeenCalled(); expect(handset.calls).toEqual([]); expect(handset.logs).toEqual([]);
+    });
+
     it('keeps one copy of an event a feed lists twice', async () => {
         const text = ics([['dup', '20260910T090000Z', 'Twice'], ['dup', '20260910T090000Z', 'Twice']]);
         const { feeds } = device({

@@ -2980,11 +2980,12 @@ private final class Engine: @unchecked Sendable {
         try cancellation.check()
         try requireCalendarAdmission()
         guard requestJSON.utf8.count <= 8192,
-              (try? NativeJSON.jsonObject(with: Data(requestJSON.utf8))) is [String: Any],
+              let input = try? NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
               (try? NativeJSON.hasUniqueObjectKeys(requestJSON)) == true else {
             throw HostFailure("INVALID_INPUT: Calendar request is invalid")
         }
-        return try invoke("iosCalendarRead", arguments: [requestJSON], localCancellation: cancellation)
+        return try invoke("iosCalendarRead", arguments: [requestJSON], localCancellation: cancellation,
+                          drainCalendarTest: Set(input.keys) == Set(["op"]) && input["op"] as? String == "testSettings")
     }
 
     func admitReminderPlanRead(cancellation: NativeAttachmentCancellation) throws -> NativeReminderPlanReadAdmission {
@@ -20940,7 +20941,8 @@ private final class Engine: @unchecked Sendable {
         runtime.exception = nil
     }
 
-    private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil) throws -> String {
+    private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil,
+                        drainCalendarTest: Bool = false) throws -> String {
         guard calendarAccessTurn == nil || method == "deviceCalendarAccessAcknowledged" else {
             throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner")
         }
@@ -20961,7 +20963,9 @@ private final class Engine: @unchecked Sendable {
         let selectedEncryption = encryptionUnlockTurn
         var selectedTicket: String?, selectedSucceeded = false, terminalConsumed = false
         defer {
-            if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil {
+            if drainCalendarTest, let selectedTicket {
+                settleSelectedTicket(selectedTicket, terminalConsumed: terminalConsumed, turn: nil, runtime: context, host: host)
+            } else if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil {
                 selectedDownload?.preparing = false
                 selectedProject?.live = false
                 selectedEncryption?.live = false
@@ -20982,7 +20986,7 @@ private final class Engine: @unchecked Sendable {
         }
         // Capture a trusted submitted ticket before observing a synchronous
         // exception so an accepted selected call is still cancelled and polled.
-        if selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
+        if drainCalendarTest || selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
             selectedTicket = id
         }
         try checkException()
@@ -20993,7 +20997,7 @@ private final class Engine: @unchecked Sendable {
         // Promise jobs drain whenever JSC returns from a call; timers share this queue.
         var cancelled = false
         defer {
-            if cancelled && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil {
+            if cancelled && !drainCalendarTest && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil {
                 attachmentJobs?.cancelAndDrain()
                 httpJobs?.cancelAndDrain()
                 secretJobs?.drain()
@@ -21016,11 +21020,13 @@ private final class Engine: @unchecked Sendable {
                     try checkException()
                     // Completes uninterruptible RN installer work before allowing
                     // another operation or library owner to observe the namespace.
-                    attachmentJobs?.cancelAndDrain()
-                    httpJobs?.cancelAndDrain()
-                    secretJobs?.drain()
-                    calendarJobs?.drain()
-                    if selectedTurn != nil || selectedEncryption != nil || selectedDownload != nil { cryptoJobs?.drain() }
+                    if !drainCalendarTest {
+                        attachmentJobs?.cancelAndDrain()
+                        httpJobs?.cancelAndDrain()
+                        secretJobs?.drain()
+                        calendarJobs?.drain()
+                        if selectedTurn != nil || selectedEncryption != nil || selectedDownload != nil { cryptoJobs?.drain() }
+                    }
                 }
             }
             if reply == nil || reply!.isNull || reply!.isUndefined {

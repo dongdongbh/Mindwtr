@@ -1090,6 +1090,293 @@ describe('native host contract: Settings › Calendar', () => {
         });
     });
 
+    describe('Task471 Test-fetch ownership', () => {
+        const deferred = <T,>() => {
+            let resolve!: (value: T) => void;
+            let reject!: (error: Error) => void;
+            const promise = new Promise<T>((accept, refuse) => { resolve = accept; reject = refuse; });
+            return { promise, resolve, reject };
+        };
+        const setup = async (options: { settings?: AppSettings; device?: Device; language?: 'en' | 'zh' } = {}) => {
+            await seed(options.settings ?? { externalCalendars: fixture.settings.synced.externalCalendars });
+            const handset = phone({ os: 'ios', permission: 'denied', ...options.device });
+            handset.host.repairFeedDeviceCopyOnOpen = false;
+            const fetches = vi.fn(handset.host.fetch);
+            handset.host.fetch = fetches;
+            let currentHost: NativeCalendarHost | null = handset.host;
+            let ready = true;
+            const language = options.language ?? 'en';
+            const contract = createCalendarSettingsMethods({
+                readiness: () => ready ? { ok: true, value: null } : { ok: false, error: { code: 'ACTION_FAILED', message: 'Library retired' } },
+                save: async () => ({ ok: true, value: null }),
+                t: () => (key) => strings[language][key] ?? key, language: () => language,
+                requestIdPattern: /^[0-9a-f-]{36}$/, host: () => currentHost,
+            });
+            value(await contract.openCalendarSettings());
+            freezeClock();
+            return { handset, contract, fetches, replaceHost: (host: NativeCalendarHost) => { currentHost = host; },
+                retire: () => { ready = false; }, restore: () => { ready = true; } };
+        };
+        const flushMicrotasks = async () => { for (let index = 0; index < 30; index += 1) await Promise.resolve(); };
+        const warning = () => ({ title: strings.en['settings.syncMobile.error'],
+            message: strings.en['settings.calendarMobile.failedToLoadEvents'], tone: 'warning', durationMs: null });
+        const success = (count: number) => ({ title: strings.en['common.success'], message: `Loaded ${count} events`, tone: 'success', durationMs: null });
+
+        it('refuses a pre-aborted Test before source, HTTP or provider work', async () => {
+            const { handset, contract, fetches } = await setup(), owner = new AbortController();
+            const ports = [vi.spyOn(handset.host.storage, 'getItem'), fetches,
+                vi.spyOn(handset.host.calendars, 'getPermissions')];
+            owner.abort(new Error('PRIVATE caller reason'));
+            expect(await contract.testCalendarFeeds({ signal: owner.signal, timeoutMs: 15_000 }))
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            for (const port of ports) expect(port).not.toHaveBeenCalled();
+            expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
+        });
+
+        it('starts the logical deadline before a held first source read and observes its late rejection', async () => {
+            const { handset, contract } = await setup(), gate = deferred<[string, string | null][]>();
+            handset.host.storage.multiGet = () => gate.promise;
+            const log = vi.spyOn(handset.host.log, 'error');
+            const add = vi.spyOn(AbortSignal.prototype, 'addEventListener'), remove = vi.spyOn(AbortSignal.prototype, 'removeEventListener');
+            vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+            let settled = false;
+            const pending = contract.testCalendarFeeds({ timeoutMs: 15_000 });
+            void pending.then(() => { settled = true; });
+            try {
+                await vi.advanceTimersByTimeAsync(14_999); expect(settled).toBe(false);
+                await vi.advanceTimersByTimeAsync(1); expect(settled).toBe(true);
+                expect(value(await pending).toasts).toEqual([{
+                    title: strings.en['settings.syncMobile.error'], message: strings.en['settings.calendarMobile.failedToLoadEvents'],
+                    tone: 'warning', durationMs: null,
+                }]);
+                expect(vi.getTimerCount()).toBe(0);
+                expect(add).toHaveBeenCalledTimes(1); expect(remove).toHaveBeenCalledTimes(1);
+                expect(remove.mock.calls[0]).toEqual(add.mock.calls[0].slice(0, 2));
+            } finally {
+                gate.reject(new Error('PRIVATE late cell failure'));
+                await pending;
+            }
+            expect(log).toHaveBeenCalledTimes(1);
+            expect(log.mock.calls[0][0]).not.toEqual(new Error('PRIVATE late cell failure'));
+            expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
+        });
+
+        it('lets caller cancellation win a fired deadline before its warning is published', async () => {
+            const { handset, contract } = await setup(), gate = deferred<[string, string | null][]>(), owner = new AbortController();
+            handset.host.storage.multiGet = () => gate.promise;
+            const error = vi.spyOn(handset.host.log, 'error');
+            vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+            const pending = contract.testCalendarFeeds({ signal: owner.signal, timeoutMs: 15_000 });
+            vi.advanceTimersByTime(15_000);
+            owner.abort(new Error('Screen retired before publication'));
+            expect(await pending).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(error).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+            gate.reject(new Error('PRIVATE late failure')); await flushMicrotasks();
+            expect(error).not.toHaveBeenCalled(); expect(writes).toEqual([]);
+        });
+
+        it.each([
+            ['first source', 'abort'], ['final source', 'abort'], ['permission', 'abort'], ['events', 'abort'], ['HTTP', 'abort'],
+            ['first source', 'deadline'], ['final source', 'deadline'], ['permission', 'deadline'], ['events', 'deadline'], ['HTTP', 'deadline'],
+        ] as const)('terminalizes %s on %s while observing late rejection and allowing a fresh Test', async (phase, stop) => {
+            const provider = phase === 'permission' || phase === 'events';
+            const { handset, contract, fetches } = await setup({
+                settings: { externalCalendars: provider ? [] : fixture.settings.synced.externalCalendars },
+                device: { permission: 'granted', calendars: ['primary'],
+                    storage: { [KEYS.system]: JSON.stringify({ enabled: provider }) } },
+            });
+            const gate = deferred<never>(), entered = deferred<void>(), owner = new AbortController();
+            const info = vi.spyOn(handset.host.log, 'info'), error = vi.spyOn(handset.host.log, 'error');
+            const oldPermission = handset.host.calendars.getPermissions, oldEvents = handset.host.calendars.getEvents;
+            const originalFetch = fetches.getMockImplementation()!;
+            let sourceReads = 0;
+            handset.host.storage.multiGet = (names) => {
+                if ((phase === 'first source' && ++sourceReads === 1) || (phase === 'final source' && ++sourceReads === 2)) {
+                    entered.resolve(); return gate.promise;
+                }
+                return Promise.resolve(names.map((name) => [name, handset.state.storage.get(name) ?? null]));
+            };
+            if (phase === 'permission') handset.host.calendars.getPermissions = () => { entered.resolve(); return gate.promise; };
+            if (phase === 'events') handset.host.calendars.getEvents = () => { entered.resolve(); return gate.promise; };
+            if (phase === 'HTTP') fetches.mockImplementation(() => { entered.resolve(); return gate.promise; });
+            const add = vi.spyOn(owner.signal, 'addEventListener'), remove = vi.spyOn(owner.signal, 'removeEventListener');
+            vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+            vi.setSystemTime(new Date(fixture.now));
+            const beforeSettings = JSON.parse(JSON.stringify(useTaskStore.getState().settings)), beforeDevice = handset.snapshot();
+            const pending = contract.testCalendarFeeds({ signal: owner.signal, timeoutMs: 15_000 });
+            await entered.promise;
+            if (stop === 'abort') owner.abort(new Error('PRIVATE caller cancellation'));
+            else await vi.advanceTimersByTimeAsync(15_000);
+            if (stop === 'abort') expect(await pending).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            else expect(value(await pending).toasts).toEqual([warning()]);
+            expect(add).toHaveBeenCalledTimes(1); expect(remove).toHaveBeenCalledTimes(1);
+            expect(info).not.toHaveBeenCalled(); expect(error).toHaveBeenCalledTimes(stop === 'abort' ? 0 : 1);
+            gate.reject(new Error('PRIVATE late rejected read')); await flushMicrotasks();
+            expect(info).not.toHaveBeenCalled(); expect(error).toHaveBeenCalledTimes(stop === 'abort' ? 0 : 1);
+            expect(vi.getTimerCount()).toBe(0);
+            delete handset.host.storage.multiGet;
+            handset.host.calendars.getPermissions = oldPermission; handset.host.calendars.getEvents = oldEvents;
+            fetches.mockImplementation(originalFetch);
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(2)]);
+            expect(useTaskStore.getState().settings).toEqual(beforeSettings); expect(handset.snapshot()).toEqual(beforeDevice);
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0); expect(handset.state.prompts).toBe(0);
+            expect(handset.state.calendarWrites).toEqual([]);
+        });
+
+        it.each(['session', 'host', 'adapter', 'canonical', 'readiness'] as const)('refuses a rejected held read after %s retirement without a late toast or error log', async (kind) => {
+            const state = await setup(), { handset, contract } = state;
+            const gate = deferred<[string, string | null][]>(), entered = deferred<void>();
+            handset.host.storage.multiGet = () => { entered.resolve(); return gate.promise; };
+            const info = vi.spyOn(handset.host.log, 'info'), error = vi.spyOn(handset.host.log, 'error');
+            const pending = contract.testCalendarFeeds({ timeoutMs: 15_000 }); await entered.promise;
+            if (kind === 'session') value(contract.closeCalendarSettings());
+            if (kind === 'host') state.replaceHost(phone({ permission: 'denied' }).host);
+            if (kind === 'adapter') setStorageAdapter({ ...getStorageAdapter() });
+            if (kind === 'canonical') useTaskStore.setState({ settings: { externalCalendars: [] } });
+            if (kind === 'readiness') state.retire();
+            gate.reject(new Error('PRIVATE retired source error'));
+            expect(await pending).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(info).not.toHaveBeenCalled(); expect(error).not.toHaveBeenCalled();
+            delete handset.host.storage.multiGet; state.restore();
+            expect(value(await contract.openCalendarSettings()).toasts).toEqual([]);
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts[0].tone).toBe('success');
+            expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
+        });
+
+        it.each(['fulfill', 'reject'] as const)('drops a %s HTTP result after the Settings visit closes and reopens', async (outcome) => {
+            const { handset, contract, fetches } = await setup(), gate = deferred<Response>(), entered = deferred<void>();
+            const original = fetches.getMockImplementation()!;
+            fetches.mockImplementation(() => { entered.resolve(); return gate.promise; });
+            const info = vi.spyOn(handset.host.log, 'info'), error = vi.spyOn(handset.host.log, 'error');
+            const old = contract.testCalendarFeeds({ timeoutMs: 15_000 }); await entered.promise;
+            value(contract.closeCalendarSettings());
+            expect(value(await contract.openCalendarSettings()).toasts).toEqual([]);
+            if (outcome === 'fulfill') gate.resolve(new Response(fixture.feeds[fixture.settings.synced.externalCalendars![0].url]));
+            else gate.reject(new Error('PRIVATE old HTTP result'));
+            expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(info).not.toHaveBeenCalled(); expect(error).not.toHaveBeenCalled();
+            fetches.mockImplementation(original);
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(2)]);
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0); expect(handset.state.prompts).toBe(0);
+        });
+
+        it.each([
+            ['legacy', 'provider failure'], ['system', 'provider failure'],
+            ['legacy', 'deadline'], ['system', 'deadline'],
+        ] as const)('keeps a generic attempted-Test warning after %s cells change during held %s, without counts or repair', async (kind, stop) => {
+            const { handset, contract } = await setup({
+                settings: kind === 'legacy' ? {} : { externalCalendars: [] },
+                device: { permission: 'granted', calendars: ['primary'], storage: {
+                    [KEYS.feeds]: JSON.stringify(fixture.settings.synced.externalCalendars),
+                    [KEYS.system]: JSON.stringify({ enabled: true }),
+                } },
+            });
+            const gate = deferred<never>(), entered = deferred<void>();
+            const cells = vi.fn((names: string[]) => Promise.resolve(names.map((name) => [name, handset.state.storage.get(name) ?? null] as [string, string | null])));
+            handset.host.storage.multiGet = cells;
+            handset.host.calendars.getEvents = () => { entered.resolve(); return gate.promise; };
+            const info = vi.spyOn(handset.host.log, 'info'), error = vi.spyOn(handset.host.log, 'error');
+            vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+            vi.setSystemTime(new Date(fixture.now));
+            const beforeSettings = JSON.parse(JSON.stringify(useTaskStore.getState().settings));
+            const pending = contract.testCalendarFeeds({ timeoutMs: 15_000 });
+            await entered.promise;
+            handset.state.storage.set(kind === 'legacy' ? KEYS.feeds : KEYS.system, kind === 'legacy' ? '[]' : JSON.stringify({ enabled: false }));
+            const changedDevice = handset.snapshot();
+            if (stop === 'provider failure') gate.reject(new Error('Calendar provider unavailable'));
+            else await vi.advanceTimersByTimeAsync(15_000);
+            expect(value(await pending)).toEqual({ toasts: [warning()] });
+            expect(cells).toHaveBeenCalledTimes(1); // A failure warning does not claim a fresh source or start another read.
+            expect(info).not.toHaveBeenCalled(); expect(error).toHaveBeenCalledTimes(1);
+            if (stop === 'deadline') {
+                expect(error.mock.calls[0][0]).toEqual(new Error('External calendar request timed out'));
+                gate.reject(new Error('PRIVATE late provider failure'));
+                await flushMicrotasks();
+                expect(error).toHaveBeenCalledTimes(1);
+            }
+            expect(vi.getTimerCount()).toBe(0);
+            expect(useTaskStore.getState().settings).toEqual(beforeSettings); expect(handset.snapshot()).toEqual(changedDevice);
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0); expect(handset.state.prompts).toBe(0);
+            expect(handset.state.calendarWrites).toEqual([]);
+        });
+
+        it.each(['legacy', 'system', 'canonical'] as const)('rejects a final captured-source mismatch for %s without publishing or repairing it', async (kind) => {
+            const { handset, contract } = await setup({ settings: kind === 'legacy' ? {} : { externalCalendars: fixture.settings.synced.externalCalendars },
+                device: { storage: { [KEYS.feeds]: JSON.stringify(fixture.settings.synced.externalCalendars) } } });
+            const gate = deferred<[string, string | null][]>(), entered = deferred<void>();
+            let reads = 0;
+            handset.host.storage.multiGet = (names) => {
+                if (++reads === 2) { entered.resolve(); return gate.promise; }
+                return Promise.resolve(names.map((name) => [name, handset.state.storage.get(name) ?? null]));
+            };
+            const info = vi.spyOn(handset.host.log, 'info'), error = vi.spyOn(handset.host.log, 'error');
+            const pending = contract.testCalendarFeeds({ timeoutMs: 15_000 }); await entered.promise;
+            if (kind === 'legacy') handset.state.storage.set(KEYS.feeds, '[]');
+            if (kind === 'system') handset.state.storage.set(KEYS.system, JSON.stringify({ enabled: true }));
+            if (kind === 'canonical') useTaskStore.setState({ settings: { externalCalendars: [] } });
+            gate.resolve((kind === 'legacy' ? [KEYS.feeds, KEYS.system] : [KEYS.system]).map((name) => [name, handset.state.storage.get(name) ?? null]));
+            expect(await pending).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(info).not.toHaveBeenCalled(); expect(error).not.toHaveBeenCalled(); expect(writes).toEqual([]); expect(handset.life.step).toBe(0);
+        });
+
+        it.each(['canonical', 'legacy', 'empty'] as const)('uses saved %s authority without writes, repair, prompts or the draft URL', async (kind) => {
+            const canonical = fixture.settings.synced.externalCalendars!;
+            const { handset, contract, fetches } = await setup({ settings: kind === 'legacy' ? {} : { externalCalendars: kind === 'empty' ? [] : canonical },
+                device: { storage: { [KEYS.feeds]: JSON.stringify(kind === 'legacy' ? canonical : [{ ...canonical[0], url: 'https://poison.invalid/old.ics' }]) } } });
+            const beforeSettings = JSON.parse(JSON.stringify(useTaskStore.getState().settings)), beforeDevice = handset.snapshot();
+            value(contract.getCalendarSettings({ draft: { name: 'Unsaved', url: 'https://unsaved.invalid/secret.ics' } }));
+            const reads = vi.spyOn(handset.host.storage, 'getItem');
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(kind === 'empty' ? 0 : 2)]);
+            expect(fetches.mock.calls.map(([url]) => String(url))).toEqual(kind === 'empty' ? [] : [canonical[0].url]);
+            expect(reads.mock.calls.map(([name]) => name)).toEqual(kind === 'legacy' ? [KEYS.feeds, KEYS.system, KEYS.feeds, KEYS.system] : [KEYS.system, KEYS.system]);
+            expect(useTaskStore.getState().settings).toEqual(beforeSettings); expect(handset.snapshot()).toEqual(beforeDevice);
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0); expect(handset.state.prompts).toBe(0);
+        });
+
+        it('refetches on each Test without joining or populating the Calendar slot cache and detaches a successful owner', async () => {
+            const { handset, contract, fetches } = await setup(), owner = new AbortController();
+            freezeClock();
+            const request = { slot: 'calendar' as const, start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z', refresh: true };
+            const cached = value(await contract.loadExternalCalendarFeed(request));
+            const ics = (count: number) => ['BEGIN:VCALENDAR', 'VERSION:2.0', ...Array.from({ length: count }, (_, index) =>
+                ['BEGIN:VEVENT', `UID:changed-${index}`, 'DTSTART:20260910T090000Z', 'DURATION:PT1H', `SUMMARY:Changed ${index}`, 'END:VEVENT']).flat(), 'END:VCALENDAR'].join('\r\n');
+            fetches.mockImplementation(async () => new Response(ics(1)));
+            const remove = vi.spyOn(owner.signal, 'removeEventListener');
+            expect(value(await contract.testCalendarFeeds({ signal: owner.signal, timeoutMs: 15_000 })).toasts).toEqual([success(1)]);
+            expect(remove).toHaveBeenCalledTimes(1); owner.abort(new Error('A completed Test later retired'));
+            fetches.mockImplementation(async () => new Response(ics(3)));
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(3)]);
+            expect(value(await contract.loadExternalCalendarFeed(request))).toEqual(cached); expect(fetches).toHaveBeenCalledTimes(3);
+            expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
+        });
+
+        it('uses the exact local-month range, saved selection, shared count and a single generic partial warning', async () => {
+            const { handset, contract, fetches } = await setup({ device: { permission: 'granted', calendars: ['primary'],
+                storage: { [KEYS.system]: JSON.stringify({ enabled: true, selectAll: false, selectedCalendarIds: ['g-primary'] }) } } });
+            freezeClock();
+            const events = vi.spyOn(handset.host.calendars, 'getEvents');
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(4)]);
+            expect(events.mock.calls[0][0]).toEqual(['g-primary']);
+            expect(events.mock.calls[0][1].toISOString()).toBe('2026-09-01T00:00:00.000Z');
+            expect(events.mock.calls[0][2].toISOString()).toBe('2026-09-30T23:59:59.999Z');
+            useTaskStore.setState({ settings: { externalCalendars: [...fixture.settings.synced.externalCalendars!, {
+                id: 'failed', name: 'Private name', url: 'https://synthetic-person:synthetic-secret@example.invalid/private.ics', enabled: true,
+            }] } });
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([warning()]);
+            expect(fetches).toHaveBeenCalledTimes(3); expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
+        });
+
+        it.each(['en', 'zh'] as const)('keeps HTTP200 empty parsing and localized zero-count semantics (%s)', async (language) => {
+            const { contract, fetches } = await setup({ language });
+            fetches.mockImplementation(async () => new Response('Not a strict ICS document'));
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([{
+                title: strings[language]['common.success'], message: language === 'zh' ? '已加载 0 个日程' : 'Loaded 0 events',
+                tone: 'success', durationMs: null,
+            }]);
+            expect(writes).toEqual([]);
+        });
+    });
+
     describe('loadExternalCalendarFeed', () => {
         const range = { start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' };
         it.each(['en', 'zh'])('retains successful ICS/device events and subscriptions with a failed local feed and localized warning (%s)', async (language) => {
