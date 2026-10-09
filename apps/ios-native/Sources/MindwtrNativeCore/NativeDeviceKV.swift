@@ -255,6 +255,36 @@ final class NativeDeviceKV {
         try mutate(changes, skipUnchanged: true)
     }
 
+    private static let calendarPushNames = [
+        "mindwtr:calendar-push-sync:enabled", "mindwtr:calendar-push-sync:calendar-id",
+        "mindwtr:calendar-push-sync:target-calendar-id", "mindwtr:calendar-push-sync:color",
+        "mindwtr:calendar-push-sync:creation-intent", "mindwtr:native:calendar-push-effect:v1",
+    ]
+    func readCalendarPushState() throws -> [String?] {
+        let values = try multiGet(Self.calendarPushNames).map(\.1)
+        guard values.allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.failure }
+        return values
+    }
+    var hasPendingCalendarPushMutation: Bool {
+        pending.map { $0.changes.map(\.key) == Self.calendarPushNames } ?? false
+    }
+    /// Private raw six-cell authority; the effect owner validates transitions before using it.
+    func compareAndSetCalendarPushState(expected: [String?], next: [String?]) throws {
+        guard expected.count == 6, next.count == 6,
+              (expected + next).allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.invalid }
+        try requireUsable()
+        let changes = zip(Self.calendarPushNames, next).map { Change(key: $0.0, bytes: Data($0.0.utf8), value: $0.1) }
+        let before: Snapshot
+        if let pending {
+            guard pending.changes == changes else { throw Self.failure }
+            before = pending.before
+        } else { before = try checkedRead() }
+        guard zip(Self.calendarPushNames, expected).allSatisfy({ name, value in
+            before.values[Data(name.utf8)].map { Data($0.utf8) } == value.map { Data($0.utf8) }
+        }) else { throw Self.failure }
+        try mutate(changes, skipUnchanged: true)
+    }
+
     private static func validateAboutTimestamp(_ timestamp: String) throws {
         guard !timestamp.isEmpty, timestamp.utf8.count <= 16, let value = UInt64(timestamp),
               value <= 9_007_199_254_740_991, String(value) == timestamp else { throw invalid }
