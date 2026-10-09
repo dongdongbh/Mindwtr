@@ -6,11 +6,12 @@ import { CALENDAR_PUSH_CREATION_INTENT_KEY, CALENDAR_PUSH_PENDING_KEY } from './
 import type { DeviceCalendar } from './external-calendar-feeds';
 import { loadTranslations } from './i18n/i18n-loader';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
-import type { NativeCalendarHost, NativeCalendarSettings, NativeCalendarSettingsEdit, NativeCalendarToast } from './native-host-contract-settings-calendar';
+import type { NativeCalendarFeed } from './native-host-contract-calendar';
+import { createCalendarSettingsMethods, type NativeCalendarHost, type NativeCalendarSettings, type NativeCalendarSettingsEdit, type NativeCalendarToast } from './native-host-contract-settings-calendar';
 import { loadNativeRequestReceipts, NATIVE_UNJOURNALED_COMMANDS, NativeReceiptSqliteAdapter, resetNativeRequestReceipts } from './native-request-receipts';
 import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter } from './sqlite-adapter';
-import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
+import { flushPendingSave, getStorageAdapter, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppSettings, Area } from './types';
 import { deterministicHash128Hex, generateUUID } from './uuid';
 
@@ -1141,10 +1142,12 @@ describe('native host contract: Settings › Calendar', () => {
             const contract = await openHost(handset.host);
             const first = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range });
             const joined = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range });
-            expect(joined).toBe(first);
+            // Source admission is call-owned; identical sources join one inner IO.
             await settle();
+            expect(fetches).toBe(1); // One enabled subscription fetched once for both callers.
             const replacing = contract.loadExternalCalendarFeed({ slot: 'calendar', start: '2026-10-01T00:00:00.000Z', end: '2026-11-01T00:00:00.000Z' });
             expect(await first).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await joined).toEqual(await first);
             (release as (() => void) | null)?.();
             const later = value(await replacing);
             expect(later.status).toBe('ready');
@@ -1153,6 +1156,30 @@ describe('native host contract: Settings › Calendar', () => {
             if (ready.status !== 'ready') throw new Error('not ready');
             expect(ready.calendars.map((calendar) => calendar.id)).toEqual(['feed-a', 'feed-b', 'system:g-primary']);
             expect(ready.events.map((event) => event.title)).toEqual(['Planning', 'Stand-up', 'Review', 'Offsite']);
+        });
+
+        it('reads canonical subscriptions without repairing an absent or stale device copy, including explicit empty', async () => {
+            const canonical = [fixture.settings.synced.externalCalendars![0]];
+            for (const stored of [undefined, JSON.stringify([{ id: 'poison', name: 'Poison', url: 'https://poison.invalid/old.ics', enabled: true }])]) {
+                await seed({ externalCalendars: canonical });
+                const handset = phone({ calendars: [], storage: stored === undefined ? {} : { [KEYS.feeds]: stored } });
+                const requested: string[] = [];
+                const fetchFeed = handset.host.fetch;
+                handset.host.fetch = (async (...args: Parameters<typeof fetch>) => {
+                    requested.push(String(args[0])); return fetchFeed(...args);
+                }) as typeof fetch;
+                const before = handset.snapshot(), contract = await openHost(handset.host);
+                const feed = value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }));
+                expect.soft(requested).toEqual([canonical[0].url]);
+                expect.soft(feed.status === 'ready' ? feed.events.map((event) => event.title) : []).toEqual(['Planning', 'Review']);
+                expect(handset.snapshot()).toEqual(before); expect(writes).toEqual([]);
+            }
+            await seed({ externalCalendars: [] });
+            const handset = phone({ calendars: [], storage: { [KEYS.feeds]: JSON.stringify(canonical) } });
+            const fetchFeed = vi.spyOn(handset.host, 'fetch'), before = handset.snapshot();
+            const contract = await openHost(handset.host);
+            expect(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range }))).toMatchObject({ status: 'ready', events: [] });
+            expect(fetchFeed).not.toHaveBeenCalled(); expect(handset.snapshot()).toEqual(before); expect(writes).toEqual([]);
         });
 
         it('retires a cancelled host load rather than caching its aborted HTTP failures as a partial refresh', async () => {
@@ -1179,7 +1206,7 @@ describe('native host contract: Settings › Calendar', () => {
             const joinedOwner = new AbortController();
             const request = { slot: 'calendar' as const, ...range, refresh: true };
             const pending = contract.loadExternalCalendarFeed(request, owner.signal);
-            expect(contract.loadExternalCalendarFeed(request, joinedOwner.signal)).toBe(pending);
+            const joined = contract.loadExternalCalendarFeed(request, joinedOwner.signal);
             await settle();
             expect(fetches).toBe(1);
             joinedOwner.abort(new Error('The Calendar page closed'));
@@ -1187,6 +1214,7 @@ describe('native host contract: Settings › Calendar', () => {
             // of their signal. This must not become a legitimate partial result.
             rejectTransport?.(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
             const cancelled = await pending;
+            expect(await joined).toEqual(cancelled);
             vi.setSystemTime(new Date(Date.parse(fixture.now) + 999));
             const retried = value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }));
             expect.soft(cancelled).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -1241,11 +1269,12 @@ describe('native host contract: Settings › Calendar', () => {
             const joinedRemoved = vi.spyOn(joinedOwner.signal, 'removeEventListener');
             const nextRemoved = vi.spyOn(nextOwner.signal, 'removeEventListener');
             const old = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, oldOwner.signal);
-            expect(contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, joinedOwner.signal)).toBe(old);
+            const joined = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, joinedOwner.signal);
             await settle();
             const next = { slot: 'calendar' as const, start: '2026-09-02T00:00:00.000Z', end: '2026-10-02T00:00:00.000Z', refresh: true };
             const replaced = value(await contract.loadExternalCalendarFeed(next, nextOwner.signal));
             expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await joined).toEqual(await old);
             expect(replaced.status).toBe('ready');
             expect(fetches).toBe(2);
             for (const removed of [oldRemoved, joinedRemoved, nextRemoved]) expect(removed).toHaveBeenCalledTimes(1);
@@ -1277,6 +1306,283 @@ describe('native host contract: Settings › Calendar', () => {
             expect(fetches).toBe(3);
         });
 
+        const deferred = () => {
+            let release!: () => void;
+            const promise = new Promise<void>((resolve) => { release = resolve; });
+            return { promise, release };
+        };
+        const feedA = () => fixture.settings.synced.externalCalendars![0];
+        const feedB = () => ({ ...feedA(), id: 'feed-new', name: 'New source', url: 'https://new.example/calendar.ics' });
+        const titles = (feed: NativeCalendarFeed) =>
+            feed.status === 'ready' ? feed.events.map((event) => event.title) : [];
+        const methods = (host: () => NativeCalendarHost) => createCalendarSettingsMethods({
+            readiness: () => ({ ok: true, value: null }), save: async () => ({ ok: true, value: null }),
+            t: () => (key) => strings.en[key] ?? key, language: () => 'en',
+            requestIdPattern: /^[0-9a-f-]{36}$/, host,
+        });
+        const observeFetches = (handset: ReturnType<typeof phone>) => {
+            const urls: string[] = [];
+            const original = handset.host.fetch;
+            handset.host.fetch = (async (...args: Parameters<typeof fetch>) => {
+                urls.push(String(args[0]));
+                if (String(args[0]) === feedB().url) return { ok: true, status: 200, text: async () => fixture.feeds[feedA().url].replaceAll('Planning', 'New Planning') };
+                return original(...args);
+            }) as typeof fetch;
+            return urls;
+        };
+
+        it('normalizes canonical metadata and exact identities once without reading the poison device subscriptions', async () => {
+            const id = ' e\u0301 /漢+😀 ', areas = ['é', 'e\u0301'];
+            const canonical = [{ ...feedA(), id, name: '  Source  ', url: `  ${feedA().url}  `, color: '#2563eb', areaIds: areas },
+                { ...feedB(), enabled: false }];
+            await seed({ externalCalendars: canonical });
+            const handset = phone({ storage: { [KEYS.feeds]: JSON.stringify([feedB()]) } });
+            const read = vi.spyOn(handset.host.storage, 'getItem'), urls = observeFetches(handset);
+            const contract = await openHost(handset.host);
+            const result = value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range }));
+            expect(result.status).toBe('ready');
+            if (result.status !== 'ready') throw new Error('not ready');
+            expect(result.calendars).toEqual([{ id, name: 'Source', color: '#2563EB', areaIds: areas, enabled: true, url: feedA().url },
+                { ...feedB(), enabled: false, color: undefined }]);
+            expect(titles(result)).toEqual(['Planning', 'Review']);
+            expect(result.events.every((event) => event.sourceId === id)).toBe(true);
+            expect(urls).toEqual([feedA().url]);
+            expect(read.mock.calls.every(([name]) => name === KEYS.system)).toBe(true);
+            expect(useTaskStore.getState().settings.externalCalendars).toEqual(canonical);
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0);
+        });
+
+        it.each([undefined, null, { invalid: true }])('retains legacy subscriptions for non-array canonical value %j', async (externalCalendars) => {
+            await seed({ externalCalendars } as AppSettings);
+            const handset = phone({ storage: { [KEYS.feeds]: JSON.stringify([feedA()]) } });
+            const urls = observeFetches(handset), contract = await openHost(handset.host);
+            expect(titles(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range })))).toEqual(['Planning', 'Review']);
+            expect(urls).toEqual([feedA().url]); expect(writes).toEqual([]); expect(handset.life.step).toBe(0);
+        });
+
+        it('refuses invalid canonical normalization without resurrecting a valid device copy', async () => {
+            await seed({ externalCalendars: [{ ...feedB(), name: 5 }] } as unknown as AppSettings);
+            const handset = phone({ storage: { [KEYS.feeds]: JSON.stringify([feedA()]) } });
+            const urls = observeFetches(handset), read = vi.spyOn(handset.host.storage, 'getItem'), contract = await openHost(handset.host);
+            expect(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range }))).toEqual({ status: 'error', message: 'Calendar sources could not be read' });
+            expect(urls).toEqual([]); expect(read.mock.calls.every(([name]) => name === KEYS.system)).toBe(true);
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0);
+        });
+
+        it('source-read failure is bounded, not cached, and does not start HTTP', async () => {
+            await seed({ externalCalendars: [feedA()] });
+            const handset = phone({}), urls = observeFetches(handset), contract = await openHost(handset.host);
+            const read = vi.spyOn(handset.host.storage, 'getItem').mockRejectedValueOnce(new Error('PRIVATE URL '.repeat(2000)));
+            expect(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }))).toEqual({ status: 'error', message: 'Calendar sources could not be read' });
+            expect(urls).toEqual([]); read.mockRestore();
+            expect(titles(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true })))).toEqual(['Planning', 'Review']);
+            expect(urls).toEqual([feedA().url]);
+        });
+
+        it('a cancelled admission starts no HTTP when its held fixed-cell read returns', async () => {
+            await seed({ externalCalendars: [feedA()] });
+            const handset = phone({}), gate = deferred(), entered = deferred();
+            handset.host.storage.multiGet = async (names) => { entered.release(); await gate.promise; return names.map((name) => [name, null]); };
+            const urls = observeFetches(handset), contract = await openHost(handset.host), owner = new AbortController();
+            const pending = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, owner.signal);
+            await entered.promise; owner.abort(); gate.release();
+            expect(await pending).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(urls).toEqual([]);
+            delete handset.host.storage.multiGet;
+            expect(titles(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true })))).toEqual(['Planning', 'Review']);
+            expect(urls).toEqual([feedA().url]); expect(writes).toEqual([]);
+        });
+
+        it('a late legacy A admission cannot install or evict an already accepted B admission', async () => {
+            await seed({});
+            const handset = phone({ storage: { [KEYS.feeds]: JSON.stringify([feedA()]) } }), gate = deferred(), entered = deferred();
+            let reads = 0;
+            handset.host.storage.multiGet = async (names) => {
+                const rows: [string, string | null][] = names.map((name) => [name, handset.state.storage.get(name) ?? null]);
+                if (++reads === 1) { entered.release(); await gate.promise; }
+                return rows;
+            };
+            const urls = observeFetches(handset), contract = await openHost(handset.host); freezeClock();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            const old = contract.loadExternalCalendarFeed(request); await entered.promise;
+            handset.state.storage.set(KEYS.feeds, JSON.stringify([feedB()]));
+            const newer = value(await contract.loadExternalCalendarFeed(request));
+            expect(titles(newer)).toEqual(['New Planning', 'Review']);
+            gate.release(); expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            vi.setSystemTime(new Date(Date.parse(fixture.now) + 999));
+            expect(value(await contract.loadExternalCalendarFeed(request))).toEqual(newer);
+            expect(urls).toEqual([feedB().url]); expect(writes).toEqual([]);
+        });
+
+        it('a rejected older legacy admission is stale after newer B succeeds and cannot disturb B reuse', async () => {
+            await seed({});
+            const handset = phone({ storage: { [KEYS.feeds]: JSON.stringify([feedA()]) } }), gate = deferred(), entered = deferred();
+            let reads = 0;
+            handset.host.storage.multiGet = async (names) => {
+                if (++reads === 1) { entered.release(); await gate.promise; throw new Error('PRIVATE old cell failure'); }
+                return names.map((name) => [name, handset.state.storage.get(name) ?? null]);
+            };
+            const urls = observeFetches(handset), contract = await openHost(handset.host); freezeClock();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            const old = contract.loadExternalCalendarFeed(request); await entered.promise;
+            handset.state.storage.set(KEYS.feeds, JSON.stringify([feedB()]));
+            const newer = value(await contract.loadExternalCalendarFeed(request));
+            gate.release(); expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(value(await contract.loadExternalCalendarFeed(request))).toEqual(newer); expect(urls).toEqual([feedB().url]);
+        });
+
+        it('same admitted raw sources share one fetch, generated fallback identity and complete result across outer promises', async () => {
+            const canonical = [{ ...feedA(), id: undefined, areaIds: ['é', 'e\u0301'] }];
+            await seed({ externalCalendars: canonical } as unknown as AppSettings);
+            const handset = phone({}), gate = deferred(), entered = deferred(), original = handset.host.fetch;
+            let fetches = 0;
+            handset.host.fetch = (async (...args: Parameters<typeof fetch>) => { fetches += 1; entered.release(); await gate.promise; return original(...args); }) as typeof fetch;
+            const contract = await openHost(handset.host); freezeClock();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            const first = contract.loadExternalCalendarFeed(request), joined = contract.loadExternalCalendarFeed(request);
+            await entered.promise; await settle(); expect(fetches).toBe(1); gate.release();
+            const result = value(await first); expect(value(await joined)).toEqual(result);
+            if (result.status !== 'ready') throw new Error('not ready');
+            expect(result.calendars[0].id).toMatch(/^[0-9a-f-]{36}$/);
+            expect(result.events.every((event) => event.sourceId === result.calendars[0].id)).toBe(true);
+            expect(result.calendars[0].areaIds).toEqual(['é', 'e\u0301']);
+            expect(value(await contract.loadExternalCalendarFeed(request))).toEqual(result); expect(fetches).toBe(1);
+        });
+
+        it('canonical A-to-B-to-empty replaces held or throttled loads without a sync stamp', async () => {
+            await seed({ externalCalendars: [feedA()] });
+            const handset = phone({}), urls = observeFetches(handset), original = handset.host.fetch, entered = deferred();
+            handset.host.fetch = (async (...args: Parameters<typeof fetch>) => {
+                if (String(args[0]) === feedA().url) { entered.release(); await new Promise((_resolve, reject) => args[1]?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })); }
+                return original(...args);
+            }) as typeof fetch;
+            const contract = await openHost(handset.host); freezeClock();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            const old = contract.loadExternalCalendarFeed(request); await entered.promise;
+            useTaskStore.setState({ settings: { externalCalendars: [feedB()] } });
+            expect(titles(value(await contract.loadExternalCalendarFeed(request)))).toEqual(['New Planning', 'Review']);
+            expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            useTaskStore.setState({ settings: { externalCalendars: [] } });
+            expect(value(await contract.loadExternalCalendarFeed(request))).toEqual({ status: 'ready', events: [], calendars: [] });
+            expect(urls).toEqual([feedB().url]); expect(writes).toEqual([]);
+        });
+
+        it.each(['legacy', 'system', 'nested canonical'])('rejects held IO after a %s source change even without another read', async (kind) => {
+            await seed(kind === 'legacy' ? {} : { externalCalendars: [{ ...feedA(), areaIds: ['old-area'] }] });
+            const handset = phone({ storage: { [KEYS.feeds]: JSON.stringify([feedA()]) } }), gate = deferred(), entered = deferred();
+            const original = handset.host.fetch;
+            handset.host.fetch = (async (...args: Parameters<typeof fetch>) => { entered.release(); await gate.promise; return original(...args); }) as typeof fetch;
+            const contract = await openHost(handset.host), pending = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true });
+            await entered.promise;
+            if (kind === 'legacy') handset.state.storage.set(KEYS.feeds, JSON.stringify([feedB()]));
+            else if (kind === 'system') handset.state.storage.set(KEYS.system, JSON.stringify({ enabled: true }));
+            else useTaskStore.getState().settings.externalCalendars![0].areaIds!.push('new-area');
+            gate.release(); expect(await pending).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0);
+        });
+
+        it('retires a stale terminal so A-to-B-to-A before retry fetches again inside the throttle', async () => {
+            await seed({ externalCalendars: [feedA()] });
+            const handset = phone({}), gate = deferred(), entered = deferred(), original = handset.host.fetch;
+            let fetches = 0;
+            handset.host.fetch = (async (...args: Parameters<typeof fetch>) => {
+                if (++fetches === 1) { entered.release(); await gate.promise; }
+                return original(...args);
+            }) as typeof fetch;
+            const contract = await openHost(handset.host); freezeClock();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            const old = contract.loadExternalCalendarFeed(request); await entered.promise;
+            useTaskStore.setState({ settings: { externalCalendars: [feedB()] } });
+            gate.release(); expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            useTaskStore.setState({ settings: { externalCalendars: [feedA()] } });
+            expect(titles(value(await contract.loadExternalCalendarFeed(request)))).toEqual(['Planning', 'Review']);
+            expect(fetches).toBe(2);
+        });
+
+        it('rejected held source reads respect newer adapter and Settings session owners', async () => {
+            await seed({ externalCalendars: [feedA()] });
+            const handset = phone({ permission: 'denied' }), contract = methods(() => handset.host), gate = deferred(), entered = deferred();
+            handset.host.storage.multiGet = async () => { entered.release(); await gate.promise; throw new Error('PRIVATE old source failure'); };
+            const urls = observeFetches(handset), old = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range });
+            await entered.promise; setStorageAdapter({ ...getStorageAdapter() }); delete handset.host.storage.multiGet;
+            expect(titles(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range })))).toEqual(['Planning', 'Review']);
+            gate.release(); expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } }); expect(urls).toHaveLength(1);
+            value(await contract.openCalendarSettings());
+            const testGate = deferred(), testEntered = deferred();
+            handset.host.storage.multiGet = async () => { testEntered.release(); await testGate.promise; throw new Error('PRIVATE old Test failure'); };
+            const oldTest = contract.testCalendarFeeds(); await testEntered.promise;
+            value(contract.closeCalendarSettings()); delete handset.host.storage.multiGet;
+            const reopened = value(await contract.openCalendarSettings()); expect(reopened.toasts).toEqual([]);
+            const errorLog = vi.spyOn(handset.host.log, 'error');
+            testGate.release(); expect(await oldTest).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(errorLog).not.toHaveBeenCalled();
+        });
+
+        it('system choice changes invalidate healthy reuse, including exact selected IDs and Area associations', async () => {
+            await seed({ externalCalendars: [] });
+            const handset = phone({ calendars: ['primary', 'phone'], storage: { [KEYS.system]: JSON.stringify({ enabled: false }) } });
+            const getEvents = vi.spyOn(handset.host.calendars, 'getEvents'), contract = await openHost(handset.host); freezeClock();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            expect(titles(value(await contract.loadExternalCalendarFeed(request)))).toEqual([]);
+            handset.state.storage.set(KEYS.system, JSON.stringify({ enabled: true, selectAll: false, selectedCalendarIds: ['g-primary'], areaIdsByCalendar: { 'g-primary': ['exact-area'] } }));
+            const result = value(await contract.loadExternalCalendarFeed(request));
+            expect(titles(result)).toEqual(['Stand-up', 'Offsite']);
+            expect(getEvents.mock.calls[0][0]).toEqual(['g-primary']);
+            if (result.status !== 'ready') throw new Error('not ready');
+            expect(result.calendars.find((calendar) => calendar.id === 'system:g-primary')?.areaIds).toEqual(['exact-area']);
+            expect(result.events.every((event) => event.sourceId === 'system:g-primary')).toBe(true);
+            handset.state.storage.set(KEYS.system, JSON.stringify({ enabled: false }));
+            expect(titles(value(await contract.loadExternalCalendarFeed(request)))).toEqual([]); expect(getEvents).toHaveBeenCalledTimes(1);
+        });
+
+        it('actual adapter and host replacements bypass the healthy throttle and retire held admissions', async () => {
+            await seed({ externalCalendars: [feedA()] });
+            const firstHost = phone({}), secondHost = phone({}); let host = firstHost.host;
+            const firstUrls = observeFetches(firstHost), secondUrls = observeFetches(secondHost), contract = methods(() => host); freezeClock();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            value(await contract.loadExternalCalendarFeed(request));
+            setStorageAdapter({ ...getStorageAdapter() });
+            value(await contract.loadExternalCalendarFeed(request)); expect(firstUrls).toHaveLength(2);
+            host = secondHost.host;
+            value(await contract.loadExternalCalendarFeed(request)); expect(secondUrls).toHaveLength(1);
+            const gate = deferred(), entered = deferred();
+            host.storage.multiGet = async (names) => { entered.release(); await gate.promise; return names.map((name) => [name, null]); };
+            const old = contract.loadExternalCalendarFeed(request); await entered.promise;
+            setStorageAdapter({ ...getStorageAdapter() }); delete host.storage.multiGet;
+            value(await contract.loadExternalCalendarFeed(request)); gate.release();
+            expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(secondUrls).toHaveLength(2); expect(writes).toEqual([]);
+        });
+
+        it.each([{ canonical: [feedA()] }, { canonical: [] }])('native passive Settings does not repair its copy and Test uses canonical sources $canonical', async ({ canonical }) => {
+            await seed({ externalCalendars: canonical });
+            const handset = phone({ os: 'ios', permission: 'denied', storage: { [KEYS.feeds]: JSON.stringify([feedB()]) } });
+            handset.host.repairFeedDeviceCopyOnOpen = false;
+            const urls = observeFetches(handset), before = handset.snapshot(), logs = vi.spyOn(handset.host.log, 'info'), contract = await openHost(handset.host);
+            const shown = value(await contract.openCalendarSettings());
+            expect(shown.feeds.items.map((item) => item.name)).toEqual(canonical.map((feed) => feed.name));
+            value(await contract.testCalendarFeeds());
+            expect(urls).toEqual(canonical.map((feed) => feed.url));
+            expect(handset.snapshot()).toEqual(before); expect(handset.life.step).toBe(0); expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
+            expect(logs.mock.calls).toEqual([['Native iOS calendar source selected', { scope: 'calendar', extra: { releaseCheck: 'v1.3.5/ios-calendar-source', outcome: 'canonical' } }]]);
+        });
+
+        it('shared sandbox source admission touches no storage, HTTP, provider or log port', async () => {
+            vi.resetModules();
+            const sandbox = await import('./sandbox');
+            const module = await import('./native-host-contract-settings-calendar');
+            sandbox.initializeSandboxRuntime(true);
+            const handset = phone({}), contract = module.createCalendarSettingsMethods({
+                readiness: () => ({ ok: true, value: null }), save: async () => ({ ok: true, value: null }),
+                t: () => (key) => key, language: () => 'en', requestIdPattern: /^[0-9a-f-]{36}$/, host: () => handset.host,
+            });
+            const reads = [vi.spyOn(handset.host.storage, 'getItem'), vi.spyOn(handset.host, 'fetch'), vi.spyOn(handset.host.calendars, 'getPermissions'),
+                vi.spyOn(handset.host.calendars, 'getCalendars'), vi.spyOn(handset.host.calendars, 'getEvents'), vi.spyOn(handset.host.log, 'info')];
+            try { expect(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range }))).toEqual({ status: 'ready', calendars: [], events: [] }); }
+            finally { vi.resetModules(); }
+            for (const read of reads) expect(read).not.toHaveBeenCalled();
+        });
+
         it('answers an error feed when the device calendars fail, and refuses bad input', async () => {
             await seed({});
             const handset = phone({ calendars: ['primary'], failEvents: true, storage: { [KEYS.system]: JSON.stringify({ enabled: true }) } });
@@ -1284,6 +1590,16 @@ describe('native host contract: Settings › Calendar', () => {
             expect(value(await contract.loadExternalCalendarFeed({ slot: 'weeklyReview', ...range }))).toEqual({ status: 'error', message: 'Calendar provider unavailable' });
             expect(await contract.loadExternalCalendarFeed({ slot: 'calendar', start: range.end, end: range.start })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             expect(await contract.loadExternalCalendarFeed({ slot: 'other' as never, ...range })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        });
+
+        it('keeps an oversized provider error inside the existing feed message bound without truncating it', async () => {
+            await seed({ externalCalendars: [] });
+            const handset = phone({ calendars: ['primary'], storage: { [KEYS.system]: JSON.stringify({ enabled: true }) } });
+            handset.host.calendars.getEvents = async () => { throw new Error('PRIVATE CONTENT '.repeat(2000)); };
+            const contract = await openHost(handset.host);
+            expect(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range })))
+                .toEqual({ status: 'error', message: 'Calendar events could not be read' });
+            expect(writes).toEqual([]); expect(handset.life.step).toBe(0);
         });
     });
 });

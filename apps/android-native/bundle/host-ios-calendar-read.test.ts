@@ -92,6 +92,7 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
                 },
             } : {}),
             rnStateCommit: () => null, kvGet: (key: string) => JSON.stringify([kv.get(key) ?? null]),
+            kvMultiGet: (names: string) => JSON.stringify((JSON.parse(names) as string[]).map((name) => [name, kv.get(name) ?? null])),
             kvSet: (key: string, value: string) => { writes.push('kvSet'); kv.set(key, value); return null; },
             kvRemove: (key: string) => { writes.push('kvRemove'); kv.delete(key); return null; },
             fileList: () => 'null', fileRead: () => '', fileDelete: () => { writes.push('fileDelete'); return null; },
@@ -150,6 +151,23 @@ describe('actual exported iOS calendar read transport', () => {
         expect(await f.read({ op: 'getSettings' })).toMatchObject({ ok: true });
         expect(await f.read({ op: 'closeSettings' })).toEqual({ ok: true, value: null });
         expect(f.calls).toEqual(calls);
+        await assertReadonly(f, before, kv);
+    });
+
+    it.each([true, false])('uses canonical empty sources and opens native Settings without repairing the stale device copy (logging %s)', async (loggingEnabled) => {
+        const f = fixture({ permission: 'denied' }); await f.boot();
+        f.state.fixture.install({ ...structuredClone(data), settings: { externalCalendars: [], diagnostics: { loggingEnabled } } });
+        f.kv.set('mindwtr-external-calendars', JSON.stringify([{ id: 'PRIVATE OLD SOURCE', name: 'PRIVATE OLD NAME',
+            url: 'https://private.example/poison.ics', enabled: true }]));
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv);
+        expect(await f.read()).toMatchObject({ ok: true, value: { status: 'ready', events: [], calendars: [] } });
+        expect(await f.read({ op: 'openSettings' })).toMatchObject({ ok: true, value: { feeds: { items: [] } } });
+        expect(f.calls.every((call) => call.op === 'permissions')).toBe(true);
+        const entries = f.logText().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        const sourceLines = entries.filter((entry) => entry.message === 'Native iOS calendar source selected');
+        expect(sourceLines.map((entry) => entry.context)).toEqual(loggingEnabled
+            ? [{ releaseCheck: 'v1.3.5/ios-calendar-source', outcome: 'canonical' }] : []);
+        expect(f.logText()).not.toContain('PRIVATE'); expect(f.logText()).not.toContain('private.example');
         await assertReadonly(f, before, kv);
     });
 

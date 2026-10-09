@@ -93,10 +93,16 @@ import {
 import { getDocsGuideUrl } from './docs-guidance';
 import {
     createExternalCalendarFeeds,
+    decodeExternalCalendarSubscriptions,
+    decodeSystemCalendarSettings,
+    EXTERNAL_CALENDARS_KEY,
     EXTERNAL_CALENDAR_REFRESH_THROTTLE_MS,
+    normalizeExternalCalendarSubscriptions,
     normalizeSystemCalendarSettings,
+    SYSTEM_CALENDAR_SETTINGS_KEY,
     type DeviceCalendarReader,
     type ExternalCalendarFeeds,
+    type ExternalCalendarFetchOptions,
     type SystemCalendarInfo,
     type SystemCalendarPermissionStatus,
     type SystemCalendarSettings,
@@ -109,17 +115,28 @@ import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-ho
 import type { NativeCalendarFeed } from './native-host-contract-calendar';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite, type NativeUnsavedWrite } from './native-request-receipts';
-import { useTaskStore } from './store';
+import { getStorageAdapter, useTaskStore } from './store';
+import { isSandboxMode } from './sandbox';
 import { themeDescriptor } from './theme-scheme';
 import { deterministicHash128Hex } from './uuid';
 
 type Translate = (key: string) => string;
 
+function boundedFeedError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.length <= 2000 ? message : 'Calendar events could not be read';
+}
+
 /** What a host binds for the external calendars and Settings › Calendar. */
 export type NativeCalendarHost = {
     platform: { os: 'android' | 'ios' };
     /** RN's key-value store (RKStorage on Android), with RN's keys. Durable when a write resolves. */
-    storage: CalendarPushServiceHost['storage'];
+    storage: CalendarPushServiceHost['storage'] & {
+        /** Native fixed-cell read; legacy hosts may supply individual reads. */
+        multiGet?(names: readonly string[]): Promise<[string, string | null][]>;
+    };
+    /** RN repairs its subscription copy on opening; native passive reads do not. */
+    repairFeedDeviceCopyOnOpen?: boolean;
     fetch: typeof fetch;
     /** Reads a local subscription: a `file://` or `content://` URL the document picker gave. */
     readLocalFile(url: string): Promise<string>;
@@ -360,6 +377,54 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
         key: string; controller: AbortController; running: FeedLoad | null; last: FeedLoad; refreshedAt: number;
         watch: (signal?: AbortSignal) => void;
     }>();
+    type SourceOwner = { host: NativeCalendarHost; adapter: ReturnType<typeof getStorageAdapter>; canonical: string | null };
+    type SourceCells = { subscriptions: string | null; system: string | null };
+    type Sources = NonNullable<ExternalCalendarFetchOptions['sources']>;
+    type Admission = SourceOwner & { base: string; acceptedOrder: number; acceptedKey: string | null };
+    const feedAdmissions = new Map<NativeCalendarFeedSlot, Admission>();
+    let admissionOrder = 0;
+
+    const canonicalSubscriptions = (): string | null => {
+        const subscriptions = useTaskStore.getState().settings.externalCalendars;
+        return Array.isArray(subscriptions) ? JSON.stringify(subscriptions) : null;
+    };
+    const sourceOwner = (host: NativeCalendarHost): SourceOwner => ({ host, adapter: getStorageAdapter(), canonical: canonicalSubscriptions() });
+    const ownsSources = (owner: SourceOwner): boolean => {
+        try {
+            return deps.readiness().ok && deps.host() === owner.host && getStorageAdapter() === owner.adapter
+                && canonicalSubscriptions() === owner.canonical && !isSandboxMode();
+        } catch { return false; }
+    };
+    const readSourceCells = async (owner: SourceOwner): Promise<SourceCells> => {
+        // An explicit canonical array (including []) never reads the legacy subscription cell.
+        const names = owner.canonical === null ? [EXTERNAL_CALENDARS_KEY, SYSTEM_CALENDAR_SETTINGS_KEY] : [SYSTEM_CALENDAR_SETTINGS_KEY];
+        const rows = owner.host.storage.multiGet
+            ? await owner.host.storage.multiGet(names)
+            : await Promise.all(names.map(async (name): Promise<[string, string | null]> => [name, await owner.host.storage.getItem(name)]));
+        if (!Array.isArray(rows) || rows.length !== names.length || rows.some((row, index) => !Array.isArray(row)
+            || row.length !== 2 || row[0] !== names[index] || (row[1] !== null && typeof row[1] !== 'string'))) {
+            throw new Error('Calendar sources could not be read');
+        }
+        return { subscriptions: owner.canonical === null ? rows[0][1] : null, system: rows[rows.length - 1][1] };
+    };
+    const sameCells = (left: SourceCells, right: SourceCells) => left.subscriptions === right.subscriptions && left.system === right.system;
+    const freezeSources = (owner: SourceOwner, cells: SourceCells): Sources => {
+        // Parse the very bytes used by the witness. No nested mutable store arrays escape.
+        const subscriptions = owner.canonical === null
+            ? decodeExternalCalendarSubscriptions(cells.subscriptions)
+            : normalizeExternalCalendarSubscriptions(JSON.parse(owner.canonical) as ExternalCalendarSubscription[]);
+        return { subscriptions, systemSettings: decodeSystemCalendarSettings(cells.system) };
+    };
+    const staleLoad = () => fail('STALE_REVISION', 'A newer load for this screen replaced it');
+    const sourceReadFailed = (): NativeHostResult<NativeCalendarFeed> => ({ ok: true, value: { status: 'error', message: 'Calendar sources could not be read' } });
+    const logSource = (owner: SourceOwner) => {
+        if (owner.host.platform.os !== 'ios') return;
+        try {
+            owner.host.log.info('Native iOS calendar source selected', { scope: 'calendar', extra: {
+                releaseCheck: 'v1.3.5/ios-calendar-source', outcome: owner.canonical === null ? 'legacy' : 'canonical',
+            } });
+        } catch { /* Diagnostics cannot fail a read. */ }
+    };
 
     /** Core's feeds and push for this host, made on first use. */
     const device = (host: NativeCalendarHost) => {
@@ -511,7 +576,7 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
             const stored = await feeds.getExternalCalendars();
             current.storedFeeds = stored;
             const shown = resolveCalendarFeedsOnLoad(useTaskStore.getState().settings.externalCalendars, stored);
-            if (shown.saveDeviceCopy) await feeds.saveExternalCalendars(shown.feeds);
+            if (shown.saveDeviceCopy && current.host.repairFeedDeviceCopyOnOpen !== false) await feeds.saveExternalCalendars(shown.feeds);
         } catch (error) {
             logError(current, error);
             showToast(translators().toastsOf.loadSavedCalendarsFailed());
@@ -882,9 +947,9 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
     // ---------------------------------------------------------------------------
     // External calendars for the Calendar screen and the reviews.
 
-    const loadFeed = (host: NativeCalendarHost, start: Date, end: Date, timeoutMs: number | undefined, signal: AbortSignal) => {
+    const loadFeed = (host: NativeCalendarHost, start: Date, end: Date, timeoutMs: number | undefined, signal: AbortSignal, sources?: Sources) => {
         let failedFeeds = 0;
-        return device(host).feeds.fetchExternalCalendarEvents(start, end, { signal, timeoutMs, onFeedError: () => { failedFeeds += 1; } })
+        return device(host).feeds.fetchExternalCalendarEvents(start, end, { signal, timeoutMs, sources, onFeedError: () => { failedFeeds += 1; } })
             .then((data): NativeHostResult<NativeCalendarFeed> => (signal.aborted
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
                 : { ok: true, value: {
@@ -893,7 +958,7 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 } }))
             .catch((error: unknown): NativeHostResult<NativeCalendarFeed> => (signal.aborted
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
-                : { ok: true, value: { status: 'error', message: error instanceof Error ? error.message : String(error) } }));
+                : { ok: true, value: { status: 'error', message: boundedFeedError(error) } }));
     };
 
     return {
@@ -1014,14 +1079,29 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
             const opened = openedSession();
             if (!opened.ok) return opened;
             const { toastsOf } = translators();
+            let owner: SourceOwner | null = null;
             try {
+                if (isSandboxMode()) {
+                    showToast(toastsOf.testResult(0, 0, deps.language()));
+                    return { ok: true, value: { toasts: takeToasts() } };
+                }
+                owner = sourceOwner(opened.value.host);
+                const cells = await readSourceCells(owner);
+                if (!ownsSources(owner) || session !== opened.value) return staleLoad();
+                const sources = freezeSources(owner, cells);
                 const range = getCalendarTestRange(new Date());
                 let failedFeeds = 0;
                 const { events } = await device(opened.value.host).feeds.fetchExternalCalendarEvents(range.start, range.end, {
+                    sources,
                     onFeedError: () => { failedFeeds += 1; },
                 });
+                if (!ownsSources(owner) || session !== opened.value) return staleLoad();
+                const after = await readSourceCells(owner);
+                if (!ownsSources(owner) || session !== opened.value || !sameCells(cells, after)) return staleLoad();
+                logSource(owner);
                 showToast(toastsOf.testResult(events.length, failedFeeds, deps.language()));
             } catch (error) {
+                if (session !== opened.value || (owner && !ownsSources(owner))) return staleLoad();
                 logError(opened.value, error);
                 showToast(toastsOf.testFailed());
             }
@@ -1042,56 +1122,116 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
          * public input. Cancelling a joined owner retires that screen's load, so
          * aborted HTTP reads cannot become a cached successful partial feed.
          */
-        loadExternalCalendarFeed(input: { slot: NativeCalendarFeedSlot; start: string; end: string; timeoutMs?: number; refresh?: boolean }, signal?: AbortSignal): Promise<NativeHostResult<NativeCalendarFeed>> {
+        async loadExternalCalendarFeed(input: { slot: NativeCalendarFeedSlot; start: string; end: string; timeoutMs?: number; refresh?: boolean }, signal?: AbortSignal): Promise<NativeHostResult<NativeCalendarFeed>> {
             const ready = deps.readiness();
-            if (!ready.ok) return Promise.resolve(ready);
+            if (!ready.ok) return ready;
             const start = isObjectRecord(input) && isText(input.start, 40) ? new Date(input.start) : null;
             const end = isObjectRecord(input) && isText(input.end, 40) ? new Date(input.end) : null;
             if (!isObjectRecord(input) || !(NATIVE_CALENDAR_FEED_SLOTS as readonly unknown[]).includes(input.slot)
                 || !start || !end || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end.getTime() <= start.getTime()
                 || (input.timeoutMs !== undefined && (typeof input.timeoutMs !== 'number' || !Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0))
                 || (input.refresh !== undefined && typeof input.refresh !== 'boolean')) {
-                return Promise.resolve(fail('INVALID_INPUT', 'A screen slot, an ISO start before an ISO end, an optional positive timeoutMs and an optional refresh are required'));
+                return fail('INVALID_INPUT', 'A screen slot, an ISO start before an ISO end, an optional positive timeoutMs and an optional refresh are required');
             }
-            if (signal?.aborted) return Promise.resolve(fail('STALE_REVISION', 'This Calendar load was cancelled'));
+            if (signal?.aborted) return fail('STALE_REVISION', 'This Calendar load was cancelled');
+            // RN's sandbox feed is empty without touching any host port.
+            if (isSandboxMode()) return { ok: true, value: { status: 'ready', calendars: [], events: [] } };
             const host = deps.host();
-            if (!host) return Promise.resolve(fail('ACTION_FAILED', 'Calendars are not available on this host yet'));
-            const key = JSON.stringify([start.toISOString(), end.toISOString(), input.timeoutMs ?? null]);
-            const previous = feedLoads.get(input.slot);
-            const now = Date.now();
-            if (previous?.key === key && !previous.controller.signal.aborted) {
-                if (previous.running) {
-                    previous.watch(signal);
-                    return previous.running;
+            if (!host) return fail('ACTION_FAILED', 'Calendars are not available on this host yet');
+            let capturedOwner: SourceOwner | null = null;
+            let capturedAdmission: Admission | null = null;
+            let capturedOrder = 0;
+            try {
+                const owner = sourceOwner(host);
+                capturedOwner = owner;
+                const base = JSON.stringify([start.toISOString(), end.toISOString(), input.timeoutMs ?? null, owner.canonical]);
+                let admission = feedAdmissions.get(input.slot);
+                if (!admission || admission.host !== host || admission.adapter !== owner.adapter || admission.base !== base) {
+                    // Reserve before awaiting device cells: an older admission may never retire a newer owner.
+                    admission = { ...owner, base, acceptedOrder: 0, acceptedKey: null };
+                    feedAdmissions.set(input.slot, admission);
+                    feedLoads.get(input.slot)?.controller.abort(new Error('A newer load for this screen replaced it'));
+                    feedLoads.delete(input.slot);
                 }
-                if (input.refresh && now - previous.refreshedAt < EXTERNAL_CALENDAR_REFRESH_THROTTLE_MS) return previous.last;
-            }
-            previous?.controller.abort(new Error('A newer load for this screen replaced it'));
-            const controller = new AbortController();
-            const owners = new Map<AbortSignal, () => void>();
-            const watch = (owner?: AbortSignal) => {
-                if (!owner || owners.has(owner)) return;
-                const abort = () => {
-                    controller.abort(owner.reason);
-                    if (feedLoads.get(input.slot)?.controller === controller) feedLoads.delete(input.slot);
+                const currentAdmission = admission;
+                capturedAdmission = currentAdmission;
+                const order = ++admissionOrder;
+                capturedOrder = order;
+                const current = () => !signal?.aborted && ownsSources(owner) && feedAdmissions.get(input.slot) === currentAdmission;
+                const cells = await readSourceCells(owner);
+                if (!current()) return staleLoad();
+                const key = JSON.stringify([base, cells.subscriptions, cells.system]);
+                if (order < currentAdmission.acceptedOrder && key !== currentAdmission.acceptedKey) return staleLoad();
+                currentAdmission.acceptedOrder = Math.max(order, currentAdmission.acceptedOrder);
+                currentAdmission.acceptedKey = key;
+                const previous = feedLoads.get(input.slot);
+                const now = Date.now();
+                if (previous?.key === key && !previous.controller.signal.aborted) {
+                    if (previous.running) {
+                        previous.watch(signal);
+                        const result = await previous.running;
+                        return current() && currentAdmission.acceptedKey === key ? result : staleLoad();
+                    }
+                    if (input.refresh && now - previous.refreshedAt < EXTERNAL_CALENDAR_REFRESH_THROTTLE_MS) {
+                        const result = await previous.last;
+                        if (!current() || currentAdmission.acceptedKey !== key) return staleLoad();
+                        logSource(owner);
+                        return result;
+                    }
+                }
+                previous?.controller.abort(new Error('A newer load for this screen replaced it'));
+                // Normalize once for a new inner load. Generated legacy IDs are shared by joiners.
+                const sources = freezeSources(owner, cells);
+                const controller = new AbortController();
+                const owners = new Map<AbortSignal, () => void>();
+                const watch = (ticket?: AbortSignal) => {
+                    if (!ticket || owners.has(ticket)) return;
+                    const abort = () => {
+                        controller.abort(ticket.reason);
+                        if (feedLoads.get(input.slot)?.controller === controller) feedLoads.delete(input.slot);
+                    };
+                    owners.set(ticket, abort);
+                    ticket.addEventListener('abort', abort, { once: true });
+                    if (ticket.aborted) abort();
                 };
-                owners.set(owner, abort);
-                owner.addEventListener('abort', abort, { once: true });
-                if (owner.aborted) abort();
-            };
-            watch(signal);
-            const load: FeedLoad = loadFeed(host, start, end, input.timeoutMs, controller.signal).finally(() => {
-                for (const [owner, abort] of owners) owner.removeEventListener('abort', abort);
-                owners.clear();
-                const entry = feedLoads.get(input.slot);
-                if (entry?.controller === controller) {
-                    if (controller.signal.aborted) feedLoads.delete(input.slot);
-                    else entry.running = null;
-                }
-            });
-            const refreshedAt = input.refresh ? now : previous?.key === key ? previous.refreshedAt : 0;
-            feedLoads.set(input.slot, { key, controller, running: load, last: load, refreshedAt, watch });
-            return load;
+                watch(signal);
+                const load: FeedLoad = loadFeed(host, start, end, input.timeoutMs, controller.signal, sources).then(async (result) => {
+                    const ownsLoad = () => !controller.signal.aborted && ownsSources(owner)
+                        && feedAdmissions.get(input.slot) === currentAdmission && currentAdmission.acceptedKey === key
+                        && feedLoads.get(input.slot)?.controller === controller;
+                    if (!ownsLoad()) {
+                        controller.abort(new Error('Calendar load ownership changed'));
+                        return staleLoad();
+                    }
+                    // Legacy subscriptions and device choices can change without a store stamp or another caller.
+                    const after = await readSourceCells(owner);
+                    if (!ownsLoad() || !sameCells(cells, after)) {
+                        controller.abort(new Error('Calendar sources changed during this load'));
+                        return staleLoad();
+                    }
+                    logSource(owner);
+                    return result;
+                }).catch((): NativeHostResult<NativeCalendarFeed> => {
+                    const stale = controller.signal.aborted || !ownsSources(owner) || feedAdmissions.get(input.slot) !== currentAdmission;
+                    controller.abort(new Error('Calendar source admission failed'));
+                    return stale ? staleLoad() : sourceReadFailed();
+                }).finally(() => {
+                    for (const [ticket, abort] of owners) ticket.removeEventListener('abort', abort);
+                    owners.clear();
+                    const entry = feedLoads.get(input.slot);
+                    if (entry?.controller === controller) {
+                        if (controller.signal.aborted) feedLoads.delete(input.slot);
+                        else entry.running = null;
+                    }
+                });
+                const refreshedAt = input.refresh ? now : previous?.key === key ? previous.refreshedAt : 0;
+                feedLoads.set(input.slot, { key, controller, running: load, last: load, refreshedAt, watch });
+                return await load;
+            } catch {
+                return signal?.aborted || (capturedOwner && !ownsSources(capturedOwner))
+                    || (capturedAdmission && (feedAdmissions.get(input.slot) !== capturedAdmission
+                        || capturedAdmission.acceptedOrder > capturedOrder)) ? staleLoad() : sourceReadFailed();
+            }
         },
     };
 }

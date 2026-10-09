@@ -469,7 +469,7 @@ const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contrac
 const calendarCall = (globalThis as typeof globalThis & { __mindwtrCalendarCall?: CalendarCall }).__mindwtrCalendarCall;
 const iosCalendar = globalThis.__mindwtrHostPlatform === 'ios' && calendarCall ? createIOSCalendarHost({
     call: calendarCall,
-    storage: { getItem: keyValue.get, setItem: keyValue.set, removeItem: keyValue.remove },
+    storage: { getItem: keyValue.get, setItem: keyValue.set, removeItem: keyValue.remove, multiGet: keyValue.multiGet },
     adapter: () => {
         if (!bootAdapter || getStorageAdapter() !== bootAdapter || isSandboxMode() || isWorkspaceTransitionActive()) {
             throw new Error('NOT_READY: Calendar storage is unavailable');

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hasCalendarPushTaskMarker } from './calendar-scheduling';
 import {
     createExternalCalendarFeeds,
+    normalizeSystemCalendarSettings,
     EXTERNAL_CALENDARS_KEY,
     SYSTEM_CALENDAR_SETTINGS_KEY,
     type DeviceCalendar,
@@ -242,10 +243,35 @@ describe('external calendar feeds behind the host ports', () => {
         const { host, calls, storage } = device({ storage: { [EXTERNAL_CALENDARS_KEY]: JSON.stringify([feed('team', 'https://example.com/team.ics')]) } });
         const feeds = module.createExternalCalendarFeeds(host);
         expect(await feeds.fetchExternalCalendarEvents(...SEPT)).toEqual({ calendars: [], events: [] });
+        expect(await feeds.fetchExternalCalendarEvents(...SEPT, { sources: {
+            subscriptions: [feed('captured', 'https://example.com/captured.ics')], systemSettings: normalizeSystemCalendarSettings({ enabled: true }),
+        } })).toEqual({ calendars: [], events: [] });
         await feeds.saveExternalCalendars([feed('new', 'https://example.com/new.ics')]);
         expect(await feeds.getSystemCalendars()).toEqual([]);
         expect(calls).toEqual([]);
         expect(JSON.parse(storage.get(EXTERNAL_CALENDARS_KEY)!)).toHaveLength(1);
         vi.resetModules();
+    });
+
+    it('uses captured subscription and device choices without rereading stale device cells; omitted sources retain RN behavior', async () => {
+        const canonicalUrl = 'https://example.com/canonical.ics', legacyUrl = 'https://example.com/legacy.ics';
+        const handset = device({
+            storage: { [EXTERNAL_CALENDARS_KEY]: JSON.stringify([feed('legacy', legacyUrl)]),
+                [SYSTEM_CALENDAR_SETTINGS_KEY]: JSON.stringify({ enabled: true }) },
+            feeds: { [canonicalUrl]: ics([['canonical', '20260910T090000Z', 'Canonical']]), [legacyUrl]: ics([['legacy', '20260910T090000Z', 'Legacy']]) },
+            calendars: [{ id: 'device', title: 'Device' }], events: [{ id: 'event', calendarId: 'device', title: 'Device',
+                startDate: '2026-09-10T11:00:00.000Z', endDate: '2026-09-10T12:00:00.000Z' }],
+        });
+        const reads = vi.spyOn(handset.host.storage, 'getItem');
+        const captured = await handset.feeds.fetchExternalCalendarEvents(...SEPT, { sources: {
+            subscriptions: [feed('canonical', canonicalUrl, { areaIds: ['é', 'e\u0301'] })],
+            systemSettings: normalizeSystemCalendarSettings({ enabled: false }),
+        } });
+        expect(captured.events.map((event) => event.title)).toEqual(['Canonical']);
+        expect(captured.calendars[0].areaIds).toEqual(['é', 'e\u0301']);
+        expect(reads).not.toHaveBeenCalled(); expect(handset.calls).toEqual([['fetch', canonicalUrl]]);
+        handset.calls.length = 0;
+        expect((await handset.feeds.fetchExternalCalendarEvents(...SEPT)).events.map((event) => event.title)).toEqual(['Legacy', 'Device']);
+        expect(reads.mock.calls.map(([name]) => name).sort()).toEqual([EXTERNAL_CALENDARS_KEY, SYSTEM_CALENDAR_SETTINGS_KEY].sort());
     });
 });

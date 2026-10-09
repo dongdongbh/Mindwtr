@@ -65,6 +65,8 @@ export type ExternalCalendarFetchOptions = {
     timeoutMs?: number;
     /** Called for each enabled subscription that could not be read or parsed (it drops out of the result). */
     onFeedError?: (calendarId: string) => void;
+    /** A native read's admitted sources; omission retains RN's device getters. */
+    sources?: { subscriptions: ExternalCalendarSubscription[]; systemSettings: SystemCalendarSettings };
 };
 
 /** A device calendar as expo-calendar describes it (Android: a CalendarContract.Calendars row). */
@@ -259,6 +261,25 @@ function toDateSafe(value: unknown): Date | null {
     return date;
 }
 
+export function normalizeExternalCalendarSubscriptions(calendars: readonly ExternalCalendarSubscription[]): ExternalCalendarSubscription[] {
+    return calendars
+        .filter((c) => c && typeof c.url === 'string')
+        .map((c) => ({
+            id: c.id || generateUUID(),
+            name: (c.name || 'Calendar').trim() || 'Calendar',
+            url: c.url.trim(),
+            enabled: c.enabled !== false,
+            color: normalizeExternalCalendarColor(c.color),
+            ...(Array.isArray(c.areaIds) ? { areaIds: c.areaIds } : {}),
+        }))
+        .filter((c) => c.url.length > 0);
+}
+
+/** Decode a legacy device copy with the same defaults as the RN reader. */
+export function decodeExternalCalendarSubscriptions(raw: string | null): ExternalCalendarSubscription[] {
+    return normalizeExternalCalendarSubscriptions(safeJsonParse<ExternalCalendarSubscription[]>(raw, []));
+}
+
 function sanitizeExternalCalendars(calendars: ExternalCalendarSubscription[]): ExternalCalendarSubscription[] {
     return calendars
         .map((c) => ({
@@ -348,18 +369,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
     const getExternalCalendars = async (): Promise<ExternalCalendarSubscription[]> => {
         if (isSandboxMode()) return [];
         const raw = await host.storage.getItem(EXTERNAL_CALENDARS_KEY);
-        const parsed = safeJsonParse<ExternalCalendarSubscription[]>(raw, []);
-        return parsed
-            .filter((c) => c && typeof c.url === 'string')
-            .map((c) => ({
-                id: c.id || generateUUID(),
-                name: (c.name || 'Calendar').trim() || 'Calendar',
-                url: c.url.trim(),
-                enabled: c.enabled !== false,
-                color: normalizeExternalCalendarColor(c.color),
-                ...(Array.isArray(c.areaIds) ? { areaIds: c.areaIds } : {}),
-            }))
-            .filter((c) => c.url.length > 0);
+        return decodeExternalCalendarSubscriptions(raw);
     };
 
     const saveExternalCalendars = async (calendars: ExternalCalendarSubscription[]): Promise<void> => {
@@ -463,9 +473,10 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         rangeEnd: Date,
         signal?: AbortSignal,
         onFeedError?: (calendarId: string) => void,
+        sources?: ExternalCalendarFetchOptions['sources'],
     ): Promise<ExternalCalendarSourceResult> => {
         throwIfAborted(signal);
-        const calendars = await getExternalCalendars();
+        const calendars = sources ? sources.subscriptions : await getExternalCalendars();
         const enabled = calendars.filter((c) => c.enabled);
 
         const results = await Promise.allSettled(
@@ -512,14 +523,14 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         return merged;
     };
 
-    const fetchSystemCalendarEvents = async (rangeStart: Date, rangeEnd: Date, signal?: AbortSignal): Promise<ExternalCalendarSourceResult> => {
+    const fetchSystemCalendarEvents = async (rangeStart: Date, rangeEnd: Date, signal?: AbortSignal, sources?: ExternalCalendarFetchOptions['sources']): Promise<ExternalCalendarSourceResult> => {
         throwIfAborted(signal);
         const platform = host.platform();
         if (platform === 'web') {
             return { calendars: [], events: [] };
         }
 
-        const settings = await getSystemCalendarSettings();
+        const settings = sources ? sources.systemSettings : await getSystemCalendarSettings();
         if (!settings.enabled) {
             return { calendars: [], events: [] };
         }
@@ -716,8 +727,8 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
 
         try {
             const [icsData, systemData] = await Promise.all([
-                fetchIcsCalendarEvents(rangeStart, rangeEnd, signal, options.onFeedError),
-                fetchSystemCalendarEvents(rangeStart, rangeEnd, signal),
+                fetchIcsCalendarEvents(rangeStart, rangeEnd, signal, options.onFeedError, options.sources),
+                fetchSystemCalendarEvents(rangeStart, rangeEnd, signal, options.sources),
             ]);
 
             return mergeExternalCalendarSources([icsData, systemData]);

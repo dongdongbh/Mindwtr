@@ -20,6 +20,7 @@ export function createIOSCalendarHost(deps: {
     const permissions = () => read<{ status: unknown }>({ op: 'permissions' });
     return {
         platform: { os: 'ios' }, storage: deps.storage, fetch: deps.fetch, log: deps.log,
+        repairFeedDeviceCopyOnOpen: false,
         // A legacy provider URL cannot be opened through the app-private attachment port.
         readLocalFile: async () => { throw new Error('Local calendar subscription is unavailable'); },
         calendars: {

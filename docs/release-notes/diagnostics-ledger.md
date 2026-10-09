@@ -30,6 +30,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.5 (add before tagging, trim in the release after)
 
+- **`v1.3.5/ios-calendar-source`** — `packages/core/src/native-host-contract-settings-calendar.ts`. Fixed message: `Native iOS calendar source selected`; With Diagnostics logging enabled, `outcome=canonical|legacy` means the current native read selected the saved subscription array (including an empty array) or the legacy device list after checking its source owner. It does not prove every provider succeeded or that events were displayed. No source/calendar IDs, URLs, names, event content or settings payloads are logged.
+
 - **`v1.3.5/ios-calendar-feed`** — `apps/ios-native/App/CoreModel.swift`, admitted by `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`. Fixed message: `Native iOS calendar feed view published`; With Diagnostics logging enabled, `outcome=ready|partial|error` follows publication of the current shared external-calendar projection. Partial retains successful events; error does not imply all sources succeeded. It does not prove real EventKit access or event actions. No event/calendar identifiers, titles, notes, locations, dates or URLs are logged.
 
 - **`v1.3.5/ios-calendar-access`** — `apps/android-native/bundle/host-entry.ts`. Fixed message: `Native iOS calendar access request returned`; `outcome=returned` means the explicit Settings permission callback completed and the same page, host and saved choice were readmitted. It does not mean permission was granted or events were visible. Cancelled/stale callbacks emit no marker. No calendar identifiers, choices, permission errors or content are logged.
