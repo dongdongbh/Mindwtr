@@ -9108,10 +9108,15 @@ final class CoreHostTests: XCTestCase {
         let state: [String: Any] = ["viewMode": "day", "selectedDate": "2026-11-01", "visibleMonth": "2026-11-01"]
         for (name, valid) in [("calendar", ["state": state, "offset": 0, "limit": 50] as [String: Any]), ("calendarItem", ["state": state, "taskId": "calendar-timed"] as [String: Any])] {
             try await read(name, valid)
-            for field in ["calendar", "events", "feed", "event", "canOpen", "action", "requestId", "unknown"] {
+            for field in ["events", "feed", "event", "canOpen", "action", "requestId", "unknown"] {
                 var input = valid; input[field] = NSNull()
-                await expectFailure("Unsupported native Calendar browsing input") { try await read(name, input) }
+                // An event member selects the closed event grammar for calendarItem.
+                await expectFailure("Unsupported native Calendar") { try await read(name, input) }
             }
+            // The optional, explicitly supplied feed is admitted by the native
+            // grammar, then rejected as malformed by the shared reader.
+            var nullCalendar = valid; nullCalendar["calendar"] = NSNull()
+            await expectFailure("INVALID_INPUT") { try await read(name, nullCalendar) }
             for malformedState in [NSNull(), [], ["viewMode": "unknown"], ["viewMode": "day", "selectedDate": "2026-02-30", "visibleMonth": "2026-11-01"], ["viewMode": "day", "selectedDate": "2026-11-01", "visibleMonth": "2026-11-01T00:00:00Z"]] as [Any] {
                 var input = valid; input["state"] = malformedState
                 await expectFailure("INVALID_INPUT") { try await read(name, input) }

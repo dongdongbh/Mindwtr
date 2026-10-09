@@ -383,22 +383,36 @@ final class NativeCalendarSubscriptionAuthorityHostTests: XCTestCase {
         _ = try await core.start(); try await replace(core, library: library, subscriptions: [a])
         let before = try await baseline(core, library: library); io.arm(true)
         let loaded = try await feed(core); try assertFeed(loaded, source: a)
+        let events = try XCTUnwrap(loaded["events"] as? [[String: Any]])
+        let eventStart = try XCTUnwrap(events.first?["start"] as? String)
+        let instant = ISO8601DateFormatter()
+        instant.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let eventDate = try XCTUnwrap(instant.date(from: eventStart))
+        let local = DateFormatter()
+        local.calendar = Calendar(identifier: .gregorian)
+        local.locale = Locale(identifier: "en_US_POSIX")
+        local.timeZone = ProcessInfo.processInfo.environment["TZ"].flatMap { TimeZone(identifier: $0) } ?? .current
+        local.dateFormat = "yyyy-MM-dd"
+        let selectedDay = local.string(from: eventDate)
+        local.dateFormat = "HH:mm"
+        let startTime = local.string(from: eventDate)
         let shown = try object(await core.call("menuRead", argumentsJSON: json(["calendar", json([
-            "state": ["viewMode": "day", "selectedDate": day, "visibleMonth": day], "offset": 0, "limit": 100, "calendar": loaded,
+            "state": ["viewMode": "day", "selectedDate": selectedDay, "visibleMonth": selectedDay], "offset": 0, "limit": 100, "calendar": loaded,
         ])])))
         let entries = try XCTUnwrap(shown["items"] as? [[String: Any]])
         XCTAssertTrue(entries.contains { ($0["item"] as? [String: Any])?["eventId"] as? String != nil })
         let opened = try object(await core.call("calendarComposerOpen", argumentsJSON: json([json([
-            "day": day, "mode": "new", "rawMinutes": 600, "calendar": loaded,
+            "at": eventStart, "mode": "new", "calendar": loaded,
         ])])))
         let wrapper = try XCTUnwrap(opened["composer"] as? [String: Any])
         var composer = try XCTUnwrap(wrapper["composer"] as? [String: Any])
-        for edit in [["type": "title", "title": "Authority planned task"], ["type": "duration", "minutes": 30], ["type": "startTime", "value": "10:00"]] as [[String: Any]] {
+        for edit in [["type": "title", "title": "Authority planned task"], ["type": "duration", "minutes": 30], ["type": "startTime", "value": startTime]] as [[String: Any]] {
             let edited = try object(await core.call("calendarComposerEdit", argumentsJSON: json([json([
                 "composer": composer, "edit": edit, "calendar": loaded,
             ])])))
             composer = try XCTUnwrap(edited["composer"] as? [String: Any])
         }
+        XCTAssertEqual(composer["startAt"] as? String, eventStart, "The local edit must still overlap the exact loaded UTC occurrence")
         let saved = try object(await core.call("calendarComposerSave", argumentsJSON: json([json([
             "requestId": UUID().uuidString.lowercased(), "composer": composer, "calendar": loaded,
         ])])))
