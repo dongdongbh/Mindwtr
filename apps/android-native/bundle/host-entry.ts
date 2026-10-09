@@ -3282,6 +3282,25 @@ globalThis.MindwtrHost = {
     calendarComposerCreateCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedCalendarComposerCreate(JSON.parse(json))));
     },
+    calendarEventTaskPrepare(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(await contract.prepareCalendarEventTaskCreate(JSON.parse(json))); });
+    },
+    calendarEventTaskValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedCalendarEventTaskCreate(JSON.parse(json))));
+    },
+    calendarEventTaskCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitCalendarEventTaskCreate(JSON.parse(json))));
+    },
+    calendarEventTaskAcknowledged(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') return null;
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS calendar event task created',
+                context: { releaseCheck: 'v1.3.5/ios-calendar-event-task', outcome: 'confirmed' },
+            }); } catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+            return null;
+        });
+    },
     /** Private native Board preparation: no store writes before the host journals it. */
     boardPrepare(json: string): string {
         return submit(async () => {

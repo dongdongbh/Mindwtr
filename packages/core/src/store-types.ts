@@ -481,6 +481,8 @@ export type PreparedCalendarCreate = {
     project: Project | null;
     deviceIdBefore: string | null;
     deviceIdToInitialize: string | null;
+    /** Event copy only: a fixed default Area's presence/deletion, including absence. */
+    defaultAreaWitness?: { id: string; before: { deletedAt: string | null } | null } | null;
     intent: { props: Partial<Task>; projectToCreate: { name: string; color: string; areaId: string | null } | null };
     creation: {
         selectedProject: Project | null;

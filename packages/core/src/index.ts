@@ -39,6 +39,7 @@ export * from './sandbox';
 export * from './sandbox-data';
 export * from './store';
 export * from './native-host-contract';
+export * from './native-host-contract-calendar';
 export * from './native-host-contract-saved-search-write';
 export * from './native-host-contract-attachments';
 export * from './native-host-contract-area-rename';

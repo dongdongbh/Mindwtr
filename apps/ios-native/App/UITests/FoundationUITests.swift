@@ -9963,7 +9963,7 @@ final class FoundationUITests: XCTestCase {
             waitForExpectations(timeout: 30)
             XCTAssertTrue(event.waitForExistence(timeout: 30), "External event missing in " + mode)
             XCTAssertEqual(events.count, eventCount, "Byte-distinct source events must survive in " + mode)
-            for row in events.allElementsBoundByIndex { XCTAssertFalse(row.isEnabled, "External event actions await their native owners") }
+            for row in events.allElementsBoundByIndex { boardEnabled(row, timeout: 20) }
             XCTAssertFalse(app.staticTexts["calendar-error"].exists)
             if partial {
                 XCTAssertTrue(app.staticTexts["calendar-feed-message"].exists)
@@ -9986,10 +9986,14 @@ final class FoundationUITests: XCTestCase {
         if layout.exists { task467Reveal(app, details, in: layout, requireHittable: false) }
         task467Reveal(app, event, in: details, requireHittable: false)
         task467Contained(app, event, in: details)
-        XCTAssertFalse(event.isEnabled)
+        boardEnabled(event)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = partial ? "Calendar partial feed retains successful event" : largest ? "Calendar external event largest text" : "Calendar external event normal"
         shot.lifetime = .keepAlways; add(shot)
+        task468OpenEventSheet(app, event: event, title: "Task465 timed event")
+        task468EventAction(app, "cancel")
+        task468ClosedEventSheet(app)
+        XCTAssertTrue(app.buttons["calendar-mode-month"].isSelected)
         // The rejected preparation checks the actual external busy interval without writing a task.
         let query = app.textFields["calendar-query"]
         task467Reveal(app, query, in: details, requireHittable: false)
@@ -10181,14 +10185,281 @@ final class FoundationUITests: XCTestCase {
         let events = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "calendar-item-", "Task465 timed event"))
         XCTAssertTrue(events.firstMatch.waitForExistence(timeout: 30), "The restarted current feed must publish after release")
-        XCTAssertEqual(events.count, 1); XCTAssertFalse(events.firstMatch.isEnabled)
+        XCTAssertEqual(events.count, 1); boardEnabled(events.firstMatch, timeout: 20)
         XCTAssertFalse(app.staticTexts["calendar-error"].exists)
         XCTAssertFalse(app.staticTexts["calendar-feed-message"].exists)
         XCTAssertTrue(app.buttons["calendar-mode-month"].isSelected)
         XCTAssertEqual(heading.label, month)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Calendar held feed responds to controls and publishes after release"; shot.lifetime = .keepAlways; add(shot)
+        let details = app.scrollViews["calendar-details"], layout = app.scrollViews["calendar-layout-scroll"]
+        if layout.exists { task467Reveal(app, details, in: layout, requireHittable: false) }
+        task467Reveal(app, events.firstMatch, in: details, requireHittable: false)
+        task467Contained(app, events.firstMatch, in: details)
+        task468OpenEventSheet(app, event: events.firstMatch, title: "Task465 timed event")
+        task468EventAction(app, "cancel"); task468ClosedEventSheet(app)
+        XCTAssertTrue(app.buttons["calendar-mode-month"].isSelected)
     }
+
+    private func task468OpenEventSheet(_ app: XCUIApplication, event: XCUIElement, title: String) {
+        boardEnabled(event, timeout: 20)
+        event.tap()
+        let heading = app.staticTexts["calendar-item-title"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 15)); XCTAssertEqual(heading.label, title)
+        let actions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "calendar-action-"))
+        XCTAssertEqual(Set(actions.allElementsBoundByIndex.map(\.identifier)),
+            Set(["calendar-action-createTask", "calendar-action-cancel"]))
+        XCTAssertEqual(app.buttons["calendar-action-createTask"].label, "Create task")
+        XCTAssertFalse(app.staticTexts["calendar-item-error"].exists)
+        XCTAssertFalse(app.buttons["calendar-composer-save"].exists)
+        boardEnabled(app.buttons["calendar-action-createTask"])
+        boardEnabled(app.buttons["calendar-action-cancel"])
+    }
+
+    private func task468EventAction(_ app: XCUIApplication, _ action: String, doubleTap: Bool = false) {
+        let button = app.buttons["calendar-action-" + action]
+        let scroll = app.scrollViews.containing(.button, identifier: "calendar-action-createTask").firstMatch
+        revealPagedElement(app, button, in: scroll)
+        if doubleTap { button.doubleTap() } else { button.tap() }
+    }
+
+    private func task468ClosedEventSheet(_ app: XCUIApplication) {
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["calendar-item-title"])
+        waitForExpectations(timeout: 20)
+        XCTAssertFalse(app.buttons["calendar-action-createTask"].exists)
+        XCTAssertFalse(app.staticTexts["calendar-item-error"].exists)
+    }
+
+    private func task468OpenCalendar(_ app: XCUIApplication, day: String, mode: String) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        let calendar = app.buttons["menu-calendar"]
+        if !calendar.isHittable {
+            task442Reveal(app, calendar, in: app.scrollViews.containing(.button, identifier: "menu-calendar").firstMatch)
+        }
+        boardTap(app, "menu-calendar"); task465Tap(app, "calendar-mode-month")
+        // Copy-owner fixtures select a settled ready feed; held-feed navigation has its separate regression.
+        task468Ready(app)
+        let targetDay = app.buttons["calendar-day-" + day]
+        print("Calendar settled-day selection probe: \(targetDay.debugDescription)")
+        let before = XCTAttachment(screenshot: app.screenshot())
+        before.name = "Calendar settled Month before selecting " + day; before.lifetime = .keepAlways; add(before)
+        task465Tap(app, "calendar-day-" + day)
+        // The first selection also changes grid geometry. Await the shared selected trait before changing mode.
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: targetDay)
+        waitForExpectations(timeout: 15)
+        let selected = XCTAttachment(screenshot: app.screenshot())
+        selected.name = "Calendar shared selection confirmed for " + day; selected.lifetime = .keepAlways; add(selected)
+        if mode != "month" { task465Tap(app, "calendar-mode-" + mode) }
+        boardEnabled(app.buttons["calendar-mode-" + mode], timeout: 30)
+        XCTAssertTrue(app.buttons["calendar-mode-" + mode].isSelected)
+    }
+
+    private func task468Ready(_ app: XCUIApplication, expectFeedFailure: Bool = false) {
+        let loading = app.descendants(matching: .any).matching(identifier: "calendar-feed-loading").firstMatch
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: loading)
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.staticTexts["calendar-error"].exists)
+        if expectFeedFailure {
+            XCTAssertTrue(app.staticTexts["calendar-feed-message"].exists)
+            XCTAssertFalse(app.staticTexts["calendar-feed-message"].label.isEmpty)
+            boardEnabled(app.buttons["calendar-feed-retry"])
+        } else { XCTAssertFalse(app.staticTexts["calendar-feed-message"].exists) }
+    }
+
+    private func task468RevealEvent(_ app: XCUIApplication, event: XCUIElement, mode: String, allDay: Bool) {
+        let layout = app.scrollViews["calendar-layout-scroll"]
+        if mode == "month" || mode == "schedule" {
+            let owner = app.scrollViews[mode == "month" ? "calendar-details" : "calendar-schedule"]
+            if layout.exists { task467Reveal(app, owner, in: layout, requireHittable: false) }
+            task467Reveal(app, event, in: owner, requireHittable: false)
+            task467Contained(app, event, in: owner)
+        } else if mode == "week" {
+            let columns = app.scrollViews["calendar-week-columns"]
+            if layout.exists { task467Reveal(app, columns, in: layout, requireHittable: false) }
+            task467Reveal(app, event, in: columns, horizontal: true, requireHittable: false)
+            if !allDay {
+                task467Reveal(app, event, in: app.scrollViews["calendar-week-timeline"], requireHittable: false)
+            }
+        } else if !allDay {
+            let timeline = app.scrollViews["calendar-day-timeline"]
+            if layout.exists { task467Reveal(app, timeline, in: layout, requireHittable: false) }
+            task467Reveal(app, event, in: timeline, requireHittable: false)
+        }
+        if allDay && (mode == "day" || mode == "week") && !event.isHittable {
+            // The existing all-day band has a distinct per-day vertical owner.
+            let owners = app.scrollViews.containing(.button, identifier: event.identifier).allElementsBoundByIndex
+                .filter { $0.frame.width > 0 && $0.frame.height > 0 }
+            guard let owner = owners.min(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else {
+                XCTFail("The all-day event has no owning scroll view"); return
+            }
+            task467Reveal(app, event, in: owner, requireHittable: false)
+        }
+        boardEnabled(event, timeout: 20)
+    }
+
+    private func task468CopiedRows(_ app: XCUIApplication, title: String, count: Int) {
+        // Month/timed Day use task UUIDs directly. CalendarDayItem-backed lanes retain their shared kind prefix.
+        // Fixture tasks have stable non-UUID IDs; count distinct copy UUIDs, even across repeated rendered lanes.
+        let copies = app.buttons.matching(NSPredicate(format: "identifier MATCHES %@ AND label CONTAINS %@",
+            "calendar-item-(?:scheduled-|deadline-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", title))
+        func copyIDs() -> Set<String> { Set(copies.allElementsBoundByIndex.map { String($0.identifier.suffix(36)) }) }
+        expectation(for: NSPredicate { _, _ in copyIDs().count == count }, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
+        XCTAssertEqual(copyIDs().count, count)
+    }
+
+    private func task468Created(_ app: XCUIApplication, title: String, mode: String, count: Int, expectFeedFailure: Bool = false) {
+        task468ClosedEventSheet(app)
+        boardEnabled(app.buttons["calendar-mode-" + mode], timeout: 30)
+        XCTAssertTrue(app.buttons["calendar-mode-" + mode].isSelected, "Copy preserves the current Calendar mode")
+        let notice = app.staticTexts["calendar-notice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 15))
+        XCTAssertEqual(notice.label, "Task created: Task created from event.")
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        task468Ready(app, expectFeedFailure: expectFeedFailure); task468CopiedRows(app, title: title, count: count)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Calendar event copy acknowledged in " + mode; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    private func task468Copy(_ suffix: String, mode: String, allDay: Bool, repeatedWeek: Bool = false, duplicate: Bool = false) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_EVENT_TASK_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launch(); defer { app.terminate() }
+        task468OpenCalendar(app, day: allDay ? "2026-10-11" : "2026-10-09", mode: mode)
+        task468Ready(app)
+        let title = allDay ? "Task465 spanning event" : "Task465 timed event"
+        let events = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "calendar-item-", title))
+        XCTAssertTrue(events.firstMatch.waitForExistence(timeout: 30))
+        XCTAssertEqual(events.count, repeatedWeek ? 2 : 1)
+        if repeatedWeek {
+            XCTAssertEqual(events.element(boundBy: 0).identifier, events.element(boundBy: 1).identifier,
+                "Two Week columns render the same immutable event tuple")
+            XCTAssertTrue(app.buttons["calendar-week-day-2026-10-05"].exists, "The canonical Monday week start is used")
+        }
+        // Sunday is a later displayed day of the Saturday-starting event. Shared acknowledgment owns its original date.
+        let event = repeatedWeek ? events.element(boundBy: 1) : events.firstMatch
+        let eventID = event.identifier
+        task468RevealEvent(app, event: event, mode: mode, allDay: allDay)
+        task468OpenEventSheet(app, event: event, title: title)
+        task468EventAction(app, "cancel"); task468ClosedEventSheet(app)
+        XCTAssertTrue(app.buttons["calendar-mode-" + mode].isSelected)
+        XCTAssertFalse(app.staticTexts["calendar-notice"].exists)
+        task468CopiedRows(app, title: title, count: 0)
+        task468OpenEventSheet(app, event: event, title: title)
+        task468EventAction(app, "createTask", doubleTap: duplicate)
+        task468Created(app, title: title, mode: mode, count: 1)
+        if allDay && mode == "day" {
+            XCTAssertTrue(app.staticTexts["calendar-period-title"].label.contains("10"), "The copied event's original local day is selected")
+        }
+        if duplicate {
+            let retainedEvent = app.buttons.matching(identifier: eventID).firstMatch
+            task468RevealEvent(app, event: retainedEvent, mode: mode, allDay: allDay)
+            task468OpenEventSheet(app, event: retainedEvent, title: title)
+            task468EventAction(app, "createTask")
+            task468Created(app, title: title, mode: mode, count: 2)
+        }
+    }
+
+    func testNativeCalendarEventTaskTimedMonth() throws { try task468Copy("TIMED_MONTH", mode: "month", allDay: false) }
+    func testNativeCalendarEventTaskAllDayDay() throws { try task468Copy("ALLDAY_DAY", mode: "day", allDay: true) }
+    func testNativeCalendarEventTaskMultiDayWeek() throws { try task468Copy("MULTIDAY_WEEK", mode: "week", allDay: true, repeatedWeek: true) }
+    func testNativeCalendarEventTaskDoubleIntentSchedule() throws { try task468Copy("DOUBLE_SCHEDULE", mode: "schedule", allDay: false, duplicate: true) }
+
+    func testNativeCalendarEventTaskColdInventoryRetry() throws {
+        let library = try task371Library("RECOVERY", prefix: "MINDWTR_CALENDAR_EVENT_TASK_UI_")
+        guard let value = ProcessInfo.processInfo.environment["MINDWTR_CALENDAR_FEED_UI_CONTROL_URL"],
+              let control = URL(string: value), control.scheme == "https" else {
+            throw XCTSkip("Requires the root-staged synthetic calendar fixture control")
+        }
+        continueAfterFailure = false
+        let restored = try task465Control(control, "recovery-restore", method: "POST")
+        XCTAssertEqual(restored["withdrawn"] as? Bool, false)
+        let app = XCUIApplication()
+        let arguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launchArguments = arguments + ["--native-calendar-event-task-terminal-failure-once"]
+        app.launch(); defer { app.terminate(); _ = try? task465Control(control, "recovery-restore", method: "POST") }
+        task468OpenCalendar(app, day: "2026-10-09", mode: "schedule"); task468Ready(app)
+        let event = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "calendar-item-", "Task465 timed event")).firstMatch
+        XCTAssertTrue(event.waitForExistence(timeout: 30))
+        let sourceEventID = event.identifier
+        task468RevealEvent(app, event: event, mode: "schedule", allDay: false)
+        task468OpenEventSheet(app, event: event, title: "Task465 timed event")
+        task468EventAction(app, "createTask")
+        boardEnabled(app.buttons["persistence-retry"], timeout: 20)
+        XCTAssertTrue(app.staticTexts["calendar-item-error"].exists)
+        app.terminate()
+        let withdrawn = try task465Control(control, "recovery-withdraw", method: "POST")
+        XCTAssertEqual(withdrawn["withdrawn"] as? Bool, true)
+        // Real startup consumes the accepted journal before the one-shot App inventory read fails.
+        app.launchArguments = arguments + ["--native-startup-inventory-read-failure-once"]
+        app.launch()
+        // Normal activation/notification lifecycle may retry startup automatically on this same host.
+        // Root's offline audit requires the isolated post-start failure marker before this acknowledgment.
+        task468Created(app, title: "Task465 timed event", mode: "schedule", count: 1, expectFeedFailure: true)
+        XCTAssertFalse(app.buttons.matching(identifier: sourceEventID).firstMatch.exists,
+            "Accepted recovery must not require the withdrawn original provider event")
+        XCTAssertFalse(app.buttons["app-lock-read-retry"].exists)
+    }
+
+    private func task468RetiredOperation(_ suffix: String, predispatch: Bool) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_EVENT_TASK_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL",
+            predispatch ? "--native-calendar-event-task-predispatch-hold-once" : "--native-calendar-event-task-terminal-failure-once"]
+        app.launch(); defer { app.terminate() }
+        task468OpenCalendar(app, day: "2026-10-11", mode: "day"); task468Ready(app)
+        let heading = app.staticTexts["calendar-period-title"], originalDay = heading.label
+        let event = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "calendar-item-", "Task465 spanning event")).firstMatch
+        XCTAssertTrue(event.waitForExistence(timeout: 30))
+        task468RevealEvent(app, event: event, mode: "day", allDay: true)
+        task468OpenEventSheet(app, event: event, title: "Task465 spanning event")
+        task468EventAction(app, "createTask")
+        if predispatch {
+            // This state is reached only after the real feed drain, immediately before host dispatch.
+            expectation(for: NSPredicate(format: "value == %@", "held"), evaluatedWith: app.staticTexts["calendar-item-title"])
+            waitForExpectations(timeout: 20)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        } else {
+            boardEnabled(app.buttons["persistence-retry"], timeout: 20)
+            XCTAssertTrue(app.staticTexts["calendar-item-error"].exists)
+        }
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        task468ClosedEventSheet(app)
+        XCTAssertFalse(app.staticTexts["calendar-notice"].exists)
+        if !predispatch {
+            boardEnabled(app.buttons["persistence-retry"], timeout: 20)
+            boardTap(app, "persistence-retry")
+        }
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["persistence-retry"])
+        waitForExpectations(timeout: 20)
+        boardEnabled(app.buttons["calendar-mode-day"], timeout: 30)
+        XCTAssertTrue(app.buttons["calendar-mode-day"].isSelected)
+        XCTAssertEqual(heading.label, originalDay, "A retired operation must not select the copied event's original Oct10 day")
+        XCTAssertFalse(app.staticTexts["calendar-notice"].exists)
+        XCTAssertFalse(app.staticTexts["calendar-item-title"].exists)
+        XCTAssertFalse(app.buttons["calendar-action-createTask"].exists)
+        XCTAssertFalse(app.staticTexts["calendar-item-error"].exists)
+        task468Ready(app)
+        // The accepted warm copy is due Oct10 and is intentionally absent from preserved DayOct11.
+        // Root's exact offline audit requires one row for warm Retry and zero for pre-dispatch cancellation.
+        task468CopiedRows(app, title: "Task465 spanning event", count: 0)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = predispatch ? "Calendar retired pre-dispatch copy leaves the current day" : "Calendar retired warm acknowledgment leaves the current day"
+        shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testNativeCalendarEventTaskRetiredWarmRetry() throws { try task468RetiredOperation("WARM_RETRY", predispatch: false) }
+    func testNativeCalendarEventTaskPredispatchCancel() throws { try task468RetiredOperation("PREDISPATCH_CANCEL", predispatch: true) }
 
     private func task97Normal(_ library: String) {
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]

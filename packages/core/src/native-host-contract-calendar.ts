@@ -32,8 +32,9 @@
  * the import cycle between the two files is safe.
  */
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
+import { getDefaultTaskAreaMode } from './area-utils';
 import { filterCalendarEventsForAreas } from './external-calendar-ingestion';
-import { formatCalendarTimeInputValue, minutesToTimeEstimate } from './calendar-scheduling';
+import { buildCalendarEventTaskDraft, formatCalendarTimeInputValue, minutesToTimeEstimate } from './calendar-scheduling';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import {
     applyComposerCreatedProject,
@@ -171,6 +172,7 @@ import { countFocusedTasksBeforeBoundary } from './task-utils';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { themeDescriptor } from './theme-scheme';
 import type { Area, Project, Section, Task } from './types';
+import type { PreparedCalendarCreate } from './store-types';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
 type Translate = (key: string) => string;
@@ -210,6 +212,8 @@ export type NativeCalendarItem = {
     kind: 'scheduled' | 'deadline' | 'completed' | 'event';
     taskId: string | null;
     eventId: string | null;
+    /** The exact displayed occurrence; provider identity remains transient. */
+    eventRef: { sourceId: string; id: string; start: string; end: string } | null;
     /** The title as drawn: a projected occurrence adds "· Projected · Oct 31" where the screen does. */
     title: string;
     /** The second line (a time, "All day", "Deadline"), or null where the surface draws none. */
@@ -366,7 +370,8 @@ export type NativeCalendarSheet =
     | { kind: 'projected'; title: string; message: string; buttons: CalendarSheetButton<'ok'>[] }
     /** Remove from calendar, Done and Delete send `taskRevision` back. */
     | { kind: 'task'; taskId: string; taskRevision: string; title: string; buttons: CalendarSheetButton<'edit' | 'unschedule' | 'done' | 'delete' | 'cancel'>[] }
-    | { kind: 'event'; title: string; buttons: CalendarSheetButton<'createTask' | 'openInCalendar' | 'cancel'>[] };
+    | { kind: 'event'; title: string; buttons: CalendarSheetButton<'createTask' | 'openInCalendar' | 'cancel'>[];
+        creationTemplate?: NativeCalendarEventTaskTemplate };
 
 export type NativeCalendarAction =
     /** The composer's Save. A new task takes the request ID as its id. */
@@ -632,6 +637,21 @@ export type NativePreparedCalendarCreate = {
 export type NativeCalendarCreatePreparation = { kind: 'prepared'; prepared: NativePreparedCalendarCreate }
     | { kind: 'refused'; result: NativeCalendarActionResult };
 
+/** Only the fields RN intentionally copies; never a provider id, URL or feed. */
+export type NativeCalendarEventTaskTemplate = {
+    event: { title: string; start: string; end: string; allDay: boolean; description?: string; location?: string };
+    calendarName: string | null;
+    fallbackTitle: string;
+    state: NativeCalendarState;
+};
+export type NativeCalendarEventTaskCreateRequest = NativeCalendarEventTaskTemplate & { requestId: string };
+export type NativePreparedCalendarEventTaskCreate = Omit<NativePreparedCalendarCreate, 'kind' | 'request' | 'generatedLinkIds'> & {
+    kind: 'event';
+    request: NativeCalendarEventTaskCreateRequest;
+    defaultAreaWitness: NonNullable<PreparedCalendarCreate['defaultAreaWitness']> | null;
+};
+export type NativeCalendarEventTaskCreatePreparation = { kind: 'prepared'; prepared: NativePreparedCalendarEventTaskCreate };
+
 const CALENDAR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CALENDAR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const calendarRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -732,7 +752,8 @@ const createIntentValid = (intent: CalendarCreateIntent, request: NativeCalendar
 };
 
 /** Re-run the existing factories over only the inputs they read; never parse the user's title again. */
-const calendarCreatedRows = (prepared: NativePreparedCalendarCreate): { task: Task; project: Project | null } | null => {
+const calendarCreatedRows = (prepared: Pick<NativePreparedCalendarCreate, 'creation' | 'intent' | 'project' | 'preparedAt' | 'deviceIdBefore' | 'deviceIdToInitialize'>
+    & { request: { requestId: string } }): { task: Task; project: Project | null } | null => {
     const { creation, intent, project, preparedAt } = prepared;
     const settings = { gtd: {
         defaultAreaMode: creation.defaultAreaMode, defaultAreaId: creation.defaultAreaId,
@@ -865,6 +886,121 @@ export const validatePreparedCalendarCreate = (input: unknown): NativeHostResult
     } catch {
         return fail('INVALID_INPUT', 'Malformed prepared Calendar creation');
     }
+};
+
+const eventCopyDateValid = (value: unknown): value is string => {
+    if (typeof value !== 'string' || value.length > ISO_INSTANT_LIMIT) return false;
+    if (storedCalendarDateValid(value)) return true;
+    const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+    return Boolean(match && storedCalendarDateValid(match[1]) && Number(match[2]) < 24
+        && Number(match[3]) < 60 && Number(match[4]) < 60 && !Number.isNaN(Date.parse(value)));
+};
+const eventCopyStateValid = (state: unknown): state is NativeCalendarState => calendarRecord(state)
+    && calendarKeys(state, ['viewMode', 'selectedDate', 'visibleMonth'])
+    && CALENDAR_VIEW_MODES.includes(state.viewMode as CalendarViewMode)
+    && typeof state.visibleMonth === 'string' && DAY_KEY_PATTERN.test(state.visibleMonth) && storedCalendarDateValid(state.visibleMonth)
+    && (state.selectedDate === null ? state.viewMode === 'month'
+        : typeof state.selectedDate === 'string' && DAY_KEY_PATTERN.test(state.selectedDate) && storedCalendarDateValid(state.selectedDate));
+const eventCopyTemplateValid = (value: unknown, withRequestId: boolean): value is NativeCalendarEventTaskCreateRequest => {
+    if (!calendarRecord(value) || !calendarKeys(value, withRequestId
+        ? ['requestId', 'event', 'calendarName', 'fallbackTitle', 'state'] : ['event', 'calendarName', 'fallbackTitle', 'state'])
+        || (withRequestId && (typeof value.requestId !== 'string' || !CALENDAR_UUID.test(value.requestId)
+            || value.requestId !== value.requestId.toLowerCase()))
+        || !(value.calendarName === null || typeof value.calendarName === 'string' && value.calendarName.length <= 2000)
+        || typeof value.fallbackTitle !== 'string' || value.fallbackTitle.length > 2000
+        || !eventCopyStateValid(value.state) || !calendarRecord(value.event)) return false;
+    const event = value.event;
+    return ['title', 'start', 'end', 'allDay'].every((key) => Object.prototype.hasOwnProperty.call(event, key))
+        && Object.keys(event).every((key) => ['title', 'start', 'end', 'allDay', 'description', 'location'].includes(key))
+        && typeof event.title === 'string' && event.title.length <= 2000 && typeof event.allDay === 'boolean'
+        && eventCopyDateValid(event.start) && eventCopyDateValid(event.end)
+        && (event.allDay || !DAY_KEY_PATTERN.test(event.start) && !DAY_KEY_PATTERN.test(event.end))
+        && (event.description === undefined || typeof event.description === 'string' && event.description.length <= 20_000)
+        && (event.location === undefined || typeof event.location === 'string' && event.location.length <= 2000);
+};
+const eventCopyPlan = (request: NativeCalendarEventTaskTemplate) => planCalendarEventTask({
+    ...request.event, id: 'calendar-copy', sourceId: 'calendar-copy',
+}, { calendarName: request.calendarName ?? undefined, t: () => request.fallbackTitle });
+const eventDefaultAreaId = (creation: CalendarCreationWitness): string | null => {
+    const settings = { gtd: { defaultAreaMode: creation.defaultAreaMode, defaultAreaId: creation.defaultAreaId } } as unknown as ReturnType<typeof useTaskStore.getState>['settings'];
+    return getDefaultTaskAreaMode(settings) === 'fixed' ? creation.defaultAreaId?.trim() || null : null;
+};
+const eventAreaValid = (area: unknown): area is Area => calendarRecord(area)
+    && ['id', 'name', 'order', 'createdAt', 'updatedAt'].every((key) => Object.prototype.hasOwnProperty.call(area, key))
+    && Object.keys(area).every((key) => ['id', 'name', 'color', 'icon', 'order', 'rev', 'revBy', 'createdAt', 'updatedAt', 'deletedAt'].includes(key))
+    && typeof area.id === 'string' && area.id.length <= 500 && typeof area.name === 'string' && area.name.length <= 10_000
+    && Number.isFinite(area.order) && instantValid(area.createdAt) && instantValid(area.updatedAt)
+    && (area.deletedAt === undefined || instantValid(area.deletedAt))
+    && (area.rev === undefined || Number.isSafeInteger(area.rev) && (area.rev as number) >= 0)
+    && ['color', 'icon', 'revBy'].every((key) => area[key] === undefined || typeof area[key] === 'string' && (area[key] as string).length <= 500);
+const eventCopyResult = (request: NativeCalendarEventTaskCreateRequest, localDay: string): NativeCalendarActionResult => ({
+    changed: true, toast: null, composer: null, next: { viewMode: request.state.viewMode, selectedDate: localDay, visibleMonth: localDay },
+    scrollToMinutes: null, taskId: request.requestId,
+});
+
+/** Closed event-copy journal authority; no provider, store, clock, locale or timezone access. */
+export const validatePreparedCalendarEventTaskCreate = (input: unknown): NativeHostResult<NativeCalendarActionResult> => {
+    try {
+        if (!calendarRecord(input) || !calendarKeys(input, ['request', 'prepared'])
+            || !eventCopyTemplateValid(input.request, true) || !calendarRecord(input.prepared)
+            || !calendarUtf8Within(JSON.stringify(input), 2_000_000)) return fail('INVALID_INPUT', 'Malformed prepared Calendar event task');
+        const request = input.request;
+        const prepared = input.prepared as NativePreparedCalendarEventTaskCreate;
+        const { creation, projection, intent, defaultAreaWitness } = prepared;
+        // The planner's draft is shared with RN. Date-only parsing is anchored
+        // explicitly here; the planner's live showDate is not journal authority.
+        const plan = buildCalendarEventTaskDraft({ ...request.event, id: 'calendar-copy', sourceId: 'calendar-copy',
+            start: request.event.allDay ? `${request.event.start.slice(0, 10)}T00:00:00.000Z` : request.event.start },
+        { calendarName: request.calendarName ?? undefined, fallbackTitle: request.fallbackTitle });
+        if (!calendarKeys(input.prepared, ['version', 'kind', 'request', 'intent', 'task', 'project', 'preparedAt', 'deviceIdBefore', 'deviceIdToInitialize', 'creation', 'projection', 'result', 'defaultAreaWitness'])
+            || prepared.version !== 1 || prepared.kind !== 'event' || !eventCopyTemplateValid(prepared.request, true) || !calendarSame(request, prepared.request)
+            || !instantValid(prepared.preparedAt) || prepared.project !== null || !calendarRecord(prepared.task)
+            || !calendarRecord(intent) || !calendarKeys(intent, ['sourceTitle', 'title', 'props', 'projectToCreate'])
+            || intent.sourceTitle !== request.event.title || intent.title !== plan.title || intent.projectToCreate !== null
+            || !calendarRecord(intent.props) || Object.keys(intent.props).some((key) => !['status', 'startTime', 'timeEstimate', 'dueDate', 'description', 'location'].includes(key))
+            || !calendarSame(intent.props, plan.initialProps)
+            || (plan.initialProps.description?.length ?? 0) > 22_012
+            || !calendarRecord(creation) || !calendarKeys(creation, ['selectedProject', 'areas', 'projectOrderMax', 'taskOrderMax', 'defaultAreaMode', 'defaultAreaId', 'defaultProjectFlowMode', 'focusCount', 'focusLimit', 'focusRequested', 'sequentialEmpty', 'focusEndOfTodayIso', 'focusEndOffsetMinutes', 'preparedOffsetMinutes', 'preparedLocalDay'])
+            || creation.selectedProject !== null || creation.projectOrderMax !== null || creation.taskOrderMax !== null
+            || creation.focusCount !== 0 || creation.focusLimit !== 1 || creation.focusRequested !== false || creation.sequentialEmpty !== false
+            || creation.focusEndOfTodayIso !== null || creation.focusEndOffsetMinutes !== null
+            || !(creation.defaultAreaMode === null || ['none', 'fixed', 'active'].includes(creation.defaultAreaMode))
+            || !(creation.defaultAreaId === null || typeof creation.defaultAreaId === 'string' && creation.defaultAreaId.length <= 500)
+            || creation.defaultProjectFlowMode !== null || !offsetValid(creation.preparedOffsetMinutes)
+            || localProjection(prepared.preparedAt, creation.preparedOffsetMinutes).day !== creation.preparedLocalDay
+            || !Array.isArray(creation.areas) || creation.areas.length > 1 || !creation.areas.every(eventAreaValid)
+            || !(prepared.deviceIdBefore === null || typeof prepared.deviceIdBefore === 'string' && Boolean(prepared.deviceIdBefore) && prepared.deviceIdBefore.length <= 500)
+            || !(prepared.deviceIdToInitialize === null || typeof prepared.deviceIdToInitialize === 'string' && CALENDAR_UUID.test(prepared.deviceIdToInitialize))
+            || (prepared.deviceIdBefore === null ? !prepared.deviceIdToInitialize : prepared.deviceIdToInitialize !== null)
+            || !calendarRecord(projection) || !calendarKeys(projection, ['offsetMinutes', 'localDay', 'localMinute'])
+            || !offsetValid(projection.offsetMinutes)) return fail('INVALID_INPUT', 'Malformed prepared Calendar event task');
+        const defaultId = eventDefaultAreaId(creation);
+        if (defaultId === null ? defaultAreaWitness !== null || creation.areas.length !== 0
+            : !calendarRecord(defaultAreaWitness) || !calendarKeys(defaultAreaWitness, ['id', 'before'])
+                || defaultAreaWitness.id !== defaultId
+                || (defaultAreaWitness.before === null ? creation.areas.length !== 0
+                    : !calendarRecord(defaultAreaWitness.before) || !calendarKeys(defaultAreaWitness.before, ['deletedAt'])
+                        || creation.areas.length !== 1 || creation.areas[0].id !== defaultId
+                        || (creation.areas[0].deletedAt ?? null) !== defaultAreaWitness.before.deletedAt)) {
+            return fail('INVALID_INPUT', 'Prepared Calendar event Area witness does not match');
+        }
+        const expectedProjection = request.event.allDay
+            ? { day: plan.initialProps.dueDate, minute: 0 }
+            : localProjection(plan.initialProps.startTime!, projection.offsetMinutes);
+        if (projection.localDay !== expectedProjection.day || projection.localMinute !== expectedProjection.minute) {
+            return fail('INVALID_INPUT', 'Prepared Calendar event navigation does not match');
+        }
+        const rows = calendarCreatedRows(prepared);
+        if (!rows || Object.keys(prepared.task).some((key) => !Object.prototype.hasOwnProperty.call(rows.task, key))
+            || !calendarSame(rows.task, prepared.task) || !calendarRowEqual(rows.task, prepared.task)) {
+            return fail('INVALID_INPUT', 'Prepared Calendar event task row does not match');
+        }
+        const expected = eventCopyResult(request, projection.localDay);
+        if (!calendarRecord(prepared.result) || !calendarKeys(prepared.result, Object.keys(expected))
+            || !eventCopyStateValid(prepared.result.next)
+            || !calendarSame(prepared.result, expected)) return fail('INVALID_INPUT', 'Prepared Calendar event result does not match');
+        return { ok: true, value: expected };
+    } catch { return fail('INVALID_INPUT', 'Malformed prepared Calendar event task'); }
 };
 
 /** Pure journal authority: no store, clock, locale, or ambient timezone reads. */
@@ -1171,6 +1307,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         kind: source?.kind ?? (event ? 'event' : 'scheduled'),
         taskId: task?.id ?? null,
         eventId: event?.id ?? null,
+        eventRef: event ? { sourceId: event.sourceId, id: event.id, start: event.start, end: event.end } : null,
         detail: null,
         accessibilityLabel: null,
         projected: false,
@@ -1825,13 +1962,30 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
          */
         getCalendarItemSheet(input:
             | { taskId: string; state?: NativeCalendarState; calendar?: NativeCalendarFeed }
-            | { event: ExternalCalendarEvent; canOpen: boolean }): NativeHostResult<NativeCalendarSheet> {
+            | { event: ExternalCalendarEvent; canOpen: boolean; state?: NativeCalendarState; calendarName?: string | null }): NativeHostResult<NativeCalendarSheet> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const now = new Date();
             const ctx = context(now);
             if (isObjectRecord(input) && 'event' in input) {
                 if (!isEvent(input.event) || typeof input.canOpen !== 'boolean') return fail('INVALID_INPUT', 'An event and whether the host can open it are required');
+                if (input.state !== undefined) {
+                    if (!calendarKeys(input, ['event', 'canOpen', 'state', 'calendarName']) || input.canOpen !== false
+                        || !eventCopyStateValid(input.state)
+                        || Object.keys(input.event).some((key) => !['id', 'sourceId', 'title', 'start', 'end', 'allDay', 'nativeEventId', 'description', 'location'].includes(key))) {
+                        return fail('INVALID_INPUT', 'An owned event state and calendar name are required');
+                    }
+                    const { title, start, end, allDay, description, location } = input.event;
+                    const creationTemplate: NativeCalendarEventTaskTemplate = {
+                        event: { title, start, end, allDay, ...(description === undefined ? {} : { description }), ...(location === undefined ? {} : { location }) },
+                        calendarName: input.calendarName as string | null, fallbackTitle: ctx.t('calendar.eventFallbackTitle'), state: input.state,
+                    };
+                    if (!eventCopyTemplateValid(creationTemplate, false) || !calendarUtf8Within(JSON.stringify(creationTemplate), 2_000_000)) {
+                        return fail('INVALID_INPUT', 'Calendar event cannot be copied');
+                    }
+                    return { ok: true, value: { kind: 'event', ...getCalendarEventSheet(input.event, { canOpen: false, t: ctx.t }),
+                        creationTemplate: JSON.parse(JSON.stringify(creationTemplate)) as NativeCalendarEventTaskTemplate } };
+                }
                 return { ok: true, value: { kind: 'event', ...getCalendarEventSheet(input.event, { canOpen: input.canOpen, t: ctx.t }) } };
             }
             if (!isObjectRecord(input) || !isText(input.taskId)) return fail('INVALID_INPUT', 'A task id or an event is required');
@@ -2113,6 +2267,67 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         },
 
         /** Resolve RN New composer policy once, then freeze its complete atomic task/project publication. */
+        async prepareCalendarEventTaskCreate(input: NativeCalendarEventTaskCreateRequest): Promise<NativeHostResult<NativeCalendarEventTaskCreatePreparation>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            try {
+                if (!eventCopyTemplateValid(input, true) || !calendarUtf8Within(JSON.stringify(input), 2_000_000)) {
+                    return fail('INVALID_INPUT', 'A bounded Calendar event copy and request UUID are required');
+                }
+                const request = JSON.parse(JSON.stringify(input)) as NativeCalendarEventTaskCreateRequest;
+                const store = useTaskStore.getState();
+                // A fresh hot submission is not a prepared journal replay.
+                if (store._tasksById.has(request.requestId)) return fail('INVALID_INPUT', 'Request ID already belongs to a task');
+                const now = new Date();
+                const plan = eventCopyPlan(request);
+                if (!plan.showDate || (plan.initialProps.description?.length ?? 0) > 22_012) return fail('INVALID_INPUT', 'Calendar event cannot be copied');
+                const device = ensureDeviceId(store.settings);
+                const creation: CalendarCreationWitness = {
+                    selectedProject: null, areas: [], projectOrderMax: null, taskOrderMax: null,
+                    defaultAreaMode: store.settings.gtd?.defaultAreaMode ?? null, defaultAreaId: store.settings.gtd?.defaultAreaId ?? null,
+                    defaultProjectFlowMode: null, focusCount: 0, focusLimit: 1, focusRequested: false, sequentialEmpty: false,
+                    focusEndOfTodayIso: null, focusEndOffsetMinutes: null, preparedOffsetMinutes: -now.getTimezoneOffset(), preparedLocalDay: dayKey(now),
+                };
+                const defaultId = eventDefaultAreaId(creation);
+                const area = defaultId === null ? undefined : store._allAreas.find((item) => item.id === defaultId);
+                creation.areas = area ? JSON.parse(JSON.stringify([area])) as Area[] : [];
+                const localDay = request.event.allDay ? plan.initialProps.dueDate! : dayKey(plan.showDate);
+                const prepared: NativePreparedCalendarEventTaskCreate = {
+                    version: 1, kind: 'event', request, intent: { sourceTitle: request.event.title, title: plan.title,
+                        props: JSON.parse(JSON.stringify(plan.initialProps)) as Partial<Task>, projectToCreate: null },
+                    task: {} as Task, project: null, preparedAt: now.toISOString(), deviceIdBefore: store.settings.deviceId ?? null,
+                    deviceIdToInitialize: device.updated ? device.deviceId : null, creation,
+                    defaultAreaWitness: defaultId === null ? null : { id: defaultId, before: area ? { deletedAt: area.deletedAt ?? null } : null },
+                    projection: { offsetMinutes: -plan.showDate.getTimezoneOffset(), localDay,
+                        localMinute: request.event.allDay ? 0 : plan.showDate.getHours() * 60 + plan.showDate.getMinutes() },
+                    result: eventCopyResult(request, localDay),
+                };
+                const rows = calendarCreatedRows(prepared);
+                if (!rows) return fail('INVALID_INPUT', 'Calendar event cannot resolve its task container');
+                prepared.task = rows.task;
+                const authority = validatePreparedCalendarEventTaskCreate({ request, prepared });
+                if (!authority.ok) return authority;
+                return { ok: true, value: { kind: 'prepared', prepared } };
+            } catch { return fail('INVALID_INPUT', 'A bounded Calendar event copy and request UUID are required'); }
+        },
+
+        validatePreparedCalendarEventTaskCreate,
+
+        async commitCalendarEventTaskCreate(input: { request: NativeCalendarEventTaskCreateRequest; prepared: NativePreparedCalendarEventTaskCreate }): Promise<NativeHostResult<NativeCalendarActionResult>> {
+            const authority = validatePreparedCalendarEventTaskCreate(input);
+            if (!authority.ok) return authority;
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const applied = await useTaskStore.getState().commitPreparedCalendarCreate(input.prepared);
+            if (!applied.success) return fail('STALE_REVISION', applied.error ?? 'Prepared Calendar event task conflicts with current data');
+            if (useTaskStore.getState().persistenceFailure) {
+                try { await useTaskStore.getState().retryPersistence(); }
+                catch { return fail('SAVE_FAILED', 'Pending Calendar event task is not saved'); }
+            }
+            const saved = await deps.save();
+            return saved.ok ? authority : saved;
+        },
+
         async prepareCalendarComposerCreate(input: { requestId: string; composer: NativeCalendarComposer; calendar?: NativeCalendarFeed }): Promise<NativeHostResult<NativeCalendarCreatePreparation>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

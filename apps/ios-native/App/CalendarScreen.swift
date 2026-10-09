@@ -787,7 +787,7 @@ private struct CalendarItemButton: View {
                     .frame(maxWidth: .infinity, maxHeight: timed ? .infinity : nil, alignment: .topLeading)
                     .frame(minHeight: timed ? 0 : 44).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(!model.calendarActionsEnabled || !item.flag("pressable") || item.text("taskId").isEmpty)
+            .buttonStyle(.plain).disabled(!model.calendarItemOpeningEnabled(item))
             .accessibilityLabel(item.text("accessibilityLabel").isEmpty ? [item.text("title"), item.text("detail")].filter { !$0.isEmpty }.joined(separator: ", ") : item.text("accessibilityLabel"))
             .accessibilityIdentifier("calendar-item-" + item.text("id"))
             if item.flag("showDone") {
@@ -862,14 +862,22 @@ private struct CalendarAction: View {
 struct CalendarItemSheet: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
+    private var sheetTitle: some View {
+        let title = Text(model.calendarItemSheet.text("title")).rnFont(19, .bold).accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("calendar-item-title")
+        #if DEBUG && targetEnvironment(simulator)
+        return title.accessibilityValue(model.calendarEventTaskDispatchTestState)
+        #else
+        return title
+        #endif
+    }
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { model.closeCalendarItem() }.accessibilityHidden(true)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(model.calendarItemSheet.text("title")).rnFont(19, .bold).accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("calendar-item-title")
+                        sheetTitle
                         if !model.calendarItemSheet.text("message").isEmpty {
                             Text(model.calendarItemSheet.text("message")).rnFont(14).fixedSize(horizontal: false, vertical: true)
                         }
@@ -878,10 +886,12 @@ struct CalendarItemSheet: View {
                             CalendarAction(title: model.label("common.retry"), enabled: !model.busy && !model.retryNeeded,
                                 palette: palette, id: "calendar-item-retry") { Task { await model.retryCalendarItem() } }
                         }
-                        let actions = model.calendarItemSheet.objects("buttons").filter { ["edit", "unschedule", "done", "delete", "cancel", "ok"].contains($0.text("id")) }
+                        let allowedActions = model.calendarItemSheet.text("kind") == "event"
+                            ? ["createTask", "cancel"] : ["edit", "unschedule", "done", "delete", "cancel", "ok"]
+                        let actions = model.calendarItemSheet.objects("buttons").filter { allowedActions.contains($0.text("id")) }
                         ForEach(actions.indices, id: \.self) { index in
                             let action = actions[index]
-                            CalendarAction(title: action.text("label"), destructive: action.text("style") == "destructive", enabled: !model.busy && !model.retryNeeded,
+                            CalendarAction(title: action.text("label"), destructive: action.text("style") == "destructive", enabled: model.calendarItemActionEnabled(action.text("id")),
                                 palette: palette, id: "calendar-action-" + action.text("id")) {
                                 Task { await model.performCalendarItemAction(action.text("id")) }
                             }

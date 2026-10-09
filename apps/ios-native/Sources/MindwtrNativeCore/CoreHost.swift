@@ -409,6 +409,11 @@ public final class CoreHost: @unchecked Sendable {
         try await perform { try $0.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnly) }
     }
     #endif
+    #if DEBUG && os(iOS) && targetEnvironment(simulator)
+    public func configureIsolatedCalendarEventTaskTerminalFailureOnce() async throws {
+        try await perform { try $0.configureIsolatedCalendarEventTaskTerminalFailureOnce() }
+    }
+    #endif
 
     public func beginAttachmentDraft(expectedSession: String, expectedGeneration: Int) async throws -> String {
         try await perform { try $0.beginAttachmentDraft(expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
@@ -1782,13 +1787,13 @@ private final class Engine: @unchecked Sendable {
         "projectDateOptions": 1, "projectDateWrite": 1, "projectDateRetryOutcome": 1,
         "projectAreaOptions": 1, "projectAreaWrite": 1, "projectAreaRetryOutcome": 1,
         "menuRead": 2, "archiveTaskSelection": 1, "doneBulkTagInput": 2, "destinationPicker": 1, "editorSuggestions": 4, "calendarPreference": 1, "calendarUnschedule": 1, "calendarDelete": 1, "boardAction": 1,
-        "calendarComposerOpen": 1, "calendarComposerEdit": 1, "calendarComposerSave": 1,
+        "calendarComposerOpen": 1, "calendarComposerEdit": 1, "calendarComposerSave": 1, "calendarEventTaskCreate": 1,
         "mindSweepGuide": 1, "mindSweepAdd": 1,
         "inboxStart": 1, "inboxStep": 1, "inboxEnd": 1,
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "calendarEventTaskCreate", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -1853,6 +1858,11 @@ private final class Engine: @unchecked Sendable {
             throw HostFailure("Invalid pending command journal")
         }
         guard saved.version == 2 else { throw HostFailure("Unsupported pending command journal; raw captures cannot be safely replanned") }
+        if saved.method == "calendarEventTaskCommit" || raw["method"] as? String == "calendarEventTaskCommit" {
+            guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared Calendar event task journal")
+            }
+        }
         if saved.method == "deviceCalendarSettingCommit" {
             guard journalData.count <= Self.deviceCalendarSettingJournalLimit,
                   try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
@@ -2118,6 +2128,10 @@ private final class Engine: @unchecked Sendable {
             }
             if let command = pending, command.method == "calendarUnscheduleCommit" {
                 _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
+            }
+            if let command = pending, command.method == "calendarEventTaskCommit" {
+                _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
             }
             if let command = pending, ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
@@ -2450,8 +2464,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringTrashTaskRestore = pending?.method == "trashTaskRestoreCommit"
         let recoveringTrashProjectRestore = pending?.method == "trashProjectRestoreCommit"
         let recoveringTaskPromote = pending?.method == "taskPromoteCommit"
-        let recoveringCalendarMethod = pending?.method == "calendarComposerCreateCommit" ? "calendarComposerCreateCommit"
-            : pending?.method == "calendarComposerCommit" ? "calendarComposerCommit" : nil
+        let recoveringCalendarMethod = ["calendarComposerCreateCommit", "calendarComposerCommit", "calendarEventTaskCommit"].first { $0 == pending?.method }
         let recoveringMindSweep = pending?.method == "mindSweepCommit"
         let recoveringProjectCreate = pending?.method == "projectCreateCommit"
         let recoveringProjectSectionCreate = pending?.method == "projectSectionCreateCommit"
@@ -10084,6 +10097,26 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "calendarUnscheduleCommit", argumentsJSON: encoded)
                 _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "calendarEventTaskCreate" {
+            try allowRetainedOrdinaryPreparation()
+            do {
+                guard let original = args.first as? String,
+                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
+                    throw HostFailure("Malformed Calendar event task request")
+                }
+                let value = try invoke("calendarEventTaskPrepare", arguments: args)
+                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
+                      let prepared = response["prepared"] as? [String: Any], let request = prepared["request"] as? [String: Any],
+                      try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                        == JSONSerialization.data(withJSONObject: submitted, options: [.sortedKeys]) else {
+                    throw HostFailure("Malformed prepared Calendar event task")
+                }
+                let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
+                command = PendingCommand(version: 2, method: "calendarEventTaskCommit", argumentsJSON: encoded)
+                _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "calendarComposerSave" {
             try allowRetainedOrdinaryPreparation()
             do {
@@ -10636,6 +10669,10 @@ private final class Engine: @unchecked Sendable {
         }
         if command.method == "calendarUnscheduleCommit" {
             _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal { try validateCalendarAcknowledgment(command, value: value) }
+        }
+        if command.method == "calendarEventTaskCommit" {
+            _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateCalendarAcknowledgment(command, value: value) }
         }
         if ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
@@ -11277,6 +11314,12 @@ private final class Engine: @unchecked Sendable {
         if command.method == "reminderCompletionCommit", case .success = terminal {
             _ = try? invoke("reminderCompletionAcknowledged", arguments: [])
         }
+        if command.method == "calendarEventTaskCommit", case .success = terminal {
+#if DEBUG
+            faults?.commandDiagnostic?("calendarEventTaskCreate")
+#endif
+            _ = try? invoke("calendarEventTaskAcknowledged", arguments: [])
+        }
         if command.method == "generalPreferenceCommit", case .success(let value) = terminal {
 #if DEBUG
             faults?.commandDiagnostic?("generalPreferenceApplied")
@@ -11548,7 +11591,7 @@ private final class Engine: @unchecked Sendable {
             || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "referenceTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "deviceCalendarSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "deviceCalendarSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -11586,6 +11629,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateCalendarAcknowledgment(_ command: PendingCommand, value: String) throws {
+        if command.method == "calendarEventTaskCommit" {
+            guard try NativeJSON.hasUniqueObjectKeys(value) else { throw HostFailure("Malformed Calendar event task acknowledgment") }
+        }
         let args = try journalArguments(command)
         guard let encoded = args.first as? String,
               let envelope = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
@@ -15532,6 +15578,21 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("calendarUnschedule", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
+        if command.method == "calendarEventTaskCommit" {
+            guard let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 2_000_000,
+                  (try? NativeJSON.hasUniqueObjectKeys(args[0])) == true,
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["request", "prepared"]), let request = input["request"] as? [String: Any],
+                  let prepared = input["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
+                  prepared["kind"] as? String == "event", let original = prepared["request"] as? [String: Any],
+                  try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                    == JSONSerialization.data(withJSONObject: original, options: [.sortedKeys]) else {
+                throw HostFailure("Malformed prepared Calendar event task journal")
+            }
+            try validateCalendarEventTaskRequest(request)
+            return args
+        }
         if ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
             guard let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
                   args[0].utf8.count <= 2_000_000,
@@ -15720,6 +15781,16 @@ private final class Engine: @unchecked Sendable {
         // Client diagnostics carry only audited marker enums and aggregate counts.
         let valid: Bool
         switch message {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+        case "Native iOS isolated startup inventory read failed":
+            let directory = databaseURL.deletingLastPathComponent()
+            let identifier = directory.lastPathComponent
+            valid = databaseURL.lastPathComponent == "mindwtr.sqlite"
+                && directory.deletingLastPathComponent().lastPathComponent == "NativeUITests"
+                && UUID(uuidString: identifier)?.uuidString.lowercased() == identifier
+                && faults?.secretService == "mindwtr.native-keychain.fixture." + identifier
+                && Self.equalJSON(context, ["outcome": "injected"])
+        #endif
         case "Native iOS launch selection admitted":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"])
         case "Native iOS reminder lifecycle reconciled":
@@ -16325,7 +16396,7 @@ private final class Engine: @unchecked Sendable {
             }
         }
         if ["inboxView", "captureView", "captureEdit", "captureSubmit", "setAreaFilter", "taskView", "taskOpenTab", "taskViewReferenceTarget", "editDraft", "destinationPicker", "search", "mindSweepGuide", "mindSweepAdd",
-            "calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome",
+            "calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave", "calendarEventTaskCreate", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome",
             "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
             guard let json = args.first as? String,
                   (try NativeJSON.jsonObject(with: Data(json.utf8))) is [String: Any] else {
@@ -17556,6 +17627,14 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Calendar action needs a task and revision")
             }
         }
+        if method == "calendarEventTaskCreate" {
+            guard let json = args.first as? String, json.utf8.count <= 2_000_000,
+                  (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
+                  let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
+                throw HostFailure("INVALID_INPUT: Unsupported native Calendar event task input")
+            }
+            try validateCalendarEventTaskRequest(input)
+        }
         if ["calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave"].contains(method) {
             guard let json = args.first as? String, json.utf8.count <= 2_000_000,
                   (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
@@ -17584,6 +17663,35 @@ private final class Engine: @unchecked Sendable {
                   let taskID = action["taskId"] as? String, !taskID.isEmpty, taskID.count <= 500 else {
                 throw HostFailure("Unsupported native Board action")
             }
+        }
+    }
+
+    private func validateCalendarEventTaskRequest(_ input: [String: Any]) throws {
+        guard Set(input.keys) == Set(["requestId", "event", "calendarName", "fallbackTitle", "state"]),
+              let id = input["requestId"] as? String, UUID(uuidString: id) != nil, id == id.lowercased(),
+              let fallback = input["fallbackTitle"] as? String, fallback.utf16.count <= 2_000 else {
+            throw HostFailure("INVALID_INPUT: Unsupported native Calendar event task request")
+        }
+        try validateCalendarEventProjection(input, includesIdentity: false)
+    }
+
+    private func validateCalendarEventProjection(_ input: [String: Any], includesIdentity: Bool) throws {
+        let fields: Set<String> = ["title", "start", "end", "allDay", "description", "location"]
+        let identity: Set<String> = includesIdentity ? ["id", "sourceId"] : []
+        guard let event = input["event"] as? [String: Any], Set(event.keys).isSubset(of: fields.union(identity)),
+              ["title", "start", "end"].allSatisfy({ (event[$0] as? String).map { $0.utf16.count <= 2_000 } == true }),
+              Self.isBoolean(event["allDay"]),
+              ["description", "location"].allSatisfy({ field in
+                  event[field] == nil || (event[field] as? String).map { $0.utf16.count <= (field == "description" ? 20_000 : 2_000) } == true
+              }),
+              identity.allSatisfy({ (event[$0] as? String).map { !$0.isEmpty && $0.utf16.count <= 500 } == true }),
+              input["calendarName"] is NSNull || (input["calendarName"] as? String).map({ $0.utf16.count <= 2_000 }) == true,
+              let state = input["state"] as? [String: Any], Set(state.keys) == Set(["viewMode", "selectedDate", "visibleMonth"]),
+              ["month", "week", "day", "schedule"].contains(state["viewMode"] as? String ?? ""),
+              (state["visibleMonth"] as? String).map({ $0.utf16.count <= 64 }) == true,
+              (state["selectedDate"] is NSNull ? state["viewMode"] as? String == "month"
+                : (state["selectedDate"] as? String).map({ $0.utf16.count <= 64 }) == true) else {
+            throw HostFailure("INVALID_INPUT: Unsupported native Calendar event projection")
         }
     }
 
@@ -17811,7 +17919,14 @@ private final class Engine: @unchecked Sendable {
                 "calendarItem": ["taskId", "state", "calendar"],
                 "calendarPreferences": [],
             ]
-            if let fields = calendarFields[name], !Set(input.keys).isSubset(of: fields) {
+            if name == "calendarItem", input["event"] != nil {
+                guard json.utf8.count <= 2_000_000, (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
+                      Set(input.keys) == Set(["event", "canOpen", "state", "calendarName"]),
+                      Self.isBoolean(input["canOpen"]), input["canOpen"] as? Bool == false else {
+                    throw HostFailure("Unsupported native Calendar event browsing input")
+                }
+                try validateCalendarEventProjection(input, includesIdentity: true)
+            } else if let fields = calendarFields[name], !Set(input.keys).isSubset(of: fields) {
                 throw HostFailure("Unsupported native Calendar browsing input")
             }
             if name == "board" || name == "boardList" {
@@ -18659,6 +18774,26 @@ private final class Engine: @unchecked Sendable {
             }
         }
         projectFileDownloadHooks = hooks
+    }
+    #endif
+
+    #if DEBUG && os(iOS) && targetEnvironment(simulator)
+    func configureIsolatedCalendarEventTaskTerminalFailureOnce() throws {
+        let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
+        guard !started, !closed, !invoking, pending == nil, let faults, faults.journalRemove == nil,
+              databaseURL.lastPathComponent == "mindwtr.sqlite", directory.deletingLastPathComponent().lastPathComponent == "NativeUITests",
+              Self.ownedDiscardUUID(identifier) == identifier,
+              faults.secretService == "mindwtr.native-keychain.fixture." + identifier,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil else {
+            throw HostFailure("Isolated Calendar event task fixture is unavailable")
+        }
+        var fired = false
+        faults.journalRemove = { [unowned self] in
+            guard !fired, let command = self.pending, command.method == "calendarEventTaskCommit",
+                  let terminal = command.terminal, case .success = terminal else { return }
+            fired = true
+            throw HostFailure("Isolated Calendar event task terminal cleanup interrupted")
+        }
     }
     #endif
 
