@@ -1155,6 +1155,105 @@ describe('native host contract: Settings › Calendar', () => {
             expect(ready.events.map((event) => event.title)).toEqual(['Planning', 'Stand-up', 'Review', 'Offsite']);
         });
 
+        it('retires a cancelled host load rather than caching its aborted HTTP failures as a partial refresh', async () => {
+            await seed({});
+            const feeds = [fixture.settings.synced.externalCalendars![0]];
+            const handset = phone({ calendars: [], storage: { [KEYS.feeds]: JSON.stringify(feeds) } });
+            const fetchFeed = handset.host.fetch;
+            let fetches = 0;
+            let rejectTransport: ((reason: unknown) => void) | undefined;
+            handset.host.fetch = (async (...args: Parameters<typeof fetch>) => {
+                fetches += 1;
+                if (fetches === 1) {
+                    await new Promise<void>((_resolve, reject) => {
+                        rejectTransport = reject;
+                        args[1]?.signal?.addEventListener('abort', () => reject(args[1]?.signal?.reason), { once: true });
+                    });
+                }
+                return fetchFeed(...args);
+            }) as typeof fetch;
+            const contract = await openHost(handset.host);
+            vi.useFakeTimers({ toFake: ['Date'] });
+            vi.setSystemTime(new Date(fixture.now));
+            const owner = new AbortController();
+            const joinedOwner = new AbortController();
+            const request = { slot: 'calendar' as const, ...range, refresh: true };
+            const pending = contract.loadExternalCalendarFeed(request, owner.signal);
+            expect(contract.loadExternalCalendarFeed(request, joinedOwner.signal)).toBe(pending);
+            await settle();
+            expect(fetches).toBe(1);
+            joinedOwner.abort(new Error('The Calendar page closed'));
+            // Native cancellation also rejects outstanding fetches independently
+            // of their signal. This must not become a legitimate partial result.
+            rejectTransport?.(Object.assign(new Error('The host operation timed out'), { name: 'AbortError' }));
+            const cancelled = await pending;
+            vi.setSystemTime(new Date(Date.parse(fixture.now) + 999));
+            const retried = value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }));
+            expect.soft(cancelled).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect.soft(fetches).toBe(2);
+            expect.soft(retried).toMatchObject({ status: 'ready' });
+            if (retried.status !== 'ready') throw new Error('not ready');
+            expect.soft(retried.warning).toBeUndefined();
+            expect.soft(retried.events.map((event) => event.title)).toEqual(['Planning', 'Review']);
+        });
+
+        it('refuses a pre-cancelled host owner without joining or reading any device/network port', async () => {
+            await seed({});
+            const handset = phone({ calendars: ['primary'], storage: {
+                [KEYS.feeds]: JSON.stringify([fixture.settings.synced.externalCalendars![0]]),
+                [KEYS.system]: JSON.stringify({ enabled: true }),
+            } });
+            const reads = [vi.spyOn(handset.host.storage, 'getItem'), vi.spyOn(handset.host, 'fetch'),
+                vi.spyOn(handset.host.calendars, 'getPermissions'), vi.spyOn(handset.host.calendars, 'getCalendars'),
+                vi.spyOn(handset.host.calendars, 'getEvents')];
+            const contract = await openHost(handset.host);
+            const owner = new AbortController();
+            owner.abort(new Error('Already closed'));
+            expect(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, owner.signal))
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            for (const read of reads) expect(read).not.toHaveBeenCalled();
+            value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }));
+            const counts = reads.map((read) => read.mock.calls.length);
+            expect(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, owner.signal))
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(reads.map((read) => read.mock.calls.length)).toEqual(counts);
+        });
+
+        it('detaches cancelled old owners so they cannot evict a newer range or its healthy refresh', async () => {
+            await seed({});
+            const handset = phone({ calendars: [], storage: {
+                [KEYS.feeds]: JSON.stringify([fixture.settings.synced.externalCalendars![0]]),
+            } });
+            const fetchFeed = handset.host.fetch;
+            let fetches = 0;
+            handset.host.fetch = (async (...args: Parameters<typeof fetch>) => {
+                fetches += 1;
+                if (fetches === 1) await new Promise<void>((_resolve, reject) => {
+                    args[1]?.signal?.addEventListener('abort', () => reject(args[1]?.signal?.reason), { once: true });
+                });
+                return fetchFeed(...args);
+            }) as typeof fetch;
+            const contract = await openHost(handset.host);
+            vi.useFakeTimers({ toFake: ['Date'] });
+            vi.setSystemTime(new Date(fixture.now));
+            const oldOwner = new AbortController(), joinedOwner = new AbortController(), nextOwner = new AbortController();
+            const oldRemoved = vi.spyOn(oldOwner.signal, 'removeEventListener');
+            const joinedRemoved = vi.spyOn(joinedOwner.signal, 'removeEventListener');
+            const nextRemoved = vi.spyOn(nextOwner.signal, 'removeEventListener');
+            const old = contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, oldOwner.signal);
+            expect(contract.loadExternalCalendarFeed({ slot: 'calendar', ...range, refresh: true }, joinedOwner.signal)).toBe(old);
+            await settle();
+            const next = { slot: 'calendar' as const, start: '2026-09-02T00:00:00.000Z', end: '2026-10-02T00:00:00.000Z', refresh: true };
+            const replaced = value(await contract.loadExternalCalendarFeed(next, nextOwner.signal));
+            expect(await old).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(replaced.status).toBe('ready');
+            expect(fetches).toBe(2);
+            for (const removed of [oldRemoved, joinedRemoved, nextRemoved]) expect(removed).toHaveBeenCalledTimes(1);
+            oldOwner.abort(); joinedOwner.abort(); nextOwner.abort();
+            expect(value(await contract.loadExternalCalendarFeed(next))).toEqual(replaced);
+            expect(fetches).toBe(2);
+        });
+
         it('answers a refresh within a second from the last load, and loads again after it', async () => {
             await seed({});
             const handset = phone({ calendars: [], storage: { [KEYS.feeds]: JSON.stringify(fixture.settings.synced.externalCalendars) } });

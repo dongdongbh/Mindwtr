@@ -356,7 +356,10 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
     let session: Session | null = null;
     let bound: { host: NativeCalendarHost; feeds: ExternalCalendarFeeds; push: CalendarPushService } | null = null;
     type FeedLoad = Promise<NativeHostResult<NativeCalendarFeed>>;
-    const feedLoads = new Map<NativeCalendarFeedSlot, { key: string; controller: AbortController; running: FeedLoad | null; last: FeedLoad; refreshedAt: number }>();
+    const feedLoads = new Map<NativeCalendarFeedSlot, {
+        key: string; controller: AbortController; running: FeedLoad | null; last: FeedLoad; refreshedAt: number;
+        watch: (signal?: AbortSignal) => void;
+    }>();
 
     /** Core's feeds and push for this host, made on first use. */
     const device = (host: NativeCalendarHost) => {
@@ -1035,8 +1038,11 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
          * screen gains focus or the app returns from the background
          * (shouldRefreshExternalCalendarOnAppStateChange): a refresh within a second
          * of the last one answers that one's load (EXTERNAL_CALENDAR_REFRESH_THROTTLE_MS).
+         * The trusted host may supply its operation's signal separately from the
+         * public input. Cancelling a joined owner retires that screen's load, so
+         * aborted HTTP reads cannot become a cached successful partial feed.
          */
-        loadExternalCalendarFeed(input: { slot: NativeCalendarFeedSlot; start: string; end: string; timeoutMs?: number; refresh?: boolean }): Promise<NativeHostResult<NativeCalendarFeed>> {
+        loadExternalCalendarFeed(input: { slot: NativeCalendarFeedSlot; start: string; end: string; timeoutMs?: number; refresh?: boolean }, signal?: AbortSignal): Promise<NativeHostResult<NativeCalendarFeed>> {
             const ready = deps.readiness();
             if (!ready.ok) return Promise.resolve(ready);
             const start = isObjectRecord(input) && isText(input.start, 40) ? new Date(input.start) : null;
@@ -1047,23 +1053,44 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 || (input.refresh !== undefined && typeof input.refresh !== 'boolean')) {
                 return Promise.resolve(fail('INVALID_INPUT', 'A screen slot, an ISO start before an ISO end, an optional positive timeoutMs and an optional refresh are required'));
             }
+            if (signal?.aborted) return Promise.resolve(fail('STALE_REVISION', 'This Calendar load was cancelled'));
             const host = deps.host();
             if (!host) return Promise.resolve(fail('ACTION_FAILED', 'Calendars are not available on this host yet'));
             const key = JSON.stringify([start.toISOString(), end.toISOString(), input.timeoutMs ?? null]);
             const previous = feedLoads.get(input.slot);
             const now = Date.now();
-            if (previous?.key === key) {
-                if (previous.running) return previous.running;
+            if (previous?.key === key && !previous.controller.signal.aborted) {
+                if (previous.running) {
+                    previous.watch(signal);
+                    return previous.running;
+                }
                 if (input.refresh && now - previous.refreshedAt < EXTERNAL_CALENDAR_REFRESH_THROTTLE_MS) return previous.last;
             }
             previous?.controller.abort(new Error('A newer load for this screen replaced it'));
             const controller = new AbortController();
+            const owners = new Map<AbortSignal, () => void>();
+            const watch = (owner?: AbortSignal) => {
+                if (!owner || owners.has(owner)) return;
+                const abort = () => {
+                    controller.abort(owner.reason);
+                    if (feedLoads.get(input.slot)?.controller === controller) feedLoads.delete(input.slot);
+                };
+                owners.set(owner, abort);
+                owner.addEventListener('abort', abort, { once: true });
+                if (owner.aborted) abort();
+            };
+            watch(signal);
             const load: FeedLoad = loadFeed(host, start, end, input.timeoutMs, controller.signal).finally(() => {
+                for (const [owner, abort] of owners) owner.removeEventListener('abort', abort);
+                owners.clear();
                 const entry = feedLoads.get(input.slot);
-                if (entry?.controller === controller) entry.running = null;
+                if (entry?.controller === controller) {
+                    if (controller.signal.aborted) feedLoads.delete(input.slot);
+                    else entry.running = null;
+                }
             });
             const refreshedAt = input.refresh ? now : previous?.key === key ? previous.refreshedAt : 0;
-            feedLoads.set(input.slot, { key, controller, running: load, last: load, refreshedAt });
+            feedLoads.set(input.slot, { key, controller, running: load, last: load, refreshedAt, watch });
             return load;
         },
     };

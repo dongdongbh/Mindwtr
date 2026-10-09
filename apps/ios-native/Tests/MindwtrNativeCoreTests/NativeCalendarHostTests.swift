@@ -32,6 +32,76 @@ private final class CalendarHostState: @unchecked Sendable {
     var counters: (jobs: Int, running: Int)? { lock.lock(); let value = jobs; lock.unlock(); return value?.counters }
 }
 
+private final class CalendarHeldFeedProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var state: CalendarHeldFeedState?
+    private var owner: CalendarHeldFeedState?
+    static func install(_ value: CalendarHeldFeedState?) { lock.lock(); state = value; lock.unlock() }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lock.lock(); owner = Self.state; Self.lock.unlock()
+        guard let owner else { XCTFail("Unexpected Calendar HTTP owner"); fail(); return }
+        owner.start(self)
+    }
+    override func stopLoading() { owner?.stop(self) }
+    func fail() { client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)) }
+    func reply(_ bytes: Data) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/calendar", "Content-Length": String(bytes.count)])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: bytes)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+private final class CalendarHeldFeedState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requests = 0, stopped = 0, settled = false, writes = 0, prompts = 0
+    private var entered: XCTestExpectation?, stopExpectation: XCTestExpectation?, completion: XCTestExpectation?
+    private var completionRelease: DispatchSemaphore?
+    private var jobs: NativeHTTPJobs?
+    private var held: CalendarHeldFeedProtocol?
+    private let bytes = Data("""
+    BEGIN:VCALENDAR\r
+    VERSION:2.0\r
+    BEGIN:VEVENT\r
+    UID:cancel-retry-conflict\r
+    DTSTART:20361003T100000Z\r
+    DTEND:20361003T110000Z\r
+    SUMMARY:Retried ICS conflict\r
+    END:VEVENT\r
+    END:VCALENDAR\r
+
+    """.utf8)
+    func hold(entered: XCTestExpectation, stopped: XCTestExpectation, completion: XCTestExpectation, release: DispatchSemaphore) {
+        lock.lock(); self.entered = entered; stopExpectation = stopped
+        self.completion = completion; completionRelease = release; lock.unlock()
+    }
+    func start(_ transport: CalendarHeldFeedProtocol) {
+        lock.lock(); requests += 1; let first = requests == 1, entered = self.entered
+        if first { self.entered = nil; held = transport }; lock.unlock()
+        guard transport.request.url?.absoluteString == "https://calendar.example.invalid/calendar.ics",
+              transport.request.httpMethod == "GET" else { XCTFail("Unexpected Calendar feed request"); transport.fail(); return }
+        if first { entered?.fulfill() } else { transport.reply(bytes) }
+    }
+    func stop(_ transport: CalendarHeldFeedProtocol) {
+        lock.lock(); guard held === transport else { lock.unlock(); return }
+        held = nil; stopped += 1; let expected = stopExpectation; stopExpectation = nil; lock.unlock(); expected?.fulfill()
+    }
+    func capture(_ value: NativeHTTPJobs) { lock.lock(); jobs = value; lock.unlock() }
+    func beforeCompletion() {
+        lock.lock(); let entered = completion, release = completionRelease; completion = nil; completionRelease = nil; lock.unlock()
+        if let entered, let release { entered.fulfill(); _ = release.wait(timeout: .now() + 10) }
+    }
+    func markSettled() { lock.lock(); settled = true; lock.unlock() }
+    func write() { lock.lock(); writes += 1; lock.unlock() }
+    func prompt() { lock.lock(); prompts += 1; lock.unlock() }
+    var counts: [Int] { lock.lock(); defer { lock.unlock() }; return [requests, stopped, writes, prompts] }
+    var hasSettled: Bool { lock.lock(); defer { lock.unlock() }; return settled }
+    var counters: (jobs: Int, running: Int)? { lock.lock(); let value = jobs; lock.unlock(); return value?.counters }
+}
+
 final class NativeCalendarHostTests: XCTestCase {
     private var root: URL!, bundle: URL!, state: CalendarHostState!
     private var networkBefore = 0
@@ -223,6 +293,64 @@ final class NativeCalendarHostTests: XCTestCase {
         let retry = try object(await value.calendarRead(requestJSON: "{\"op\":\"permissions\"}"))
         XCTAssertEqual(retry["status"] as? String, "granted"); try await drained()
         XCTAssertEqual(state.reader.operations, ["permissions", "calendars", "permissions"])
+    }
+
+    func testActualSharedICSCancellationCannotPoisonSameRangeRefreshCache() async throws {
+        let entered = expectation(description: "Actual shared ICS fetch entered")
+        let stopped = expectation(description: "Cancelled ICS transport stopped")
+        let completing = expectation(description: "Cancelled HTTP delegate completion is held")
+        let release = DispatchSemaphore(value: 0), http = CalendarHeldFeedState()
+        defer { release.signal(); CalendarHeldFeedProtocol.install(nil) }
+        http.hold(entered: entered, stopped: stopped, completion: completing, release: release)
+        CalendarHeldFeedProtocol.install(http)
+        let namespace = "tech.example.mindwtr.calendar-feed-cancel"
+        let container = root.appendingPathComponent("cancel-container")
+        let manifest = container.appendingPathComponent("Library/Application Support/\(namespace)/RCTAsyncLocalStorage_V1/manifest.json")
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let feeds = [["id": "feed-cancel", "name": "ICS cancellation fixture", "url": "https://calendar.example.invalid/calendar.ics", "enabled": true]] as [[String: Any]]
+        let original = Data(try json(["mindwtr-external-calendars": json(feeds), "@mindwtr_sync_backend": "off", "unknown": "preserve"]).utf8)
+        try original.write(to: manifest)
+        // Only Date.now is frozen, so a slow CI drain still retries within the
+        // one-second cache window. All production entry/loader/IO code is intact.
+        let clockBundle = root.appendingPathComponent("calendar-cancel-clock.js")
+        try (String(contentsOf: bundle, encoding: .utf8) + "\n;Date.now=()=>1791504000000;\n")
+            .write(to: clockBundle, atomically: true, encoding: .utf8)
+        let faults = HostIOFaults(), configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CalendarHeldFeedProtocol.self]; faults.httpConfiguration = configuration
+        faults.configureHTTPJobs = { jobs in http.capture(jobs); jobs.beforeCompletion = { http.beforeCompletion() } }
+        faults.calendarReaderFactory = { XCTFail("Disabled system calendars cannot read EventKit"); return CalendarTestReader() }
+        faults.calendarAuthorizationRequest = { http.prompt(); throw NativeCalendarReadError.unavailable }
+        faults.secretService = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
+        faults.secretStatus = { _, _ in errSecNotAvailable }
+        let value = CoreHost(databaseURL: database, bundleURL: clockBundle, faults: faults,
+            deviceStorage: (containerURL: container, bundleIdentifier: namespace))
+        addTeardownBlock { await value.close() }; _ = try await value.start()
+        faults.beforeSQL = { statement in
+            if statement.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+(?:tasks|projects|settings|native_request_receipts)\b"#, options: .regularExpression) != nil { http.write() }
+        }
+        faults.journalWrite = { http.write() }
+        let request = try json(["op": "feed", "slot": "calendar", "start": "2036-10-03T00:00:00.000Z",
+            "end": "2036-10-04T00:00:00.000Z", "refresh": true])
+        let pending = Task { defer { http.markSettled() }; return try await value.calendarRead(requestJSON: request) }
+        await fulfillment(of: [entered], timeout: 3); pending.cancel()
+        await fulfillment(of: [stopped, completing], timeout: 3)
+        XCTAssertFalse(http.hasSettled, "Caller cancellation must wait for the accepted HTTP delegate to drain")
+        XCTAssertEqual(http.counters?.running, 1)
+        release.signal()
+        do { _ = try await pending.value; XCTFail("Cancelled shared feed cannot publish a partial success") }
+        catch is CancellationError {} catch { XCTFail("Expected caller cancellation, got \(error)") }
+        XCTAssertEqual(http.counters?.jobs, 0); XCTAssertEqual(http.counters?.running, 0)
+        let retry = try object(await value.calendarRead(requestJSON: request))
+        XCTAssertEqual(retry["status"] as? String, "ready"); XCTAssertNil(retry["warning"])
+        let events = try XCTUnwrap(retry["events"] as? [[String: Any]])
+        XCTAssertEqual(events.map { $0["title"] as? String }, ["Retried ICS conflict"])
+        XCTAssertEqual(events.first?["start"] as? String, "2036-10-03T10:00:00.000Z")
+        XCTAssertEqual(http.counts, [2, 1, 0, 0], "Retry must fetch again without a write or permission prompt")
+        let throttled = try object(await value.calendarRead(requestJSON: request))
+        XCTAssertEqual((throttled["events"] as? [[String: Any]])?.count, 1)
+        XCTAssertEqual(http.counts, [2, 1, 0, 0], "Successful same-range refresh still uses the normal throttle")
+        XCTAssertEqual(try Data(contentsOf: manifest), original)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
     }
 
     func testCloseWaitsHeldWorkerBeforeLibraryUnlockAndColdOwnerHasNoLateResponse() async throws {

@@ -15726,6 +15726,10 @@ private final class Engine: @unchecked Sendable {
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"])
         case "Native iOS foreground activation refreshed":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"])
+        case "Native iOS calendar feed view published":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-feed"
+                && ["ready", "partial", "error"].contains(context["outcome"] as? String ?? "")
         case "Native iOS system search":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome", "count"])
                 && context["releaseCheck"] as? String == "v1.3.5/ios-search-publication"
@@ -17554,6 +17558,7 @@ private final class Engine: @unchecked Sendable {
         }
         if ["calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave"].contains(method) {
             guard let json = args.first as? String, json.utf8.count <= 2_000_000,
+                  (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
                   let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
                 throw HostFailure("INVALID_INPUT: Native Calendar composer requires a bounded JSON object")
             }
@@ -17590,8 +17595,16 @@ private final class Engine: @unchecked Sendable {
         }
         if method == "menuRead" {
             guard let name = args[0] as? String, ["more", "savedSearch", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
-                  let json = args[1] as? String,
-                  let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
+                  let json = args[1] as? String else {
+                throw HostFailure("Unsupported native menu read or JSON object input")
+            }
+            if ["calendar", "calendarItem"].contains(name) {
+                guard json.utf8.count <= 2_000_000,
+                      (try? NativeJSON.hasUniqueObjectKeys(json)) == true else {
+                    throw HostFailure("INVALID_INPUT: Native Calendar browsing requires a bounded JSON object")
+                }
+            }
+            guard let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
                 throw HostFailure("Unsupported native menu read or JSON object input")
             }
             if ["dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport"].contains(name), !input.isEmpty { throw HostFailure("INVALID_INPUT: Unsupported Data settings read") }
@@ -17794,8 +17807,8 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("Unsupported native Review browsing input")
             }
             let calendarFields: [String: Set<String>] = [
-                "calendar": ["state", "scheduleQuery", "offset", "limit", "revision"],
-                "calendarItem": ["taskId", "state"],
+                "calendar": ["state", "scheduleQuery", "offset", "limit", "revision", "calendar"],
+                "calendarItem": ["taskId", "state", "calendar"],
                 "calendarPreferences": [],
             ]
             if let fields = calendarFields[name], !Set(input.keys).isSubset(of: fields) {

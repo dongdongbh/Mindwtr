@@ -9789,6 +9789,247 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["settings-advanced"], timeout: 30)
     }
 
+    private func task465Tap(_ app: XCUIApplication, _ identifier: String) {
+        let target = app.buttons[identifier], layout = app.scrollViews["calendar-layout-scroll"]
+        if !target.isHittable {
+            let scroll = layout.exists ? layout : app.scrollViews["calendar-month-grid"]
+            task442Reveal(app, target, in: scroll)
+        }
+        boardTap(app, identifier)
+    }
+
+    // Root stages isolated shared storage and actual HTTPS ICS fixtures; device calendars stay OFF.
+    private func task465CalendarFeed(_ suffix: String, largest: Bool, partial: Bool, eventCount: Int = 1) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_FEED_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        let calendar = app.buttons["menu-calendar"]
+        if !calendar.isHittable {
+            task442Reveal(app, calendar, in: app.scrollViews.containing(.button, identifier: "menu-calendar").firstMatch)
+        }
+        boardTap(app, "menu-calendar")
+        task465Tap(app, "calendar-mode-month")
+        task465Tap(app, "calendar-day-2026-10-09")
+        let events = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "calendar-item-", "Task465 timed event"))
+        let event = events.firstMatch
+        func expectEvent(_ mode: String) {
+            let loading = app.descendants(matching: .any).matching(identifier: "calendar-feed-loading").firstMatch
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: loading)
+            waitForExpectations(timeout: 30)
+            XCTAssertTrue(event.waitForExistence(timeout: 30), "External event missing in " + mode)
+            XCTAssertEqual(events.count, eventCount, "Byte-distinct source events must survive in " + mode)
+            for row in events.allElementsBoundByIndex { XCTAssertFalse(row.isEnabled, "External event actions await their native owners") }
+            XCTAssertFalse(app.staticTexts["calendar-error"].exists)
+            if partial {
+                XCTAssertTrue(app.staticTexts["calendar-feed-message"].exists)
+                XCTAssertFalse(app.staticTexts["calendar-feed-message"].label.isEmpty)
+                boardEnabled(app.buttons["calendar-feed-retry"], timeout: 30)
+            } else { XCTAssertFalse(app.staticTexts["calendar-feed-message"].exists) }
+        }
+        expectEvent("month")
+        for mode in ["week", "day", "schedule", "month"] {
+            task465Tap(app, "calendar-mode-" + mode)
+            expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["calendar-mode-" + mode])
+            waitForExpectations(timeout: 20)
+            expectEvent(mode)
+        }
+        if partial {
+            boardTap(app, "calendar-feed-retry")
+            expectEvent("month after partial-feed retry")
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = partial ? "Calendar partial feed retains successful event" : largest ? "Calendar external event largest text" : "Calendar external event normal"
+        shot.lifetime = .keepAlways; add(shot)
+        // The rejected preparation checks the actual external busy interval without writing a task.
+        let query = app.textFields["calendar-query"]
+        if !query.isHittable {
+            task442Reveal(app, query, in: app.scrollViews["calendar-layout-scroll"])
+        }
+        boardEnabled(query); query.tap(); query.typeText("Task465 schedulable")
+        let returnKey = app.keyboards.buttons["Return"]
+        if returnKey.exists && returnKey.isHittable { returnKey.tap() }
+        let candidate = app.buttons["calendar-candidate-task465-schedulable"]
+        if !candidate.isHittable {
+            task442Reveal(app, candidate, in: app.scrollViews["calendar-details"])
+        }
+        boardEnabled(candidate, timeout: 30); candidate.tap()
+        XCTAssertTrue(app.staticTexts["calendar-composer-title"].waitForExistence(timeout: 10))
+        let composerScroll = app.scrollViews.containing(.button, identifier: "calendar-composer-save").firstMatch
+        func composerTap(_ id: String) {
+            revealPagedElement(app, app.buttons[id], in: composerScroll)
+            boardTap(app, id)
+        }
+        func composerText(_ input: XCUIElement, _ text: String) {
+            revealPagedElement(app, input, in: composerScroll)
+            replaceTextView(input, with: text)
+        }
+        let start = app.textFields["calendar-composer-start"]
+        composerText(start, "10:00")
+        composerTap("calendar-composer-duration-30")
+        composerTap("calendar-composer-save")
+        XCTAssertTrue(app.staticTexts["calendar-composer-error"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["calendar-composer-title"].exists)
+        XCTAssertEqual(app.staticTexts["calendar-composer-error"].label, "That time overlaps with an event. Please choose a free slot.")
+        let conflict = XCTAttachment(screenshot: app.screenshot())
+        conflict.name = "Calendar frozen feed refuses occupied task slot"; conflict.lifetime = .keepAlways; add(conflict)
+        composerTap("calendar-composer-cancel")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["calendar-composer-title"])
+        waitForExpectations(timeout: 10)
+        boardEnabled(app.buttons["calendar-mode-month"])
+        XCTAssertTrue(app.buttons["calendar-mode-month"].isSelected)
+    }
+
+    func testNativeCalendarExternalFeedNormal() throws { try task465CalendarFeed("NORMAL", largest: false, partial: false) }
+    func testNativeCalendarExternalFeedLargest() throws { try task465CalendarFeed("LARGEST", largest: true, partial: false) }
+    func testNativeCalendarExternalFeedPartialFailure() throws { try task465CalendarFeed("PARTIAL", largest: false, partial: true) }
+
+    func testNativeCalendarExternalFeedUnicodeSources() throws { try task465CalendarFeed("UNICODE", largest: false, partial: false, eventCount: 2) }
+
+    private final class Task465ControlResult: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<Data, NSError>?
+        func store(_ value: Result<Data, NSError>) { lock.lock(); defer { lock.unlock() }; result = value }
+        func read() -> Result<Data, NSError>? { lock.lock(); defer { lock.unlock() }; return result }
+    }
+
+    // Test-runner HTTP controls only the synthetic fixture server; it never reaches App configuration.
+    private func task465Control(_ base: URL, _ operation: String, method: String = "GET") throws -> [String: Any] {
+        var request = URLRequest(url: base.appendingPathComponent(operation), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        request.httpMethod = method
+        let box = Task465ControlResult(), done = expectation(description: "Synthetic calendar fixture control")
+        let call = URLSession.shared.dataTask(with: request) { data, response, error in
+            if error == nil, let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode), let data {
+                box.store(.success(data))
+            } else {
+                // Keep the random fixture token and endpoint out of test diagnostics.
+                box.store(.failure(NSError(domain: "Task465Fixture", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Synthetic calendar fixture control failed"])))
+            }
+            done.fulfill()
+        }
+        call.resume(); wait(for: [done], timeout: 5); call.cancel()
+        guard let result = box.read(), let object = try JSONSerialization.jsonObject(with: result.get()) as? [String: Any] else {
+            throw NSError(domain: "Task465Fixture", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Synthetic calendar fixture control returned no status"])
+        }
+        return object
+    }
+
+    private func task465HeldRead(_ app: XCUIApplication, control: URL, after requests: Int) throws -> Int {
+        let deadline = Date().addingTimeInterval(10)
+        repeat {
+            let status = try task465Control(control, "status")
+            let count = (status["requests"] as? NSNumber)?.intValue ?? 0
+            if count > requests, (status["waiting"] as? NSNumber)?.intValue ?? 0 > 0,
+               status["released"] as? Bool == false { return count }
+            // A cancelled range may finish inside the shared throttle; Retry deliberately restarts it.
+            let retry = app.buttons["calendar-feed-retry"]
+            if retry.exists && retry.isEnabled && retry.isHittable { retry.tap() }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+        XCTFail("The fixture did not observe a fresh held App feed request")
+        throw NSError(domain: "Task465Fixture", code: 3)
+    }
+
+    func testNativeCalendarExternalFeedDelayed() throws {
+        let library = try task371Library("DELAYED", prefix: "MINDWTR_CALENDAR_FEED_UI_")
+        guard let value = ProcessInfo.processInfo.environment["MINDWTR_CALENDAR_FEED_UI_CONTROL_URL"],
+              let control = URL(string: value), control.scheme == "https" else {
+            throw XCTSkip("Requires the root-staged synthetic calendar fixture control")
+        }
+        continueAfterFailure = false
+        _ = try task465Control(control, "reset", method: "POST")
+        let initial = try task465Control(control, "status")
+        var requests = (initial["requests"] as? NSNumber)?.intValue ?? 0
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate(); _ = try? task465Control(control, "release", method: "POST") }
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        let calendar = app.buttons["menu-calendar"]
+        if !calendar.isHittable {
+            task442Reveal(app, calendar, in: app.scrollViews.containing(.button, identifier: "menu-calendar").firstMatch)
+        }
+        boardTap(app, "menu-calendar"); task465Tap(app, "calendar-mode-month")
+        task465Tap(app, "calendar-day-2026-10-09")
+        func responsive(_ name: String, action: () -> Void, result: XCUIElement, predicate: NSPredicate) {
+            let start = Date()
+            action()
+            expectation(for: predicate, evaluatedWith: result)
+            waitForExpectations(timeout: 8)
+            XCTAssertLessThan(Date().timeIntervalSince(start), 10, name + " waited for the held feed timeout")
+        }
+        requests = try task465HeldRead(app, control: control, after: requests)
+        let heading = app.staticTexts["calendar-period-title"], month = heading.label
+        responsive("Next range", action: { boardTap(app, "calendar-next") }, result: heading,
+            predicate: NSPredicate(format: "label != %@", month))
+        boardEnabled(app.buttons["calendar-mode-month"], timeout: 8)
+        requests = try task465HeldRead(app, control: control, after: requests)
+        responsive("Previous range", action: { boardTap(app, "calendar-previous") }, result: heading,
+            predicate: NSPredicate(format: "label == %@", month))
+        boardEnabled(app.buttons["calendar-mode-month"], timeout: 8)
+        task465Tap(app, "calendar-day-2026-10-09")
+        requests = try task465HeldRead(app, control: control, after: requests)
+        responsive("Mode preference", action: { boardTap(app, "calendar-mode-week") }, result: app.buttons["calendar-mode-week"],
+            predicate: NSPredicate(format: "selected == true AND enabled == true"))
+        boardTap(app, "calendar-mode-month")
+        boardEnabled(app.buttons["calendar-mode-month"], timeout: 8)
+        let query = app.textFields["calendar-query"]
+        if !query.isHittable {
+            task442Reveal(app, query, in: app.scrollViews["calendar-layout-scroll"])
+        }
+        boardEnabled(query); query.tap(); query.typeText("Task465 schedulable")
+        let setupReturn = app.keyboards.buttons["Return"]
+        if setupReturn.exists && setupReturn.isHittable { setupReturn.tap() }
+        let candidate = app.buttons["calendar-candidate-task465-schedulable"]
+        XCTAssertTrue(candidate.waitForExistence(timeout: 8))
+        boardEnabled(app.buttons["calendar-mode-month"], timeout: 8)
+        requests = try task465HeldRead(app, control: control, after: requests)
+        responsive("Search exclusion projection", action: {
+            replaceTextView(query, with: "Task465 missing candidate")
+            let key = app.keyboards.buttons["Return"]
+            if key.exists && key.isHittable { key.tap() }
+        }, result: candidate, predicate: NSPredicate(format: "exists == false"))
+        boardEnabled(app.buttons["calendar-mode-month"], timeout: 8)
+        requests = try task465HeldRead(app, control: control, after: requests)
+        responsive("Search inclusion projection", action: {
+            replaceTextView(query, with: "Task465 schedulable")
+            let key = app.keyboards.buttons["Return"]
+            if key.exists && key.isHittable { key.tap() }
+        }, result: candidate, predicate: NSPredicate(format: "exists == true"))
+        boardEnabled(app.buttons["calendar-mode-month"], timeout: 8)
+        XCTAssertEqual(query.value as? String, "Task465 schedulable")
+        XCTAssertFalse(candidate.isEnabled)
+        requests = try task465HeldRead(app, control: control, after: requests)
+        responsive("Area picker read", action: { boardTap(app, "area-open") }, result: app.staticTexts["area-title"],
+            predicate: NSPredicate(format: "exists == true"))
+        boardEnabled(app.buttons["area-dismiss"], timeout: 8)
+        app.buttons["area-dismiss"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["area-title"])
+        waitForExpectations(timeout: 8)
+        _ = try task465HeldRead(app, control: control, after: requests)
+        let released = try task465Control(control, "release", method: "POST")
+        XCTAssertEqual(released["released"] as? Bool, true)
+        let loading = app.descendants(matching: .any).matching(identifier: "calendar-feed-loading").firstMatch
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: loading)
+        waitForExpectations(timeout: 30)
+        let events = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "calendar-item-", "Task465 timed event"))
+        XCTAssertTrue(events.firstMatch.waitForExistence(timeout: 30), "The restarted current feed must publish after release")
+        XCTAssertEqual(events.count, 1); XCTAssertFalse(events.firstMatch.isEnabled)
+        XCTAssertFalse(app.staticTexts["calendar-error"].exists)
+        XCTAssertFalse(app.staticTexts["calendar-feed-message"].exists)
+        XCTAssertTrue(app.buttons["calendar-mode-month"].isSelected)
+        XCTAssertEqual(heading.label, month)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Calendar held feed responds to controls and publishes after release"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     private func task97Normal(_ library: String) {
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]
         app.launch(); task97Open(app)

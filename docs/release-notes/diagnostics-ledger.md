@@ -30,6 +30,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.5 (add before tagging, trim in the release after)
 
+- **`v1.3.5/ios-calendar-feed`** — `apps/ios-native/App/CoreModel.swift`, admitted by `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`. Fixed message: `Native iOS calendar feed view published`; With Diagnostics logging enabled, `outcome=ready|partial|error` follows publication of the current shared external-calendar projection. Partial retains successful events; error does not imply all sources succeeded. It does not prove real EventKit access or event actions. No event/calendar identifiers, titles, notes, locations, dates or URLs are logged.
+
 - **`v1.3.5/ios-calendar-access`** — `apps/android-native/bundle/host-entry.ts`. Fixed message: `Native iOS calendar access request returned`; `outcome=returned` means the explicit Settings permission callback completed and the same page, host and saved choice were readmitted. It does not mean permission was granted or events were visible. Cancelled/stale callbacks emit no marker. No calendar identifiers, choices, permission errors or content are logged.
 
 - **`v1.3.5/ios-calendar-setting`** — `apps/android-native/bundle/host-entry.ts`. Fixed message: `Native iOS device calendar setting saved`; `outcome=saved` follows native journal acknowledgment of a device-calendar choice and its durable receipt. Retry uses the original prepared operation and atomically stored mutation proof; it does not request permission or reload providers. This marker does not prove permission, feed rendering or task-to-calendar export. No calendar IDs, choice objects, request IDs or content are logged.

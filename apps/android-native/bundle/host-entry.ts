@@ -4650,11 +4650,11 @@ globalThis.MindwtrHost = {
             if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.op !== 'string') {
                 throw new Error('INVALID_INPUT: Invalid calendar read');
             }
-            let result: unknown;
+            let result: Parameters<typeof unwrap>[0];
             if (['openSettings', 'getSettings', 'closeSettings'].includes(input.op)) {
                 if (Object.keys(input).length !== 1) throw new Error('INVALID_INPUT: Invalid calendar read');
-                result = input.op === 'openSettings' ? unwrap(await contract.openCalendarSettings())
-                    : input.op === 'getSettings' ? unwrap(contract.getCalendarSettings()) : unwrap(contract.closeCalendarSettings());
+                result = input.op === 'openSettings' ? await contract.openCalendarSettings()
+                    : input.op === 'getSettings' ? contract.getCalendarSettings() : contract.closeCalendarSettings();
             } else if (input.op === 'feed' && Object.keys(input).every((name) => ['op', 'slot', 'start', 'end', 'refresh'].includes(name))
                 && typeof input.slot === 'string' && ['calendar', 'weeklyReview', 'dailyReview'].includes(input.slot)
                 && typeof input.start === 'string' && typeof input.end === 'string'
@@ -4664,15 +4664,16 @@ globalThis.MindwtrHost = {
                 if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 366 * 86_400_000) {
                     throw new Error('INVALID_INPUT: Invalid calendar range');
                 }
-                result = unwrap(await contract.loadExternalCalendarFeed({
+                result = await contract.loadExternalCalendarFeed({
                     slot: input.slot as 'calendar' | 'weeklyReview' | 'dailyReview', start: input.start, end: input.end,
                     ...(input.refresh === undefined ? {} : { refresh: input.refresh }),
-                }));
+                }, signal);
             } else throw new Error('INVALID_INPUT: Invalid calendar read');
             assertReady();
+            const value = unwrap(result);
             logInfo('Native iOS calendar read delivered', { scope: 'native-ios', force: true,
                 context: { releaseCheck: 'v1.3.5/ios-calendar-read', outcome: input.op } });
-            return result;
+            return value;
         });
     },
     iosAboutUpdateState(): string {

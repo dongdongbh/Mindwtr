@@ -58,6 +58,7 @@ struct CalendarScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     .accessibilityIdentifier("calendar-notice")
             }
+            feedStatus
             if let error = model.calendarError {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(error).rnFont(14).foregroundStyle(palette.danger).accessibilityIdentifier("calendar-error")
@@ -74,6 +75,29 @@ struct CalendarScreen: View {
             }.frame(height: contentHeight)
             if content.text("mode") == "week" { weekDensity }
             if model.busy { ProgressView().padding(6).accessibilityLabel(model.label("common.loading")) }
+        }
+    }
+
+    @ViewBuilder
+    private var feedStatus: some View {
+        let state = view.object("feedState")
+        let message = state.text("message")
+        if !message.isEmpty && model.calendarError == nil {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    if state.text("status") == "loading" {
+                        ProgressView().accessibilityIdentifier("calendar-feed-loading")
+                    }
+                    Text(message).rnFont(14)
+                        .foregroundStyle(state.text("status") == "error" ? palette.danger : palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("calendar-feed-message")
+                }
+                if state.text("status") != "loading" {
+                    CalendarAction(title: model.label("common.retry"), enabled: model.calendarFeedRetryEnabled,
+                        palette: palette, id: "calendar-feed-retry") { Task { await model.retryCalendar() } }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
         }
     }
 
@@ -168,7 +192,7 @@ struct CalendarScreen: View {
                             Text(details.text("title")).rnFont(16, .semibold).fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
                                 .accessibilityIdentifier("calendar-selected-date")
-                            CalendarAction(title: text.text("addTask"), enabled: model.calendarActionsEnabled,
+                            CalendarAction(title: text.text("addTask"), enabled: model.calendarComposerOpeningEnabled,
                                 palette: palette, id: "calendar-add-selected-day") {
                                 Task { await model.openNewCalendarComposer(day: view.object("state").text("selectedDate")) }
                             }
@@ -391,7 +415,7 @@ struct CalendarScreen: View {
                 (today ? palette.tint.opacity(0.04) : palette.card)
                     .contentShape(Rectangle())
                     .gesture(SpatialTapGesture().onEnded { tap in
-                        guard model.calendarActionsEnabled else { return }
+                        guard model.calendarComposerOpeningEnabled else { return }
                         let raw = mode == "day" ? Double(min(1440, max(0, tap.location.y / pixelsPerMinute))) : nil
                         Task { await model.openNewCalendarComposer(day: dayKey, rawMinutes: raw) }
                     })
@@ -563,8 +587,10 @@ private struct CalendarEntryOffsets: PreferenceKey {
 }
 
 private func calendarEntryID(_ entry: CoreObject) -> String {
-    entry.text("type") + ":" + entry.text("dayKey") + ":" + entry.text("lane") + ":" +
-        (entry.text("type") == "day" ? entry.text("key") : entry.text("type") == "task" ? entry.text("taskId") : entry.object("item").text("id"))
+    let opaqueID = entry.text("type") == "day" ? entry.text("key")
+        : entry.text("type") == "task" ? entry.text("taskId") : entry.object("item").text("id")
+    return entry.text("type") + ":" + entry.text("dayKey") + ":" + entry.text("lane") + ":" +
+        Data(opaqueID.utf8).base64EncodedString()
 }
 
 private struct CalendarEntryList: View {
@@ -659,7 +685,7 @@ private struct CalendarCandidate: View {
             .padding(12).background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).disabled(!model.calendarActionsEnabled)
+        .buttonStyle(.plain).disabled(!model.calendarComposerOpeningEnabled)
         .accessibilityIdentifier("calendar-candidate-" + entry.text("taskId"))
     }
 }

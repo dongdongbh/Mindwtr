@@ -484,7 +484,7 @@ private struct AppLockRoot: View {
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         .onAppear {
             lock.sceneChanged(phase)
-            if applicationActive { model.notificationSettingsDidBecomeActive(); model.calendarSettingsDidBecomeActive() }
+            if applicationActive { model.notificationSettingsDidBecomeActive(); model.calendarSettingsDidBecomeActive(); model.calendarFeedDidBecomeActive() }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
@@ -498,6 +498,7 @@ private struct AppLockRoot: View {
             observedApplicationActive = true
             model.notificationSettingsDidBecomeActive()
             model.calendarSettingsDidBecomeActive()
+            model.calendarFeedDidBecomeActive()
             model.requestNotificationResponses()
             model.requestEntityLinks()
             model.requestSearchLifecycle(token: model.completedStartupToken, active: true, force: true)
@@ -510,6 +511,7 @@ private struct AppLockRoot: View {
             model.suspendEntityLinks()
             model.notificationSettingsWillResignActive()
             model.calendarSettingsWillResignActive()
+            model.calendarFeedWillResignActive()
             model.cancelForegroundSync()
             model.cancelReminderLifecycle()
             model.cancelSearchLifecycle()
@@ -525,9 +527,10 @@ private struct AppLockRoot: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
             model.cancelNotificationSettingsIntent()
             model.cancelCalendarSettingsIntent()
+            model.retireCalendarFeed()
         }
         .onChange(of: phase) { next in
-            if next == .background { model.cancelNotificationSettingsIntent(); model.cancelCalendarSettingsIntent() }
+            if next == .background { model.cancelNotificationSettingsIntent(); model.cancelCalendarSettingsIntent(); model.retireCalendarFeed() }
             model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
                 model.suspendEntityLinks()
@@ -554,6 +557,7 @@ private struct AppLockRoot: View {
                 model.suspendEntityLinks()
                 model.cancelNotificationSettingsIntent()
                 model.cancelCalendarSettingsIntent()
+                model.retireCalendarFeed()
                 model.cancelForegroundSync()
                 model.cancelReminderLifecycle()
                 model.cancelProjectAttachmentDownload()

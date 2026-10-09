@@ -217,6 +217,7 @@ final class CoreModel: ObservableObject {
                 invalidateProjectAttachmentOpen()
                 cancelProjectFileImport()
             }
+            if oldValue == .calendar && selectedSurface != .calendar { retireCalendarFeed() }
             if oldValue == .settings && selectedSurface != .settings {
                 retireNotificationSettingsPage()
                 retireCalendarSettingsPage()
@@ -1373,6 +1374,7 @@ final class CoreModel: ObservableObject {
                 retireNotificationSettingsPage()
                 retireCalendarSettingsPage()
                 settingsAdvancedPresented = false
+                retireCalendarFeed(clear: true)
                 retireReminderLifecycleHost(oldValue)
                 retireSearchHost(oldValue)
                 if oldValue != nil {
@@ -1468,6 +1470,34 @@ final class CoreModel: ObservableObject {
     private var calendarLoadedDepth = 50
     private var calendarNeedsRead = false
     private var calendarReadTask: Task<Void, Never>?
+    private struct CalendarFeedRange: Equatable {
+        let start: String
+        let end: String
+        init(_ range: CoreObject) throws {
+            start = range.text("start")
+            end = range.text("end")
+            guard !start.isEmpty, !end.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+        }
+    }
+    private var calendarPageSession = UUID()
+    private var calendarReadGeneration = 0
+    private var calendarViewHost: CoreHost?
+    private var calendarFeedRange: CalendarFeedRange?
+    private var calendarFeed: CoreObject = [:]
+    private var calendarViewFeed: CoreObject = [:]
+    private var calendarFeedTask: Task<Void, Never>?
+    private var calendarFeedOwner: UUID?
+    private var calendarFeedDrainID: UUID?
+    private var calendarCoreCallsInFlight = 0
+    private var calendarProjectionInFlight = 0
+    private var calendarFeedGeneration = UUID()
+    private var calendarViewFeedGeneration = UUID()
+    private var calendarFeedLoggedGeneration: UUID?
+    private var calendarFeedRefreshRequested = true
+    private var calendarFeedApplicationActive = false
+    private var calendarItemFeed: CoreObject = [:]
+    private var calendarComposerFeed: CoreObject = [:]
+    private var calendarComposerHost: CoreHost?
     private var calendarItemTaskID = ""
     private var calendarItemWriteRequest: (method: String, payload: String)?
     private var calendarPreferenceValues: CoreObject = [:]
@@ -1998,7 +2028,15 @@ final class CoreModel: ObservableObject {
     var calendarActionsEnabled: Bool {
         ready && selectedSurface == .calendar && calendarCurrent && !busy && !retryNeeded
             && !taskPresented && !areaPickerPresented && !calendarItemPresented && !calendarComposerPresented
-            && !capturePresented && !morePresented
+            && !capturePresented && !morePresented && !appLock.concealed && calendarFeedApplicationActive
+    }
+    var calendarComposerOpeningEnabled: Bool {
+        calendarActionsEnabled && calendarViewHost === host && calendarViewFeed.text("status") == "ready"
+            && calendarError == nil && !appLock.concealed && calendarFeedApplicationActive
+    }
+    var calendarFeedRetryEnabled: Bool {
+        ready && selectedSurface == .calendar && !busy && !retryNeeded && !appLock.concealed
+            && !taskPresented && !calendarItemPresented && !calendarComposerPresented && calendarFeedApplicationActive
     }
     var calendarComposerCanSave: Bool {
         let composer = calendarComposerView.object("composer")
@@ -2009,14 +2047,16 @@ final class CoreModel: ObservableObject {
             && calendarComposerStartInput == composer.text("startTimeValue")
             && calendarComposerEndInput == composer.text("endTimeValue")
             && !busy && !retryNeeded && calendarComposerSaveRequest == nil
+            && calendarComposerHost === host && calendarComposerFeed.text("status") == "ready"
+            && !appLock.concealed && calendarFeedApplicationActive
     }
     var calendarComposerEditPending: Bool { calendarComposerEditing || !calendarComposerEdits.isEmpty }
     var calendarItems: [CoreObject] {
         calendarView.objects("items").compactMap { $0.text("type") == "item" ? $0.object("item") : nil }
     }
     private func calendarEditableTask(_ id: String) -> Bool {
-        calendarItems.contains { $0.text("taskId") == id && $0.flag("pressable") && !$0.flag("projected")
-            && $0.object("row").text("id") == id && !$0.object("row").flag("readOnly") }
+        calendarItems.contains { $0.text("taskId").utf8.elementsEqual(id.utf8) && $0.flag("pressable") && !$0.flag("projected")
+            && $0.object("row").text("id").utf8.elementsEqual(id.utf8) && !$0.object("row").flag("readOnly") }
     }
     var focusActionsEnabled: Bool { focusControlsEnabled && focusCurrent && focusPanel.isEmpty }
     var focusPickerMatchesQuery: Bool {
@@ -4956,6 +4996,7 @@ final class CoreModel: ObservableObject {
             }
             requestNotificationResponses()
             requestEntityLinks()
+            if selectedSurface == .calendar { calendarNeedsRead = true; scheduleCalendarRead() }
         } catch is CoreHostProjectFileAvailabilityRecovery {
             guard let currentHost = startingHost, host === currentHost else { return }
             ready = false
@@ -6158,6 +6199,7 @@ final class CoreModel: ObservableObject {
     }
 
     func refresh() async {
+        if selectedSurface == .calendar { calendarFeedRefreshRequested = true }
         guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired,
               calendarSettingsCloseTask == nil else { return }
         if taskStartupSaveReceipt != nil {
@@ -14769,12 +14811,14 @@ final class CoreModel: ObservableObject {
 
     private func scheduleCalendarRead() {
         guard selectedSurface == .calendar, !busy, !retryNeeded, !taskPresented, !calendarItemPresented,
-              !calendarComposerPresented else { return }
+              !calendarComposerPresented, calendarCoreCallsInFlight == 0, ready,
+              !appLock.concealed, calendarFeedApplicationActive else { return }
         calendarReadTask?.cancel()
         calendarReadTask = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
             guard let self, self.selectedSurface == .calendar, !self.busy, !self.retryNeeded,
-                  !self.taskPresented, !self.calendarItemPresented, !self.calendarComposerPresented else { return }
+                  !self.taskPresented, !self.calendarItemPresented, !self.calendarComposerPresented,
+                  self.ready, !self.appLock.concealed, self.calendarFeedApplicationActive else { return }
             self.calendarReadTask = nil
             self.busy = true
             defer { self.finishOperation() }
@@ -14782,9 +14826,10 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    func retryCalendar() async {
+    func retryCalendar(refreshFeed: Bool = true) async {
         guard selectedSurface == .calendar, !busy, !retryNeeded, !taskPresented, !calendarItemPresented,
               !calendarComposerPresented else { return }
+        if refreshFeed { calendarFeedRefreshRequested = true }
         busy = true
         defer { finishOperation() }
         await readCalendar()
@@ -14793,18 +14838,21 @@ final class CoreModel: ObservableObject {
     func loadMoreCalendar() async {
         guard calendarActionsEnabled, calendarView.objects("items").count < calendarView.number("total") else { return }
         calendarLoadedDepth = calendarView.objects("items").count + pageSize
-        await retryCalendar()
+        await retryCalendar(refreshFeed: false)
     }
 
     func openCalendarComposer(_ entry: CoreObject) async {
+        guard let openingHost = host else { return }
+        let openingSession = calendarPageSession
+        let openingFeed = calendarViewFeed
         let openingState = calendarView.object("state")
         let day = openingState.text("selectedDate")
         let openingQuery = calendarQuery
         let openingRevision = calendarView.text("revision")
-        guard calendarActionsEnabled, entry.text("type") == "task", !day.isEmpty,
+        guard calendarComposerOpeningEnabled, entry.text("type") == "task", !day.isEmpty,
               !entry.text("taskId").isEmpty,
               calendarView.objects("items").contains(where: {
-                  $0.text("type") == "task" && $0.text("taskId") == entry.text("taskId")
+                  $0.text("type") == "task" && $0.text("taskId").utf8.elementsEqual(entry.text("taskId").utf8)
                       && $0.text("list") == entry.text("list") && $0.text("title") == entry.text("title")
               }) else { return }
         busy = true
@@ -14812,10 +14860,10 @@ final class CoreModel: ObservableObject {
         calendarComposerError = nil
         defer { finishOperation() }
         do {
-            let result = try await query("calendarComposerOpen", [try json([
-                "day": day, "scheduleTaskId": entry.text("taskId")
+            let result = try await query("calendarComposerOpen", [try calendarInputJSON([
+                "day": day, "scheduleTaskId": entry.text("taskId"), "calendar": openingFeed
             ])])
-            guard calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) else { return }
+            guard calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) else { return }
             let view = result.object("composer")
             if view.isEmpty {
                 let toast = result.object("toast")
@@ -14824,19 +14872,24 @@ final class CoreModel: ObservableObject {
                 return
             }
             guard view.object("composer").text("mode") == "existing" else { throw CocoaError(.coderReadCorrupt) }
+            calendarComposerHost = openingHost
+            calendarComposerFeed = openingFeed
             calendarComposerGeneration += 1
             calendarComposerEdits = []
             calendarComposerView = view
             syncCalendarComposerInputs()
             calendarComposerPresented = true
         } catch {
-            if calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) {
+            if calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) {
                 calendarError = error.localizedDescription
             }
         }
     }
 
     func openNewCalendarComposer(day: String, rawMinutes: Double? = nil) async {
+        guard let openingHost = host else { return }
+        let openingSession = calendarPageSession
+        let openingFeed = calendarViewFeed
         let openingState = calendarView.object("state")
         let openingQuery = calendarQuery
         let openingRevision = calendarView.text("revision")
@@ -14853,16 +14906,16 @@ final class CoreModel: ObservableObject {
             validTarget = day == calendarView.object("content").text("dayKey")
                 && (rawMinutes.map { $0.isFinite && $0 >= 0 && $0 <= 1440 } ?? true)
         } else { validTarget = false }
-        guard calendarActionsEnabled, validTarget, !day.isEmpty else { return }
+        guard calendarComposerOpeningEnabled, validTarget, !day.isEmpty else { return }
         busy = true
         calendarNotice = nil
         calendarComposerError = nil
         defer { finishOperation() }
         do {
-            var input: CoreObject = ["day": day, "mode": "new"]
+            var input: CoreObject = ["day": day, "mode": "new", "calendar": openingFeed]
             if let rawMinutes { input["rawMinutes"] = rawMinutes }
-            let result = try await query("calendarComposerOpen", [try json(input)])
-            guard calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) else { return }
+            let result = try await query("calendarComposerOpen", [try calendarInputJSON(input)])
+            guard calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) else { return }
             let next = result.object("composer")
             if next.isEmpty {
                 let toast = result.object("toast")
@@ -14871,21 +14924,25 @@ final class CoreModel: ObservableObject {
                 return
             }
             guard next.object("composer").text("mode") == "new" else { throw CocoaError(.coderReadCorrupt) }
+            calendarComposerHost = openingHost
+            calendarComposerFeed = openingFeed
             calendarComposerGeneration += 1
             calendarComposerEdits = []
             calendarComposerView = next
             syncCalendarComposerInputs()
             calendarComposerPresented = true
         } catch {
-            if calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) {
+            if calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) {
                 calendarError = error.localizedDescription
             }
         }
     }
 
-    private func calendarComposerOpeningCurrent(query: String, revision: String, state: CoreObject) -> Bool {
+    private func calendarComposerOpeningCurrent(host currentHost: CoreHost, session: UUID, query: String, revision: String, state: CoreObject) -> Bool {
         let current = calendarView.object("state")
-        return selectedSurface == .calendar && calendarCurrent && calendarQuery == query
+        return host === currentHost && calendarViewHost === currentHost && calendarPageSession == session
+            && !appLock.concealed && calendarFeedApplicationActive && !Task.isCancelled
+            && selectedSurface == .calendar && calendarCurrent && calendarQuery == query
             && calendarView.text("revision") == revision
             && current.text("selectedDate") == state.text("selectedDate")
             && current.text("visibleMonth") == state.text("visibleMonth")
@@ -14897,6 +14954,8 @@ final class CoreModel: ObservableObject {
         calendarComposerGeneration += 1
         calendarComposerPresented = false
         calendarComposerView = [:]
+        calendarComposerFeed = [:]
+        calendarComposerHost = nil
         calendarComposerEdits = []
         calendarComposerError = nil
         if calendarNeedsRead { scheduleCalendarRead() }
@@ -14939,7 +14998,7 @@ final class CoreModel: ObservableObject {
 
     func selectCalendarComposerTask(_ id: String) {
         guard calendarComposerPresented, !calendarComposerEditPending, !busy, !retryNeeded,
-              calendarComposerView.objects("candidates").contains(where: { $0.text("id") == id }) else { return }
+              calendarComposerView.objects("candidates").contains(where: { $0.text("id").utf8.elementsEqual(id.utf8) }) else { return }
         queueCalendarComposerEdit(["type": "selectTask", "taskId": id])
     }
 
@@ -14969,11 +15028,13 @@ final class CoreModel: ObservableObject {
     }
 
     private func pumpCalendarComposerEdits() async {
-        guard !calendarComposerEditing, calendarComposerPresented, !busy, !retryNeeded else { return }
+        guard !calendarComposerEditing, calendarComposerPresented, !busy, !retryNeeded,
+              calendarComposerHost === host, calendarComposerFeed.text("status") == "ready",
+              !appLock.concealed, calendarFeedApplicationActive, let currentHost = host else { return }
         calendarComposerEditing = true
         defer {
             calendarComposerEditing = false
-            if calendarComposerPresented && !calendarComposerEdits.isEmpty && calendarComposerError == nil {
+            if calendarComposerPresented && !calendarComposerEdits.isEmpty && calendarComposerError == nil && calendarFeedApplicationActive && !appLock.concealed {
                 Task { await pumpCalendarComposerEdits() }
             }
         }
@@ -14982,10 +15043,14 @@ final class CoreModel: ObservableObject {
             let edit = calendarComposerEdits.removeFirst()
             let previousMode = calendarComposerView.object("composer").text("mode")
             do {
-                let next = try await query("calendarComposerEdit", [try json([
-                    "composer": calendarComposerView.object("composer"), "edit": edit
+                let next = try await query("calendarComposerEdit", [try calendarInputJSON([
+                    "composer": calendarComposerView.object("composer"), "edit": edit, "calendar": calendarComposerFeed
                 ])])
-                guard calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard host === currentHost, calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard !appLock.concealed, calendarFeedApplicationActive else {
+                    calendarComposerEdits.insert(edit, at: 0)
+                    return
+                }
                 let returnedMode = next.object("composer").text("mode")
                 guard ["new", "existing"].contains(returnedMode),
                       returnedMode == (edit.text("type") == "mode" ? edit.text("mode") : previousMode) else {
@@ -14995,7 +15060,11 @@ final class CoreModel: ObservableObject {
                 syncCalendarComposerInputs()
                 calendarComposerError = nil
             } catch {
-                guard calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard host === currentHost, calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard !appLock.concealed, calendarFeedApplicationActive else {
+                    calendarComposerEdits.insert(edit, at: 0)
+                    return
+                }
                 if calendarComposerEdits.first?.text("type") == edit.text("type") {
                     // A newer raw value superseded the refused in-flight value.
                     continue
@@ -15027,8 +15096,8 @@ final class CoreModel: ObservableObject {
         guard calendarComposerCanSave else { return }
         let request: String
         do {
-            request = try json(["requestId": UUID().uuidString.lowercased(),
-                "composer": calendarComposerView.object("composer")])
+            request = try calendarInputJSON(["requestId": UUID().uuidString.lowercased(),
+                "composer": calendarComposerView.object("composer"), "calendar": calendarComposerFeed])
         } catch { calendarComposerError = error.localizedDescription; return }
         calendarComposerSaveRequest = request
         busy = true
@@ -15074,6 +15143,8 @@ final class CoreModel: ObservableObject {
         calendarComposerGeneration += 1
         calendarComposerPresented = false
         calendarComposerView = [:]
+        calendarComposerFeed = [:]
+        calendarComposerHost = nil
         calendarComposerEdits = []
         calendarComposerError = nil
         calendarComposerNavigation = (next, minute.doubleValue)
@@ -15129,15 +15200,150 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    private func calendarInputJSON(_ input: CoreObject) throws -> String {
+        let value = try json(input)
+        guard value.utf8.count <= 2_000_000 else {
+            throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.coderInvalidValue.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: label("settings.calendarMobile.failedToLoadEvents")])
+        }
+        return value
+    }
+
+    private func calendarReadCurrent(_ currentHost: CoreHost, session: UUID, generation: Int, query: String) -> Bool {
+        host === currentHost && calendarPageSession == session && calendarReadGeneration == generation
+            && selectedSurface == .calendar && calendarQuery == query && !appLock.concealed
+            && calendarFeedApplicationActive && !Task.isCancelled
+    }
+
+    func retireCalendarFeed(clear: Bool = false) {
+        calendarPageSession = UUID()
+        calendarReadGeneration += 1
+        calendarReadTask?.cancel()
+        calendarFeedTask?.cancel()
+        calendarFeedTask = nil
+        calendarFeedOwner = nil
+        calendarFeedDrainID = nil
+        calendarFeedGeneration = UUID()
+        calendarFeedRefreshRequested = true
+        if clear {
+            calendarFeedRange = nil
+            calendarFeed = [:]
+            calendarViewFeed = [:]
+            calendarViewHost = nil
+            calendarComposerFeed = [:]
+            calendarComposerHost = nil
+            calendarItemFeed = [:]
+        }
+    }
+
+    func calendarFeedDidBecomeActive() {
+        let returning = !calendarFeedApplicationActive
+        calendarFeedApplicationActive = true
+        guard returning, ready, selectedSurface == .calendar, !appLock.concealed else { return }
+        calendarFeedRefreshRequested = true
+        calendarNeedsRead = true
+        if calendarComposerPresented { Task { await pumpCalendarComposerEdits() } }
+        else { scheduleCalendarRead() }
+    }
+
+    func calendarFeedWillResignActive() {
+        calendarFeedApplicationActive = false
+        retireCalendarFeed()
+    }
+
+    private func beginCalendarFeedRead(_ range: CalendarFeedRange) {
+        guard ready, selectedSurface == .calendar, !appLock.concealed, calendarFeedApplicationActive,
+              calendarFeedTask == nil, calendarCoreCallsInFlight == 0, calendarFeedDrainID == nil,
+              calendarFeedRange == range, calendarFeed.text("status") == "loading",
+              let currentHost = host else { return }
+        let owner = UUID(), session = calendarPageSession
+        let refresh = calendarFeedRefreshRequested
+        calendarFeedRefreshRequested = false
+        calendarFeedOwner = owner
+        calendarFeedGeneration = owner
+        calendarFeedTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.calendarFeedOwner == owner { self.calendarFeedTask = nil; self.calendarFeedOwner = nil }
+            }
+            @MainActor func current() -> Bool {
+                self.host === currentHost && self.calendarPageSession == session && self.calendarFeedOwner == owner
+                    && self.calendarFeedRange == range && self.selectedSurface == .calendar && self.ready
+                    && self.calendarFeedApplicationActive && !self.appLock.concealed && !Task.isCancelled
+            }
+            do {
+                var input: CoreObject = ["op": "feed", "slot": "calendar", "start": range.start, "end": range.end]
+                if refresh { input["refresh"] = true }
+                guard current() else { return }
+                let result = try self.decode(await currentHost.calendarRead(requestJSON: self.json(input)))
+                guard current() else { return }
+                guard ["ready", "error"].contains(result.text("status")) else { throw CocoaError(.coderReadCorrupt) }
+                // Shared projection validates every source/event and the full request byte bound.
+                self.calendarFeed = result
+            } catch {
+                guard current() else { return }
+                self.calendarFeed = ["status": "error", "message": self.label("settings.calendarMobile.failedToLoadEvents")]
+                self.calendarError = error.localizedDescription
+            }
+            guard current() else { return }
+            self.calendarNeedsRead = true
+            self.scheduleCalendarRead()
+        }
+    }
+
+    private func drainCalendarFeedForCoreCall() async {
+        guard let read = calendarFeedTask else { return }
+        // invoke owns the serial engine queue while HTTP is pending. Signal its cancellation
+        // before queueing another call; preserve same-range events for the deliberate restart.
+        let drainID = calendarFeedDrainID ?? UUID()
+        calendarFeedDrainID = drainID
+        calendarFeedOwner = nil
+        calendarFeedGeneration = UUID()
+        calendarFeedRefreshRequested = true
+        if calendarProjectionInFlight == 0 { calendarNeedsRead = true }
+        read.cancel()
+        await read.value
+        guard calendarFeedDrainID == drainID else { return }
+        calendarFeedTask = nil
+        calendarFeedDrainID = nil
+    }
+
+    private func calendarFeedPublished(_ feed: CoreObject, generation: UUID, host observed: CoreHost, session: UUID) {
+        let status = feed.text("status")
+        guard ["ready", "error"].contains(status), generation == calendarFeedGeneration,
+              calendarFeedLoggedGeneration != generation else { return }
+        let outcome = status == "error" ? "error" : feed.text("warning").isEmpty ? "ready" : "partial"
+        calendarFeedLoggedGeneration = generation
+        Task { [weak self] in
+            guard let self, self.host === observed, self.calendarViewHost === observed,
+                  self.calendarPageSession == session, self.calendarViewFeedGeneration == generation,
+                  self.calendarFeedGeneration == generation, self.selectedSurface == .calendar,
+                  self.calendarCurrent, !self.appLock.concealed, self.calendarFeedApplicationActive,
+                  !Task.isCancelled else { return }
+            _ = try? await observed.call("logLine", argumentsJSON: self.json([
+                "Native iOS calendar feed view published", try self.json([
+                    "releaseCheck": "v1.3.5/ios-calendar-feed", "outcome": outcome,
+                ]),
+            ]))
+        }
+    }
+
     private func readCalendar() async {
+        calendarProjectionInFlight += 1
+        defer { calendarProjectionInFlight -= 1 }
         calendarReadTask?.cancel()
         calendarNeedsRead = false
         calendarCurrent = false
         calendarError = nil
-        let text = calendarQuery
+        guard let currentHost = host else { return }
+        calendarReadGeneration += 1
+        let generation = calendarReadGeneration, session = calendarPageSession, text = calendarQuery
+        func current() -> Bool { calendarReadCurrent(currentHost, session: session, generation: generation, query: text) }
         for attempt in 0..<2 {
             do {
+                guard current() else { return }
                 let preferences = try await query("menuRead", ["calendarPreferences", "{}"])
+                guard current() else { return }
                 let values = preferences.object("values")
                 guard preferences.number("version") == 1, values["viewMode"] is String,
                       values["showCompleted"] is Bool, values["weekVisibleDays"] is NSNumber else {
@@ -15146,17 +15352,48 @@ final class CoreModel: ObservableObject {
                 var state = calendarState
                 if let target = calendarPreferenceTarget, !calendarPreferencePending {
                     state = target
-                    // Preserve the core navigation target, but honor the acknowledged stored mode
-                    // if replay finished persistence after a newer same-field preference arrived.
+                    // Honor the acknowledged stored mode if replay followed newer same-field intent.
                     state["viewMode"] = values["viewMode"]
                 }
                 var input: CoreObject = ["scheduleQuery": text, "offset": 0, "limit": pageSize]
                 if !state.isEmpty { input["state"] = state }
-                var next = try await query("menuRead", ["calendar", try json(input)])
-                guard !next.text("revision").isEmpty, !next.object("state").isEmpty,
-                      next.number("total") >= 0, next.objects("items").count == min(pageSize, next.number("total")) else {
-                    throw CocoaError(.coderReadCorrupt)
+                // Only core computes/normalizes the range; this task-only projection is never published.
+                let baseline = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                guard current() else { return }
+                let range = try CalendarFeedRange(baseline.object("range"))
+                if calendarFeedRange != range {
+                    calendarFeedTask?.cancel()
+                    calendarFeedTask = nil
+                    calendarFeedOwner = nil
+                    calendarFeedRange = range
+                    calendarFeed = ["status": "loading"]
+                    calendarFeedRefreshRequested = true
+                } else if calendarFeedRefreshRequested && calendarFeedTask == nil {
+                    var loading: CoreObject = ["status": "loading"]
+                    if calendarFeed["calendars"] != nil { loading["calendars"] = calendarFeed["calendars"] }
+                    if calendarFeed["events"] != nil { loading["events"] = calendarFeed["events"] }
+                    calendarFeed = loading
                 }
+                var frozenFeed = calendarFeed
+                let frozenFeedGeneration = calendarFeedGeneration
+                input["state"] = baseline.object("state")
+                input["calendar"] = frozenFeed
+                var next: CoreObject
+                do {
+                    next = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                } catch {
+                    guard current() else { return }
+                    // A rejected feed must remain visible as failure; keep core-rendered tasks and block planning.
+                    calendarError = error.localizedDescription
+                    frozenFeed = ["status": "error", "message": label("settings.calendarMobile.failedToLoadEvents")]
+                    calendarFeed = frozenFeed
+                    input["calendar"] = frozenFeed
+                    next = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                }
+                guard current() else { return }
+                guard !next.text("revision").isEmpty, !next.object("state").isEmpty,
+                      next.number("total") >= 0, next.objects("items").count == min(pageSize, next.number("total")),
+                      next.object("feedState")["status"] is String else { throw CocoaError(.coderReadCorrupt) }
                 var entries = next.objects("items")
                 input["state"] = next.object("state")
                 input["revision"] = next.text("revision")
@@ -15165,38 +15402,45 @@ final class CoreModel: ObservableObject {
                     let limit = min(pageSize, target - entries.count)
                     input["offset"] = entries.count
                     input["limit"] = limit
-                    let page = try await query("menuRead", ["calendar", try json(input)])
+                    let page = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                    guard current() else { return }
                     guard page.text("revision") == next.text("revision"), page.number("total") == next.number("total"),
                           page.objects("items").count == limit,
                           try json(page.object("state")) == json(next.object("state")) else { throw CocoaError(.coderReadCorrupt) }
                     entries += page.objects("items")
                 }
-                guard selectedSurface == .calendar, text == calendarQuery else { calendarNeedsRead = true; return }
+                guard current() else { return }
                 next["items"] = entries
                 calendarState = next.object("state")
                 calendarPreferenceValues = values
                 calendarPreferenceTarget = nil
+                calendarViewFeed = frozenFeed
+                calendarViewFeedGeneration = frozenFeedGeneration
+                calendarViewHost = currentHost
                 if calendarView.isEmpty { NSLog("Native iOS Calendar view loaded releaseCheck=v1.3.3/native-ios-calendar-read") }
                 calendarView = next
                 calendarCurrent = true
+                calendarFeedPublished(frozenFeed, generation: frozenFeedGeneration, host: currentHost, session: session)
+                beginCalendarFeedRead(range)
                 return
             } catch {
-                guard selectedSurface == .calendar, text == calendarQuery else { calendarNeedsRead = true; return }
+                guard current() else { return }
                 if attempt == 1 { calendarError = error.localizedDescription }
             }
         }
     }
 
     func completeCalendarItem(_ item: CoreObject) async {
-        guard calendarActionsEnabled, calendarItems.contains(where: { $0.text("id") == item.text("id")
-            && $0.text("taskId") == item.text("taskId") && $0.flag("showDone") }),
+        guard calendarActionsEnabled, calendarItems.contains(where: { $0.text("id").utf8.elementsEqual(item.text("id").utf8)
+            && $0.text("taskId").utf8.elementsEqual(item.text("taskId").utf8) && $0.flag("showDone") }),
               calendarEditableTask(item.text("taskId")) else { return }
         await complete(item.text("taskId"), taskRevision: item.object("row").text("taskRevision"))
     }
 
     func openCalendarItem(_ item: CoreObject) async {
         guard calendarActionsEnabled, item.flag("pressable"), !item.text("taskId").isEmpty,
-              calendarItems.contains(where: { $0.text("id") == item.text("id") && $0.text("taskId") == item.text("taskId") && $0.flag("pressable") }) else { return }
+              calendarItems.contains(where: { $0.text("id").utf8.elementsEqual(item.text("id").utf8) && $0.text("taskId").utf8.elementsEqual(item.text("taskId").utf8) && $0.flag("pressable") }) else { return }
+        calendarItemFeed = calendarViewFeed
         calendarItemTaskID = item.text("taskId")
         calendarItemSheet = [:]
         calendarItemError = nil
@@ -15205,26 +15449,36 @@ final class CoreModel: ObservableObject {
     }
 
     func retryCalendarItem() async {
-        guard calendarItemPresented, !busy, !retryNeeded, !taskPresented else { return }
+        guard calendarItemPresented, !busy, !retryNeeded, !taskPresented, !appLock.concealed,
+              calendarFeedApplicationActive, let currentHost = host, calendarViewHost === currentHost else { return }
+        let session = calendarPageSession, taskID = calendarItemTaskID
+        func current() -> Bool {
+            host === currentHost && calendarPageSession == session && calendarItemPresented
+                && calendarItemTaskID.utf8.elementsEqual(taskID.utf8) && !appLock.concealed
+                && calendarFeedApplicationActive && !Task.isCancelled
+        }
         busy = true
         defer { finishOperation() }
         calendarItemError = nil
         calendarItemSheet = [:]
         do {
-            let sheet = try await query("menuRead", ["calendarItem", try json(["taskId": calendarItemTaskID, "state": calendarState])])
-            guard sheet.text("kind") == "projected" || (sheet.text("kind") == "task" && sheet.text("taskId") == calendarItemTaskID) else {
+            let sheet = try await query("menuRead", ["calendarItem", try calendarInputJSON(["taskId": calendarItemTaskID, "state": calendarState, "calendar": calendarItemFeed])])
+            guard current() else { return }
+            guard sheet.text("kind") == "projected" || (sheet.text("kind") == "task" && sheet.text("taskId").utf8.elementsEqual(calendarItemTaskID.utf8)) else {
                 throw CocoaError(.coderReadCorrupt)
             }
             calendarItemSheet = sheet
-        } catch { calendarItemError = error.localizedDescription }
+        } catch { if current() { calendarItemError = error.localizedDescription } }
     }
 
     func closeCalendarItem() {
         guard !busy, !retryNeeded else { return }
         calendarItemPresented = false
         calendarItemSheet = [:]
+        calendarItemFeed = [:]
         calendarItemTaskID = ""
         calendarItemError = nil
+        if calendarNeedsRead { scheduleCalendarRead() }
     }
 
     func performCalendarItemAction(_ action: String) async {
@@ -28753,6 +29007,15 @@ final class CoreModel: ObservableObject {
             }
         }
         #endif
+        calendarCoreCallsInFlight += 1
+        defer {
+            calendarCoreCallsInFlight -= 1
+            if calendarCoreCallsInFlight == 0, calendarProjectionInFlight == 0, calendarNeedsRead, !busy {
+                scheduleCalendarRead()
+            }
+        }
+        await drainCalendarFeedForCoreCall()
+        guard self.host === host else { throw CancellationError() }
         let result = try await host.call(method, argumentsJSON: json(args))
         #if DEBUG && targetEnvironment(simulator)
         if method == "taskView", entityLinkPreview != nil, !entityLinkTestHeldOnce,

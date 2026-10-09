@@ -220,6 +220,30 @@ describe('native host contract: Calendar', () => {
         expect(view.content.mode === 'month' && view.content.details?.events?.error).toBe('Feed unavailable');
     });
 
+    it('publishes feed status in every mode while retaining refresh events, ready warnings and task presentation', async () => {
+        freezeClock();
+        const { host, recorder } = await openHost();
+        const before = JSON.stringify(useTaskStore.getState().tasks);
+        for (const viewMode of ['month', 'week', 'day', 'schedule'] as const) {
+            const state = { ...week, viewMode };
+            const shown = value(host.getCalendarView({ state, calendar: ready, ...page }));
+            expect(shown.feedState).toEqual({ status: 'ready', message: null });
+            const loading = value(host.getCalendarView({ state, calendar: { ...ready, status: 'loading' }, ...page }));
+            expect(loading.feedState).toEqual({ status: 'loading', message: shown.text.loading });
+            expect(loading.items).toEqual(shown.items);
+            const partial = value(host.getCalendarView({ state, calendar: { ...ready, warning: 'Failed to load events' }, ...page }));
+            expect(partial.feedState).toEqual({ status: 'ready', message: 'Failed to load events' });
+            expect(partial.items).toEqual(shown.items);
+            const failed = value(host.getCalendarView({ state, calendar: { status: 'error', message: 'Feed unavailable', calendars: fixture.calendars }, ...page }));
+            const empty = value(host.getCalendarView({ state, calendar: { status: 'ready', calendars: fixture.calendars, events: [] }, ...page }));
+            expect(failed.feedState).toEqual({ status: 'error', message: 'Feed unavailable' });
+            expect(failed.items).toEqual(empty.items);
+            expect(value(host.getCalendarView({ state, ...page })).feedState).toEqual({ status: 'ready', message: null });
+        }
+        expect(JSON.stringify(useTaskStore.getState().tasks)).toBe(before);
+        expect(recorder.log).toEqual([]);
+    });
+
     it('shows a task due and scheduled on one day only as scheduled in month details', async () => {
         freezeClock();
         const { host } = await openHost();
@@ -332,6 +356,65 @@ describe('native host contract: Calendar', () => {
         expect(loading.content.mode === 'month' && loading.content.details?.events?.loading).toBeTruthy();
         const empty = value(host.getCalendarView({ state, calendar: { status: 'loading', calendars: fixture.calendars }, ...page }));
         expect(items(empty, 'events')).toEqual([]);
+    });
+
+    it('checks frozen feed occupancy but excludes transient source and event data from both prepared composer families', async () => {
+        freezeClock();
+        const { host } = await openHost();
+        const source = { ...fixture.calendars[0], id: 'PRIVATE_TRANSIENT_SOURCE', name: 'PRIVATE_TRANSIENT_NAME', url: 'https://PRIVATE_TRANSIENT_URL.invalid/calendar.ics' };
+        for (const mode of ['new', 'existing'] as const) {
+            const opened = value(host.openCalendarComposer({ day: '2026-10-31', ...(mode === 'new' ? { mode } : { scheduleTaskId: 'n-email' }) })).composer!;
+            const composer = mode === 'new'
+                ? value(host.editCalendarComposer({ composer: opened.composer, edit: { type: 'title', title: 'Planned task' } })).composer
+                : opened.composer;
+            const start = new Date(composer.startAt!);
+            const event = { id: 'PRIVATE_TRANSIENT_EVENT', sourceId: source.id, title: 'PRIVATE_TRANSIENT_TITLE', start: start.toISOString(),
+                end: new Date(start.getTime() + composer.durationMinutes * 60_000).toISOString(), allDay: false,
+                description: 'PRIVATE_TRANSIENT_DESCRIPTION', location: 'PRIVATE_TRANSIENT_LOCATION' };
+            const request = { requestId: generateUUID(), composer };
+            const prepare = mode === 'new' ? host.prepareCalendarComposerCreate.bind(host) : host.prepareCalendarComposerSave.bind(host);
+            const blocked = value(await prepare({ ...request, calendar: { status: 'ready', calendars: [source], events: [event] } }));
+            expect(blocked).toMatchObject({ kind: 'refused', result: { composer: { composer: { error: { code: 'overlap' } } } } });
+            const freeEvent = { ...event, start: '2026-11-20T12:00:00.000Z', end: '2026-11-20T13:00:00.000Z' };
+            const prepared = value(await prepare({ ...request, calendar: { status: 'ready', calendars: [source], events: [freeEvent] } }));
+            expect(prepared.kind).toBe('prepared');
+            if (prepared.kind !== 'prepared') continue;
+            expect(prepared.prepared.request).toEqual(request);
+            expect(JSON.stringify(prepared)).not.toContain('PRIVATE_TRANSIENT');
+        }
+    });
+
+    it('refuses supplied loading or failed feeds before suggesting or preparing composer availability', async () => {
+        freezeClock();
+        const { host, recorder } = await openHost();
+        const opened = value(host.openCalendarComposer({ day: '2026-10-31', mode: 'new' })).composer!;
+        const created = value(host.editCalendarComposer({ composer: opened.composer, edit: { type: 'title', title: 'Planned task' } })).composer;
+        const existing = value(host.openCalendarComposer({ day: '2026-10-31', scheduleTaskId: 'n-email' })).composer!.composer;
+        const before = JSON.stringify(useTaskStore.getState().tasks);
+        for (const calendar of [
+            { status: 'loading', calendars: fixture.calendars },
+            { status: 'loading', calendars: fixture.calendars, events: fixture.calendarEvents },
+            { status: 'error', message: 'Unavailable', calendars: fixture.calendars },
+        ] as const) {
+            for (const input of [{ day: '2026-10-31', mode: 'new' as const }, { day: '2026-10-31', scheduleTaskId: 'n-email' }, { at: created.startAt! }]) {
+                expect(host.openCalendarComposer({ ...input, calendar })).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            }
+            expect(host.editCalendarComposer({ composer: created, edit: { type: 'startTime', value: '09:30' }, calendar }))
+                .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            expect(host.editCalendarComposer({ composer: created, edit: { type: 'title', title: 'Held edit' }, calendar }))
+                .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            expect(await host.prepareCalendarComposerCreate({ requestId: generateUUID(), composer: created, calendar }))
+                .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            expect(await host.prepareCalendarComposerSave({ requestId: generateUUID(), composer: existing, calendar }))
+                .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        }
+        const partial = { status: 'ready' as const, calendars: [], events: [], warning: 'Failed to load events' };
+        expect(host.openCalendarComposer({ day: '2026-10-31', calendar: partial }).ok).toBe(true);
+        expect(host.editCalendarComposer({ composer: created, edit: { type: 'title', title: 'Allowed' }, calendar: partial }).ok).toBe(true);
+        expect(value(await host.prepareCalendarComposerCreate({ requestId: generateUUID(), composer: created, calendar: partial })).kind).toBe('prepared');
+        expect(value(await host.prepareCalendarComposerSave({ requestId: generateUUID(), composer: existing, calendar: partial })).kind).toBe('prepared');
+        expect(JSON.stringify(useTaskStore.getState().tasks)).toBe(before);
+        expect(recorder.log).toEqual([]);
     });
 
     it('shows a ready feed warning while retaining its events and rejects malformed warnings', async () => {

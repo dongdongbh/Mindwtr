@@ -265,6 +265,8 @@ export type NativeCalendarView = {
     state: NativeCalendarState;
     /** Fetch external events for this window and send them as `calendar`. */
     range: { start: string; end: string };
+    /** All modes expose loading, whole-feed failures and retained ready warnings. */
+    feedState: { status: 'ready' | 'loading' | 'error'; message: string | null };
     header: {
         title: string;
         /** The day view uses the day title style. */
@@ -475,20 +477,20 @@ const isList = <T,>(value: unknown, limit: number, check: (entry: unknown) => en
     Array.isArray(value) && value.length <= limit && value.every(check)
 );
 
-type Feed = { calendars: ExternalCalendarSubscription[]; events: ExternalCalendarEvent[]; loading: boolean; error: string | null };
+type Feed = { status: NativeCalendarFeed['status']; calendars: ExternalCalendarSubscription[]; events: ExternalCalendarEvent[]; loading: boolean; error: string | null };
 const readFeed = (value: unknown): Feed | null => {
-    if (value === undefined) return { calendars: [], events: [], loading: false, error: null };
+    if (value === undefined) return { status: 'ready', calendars: [], events: [], loading: false, error: null };
     if (!isObjectRecord(value)) return null;
     const calendars = value.calendars === undefined ? [] : value.calendars;
     if (!isList(calendars, MAX_CALENDARS, isCalendarSource)) return null;
     if (value.status === 'loading') {
         const events = value.events === undefined ? [] : value.events;
-        return isList(events, MAX_EVENTS, isEvent) ? { calendars, events, loading: true, error: null } : null;
+        return isList(events, MAX_EVENTS, isEvent) ? { status: 'loading', calendars, events, loading: true, error: null } : null;
     }
-    if (value.status === 'error' && isText(value.message, 2000)) return { calendars, events: [], loading: false, error: value.message };
+    if (value.status === 'error' && isText(value.message, 2000)) return { status: 'error', calendars, events: [], loading: false, error: value.message };
     if (value.status === 'ready' && isList(value.events, MAX_EVENTS, isEvent)
         && (value.warning === undefined || isText(value.warning, 2000))) {
-        return { calendars, events: value.events, loading: false, error: value.warning ?? null };
+        return { status: 'ready', calendars, events: value.events, loading: false, error: value.warning ?? null };
     }
     return null;
 };
@@ -1442,6 +1444,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         return {
             state: toState(period),
             range: { start: periodData.range.rangeStart.toISOString(), end: periodData.range.rangeEnd.toISOString() },
+            feedState: { status: feed.status, message: feed.loading ? screen.loading : feed.error },
             header: {
                 title,
                 titleVariant: period.viewMode === 'day' ? 'day' : 'standard',
@@ -1865,6 +1868,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             if (!isObjectRecord(input) || !feed || (input.mode !== undefined && input.mode !== 'new' && input.mode !== 'existing')) {
                 return fail('INVALID_INPUT', 'An instant, a day or a task to schedule, and the calendar, are required');
             }
+            if (feed.status !== 'ready') return fail('ACTION_FAILED', ctx.t('settings.calendarMobile.failedToLoadEvents'));
             const events = eventsByDay(feed);
             const openDeps = composerDeps(ctx, events);
             const at = isText(input.at, ISO_INSTANT_LIMIT) ? safeParseDate(input.at) : null;
@@ -1902,6 +1906,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const feed = isObjectRecord(input) ? readFeed(input.calendar) : null;
             const edit = isObjectRecord(input) && isObjectRecord(input.edit) ? input.edit as NativeCalendarComposerEdit : null;
             if (!state || !feed || !edit) return fail('INVALID_INPUT', 'A composer, an edit and the calendar are required');
+            if (feed.status !== 'ready') return fail('ACTION_FAILED', ctx.t('settings.calendarMobile.failedToLoadEvents'));
             const events = eventsByDay(feed);
             let next: ComposerState | null = null;
             switch (edit.type) {
@@ -1953,6 +1958,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 || !ctx.schedulableTasks.some((task) => task.id === composer.selectedTaskId)) {
                 return fail('INVALID_INPUT', 'An offered existing task and composer are required');
             }
+            if (feed.status !== 'ready') return fail('ACTION_FAILED', ctx.t('settings.calendarMobile.failedToLoadEvents'));
             const request: NativeCalendarScheduleRequest = { requestId: input.requestId, composer: input.composer };
             const intent = prepareComposerSave(composer, saveContext(ctx, eventsByDay(feed)));
             if (intent.kind === 'error') return { ok: true, value: { kind: 'refused', result: result({ composer: composerView(ctx, { ...composer, error: intent.error }) }) } };
@@ -2119,6 +2125,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const composer = readComposer(input.composer, ctx.formatDate);
             const feed = readFeed(input.calendar);
             if (!composer || composer.mode !== 'new' || !feed) return fail('INVALID_INPUT', 'A valid New composer and calendar are required');
+            if (feed.status !== 'ready') return fail('ACTION_FAILED', ctx.t('settings.calendarMobile.failedToLoadEvents'));
             const resolved = prepareComposerSave(composer, saveContext(ctx, eventsByDay(feed)));
             if (resolved.kind === 'error') return { ok: true, value: { kind: 'refused', result: result({ composer: composerView(ctx, { ...composer, error: resolved.error }) }) } };
             if (resolved.kind !== 'create' || !composer.startAt) return fail('INVALID_INPUT', 'Calendar composer did not produce a new task');
