@@ -493,9 +493,14 @@ try {
     check(!afterBoot.some((name) => name.startsWith('.mindwtr-install-')) && (!target || whole),
         `(7) no installer file and no half file is left; the target is ${target ? 'the whole file (the startup sync installed it again)' : 'absent'}`);
     if (!target) await syncNow('Sync now (the install again)');
-    await until('the install to finish', () => attachmentFiles().some((name) => name.startsWith(killedId)), 120_000, 3_000);
-    const installed = live(stored('projects', names.project)).find((a) => a.id === killedId);
-    check(installed && phoneSha(installed.uri) === sha256(extraBytes('install')), '(7) the next sync installed the whole file (SHA-256)');
+    // The file lands in the pre-sync pass; its record's uri is saved once that sync's merge ends, seconds later. When the
+    // startup sync did the install, nothing above waited for that save (10-07 to 10-09: the record still read uri '', missing).
+    const installedWhole = () => {
+        const installed = live(stored('projects', names.project)).find((a) => a.id === killedId);
+        return Boolean(installed?.uri) && phoneSha(installed.uri) === sha256(extraBytes('install'));
+    };
+    await until('(7) the whole file (SHA-256) in its stored record', installedWhole, 120_000, 3_000);
+    check(true, '(7) the next sync installed the whole file (SHA-256)');
 
     // (8) A remote 404 is terminal and writes no bytes; a removed remote copy never deletes local bytes.
     const goneId = await addProjectFile('gone');
