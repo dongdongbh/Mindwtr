@@ -376,7 +376,7 @@ it('captures immutable request and Area inputs while preserving intentional copi
     const input = request();
     input.event.description = 'Visit https://example.com; this is copied event text.';
     const answer = value(await host.prepareCalendarEventTaskCreate(input));
-    const original = copy(answer.prepared);
+    const original = structuredClone(answer.prepared);
     input.event.title = 'Changed outside';
     input.state.viewMode = 'day';
     useTaskStore.getState()._allAreas.find((entry) => entry.id === 'copy-default')!.name = 'Changed outside';
