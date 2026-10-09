@@ -481,6 +481,13 @@ private struct AppLockRoot: View {
                 .accessibilityIdentifier("app-lock-gate")
             }
         }
+        .background {
+            NativeCalendarEventEditor(presentation: model.calendarEventOpenPresentation,
+                isPresented: model.calendarEventOpenPresented,
+                canPresent: { model.calendarEventOpenCanPresent($0) },
+                requestDismiss: { model.requestCalendarEventOpenDismissal($0, outcome: $1) },
+                didDismiss: { model.calendarEventOpenDidDismiss($0) })
+        }
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         .onAppear {
             lock.sceneChanged(phase)

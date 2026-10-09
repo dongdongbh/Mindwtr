@@ -887,7 +887,7 @@ struct CalendarItemSheet: View {
                                 palette: palette, id: "calendar-item-retry") { Task { await model.retryCalendarItem() } }
                         }
                         let allowedActions = model.calendarItemSheet.text("kind") == "event"
-                            ? ["createTask", "cancel"] : ["edit", "unschedule", "done", "delete", "cancel", "ok"]
+                            ? ["createTask", "openInCalendar", "cancel"] : ["edit", "unschedule", "done", "delete", "cancel", "ok"]
                         let actions = model.calendarItemSheet.objects("buttons").filter { allowedActions.contains($0.text("id")) }
                         ForEach(actions.indices, id: \.self) { index in
                             let action = actions[index]

@@ -6,6 +6,7 @@ import { planCalendarEventTask } from './calendar-view-model';
 import { taskToSqliteRow } from './task-sync-schema';
 import type { NativeCalendarEventTaskCreateRequest } from './native-host-contract-calendar';
 import type { Area } from './types';
+import * as sandbox from './sandbox';
 
 const fixture = loadCalendarViewsFixture();
 const requestId = '6475c779-e751-42d3-a2ea-85abffb3be73';
@@ -441,4 +442,30 @@ it('keeps exact occurrence identity for equal event IDs from different sources a
     const references = view.items.flatMap((entry) => entry.type === 'item' && entry.item.kind === 'event' ? [entry.item.eventRef] : []);
     expect(references).toHaveLength(3);
     expect(references).toEqual(expect.arrayContaining(events.map(({ id, sourceId, start, end }) => ({ id, sourceId, start, end }))));
+});
+
+
+it('offers owned OS Open only for eligible system events while keeping the copied task template private', async () => {
+    const saveData = vi.fn(async () => undefined);
+    const host = await open(saveData);
+    saveData.mockClear();
+    const input = request();
+    const event = { ...input.event, id: 'system:calendar:opaque-display', sourceId: 'system:calendar', nativeEventId: ' native-é ' };
+    const read = (candidate = event, canOpen = true) => host.getCalendarItemSheet({ event: candidate, canOpen, state: input.state, calendarName: input.calendarName });
+    const sheet = value(read());
+    expect(sheet.kind).toBe('event');
+    if (sheet.kind !== 'event') return;
+    expect(sheet.buttons.map((button) => button.id)).toEqual(['createTask', 'openInCalendar', 'cancel']);
+    expect(sheet.creationTemplate).toEqual({ event: input.event, state: input.state, calendarName: input.calendarName, fallbackTitle: 'Calendar event' });
+    expect(JSON.stringify(sheet.creationTemplate)).not.toMatch(/native-|opaque-display|system:/);
+    const disabled = value(read(event, false));
+    if (disabled.kind !== 'event') throw new Error('Expected event sheet');
+    expect(disabled.buttons.map((button) => button.id)).toEqual(['createTask', 'cancel']);
+    for (const candidate of [{ ...event, sourceId: 'ics:calendar' }, { ...event, nativeEventId: '' }, { ...event, nativeEventId: '  ' }]) {
+        expect(read(candidate).ok).toBe(false);
+    }
+    const guard = vi.spyOn(sandbox, 'isSandboxMode').mockReturnValue(true);
+    try { expect(read().ok).toBe(false); } finally { guard.mockRestore(); }
+    expect(saveData).not.toHaveBeenCalled();
+    expect(useTaskStore.getState()._tasksById.has(requestId)).toBe(false);
 });

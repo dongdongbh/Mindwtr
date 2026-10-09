@@ -290,6 +290,8 @@ final class CoreModel: ObservableObject {
     @Published private(set) var calendarComposerPresented = false
     @Published private(set) var calendarComposerError: String?
     @Published private(set) var calendarNotice: String?
+    @Published private(set) var calendarEventOpenPresentation: NativeCalendarEventEditorPresentation?
+    @Published private(set) var calendarEventOpenPresented = false
     @Published var calendarComposerQueryInput = ""
     @Published var calendarComposerTitleInput = ""
     @Published var calendarComposerStartInput = ""
@@ -1512,6 +1514,7 @@ final class CoreModel: ObservableObject {
         let reference: CoreObject
         let event: CoreObject
         let calendarName: String
+        let openRequest: NativeCalendarEventOpenRequest?
         let successTitle: String
         let successMessage: String
     }
@@ -1527,6 +1530,12 @@ final class CoreModel: ObservableObject {
     private var calendarEventReadGeneration = UUID()
     private var calendarEventTaskPending: CalendarEventTaskPending?
     private var calendarEventTaskRecoveredResult: (host: CoreHost, result: CoreObject)?
+    private struct CalendarEventOpenSession {
+        let id: UUID
+        let intent: CalendarEventIntent
+        var retired = false
+    }
+    private var calendarEventOpenSession: CalendarEventOpenSession?
     private var calendarPreferenceValues: CoreObject = [:]
     private var calendarPreferencePending = false
     private var calendarPreferenceTarget: CoreObject?
@@ -2060,6 +2069,7 @@ final class CoreModel: ObservableObject {
         ready && selectedSurface == .calendar && calendarCurrent && !busy && !retryNeeded
             && !taskPresented && !areaPickerPresented && !calendarItemPresented && !calendarComposerPresented
             && !capturePresented && !morePresented && !appLock.concealed && calendarFeedApplicationActive
+            && calendarEventOpenPresentation == nil
     }
     var calendarComposerOpeningEnabled: Bool {
         calendarActionsEnabled && calendarViewHost === host && calendarViewFeed.text("status") == "ready"
@@ -2068,6 +2078,7 @@ final class CoreModel: ObservableObject {
     var calendarFeedRetryEnabled: Bool {
         ready && selectedSurface == .calendar && !busy && !retryNeeded && !appLock.concealed
             && !taskPresented && !calendarItemPresented && !calendarComposerPresented && calendarFeedApplicationActive
+            && calendarEventOpenPresentation == nil
     }
     var calendarComposerCanSave: Bool {
         let composer = calendarComposerView.object("composer")
@@ -2080,6 +2091,7 @@ final class CoreModel: ObservableObject {
             && !busy && !retryNeeded && calendarComposerSaveRequest == nil
             && calendarComposerHost === host && calendarComposerFeed.text("status") == "ready"
             && !appLock.concealed && calendarFeedApplicationActive
+            && calendarEventOpenPresentation == nil
     }
     var calendarComposerEditPending: Bool { calendarComposerEditing || !calendarComposerEdits.isEmpty }
     var calendarItems: [CoreObject] {
@@ -2098,11 +2110,13 @@ final class CoreModel: ObservableObject {
     }
     func calendarItemActionEnabled(_ action: String) -> Bool {
         guard calendarItemPresented, !busy, !retryNeeded, !taskPresented,
+              calendarEventOpenPresentation == nil,
               calendarItemSheet.objects("buttons").contains(where: { $0.text("id") == action }) else { return false }
         if ["cancel", "ok"].contains(action) { return true }
         if calendarItemSheet.text("kind") == "event" {
-            return action == "createTask" && calendarEventTaskPending == nil && calendarEventTemplateJSON != nil
-                && calendarItemError == nil && calendarEventIntent.map(calendarEventIntentCurrent) == true
+            guard calendarEventTaskPending == nil, calendarEventTemplateJSON != nil, calendarItemError == nil,
+                  let intent = calendarEventIntent, calendarEventIntentCurrent(intent) else { return false }
+            return action == "createTask" || (action == "openInCalendar" && intent.openRequest != nil)
         }
         return calendarItemSheet.text("kind") == "task" && calendarEditableTask(calendarItemTaskID)
     }
@@ -5132,6 +5146,7 @@ final class CoreModel: ObservableObject {
 
     private var operationContextClean: Bool {
         !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
+            && calendarEventOpenPresentation == nil
             && !processInboxPresented && processInboxRequest == nil && !processInboxTransitioning
             && !mindSweepPresented && mindSweepRequest == nil && mindSweepDraft.isEmpty
             && !morePresented && !areaPickerPresented && !areaManagerPresented && bulkConfirm.isEmpty
@@ -6280,7 +6295,7 @@ final class CoreModel: ObservableObject {
         }
         if selectedSurface == .project { guard await flushProjectNotesEdit() else { return } }
         guard ready, !retryNeeded, !capturePresented, !taskPresented, !taskStatusMenuPresented, !referenceProjectNextActionPresented, !calendarItemPresented,
-              !calendarComposerPresented, !mindSweepPresented, !processInboxPresented,
+              !calendarComposerPresented, calendarEventOpenPresentation == nil, !mindSweepPresented, !processInboxPresented,
               !projectRenameEditing, somedaySectionRenameIndex == nil,
               somedaySectionRenameOpeningIndex == nil, managePendingCandidate == nil, managePendingInventoryDepths == nil,
               !somedaySectionRenamePending, !somedaySectionRenameAwaitingRefresh,
@@ -9092,6 +9107,7 @@ final class CoreModel: ObservableObject {
                     "task.aria.changeStatus", "task.aria.changeStatusHint", "taskStatus.changeStatus", "quickAdd.audioRecord",
                     "common.more", "agenda.reviewDueProjects", "agenda.laterToday",
                     "calendar.eventTaskCreatedTitle", "calendar.eventTaskCreated",
+                    "calendar.cannotOpenEventTitle", "calendar.openUnsupported", "calendar.openFromCalendarApp",
                     "agenda.addToFocus", "agenda.removeFromFocus",
                     "agenda.collapseOtherSections", "agenda.expandOtherSections", "markdown.expand", "markdown.collapse",
                     "projects.areaFilter", "filters.excluded", "taskEdit.tab.view", "common.notSet", "status.active", "status.waiting", "status.someday",
@@ -14871,7 +14887,7 @@ final class CoreModel: ObservableObject {
 
     func setCalendarQuery(_ text: String) {
         guard selectedSurface == .calendar, !retryNeeded, !taskPresented, !calendarItemPresented,
-              !calendarComposerPresented, text != calendarQuery else { return }
+              !calendarComposerPresented, calendarEventOpenPresentation == nil, text != calendarQuery else { return }
         calendarScrollAnchor = "calendar-list-top"
         calendarNotice = nil
         calendarQuery = text
@@ -14884,13 +14900,14 @@ final class CoreModel: ObservableObject {
 
     private func scheduleCalendarRead() {
         guard selectedSurface == .calendar, !busy, !retryNeeded, !taskPresented, !calendarItemPresented,
-              !calendarComposerPresented, calendarCoreCallsInFlight == 0, ready,
+              !calendarComposerPresented, calendarEventOpenPresentation == nil, calendarCoreCallsInFlight == 0, ready,
               !appLock.concealed, calendarFeedApplicationActive else { return }
         calendarReadTask?.cancel()
         calendarReadTask = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
             guard let self, self.selectedSurface == .calendar, !self.busy, !self.retryNeeded,
                   !self.taskPresented, !self.calendarItemPresented, !self.calendarComposerPresented,
+                  self.calendarEventOpenPresentation == nil,
                   self.ready, !self.appLock.concealed, self.calendarFeedApplicationActive else { return }
             self.calendarReadTask = nil
             self.busy = true
@@ -14901,7 +14918,7 @@ final class CoreModel: ObservableObject {
 
     func retryCalendar(refreshFeed: Bool = true) async {
         guard selectedSurface == .calendar, !busy, !retryNeeded, !taskPresented, !calendarItemPresented,
-              !calendarComposerPresented else { return }
+              !calendarComposerPresented, calendarEventOpenPresentation == nil else { return }
         if refreshFeed { calendarFeedRefreshRequested = true }
         busy = true
         defer { finishOperation() }
@@ -15289,6 +15306,7 @@ final class CoreModel: ObservableObject {
     }
 
     func retireCalendarFeed(clear: Bool = false) {
+        retireCalendarEventOpen()
         retireCalendarEventIntent()
         calendarPageSession = UUID()
         calendarReadGeneration += 1
@@ -15327,6 +15345,7 @@ final class CoreModel: ObservableObject {
 
     private func beginCalendarFeedRead(_ range: CalendarFeedRange) {
         guard ready, selectedSurface == .calendar, !appLock.concealed, calendarFeedApplicationActive,
+              calendarEventOpenPresentation == nil,
               calendarFeedTask == nil, calendarCoreCallsInFlight == 0, calendarFeedDrainID == nil,
               calendarFeedRange == range, calendarFeed.text("status") == "loading",
               let currentHost = host else { return }
@@ -15403,6 +15422,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func readCalendar() async {
+        guard calendarEventOpenPresentation == nil else { calendarNeedsRead = true; return }
         calendarProjectionInFlight += 1
         defer { calendarProjectionInFlight -= 1 }
         calendarReadTask?.cancel()
@@ -15541,6 +15561,18 @@ final class CoreModel: ObservableObject {
                 || (state["selectedDate"] as? String).map(calendarEventDayValid) == true)
     }
 
+    private func captureCalendarEventOpenRequest(_ event: CoreObject, sourceID: String, allDay: Bool) -> NativeCalendarEventOpenRequest? {
+        let prefix = "system:"
+        guard sourceID.utf8.starts(with: prefix.utf8), let itemID = event["nativeEventId"] as? String else { return nil }
+        // Only remove the shared system-source prefix; never parse the display event ID.
+        let calendarID = String(decoding: sourceID.utf8.dropFirst(prefix.utf8.count), as: UTF8.self)
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let start = parser.date(from: event.text("start")), let end = parser.date(from: event.text("end")) else { return nil }
+        return try? NativeCalendarEventOpenRequest(calendarID: calendarID, calendarItemIdentifier: itemID,
+            start: start, end: end, allDay: allDay)
+    }
+
     private func captureCalendarEvent(_ item: CoreObject) throws -> CalendarEventIntent {
         guard let currentHost = host, calendarViewHost === currentHost,
               item.text("kind") == "event", item["taskId"] is NSNull,
@@ -15585,7 +15617,9 @@ final class CoreModel: ObservableObject {
         return CalendarEventIntent(id: UUID(), host: currentHost, pageSession: calendarPageSession,
             feedGeneration: calendarViewFeedGeneration, revision: calendarView.text("revision"),
             state: captured.object("state"), reference: captured.object("reference"), event: captured.object("event"),
-            calendarName: calendarName, successTitle: label("calendar.eventTaskCreatedTitle"),
+            calendarName: calendarName,
+            openRequest: captureCalendarEventOpenRequest(events[0], sourceID: reference.text("sourceId"), allDay: allDay.boolValue),
+            successTitle: label("calendar.eventTaskCreatedTitle"),
             successMessage: label("calendar.eventTaskCreated"))
     }
 
@@ -15596,6 +15630,100 @@ final class CoreModel: ObservableObject {
             && calendarEventSame(calendarView.object("state"), intent.state)
             && ready && selectedSurface == .calendar && calendarItemPresented && calendarViewFeed.text("status") == "ready"
             && calendarFeedApplicationActive && !appLock.concealed && !Task.isCancelled
+    }
+
+    private func calendarEventOpenSessionCurrent(_ session: CalendarEventOpenSession) -> Bool {
+        let intent = session.intent
+        return !session.retired && host === intent.host && calendarViewHost === intent.host
+            && calendarPageSession == intent.pageSession && calendarViewFeedGeneration == intent.feedGeneration
+            && calendarView.text("revision").utf8.elementsEqual(intent.revision.utf8)
+            && calendarEventSame(calendarView.object("state"), intent.state)
+            && ready && calendarCurrent && selectedSurface == .calendar && calendarViewFeed.text("status") == "ready"
+            && !retryNeeded && !taskPresented && !capturePresented && !morePresented && !areaPickerPresented
+            && !calendarItemPresented && !calendarComposerPresented
+            && calendarFeedApplicationActive && UIApplication.shared.applicationState == .active
+            && !appLock.concealed && !Task.isCancelled
+    }
+
+    func calendarEventOpenCanPresent(_ id: UUID) -> Bool {
+        guard calendarEventOpenPresented, calendarEventOpenPresentation?.id == id,
+              let session = calendarEventOpenSession, session.id == id else { return false }
+        return calendarEventOpenSessionCurrent(session)
+    }
+
+    func requestCalendarEventOpenDismissal(_ id: UUID, outcome: NativeCalendarEventEditorOutcome) {
+        guard let presentation = calendarEventOpenPresentation, presentation.id == id,
+              presentation.outcome == outcome else { return }
+        presentation.concealAndCancel()
+        calendarEventOpenPresented = false
+        if !presentation.hasStarted { calendarEventOpenDidDismiss(id) }
+    }
+
+    func calendarEventOpenDidDismiss(_ id: UUID) {
+        guard let presentation = calendarEventOpenPresentation, presentation.id == id,
+              let session = calendarEventOpenSession, session.id == id else { return }
+        let wasPresented = presentation.wasPresented, outcome = presentation.outcome
+        let refreshCurrent = wasPresented && calendarEventOpenSessionCurrent(session)
+        presentation.finishDismissal()
+        calendarEventOpenPresented = false
+        calendarEventOpenPresentation = nil
+        calendarEventOpenSession = nil
+        if wasPresented, let outcome, host === session.intent.host {
+            let originalHost = session.intent.host
+            Task { [weak self] in
+                guard let self, self.host === originalHost else { return }
+                _ = try? await originalHost.call("logLine", argumentsJSON: self.json([
+                    "Native iOS calendar event dialog dismissed", try self.json([
+                        "releaseCheck": "v1.3.5/ios-calendar-event-open", "outcome": outcome.rawValue,
+                    ]),
+                ]))
+            }
+        }
+        if refreshCurrent {
+            // Shared state remains unchanged; only a passive current-page feed refresh is queued.
+            calendarFeedRefreshRequested = true
+            calendarNeedsRead = true
+        }
+        // A retired editor may have blocked a newer foreground/page request.
+        // Re-admit only the latest existing queue, without restoring its old state or host.
+        if calendarNeedsRead { scheduleCalendarRead() }
+    }
+
+    private func retireCalendarEventOpen() {
+        guard let presentation = calendarEventOpenPresentation else { return }
+        calendarEventOpenSession?.retired = true
+        presentation.concealAndCancel()
+        calendarEventOpenPresented = false
+        if !presentation.hasStarted { calendarEventOpenDidDismiss(presentation.id) }
+    }
+
+    private func openCalendarEventInEditor() async {
+        guard let intent = calendarEventIntent, calendarEventIntentCurrent(intent),
+              let request = intent.openRequest, calendarEventTaskPending == nil,
+              calendarEventOpenPresentation == nil, calendarEventTemplateJSON != nil else { return }
+        busy = true
+        calendarItemError = nil
+        defer { finishOperation() }
+        await drainCalendarFeedForCoreCall()
+        guard calendarEventIntentCurrent(intent), UIApplication.shared.applicationState == .active else { return }
+        do {
+            _ = try bindCalendarEventSheet(calendarItemSheet, to: intent)
+            let owner = try NativeCalendarEventOpenResolver().resolve(request)
+            guard calendarEventIntentCurrent(intent), UIApplication.shared.applicationState == .active else { return }
+            let id = UUID()
+            let presentation = NativeCalendarEventEditorPresentation(id: id, owner: owner)
+            calendarEventOpenSession = CalendarEventOpenSession(id: id, intent: intent)
+            calendarEventOpenPresentation = presentation
+            // The native dialog has a separate owner before its custom sheet is retired.
+            retireCalendarEventIntent()
+            calendarEventOpenPresented = true
+        } catch {
+            guard calendarEventIntentCurrent(intent) else { return }
+            let refused = (error as? NativeCalendarEventOpenError).map { $0 != .unavailable } == true
+            let message = label(refused ? "calendar.openUnsupported" : "calendar.openFromCalendarApp")
+            retireCalendarEventIntent()
+            calendarNotice = [label("calendar.cannotOpenEventTitle"), message].filter { !$0.isEmpty }.joined(separator: ": ")
+        }
     }
 
     private func retireCalendarEventIntent() {
@@ -15625,13 +15753,14 @@ final class CoreModel: ObservableObject {
     #endif
 
     private func bindCalendarEventSheet(_ sheet: CoreObject, to intent: CalendarEventIntent) throws -> String {
+        let actions = intent.openRequest == nil ? ["createTask", "cancel"] : ["createTask", "openInCalendar", "cancel"]
         guard Set(sheet.keys) == Set(["kind", "title", "buttons", "creationTemplate"]), sheet.text("kind") == "event",
               let title = sheet["title"] as? String, title.utf16.count <= 2_000,
-              let buttons = sheet["buttons"] as? [CoreObject], buttons.count == 2,
+              let buttons = sheet["buttons"] as? [CoreObject], buttons.count == actions.count,
               buttons.enumerated().allSatisfy({ index, button in
                   Set(button.keys) == Set(["id", "label", "style"])
-                      && button.text("id") == (index == 0 ? "createTask" : "cancel")
-                      && button.text("style") == (index == 0 ? "default" : "cancel")
+                      && button.text("id") == actions[index]
+                      && button.text("style") == (actions[index] == "cancel" ? "cancel" : "default")
                       && (button["label"] as? String).map { !$0.isEmpty && $0.utf16.count <= 2_000 } == true
               }) else { throw CocoaError(.coderReadCorrupt) }
         let template = sheet.object("creationTemplate")
@@ -15659,7 +15788,9 @@ final class CoreModel: ObservableObject {
         calendarItemSheet = [:]
         calendarEventTemplateJSON = nil
         do {
-            let input = try calendarInputJSON(["event": intent.event, "canOpen": false,
+            var readerEvent = intent.event
+            if let openRequest = intent.openRequest { readerEvent["nativeEventId"] = openRequest.calendarItemIdentifier }
+            let input = try calendarInputJSON(["event": readerEvent, "canOpen": intent.openRequest != nil,
                 "state": intent.state, "calendarName": intent.calendarName])
             let sheet = try await query("menuRead", ["calendarItem", input], beforeDispatch: current)
             guard current() else { return }
@@ -15772,6 +15903,7 @@ final class CoreModel: ObservableObject {
 
     func retryCalendarItem() async {
         guard calendarItemPresented, !busy, !retryNeeded, !taskPresented, !appLock.concealed,
+              calendarEventOpenPresentation == nil,
               calendarFeedApplicationActive, let currentHost = host, calendarViewHost === currentHost else { return }
         if let intent = calendarEventIntent {
             await readCalendarEventSheet(intent)
@@ -15813,6 +15945,10 @@ final class CoreModel: ObservableObject {
         if action == "cancel" || action == "ok" { closeCalendarItem(); return }
         if action == "createTask", calendarItemSheet.text("kind") == "event" {
             await createCalendarEventTask()
+            return
+        }
+        if action == "openInCalendar", calendarItemSheet.text("kind") == "event" {
+            await openCalendarEventInEditor()
             return
         }
         guard calendarItemSheet.text("kind") == "task", calendarEditableTask(calendarItemTaskID) else { return }

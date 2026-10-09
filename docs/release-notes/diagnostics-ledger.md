@@ -30,6 +30,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.5 (add before tagging, trim in the release after)
 
+- **`v1.3.5/ios-calendar-event-open`** — `apps/ios-native/App/CoreModel.swift`, through the closed native `logLine` boundary. With Diagnostics logging enabled, `Native iOS calendar event dialog dismissed` and `outcome=cancelled|saved|deleted` records the delegate outcome after an actually presented EventKit editor dismisses. It does not prove a provider sync, a particular field change, or a Mindwtr task write. No event identifiers, titles, notes, locations, dates or URLs are logged.
+
 - **`v1.3.5/ios-calendar-event-task`** — `apps/android-native/bundle/host-entry.ts`, acknowledged by `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift` after the event-derived task is durably saved and its native journal is cleared. With Diagnostics logging enabled, `Native iOS calendar event task created` with `outcome=confirmed` proves that acknowledgment path ran, including successful recovery. It does not prove a fresh provider read or a calendar write. No task or calendar identifiers, titles, notes, locations, dates or URLs are logged.
 
 - **`v1.3.5/ios-calendar-source`** — `packages/core/src/native-host-contract-settings-calendar.ts`. Fixed message: `Native iOS calendar source selected`; With Diagnostics logging enabled, `outcome=canonical|legacy` means the current native read selected the saved subscription array (including an empty array) or the legacy device list after checking its source owner. It does not prove every provider succeeded or that events were displayed. No source/calendar IDs, URLs, names, event content or settings payloads are logged.

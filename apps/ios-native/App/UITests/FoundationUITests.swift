@@ -9972,16 +9972,7 @@ final class FoundationUITests: XCTestCase {
             } else { XCTAssertFalse(app.staticTexts["calendar-feed-message"].exists) }
         }
         expectEvent("month")
-        for mode in ["week", "day", "schedule", "month"] {
-            task465Tap(app, "calendar-mode-" + mode)
-            expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["calendar-mode-" + mode])
-            waitForExpectations(timeout: 20)
-            expectEvent(mode)
-        }
-        if partial {
-            boardTap(app, "calendar-feed-retry")
-            expectEvent("month after partial-feed retry")
-        }
+        // Exercise the event action before the longer mode survey reaches the periodic refresh.
         let details = app.scrollViews["calendar-details"], layout = app.scrollViews["calendar-layout-scroll"]
         if layout.exists { task467Reveal(app, details, in: layout, requireHittable: false) }
         task467Reveal(app, event, in: details, requireHittable: false)
@@ -9994,6 +9985,16 @@ final class FoundationUITests: XCTestCase {
         task468EventAction(app, "cancel")
         task468ClosedEventSheet(app)
         XCTAssertTrue(app.buttons["calendar-mode-month"].isSelected)
+        for mode in ["week", "day", "schedule", "month"] {
+            task465Tap(app, "calendar-mode-" + mode)
+            expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["calendar-mode-" + mode])
+            waitForExpectations(timeout: 20)
+            expectEvent(mode)
+        }
+        if partial {
+            boardTap(app, "calendar-feed-retry")
+            expectEvent("month after partial-feed retry")
+        }
         // The rejected preparation checks the actual external busy interval without writing a task.
         let query = app.textFields["calendar-query"]
         task467Reveal(app, query, in: details, requireHittable: false)

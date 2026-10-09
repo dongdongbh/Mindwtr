@@ -34,6 +34,7 @@
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
 import { getDefaultTaskAreaMode } from './area-utils';
 import { filterCalendarEventsForAreas } from './external-calendar-ingestion';
+import { canOpenExternalCalendarEvent } from './external-calendar-feeds';
 import { buildCalendarEventTaskDraft, formatCalendarTimeInputValue, minutesToTimeEstimate } from './calendar-scheduling';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import {
@@ -1970,7 +1971,8 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             if (isObjectRecord(input) && 'event' in input) {
                 if (!isEvent(input.event) || typeof input.canOpen !== 'boolean') return fail('INVALID_INPUT', 'An event and whether the host can open it are required');
                 if (input.state !== undefined) {
-                    if (!calendarKeys(input, ['event', 'canOpen', 'state', 'calendarName']) || input.canOpen !== false
+                    if (!calendarKeys(input, ['event', 'canOpen', 'state', 'calendarName'])
+                        || (input.canOpen && !canOpenExternalCalendarEvent(input.event, 'ios'))
                         || !eventCopyStateValid(input.state)
                         || Object.keys(input.event).some((key) => !['id', 'sourceId', 'title', 'start', 'end', 'allDay', 'nativeEventId', 'description', 'location'].includes(key))) {
                         return fail('INVALID_INPUT', 'An owned event state and calendar name are required');
@@ -1983,7 +1985,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                     if (!eventCopyTemplateValid(creationTemplate, false) || !calendarUtf8Within(JSON.stringify(creationTemplate), 2_000_000)) {
                         return fail('INVALID_INPUT', 'Calendar event cannot be copied');
                     }
-                    return { ok: true, value: { kind: 'event', ...getCalendarEventSheet(input.event, { canOpen: false, t: ctx.t }),
+                    return { ok: true, value: { kind: 'event', ...getCalendarEventSheet(input.event, { canOpen: input.canOpen, t: ctx.t }),
                         creationTemplate: JSON.parse(JSON.stringify(creationTemplate)) as NativeCalendarEventTaskTemplate } };
                 }
                 return { ok: true, value: { kind: 'event', ...getCalendarEventSheet(input.event, { canOpen: input.canOpen, t: ctx.t }) } };

@@ -167,6 +167,30 @@ final class NativeCalendarEventTaskHostTests: XCTestCase {
         XCTAssertEqual(try task(input["requestId"] as! String)["rev"] as? Int, 1)
     }
 
+    func testOwnedSystemEventOpenSheetRetainsCopyPrivacyWithoutWritesOrProviderCalls() async throws {
+        let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
+        let before = try taskRows(), receipts = try receiptRows(), kv = try Data(contentsOf: manifest)
+        var sql = 0, journals = 0; faults.beforeSQL = { _ in sql += 1 }; faults.journalWrite = { journals += 1 }
+        var event = try XCTUnwrap(request()["event"] as? [String: Any])
+        event["id"] = "PRIVATE_DISPLAY"; event["sourceId"] = "system:PRIVATE_CALENDAR"; event["nativeEventId"] = " PRIVATE_NATIVE "
+        let reader: [String: Any] = ["event": event, "canOpen": true, "state": state, "calendarName": "Work"]
+        let sheet = try object(await core.call("menuRead", argumentsJSON: json(["calendarItem", json(reader)])))
+        XCTAssertEqual((sheet["buttons"] as? [[String: Any]])?.compactMap { $0["id"] as? String }, ["createTask", "openInCalendar", "cancel"])
+        let template = try XCTUnwrap(sheet["creationTemplate"] as? [String: Any])
+        XCTAssertFalse(try json(template).contains("PRIVATE_"))
+        for replacement in ["", "  ", String(repeating: "x", count: 1_025)] {
+            var changed = event; changed["nativeEventId"] = replacement
+            var invalid = reader; invalid["event"] = changed
+            await refused { _ = try await core.call("menuRead", argumentsJSON: self.json(["calendarItem", self.json(invalid)])) }
+        }
+        var external = event; external["sourceId"] = "ics:PRIVATE_CALENDAR"
+        var invalid = reader; invalid["event"] = external
+        await refused { _ = try await core.call("menuRead", argumentsJSON: self.json(["calendarItem", self.json(invalid)])) }
+        XCTAssertEqual(sql, 0); XCTAssertEqual(journals, 0)
+        XCTAssertEqual(try taskRows(), before); XCTAssertEqual(try receiptRows(), receipts); XCTAssertEqual(try Data(contentsOf: manifest), kv)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    }
+
     func testBeforeJournalAndAtomicTaskCommitFailuresRetainExactCommandForWarmRetry() async throws {
         let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
         let input = request(), before = try taskRows(), receipts = try receiptRows()

@@ -15797,6 +15797,10 @@ private final class Engine: @unchecked Sendable {
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"])
         case "Native iOS foreground activation refreshed":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"])
+        case "Native iOS calendar event dialog dismissed":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-event-open"
+                && ["cancelled", "saved", "deleted"].contains(context["outcome"] as? String ?? "")
         case "Native iOS calendar feed view published":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-feed"
@@ -17678,7 +17682,13 @@ private final class Engine: @unchecked Sendable {
     private func validateCalendarEventProjection(_ input: [String: Any], includesIdentity: Bool) throws {
         let fields: Set<String> = ["title", "start", "end", "allDay", "description", "location"]
         let identity: Set<String> = includesIdentity ? ["id", "sourceId"] : []
-        guard let event = input["event"] as? [String: Any], Set(event.keys).isSubset(of: fields.union(identity)),
+        let nativeOpen = includesIdentity && input["canOpen"] as? Bool == true
+        let openIdentity: Set<String> = nativeOpen ? ["nativeEventId"] : []
+        guard let event = input["event"] as? [String: Any], Set(event.keys).isSubset(of: fields.union(identity).union(openIdentity)),
+              !nativeOpen || ((event["sourceId"] as? String)?.hasPrefix("system:") == true
+                && (event["nativeEventId"] as? String).map {
+                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.utf8.count <= 1_024
+                } == true),
               ["title", "start", "end"].allSatisfy({ (event[$0] as? String).map { $0.utf16.count <= 2_000 } == true }),
               Self.isBoolean(event["allDay"]),
               ["description", "location"].allSatisfy({ field in
@@ -17922,7 +17932,7 @@ private final class Engine: @unchecked Sendable {
             if name == "calendarItem", input["event"] != nil {
                 guard json.utf8.count <= 2_000_000, (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
                       Set(input.keys) == Set(["event", "canOpen", "state", "calendarName"]),
-                      Self.isBoolean(input["canOpen"]), input["canOpen"] as? Bool == false else {
+                      Self.isBoolean(input["canOpen"]) else {
                     throw HostFailure("Unsupported native Calendar event browsing input")
                 }
                 try validateCalendarEventProjection(input, includesIdentity: true)

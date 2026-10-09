@@ -373,4 +373,40 @@ final class NativeCalendarFeedPresentationHostTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: log), saved); XCTAssertEqual(try taskRows(), before); XCTAssertEqual(try receipts(), beforeReceipts)
         XCTAssertEqual(io.counts, [0, 0, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
+    func testCalendarEventEditorDiagnosticUsesOnlyTerminalEnumsAndSavesNoPrivateContext() async throws {
+        let io = CalendarFeedPresentationIO(), core = host(io); _ = try await core.start()
+        _ = try await core.call("dataSetting", argumentsJSON: json([json([
+            "requestId": UUID().uuidString.lowercased(), "edit": ["type": "debugLogging", "value": true],
+        ])]))
+        io.reset(); let before = try taskRows(), beforeReceipts = try receipts()
+        let message = "Native iOS calendar event dialog dismissed"
+        for outcome in ["cancelled", "saved", "deleted"] {
+            let result = try await core.call("logLine", argumentsJSON: json([message, json([
+                "releaseCheck": "v1.3.5/ios-calendar-event-open", "outcome": outcome,
+            ])]))
+            XCTAssertEqual(result, "{}")
+        }
+        let shared = try object(await core.diagnosticsFileAction("logShare"))
+        let url = try await core.validatedDiagnosticsShareURL(XCTUnwrap(shared["path"] as? String))
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { try object(String($0)) }
+        let contexts = lines.filter { $0["message"] as? String == message }.compactMap { $0["context"] as? [String: Any] }
+        XCTAssertEqual(contexts.count, 3)
+        XCTAssertEqual(Set(contexts.compactMap { $0["outcome"] as? String }), Set(["cancelled", "saved", "deleted"]))
+        XCTAssertTrue(contexts.allSatisfy { Set($0.keys) == Set(["releaseCheck", "outcome"]) })
+        let log = root.appendingPathComponent("logs/mindwtr.log"), saved = try Data(contentsOf: log)
+        var invalid: [[String: Any]] = [
+            ["releaseCheck": "v1.3.5/ios-calendar-event-open", "outcome": "loading"],
+            ["releaseCheck": "v1.3.5/ios-calendar-event-open", "outcome": "PRIVATE_TRANSIENT_ERROR"],
+            ["releaseCheck": "v1.3.5/ios-calendar-event-open", "outcome": true],
+            ["releaseCheck": "v1.3.5/ios-calendar-access", "outcome": "cancelled"],
+        ]
+        for field in ["count", "sourceId", "eventId", "url", "text", "message"] {
+            invalid.append(["releaseCheck": "v1.3.5/ios-calendar-event-open", "outcome": "cancelled", field: "PRIVATE_TRANSIENT_CONTEXT"])
+        }
+        for context in invalid { await refused { _ = try await core.call("logLine", argumentsJSON: self.json([message, self.json(context)])) } }
+        await refused { _ = try await core.call("logLine", argumentsJSON: self.json([message,
+            #"{"releaseCheck":"v1.3.5/ios-calendar-event-open","outcome":"cancelled","outcome":"saved"}"#])) }
+        XCTAssertEqual(try Data(contentsOf: log), saved); XCTAssertEqual(try taskRows(), before); XCTAssertEqual(try receipts(), beforeReceipts)
+        XCTAssertEqual(io.counts, [0, 0, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    }
 }

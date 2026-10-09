@@ -10,6 +10,10 @@ node apps/ios-native/scripts/build-bundle.mjs
 node apps/ios-native/scripts/build-bundle.mjs --crypto-test
 node apps/ios-native/scripts/build-bundle.mjs --attachment-upload-test
 node apps/ios-native/scripts/check-task-date-codec.mjs
+swiftc -parse-as-library "$app/App/NativeCalendarEventEditor.swift" \
+  "$app/Tests/AppLifecycle/CalendarEventEditorLifetimeChecks.swift" \
+  -o "$app/.build/calendar-editor-lifetime-check"
+"$app/.build/calendar-editor-lifetime-check"
 python3 apps/ios-native/scripts/check-project-download-fixture.test.py
 export MINDWTR_CORE_BUNDLE="$app/Resources/core-host.js"
 export MINDWTR_CRYPTO_TEST_BUNDLE="$app/.build/crypto-test-host.js"
