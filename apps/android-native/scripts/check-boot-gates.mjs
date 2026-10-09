@@ -3578,6 +3578,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 const fakeCore = `
 export { REMINDER_STORE_RESCHEDULE_DELAY_MS, shouldRescheduleReminderAlarms } from ${JSON.stringify(resolve(app, '../../packages/core/src/mobile-reminder-alarms.ts'))};
 export { nameNotifyListener } from ${JSON.stringify(resolve(app, '../../packages/core/src/store-notify-profiler.ts'))};
+export { buildShortcutsSnapshot } from ${JSON.stringify(resolve(app, '../../packages/core/src/widget-payload.ts'))};
 export { compareAppVersions, fetchAppStoreInfo, UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY, shouldCheckForAppUpdate } from ${JSON.stringify(resolve(app, '../../packages/core/src/app-store-update.ts'))};
 export { SYNC_BACKEND_KEY, CLOUD_PROVIDER_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
 export { getBaseSyncUrl } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-paths.ts'))};

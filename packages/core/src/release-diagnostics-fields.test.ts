@@ -13,6 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // ios-search-snapshot reuses releaseCheck and count below.
     // ios-entity-link reuses releaseCheck, kind, and outcome below.
     // obsidian-inline-tag reuses releaseCheck and count below.
     // webdav-host-upload-limit and webdav-host-download-limit reuse releaseCheck, operation, and outcome below.

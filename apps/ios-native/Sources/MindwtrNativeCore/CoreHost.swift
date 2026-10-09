@@ -111,6 +111,10 @@ public final class CoreHost: @unchecked Sendable {
         try await perform { try $0.start(retainingReminderResponseIDs: retainingReminderResponseIDs) }
     }
 
+    public func searchSnapshot() async throws -> NativeSearchSnapshot {
+        try NativeSearchSnapshot(json: await call("iosSearchSnapshot"))
+    }
+
     /// One physical cleanup decision; grants no attachment metadata authority.
     public func retireAttachmentCleanup(_ requestJSON: String) async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
@@ -1588,7 +1592,7 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "iosEntityOpen": 1, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
+        "iosEntityOpen": 1, "iosSearchSnapshot": 0, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
         "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
@@ -15263,6 +15267,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateArgumentTransportSize(_ method: String, _ json: String) throws {
+        if method == "iosSearchSnapshot", json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Search snapshot request is too large")
+        }
         if method == "iosEntityOpen", json.utf8.count > 128_000 {
             throw HostFailure("INVALID_INPUT: Entity open request is too large")
         }

@@ -30,6 +30,7 @@ import {
     sanitizeForLog,
     sanitizeLogContext,
     buildImmediateNotificationDetails,
+    buildShortcutsSnapshot,
     buildNativeBackupDocumentResult,
     buildNativeBackupSnapshotRestoreConfirmation,
     commitNativeBackupDocument,
@@ -1978,6 +1979,59 @@ globalThis.MindwtrHost = {
         return submit(async () => {
             requireSaved();
             return unwrap(contract.probePersonCreateOutcome(JSON.parse(json)));
+        });
+    },
+    /** Explicit rebuild; a future publisher owns coalescing and time-boundary invalidation. */
+    iosSearchSnapshot(): string {
+        const argumentCount = arguments.length;
+        return submit(async () => {
+            if (argumentCount !== 0) throw new Error('INVALID_INPUT: Search snapshot takes no arguments');
+            const unavailable = () => new Error('NOT_READY: Native iOS search snapshot is unavailable');
+            const adapter = bootAdapter;
+            const assertReady = () => {
+                if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+                    || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
+                requireSaved();
+                const status = getPersistenceStatus();
+                if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+                    || !contract.getDataSettings().ok) throw unavailable();
+                return status;
+            };
+            const before = assertReady(), state = useTaskStore.getState();
+            const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
+                areas: state._allAreas, settings: state.settings };
+            type Item = { id: string; title: string; list: 'inbox' | 'focus' | 'next' | 'waiting' | 'someday';
+                projectName?: string; dueDate?: string; startDate?: string };
+            const result: { items: Item[] } = { items: [] };
+            try {
+                const snapshot = buildShortcutsSnapshot(data), seen = new Set<string>();
+                const lists = ['inbox', 'focus', 'next', 'waiting', 'someday'] as const;
+                const text = (value: unknown, limit: number, nonempty = false) =>
+                    typeof value === 'string' && value.length <= limit && (!nonempty || value.length > 0);
+                for (const group of [...lists.map((list) => snapshot.lists[list]), ...snapshot.projects.map((group) => group.items)]) {
+                    for (const row of group) {
+                        if (!text(row.id, 500, true) || !text(row.title, 16_384) || !lists.includes(row.list)
+                            || ('projectName' in row && !text(row.projectName, 16_384))
+                            || ('dueDate' in row && !text(row.dueDate, 100, true))
+                            || ('startDate' in row && !text(row.startDate, 100, true))) throw new Error();
+                        if (seen.has(row.id)) continue;
+                        seen.add(row.id);
+                        result.items.push({ id: row.id, title: row.title, list: row.list,
+                            ...('projectName' in row ? { projectName: row.projectName } : {}),
+                            ...('dueDate' in row ? { dueDate: row.dueDate } : {}),
+                            ...('startDate' in row ? { startDate: row.startDate } : {}) });
+                    }
+                }
+                if (result.items.length > 2_750 || new TextEncoder().encode(JSON.stringify(result)).byteLength > 8 * 1024 * 1024) throw new Error();
+            } catch { throw new Error('INVALID_INPUT: Native iOS search snapshot is invalid'); }
+            const after = assertReady(), current = useTaskStore.getState();
+            if (before.generation !== after.generation || current._allTasks !== data.tasks || current._allProjects !== data.projects
+                || current._allSections !== data.sections || current._allAreas !== data.areas || current.settings !== data.settings) throw unavailable();
+            try {
+                logInfo('Native iOS search snapshot', { scope: 'native-ios', force: true,
+                    context: { releaseCheck: 'v1.3.5/ios-search-snapshot', count: String(result.items.length) } });
+            } catch { /* Diagnostics cannot fail a successful readonly projection. */ }
+            return result;
         });
     },
     /** Private prepared Person methods; Swift owns the durable journal. */
