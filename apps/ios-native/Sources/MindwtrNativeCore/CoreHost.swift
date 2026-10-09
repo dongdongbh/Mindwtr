@@ -1428,6 +1428,7 @@ private final class Engine: @unchecked Sendable {
     private let backupImportFile: NativeBackupImportFile
     private let backupOperationFiles: NativeBackupOperationFiles
     private var backupSelections: [UUID: (selection: NativeBackupImportSelection, action: NativeBackupImportAction)] = [:]
+    private var backupReplayReadOnly = false
     private let journalURL: URL
     private let editorDrafts: EditorDraftStore
     private let legacyStorage: LegacyRNStorage?
@@ -8217,6 +8218,11 @@ private final class Engine: @unchecked Sendable {
             try? backupOperationFiles.discard(reference, provenRejected: true)
             throw CoreHostRejection(message: "INVALID_INPUT: Backup operation is unavailable")
         }
+        do { try requireBackupDocumentMutationAllowed(command, arguments: arguments) }
+        catch {
+            try? backupOperationFiles.discard(reference, provenRejected: true)
+            throw CoreHostRejection(message: "NOT_READY: Finish pending Calendar effects before restoring or replacing data")
+        }
         pending = command
         try persist(command)
         // Document reload intentionally suppresses maintenance until this exact
@@ -8255,6 +8261,49 @@ private final class Engine: @unchecked Sendable {
         let reference = try backupOperationReference(command)
         let operation = try backupOperationFiles.read(reference)
         return [try backupEncoded(reference), operation.planJSON, operation.snapshot.name]
+    }
+
+    private func calendarPushEffectConstrainsBackup() -> Bool {
+        // Hosts without this capability cannot own a Calendar effect. A configured
+        // namespace that cannot prove absence must retain the same safety fence.
+        guard deviceStorageLocation != nil else { return false }
+        guard let deviceStorage, let cells = try? deviceStorage.readCalendarPushState(), cells.count == 6 else { return true }
+        return cells[5] != nil
+    }
+
+    private func backupDocumentPlanMode(_ command: PendingCommand, arguments: [Any]) throws -> String {
+        let reference = try backupOperationReference(command)
+        guard arguments.count == 3, let planJSON = arguments[1] as? String,
+              let plan = try NativeJSON.jsonObject(with: Data(planJSON.utf8)) as? [String: Any],
+              Set(plan.keys) == Set(["version", "requestId", "mode", "preparedAt", "expectedCurrent", "data", "reply"]),
+              Self.isInteger(plan["version"], equalTo: 1), plan["requestId"] as? String == reference.id,
+              let mode = plan["mode"] as? String,
+              ["merge", "restore", "replace", "csv", "todoist", "ticktick", "dgt", "omnifocus"].contains(mode) else {
+            throw HostFailure("Invalid owned backup document plan")
+        }
+        return mode
+    }
+
+    private func requireBackupDocumentMutationAllowed(_ command: PendingCommand, arguments: [Any]) throws {
+        let mode = try backupDocumentPlanMode(command, arguments: arguments)
+        guard !["restore", "replace"].contains(mode) || !calendarPushEffectConstrainsBackup() else {
+            throw HostFailure("NOT_READY: Finish pending Calendar effects before restoring or replacing data")
+        }
+    }
+
+    private func invokeBackupDocumentReplay(_ command: PendingCommand, arguments: [Any]) throws -> String {
+        _ = try backupDocumentPlanMode(command, arguments: arguments)
+        let previous = backupReplayReadOnly
+        defer { backupReplayReadOnly = previous }
+        if calendarPushEffectConstrainsBackup() {
+            backupReplayReadOnly = true
+            // Keep the existing exact receipt proof and normal reload/finish path.
+            // A vanished receipt cannot fall through to document writes afterward.
+            guard try invoke("backupDocumentOutcome", arguments: arguments) != "null" else {
+                throw HostFailure("SAVE_FAILED: Pending Calendar effects require an exact saved backup receipt")
+            }
+        }
+        return try invoke(command.method, arguments: arguments)
     }
 
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
@@ -10767,6 +10816,9 @@ private final class Engine: @unchecked Sendable {
                 throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
             }
         }
+        if command.method == "backupDocumentCommit" {
+            try requireBackupDocumentMutationAllowed(command, arguments: backupDocumentArguments(command))
+        }
         pending = command
         try persist(command)
         let terminal: TerminalResult
@@ -11072,7 +11124,8 @@ private final class Engine: @unchecked Sendable {
             if command.method == "backupDocumentCommit" { replay = try backupDocumentArguments(command) }
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
-            value = try invoke(command.method, arguments: replay)
+            value = try command.method == "backupDocumentCommit"
+                ? invokeBackupDocumentReplay(command, arguments: replay) : invoke(command.method, arguments: replay)
         }
         catch let failure as HostFailure {
             if command.method == "appLockCommit", recoveryActivationPending, failure.message.hasPrefix("STALE_REVISION:") {
@@ -21347,8 +21400,8 @@ private final class Engine: @unchecked Sendable {
         try requireProjectDownloadTurn()
         try requireProjectAvailabilityTurn()
         let result: String
-        if let parameters { result = try requireDatabase().execute(sql, parametersJSON: parameters) }
-        else { result = try requireDatabase().execute(sql) }
+        if let parameters { result = try requireDatabase().execute(sql, parametersJSON: parameters, readOnly: backupReplayReadOnly) }
+        else { result = try requireDatabase().execute(sql, readOnly: backupReplayReadOnly) }
         try requireEncryptionUnlockTurn()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()

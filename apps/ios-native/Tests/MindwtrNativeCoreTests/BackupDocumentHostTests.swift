@@ -15,8 +15,13 @@ final class BackupDocumentHostTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
     override func tearDownWithError() throws { if let root { try FileManager.default.removeItem(at: root) } }
-    private func host(_ faults: HostIOFaults = HostIOFaults()) -> CoreHost {
-        let value = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults)
+    private let calendarNamespace = "mindwtr.backup.calendar.fixture"
+    private var calendarManifest: URL {
+        root.appendingPathComponent("Library/Application Support/\(calendarNamespace)/RCTAsyncLocalStorage_V1/manifest.json")
+    }
+    private func host(_ faults: HostIOFaults = HostIOFaults(), calendarStorage: Bool = false) -> CoreHost {
+        let value = CoreHost(databaseURL: database, bundleURL: bundle, faults: faults,
+                             deviceStorage: calendarStorage ? (containerURL: root, bundleIdentifier: calendarNamespace) : nil)
         addTeardownBlock { await value.close() }
         return value
     }
@@ -55,6 +60,178 @@ final class BackupDocumentHostTests: XCTestCase {
     private func snapshots(_ core: CoreHost) async throws -> [[String: Any]] {
         let encoded = try await core.listBackupSnapshots()
         return try XCTUnwrap(NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [[String: Any]])
+    }
+    private func seedCalendarEffect(saved: Bool) throws -> String {
+        let storage = try NativeDeviceKV(containerURL: root, bundleIdentifier: calendarNamespace)
+        defer { storage.close() }
+        let request = try json(["op": "createEvent", "calendarId": "fixture-calendar", "details": [
+            "title": "Synthetic fixture", "startMs": 1_800_000_000_000, "endMs": 1_800_003_600_000,
+            "allDay": false, "notes": "", "location": "",
+        ]])
+        let started = try NativeCalendarPushEffect(libraryID: "fixture-library", requestJSON: request,
+                                                  taskID: "fixture-task").markingStarted()
+        let effect = try (saved ? started.recording(result: .identifier("fixture-event")) : started).encoded()
+        let before = try storage.readCalendarPushState()
+        var next = before; next[5] = effect
+        try storage.compareAndSetCalendarPushState(expected: before, next: next)
+        return effect
+    }
+    private func calendarEffect() throws -> String? {
+        let storage = try NativeDeviceKV(containerURL: root, bundleIdentifier: calendarNamespace)
+        defer { storage.close() }
+        return try storage.readCalendarPushState()[5]
+    }
+    private func seedCalendarMapping() throws {
+        _ = try rows("INSERT INTO calendar_sync (task_id, calendar_event_id, calendar_id, platform, last_synced_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, platform) DO NOTHING",
+                     ["fixture-task", "fixture-event", "fixture-calendar", "ios", "fixture-stamp"])
+    }
+
+    func testPendingCalendarEffectRefusesWarmRestoreAndReplaceButAllowsMergeAndTasks() async throws {
+        for saved in [false, true] {
+            let setup = host(calendarStorage: true); _ = try await setup.start()
+            _ = try await capture(setup, "Original fixture")
+            let (url, _) = try await source(setup)
+            let merge = try await setup.prepareBackupImport(url)
+            _ = try await setup.mergeBackupImport(merge.id)
+            let roster = try await snapshots(setup)
+            let reference = try json(XCTUnwrap(roster.first))
+            await setup.close()
+            let effect = try seedCalendarEffect(saved: saved)
+            try seedCalendarMapping()
+            let core = host(calendarStorage: true); _ = try await core.start()
+            let replacement = try await core.prepareBackupImport(url, action: .replace)
+            XCTAssertEqual(try object(replacement.json)["valid"] as? Bool, true)
+            _ = try await core.backupSnapshotRestoreModel(reference)
+            let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
+            let beforeMappings = try json(rows("SELECT * FROM calendar_sync ORDER BY task_id, platform"))
+            let beforeManifest = try Data(contentsOf: calendarManifest)
+            await failure { _ = try await core.mergeBackupImport(replacement.id) }
+            await failure { _ = try await core.restoreBackupSnapshot(reference) }
+            XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
+            XCTAssertEqual(try json(rows("SELECT * FROM calendar_sync ORDER BY task_id, platform")), beforeMappings)
+            XCTAssertEqual(try Data(contentsOf: calendarManifest), beforeManifest)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+            let allowedMerge = try await core.prepareBackupImport(url)
+            let merged = try object(await core.mergeBackupImport(allowedMerge.id))
+            XCTAssertEqual(merged["operation"] as? String, "merge")
+            let task = try await capture(core, "Task remains available")
+            XCTAssertEqual(try rows("SELECT id FROM tasks WHERE id = ?", [task]).count, 1)
+            await core.close()
+            XCTAssertEqual(try calendarEffect(), effect)
+        }
+    }
+
+    func testUnreadableCalendarNamespaceRefusesWarmReplacementWithoutBreakingPreview() async throws {
+        let setup = host(calendarStorage: true); _ = try await setup.start()
+        _ = try await capture(setup, "Original")
+        let (url, _) = try await source(setup)
+        await setup.close()
+        try Data("unreadable fixture".utf8).write(to: calendarManifest)
+        let core = host(calendarStorage: true); _ = try await core.start()
+        let preview = try await core.prepareBackupImport(url, action: .replace)
+        XCTAssertEqual(try object(preview.json)["valid"] as? Bool, true)
+        let before = try json(rows("SELECT * FROM tasks ORDER BY id"))
+        await failure { _ = try await core.mergeBackupImport(preview.id) }
+        XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try Data(contentsOf: calendarManifest), Data("unreadable fixture".utf8))
+    }
+
+    func testPendingCalendarEffectMissingColdBackupReceiptRetainsJournalAndDoesNotApply() async throws {
+        let faults = HostIOFaults(), core = host(faults, calendarStorage: true)
+        _ = try await core.start()
+        let (url, imported) = try await source(core)
+        let preview = try await core.prepareBackupImport(url, action: .replace)
+        faults.beforeSQL = { if $0 == "BEGIN IMMEDIATE" { throw HostFailure("Injected document admission failure") } }
+        await failure { _ = try await core.mergeBackupImport(preview.id) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertTrue(try rows("SELECT id FROM tasks WHERE id = ?", [imported]).isEmpty)
+        await core.close()
+        let effect = try seedCalendarEffect(saved: false)
+        try seedCalendarMapping()
+        let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
+        let beforeMappings = try json(rows("SELECT * FROM calendar_sync ORDER BY task_id, platform"))
+        let beforeJournal = try Data(contentsOf: journal)
+        let owned = root.appendingPathComponent("backup-operations")
+        let operationNames = try FileManager.default.contentsOfDirectory(atPath: owned.path)
+        let reopened = host(calendarStorage: true)
+        await failure { _ = try await reopened.start() }
+        XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
+        XCTAssertEqual(try json(rows("SELECT * FROM calendar_sync ORDER BY task_id, platform")), beforeMappings)
+        XCTAssertEqual(try Data(contentsOf: journal), beforeJournal)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: owned.path), operationNames)
+        await reopened.close()
+        XCTAssertEqual(try calendarEffect(), effect)
+    }
+
+    func testPendingCalendarEffectLandedColdBackupReplayPreservesLaterEditsAndRestoresNormalWrites() async throws {
+        for terminal in [false, true] {
+            let faults = HostIOFaults(), core = host(faults, calendarStorage: true)
+            _ = try await core.start()
+            let (url, imported) = try await source(core)
+            let preview = try await core.prepareBackupImport(url, action: .replace)
+            if terminal { faults.journalRemove = { throw HostFailure("Injected terminal retention") } }
+            else { var writes = 0; faults.journalWrite = { writes += 1; if writes == 2 { throw HostFailure("Injected lost document reply") } } }
+            await failure { _ = try await core.mergeBackupImport(preview.id) }
+            let retained = try object(String(contentsOf: journal, encoding: .utf8))
+            XCTAssertEqual(retained["method"] as? String, "backupDocumentCommit")
+            XCTAssertEqual(retained["terminal"] != nil, terminal)
+            await core.close()
+            let effect = try seedCalendarEffect(saved: true)
+            _ = try rows("UPDATE tasks SET title = ?, rev = rev + 1 WHERE id = ?", ["Later edit survives constrained replay", imported])
+            try seedCalendarMapping()
+            let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
+            let beforeMappings = try json(rows("SELECT * FROM calendar_sync ORDER BY task_id, platform"))
+            let reopened = host(calendarStorage: true)
+            let startup = try object(await reopened.start())
+            XCTAssertEqual((startup["recovery"] as? [String: Any])?["method"] as? String, "backupDocumentCommit")
+            XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
+            XCTAssertEqual(try json(rows("SELECT * FROM calendar_sync ORDER BY task_id, platform")), beforeMappings)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+            let task = try await capture(reopened, "Normal write after constrained replay")
+            XCTAssertEqual(try rows("SELECT id FROM tasks WHERE id = ?", [task]).count, 1)
+            await reopened.close()
+            XCTAssertEqual(try calendarEffect(), effect)
+            // Each iteration needs a fresh pre-effect backup; remove only this closed fixture's effect.
+            let storage = try NativeDeviceKV(containerURL: root, bundleIdentifier: calendarNamespace)
+            let before = try storage.readCalendarPushState()
+            var next = before; next[5] = nil
+            try storage.compareAndSetCalendarPushState(expected: before, next: next)
+            storage.close()
+        }
+    }
+
+    func testPendingCalendarEffectReceiptVanishingAfterProbeCannotMutate() async throws {
+        let faults = HostIOFaults(), core = host(faults, calendarStorage: true)
+        _ = try await core.start()
+        let (url, _) = try await source(core)
+        let preview = try await core.prepareBackupImport(url, action: .replace)
+        var writes = 0
+        faults.journalWrite = { writes += 1; if writes == 2 { throw HostFailure("Injected lost document reply") } }
+        await failure { _ = try await core.mergeBackupImport(preview.id) }
+        await core.close()
+        let effect = try seedCalendarEffect(saved: true)
+        let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
+        let beforeJournal = try Data(contentsOf: journal)
+        let replayFaults = HostIOFaults()
+        var receiptReads = 0, mutations = 0
+        replayFaults.beforeSQL = { sql in
+            if sql == "SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?" {
+                receiptReads += 1
+                if receiptReads == 2 {
+                    _ = try self.rows("DELETE FROM native_request_receipts WHERE method LIKE '[\"backupDocument\",%'")
+                }
+            }
+            if receiptReads > 0 && ["INSERT", "UPDATE", "DELETE"].contains(where: { sql.uppercased().hasPrefix($0) }) { mutations += 1 }
+        }
+        let reopened = host(replayFaults, calendarStorage: true)
+        await failure { _ = try await reopened.start() }
+        XCTAssertEqual(receiptReads, 2)
+        XCTAssertEqual(mutations, 0)
+        XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
+        XCTAssertEqual(try Data(contentsOf: journal), beforeJournal)
+        await reopened.close()
+        XCTAssertEqual(try calendarEffect(), effect)
     }
 
     func testInspectionCancelAndInvalidInputDoNotWriteDomainOrSnapshot() async throws {

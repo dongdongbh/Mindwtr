@@ -168,18 +168,29 @@ final class SQLiteBridge {
         String(decoding: try JSONSerialization.data(withJSONObject: values), as: UTF8.self)
     }
 
-    func execute(_ sql: String, parametersJSON: String = "[]") throws -> String {
+    func execute(_ sql: String, parametersJSON: String = "[]", readOnly: Bool = false) throws -> String {
         #if DEBUG
         try faults?.beforeSQL?(sql)
         #endif
         guard let parameters = try NativeJSON.jsonObject(with: Data(parametersJSON.utf8)) as? [Any] else {
             throw HostFailure("SQLite parameters must be an array")
         }
+        if readOnly {
+            // SQLite also calls some connection-changing PRAGMAs read-only, and
+            // some PRAGMAs act at prepare time. Admit only the recovery read shapes.
+            let query = sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard query.hasPrefix("SELECT ") || query == "PRAGMA DATA_VERSION" else {
+                throw HostFailure("SQLite recovery requires read-only statements")
+            }
+        }
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw failure("prepare")
         }
         defer { sqlite3_finalize(statement) }
+        guard !readOnly || sqlite3_stmt_readonly(statement) != 0 else {
+            throw HostFailure("SQLite recovery requires read-only statements")
+        }
         guard sqlite3_bind_parameter_count(statement) == parameters.count else { throw HostFailure("SQLite parameter count mismatch") }
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         for (offset, value) in parameters.enumerated() {
