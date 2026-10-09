@@ -27,6 +27,7 @@ private final class WriteTestProvider: NativeCalendarWriteProviding {
     var eventValues = [WriteTestEvent()]
     var calendarResult = "created-calendar"
     var eventResult = "created-event"
+    var calendarFailure: Error?
     var failAt: Int?
     var beforeOperation: ((Int) -> Void)?
     private(set) var operations: [String] = []
@@ -51,7 +52,11 @@ private final class WriteTestProvider: NativeCalendarWriteProviding {
     }
     func sources() throws -> [WriteTestSource] { try record("sources"); return sourceValues }
     func source(_ value: WriteTestSource) -> NativeCalendarSource { value.value }
-    func calendars() throws -> [WriteTestCalendar] { try record("calendars"); return calendarValues }
+    func calendars() throws -> [WriteTestCalendar] {
+        try record("calendars")
+        if let calendarFailure { throw calendarFailure }
+        return calendarValues
+    }
     func target(_ value: WriteTestCalendar) -> NativeCalendarWriteTarget { value.value }
     func events(eventID: String, calendar: WriteTestCalendar) throws -> [WriteTestEvent] {
         requestedEventID = eventID; selectedCalendar = calendar
@@ -277,7 +282,9 @@ final class NativeCalendarWriterTests: XCTestCase {
         for operation in [Operation.updateCalendar, .deleteCalendar, .createEvent, .updateEvent, .deleteEvent] {
             for values in [[], [WriteTestCalendar("other")]] as [[WriteTestCalendar]] {
                 let provider = WriteTestProvider(); provider.calendarValues = values
-                assertError(.missingCalendar) { try run(operation, provider) }
+                assertError(operation == .updateEvent || operation == .deleteEvent ? .missingEvent : .missingCalendar) {
+                    try run(operation, provider)
+                }
                 XCTAssertTrue(provider.writes.isEmpty); XCTAssertNil(provider.requestedEventID)
             }
             let duplicate = WriteTestProvider(); duplicate.calendarValues = [WriteTestCalendar(), WriteTestCalendar()]
@@ -317,6 +324,64 @@ final class NativeCalendarWriterTests: XCTestCase {
         assertError(.invalid) { try run(.deleteEvent, provider, eventID: "cafe\u{301}") }
     }
 
+    func testConfirmedMissingCalendarMakesMappedEventsMissingWithoutLookupOrMutation() throws {
+        for operation in [Operation.updateEvent, .deleteEvent] {
+            for values in [[], [WriteTestCalendar("calendar-\u{e9}")]] as [[WriteTestCalendar]] {
+                let provider = WriteTestProvider(); provider.calendarValues = values
+                assertError(.missingEvent) { try run(operation, provider, calendarID: "calendar-e\u{301}") }
+                XCTAssertEqual(provider.operations, ["permissions", "calendars", "permissions"])
+                XCTAssertTrue(provider.writes.isEmpty); XCTAssertNil(provider.requestedEventID)
+            }
+        }
+        for operation in [Operation.updateCalendar, .deleteCalendar, .createEvent] {
+            let provider = WriteTestProvider(); provider.calendarValues = []
+            assertError(.missingCalendar) { try run(operation, provider) }
+            XCTAssertEqual(provider.operations, ["permissions", "calendars", "permissions"])
+            XCTAssertTrue(provider.writes.isEmpty); XCTAssertNil(provider.requestedEventID)
+        }
+    }
+
+    func testMissingCalendarRequiresSuccessfulEnumerationAndPermissionRecheck() throws {
+        let errors: [(Error, NativeCalendarWriteError)] = [
+            (NativeCalendarReadError.denied, .denied), (NativeCalendarReadError.unavailable, .unavailable),
+            (NativeCalendarWriteError.missingCalendar, .missingCalendar),
+            (NativeCalendarWriteError.failed, .failed), (NativeCalendarWriteError.ambiguous, .ambiguous),
+            (NativeCalendarWriteError.invalid, .invalid)
+        ]
+        for operation in [Operation.updateCalendar, .deleteCalendar, .createEvent, .updateEvent, .deleteEvent] {
+            for (failure, expected) in errors {
+                let provider = WriteTestProvider(); provider.calendarValues = []; provider.calendarFailure = failure
+                assertError(expected) { try run(operation, provider) }
+                XCTAssertEqual(provider.operations, ["permissions", "calendars"])
+                XCTAssertTrue(provider.writes.isEmpty); XCTAssertNil(provider.requestedEventID)
+            }
+            for permission in [NativeCalendarPermission.denied, .undetermined] {
+                let initiallyDenied = WriteTestProvider(); initiallyDenied.calendarValues = []
+                initiallyDenied.permissionReplies = [permission]
+                assertError(.denied) { try run(operation, initiallyDenied) }
+                XCTAssertEqual(initiallyDenied.operations, ["permissions"])
+                XCTAssertTrue(initiallyDenied.writes.isEmpty)
+                for values in [[], [WriteTestCalendar(), WriteTestCalendar()]] as [[WriteTestCalendar]] {
+                    let revoked = WriteTestProvider(); revoked.calendarValues = values
+                    revoked.permissionReplies = [.granted, permission]
+                    assertError(.denied) { try run(operation, revoked) }
+                    XCTAssertEqual(revoked.operations, ["permissions", "calendars", "permissions"])
+                    XCTAssertTrue(revoked.writes.isEmpty); XCTAssertNil(revoked.requestedEventID)
+                }
+            }
+            for position in [2, 3] {
+                let failed = WriteTestProvider(); failed.calendarValues = []; failed.failAt = position
+                assertError(.failed) { try run(operation, failed) }
+                XCTAssertEqual(failed.operations.count, position)
+                XCTAssertTrue(failed.writes.isEmpty); XCTAssertNil(failed.requestedEventID)
+            }
+            let duplicate = WriteTestProvider(); duplicate.calendarValues = [WriteTestCalendar(), WriteTestCalendar()]
+            assertError(.ambiguous) { try run(operation, duplicate) }
+            XCTAssertEqual(duplicate.operations, ["permissions", "calendars", "permissions"])
+            XCTAssertTrue(duplicate.writes.isEmpty); XCTAssertNil(duplicate.requestedEventID)
+        }
+    }
+
     func testFinalPermissionObservationRevalidatesSourceTargetAndEventIdentity() throws {
         let source = WriteTestProvider()
         source.beforeOperation = { count in
@@ -335,9 +400,11 @@ final class NativeCalendarWriterTests: XCTestCase {
                 XCTAssertTrue(provider.writes.isEmpty)
             }
         }
+        let successfulEvent = WriteTestProvider(); try run(.updateEvent, successfulEvent)
+        let finalEventCheck = try XCTUnwrap(successfulEvent.operations.lastIndex(of: "permissions")) + 1
         for changed in [WriteTestEvent("changed"), WriteTestEvent(calendarID: "changed"), WriteTestEvent(recurring: true)] {
             let provider = WriteTestProvider()
-            provider.beforeOperation = { count in if count == 6 { provider.eventValues[0].value = changed.value } }
+            provider.beforeOperation = { count in if count == finalEventCheck { provider.eventValues[0].value = changed.value } }
             assertError(changed.value?.recurring == true ? .recurring : .invalid) { try run(.updateEvent, provider) }
             XCTAssertTrue(provider.writes.isEmpty)
         }

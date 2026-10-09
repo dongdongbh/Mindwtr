@@ -259,10 +259,13 @@ enum NativeCalendarWritePolicy {
         if let details { value["details"] = details }
         try NativeCalendarWriteValidation.frame(value)
     }
-    private static func target<P: NativeCalendarWriteProviding>(_ id: String, provider: P) throws -> P.CalendarValue {
+    private static func target<P: NativeCalendarWriteProviding>(_ id: String, provider: P,
+                                                              missingError: NativeCalendarWriteError = .missingCalendar) throws -> P.CalendarValue {
         try requireAccess(provider)
-        let matches = try provider.calendars().filter { NativeCalendarWriteValidation.equalID(provider.target($0).id, id) }
-        guard let calendar = matches.first else { throw NativeCalendarWriteError.missingCalendar }
+        let calendars = try provider.calendars()
+        try requireAccess(provider)
+        let matches = calendars.filter { NativeCalendarWriteValidation.equalID(provider.target($0).id, id) }
+        guard let calendar = matches.first else { throw missingError }
         guard matches.count == 1 else { throw NativeCalendarWriteError.ambiguous }
         return calendar
     }
@@ -272,7 +275,7 @@ enum NativeCalendarWritePolicy {
         guard value.allowsModifications, !mutableCalendar || !value.immutable else { throw NativeCalendarWriteError.readOnly }
     }
     private static func exactEvent<P: NativeCalendarWriteProviding>(_ id: String, calendarID: String, provider: P) throws -> (P.CalendarValue, P.EventValue) {
-        let calendar = try target(calendarID, provider: provider)
+        let calendar = try target(calendarID, provider: provider, missingError: .missingEvent)
         try requireAccess(provider); try writable(calendar, id: calendarID, provider: provider)
         let matches = try provider.events(eventID: id, calendar: calendar)
         try requireAccess(provider)
