@@ -104,7 +104,7 @@ function main() {
 
     if (opts.detach) {
         const unit = opts.unit ?? `device-batch-${basename(opts.log)}`.replace(/[^\w.-]/g, '-');
-        const env = ['PATH', 'JAVA_HOME', 'HOME'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`);
+        const env = ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`);
         // KillMode=process: the unit's end must not take down an adb server or Gradle daemon other sessions now use.
         const run = spawnSync('systemd-run', ['--user', `--unit=${unit}`, '--collect', '--property=KillMode=process', `--working-directory=${opts.tree}`, ...env,
             `--property=StandardOutput=append:${opts.log}/runner.out`, `--property=StandardError=append:${opts.log}/runner.out`,
