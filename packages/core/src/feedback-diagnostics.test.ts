@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFeedbackDiagnostics, createFeedbackDiagnosticsBuffer } from './feedback-diagnostics';
+import { buildFeedbackDiagnostics, createFeedbackDiagnosticsBuffer, sanitizeSavedFeedbackLog } from './feedback-diagnostics';
 
 const entry = (message: string, level: 'info' | 'warn' | 'error' = 'info', offset = 0) => ({
     ts: new Date(Date.UTC(2026, 8, 14) + offset).toISOString(), level, scope: 'sync', message,
@@ -53,5 +53,19 @@ describe('feedback diagnostics', () => {
         expect(retained.context.diagnosticTruncated).toBe('true');
         expect(buffer.read().length).toBeLessThan(8_000);
         expect(buildFeedbackDiagnostics([buffer.read()], snapshot, 1)).toBeNull();
+    });
+
+    it('passes every saved line through the log sanitizer and drops what is not a whole diagnostics line', () => {
+        const saved = [
+            '{"level":"info","scope":"sync","message":"rotated fragment"}',
+            JSON.stringify({ ...entry('Saved task', 'warn'), context: { title: 'Private task title', count: '2' } }),
+            JSON.stringify({ ...entry('Saved login', 'error'), context: { password: 'hunter2-secret', passphrase: 'correct horse battery' } }),
+            'not json',
+        ].join('\n');
+        const lines = sanitizeSavedFeedbackLog(saved).split('\n').map((line) => JSON.parse(line));
+        expect(lines.map((line) => line.message)).toEqual(['Saved task', 'Saved login']);
+        for (const secret of ['Private task title', 'hunter2-secret', 'correct horse battery']) expect(JSON.stringify(lines)).not.toContain(secret);
+        expect(lines[0].context).toEqual({ title: '[redacted]', count: '2' });
+        expect(sanitizeSavedFeedbackLog(null)).toBe('');
     });
 });

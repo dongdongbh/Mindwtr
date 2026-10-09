@@ -25,10 +25,9 @@ import {
     buildDiagnosticsLogEntry,
     submitFeedbackSubmission,
     FEEDBACK_CATEGORIES,
-    FEEDBACK_DIAGNOSTICS_SOURCE_CHARS,
+    feedbackDiagnosticEntry,
     getBreadcrumbs,
-    sanitizeForLog,
-    sanitizeLogContext,
+    sanitizeSavedFeedbackLog,
     buildFeedbackDiagnosticsSnapshot,
     buildImmediateNotificationDetails,
     buildShortcutsSnapshot,
@@ -100,7 +99,6 @@ import {
     resolveThemeStatusPreset,
     type AppTheme,
     type DiagnosticsLogFile,
-    type DiagnosticsLogEntry,
     type FeedbackMetadata,
     type FocusTaskSectionKey,
     type SqliteClient,
@@ -258,21 +256,6 @@ const diagnosticsFileLog = createDiagnosticsLog({
     files: [nativeLogFile],
 });
 const feedbackDiagnosticsBuffer = createFeedbackDiagnosticsBuffer();
-/** Only existing sanitized diagnostic fields can enter explicit feedback. */
-const feedbackDiagnosticEntry = (value: unknown): DiagnosticsLogEntry | null => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    const entry = value as Record<string, unknown>;
-    if (typeof entry.ts !== 'string' || !Number.isFinite(Date.parse(entry.ts))
-        || !['info', 'warn', 'error'].includes(String(entry.level))
-        || typeof entry.scope !== 'string' || typeof entry.message !== 'string') return null;
-    return {
-        ts: entry.ts, level: entry.level as DiagnosticsLogEntry['level'],
-        scope: sanitizeForLog(entry.scope), message: sanitizeForLog(entry.message),
-        ...(typeof entry.stack === 'string' ? { stack: sanitizeForLog(entry.stack) } : {}),
-        ...(entry.context && typeof entry.context === 'object' && !Array.isArray(entry.context)
-            ? { context: sanitizeLogContext(entry.context as Record<string, unknown>) } : {}),
-    };
-};
 // Keep the current session before the file gate, as RN's app-log does. The file
 // log retains its existing serialization, rotation and detailed-logging policy.
 const diagnosticsLog = {
@@ -302,8 +285,8 @@ setLogger((payload) => {
 const collectFeedbackDiagnostics = async (): Promise<string | null> => {
     const snapshot = buildFeedbackDiagnosticsSnapshot({
         debugLoggingEnabled: isDiagnosticsLoggingEnabled(useTaskStore.getState().settings), breadcrumbs: getBreadcrumbs() });
-    const saved = (await diagnosticsLog.read())?.trim();
-    return buildFeedbackDiagnostics([saved ? saved.slice(-FEEDBACK_DIAGNOSTICS_SOURCE_CHARS) : null, feedbackDiagnosticsBuffer.read()], snapshot, 20_000);
+    // Each saved line through the sanitizer again, as iOS's feedback does.
+    return buildFeedbackDiagnostics([sanitizeSavedFeedbackLog(await diagnosticsLog.read()), feedbackDiagnosticsBuffer.read()], snapshot, 20_000);
 };
 
 // The pending-captures queue under the app's files folder (Kotlin's HostFiles), and the record of the last queued command
@@ -4805,14 +4788,7 @@ globalThis.MindwtrHost = {
                 }));
                 const saved = await diagnosticsLog.read();
                 assertReady();
-                const sanitized: string[] = [];
-                for (const line of (saved ?? '').slice(-FEEDBACK_DIAGNOSTICS_SOURCE_CHARS).split('\n')) {
-                    try {
-                        const entry = feedbackDiagnosticEntry(JSON.parse(line));
-                        if (entry) sanitized.push(JSON.stringify(entry));
-                    } catch { /* Never export a rotated fragment or an invalid diagnostic line. */ }
-                }
-                logs = buildFeedbackDiagnostics([sanitized.join('\n'), feedbackDiagnosticsBuffer.read()], snapshot);
+                logs = buildFeedbackDiagnostics([sanitizeSavedFeedbackLog(saved), feedbackDiagnosticsBuffer.read()], snapshot);
             }
             assertReady();
             try {
