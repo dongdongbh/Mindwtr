@@ -29,6 +29,8 @@ struct SettingsScreen: View {
     @State private var notificationDayDraft = 0
     @State private var notificationTimeDraft = Date()
     @State private var calendarAreaPicker: Data?
+    private enum CalendarSubscriptionField: Hashable { case name, url }
+    @FocusState private var calendarSubscriptionField: CalendarSubscriptionField?
 
 
     var body: some View {
@@ -42,7 +44,7 @@ struct SettingsScreen: View {
                     else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
                     else if model.settingsAboutPresented { model.closeAboutSettings() }
                     else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
-                    else if model.settingsCalendarPresented { model.closeCalendarSettings() }
+                    else if model.settingsCalendarPresented { calendarSubscriptionField = nil; model.closeCalendarSettings() }
                     else if model.settingsGeneralPresented { model.closeGeneralSettings() }
                     else if model.settingsManagePresented { model.closeManageSettings() }
                     else if model.settingsAdvancedPresented { model.closeAdvancedSettings() }
@@ -267,7 +269,7 @@ struct SettingsScreen: View {
             else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
             else if model.settingsAboutPresented { model.closeAboutSettings() }
             else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
-            else if model.settingsCalendarPresented { model.closeCalendarSettings() }
+            else if model.settingsCalendarPresented { calendarSubscriptionField = nil; model.closeCalendarSettings() }
             else if model.settingsGeneralPresented { model.closeGeneralSettings() }
             else if model.settingsManagePresented { model.closeManageSettings() }
             else if model.settingsAdvancedPresented { model.closeAdvancedSettings() }
@@ -1229,7 +1231,7 @@ struct SettingsScreen: View {
                     }
                 }
             }.padding(16)
-        }.accessibilityIdentifier("calendar-settings-scroll")
+        }.scrollDismissesKeyboard(.interactively).accessibilityIdentifier("calendar-settings-scroll")
     }
 
     private var calendarSubscriptionContent: some View {
@@ -1240,6 +1242,34 @@ struct SettingsScreen: View {
                 Text(feeds.text("title")).rnFont(16, .semibold).foregroundStyle(palette.text)
                 Text(feeds.text("description")).rnFont(13).foregroundStyle(palette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if !model.calendarSettings.object("feeds").object("add").text("label").isEmpty {
+                let fields = model.calendarSettings.object("feeds")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(fields.object("name").text("label")).rnFont(14).foregroundStyle(palette.text)
+                    TextField(fields.object("name").text("placeholder"), text: $model.calendarSubscriptionName)
+                        .focused($calendarSubscriptionField, equals: .name).submitLabel(.next)
+                        .onSubmit { calendarSubscriptionField = .url }
+                        .rnFont(15).textFieldStyle(.roundedBorder).frame(minHeight: 44)
+                        .accessibilityLabel(fields.object("name").text("label"))
+                        .accessibilityIdentifier("calendar-subscription-name")
+                        .disabled(!model.calendarSubscriptionEnabled)
+                    Text(fields.object("url").text("label")).rnFont(14).foregroundStyle(palette.text)
+                    TextField(fields.object("url").text("placeholder"), text: $model.calendarSubscriptionURL)
+                        .focused($calendarSubscriptionField, equals: .url).submitLabel(.done)
+                        .onSubmit { calendarSubscriptionField = nil }
+                        .rnFont(15).textFieldStyle(.roundedBorder).frame(minHeight: 44)
+                        .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityLabel(fields.object("url").text("label"))
+                        .accessibilityIdentifier("calendar-subscription-url")
+                        .disabled(!model.calendarSubscriptionEnabled)
+                    Button { calendarSubscriptionField = nil; model.addCalendarSubscription() } label: {
+                        Text(fields.object("add").text("label")).rnFont(15, .semibold)
+                            .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                    }
+                    .disabled(!model.calendarSubscriptionAddEnabled)
+                    .accessibilityIdentifier("calendar-subscription-add")
+                }
             }
             if !model.calendarSettings.object("feeds").object("test").text("label").isEmpty {
                 Button { Task { await model.testCalendarSettings() } } label: {

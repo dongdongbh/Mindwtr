@@ -9,6 +9,7 @@ import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import type { ExternalCalendarSubscription } from './ics';
 import type { AppSettings } from './types';
 import { deterministicHash128Hex } from './uuid';
+import { calendarSubscriptionModules } from './store-calendar-subscription-modules';
 
 export type CalendarSubscriptionSettingEdit = Extract<NativeCalendarSettingsEdit, { type: 'feed' | 'removeFeed' }>;
 export type CalendarSubscriptionSettingWitness = {
@@ -102,3 +103,5 @@ export function planCalendarSubscriptionSetting(feeds: readonly ExternalCalendar
             : feeds.map((row) => row.id === edit.feedId ? { ...row, areaIds: [...edit.value] } : row);
     return next ? { changed: true, feeds: next } : null;
 }
+
+calendarSubscriptionModules.setting = { source: calendarSubscriptionSettingSource, plan: planCalendarSubscriptionSetting };

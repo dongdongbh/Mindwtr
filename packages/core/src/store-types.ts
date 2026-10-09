@@ -792,6 +792,8 @@ export interface TaskStore {
     /** Existing subscription metadata, saved only in canonical synced SQL settings. */
     commitPreparedCalendarSubscriptionSetting: (prepared: import('./native-host-contract-calendar-subscription-settings').PreparedCalendarSubscriptionSetting,
         authority: PreparedAreaAuthority, legacyRaw: string | null) => Promise<PreparedTaskEditResult>;
+    commitPreparedCalendarSubscriptionAdd: (prepared: import('./native-host-contract-calendar-subscription-add').PreparedCalendarSubscriptionAdd,
+        authority: PreparedAreaAuthority, legacyRaw: string | null) => Promise<PreparedTaskEditResult>;
     retryPreparedCalendarSubscriptionSettingSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     /** Update a project */
     updateProject: (id: string, updates: Partial<Project>) => Promise<StoreActionResult>;

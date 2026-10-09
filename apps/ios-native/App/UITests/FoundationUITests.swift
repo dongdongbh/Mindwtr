@@ -9855,6 +9855,93 @@ final class FoundationUITests: XCTestCase {
     func testNativeCalendarSubscriptionsLargest() throws { try task470CalendarSubscriptions("LARGEST", largest: true) }
     func testNativeCalendarSubscriptionsRecovery() throws { try task470CalendarSubscriptions("RECOVERY", largest: false, recovery: true) }
 
+    private func task472CalendarSubscriptionAdd(_ suffix: String, largest: Bool = false, recovery: Bool = false) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_ADD_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if recovery { app.launchArguments += ["--native-calendar-subscription-commit-reply-failure-once"] }
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        let scroll = app.scrollViews["calendar-settings-scroll"]
+        let name = app.textFields["calendar-subscription-name"]
+        let url = app.textFields["calendar-subscription-url"]
+        let addButton = app.buttons["calendar-subscription-add"]
+        let rawURL = "  https://valid-skirts-exchange-chip.trycloudflare.com/calendar.ics?token=synthetic-secret  "
+        func openSettings() {
+            boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+            let settings = app.buttons["menu-settings"]
+            if !settings.isHittable {
+                task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+            }
+            boardTap(app, "menu-settings")
+            let advanced = app.buttons["settings-advanced"]
+            task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"])
+            boardEnabled(advanced, timeout: 30); advanced.tap()
+            let calendar = app.buttons["settings-calendar"]
+            task442Reveal(app, calendar, in: app.scrollViews["advanced-scroll"])
+            boardEnabled(calendar, timeout: 30); calendar.tap()
+            XCTAssertEqual(app.switches["calendar-device-enabled"].value as? String, "0")
+            XCTAssertFalse(app.buttons["calendar-device-grant"].exists)
+            task442Reveal(app, url, in: scroll)
+            boardEnabled(url, timeout: 30)
+        }
+        func expectEmpty(_ field: XCUIElement) {
+            expectation(for: NSPredicate(format: "value == %@ OR value == ''", field.placeholderValue ?? ""), evaluatedWith: field)
+            waitForExpectations(timeout: 30)
+        }
+        func submit(_ row: Int, named: Bool, failOnce: Bool) {
+            if named {
+                task442Reveal(app, name, in: scroll); boardEnabled(name, timeout: 30)
+                name.tap(); name.typeText("  Synthetic added subscription  ")
+            }
+            task442Reveal(app, url, in: scroll); boardEnabled(url, timeout: 30)
+            url.tap(); url.typeText(rawURL + "\n")
+            XCTAssertEqual(url.value as? String, rawURL)
+            XCTAssertFalse(app.keyboards.firstMatch.exists)
+            task442Reveal(app, addButton, in: scroll); boardEnabled(addButton, timeout: 30)
+            XCTAssertGreaterThanOrEqual(addButton.frame.height, 44 - 0.001)
+            addButton.tap()
+            if failOnce {
+                let retry = app.buttons["calendar-settings-retry"]
+                task442Reveal(app, retry, in: scroll); boardEnabled(retry, timeout: 30)
+                XCTAssertEqual(url.value as? String, rawURL)
+                XCTAssertEqual(name.value as? String, "  Synthetic added subscription  ")
+                retry.tap()
+            }
+            expectEmpty(url); expectEmpty(name)
+            let added = app.switches["calendar-feed-enabled-\(row)"]
+            task442Reveal(app, added, in: scroll); boardEnabled(added, timeout: 30)
+            XCTAssertEqual(added.value as? String, "1")
+            XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "synthetic-secret")).firstMatch.exists)
+        }
+        openSettings()
+        XCTAssertFalse(addButton.isEnabled)
+        submit(1, named: !largest, failOnce: recovery)
+        if suffix == "NORMAL" { submit(2, named: false, failOnce: false) }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Calendar subscription Add " + suffix; shot.lifetime = .keepAlways; add(shot)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--native-calendar-subscription-commit-reply-failure-once" }
+        app.launch(); openSettings()
+        expectEmpty(name); expectEmpty(url)
+        XCTAssertFalse(addButton.isEnabled)
+        let lastRow = suffix == "NORMAL" ? 2 : 1
+        for row in 0...lastRow {
+            let item = app.switches["calendar-feed-enabled-\(row)"]
+            task442Reveal(app, item, in: scroll); boardEnabled(item, timeout: 30)
+            XCTAssertEqual(item.value as? String, row == 0 ? "0" : "1")
+        }
+        XCTAssertFalse(app.switches["calendar-feed-enabled-\(lastRow + 1)"].exists)
+        XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+    }
+
+    func testNativeCalendarSubscriptionAddNormal() throws { try task472CalendarSubscriptionAdd("NORMAL") }
+    func testNativeCalendarSubscriptionAddLargest() throws { try task472CalendarSubscriptionAdd("LARGEST", largest: true) }
+    func testNativeCalendarSubscriptionAddRecovery() throws { try task472CalendarSubscriptionAdd("RECOVERY", recovery: true) }
+
     private func task471CalendarSettingsTest(_ suffix: String, largest: Bool = false) throws {
         let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_SETTINGS_TEST_UI_")
         let held = ["TIMEOUT", "CANCEL", "BACKGROUND"].contains(suffix)

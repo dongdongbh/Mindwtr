@@ -330,3 +330,126 @@ describe('actual private iOS calendar subscription settings bundle', () => {
         expect(f.log()).toBe(before); expect(f.writes).toEqual([]); expect(f.deviceWrites).toEqual([]); expect(f.providers).toEqual([]);
     });
 });
+
+
+const addResult = { changed: true, toasts: [], open: null, clearDraft: true };
+const addRequest = (expected: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    requestId, name: '  PRIVATE NEW NAME  ', url: `  ${privateUrl}  `, defaultName: 'Calendar', expected, ...extra,
+});
+const preparedAdd = async (f: ReturnType<typeof fixture>, extra: Record<string, unknown> = {}) => {
+    const options = await f.call('calendarSubscriptionSettingOptions', {});
+    expect(options.ok).toBe(true);
+    const request = addRequest(options.value.expected, extra);
+    const prepared = await f.call('calendarSubscriptionAddPrepare', request);
+    expect(prepared).toMatchObject({ ok: true, value: { kind: 'prepared' } });
+    return { request, prepared: prepared.value.prepared };
+};
+
+describe('actual private iOS calendar subscription URL Add bundle', () => {
+    it('appends the RN-shaped private intent atomically, retains unrelated bytes and permits a distinct repeated URL', async () => {
+        const f = fixture(); await f.boot(canonicalSettings());
+        const before = f.savedSettings(), domain = f.domain(), device = new Map(f.kv);
+        const command = await preparedAdd(f);
+        expect(command.prepared.request).toEqual(command.request);
+        expect(await f.call('calendarSubscriptionAddValidate', command)).toEqual({ ok: true, value: addResult });
+        expect(f.writes).toEqual([]); expect(f.log()).toBe('');
+        expect(await f.call('calendarSubscriptionAddCommit', command)).toEqual({ ok: true, value: addResult });
+        expect(f.savedSettings()).toEqual({ ...before,
+            externalCalendars: [...before.externalCalendars, { id: requestId, name: 'PRIVATE NEW NAME', url: privateUrl, enabled: true }],
+            syncPreferencesUpdatedAt: { ...before.syncPreferencesUpdatedAt, externalCalendars: command.prepared.stamp } });
+        expect(f.domain()).toEqual(domain); expect(f.legacyReads).toEqual([]);
+        const receipt = f.database.query('SELECT method, reply FROM native_request_receipts').all();
+        expect(receipt).toEqual([{ method: expect.stringMatching(/^calendarSubscriptionAdd:[0-9a-f]{32}$/), reply: JSON.stringify(addResult) }]);
+        expect(JSON.stringify(receipt)).not.toContain('PRIVATE');
+        f.clearEffects();
+        expect(await f.call('calendarSubscriptionAddRetryOutcome', command.request)).toEqual({ ok: true, value: addResult });
+        expect(await f.call('calendarSubscriptionAddCommit', command)).toEqual({ ok: true, value: addResult });
+        expect(f.writes).toEqual([]);
+        const second = await preparedAdd(f, { requestId: '12345678-1234-4234-8234-123456789abd', name: ' ', defaultName: ' Calendar translated ' });
+        expect(await f.call('calendarSubscriptionAddCommit', second)).toEqual({ ok: true, value: addResult });
+        expect(f.savedSettings().externalCalendars.at(-1)).toEqual({ id: second.request.requestId,
+            name: 'Calendar translated', url: privateUrl, enabled: true });
+        expect(f.savedSettings().externalCalendars).toHaveLength(4);
+        assertNoExternalEffects(f, device); expect(f.log()).toBe('');
+    });
+
+    it.each([true, false])('adds from canonical empty or exact legacy authority without repairing the device copy (%s)', async (canonical) => {
+        const f = fixture(); await f.boot(canonical ? { externalCalendars: [] } : {});
+        const before = new Map(f.kv), command = await preparedAdd(f);
+        expect(command.request.expected.source).toBe(canonical ? 'canonical' : 'legacy');
+        expect(await f.call('calendarSubscriptionAddCommit', command)).toEqual({ ok: true, value: addResult });
+        expect(f.savedSettings().externalCalendars).toEqual([...(canonical ? [] : feeds().map(({ retained: _retained, ...feed }) => feed)),
+            { id: requestId, name: 'PRIVATE NEW NAME', url: privateUrl, enabled: true }]);
+        if (canonical) expect(f.legacyReads).toEqual([]);
+        else expect(f.legacyReads.length).toBeGreaterThan(0);
+        assertNoExternalEffects(f, before);
+    });
+
+    it.each(['before boot', 'android', 'missing port', 'adapter', 'sandbox', 'transition'])('refuses Add admission for %s before effects', async (guard) => {
+        const healthy = fixture(); await healthy.boot(canonicalSettings());
+        const command = await preparedAdd(healthy);
+        const f = fixture({ platform: guard === 'android' ? 'android' : 'ios', port: guard !== 'missing port' });
+        if (guard !== 'before boot') await f.boot(canonicalSettings());
+        if (guard === 'adapter') f.state.fixture.replaceAdapter();
+        if (guard === 'sandbox') f.state.fixture.sandbox();
+        if (guard === 'transition') f.state.fixture.transition();
+        const device = new Map(f.kv); f.clearEffects();
+        expect((await f.call('calendarSubscriptionAddPrepare', command.request)).ok).toBe(false);
+        expect((await f.call('calendarSubscriptionAddCommit', command)).ok).toBe(false);
+        expect(f.writes).toEqual([]); expect(f.legacyReads).toEqual([]); assertNoExternalEffects(f, device);
+    });
+
+    it('rejects blank, malformed and oversized requests before any effect', async () => {
+        const f = fixture(); await f.boot(canonicalSettings());
+        const options = await f.call('calendarSubscriptionSettingOptions', {}), before = f.savedSettings(), device = new Map(f.kv);
+        for (const patch of [{ url: ' \n\t' }, { name: 'x'.repeat(501) }, { url: 'x'.repeat(4001) },
+            { defaultName: '' }, { defaultName: 'x'.repeat(501) }, { name: null }, { url: 1 }, { extra: true }]) {
+            expect((await f.call('calendarSubscriptionAddPrepare', addRequest(options.value.expected, patch))).ok).toBe(false);
+        }
+        const raw = JSON.stringify(addRequest(options.value.expected));
+        expect((await f.raw('calendarSubscriptionAddPrepare', ' '.repeat(1_048_577) + raw)).ok).toBe(false);
+        expect(f.savedSettings()).toEqual(before); expect(f.writes).toEqual([]);
+        expect(f.log()).not.toContain('PRIVATE'); assertNoExternalEffects(f, device);
+    });
+
+    it('refuses a forged prepared request and a changed source, without overwriting the external choice', async () => {
+        const f = fixture(); await f.boot(canonicalSettings());
+        const command = await preparedAdd(f), device = new Map(f.kv);
+        const forged = structuredClone(command); forged.prepared.request.url = 'https://different.example';
+        expect((await f.call('calendarSubscriptionAddValidate', forged)).ok).toBe(false);
+        expect((await f.call('calendarSubscriptionAddCommit', forged)).ok).toBe(false);
+        const changed = { ...f.savedSettings(), externalCalendars: [] };
+        f.replaceSavedSettings(changed); f.clearEffects();
+        expect((await f.call('calendarSubscriptionAddCommit', command)).ok).toBe(false);
+        expect(f.savedSettings()).toEqual(changed); expect(f.writes).toEqual([]); assertNoExternalEffects(f, device);
+    });
+
+    it('cold receipt replay after removal cannot reappend and a conflicting private request cannot consume it', async () => {
+        const f = fixture(); await f.boot(canonicalSettings());
+        const command = await preparedAdd(f);
+        expect(await f.call('calendarSubscriptionAddCommit', command)).toEqual({ ok: true, value: addResult });
+        const removed = { ...f.savedSettings(), externalCalendars: [] };
+        f.replaceSavedSettings(removed);
+        const fresh = fixture({ database: f.database, kv: f.kv }); await fresh.boot(undefined, true);
+        const device = new Map(fresh.kv), domain = fresh.domain();
+        expect(await fresh.call('calendarSubscriptionAddRetryOutcome', command.request)).toEqual({ ok: true, value: addResult });
+        expect(await fresh.call('calendarSubscriptionAddCommit', command)).toEqual({ ok: true, value: addResult });
+        expect((await fresh.call('calendarSubscriptionAddPrepare', { ...command.request, url: 'https://different.example' })).ok).toBe(false);
+        expect(fresh.savedSettings()).toEqual(removed); expect(fresh.domain()).toEqual(domain);
+        expect(fresh.writes).toEqual([]); expect(fresh.legacyReads).toEqual([]); assertNoExternalEffects(fresh, device);
+    });
+
+    it.each([true, false])('keeps Add acknowledgments content-free and respects Diagnostics=%s', async (loggingEnabled) => {
+        const f = fixture(); await f.boot({ ...canonicalSettings(), diagnostics: { loggingEnabled } });
+        const command = await preparedAdd(f);
+        expect(await f.call('calendarSubscriptionAddCommit', command)).toEqual({ ok: true, value: addResult });
+        expect(f.log()).toBe('');
+        expect(await f.call('calendarSubscriptionAddAcknowledged')).toEqual({ ok: true, value: null });
+        const lines = f.log().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        expect(lines.map((line) => ({ message: line.message, context: line.context }))).toEqual(loggingEnabled ? [{
+            message: 'Native iOS calendar subscription added', context: { releaseCheck: 'v1.3.5/ios-calendar-subscription-add', outcome: 'saved' },
+        }] : []);
+        expect(f.log()).not.toContain('PRIVATE'); expect(f.log()).not.toContain('private.example');
+        f.failLog(); expect(await f.call('calendarSubscriptionAddAcknowledged')).toEqual({ ok: true, value: null });
+    });
+});

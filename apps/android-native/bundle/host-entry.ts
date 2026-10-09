@@ -63,6 +63,7 @@ import {
     createNativeHostContract,
     createDeviceCalendarSettingsMethods,
     createCalendarSubscriptionSettingsMethods,
+    createCalendarSubscriptionAddMethods,
     buildCalendarSubscriptionSettingsModel,
     diagnosticsEntryFromLogPayload,
     getGeneralSettingsDeviceWrites,
@@ -715,7 +716,7 @@ const calendarSubscriptionStorage = {
         return values[0] as string | null;
     },
 };
-const calendarSubscriptionSettings = createCalendarSubscriptionSettingsMethods({
+const calendarSubscriptionBindings: Parameters<typeof createCalendarSubscriptionSettingsMethods>[0] = {
     readiness: () => {
         if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
             || isSandboxMode() || isWorkspaceTransitionActive()
@@ -734,7 +735,9 @@ const calendarSubscriptionSettings = createCalendarSubscriptionSettingsMethods({
         areas,
         theme: settings.theme ?? 'system',
     }),
-});
+};
+const calendarSubscriptionSettings = createCalendarSubscriptionSettingsMethods(calendarSubscriptionBindings);
+const calendarSubscriptionAdd = createCalendarSubscriptionAddMethods(calendarSubscriptionBindings);
 
 /** host-polyfills.js's secret calls (SecretStore.kt). */
 type HostSecrets = {
@@ -1165,7 +1168,7 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     // a journal keeps its receipts in memory, as before.
     traceStep('js:receipts');
     if (journaled) await loadNativeRequestReceipts(sqlite);
-    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
+    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
     // The legacy import plans from a validated full read. Any other boot needs only the schema here: the activation's own read
     // is validated before anything saves.
     traceStep('js:schema');
@@ -2414,6 +2417,28 @@ globalThis.MindwtrHost = {
             try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                 message: 'Native iOS calendar subscription setting saved',
                 context: { releaseCheck: 'v1.3.5/ios-calendar-subscription-setting', outcome: 'saved' },
+            }); } catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+            return null;
+        });
+    },
+    calendarSubscriptionAddPrepare(json: string): string {
+        return submit(async () => unwrap(await calendarSubscriptionAdd.prepareCalendarSubscriptionAdd(completionJson(json, 1_048_576))));
+    },
+    calendarSubscriptionAddValidate(json: string): string {
+        return submit(async () => unwrap(calendarSubscriptionAdd.validatePreparedCalendarSubscriptionAdd(completionJson(json, 4_194_304))));
+    },
+    calendarSubscriptionAddCommit(json: string): string {
+        return submit(async () => unwrap(await calendarSubscriptionAdd.commitPreparedCalendarSubscriptionAdd(completionJson(json, 4_194_304))));
+    },
+    calendarSubscriptionAddRetryOutcome(json: string): string {
+        return submit(async () => unwrap(await calendarSubscriptionAdd.probeCalendarSubscriptionAddOutcome(completionJson(json, 1_048_576))));
+    },
+    calendarSubscriptionAddAcknowledged(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') return null;
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS calendar subscription added',
+                context: { releaseCheck: 'v1.3.5/ios-calendar-subscription-add', outcome: 'saved' },
             }); } catch { /* Diagnostics cannot change a durable acknowledgment. */ }
             return null;
         });

@@ -663,9 +663,17 @@ final class CoreModel: ObservableObject {
     @Published private(set) var calendarSubscriptions: CoreObject = [:]
     @Published private(set) var calendarSubscriptionReadError: String?
     private var calendarSubscriptionExpected: CoreObject = [:]
-    private enum CalendarSettingKind { case device, subscription }
+    @Published var calendarSubscriptionName = "" {
+        didSet { if !oldValue.utf8.elementsEqual(calendarSubscriptionName.utf8) { calendarSubscriptionDraftID = UUID() } }
+    }
+    @Published var calendarSubscriptionURL = "" {
+        didSet { if !oldValue.utf8.elementsEqual(calendarSubscriptionURL.utf8) { calendarSubscriptionDraftID = UUID() } }
+    }
+    private var calendarSubscriptionDraftID = UUID()
+    private var calendarSubscriptionAddDraft: (request: String, draft: UUID)?
+    private enum CalendarSettingKind { case device, subscription, subscriptionAdd }
     private var calendarSettingKind: CalendarSettingKind = .device
-    private var calendarSubscriptionRuntimeRecovery: (host: CoreHost, request: String)?
+    private var calendarSubscriptionRuntimeRecovery: (host: CoreHost, request: String, kind: CalendarSettingKind)?
     @Published private(set) var calendarSettingError: String?
     @Published private(set) var calendarSettingReadError: String?
     @Published private(set) var calendarSettingAwaitingRefresh = false
@@ -701,6 +709,12 @@ final class CoreModel: ObservableObject {
     }
     var settingsCalendarCanCancel: Bool {
         settingsCalendarPresented && calendarSettingRequest == nil && !retryNeeded
+    }
+    var calendarSubscriptionAddEnabled: Bool {
+        calendarSubscriptionEnabled && calendarSettingsApplicationActive
+            && UIApplication.shared.applicationState == .active
+            && !calendarSubscriptionURL.trimmingCharacters(in: Self.ecmaScriptWhitespace).isEmpty
+            && !calendarSettings.object("feeds").object("add").text("label").isEmpty
     }
     var calendarSettingsTestEnabled: Bool {
         calendarSettingEnabled && calendarSettingsReadTask == nil && calendarSettingsApplicationActive
@@ -5006,15 +5020,23 @@ final class CoreModel: ObservableObject {
             } else if recovery.text("method") == "dataSetting" {
                 selectedSurface = .settings
                 settingsDataPresented = true
-            } else if ["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit"].contains(recovery.text("method")) {
-                try validateDeviceCalendarSettingResult(recovery.object("result"), subscription: recovery.text("method") == "calendarSubscriptionSettingCommit")
+            } else if ["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "calendarSubscriptionAddCommit"].contains(recovery.text("method")) {
+                let kind: CalendarSettingKind = recovery.text("method") == "calendarSubscriptionAddCommit" ? .subscriptionAdd
+                    : recovery.text("method") == "calendarSubscriptionSettingCommit" ? .subscription : .device
+                try validateDeviceCalendarSettingResult(recovery.object("result"), kind: kind)
                 selectedSurface = .settings
                 settingsAdvancedPresented = true
                 settingsCalendarPresented = true
                 calendarSettingsPageHost = host
                 calendarSettingsApplicationActive = UIApplication.shared.applicationState == .active
-                calendarSettingRequest = nil
-                calendarSettingHost = nil
+                if kind == .subscriptionAdd, calendarSettingKind == .subscriptionAdd,
+                   calendarSettingHost === currentHost, let request = calendarSettingRequest {
+                    // Probe the original intent before clearing a live draft after runtime recovery.
+                    calendarSubscriptionRuntimeRecovery = (currentHost, request, kind)
+                } else {
+                    calendarSettingRequest = nil
+                    calendarSettingHost = nil
+                }
                 calendarSettingAwaitingRefresh = true
             } else if recovery.text("method") == "notificationSettingCommit" {
                 selectedSurface = .settings
@@ -5090,7 +5112,7 @@ final class CoreModel: ObservableObject {
             mindSweepRecoveredResult = nil
             appLockRecoveryPending = false
             let resumedCalendarSubscription = try await settleCalendarSubscriptionRuntimeRecovery(currentHost)
-            if (["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit"].contains(recovery.text("method")) || resumedCalendarSubscription), !retryNeeded, !Task.isCancelled,
+            if (["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "calendarSubscriptionAddCommit"].contains(recovery.text("method")) || resumedCalendarSubscription), !retryNeeded, !Task.isCancelled,
                calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession) {
                 await refreshCalendarSettings()
             }
@@ -8105,19 +8127,19 @@ final class CoreModel: ObservableObject {
     }
 
     // Match JavaScript trim/\s rather than Foundation's broader whitespace set.
-    private static let feedbackWhitespace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+    private static let ecmaScriptWhitespace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
     private var feedbackSubmittedMessage: String {
-        let message = settingsFeedbackMessage.trimmingCharacters(in: Self.feedbackWhitespace)
+        let message = settingsFeedbackMessage.trimmingCharacters(in: Self.ecmaScriptWhitespace)
         return settingsFeedbackCategory == "bug" && !settingsFeedbackLocation.isEmpty
             ? label("settings.feedbackWhereMessagePrefix") + ": " + feedbackLocationLabel(settingsFeedbackLocation) + "\n\n" + message : message
     }
     var settingsFeedbackMessageCount: Int { feedbackSubmittedMessage.utf16.count }
     var settingsFeedbackEmailValid: Bool {
-        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.feedbackWhitespace)
+        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.ecmaScriptWhitespace)
         if email.isEmpty { return true }
         let parts = email.components(separatedBy: "@")
         guard email.utf16.count <= 254, parts.count == 2, !parts[0].isEmpty,
-              !email.unicodeScalars.contains(where: { Self.feedbackWhitespace.contains($0) }),
+              !email.unicodeScalars.contains(where: { Self.ecmaScriptWhitespace.contains($0) }),
               !parts[1].isEmpty else { return false }
         let domain = Array(parts[1].unicodeScalars)
         return domain.enumerated().contains { index, scalar in
@@ -8131,7 +8153,7 @@ final class CoreModel: ObservableObject {
     }
     var settingsFeedbackCanSubmit: Bool {
         settingsFeedbackEditable && settingsFeedbackConfigured == true && settingsFeedbackEmailValid
-            && !settingsFeedbackMessage.trimmingCharacters(in: Self.feedbackWhitespace).isEmpty && settingsFeedbackMessageCount <= 4_000
+            && !settingsFeedbackMessage.trimmingCharacters(in: Self.ecmaScriptWhitespace).isEmpty && settingsFeedbackMessageCount <= 4_000
     }
     var settingsFeedbackVisibleError: String? {
         settingsFeedbackError ?? (!settingsFeedbackEmailValid ? label("settings.feedbackInvalidEmail") : nil)
@@ -8245,7 +8267,7 @@ final class CoreModel: ObservableObject {
         let session = settingsAboutSession, endpoint = feedbackEndpointURL
         var input: CoreObject = ["category": settingsFeedbackCategory, "message": feedbackSubmittedMessage,
                                  "includeDiagnostics": settingsFeedbackCategory == "bug" && settingsFeedbackIncludeDiagnostics]
-        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.feedbackWhitespace)
+        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.ecmaScriptWhitespace)
         if !email.isEmpty { input["email"] = email }
         guard let request = try? json(input) else { settingsFeedbackError = label("settings.feedbackFailed"); return }
         settingsFeedbackSending = true
@@ -8481,6 +8503,8 @@ final class CoreModel: ObservableObject {
         calendarSettingReadError = nil
         calendarSettingsTestResult = [:]
         calendarSettings = [:]
+        calendarSubscriptionName = ""
+        calendarSubscriptionURL = ""
         calendarSubscriptions = [:]
         calendarSubscriptionExpected = [:]
         calendarSubscriptionReadError = nil
@@ -8709,6 +8733,22 @@ final class CoreModel: ObservableObject {
         } catch { calendarSettingError = error.localizedDescription }
     }
 
+    func addCalendarSubscription() {
+        guard calendarSubscriptionAddEnabled, let currentHost = host,
+              calendarSettingsPageHost === currentHost else { return }
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(),
+                "name": calendarSubscriptionName, "url": calendarSubscriptionURL,
+                "defaultName": label("nav.calendar"), "expected": calendarSubscriptionExpected])
+            calendarSettingRequest = request
+            calendarSettingHost = currentHost
+            calendarSettingKind = .subscriptionAdd
+            calendarSubscriptionAddDraft = (request, calendarSubscriptionDraftID)
+            calendarSettingsTestResult = [:]
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
     func grantDeviceCalendarAccess() {
         guard calendarSettingEnabled, !calendarSettings.object("device").object("access").isEmpty else { return }
         beginCalendarSettingOperation(retry: false, grantOnly: true)
@@ -8751,12 +8791,14 @@ final class CoreModel: ObservableObject {
                     let reply: String
                     if retry {
                         if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
+                        else if kind == .subscriptionAdd { reply = try await currentHost.probeCalendarSubscriptionAddOutcome(requestJSON: request) }
                         else if kind == .subscription { reply = try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: request) }
                         else { reply = try await currentHost.probeDeviceCalendarSettingOutcome(requestJSON: request) }
-                    } else if kind == .subscription { reply = try await currentHost.setCalendarSubscriptionSetting(requestJSON: request) }
+                    } else if kind == .subscriptionAdd { reply = try await currentHost.addCalendarSubscription(requestJSON: request) }
+                    else if kind == .subscription { reply = try await currentHost.setCalendarSubscriptionSetting(requestJSON: request) }
                     else { reply = try await currentHost.setDeviceCalendarSetting(requestJSON: request) }
                     let result = try self.decode(reply)
-                    try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session, subscription: kind == .subscription)
+                    try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session, kind: kind)
                     grant = kind == .device && !retry && result.text("open") == "device"
                 }
                 if grant, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
@@ -8770,9 +8812,9 @@ final class CoreModel: ObservableObject {
                 }
             } catch {
                 if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost, self.host === currentHost {
-                    if kind == .subscription,
+                    if kind != .device,
                        error.localizedDescription == "SAVE_FAILED: Calendar subscription save requires fresh runtime recovery" {
-                        await self.prepareCalendarSubscriptionRuntimeRecovery(currentHost, request: request)
+                        await self.prepareCalendarSubscriptionRuntimeRecovery(currentHost, request: request, kind: kind)
                         guard self.host === currentHost, self.calendarSettingHost === currentHost,
                               self.calendarSettingRequest == request else { return }
                     }
@@ -8780,6 +8822,7 @@ final class CoreModel: ObservableObject {
                     if self.isDefiniteRejection(error) {
                         self.calendarSettingRequest = nil
                         self.calendarSettingHost = nil
+                        if self.calendarSubscriptionAddDraft?.request == request { self.calendarSubscriptionAddDraft = nil }
                         self.retryNeeded = false
                         self.error = nil
                         self.calendarSettingAwaitingRefresh = self.calendarSettingsPageCurrent(currentHost, session: session)
@@ -8793,9 +8836,9 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func prepareCalendarSubscriptionRuntimeRecovery(_ currentHost: CoreHost, request: String) async {
+    private func prepareCalendarSubscriptionRuntimeRecovery(_ currentHost: CoreHost, request: String, kind: CalendarSettingKind) async {
         guard host === currentHost, calendarSettingHost === currentHost, calendarSettingRequest == request else { return }
-        calendarSubscriptionRuntimeRecovery = (currentHost, request)
+        calendarSubscriptionRuntimeRecovery = (currentHost, request, kind)
         ready = false
         retryNeeded = true
         let reminder = reminderLifecycleTask, search = searchLifecycleTask, sync = foregroundSyncTask
@@ -8829,14 +8872,17 @@ final class CoreModel: ObservableObject {
                 throw CocoaError(.coderReadCorrupt)
             }
             do {
-                let reply = try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: pending.request)
+                let reply = pending.kind == .subscriptionAdd
+                    ? try await currentHost.probeCalendarSubscriptionAddOutcome(requestJSON: pending.request)
+                    : try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: pending.request)
                 guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
                 try acknowledgeDeviceCalendarSetting(try decode(reply), request: pending.request,
-                    from: currentHost, session: calendarSettingsSession, subscription: true)
+                    from: currentHost, session: calendarSettingsSession, kind: pending.kind)
             } catch {
                 guard isDefiniteRejection(error), host === currentHost, !Task.isCancelled else { throw error }
                 calendarSettingRequest = nil
                 calendarSettingHost = nil
+                if calendarSubscriptionAddDraft?.request == pending.request { calendarSubscriptionAddDraft = nil }
                 calendarSettingError = error.localizedDescription
                 calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession)
                 retryNeeded = false
@@ -8851,17 +8897,25 @@ final class CoreModel: ObservableObject {
         return true
     }
 
-    private func validateDeviceCalendarSettingResult(_ result: CoreObject, subscription: Bool = false) throws {
+    private func validateDeviceCalendarSettingResult(_ result: CoreObject, kind: CalendarSettingKind = .device) throws {
         guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
               let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
               let clearDraft = result["clearDraft"] as? NSNumber, CFGetTypeID(clearDraft) == CFBooleanGetTypeID(),
-              !clearDraft.boolValue, let toasts = result["toasts"] as? [Any], toasts.isEmpty,
-              result["open"] is NSNull || (!subscription && result.text("open") == "device") else { throw CocoaError(.coderReadCorrupt) }
+              clearDraft.boolValue == (kind == .subscriptionAdd), kind != .subscriptionAdd || changed.boolValue,
+              let toasts = result["toasts"] as? [Any], toasts.isEmpty,
+              result["open"] is NSNull || (kind == .device && result.text("open") == "device") else { throw CocoaError(.coderReadCorrupt) }
     }
 
-    private func acknowledgeDeviceCalendarSetting(_ result: CoreObject, request: String, from currentHost: CoreHost, session: UUID, subscription: Bool = false) throws {
+    private func acknowledgeDeviceCalendarSetting(_ result: CoreObject, request: String, from currentHost: CoreHost, session: UUID, kind: CalendarSettingKind = .device) throws {
         guard calendarSettingRequest == request, calendarSettingHost === currentHost else { throw CocoaError(.coderReadCorrupt) }
-        try validateDeviceCalendarSettingResult(result, subscription: subscription)
+        try validateDeviceCalendarSettingResult(result, kind: kind)
+        if kind == .subscriptionAdd, let draft = calendarSubscriptionAddDraft, draft.request == request {
+            if draft.draft == calendarSubscriptionDraftID, calendarSettingsPageCurrent(currentHost, session: session) {
+                calendarSubscriptionName = ""
+                calendarSubscriptionURL = ""
+            }
+            calendarSubscriptionAddDraft = nil
+        }
         calendarSettingRequest = nil
         calendarSettingHost = nil
         calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: session)

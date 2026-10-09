@@ -335,6 +335,9 @@ export * from './native-host-contract-general-preference';
 export * from './native-host-contract-device-calendar-settings';
 export * from './calendar-subscription-settings-witness';
 export * from './native-host-contract-calendar-subscription-settings';
+export { createCalendarSubscriptionAddMethods } from './native-host-contract-calendar-subscription-add';
+export type { CalendarSubscriptionAddRequest, PreparedCalendarSubscriptionAdd, CalendarSubscriptionAddEnvelope,
+    CalendarSubscriptionAddResult, CalendarSubscriptionAddPreparation } from './native-host-contract-calendar-subscription-add';
 export { buildCalendarSubscriptionSettingsModel } from './native-host-contract-settings-calendar';
 export * from './taxonomy-policy';
 

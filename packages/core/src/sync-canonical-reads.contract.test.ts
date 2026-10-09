@@ -43,6 +43,7 @@ import { toStableSyncJson } from './sync-helpers';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { createNativeHostContract } from './native-host-contract';
 import { createCalendarSubscriptionSettingsMethods } from './native-host-contract-calendar-subscription-settings';
+import { createCalendarSubscriptionAddMethods } from './native-host-contract-calendar-subscription-add';
 import { buildCalendarSubscriptionSettingsModel } from './native-host-contract-settings-calendar';
 import { prepareChecklistProjectConversion } from './checklist-project-conversion';
 import { readAreaDurableData } from './native-host-contract-area-durable';
@@ -1199,6 +1200,38 @@ describe('canonical local reads contract', () => {
                 });
                 expect(nativeValue(await host.commitPreparedAppLock({ request, prepared: planned.prepared })))
                     .toEqual({ changed: true, value: request.value });
+            },
+            commitPreparedCalendarSubscriptionAdd: async (control) => {
+                await useTaskStore.getState().updateSettings({ externalCalendars: [] });
+                const host = await nativeHost(control);
+                const deps = {
+                    readiness: () => {
+                        const ready = host.getDataSettings();
+                        return ready.ok ? { ok: true as const, value: null } : ready;
+                    },
+                    save: async () => { await flushPendingSave(); return { ok: true as const, value: null }; },
+                    storage: () => null,
+                };
+                const metadata = createCalendarSubscriptionSettingsMethods({ ...deps,
+                    model: ({ settings, areas, feeds, revision }) => buildCalendarSubscriptionSettingsModel(feeds, revision,
+                        { areas, theme: settings.theme, t: (key) => key }) });
+                const methods = createCalendarSubscriptionAddMethods(deps);
+                const expected = nativeValue(await metadata.getCalendarSubscriptionOptions({})).expected;
+                const request = { requestId: '5136a7dc-a2ed-4b3a-a3cf-bd0dbd841472',
+                    name: '  ', url: ' https://calendar.example.invalid/new.ics ', defaultName: 'Calendar', expected };
+                const planned = nativeValue(await methods.prepareCalendarSubscriptionAdd(request));
+                expect(planned.kind).toBe('prepared');
+                if (planned.kind !== 'prepared') return;
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                control.expectPersisted((written) => {
+                    expect(written).toEqual({ ...before, settings: { ...before.settings,
+                        externalCalendars: [{ id: request.requestId, name: 'Calendar',
+                            url: request.url.trim(), enabled: true }],
+                        syncPreferencesUpdatedAt: { ...before.settings.syncPreferencesUpdatedAt,
+                            externalCalendars: planned.prepared.stamp } } });
+                });
+                expect(nativeValue(await methods.commitPreparedCalendarSubscriptionAdd({ request, prepared: planned.prepared })))
+                    .toEqual({ changed: true, toasts: [], open: null, clearDraft: true });
             },
             commitPreparedCalendarSubscriptionSetting: async (control) => {
                 const feed = { id: 'contract-calendar', name: 'Contract calendar',
@@ -2411,7 +2444,8 @@ describe('canonical local reads contract', () => {
         const notCanonical: Array<{ action: string; storeFields: string[]; readFields: string[] }> = [];
         for (const action of Object.keys(WRITE_ACTIONS).sort()) {
             const outcome = await runMutation(action, WRITE_ACTIONS[action], settled,
-                action === 'commitPreparedCalendarSubscriptionSetting' || action === 'commitPreparedReferenceTasksMove'
+                action === 'commitPreparedCalendarSubscriptionSetting' || action === 'commitPreparedCalendarSubscriptionAdd'
+                    || action === 'commitPreparedReferenceTasksMove'
                     || action === 'commitPreparedReferenceTasksAddTag' || action === 'commitPreparedReferenceTasksRemoveTag');
             if (outcome.storeFields.length > 0 || outcome.readFields.length > 0) {
                 notCanonical.push({ action, ...outcome });
