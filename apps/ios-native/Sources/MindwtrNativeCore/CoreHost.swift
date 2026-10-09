@@ -155,6 +155,17 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    /// One cancellable, unjournaled read through the shared calendar contract.
+    public func calendarRead(requestJSON: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.calendarRead(requestJSON: requestJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
     /// Passive permission observation followed by a fresh, read-only shared plan.
     public func readReminderPlan() async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
@@ -1305,6 +1316,7 @@ private final class Engine: @unchecked Sendable {
     private let reminderAdmissions: NativeReminderEffects
     private var httpJobs: NativeHTTPJobs?
     private var secretJobs: NativeSecretJobs?
+    private var calendarJobs: NativeCalendarJobs?
     private var cryptoJobs: NativeCryptoJobs?
     private enum IOBodySource { case file, http, crypto }
     private var ioBodySource: IOBodySource?
@@ -1837,11 +1849,15 @@ private final class Engine: @unchecked Sendable {
             if let httpJobs { faults?.configureHTTPJobs?(httpJobs) }
             secretJobs = try NativeSecretJobs(registry: localRequests, faults: faults)
             if let secretJobs { faults?.configureSecretJobs?(secretJobs) }
+            calendarJobs = NativeCalendarJobs(registry: localRequests,
+                readerFactory: faults?.calendarReaderFactory ?? { NativeCalendarReader() })
+            if let calendarJobs { faults?.configureCalendarJobs?(calendarJobs) }
             cryptoJobs = NativeCryptoJobs(registry: localRequests, faults: faults)
             if let cryptoJobs { faults?.configureCryptoJobs?(cryptoJobs) }
             #else
             httpJobs = NativeHTTPJobs(registry: localRequests)
             secretJobs = NativeSecretJobs(registry: localRequests)
+            calendarJobs = NativeCalendarJobs(registry: localRequests)
             cryptoJobs = NativeCryptoJobs(registry: localRequests)
             #endif
             let httpGeneration = attachmentGeneration
@@ -1863,6 +1879,13 @@ private final class Engine: @unchecked Sendable {
                 guard let self else { return }
                 self.queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == httpGeneration else { return }
+                    self.scheduleAttachmentIdle(immediate: true)
+                }
+            }
+            calendarJobs?.setWake { [weak self] in
+                guard let self else { return }
+                self.queue.async { [weak self] in
+                    guard let self, self.attachmentGeneration == httpGeneration, !self.localRequests.isClosing else { return }
                     self.scheduleAttachmentIdle(immediate: true)
                 }
             }
@@ -2758,6 +2781,17 @@ private final class Engine: @unchecked Sendable {
         }
         try requireNoAttachmentDraft()
         return try invoke("iosAboutAppStoreInfo", arguments: [bundleIdentifier, currentVersion], localCancellation: cancellation)
+    }
+
+    func calendarRead(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        try requireCalendarAdmission()
+        guard requestJSON.utf8.count <= 8192,
+              (try? NativeJSON.jsonObject(with: Data(requestJSON.utf8))) is [String: Any],
+              (try? NativeJSON.hasUniqueObjectKeys(requestJSON)) == true else {
+            throw HostFailure("INVALID_INPUT: Calendar request is invalid")
+        }
+        return try invoke("iosCalendarRead", arguments: [requestJSON], localCancellation: cancellation)
     }
 
     func admitReminderPlanRead(cancellation: NativeAttachmentCancellation) throws -> NativeReminderPlanReadAdmission {
@@ -4238,7 +4272,7 @@ private final class Engine: @unchecked Sendable {
                 return result
             } catch {
                 turn.preparing = false
-                jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); cryptoJobs?.drain()
+                jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); calendarJobs?.drain(); cryptoJobs?.drain()
                 try? finishTaskDownloadSource(turn, completed: false)
                 throw error
             }
@@ -18664,7 +18698,7 @@ private final class Engine: @unchecked Sendable {
             return try executeProjectDownload(&state, turn: turn, cancellation: cancellation)
         } catch {
             turn.preparing = false; turn.strict = false
-            turn.jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); cryptoJobs?.drain()
+            turn.jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); calendarJobs?.drain(); cryptoJobs?.drain()
             if turn.command == nil {
                 if let receipt = turn.receipt {
                     do { try turn.jobs.retireProviderSource(receipt, requireOwner: { try self.requireProjectDownloadTurn(strict: false) }); turn.receipt = nil }
@@ -19954,6 +19988,7 @@ private final class Engine: @unchecked Sendable {
         attachmentJobs?.cancelAndDrain()
         httpJobs?.cancelAndDrain()
         secretJobs?.drain()
+        calendarJobs?.drain()
         cryptoJobs?.drain()
         if !terminalConsumed {
             while true {
@@ -20028,6 +20063,7 @@ private final class Engine: @unchecked Sendable {
                 attachmentJobs?.cancelAndDrain()
                 httpJobs?.cancelAndDrain()
                 secretJobs?.drain()
+                calendarJobs?.drain()
                 _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
                 _ = context.objectForKeyedSubscript("__resumeHostCalls")?.call(withArguments: [])
                 context.exception = nil
@@ -20049,6 +20085,7 @@ private final class Engine: @unchecked Sendable {
                     attachmentJobs?.cancelAndDrain()
                     httpJobs?.cancelAndDrain()
                     secretJobs?.drain()
+                    calendarJobs?.drain()
                     if selectedTurn != nil || selectedEncryption != nil || selectedDownload != nil { cryptoJobs?.drain() }
                 }
             }
@@ -20096,9 +20133,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
+        guard started, !closed, !localRequests.isClosing, !invoking, !recoveryActivationPending, pending == nil,
               !cleanupOwed, reminderEffectsTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil,
-              attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
+              attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil || calendarJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
         // One scheduled idle turn per generation; completions can move a timer
@@ -20115,7 +20152,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard generation == attachmentGeneration else { return }
         attachmentIdlePump = nil
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, reminderEffectsTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil, let context else { return }
+        guard started, !closed, !localRequests.isClosing, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, reminderEffectsTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil, let context else { return }
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
@@ -20325,6 +20362,18 @@ private final class Engine: @unchecked Sendable {
         try requireNoAttachmentDraft()
     }
 
+    private func requireCalendarAdmission() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !localRequests.isClosing, !recoveryActivationPending, pending == nil, lockFD >= 0,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil,
+              notificationSettingTurn == nil, !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
+            throw HostFailure("Calendar bridge is unavailable")
+        }
+        try requireNoAttachmentDraft()
+    }
+
     private func requireCryptoAdmission(_ input: String) throws {
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
@@ -20396,14 +20445,20 @@ private final class Engine: @unchecked Sendable {
         func crypto() throws -> String? {
             guard let answer = try cryptoJobs?.next() else { return nil }
             if answer.body { ioBodySource = .crypto }
+            preferredIO = 4
+            return answer.json
+        }
+        func calendar() throws -> String? {
+            guard let answer = try calendarJobs?.next() else { return nil }
             preferredIO = 0
             return answer.json
         }
         switch preferredIO {
-        case 1: return try http() ?? secret() ?? crypto() ?? file() ?? ""
-        case 2: return try secret() ?? crypto() ?? file() ?? http() ?? ""
-        case 3: return try crypto() ?? file() ?? http() ?? secret() ?? ""
-        default: return try file() ?? http() ?? secret() ?? crypto() ?? ""
+        case 1: return try http() ?? secret() ?? crypto() ?? calendar() ?? file() ?? ""
+        case 2: return try secret() ?? crypto() ?? calendar() ?? file() ?? http() ?? ""
+        case 3: return try crypto() ?? calendar() ?? file() ?? http() ?? secret() ?? ""
+        case 4: return try calendar() ?? file() ?? http() ?? secret() ?? crypto() ?? ""
+        default: return try file() ?? http() ?? secret() ?? crypto() ?? calendar() ?? ""
         }
     }
 
@@ -20604,6 +20659,18 @@ private final class Engine: @unchecked Sendable {
                 return id
             } ?? "!MindwtrNativeError:Crypto bridge is unavailable"
         }
+        let calendarCall: @convention(block) (JSValue) -> String = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
+            return self.guarded {
+                try self.requireCalendarAdmission()
+                guard let jobs = self.calendarJobs else { throw HostFailure("Calendar bridge is unavailable") }
+                return try jobs.submit(json)
+            } ?? "!MindwtrNativeError:Calendar bridge is unavailable"
+        }
+        let calendarAbort: @convention(block) (JSValue) -> Void = { [weak self] request in
+            guard request.isString, let id = request.toString() else { return }
+            self?.calendarJobs?.abort(id)
+        }
         let next: @convention(block) () -> String = { [weak self] in
             self?.guarded { try self?.nextIO() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
@@ -20611,7 +20678,8 @@ private final class Engine: @unchecked Sendable {
             self?.guarded { try self?.ioBody() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
         for (name, block) in ["netFetch": netFetch as Any, "netAbort": netAbort as Any, "secretCall": secretCall as Any,
-                              "cryptoCall": cryptoCall as Any, "ioNext": next as Any, "ioBody": body as Any] {
+                              "cryptoCall": cryptoCall as Any, "calendarCall": calendarCall as Any,
+                              "calendarAbort": calendarAbort as Any, "ioNext": next as Any, "ioBody": body as Any] {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
         }
         if deviceStorageLocation != nil {
@@ -20757,6 +20825,7 @@ private final class Engine: @unchecked Sendable {
         // No file/installer worker survives release of the library lock.
         httpJobs?.shutdown(); httpJobs = nil
         secretJobs?.shutdown(); secretJobs = nil
+        calendarJobs?.shutdown(); calendarJobs = nil
         cryptoJobs?.shutdown(); cryptoJobs = nil
         reminderSnoozeMutation = nil
         deviceStorage?.close(); deviceStorage = nil

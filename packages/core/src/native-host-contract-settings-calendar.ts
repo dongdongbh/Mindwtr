@@ -864,15 +864,19 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
     // ---------------------------------------------------------------------------
     // External calendars for the Calendar screen and the reviews.
 
-    const loadFeed = (host: NativeCalendarHost, start: Date, end: Date, timeoutMs: number | undefined, signal: AbortSignal) => (
-        device(host).feeds.fetchExternalCalendarEvents(start, end, { signal, timeoutMs })
+    const loadFeed = (host: NativeCalendarHost, start: Date, end: Date, timeoutMs: number | undefined, signal: AbortSignal) => {
+        let failedFeeds = 0;
+        return device(host).feeds.fetchExternalCalendarEvents(start, end, { signal, timeoutMs, onFeedError: () => { failedFeeds += 1; } })
             .then((data): NativeHostResult<NativeCalendarFeed> => (signal.aborted
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
-                : { ok: true, value: { status: 'ready', calendars: data.calendars, events: data.events } }))
+                : { ok: true, value: {
+                    status: 'ready', calendars: data.calendars, events: data.events,
+                    ...(failedFeeds > 0 ? { warning: translators().tr('settings.calendarMobile.failedToLoadEvents') } : {}),
+                } }))
             .catch((error: unknown): NativeHostResult<NativeCalendarFeed> => (signal.aborted
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
-                : { ok: true, value: { status: 'error', message: error instanceof Error ? error.message : String(error) } }))
-    );
+                : { ok: true, value: { status: 'error', message: error instanceof Error ? error.message : String(error) } }));
+    };
 
     return {
         /** Opens Settings › Calendar: reads the device as React Native's screen does on mount. */

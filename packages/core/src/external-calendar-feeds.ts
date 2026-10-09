@@ -188,9 +188,8 @@ export function normalizeSystemCalendarSettings(raw: Partial<SystemCalendarSetti
         ? Array.from(
             new Set(
                 raw.selectedCalendarIds
-                    .filter((id): id is string => typeof id === 'string')
-                    .map((id) => id.trim())
-                    .filter((id) => id.length > 0)
+                    // Provider identifiers are opaque; trim only to reject blank entries.
+                    .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
             )
         )
         : [];
@@ -402,7 +401,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         if (isSandboxMode()) return [];
         if (host.platform() === 'web') return [];
         const permission = await getSystemCalendarPermissionStatus();
-        if (permission !== 'granted') return [];
+        if (permission !== 'granted') throw new Error('Calendar provider unavailable');
 
         try {
             const calendars = await host.calendars.getCalendars();
@@ -416,7 +415,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
                 }))
                 .sort((a, b) => a.name.localeCompare(b.name));
         } catch {
-            return [];
+            throw new Error('Calendar provider unavailable');
         }
     };
 

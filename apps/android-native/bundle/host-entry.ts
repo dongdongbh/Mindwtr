@@ -117,6 +117,7 @@ import {
     webdavPutJson,
 } from '@mindwtr/core';
 import { createNativeAI } from './host-ai';
+import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundle/host-calendar';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
     prepareNativeTaskAttachmentAvailability, prepareNativeProjectFileAvailability, nativeProjectFileAvailabilityInitialURL,
     createNativeReadOnlySelfHostedAttachments, assertNativeSelfHostedAttachmentEncryptionAdmission } from './host-attachments';
@@ -461,7 +462,26 @@ const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwt
 
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
+const calendarCall = (globalThis as typeof globalThis & { __mindwtrCalendarCall?: CalendarCall }).__mindwtrCalendarCall;
+const iosCalendar = globalThis.__mindwtrHostPlatform === 'ios' && calendarCall ? createIOSCalendarHost({
+    call: calendarCall,
+    storage: { getItem: keyValue.get, setItem: keyValue.set, removeItem: keyValue.remove },
+    adapter: () => {
+        if (!bootAdapter || getStorageAdapter() !== bootAdapter || isSandboxMode() || isWorkspaceTransitionActive()) {
+            throw new Error('NOT_READY: Calendar storage is unavailable');
+        }
+        requireSaved();
+        return bootAdapter;
+    },
+    fetch: (...args) => globalThis.fetch(...args),
+    log: {
+        info: (message, context) => logInfo(message, { scope: context?.scope, context: context?.extra }),
+        warn: (message, context) => logWarn(message, { scope: context.scope, context: context.extra }),
+        error: () => logWarn('Native iOS calendar provider failed', { scope: 'calendar-settings' }),
+    },
+}) : undefined;
 const contract = createNativeHostContract({ reminderPlatform: globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android', get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
+    calendar: iosCalendar,
     get attachments() {
         const selected = iosProjectAttachmentDownload ? iosSelfHostedProjectAttachments?.contractHost ?? iosManualSync?.attachmentsHost : attachmentsHost;
         if (!iosRelocatedProjectAvailability || !selected) return selected ?? undefined;
@@ -4550,6 +4570,46 @@ globalThis.MindwtrHost = {
                 }, { force: true });
             } catch { /* Diagnostics cannot replace an acknowledged submission. */ }
             return { status: 'sent' };
+        });
+    },
+    iosCalendarRead(requestJSON: string): string {
+        return submit(async (signal) => {
+            const adapter = bootAdapter;
+            const assertReady = () => {
+                if (signal.aborted) throw new Error('CANCELLED: Calendar read was cancelled');
+                if (!iosCalendar || !adapter || bootAdapter !== adapter || getStorageAdapter() !== adapter
+                    || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error('NOT_READY: Calendar read is unavailable');
+                requireSaved();
+                if (!contract.getDataSettings().ok) throw new Error('NOT_READY: Calendar read is unavailable');
+            };
+            assertReady();
+            const input = completionJson(requestJSON, 8192) as Record<string, unknown>;
+            if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.op !== 'string') {
+                throw new Error('INVALID_INPUT: Invalid calendar read');
+            }
+            let result: unknown;
+            if (['openSettings', 'getSettings', 'closeSettings'].includes(input.op)) {
+                if (Object.keys(input).length !== 1) throw new Error('INVALID_INPUT: Invalid calendar read');
+                result = input.op === 'openSettings' ? unwrap(await contract.openCalendarSettings())
+                    : input.op === 'getSettings' ? unwrap(contract.getCalendarSettings()) : unwrap(contract.closeCalendarSettings());
+            } else if (input.op === 'feed' && Object.keys(input).every((name) => ['op', 'slot', 'start', 'end', 'refresh'].includes(name))
+                && typeof input.slot === 'string' && ['calendar', 'weeklyReview', 'dailyReview'].includes(input.slot)
+                && typeof input.start === 'string' && typeof input.end === 'string'
+                && input.start.length <= 40 && input.end.length <= 40
+                && (input.refresh === undefined || typeof input.refresh === 'boolean')) {
+                const start = Date.parse(input.start), end = Date.parse(input.end);
+                if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 366 * 86_400_000) {
+                    throw new Error('INVALID_INPUT: Invalid calendar range');
+                }
+                result = unwrap(await contract.loadExternalCalendarFeed({
+                    slot: input.slot as 'calendar' | 'weeklyReview' | 'dailyReview', start: input.start, end: input.end,
+                    ...(input.refresh === undefined ? {} : { refresh: input.refresh }),
+                }));
+            } else throw new Error('INVALID_INPUT: Invalid calendar read');
+            assertReady();
+            logInfo('Native iOS calendar read delivered', { scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.5/ios-calendar-read', outcome: input.op } });
+            return result;
         });
     },
     iosAboutUpdateState(): string {

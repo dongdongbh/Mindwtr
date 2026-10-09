@@ -7709,6 +7709,60 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(refused, 'AbortError', 'no new file call starts while the operation drains');
     files.__resumeHostCalls();
 }
+// Passive calendar reads share the value pump, but cancellation targets only the calendar provider.
+{
+    const polyfills = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
+    const answers = [], aborted = [], submitted = [];
+    let sequence = 0, failure = null;
+    const bridge = {
+        log() { throw new Error('Calendar transport must not log provider exceptions'); }, nowMs: () => 0,
+        calendarCall(text) {
+            if (failure === 'throw') throw new Error('Calendar read unavailable');
+            if (failure === 'native') return '!MindwtrNativeError:Calendar read unavailable';
+            submitted.push(JSON.parse(text)); return `cal:1:${++sequence}`;
+        },
+        calendarAbort(id) { aborted.push(['calendar', id]); throw new Error('Calendar abort unavailable'); },
+        fileCall: () => 'file:1:1', installerCall: () => 'installer:1:1',
+        fileAbort(id) { aborted.push(['file', id]); },
+        ioNext: () => answers.shift() ?? '',
+        ioBody() { throw new Error('Calendar replies are bodyless'); },
+    };
+    const state = vm.createContext({ __mindwtrNative: bridge });
+    vm.runInContext(polyfills, state);
+    assert.deepEqual(submitted, [], 'installing the calendar capability never reads or prompts');
+    const held = state.__mindwtrCalendarCall({ op: 'events', calendarIds: ['é'], startMs: 0, endMs: 1 });
+    const outcome = held.then(() => 'resolved', (error) => `${error.name}: ${error.message}`);
+    const file = assert.rejects(state.__mindwtrFileCall({ op: 'getInfo' }), { name: 'AbortError' });
+    const installer = assert.rejects(state.__mindwtrInstallerCall({ op: 'install' }), { name: 'AbortError' });
+    state.__cancelHostCalls('Calendar operation cancelled');
+    assert.equal(await outcome, 'AbortError: Calendar operation cancelled', 'cancellation rejects without waiting for native completion');
+    await Promise.all([file, installer]);
+    assert.deepEqual(aborted, [['calendar', 'cal:1:1'], ['file', 'file:1:1'], ['file', 'installer:1:1']],
+        'calendar uses calendarAbort; existing file and installer keep fileAbort');
+    await assert.rejects(state.__mindwtrCalendarCall({ op: 'permissions' }), { name: 'AbortError' });
+    assert.equal(submitted.length, 1, 'cancelled operation cannot start another calendar read');
+    answers.push(...['cal:1:1', 'file:1:1', 'installer:1:1'].map((id) => JSON.stringify({ id, value: [] })));
+    assert.equal(state.__pumpTimers(), 0, 'cancelled late answers are drained without settling promises');
+    state.__resumeHostCalls();
+    const retry = state.__mindwtrCalendarCall({ op: 'permissions' });
+    answers.push(JSON.stringify({ id: 'cal:1:2', value: { status: 'granted' } }));
+    assert.equal(state.__pumpTimers(), 1, 'late cancellation leaves the next read live');
+    assert.equal((await retry).status, 'granted');
+    assert.deepEqual(submitted, [{ op: 'events', calendarIds: ['é'], startMs: 0, endMs: 1 }, { op: 'permissions' }]);
+    const refused = assert.rejects(state.__mindwtrCalendarCall({ op: 'calendars' }), /^Error: Calendar read unavailable$/);
+    answers.push(JSON.stringify({ id: 'cal:1:3', error: 'Calendar read unavailable' }));
+    assert.equal(state.__pumpTimers(), 1); await refused;
+    for (const mode of ['throw', 'native']) {
+        failure = mode;
+        await assert.rejects(state.__mindwtrCalendarCall({ op: 'permissions' }), /^\w*Error: Calendar read unavailable$/);
+        assert.equal(state.__pumpTimers(), 0, 'submission exception does not leave an open pump slot');
+    }
+    for (const native of [undefined, { log() {} }, { log() {}, fileCall() {} }]) {
+        const absent = vm.createContext({ __mindwtrNative: native });
+        vm.runInContext(polyfills, absent);
+        assert.equal(absent.__mindwtrCalendarCall, undefined, 'calendar capability absent stays unavailable');
+    }
+}
 // Review finding 1 (A2): a managed attachment's delete asks core's keep() in the same engine turn as the delete itself, after every
 // file call queued before it. Here a delete waits behind a held file call while the attachment is restored: the bytes stay.
 {

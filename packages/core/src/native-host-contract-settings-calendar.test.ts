@@ -1027,6 +1027,48 @@ describe('native host contract: Settings › Calendar', () => {
         });
     });
 
+    describe('passive device enumeration preserves saved choices on failure', () => {
+        const selectedCalendarIds = ['é', 'e\u0301', ' opaque /漢+😀 '];
+        const stored = { enabled: true, selectAll: false, selectedCalendarIds, areaIdsByCalendar: { 'é': ['a-work'] } };
+
+        it.each([
+            ['provider failure', 'en'], ['provider failure', 'zh'],
+            ['permission revoked', 'en'], ['permission revoked', 'zh'],
+        ])('keeps exact persisted choices after %s and shows the localized failure toast (%s)', async (failure, language) => {
+            await seed({});
+            const original = JSON.stringify(stored);
+            const handset = phone({ storage: { [KEYS.system]: original } });
+            const permissions = vi.fn().mockResolvedValue({ status: 'granted' });
+            if (failure === 'permission revoked') {
+                permissions.mockImplementation(async () => ({ status: permissions.mock.calls.length > 2 ? 'denied' : 'granted' }));
+            } else {
+                handset.host.calendars.getCalendars = async () => { throw new Error('PRIVATE PROVIDER https://private.example/calendar'); };
+            }
+            handset.host.calendars.getPermissions = permissions;
+            const contract = await openHost(handset.host, language);
+            const opening = value(await contract.openCalendarSettings());
+            expect(permissions).toHaveBeenCalledTimes(3);
+            expect(handset.state.storage.get(KEYS.system)).toBe(original);
+            expect(opening.device.toggle.type === 'deviceCalendars' && opening.device.toggle.before.selectedCalendarIds).toEqual(selectedCalendarIds);
+            expect(opening.toasts).toContainEqual({
+                title: strings[language]['settings.syncMobile.error'],
+                message: strings[language]['settings.calendarMobile.failedToLoadDeviceCalendarSettings'],
+                tone: 'warning', durationMs: 4200,
+            });
+            expect(handset.state.prompts).toBe(0);
+        });
+
+        it('may prune saved choices after a genuinely empty successful enumeration', async () => {
+            await seed({});
+            const handset = phone({ storage: { [KEYS.system]: JSON.stringify(stored) } });
+            const contract = await openHost(handset.host);
+            const opening = value(await contract.openCalendarSettings());
+            expect(JSON.parse(handset.state.storage.get(KEYS.system)!)).toEqual({ ...stored, selectedCalendarIds: [] });
+            expect(opening.toasts).toEqual([]);
+            expect(handset.state.prompts).toBe(0);
+        });
+    });
+
     describe('without calendar push bound (until the push pass)', () => {
         it('shows the stored push options and refuses the push commands', async () => {
             freezeClock();
@@ -1049,6 +1091,33 @@ describe('native host contract: Settings › Calendar', () => {
 
     describe('loadExternalCalendarFeed', () => {
         const range = { start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' };
+        it.each(['en', 'zh'])('retains successful ICS/device events and subscriptions with a failed local feed and localized warning (%s)', async (language) => {
+            const feeds = [...fixture.settings.synced.externalCalendars!, {
+                id: 'broken-local', name: 'Legacy local file', url: 'file:///private/unavailable.ics', enabled: true,
+            }];
+            await seed({ externalCalendars: feeds });
+            const handset = phone({ calendars: ['primary'], storage: {
+                [KEYS.feeds]: JSON.stringify(feeds), [KEYS.system]: JSON.stringify({ enabled: true }),
+            } });
+            const contract = await openHost(handset.host, language);
+            const partial = value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range }));
+            expect(partial.status).toBe('ready');
+            if (partial.status !== 'ready') throw new Error('not ready');
+            expect(partial.warning).toBe(strings[language]['settings.calendarMobile.failedToLoadEvents']);
+            expect(partial.events.map((event) => event.title)).toEqual(['Planning', 'Stand-up', 'Review', 'Offsite']);
+            for (const sourceId of ['feed-a', 'system:g-primary']) {
+                const event = partial.events.find((entry) => entry.sourceId === sourceId)!;
+                const projected = value(contract.getCalendarView({
+                    state: { viewMode: 'month', selectedDate: event.start.slice(0, 10), visibleMonth: '2026-09-01' },
+                    calendar: partial, offset: 0, limit: 100,
+                }));
+                expect(projected.items.some((entry) => entry.type === 'item' && entry.item.eventId === event.id)).toBe(true);
+                expect(projected.content.mode === 'month' && projected.content.details?.events?.error).toBe(partial.warning);
+            }
+            expect(useTaskStore.getState().settings.externalCalendars).toEqual(feeds);
+            expect(JSON.parse(handset.state.storage.get(KEYS.feeds)!)).toEqual(feeds);
+        });
+
         it('answers the merged calendars, joins a load of the same range, and lets a newer range replace a running one', async () => {
             await seed({});
             // The fetch reads the device copy of the subscriptions (sync and the settings screen keep it).

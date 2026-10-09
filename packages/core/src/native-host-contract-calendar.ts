@@ -191,14 +191,15 @@ export type CalendarViewDeps = {
 
 /**
  * The external calendars as the host fetched them for the view's `range`.
- * While a refetch runs, send the calendars and events already shown with
- * `loading`; after a failure the screen keeps the calendars and shows no events.
+ * While a refetch runs for the same range, send the calendars and events already
+ * shown with `loading`; after a failure the screen keeps the calendars and shows
+ * no events. A ready feed's warning keeps its successfully fetched events.
  * Absent: no calendar fetched.
  */
 export type NativeCalendarFeed =
     | { status: 'loading'; calendars?: ExternalCalendarSubscription[]; events?: ExternalCalendarEvent[] }
     | { status: 'error'; message: string; calendars?: ExternalCalendarSubscription[] }
-    | { status: 'ready'; calendars: ExternalCalendarSubscription[]; events: ExternalCalendarEvent[] };
+    | { status: 'ready'; calendars: ExternalCalendarSubscription[]; events: ExternalCalendarEvent[]; warning?: string };
 
 /** The screen's place: its mode, the selected day (null: none, month view only) and a day of the visible month. Days are `yyyy-MM-dd`. */
 export type NativeCalendarState = { viewMode: CalendarViewMode; selectedDate: string | null; visibleMonth: string };
@@ -482,10 +483,13 @@ const readFeed = (value: unknown): Feed | null => {
     if (!isList(calendars, MAX_CALENDARS, isCalendarSource)) return null;
     if (value.status === 'loading') {
         const events = value.events === undefined ? [] : value.events;
-        return isList(events, MAX_EVENTS, isEvent) ? { calendars, events: [], loading: true, error: null } : null;
+        return isList(events, MAX_EVENTS, isEvent) ? { calendars, events, loading: true, error: null } : null;
     }
     if (value.status === 'error' && isText(value.message, 2000)) return { calendars, events: [], loading: false, error: value.message };
-    if (value.status === 'ready' && isList(value.events, MAX_EVENTS, isEvent)) return { calendars, events: value.events, loading: false, error: null };
+    if (value.status === 'ready' && isList(value.events, MAX_EVENTS, isEvent)
+        && (value.warning === undefined || isText(value.warning, 2000))) {
+        return { calendars, events: value.events, loading: false, error: value.warning ?? null };
+    }
     return null;
 };
 

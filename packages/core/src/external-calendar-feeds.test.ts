@@ -211,8 +211,27 @@ describe('external calendar feeds behind the host ports', () => {
             calendars: [{ id: 'b', title: 'Personal' }, { id: 'a', title: '' , name: 'Account' }, { id: 'm', title: 'Mindwtr' }, { id: ' ', title: 'Blank' }],
         });
         expect(await feeds.getSystemCalendars()).toEqual([{ id: 'a', name: 'Account', color: undefined }, { id: 'b', name: 'Personal', color: undefined }]);
-        await feeds.saveSystemCalendarSettings({ enabled: true, selectAll: false, selectedCalendarIds: [' a ', 'a', 'b'], areaIdsByCalendar: { a: ['x', 'x', ''] } });
-        expect(JSON.parse(storage.get(SYSTEM_CALENDAR_SETTINGS_KEY)!)).toEqual({ enabled: true, selectAll: false, selectedCalendarIds: ['a', 'b'], areaIdsByCalendar: { a: ['x'] } });
+        await feeds.saveSystemCalendarSettings({ enabled: true, selectAll: false, selectedCalendarIds: [' a ', 'a', 'b', 'é', 'e\u0301', ' a ', '', '  '], areaIdsByCalendar: { a: ['x', 'x', ''] } });
+        expect(JSON.parse(storage.get(SYSTEM_CALENDAR_SETTINGS_KEY)!)).toEqual({ enabled: true, selectAll: false, selectedCalendarIds: [' a ', 'a', 'b', 'é', 'e\u0301'], areaIdsByCalendar: { a: ['x'] } });
+    });
+
+    it('rejects unavailable enumeration with a fixed safe error and never requests permission', async () => {
+        const { feeds, host, calls } = device();
+        host.calendars.getCalendars = async () => { throw new Error('PRIVATE PROVIDER https://private.example/calendar'); };
+        await expect(feeds.getSystemCalendars()).rejects.toThrow(/^Calendar provider unavailable$/);
+        expect(calls).not.toContainEqual(['requestPermissions']);
+    });
+
+    it.each(['denied', 'undetermined'])('rejects enumeration when passive permission is %s without requesting it', async (permission) => {
+        const { feeds, calls } = device({ permission, calendars: [{ id: 'saved', title: 'Saved' }] });
+        await expect(feeds.getSystemCalendars()).rejects.toThrow(/^Calendar provider unavailable$/);
+        expect(calls).toEqual([]);
+    });
+
+    it('returns an empty enumeration only after a successful provider read', async () => {
+        const { feeds, calls } = device();
+        expect(await feeds.getSystemCalendars()).toEqual([]);
+        expect(calls).toEqual([['getCalendars']]);
     });
 
     it('touches no port in the sandbox', async () => {

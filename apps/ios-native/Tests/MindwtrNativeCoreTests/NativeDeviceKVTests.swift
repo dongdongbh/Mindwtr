@@ -243,7 +243,7 @@ final class NativeDeviceKVTests: XCTestCase {
         let denied = ["mindwtr-ai-provider-consent-v1", "mindwtr-ai-key_openai", "mindwtr-data", "gtd-data",
             "mindwtr-data:json-ahead-of-sqlite", "mindwtr-data:sqlite-json-reconcile-v1",
             "@mindwtr_attachment_presence_reconcile_v1_extra", "@mindwtr/file-sync-publication-reservations-v1",
-            "mindwtr-external-calendars_extra", "@mindwtr_background_sync_failure_state_v1",
+            "mindwtr-external-calendars_extra", "mindwtr-system-calendar-settings_extra", "@mindwtr_background_sync_failure_state_v1",
             "@mindwtr_background_sync_last_registered_interval", "@mindwtr_dropbox_last_rev",
             "@mindwtr_cloudkit_change_token", "@mindwtr_cloudkit_seeded", "@mindwtr_cloudkit_zone_created",
             "@mindwtr_sync_backend_extra", "@MINDWTR_SYNC_BACKEND", "unknown"]
@@ -260,7 +260,7 @@ final class NativeDeviceKVTests: XCTestCase {
             "@mindwtr_cloud_provider", "@mindwtr_cloud_url", "@mindwtr_cloud_allow_insecure_http",
             "@mindwtr_sync_encryption_state_v1", "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1",
             "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
-            "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars"]
+            "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars", "mindwtr-system-calendar-settings"]
         try store.multiSet(allowed.map { ($0, "opaque") })
         XCTAssertEqual(try store.multiGet(allowed).map { $0.1 }, Array(repeating: "opaque", count: allowed.count))
         for key in removeOnly + denied { XCTAssertEqual(try store.get(key), "\u{FEFF}preserve 🧠") }
@@ -273,6 +273,7 @@ final class NativeDeviceKVTests: XCTestCase {
     func testRNSyncPresenceAndCalendarsSurviveReopenWithoutChangingUnknownRecords() throws {
         try seed("{\"unknown\":\"preserve 🧠\"}")
         let entries = [
+            ("mindwtr-system-calendar-settings", "{\"enabled\":true,\"selectAll\":false,\"selectedCalendarIds\":[\"é\",\"e\\u0301\"]}"),
             ("@mindwtr_attachment_presence_reconcile_v1", "{\"scope\":\"webdav:opaque 🧠\",\"at\":1791300000000}"),
             ("mindwtr-external-calendars", "[{\"id\":\"calendar-1\",\"name\":\"Calendar 🧠\",\"url\":\"https://example.invalid/feed.ics\",\"enabled\":true}]")
         ]

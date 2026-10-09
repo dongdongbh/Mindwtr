@@ -768,7 +768,8 @@
     // with the host's text (a missing file names ENOENT). Refused once the host's deadline passed, as a fetch is, and an open
     // call then rejects at once and the host aborts it (HostIo.fileAbort: a copy stalled on a document provider), so a
     // timed-out operation drains and the host never stops; its late answer settles nothing.
-    var fileChannel = function (method) {
+    var fileChannel = function (method, abortMethod) {
+        abortMethod = abortMethod || 'fileAbort';
         return function (request, bytes) {
             return new Promise(function (resolve, reject) {
                 refuseIfCancelled();
@@ -777,7 +778,7 @@
                 if (bytes !== undefined) payload.base64 = toBase64(bytesOf(bytes));
                 var cancel = function (reason) {
                     ioPending.delete(id);
-                    try { native().fileAbort(id); } catch (_error) { /* its late answer is dropped either way */ }
+                    try { native()[abortMethod](id); } catch (_error) { /* its late answer is dropped either way */ }
                     reject(reason);
                 };
                 var id = startIo(hostCall(native()[method](JSON.stringify(payload))), function (answer) {
@@ -790,6 +791,9 @@
     if (global.__mindwtrNative && typeof global.__mindwtrNative.fileCall === 'function') {
         global.__mindwtrFileCall = fileChannel('fileCall');
         global.__mindwtrInstallerCall = fileChannel('installerCall');
+    }
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarCall === 'function') {
+        global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');
     }
 
     // --- sync crypto --------------------------------------------------------

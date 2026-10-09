@@ -320,12 +320,33 @@ describe('native host contract: Calendar', () => {
         expect(new Date(useTaskStore.getState().tasks.find((task) => task.id === saved.taskId)?.startTime ?? '').getHours()).toBe(9);
     });
 
-    it('omits stale events supplied by a loading feed', async () => {
+    it('retains supplied events during a same-view refresh and clears them when the loading feed omits them', async () => {
         freezeClock();
         const { host } = await openHost();
         const state = { viewMode: 'month' as const, selectedDate: '2026-10-31', visibleMonth: '2026-10-31' };
+        const shown = value(host.getCalendarView({ state, calendar: ready, ...page }));
+        const eventIds = items(shown, 'events').map((item) => item.eventId);
+        expect(eventIds).toEqual(['e-retreat']);
         const loading = value(host.getCalendarView({ state, calendar: { status: 'loading', calendars: fixture.calendars, events: fixture.calendarEvents }, ...page }));
-        expect(items(loading, 'details').some((item) => item.kind === 'event')).toBe(false);
+        expect(items(loading, 'events').map((item) => item.eventId)).toEqual(eventIds);
+        expect(loading.content.mode === 'month' && loading.content.details?.events?.loading).toBeTruthy();
+        const empty = value(host.getCalendarView({ state, calendar: { status: 'loading', calendars: fixture.calendars }, ...page }));
+        expect(items(empty, 'events')).toEqual([]);
+    });
+
+    it('shows a ready feed warning while retaining its events and rejects malformed warnings', async () => {
+        freezeClock();
+        const { host } = await openHost();
+        const state = { viewMode: 'month' as const, selectedDate: '2026-10-28', visibleMonth: '2026-10-28' };
+        const shown = value(host.getCalendarView({ state, calendar: ready, ...page }));
+        const warning = 'Failed to load events';
+        const partial = value(host.getCalendarView({ state, calendar: { ...ready, warning }, ...page }));
+        expect(items(partial, 'events')).toEqual(items(shown, 'events'));
+        expect(partial.content.mode === 'month' && partial.content.details?.events?.error).toBe(warning);
+        for (const malformed of [null, 42, 'x'.repeat(2001)]) {
+            expect(host.getCalendarView({ state, calendar: { ...ready, warning: malformed }, ...page } as never))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
     });
 
     it('leaves a task at the second fall 1:30 AM when its block is dropped in place', async () => {
