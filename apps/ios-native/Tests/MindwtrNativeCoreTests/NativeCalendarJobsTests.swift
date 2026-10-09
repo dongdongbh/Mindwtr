@@ -97,7 +97,7 @@ final class NativeCalendarJobsTests: XCTestCase {
         defer { jobs.shutdown() }
         _ = try jobs.submit(events(ids: [])); jobs.drain()
         XCTAssertEqual((try reply(jobs).value["value"] as? [[String: Any]])?.count, 0)
-        XCTAssertEqual(reader.operations, ["permissions"])
+        XCTAssertEqual(reader.operations, ["permissions", "permissions"])
         let ids = [" \u{feff}calendar ", "cafe\u{301}", "caf\u{e9}"]
         _ = try jobs.submit(events(ids: ids, start: 1_793_497_800_123, end: 1_793_501_400_456)); jobs.drain()
         XCTAssertTrue(try reply(jobs).completed)
@@ -117,7 +117,7 @@ final class NativeCalendarJobsTests: XCTestCase {
         let third = try jobs.submit("{\"op\":\"permissions\"}"); jobs.drain()
         XCTAssertEqual(try reply(jobs).value["id"] as? String, second)
         XCTAssertEqual(try reply(jobs).value["id"] as? String, third)
-        XCTAssertEqual(reader.operations, ["permissions", "permissions", "calendars", "permissions"])
+        XCTAssertEqual(reader.operations, ["permissions", "permissions", "calendars", "permissions", "permissions"])
         XCTAssertEqual(first.split(separator: ":").last, "1"); XCTAssertEqual(third.split(separator: ":").last, "3")
         let other = NativeCalendarJobs(registry: NativeAttachmentLocalRequests()) { CalendarTestReader() }
         defer { other.shutdown() }
@@ -187,7 +187,7 @@ final class NativeCalendarJobsTests: XCTestCase {
             XCTAssertEqual(result.value["error"] as? String, "Calendar request cancelled")
             XCTAssertNil(result.value["value"]); XCTAssertFalse(result.completed)
         }
-        XCTAssertEqual(reader.operations, ["permissions", "events"])
+        XCTAssertEqual(reader.operations, ["permissions", "events", "permissions"])
     }
 
     func testReadFinishedBeforeCloseStillRetainsCancellationUntilReplyConsumption() throws {
@@ -239,7 +239,7 @@ final class NativeCalendarJobsTests: XCTestCase {
         release.signal(); XCTAssertEqual(finished.wait(timeout: .now() + 2), .success)
         XCTAssertEqual(jobs.counters.jobs, 0); XCTAssertEqual(jobs.counters.running, 0)
         XCTAssertNil(try jobs.next()); XCTAssertThrowsError(try jobs.submit("{\"op\":\"permissions\"}"))
-        XCTAssertEqual(reader.operations, ["permissions", "permissions", "calendars"])
+        XCTAssertEqual(reader.operations, ["permissions", "permissions", "calendars", "permissions"])
         jobs.shutdown()
     }
 }

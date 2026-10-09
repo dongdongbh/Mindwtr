@@ -28,6 +28,7 @@ private final class WriteTestProvider: NativeCalendarWriteProviding {
     var calendarResult = "created-calendar"
     var eventResult = "created-event"
     var calendarFailure: Error?
+    var eventFailure: Error?
     var failAt: Int?
     var beforeOperation: ((Int) -> Void)?
     private(set) var operations: [String] = []
@@ -60,7 +61,9 @@ private final class WriteTestProvider: NativeCalendarWriteProviding {
     func target(_ value: WriteTestCalendar) -> NativeCalendarWriteTarget { value.value }
     func events(eventID: String, calendar: WriteTestCalendar) throws -> [WriteTestEvent] {
         requestedEventID = eventID; selectedCalendar = calendar
-        try record("events"); return eventValues
+        try record("events")
+        if let eventFailure { throw eventFailure }
+        return eventValues
     }
     func identity(_ value: WriteTestEvent) -> NativeCalendarWriteEventIdentity? { value.value }
     func createCalendar(_ details: NativeCalendarCreateDetails, source: WriteTestSource) throws -> String {
@@ -114,6 +117,33 @@ final class NativeCalendarWriterTests: XCTestCase {
             XCTAssertEqual(error as? NativeCalendarWriteError, expected, file: file, line: line)
             XCTAssertFalse(error.localizedDescription.contains("PRIVATE_"), file: file, line: line)
         }
+    }
+
+    func testRecoveryLookupDistinguishesConfirmedAbsenceFromProviderFailure() throws {
+        let provider = WriteTestProvider()
+        let found = try NativeCalendarWritePolicy.existingEvent(eventID: "event", calendarID: "calendar", using: provider)
+        XCTAssertTrue(found === provider.eventValues[0])
+        provider.eventValues = []
+        XCTAssertNil(try NativeCalendarWritePolicy.existingEvent(eventID: "event", calendarID: "calendar", using: provider))
+        provider.eventFailure = NativeCalendarWriteError.missingEvent
+        assertError(.missingEvent) { try NativeCalendarWritePolicy.existingEvent(eventID: "event", calendarID: "calendar", using: provider) }
+        provider.calendarValues = []
+        XCTAssertNil(try NativeCalendarWritePolicy.existingEvent(eventID: "event", calendarID: "calendar", using: provider))
+        provider.calendarFailure = NativeCalendarWriteError.missingCalendar
+        assertError(.missingCalendar) { try NativeCalendarWritePolicy.existingEvent(eventID: "event", calendarID: "calendar", using: provider) }
+        XCTAssertTrue(provider.writes.isEmpty)
+    }
+
+    func testRecoveryLookupRefusesRevokedPermissionAndForeignOrRecurringEvents() throws {
+        let provider = WriteTestProvider()
+        provider.permissionReplies = [.granted, .granted, .granted, .denied]
+        assertError(.denied) { try NativeCalendarWritePolicy.existingEvent(eventID: "event", calendarID: "calendar", using: provider) }
+        provider.permissionReplies = [.granted]
+        for event in [WriteTestEvent(calendarID: "other"), WriteTestEvent(recurring: true)] {
+            provider.eventValues = [event]
+            XCTAssertThrowsError(try NativeCalendarWritePolicy.existingEvent(eventID: "event", calendarID: "calendar", using: provider))
+        }
+        XCTAssertTrue(provider.writes.isEmpty)
     }
 
     func testTypedDetailsRejectInvalidFieldsDatesColorsAndExternalSchemes() throws {

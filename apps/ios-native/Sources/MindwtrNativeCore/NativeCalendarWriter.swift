@@ -250,6 +250,13 @@ enum NativeCalendarWritePolicy {
         }
     }
 
+    static func existingEvent<P: NativeCalendarWriteProviding>(eventID: String, calendarID: String, using provider: P) throws -> P.EventValue? {
+        guard NativeCalendarWriteValidation.id(eventID), NativeCalendarWriteValidation.id(calendarID) else {
+            throw NativeCalendarWriteError.invalid
+        }
+        return try findEvent(eventID, calendarID: calendarID, provider: provider)?.1
+    }
+
     private static func request(calendarID: String, eventID: String? = nil, operation: String, details: [String: Any]? = nil) throws {
         guard NativeCalendarWriteValidation.id(calendarID), eventID.map(NativeCalendarWriteValidation.id) ?? true else {
             throw NativeCalendarWriteError.invalid
@@ -259,13 +266,16 @@ enum NativeCalendarWritePolicy {
         if let details { value["details"] = details }
         try NativeCalendarWriteValidation.frame(value)
     }
-    private static func target<P: NativeCalendarWriteProviding>(_ id: String, provider: P,
-                                                              missingError: NativeCalendarWriteError = .missingCalendar) throws -> P.CalendarValue {
+    private static func target<P: NativeCalendarWriteProviding>(_ id: String, provider: P) throws -> P.CalendarValue {
+        guard let calendar = try findTarget(id, provider: provider) else { throw NativeCalendarWriteError.missingCalendar }
+        return calendar
+    }
+    private static func findTarget<P: NativeCalendarWriteProviding>(_ id: String, provider: P) throws -> P.CalendarValue? {
         try requireAccess(provider)
         let calendars = try provider.calendars()
         try requireAccess(provider)
         let matches = calendars.filter { NativeCalendarWriteValidation.equalID(provider.target($0).id, id) }
-        guard let calendar = matches.first else { throw missingError }
+        guard let calendar = matches.first else { return nil }
         guard matches.count == 1 else { throw NativeCalendarWriteError.ambiguous }
         return calendar
     }
@@ -275,11 +285,15 @@ enum NativeCalendarWritePolicy {
         guard value.allowsModifications, !mutableCalendar || !value.immutable else { throw NativeCalendarWriteError.readOnly }
     }
     private static func exactEvent<P: NativeCalendarWriteProviding>(_ id: String, calendarID: String, provider: P) throws -> (P.CalendarValue, P.EventValue) {
-        let calendar = try target(calendarID, provider: provider, missingError: .missingEvent)
+        guard let result = try findEvent(id, calendarID: calendarID, provider: provider) else { throw NativeCalendarWriteError.missingEvent }
+        return result
+    }
+    private static func findEvent<P: NativeCalendarWriteProviding>(_ id: String, calendarID: String, provider: P) throws -> (P.CalendarValue, P.EventValue)? {
+        guard let calendar = try findTarget(calendarID, provider: provider) else { return nil }
         try requireAccess(provider); try writable(calendar, id: calendarID, provider: provider)
         let matches = try provider.events(eventID: id, calendar: calendar)
         try requireAccess(provider)
-        guard let event = matches.first else { throw NativeCalendarWriteError.missingEvent }
+        guard let event = matches.first else { return nil }
         guard matches.count == 1 else { throw NativeCalendarWriteError.ambiguous }
         try checkIdentity(event, eventID: id, calendarID: calendarID, provider: provider)
         return (calendar, event)

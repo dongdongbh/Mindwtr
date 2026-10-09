@@ -15,6 +15,10 @@ protocol NativeCalendarReading: AnyObject {
     func events(calendarIds: [String], start: Date, end: Date) throws -> [[String: Any]]
 }
 
+protocol NativeCalendarRecoveryReading: NativeCalendarReading {
+    func event(eventID: String, calendarID: String) throws -> [String: Any]?
+}
+
 enum NativeCalendarIDs {
     static func selected(_ requested: [String], available: [String]) -> Set<Data> {
         // Swift String equality folds canonically equivalent Unicode IDs.
@@ -27,7 +31,7 @@ import EventKit
 import CoreGraphics
 
 /// Created, used and released by NativeCalendarJobs' one serial worker.
-final class NativeCalendarReader: NativeCalendarWriting {
+final class NativeCalendarReader: NativeCalendarWriting, NativeCalendarRecoveryReading {
     private var ownedStore: EKEventStore?
     private let formatter: DateFormatter = {
         let value = DateFormatter()
@@ -90,19 +94,32 @@ final class NativeCalendarReader: NativeCalendarWriting {
         // EventKit's nil/empty predicate can select every calendar.
         guard !selected.isEmpty else { return [] }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: selected)
-        return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }.map { event in
-            var value: [String: Any] = ["id": event.calendarItemIdentifier,
-                                      "calendarId": event.calendar.calendarIdentifier,
-                                      "allDay": event.isAllDay,
-                                      "isRecurring": event.isDetached || !(event.recurrenceRules ?? []).isEmpty]
-            if let title = event.title { value["title"] = title }
-            if let start = event.startDate { value["startDate"] = formatter.string(from: start) }
-            if let end = event.endDate { value["endDate"] = formatter.string(from: end) }
-            if let notes = event.notes { value["notes"] = notes }
-            if let location = event.location { value["location"] = location }
-            if let url = event.url { value["url"] = url.absoluteString }
+        return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }.map(eventValue)
+    }
+
+    func event(eventID: String, calendarID: String) throws -> [String: Any]? {
+        try requireReadAccess()
+        do {
+            let event = try NativeCalendarWritePolicy.existingEvent(eventID: eventID, calendarID: calendarID, using: writeProvider())
+            let value = event.map(eventValue)
+            try requireReadAccess()
             return value
-        }
+        } catch NativeCalendarWriteError.denied { throw NativeCalendarReadError.denied }
+    }
+
+    private func eventValue(_ event: EKEvent) -> [String: Any] {
+        var value: [String: Any] = ["id": event.calendarItemIdentifier,
+                                  "calendarId": event.calendar.calendarIdentifier,
+                                  "allDay": event.isAllDay,
+                                  "isRecurring": event.isDetached || !(event.recurrenceRules ?? []).isEmpty]
+        if let title = event.title { value["title"] = title }
+        if let start = event.startDate { value["startDate"] = formatter.string(from: start) }
+        if let end = event.endDate { value["endDate"] = formatter.string(from: end) }
+        if let notes = event.notes { value["notes"] = notes }
+        if let location = event.location { value["location"] = location }
+        if let url = event.url { value["url"] = url.absoluteString }
+        if let zone = event.timeZone { value["timeZone"] = zone.identifier }
+        return value
     }
 
     private static func sourceType(_ type: EKSourceType) -> String {
@@ -253,12 +270,13 @@ private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding 
     func deleteEvent(_ event: EKEvent) throws { try store.remove(event, span: .thisEvent, commit: true) }
 }
 #else
-final class NativeCalendarReader: NativeCalendarWriting {
+final class NativeCalendarReader: NativeCalendarWriting, NativeCalendarRecoveryReading {
     func permissions() throws -> NativeCalendarPermission { throw NativeCalendarReadError.unavailable }
     func calendars() throws -> [[String: Any]] { throw NativeCalendarReadError.unavailable }
     func events(calendarIds: [String], start: Date, end: Date) throws -> [[String: Any]] {
         throw NativeCalendarReadError.unavailable
     }
+    func event(eventID: String, calendarID: String) throws -> [String: Any]? { throw NativeCalendarReadError.unavailable }
     func sources() throws -> [NativeCalendarSource] { throw NativeCalendarWriteError.unavailable }
     func createCalendar(_ details: NativeCalendarCreateDetails) throws -> String { throw NativeCalendarWriteError.unavailable }
     func updateCalendar(calendarID: String, details: NativeCalendarUpdateDetails) throws { throw NativeCalendarWriteError.unavailable }

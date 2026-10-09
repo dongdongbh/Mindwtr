@@ -31,6 +31,7 @@ final class NativeCalendarJobs: @unchecked Sendable {
     private enum Request {
         case permissions, calendars
         case events([String], Date, Date)
+        case recoveryEvent(String, String)
         case readFile(String)
     }
     private final class Job {
@@ -94,7 +95,17 @@ final class NativeCalendarJobs: @unchecked Sendable {
     }
 
     func submit(_ json: String) throws -> String {
-        let request = try parse(json), token = NativeAttachmentCancellation(), registryID = UUID()
+        try enqueue(parse(json))
+    }
+
+    /// Only the retained native recovery owner may ask for an exact provider identity.
+    func submitRecoveryEvent(eventID: String, calendarID: String) throws -> String {
+        guard NativeCalendarWriteValidation.id(eventID), NativeCalendarWriteValidation.id(calendarID) else { throw invalid() }
+        return try enqueue(.recoveryEvent(eventID, calendarID))
+    }
+
+    private func enqueue(_ request: Request) throws -> String {
+        let token = NativeAttachmentCancellation(), registryID = UUID()
         registry.register(token, id: registryID)
         condition.lock()
         guard accepting, !token.isCancelled, !registry.isClosing, writeSlot == nil, jobs.count < 2, sequence < UInt64.max else {
@@ -241,7 +252,16 @@ final class NativeCalendarJobs: @unchecked Sendable {
                 case .events(let ids, let start, let end):
                     guard permission == .granted else { throw NativeCalendarReadError.denied }
                     value = ids.isEmpty ? [[String: Any]]() : try provider.events(calendarIds: ids, start: start, end: end)
+                case .recoveryEvent(let eventID, let calendarID):
+                    guard permission == .granted else { throw NativeCalendarReadError.denied }
+                    guard let recovery = provider as? any NativeCalendarRecoveryReading else { throw NativeCalendarReadError.unavailable }
+                    value = try recovery.event(eventID: eventID, calendarID: calendarID) as Any? ?? NSNull()
                 case .readFile: throw invalid()
+                }
+                switch job.request {
+                case .permissions: break
+                default:
+                    guard try provider.permissions() == .granted else { throw NativeCalendarReadError.denied }
                 }
                 answer = try encode(["id": job.id, "value": value]); succeeded = true
             }

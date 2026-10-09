@@ -530,7 +530,7 @@ final class NativeCalendarHostTests: XCTestCase {
         try await drained()
         let retry = try object(await value.calendarRead(requestJSON: "{\"op\":\"permissions\"}"))
         XCTAssertEqual(retry["status"] as? String, "granted"); try await drained()
-        XCTAssertEqual(state.reader.operations, ["permissions", "calendars", "permissions"])
+        XCTAssertEqual(state.reader.operations, ["permissions", "calendars", "permissions", "permissions"])
     }
 
     func testActualSharedICSCancellationCannotPoisonSameRangeRefreshCache() async throws {

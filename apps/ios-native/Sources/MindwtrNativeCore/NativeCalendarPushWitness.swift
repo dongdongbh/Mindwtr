@@ -29,15 +29,46 @@ enum NativeCalendarPushWitness {
         }
         guard candidates.count <= 1 else { throw NativeCalendarWriteError.ambiguous }
         guard let row = candidates.first else { throw NativeCalendarWriteError.unavailable }
-        let id = try text(row, "id"), title = try text(row, "title"), notes = try text(row, "notes")
-        let location = try text(row, "location"), url = try optionalURL(row)
+        return try matchingEvent(row, details: details)
+    }
+
+    static func updatedEvent(effect: NativeCalendarPushEffect, event: [String: Any]) throws {
+        guard effect.phase == .started, case .updateEvent(let eventID, let calendarID, let details) = effect.request,
+              NativeCalendarWriteValidation.equalID(try text(event, "id"), eventID),
+              NativeCalendarWriteValidation.equalID(try text(event, "calendarId"), calendarID) else {
+            throw NativeCalendarWriteError.invalid
+        }
+        _ = try matchingEvent(event, details: details, preservesUnspecifiedURL: true)
+    }
+
+    static func updatedCalendar(effect: NativeCalendarPushEffect, calendars: [[String: Any]]) throws {
+        guard effect.phase == .started, case .updateCalendar(let calendarID, let details) = effect.request,
+              calendars.count <= 10_000 else { throw NativeCalendarWriteError.invalid }
+        let matches = calendars.filter { ($0["id"] as? String).map { NativeCalendarWriteValidation.equalID($0, calendarID) } ?? false }
+        guard matches.count <= 1 else { throw NativeCalendarWriteError.ambiguous }
+        guard let calendar = matches.first else { throw NativeCalendarWriteError.unavailable }
+        guard try boolean(calendar, "allowsModifications"),
+              NativeCalendarWriteValidation.equalID(try text(calendar, "color").uppercased(), details.color.uppercased()),
+              try details.title.map({ NativeCalendarWriteValidation.equalID(try text(calendar, "title"), $0) }) ?? true else {
+            throw NativeCalendarWriteError.unavailable
+        }
+    }
+
+    private static func matchingEvent(_ row: [String: Any], details: NativeCalendarEventDetails,
+                                      preservesUnspecifiedURL: Bool = false) throws -> String {
+        let id = try text(row, "id"), title = try text(row, "title"), notes = try optionalText(row, "notes") ?? ""
+        let location = try optionalText(row, "location") ?? "", url = try optionalURL(row)
+        let timeZone = try optionalText(row, "timeZone")
+        let expectedZone = details.timeZone.flatMap { TimeZone(identifier: $0)?.identifier }
+        let observedZone = timeZone.flatMap { TimeZone(identifier: $0)?.identifier }
         let allDay = try boolean(row, "allDay"), recurring = try boolean(row, "isRecurring")
         let start = try instant(row, "startDate"), end = try instant(row, "endDate")
         guard NativeCalendarWriteValidation.id(id) else { throw NativeCalendarWriteError.invalid }
         guard NativeCalendarWriteValidation.equalID(title, details.title),
               NativeCalendarWriteValidation.equalID(notes, details.notes),
               NativeCalendarWriteValidation.equalID(location, details.location),
-              url.map({ Data($0.utf8) }) == details.url.map({ Data($0.utf8) }),
+              preservesUnspecifiedURL && details.url == nil || url.map({ Data($0.utf8) }) == details.url.map({ Data($0.utf8) }),
+              details.timeZone == nil || observedZone == expectedZone,
               allDay == details.allDay, !recurring,
               milliseconds(start) == milliseconds(details.start), milliseconds(end) == milliseconds(details.end) else {
             throw NativeCalendarWriteError.unavailable
@@ -86,8 +117,11 @@ enum NativeCalendarPushWitness {
         return value.boolValue
     }
     private static func optionalURL(_ row: [String: Any]) throws -> String? {
-        if row["url"] == nil || row["url"] is NSNull { return nil }
-        return try text(row, "url")
+        try optionalText(row, "url")
+    }
+    private static func optionalText(_ row: [String: Any], _ name: String) throws -> String? {
+        if row[name] == nil || row[name] is NSNull { return nil }
+        return try text(row, name)
     }
     private static func instant(_ row: [String: Any], _ name: String) throws -> Date {
         let raw = try text(row, name), formatter = ISO8601DateFormatter()

@@ -31,6 +31,7 @@ final class NativeCalendarPushWitnessTests: XCTestCase {
                                  "isRecurring": false, "startDate": formatter.string(from: details.start),
                                  "endDate": formatter.string(from: details.end)]
         if let url = details.url { row["url"] = url }
+        if let zone = details.timeZone { row["timeZone"] = zone }
         return row
     }
     private func calendarEffect(title: String? = nil, source: String = "source-e\u{301}",
@@ -150,10 +151,12 @@ final class NativeCalendarPushWitnessTests: XCTestCase {
 
     func testMalformedEventCandidateFieldsAndNumericFlagsAreInvalid() throws {
         let effect = try eventEffect(), row = try eventRow(effect)
-        for name in ["id", "title", "location", "startDate", "endDate", "allDay", "isRecurring"] {
+        for name in ["id", "title", "startDate", "endDate", "allDay", "isRecurring"] {
             var malformed = row; malformed.removeValue(forKey: name)
             fixed(.invalid) { try NativeCalendarPushWitness.createdEvent(effect: effect, events: [malformed]) }
         }
+        var missingLocation = row; missingLocation.removeValue(forKey: "location")
+        fixed(.unavailable) { try NativeCalendarPushWitness.createdEvent(effect: effect, events: [missingLocation]) }
         let changes: [(String, Any)] = [("id", ""), ("id", String(repeating: "a", count: 1025)),
             ("title", 3), ("startDate", "invalid date"), ("allDay", NSNumber(value: 0)),
             ("isRecurring", NSNumber(value: 0)), ("url", 123)]
