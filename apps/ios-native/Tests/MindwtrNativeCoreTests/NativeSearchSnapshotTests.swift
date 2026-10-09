@@ -1,8 +1,16 @@
+import CryptoKit
 import Foundation
 import XCTest
 @testable import MindwtrNativeCore
 
 final class NativeSearchSnapshotTests: XCTestCase {
+    func testFingerprintHashesExactValidatedWireBytes() throws {
+        let raw = #"{"items":[]}"#
+        let snapshot = try NativeSearchSnapshot(json: raw)
+        XCTAssertEqual(snapshot.fingerprint, SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined())
+        XCTAssertEqual(snapshot.fingerprint, try NativeSearchSnapshot(json: raw).fingerprint)
+        XCTAssertNotEqual(snapshot.fingerprint, try NativeSearchSnapshot(json: raw + " ").fingerprint)
+    }
     private func json(_ value: Any) throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self)
     }

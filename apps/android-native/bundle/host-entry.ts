@@ -64,6 +64,7 @@ import {
     diagnosticsEntryFromLogPayload,
     getGeneralSettingsDeviceWrites,
     getPersistenceStatus,
+    getNextFutureStartRevealAt,
     compareAppVersions,
     fetchAppStoreInfo,
     UPDATE_BADGE_AVAILABLE_KEY,
@@ -76,6 +77,7 @@ import {
     isSandboxMode,
     isEntityOpenUrl,
     parseEntityOpenUrl,
+    resolveEntityOpenTarget,
     isWorkspaceTransitionActive,
     legacyImportMismatch,
     assertNativeLegacyBackupSafe,
@@ -1387,6 +1389,19 @@ const iosReminderEffects = createIosReminderMethods({
         rescheduleDelayMs: REMINDER_STORE_RESCHEDULE_DELAY_MS,
     },
 });
+const iosSearchUnavailable = () => new Error('NOT_READY: Native iOS search is unavailable');
+const iosSearchSavedState = () => {
+    const adapter = bootAdapter;
+    if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || getStorageAdapter() !== adapter
+        || isSandboxMode() || isWorkspaceTransitionActive()) throw iosSearchUnavailable();
+    requireSaved();
+    const status = getPersistenceStatus();
+    if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+        || !contract.getDataSettings().ok) throw iosSearchUnavailable();
+    return { adapter, generation: status.generation, state: useTaskStore.getState() };
+};
+let iosSearchPrevious: { inputs: unknown[]; ready: boolean; now: number; day: string; zone: string;
+    revision: number; nextAt: number | null } | null = null;
 const requireReminderSignal = (signal: AbortSignal) => {
     if (signal.aborted) throw new Error('CANCELLED: Reminder reconciliation was cancelled');
 };
@@ -2032,6 +2047,58 @@ globalThis.MindwtrHost = {
                     context: { releaseCheck: 'v1.3.5/ios-search-snapshot', count: String(result.items.length) } });
             } catch { /* Diagnostics cannot fail a successful readonly projection. */ }
             return result;
+        });
+    },
+    iosSearchObservation(): string {
+        if (arguments.length !== 0) throw new Error('INVALID_INPUT: Search observation takes no arguments');
+        if (globalThis.__mindwtrHostPlatform !== 'ios') throw iosSearchUnavailable();
+        const state = useTaskStore.getState(), now = new Date(), nowMs = now.getTime();
+        const inputs = [state._allTasks, state._allProjects, state._allSections, state._allAreas, state.settings,
+            bootAdapter, getStorageAdapter()];
+        const day = `${now.getFullYear()}/${now.getMonth()}/${now.getDate()}`;
+        let zone = '', saved: ReturnType<typeof iosSearchSavedState> | null = null;
+        try {
+            zone = `${now.getTimezoneOffset()}/${new Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+            if (!Number.isFinite(nowMs)) throw iosSearchUnavailable();
+            saved = iosSearchSavedState();
+        } catch { /* Uncertain canonical state never admits publication. */ }
+        let ready = saved !== null;
+        const previous = iosSearchPrevious;
+        const changed = !previous || inputs.some((input, index) => input !== previous.inputs[index])
+            || ready !== previous.ready || nowMs < previous.now || day !== previous.day || zone !== previous.zone
+            || previous.nextAt !== null && nowMs >= previous.nextAt;
+        let nextAt = previous?.nextAt ?? null;
+        if (changed) {
+            nextAt = null;
+            if (saved) try {
+                const reveal = getNextFutureStartRevealAt(state._allTasks, now);
+                const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+                nextAt = reveal === null ? midnight : Math.min(reveal, midnight);
+                const after = iosSearchSavedState();
+                if (!Number.isFinite(nextAt) || nextAt <= nowMs || after.adapter !== saved.adapter
+                    || after.generation !== saved.generation || after.state._allTasks !== state._allTasks
+                    || after.state._allProjects !== state._allProjects || after.state._allSections !== state._allSections
+                    || after.state._allAreas !== state._allAreas || after.state.settings !== state.settings) throw iosSearchUnavailable();
+            } catch { ready = false; nextAt = null; }
+        }
+        const revision = (previous?.revision ?? 0) + (changed ? 1 : 0);
+        if (!Number.isSafeInteger(revision)) throw iosSearchUnavailable();
+        iosSearchPrevious = { inputs, ready, now: nowMs, day, zone, revision, nextAt };
+        return JSON.stringify({ ready, revision, nextAt });
+    },
+    iosSearchOpen(taskID: string): string {
+        const argumentCount = arguments.length;
+        return submit(async () => {
+            if (argumentCount !== 1 || typeof taskID !== 'string' || taskID.length === 0 || taskID.length > 500
+                || new TextEncoder().encode(JSON.stringify([taskID])).byteLength > 8 * 1024) {
+                throw new Error('INVALID_INPUT: A bounded search task identity is required');
+            }
+            const before = iosSearchSavedState();
+            const target = resolveEntityOpenTarget('task', taskID, before.state);
+            const after = iosSearchSavedState();
+            if (after.adapter !== before.adapter || after.generation !== before.generation
+                || after.state._tasksById !== before.state._tasksById || after.state._allTasks !== before.state._allTasks) throw iosSearchUnavailable();
+            return target && 'taskId' in target ? { type: 'task', taskId: target.taskId } : { type: 'inbox' };
         });
     },
     /** Private prepared Person methods; Swift owns the durable journal. */

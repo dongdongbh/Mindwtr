@@ -1,6 +1,112 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    private func task456App(_ suffix: String, delivery: String = "") throws -> XCUIApplication {
+        let library = try task371Library(suffix, prefix: "MINDWTR_SEARCH_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-search-fake-index", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        if !delivery.isEmpty { app.launchEnvironment["MINDWTR_SEARCH_TEST_DELIVERY"] = delivery }
+        return app
+    }
+
+    private func task456Toggle(_ app: XCUIApplication) -> XCUIElement {
+        let toggle = app.switches["general-ios-search"]
+        revealPagedElement(app, toggle, in: app.scrollViews["general-scroll"])
+        boardEnabled(toggle, timeout: 30)
+        return toggle
+    }
+
+    private func task456Published(_ app: XCUIApplication) {
+        let state = app.staticTexts["ios-search-test-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "label BEGINSWITH %@", "publicationQueued:"), evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+    }
+
+    private func task456Enable(_ app: XCUIApplication) {
+        task97Open(app)
+        XCTAssertEqual(task456Toggle(app).value as? String, "0")
+        task456Toggle(app).tap()
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "1"), evaluatedWith: app.switches["general-ios-search"])
+        waitForExpectations(timeout: 30)
+        task456Published(app)
+    }
+
+    private func task456CloseGeneral(_ app: XCUIApplication) {
+        boardTap(app, "general-back"); boardTap(app, "settings-back")
+    }
+
+    func testNativeSearchConsentDefaultsOffPersistsAndDisables() throws {
+        let app = try task456App("CONSENT")
+        app.launch(); defer { app.terminate() }
+        task456Enable(app)
+        app.terminate(); app.launch(); task97Open(app)
+        XCTAssertEqual(task456Toggle(app).value as? String, "1")
+        task456Published(app)
+        task456Toggle(app).tap()
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "0"), evaluatedWith: app.switches["general-ios-search"])
+        waitForExpectations(timeout: 30)
+        XCTAssertEqual(app.staticTexts["ios-search-test-state"].label, "removalQueued:0")
+        app.terminate(); app.launch(); task97Open(app)
+        XCTAssertEqual(task456Toggle(app).value as? String, "0")
+        XCTAssertEqual(app.staticTexts["ios-search-test-state"].label, "removalQueued:0")
+    }
+
+    func testNativeSearchAppLockEnabledWhileUnconcealedWithdraws() throws {
+        let app = try task456App("LOCK")
+        app.launchArguments += ["--native-app-lock-auth", "success"]
+        app.launch(); defer { app.terminate() }
+        task456Enable(app)
+        task102LockToggle(app).tap()
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "1"), evaluatedWith: app.switches["general-app-lock"])
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.buttons["app-lock-unlock"].exists)
+        XCTAssertEqual(task456Toggle(app).value as? String, "1")
+        XCTAssertTrue(app.staticTexts["general-ios-search-paused"].exists)
+        XCTAssertEqual(app.staticTexts["ios-search-test-state"].label, "removalQueued:0")
+    }
+
+    func testNativeSearchRouteUsesExistingQueueAndForcesView() throws {
+        let app = try task456App("ROUTE", delivery: "more")
+        app.launch(); defer { app.terminate() }
+        task456Enable(app); task456CloseGeneral(app)
+        boardTap(app, "tab-menu")
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+        boardTap(app, "menu-dismiss")
+        task454Preview(app, title: "Task454 second preview")
+        boardTap(app, "task-view-close")
+        boardTap(app, "task-title-task454-b")
+        XCTAssertTrue(app.buttons["task-mode-edit"].isSelected)
+    }
+
+    func testNativeSearchDirtyEditorPreservesDraftUntilDiscard() throws {
+        let app = try task456App("DIRTY", delivery: "dirty")
+        app.launch(); defer { app.terminate() }
+        task456Enable(app); task456CloseGeneral(app)
+        boardTap(app, "tab-focus"); boardTap(app, "task-title-task454-a")
+        boardTap(app, "task-mode-edit")
+        let title = app.textFields["task-editor-title"]
+        boardEnabled(title, timeout: 30)
+        replaceProjectNotesText(title, with: "Task456 retained local draft")
+        XCTAssertEqual(title.value as? String, "Task456 retained local draft")
+        boardTap(app, "task-mode-view")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Task454 second preview")).firstMatch.waitForExistence(timeout: 2))
+        boardTap(app, "task-mode-edit")
+        XCTAssertEqual(title.value as? String, "Task456 retained local draft")
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-discard")
+        task454Preview(app, title: "Task454 second preview")
+    }
+
+    func testNativeSearchForeignIdentifierIsRefused() throws {
+        let app = try task456App("FOREIGN", delivery: "foreign")
+        app.launch(); defer { app.terminate() }
+        task456Enable(app); task456CloseGeneral(app)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-dismiss")
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
     // Warm fixed inputs exercise deferred model ingress; cold cases use the actual OS URL callback.
     private func task454App(_ suffix: String, delivery: String = "") throws -> XCUIApplication {
         let library = try task371Library(suffix, prefix: "MINDWTR_ENTITY_UI_")

@@ -967,6 +967,43 @@ struct SettingsScreen: View {
                             .disabled(model.busy).accessibilityIdentifier("general-app-lock-retry")
                     }
                 }
+                if model.searchAvailable {
+                    Toggle(isOn: Binding(get: { model.searchConsentEnabled },
+                                         set: { enabled in Task { await model.saveSearchConsent(enabled) } })) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.label("settings.iosSearchLabel")).rnFont(15).foregroundStyle(palette.text)
+                            Text(model.label("settings.iosSearchDesc")).rnFont(12).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .tint(palette.tint).padding(14).disabled(!model.searchConsentCanChange)
+                    .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityIdentifier("general-ios-search")
+                    if model.appLock.enabled == true {
+                        Text(model.label("settings.iosSearchPaused")).rnFont(12).foregroundStyle(palette.secondary)
+                            .accessibilityIdentifier("general-ios-search-paused")
+                    }
+                    if let failure = model.searchConsentError {
+                        Text(failure).rnFont(13).foregroundStyle(palette.danger)
+                            .accessibilityIdentifier("general-ios-search-consent-error")
+                        Button(model.label("common.retry")) { Task { await model.retrySearchConsent() } }
+                            .disabled(model.searchConsentBusy || model.busy)
+                            .accessibilityIdentifier("general-ios-search-consent-retry")
+                    }
+                    if let failure = model.searchPublicationError {
+                        Text(failure).rnFont(13).foregroundStyle(palette.danger)
+                            .accessibilityIdentifier("general-ios-search-publication-error")
+                        Button(model.label("common.retry")) { model.retrySearchPublication() }
+                            .disabled(model.searchConsentBusy || model.busy)
+                            .accessibilityIdentifier("general-ios-search-publication-retry")
+                    }
+                    #if DEBUG && targetEnvironment(simulator)
+                    if !model.searchTestState.isEmpty {
+                        Text(model.searchTestState).rnFont(12)
+                            .accessibilityIdentifier("ios-search-test-state")
+                    }
+                    #endif
+                }
                 generalSettingRow(model.generalSettings.object("language"), type: "language", enabled: true)
                     .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                 VStack(spacing: 0) {

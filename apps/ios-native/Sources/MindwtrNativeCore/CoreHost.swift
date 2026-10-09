@@ -115,6 +115,14 @@ public final class CoreHost: @unchecked Sendable {
         try NativeSearchSnapshot(json: await call("iosSearchSnapshot"))
     }
 
+    public func searchObservation() async throws -> NativeSearchObservation {
+        try await perform { try $0.searchObservation() }
+    }
+
+    public func setSearchObservationHandler(_ handler: (@Sendable (NativeSearchObservation) -> Void)?) async throws {
+        try await perform { try $0.setSearchObservationHandler(handler) }
+    }
+
     /// One physical cleanup decision; grants no attachment metadata authority.
     public func retireAttachmentCleanup(_ requestJSON: String) async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
@@ -195,6 +203,14 @@ public final class CoreHost: @unchecked Sendable {
 
     public func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String? = nil) async throws {
         try await perform { try $0.storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt) }
+    }
+
+    public func readSearchConsent() async throws -> Bool {
+        try await perform { try $0.readSearchConsent() }
+    }
+
+    public func setSearchConsent(_ enabled: Bool) async throws {
+        try await perform { try $0.setSearchConsent(enabled) }
     }
 
     public func snoozeReminder(requestJSON: String) async throws -> String {
@@ -868,6 +884,7 @@ public final class CoreHost: @unchecked Sendable {
                     } catch { result = .failure(error) }
                     if cancellation != nil { reminderEffects.finishOrdinary() }
                     engine.reminderPostOperation()
+                    engine.searchPostOperation()
                     continuation.resume(with: result)
                 }
             }
@@ -1358,6 +1375,19 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var reminderObserver: ReminderObserver?
+    private final class SearchObserver {
+        let runtime: JSContext
+        let generation: UInt64
+        let callback: @Sendable (NativeSearchObservation) -> Void
+        var observation: NativeSearchObservation
+        var pending: NativeSearchObservation?
+        var deliveryScheduled = false
+        init(runtime: JSContext, generation: UInt64, callback: @escaping @Sendable (NativeSearchObservation) -> Void,
+             observation: NativeSearchObservation) {
+            self.runtime = runtime; self.generation = generation; self.callback = callback; self.observation = observation
+        }
+    }
+    private var searchObserver: SearchObserver?
     private static let reminderMapNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
     fileprivate static let reminderMethods = Set(["iosReminderBegin", "iosReminderCurrent", "iosReminderPrepare", "iosReminderAcknowledged", "iosReminderEnd",
         "iosReminderObserve", "iosReminderObservation", "iosReminderDisposeObservation"])
@@ -1581,6 +1611,7 @@ private final class Engine: @unchecked Sendable {
     #endif
 
     private static let methods: [String: Int] = [
+        "logLine": 2,
         "dataSetting": 1,
         "window": 3, "inboxView": 1, "focus": 1, "focusWindow": 4, "theme": 1, "areaFilter": 0, "setAreaFilter": 1,
         "captureOpen": 0, "captureView": 1, "captureEdit": 1, "captureSubmit": 1,
@@ -1592,7 +1623,7 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "iosEntityOpen": 1, "iosSearchSnapshot": 0, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
+        "iosEntityOpen": 1, "iosSearchSnapshot": 0, "iosSearchObservation": 0, "iosSearchOpen": 1, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
         "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
@@ -2816,6 +2847,47 @@ private final class Engine: @unchecked Sendable {
         reminderOwnerAccess = true; defer { reminderOwnerAccess = false }
         return try invoke(method, arguments: arguments, localCancellation: cancellation)
     }
+
+    func searchObservation() throws -> NativeSearchObservation {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !localRequests.isClosing, !invoking, let context,
+              let raw = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("iosSearchObservation", withArguments: [])?.toString() else {
+            throw HostFailure("NOT_READY: Native search observation is unavailable")
+        }
+        if context.exception != nil {
+            context.exception = nil
+            throw HostFailure("NOT_READY: Native search observation is unavailable")
+        }
+        let observation = try NativeSearchObservation(json: raw)
+        return .init(ready: observation.ready && (try? requireDeviceStorageAdmission()) != nil,
+                     revision: observation.revision, nextAt: observation.nextAt)
+    }
+    func setSearchObservationHandler(_ handler: (@Sendable (NativeSearchObservation) -> Void)?) throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        searchObserver = nil
+        guard let handler else { return }
+        let observation = try searchObservation()
+        guard let context else { throw HostFailure("NOT_READY: Native search observation is unavailable") }
+        searchObserver = SearchObserver(runtime: context, generation: attachmentGeneration, callback: handler,
+                                        observation: observation)
+    }
+    func searchPostOperation() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard let observer = searchObserver, context === observer.runtime, attachmentGeneration == observer.generation,
+              !closed, !localRequests.isClosing else { return }
+        let observation = (try? searchObservation()) ?? .init(ready: false, revision: observer.observation.revision, nextAt: nil)
+        if observation != observer.observation {
+            observer.observation = observation; observer.pending = observation
+        }
+        guard observer.pending != nil, !observer.deliveryScheduled else { return }
+        observer.deliveryScheduled = true
+        queue.async { [weak self, weak observer] in
+            guard let self, let observer, self.searchObserver === observer, self.context === observer.runtime,
+                  self.attachmentGeneration == observer.generation, !self.closed, !self.localRequests.isClosing else { return }
+            observer.deliveryScheduled = false
+            if let pending = observer.pending { observer.pending = nil; observer.callback(pending) }
+        }
+    }
     func beginReminderReconciliation(_ id: UUID, cancellation: NativeAttachmentCancellation) throws -> NativeReminderEffects.Admission {
         dispatchPrecondition(condition: .onQueue(queue))
         try cancellation.check()
@@ -3452,6 +3524,15 @@ private final class Engine: @unchecked Sendable {
     func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String?) throws {
         try requireDeviceStorageAdmission().storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt)
         _ = try? invoke("iosAboutUpdateStateAcknowledged", arguments: ["badge-saved"])
+    }
+
+    func readSearchConsent() throws -> Bool { try requireDeviceStorageAdmission().readSearchConsent() }
+
+    func setSearchConsent(_ enabled: Bool) throws {
+        try requireDeviceStorageAdmission().setSearchConsent(enabled)
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.5/ios-search-publication", "enabled": enabled, "outcome": "consent-saved"]) {
+            _ = try? invoke("logLine", arguments: ["Native iOS search consent saved", context])
+        }
     }
 
     func call(_ method: String, argumentsJSON: String) throws -> String {
@@ -7466,6 +7547,11 @@ private final class Engine: @unchecked Sendable {
         }
         guard pending == nil else { throw HostFailure("SAVE_FAILED: A pending command requires exact retry") }
         guard Self.mutations.contains(method) else {
+            if method == "iosSearchObservation" {
+                let observation = try searchObservation()
+                return try Self.ownedJSON(["ready": observation.ready, "revision": observation.revision,
+                                          "nextAt": observation.nextAt.map { $0 as Any } ?? NSNull()])
+            }
             if method == "referenceProjectNextActionOptions" {
                 do {
                     guard let text = args.first as? String,
@@ -15185,6 +15271,13 @@ private final class Engine: @unchecked Sendable {
             }
             return args
         }
+        if method == "iosSearchOpen" {
+            guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
+                  args.count == 1, !args[0].isEmpty, args[0].utf16.count <= 500 else {
+                throw HostFailure("INVALID_INPUT: Search open requires one bounded task ID string")
+            }
+            return args
+        }
         guard let count = Self.methods[method],
               let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [Any], args.count == count else {
             throw HostFailure("Invalid or unavailable core method arguments")
@@ -15203,6 +15296,7 @@ private final class Engine: @unchecked Sendable {
                 }
             } else if !(argument is String) { throw HostFailure("Core arguments must be strings") }
         }
+        if method == "logLine" { try validateClientDiagnosticArguments(args) }
         if method == "dataSetting" { try validateDataSettingArguments(args, json) }
         if method == "reminderCompletionCommit", let raw = args.first as? String { _ = try reminderCompletionRequest(raw) }
         try validateTaskReadArguments(method, args, json, allowPreparedDates: allowPreparedDates)
@@ -15213,6 +15307,47 @@ private final class Engine: @unchecked Sendable {
         try validatePreparedTaskArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateMenuAndDraftArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         return args
+    }
+
+    private func validateClientDiagnosticArguments(_ args: [Any]) throws {
+        let invalid = HostFailure("INVALID_INPUT: Invalid client diagnostic")
+        guard let message = args[0] as? String, message.utf8.count <= 256,
+              let raw = args[1] as? String, raw.utf8.count <= 1_024,
+              let context = try? NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              (try? NativeJSON.hasUniqueObjectKeys(raw)) == true else { throw invalid }
+        // Client diagnostics carry only audited marker enums and aggregate counts.
+        let valid: Bool
+        switch message {
+        case "Native iOS launch selection admitted":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"])
+        case "Native iOS reminder lifecycle reconciled":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"])
+        case "Native iOS foreground activation refreshed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"])
+        case "Native iOS system search":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome", "count"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-search-publication"
+                && ["publicationQueued", "removalQueued", "failed"].contains(context["outcome"] as? String ?? "")
+                && Self.isInteger(context["count"])
+                && (context["count"] as? NSNumber).map { (0.0...2_750.0).contains($0.doubleValue) } == true
+        case "Native iOS system search route", "Native iOS entity link":
+            let search = message == "Native iOS system search route"
+            valid = Set(context.keys) == Set(["releaseCheck", "kind", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/" + (search ? "ios-search-publication" : "ios-entity-link")
+                && (search ? ["none", "inbox", "task"] : ["none", "inbox", "task", "project"]).contains(context["kind"] as? String ?? "")
+                && ["opened", "refused"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS reminder response":
+            valid = Set(context.keys) == Set(["releaseCheck", "action", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-reminder-response"
+                && ["open", "complete", "snooze", "dismiss", "unknown"].contains(context["action"] as? String ?? "")
+                && ["captured", "retired", "capture-refused", "admitting", "confirmed", "refused", "uncertain"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS foreground reminder presentation requested":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-reminder-present"
+                && ["sound", "silent"].contains(context["outcome"] as? String ?? "")
+        default: valid = false
+        }
+        guard valid else { throw invalid }
     }
 
     private func validateDataSettingArguments(_ args: [Any], _ transport: String) throws {
@@ -15267,8 +15402,14 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateArgumentTransportSize(_ method: String, _ json: String) throws {
-        if method == "iosSearchSnapshot", json.utf8.count > 2_048 {
+        if method == "logLine", json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Client diagnostic request is too large")
+        }
+        if ["iosSearchSnapshot", "iosSearchObservation"].contains(method), json.utf8.count > 2_048 {
             throw HostFailure("INVALID_INPUT: Search snapshot request is too large")
+        }
+        if method == "iosSearchOpen", json.utf8.count > 8_192 {
+            throw HostFailure("INVALID_INPUT: Search open request is too large")
         }
         if method == "iosEntityOpen", json.utf8.count > 128_000 {
             throw HostFailure("INVALID_INPUT: Entity open request is too large")
@@ -19979,6 +20120,7 @@ private final class Engine: @unchecked Sendable {
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
         reminderPostOperation()
+        searchPostOperation()
     }
 
     private func checkException() throws {
@@ -20597,6 +20739,7 @@ private final class Engine: @unchecked Sendable {
 
     private func releaseRuntime() {
         removeReminderObserver(nil)
+        searchObserver = nil
         reminderAdmissions.clearOrdinaryReadyWake()
         reminderEffectsTurn = nil
         notificationSettingTurn = nil; notificationSettingOwnerAccess = false

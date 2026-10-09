@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 import LocalAuthentication
 import UIKit
 import MindwtrNativeCore
@@ -206,6 +207,10 @@ struct MindwtrNativeApp: App {
                     Task { await model.recordUpNoteHandoff(outcome, surface: surface) }
                 })
                 .onOpenURL { model.receiveEntityLink($0) }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
+                    model.receiveSearchIdentifier(identifier)
+                }
                 .task { await model.start() }
         }
     }
@@ -482,6 +487,7 @@ private struct AppLockRoot: View {
             if applicationActive { model.notificationSettingsDidBecomeActive() }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestNotificationResponses()
             model.requestEntityLinks()
         }
@@ -493,6 +499,7 @@ private struct AppLockRoot: View {
             model.notificationSettingsDidBecomeActive()
             model.requestNotificationResponses()
             model.requestEntityLinks()
+            model.requestSearchLifecycle(token: model.completedStartupToken, active: true, force: true)
             guard !lock.concealed else { return }
             model.requestForegroundSync(token: model.completedStartupToken, active: true)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
@@ -503,6 +510,7 @@ private struct AppLockRoot: View {
             model.notificationSettingsWillResignActive()
             model.cancelForegroundSync()
             model.cancelReminderLifecycle()
+            model.cancelSearchLifecycle()
             model.cancelProjectAttachmentDownload()
             model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
@@ -522,6 +530,7 @@ private struct AppLockRoot: View {
                 model.suspendEntityLinks()
                 model.cancelForegroundSync()
                 model.cancelReminderLifecycle()
+                model.cancelSearchLifecycle()
                 model.cancelProjectAttachmentDownload()
                 model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
@@ -535,6 +544,7 @@ private struct AppLockRoot: View {
             if next == .active && !lock.concealed { Task { await model.refresh() } }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
@@ -551,9 +561,13 @@ private struct AppLockRoot: View {
             }
             if !concealed && phase == .active { Task { await model.refresh() } }
         }
+        .onChange(of: lock.enabled) { _ in model.searchPolicyChanged() }
+        .onChange(of: lock.authenticating) { _ in model.searchPolicyChanged() }
+        .onChange(of: model.appLockActive) { _ in model.searchPolicyChanged() }
         .onChange(of: foreground) { next in
             model.requestForegroundSync(token: next.token, active: next.active)
             model.requestReminderLifecycle(token: next.token, active: next.active)
+            model.requestSearchLifecycle(token: next.token, active: next.active)
             if next.active && !next.concealed { model.requestNotificationResponses() }
             if next.active && !next.concealed { model.requestEntityLinks() }
         }
@@ -568,12 +582,21 @@ private struct AppLockRoot: View {
             }
         }
         .onChange(of: model.taskTitleDraft) { _ in model.deliverEntityLinkTestInput("dirty") }
+        .onChange(of: model.morePresented) { presented in
+            if presented { model.deliverSearchTestInput("more") }
+        }
+        .onChange(of: model.taskTitleDraft) { _ in model.deliverSearchTestInput("dirty") }
         #endif
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             model.reminderClockChanged()
+            model.searchClockChanged()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in model.reminderClockChanged() }
-        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in model.reminderClockChanged() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            model.reminderClockChanged(); model.searchClockChanged()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            model.reminderClockChanged(); model.searchClockChanged()
+        }
         .task(id: "\(model.ready)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard model.ready, phase == .active else { return }
             await lock.autoUnlock(label: model.label)

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A bounded readonly projection; library-scoped publication belongs to its future index owner.
@@ -16,6 +17,7 @@ public struct NativeSearchSnapshot: Sendable {
     }
 
     public let items: [Item]
+    public let fingerprint: String
 
     public init(json: String) throws {
         let invalid = HostFailure("INVALID_INPUT: Native search snapshot is invalid")
@@ -43,5 +45,6 @@ public struct NativeSearchSnapshot: Sendable {
                                 dueDate: optional["dueDate"], startDate: optional["startDate"]))
         }
         items = decoded
+        fingerprint = SHA256.hash(data: Data(json.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

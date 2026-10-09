@@ -195,6 +195,20 @@ final class NativeDeviceKV {
         try mutate(changes, skipUnchanged: true)
     }
 
+    private static let searchConsentName = "mindwtr:iosSearchIndexingEnabled"
+    func readSearchConsent() throws -> Bool {
+        switch try get(Self.searchConsentName) {
+        case nil, "false": return false
+        case "true": return true
+        default: throw Self.failure
+        }
+    }
+    // Private typed authority; the cell stays outside the generic JS writable allowlist.
+    func setSearchConsent(_ enabled: Bool) throws {
+        try mutate([Change(key: Self.searchConsentName, bytes: Data(Self.searchConsentName.utf8),
+                           value: enabled ? "true" : "false")], skipUnchanged: true)
+    }
+
     private static let reminderNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
     var hasPendingReminderMutation: Bool {
         pending.map { $0.changes.map(\.key) == Self.reminderNames } ?? false

@@ -655,13 +655,34 @@ final class CoreModel: ObservableObject {
     @Published private(set) var generalSettings: CoreObject = [:]
     let appLock = AppLockController()
     @Published private(set) var appLockRow: CoreObject = [:]
-    @Published private(set) var appLockRecoveryPending = false
+    @Published private(set) var appLockRecoveryPending = false {
+        didSet { if oldValue != appLockRecoveryPending { searchPolicyChanged() } }
+    }
     @Published private(set) var appLockError: String?
-    @Published private(set) var appLockAwaitingRefresh = false
+    @Published private(set) var appLockAwaitingRefresh = false {
+        didSet { if oldValue != appLockAwaitingRefresh { searchPolicyChanged() } }
+    }
     private var appLockExpected: CoreObject = [:]
     private var appLockRequest: String?
     var appLockActive: Bool { appLockRequest != nil || appLockAwaitingRefresh || appLock.authenticating }
     var appLockCanChange: Bool { generalPreferenceEnabled && !appLockActive && !appLockRow.isEmpty }
+    @Published private(set) var searchConsentEnabled = false
+    @Published private(set) var searchConsentKnown = false
+    @Published private(set) var searchConsentBusy = false
+    @Published private(set) var searchConsentPending: Bool?
+    @Published private(set) var searchConsentError: String?
+    @Published private(set) var searchPublicationError: String?
+    private var searchAppLockReadPending = false
+    private var searchAppLockWritePending = false
+    var searchAvailable: Bool { trustedSearchSelection != nil }
+    var searchConsentCanChange: Bool {
+        generalPreferenceEnabled && searchConsentKnown && !searchConsentBusy && searchConsentPending == nil
+    }
+    private var searchPolicyAdmitted: Bool {
+        searchAvailable && searchConsentKnown && searchConsentEnabled && searchConsentPending == nil
+            && !searchConsentBusy && appLock.enabled == false && !appLockActive && !appLockRecoveryPending
+            && !searchAppLockReadPending && !searchAppLockWritePending
+    }
     @Published private(set) var generalPreferenceError: String?
     @Published private(set) var generalPreferenceReadError: String?
     @Published private(set) var generalPreferenceAwaitingRefresh = false
@@ -1219,6 +1240,37 @@ final class CoreModel: ObservableObject {
     private var reminderDebounceReady = true
     private var reminderDrainLease: UIBackgroundTaskIdentifier = .invalid
     private var reminderDrainOwner: UUID?
+    private struct SearchLifecycleOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+        let generation: UInt64
+    }
+    private var searchIndex: NativeSearchIndex?
+    private var searchIndexWithdrawn = false
+    private var searchObservationHost: CoreHost?
+    private var searchObservationInstalled = false
+    private var searchObservationToken: UUID?
+    private var searchObservationClaim = UUID()
+    private var searchLastObservation: NativeSearchObservation?
+    private var searchLastSnapshot: NativeSearchSnapshot?
+    private var searchLifecycleOwner: SearchLifecycleOwner?
+    private var searchLifecycleTask: Task<Void, Never>?
+    private var searchDeadlineTask: Task<Void, Never>?
+    private var searchSceneActive = false
+    private var searchPublicationGeneration: UInt64 = 0
+    private var searchWakeTicket: UInt64 = 0
+    private var searchAttemptedTicket: UInt64 = 0
+    private var searchForceSnapshot = true
+    #if DEBUG && targetEnvironment(simulator)
+    private var searchTestFake: Bool {
+        guard let selection = trustedSearchSelection, case .isolated = selection else { return false }
+        return ProcessInfo.processInfo.arguments.contains("--native-search-fake-index")
+    }
+    private var searchTestDeliverySent = false
+    private var searchTestIdentifiers: [String: String] = [:]
+    @Published private(set) var searchTestState = ""
+    #endif
     private struct NotificationResponseOwner {
         let id: UUID
         let host: CoreHost
@@ -1237,9 +1289,19 @@ final class CoreModel: ObservableObject {
     private var notificationResponseDeferredUntilClean = false
     private var notificationResponseRetryRequested = false
     private var notificationResponseRetry: NotificationResponseRetry?
+    private enum EntityLinkInput {
+        case url(String), searchTask(String)
+        var bytes: Data {
+            switch self {
+            case .url(let value): return Data([0]) + Data(value.utf8)
+            case .searchTask(let value): return Data([1]) + Data(value.utf8)
+            }
+        }
+        var isSearch: Bool { if case .searchTask = self { return true }; return false }
+    }
     private struct EntityLinkDelivery {
         let token: UInt64
-        let url: String
+        let input: EntityLinkInput
     }
     private struct EntityLinkOwner {
         let id: UUID
@@ -1249,7 +1311,7 @@ final class CoreModel: ObservableObject {
     }
     private var entityLinkPending: EntityLinkDelivery?
     private var entityLinkDeliveryToken: UInt64 = 0
-    private var entityLinkLastURL: String?
+    private var entityLinkLastInput: Data?
     private var entityLinkLastReceived = -Double.infinity
     private var entityLinkWake: UInt64 = 0
     private var entityLinkAttemptedWake: UInt64 = 0
@@ -1276,6 +1338,7 @@ final class CoreModel: ObservableObject {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
                 retireNotificationSettingsPage()
                 retireReminderLifecycleHost(oldValue)
+                retireSearchHost(oldValue)
                 if oldValue != nil {
                     notificationResponseTask?.cancel()
                     notificationResponseBusyOwner = nil
@@ -5057,13 +5120,32 @@ final class CoreModel: ObservableObject {
         }
         let value = url.absoluteString
         guard value.utf16.count <= 16_000 else { return }
+        receiveEntityInput(.url(value))
+    }
+
+    func receiveSearchIdentifier(_ identifier: String) {
+        guard searchAvailable, identifier.utf16.count <= 8_000 else { return }
+        ensureSearchIndex()
+        let taskID: String?
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake { taskID = searchTestIdentifiers[identifier] }
+        else { taskID = searchIndex?.taskID(for: identifier) }
+        #else
+        taskID = searchIndex?.taskID(for: identifier)
+        #endif
+        guard let taskID, !taskID.isEmpty, taskID.utf16.count <= 500 else { return }
+        receiveEntityInput(.searchTask(taskID))
+    }
+
+    private func receiveEntityInput(_ input: EntityLinkInput) {
+        if input.isSearch && searchConsentKnown && !searchPolicyAdmitted { return }
         let received = ProcessInfo.processInfo.systemUptime
-        guard entityLinkLastURL != value || received - entityLinkLastReceived >= 1 else { return }
-        entityLinkLastURL = value
+        guard entityLinkLastInput != input.bytes || received - entityLinkLastReceived >= 1 else { return }
+        entityLinkLastInput = input.bytes
         entityLinkLastReceived = received
         withdrawEntityLinkPreview()
         entityLinkDeliveryToken += 1
-        entityLinkPending = .init(token: entityLinkDeliveryToken, url: value)
+        entityLinkPending = .init(token: entityLinkDeliveryToken, input: input)
         requestEntityLinks()
     }
 
@@ -5110,6 +5192,7 @@ final class CoreModel: ObservableObject {
             && completedStartupToken == owner.startupToken && ready && !retryNeeded
             && !settingsSyncRestartRequired && !appLockRecoveryPending && !Task.isCancelled
             && notificationResponseForeground
+            && (!owner.delivery.input.isSearch || searchPolicyAdmitted)
     }
 
     private func releaseEntityLinkBusy(_ id: UUID, settling: Bool = true) {
@@ -5125,6 +5208,7 @@ final class CoreModel: ObservableObject {
               notificationResponseForeground, notificationResponseContextClean,
               let currentHost = host, startupSyncCompletedHost === currentHost,
               let startupToken = completedStartupToken else { return }
+        guard !delivery.input.isSearch || searchPolicyAdmitted else { return }
         let owner = EntityLinkOwner(id: UUID(), host: currentHost, startupToken: startupToken, delivery: delivery)
         entityLinkAttemptedWake = entityLinkWake
         entityLinkTaskID = owner.id
@@ -5149,12 +5233,18 @@ final class CoreModel: ObservableObject {
                     throw CocoaError(.coderReadCorrupt)
                 }
                 #endif
-                let route = try self.decode(try await owner.host.call("iosEntityOpen", argumentsJSON: self.json([delivery.url])))
+                let command: String, value: String
+                switch delivery.input {
+                case .url(let url): command = "iosEntityOpen"; value = url
+                case .searchTask(let taskID): command = "iosSearchOpen"; value = taskID
+                }
+                let route = try self.decode(try await owner.host.call(command, argumentsJSON: self.json([value])))
                 guard self.entityLinkCurrent(owner), self.notificationResponseContextClean else { return }
                 let type = route.text("type")
                 let identifier = type == "task" ? "taskId" : "projectId"
                 let fields: Set<String> = ["task", "project"].contains(type) ? ["type", identifier] : ["type"]
-                guard ["none", "inbox", "task", "project"].contains(type), Set(route.keys) == fields,
+                let types = delivery.input.isSearch ? ["inbox", "task"] : ["none", "inbox", "task", "project"]
+                guard types.contains(type), Set(route.keys) == fields,
                       route.values.allSatisfy({ $0 is String }),
                       fields.count == 1 || (!route.text(identifier).isEmpty && route.text(identifier).utf16.count <= 500) else {
                     self.entityLinkPending = nil
@@ -5212,6 +5302,13 @@ final class CoreModel: ObservableObject {
 
     private func recordEntityLink(_ owner: EntityLinkOwner, kind: String, outcome: String) async {
         guard entityLinkCurrent(owner) else { return }
+        if owner.delivery.input.isSearch {
+            _ = try? await owner.host.call("logLine", argumentsJSON: json([
+                "Native iOS system search route",
+                try json(["releaseCheck": "v1.3.5/ios-search-publication", "kind": kind, "outcome": outcome]),
+            ]))
+            return
+        }
         _ = try? await owner.host.call("logLine", argumentsJSON: json([
             "Native iOS entity link",
             try json(["releaseCheck": "v1.3.5/ios-entity-link", "kind": kind, "outcome": outcome]),
@@ -5240,6 +5337,25 @@ final class CoreModel: ObservableObject {
         }
         for link in links {
             if let url = URL(string: "mindwtr-native-dev://" + link) { receiveEntityLink(url) }
+        }
+    }
+
+    func deliverSearchTestInput(_ trigger: String) {
+        guard searchTestFake, !searchTestDeliverySent, searchPolicyAdmitted,
+              !searchIndexWithdrawn, !searchTestIdentifiers.isEmpty,
+              let selection = trustedSearchSelection else { return }
+        let mode = ProcessInfo.processInfo.environment["MINDWTR_SEARCH_TEST_DELIVERY"] ?? ""
+        let ids: [String]
+        if trigger == "more", morePresented, ["more", "foreign"].contains(mode) {
+            ids = ["task454-b"]
+        } else if trigger == "dirty", mode == "dirty", taskDirty,
+                  taskTitleDraft == "Task456 retained local draft" {
+            ids = ["task454-b"]
+        } else { return }
+        searchTestDeliverySent = true
+        for id in ids {
+            guard let identifier = try? NativeSearchIndex.identifier(taskID: id, selection: selection) else { continue }
+            receiveSearchIdentifier(mode == "foreign" ? "foreign." + identifier : identifier)
         }
     }
     #endif
@@ -5569,6 +5685,267 @@ final class CoreModel: ObservableObject {
                 ]))
             } catch {
                 // Retain dirty work, but only a new source/activation/foreign settlement may retry.
+            }
+        }
+    }
+
+    private var trustedSearchSelection: NativeLaunchSelection? {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return nil }
+        switch selection {
+        case .standard(_, _, let namespace):
+            return namespace == "tech.dongdongbh.mindwtr.native.dev" ? selection : nil
+        case .isolated(_, _, let namespace, let identifier):
+            return namespace == "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased() ? selection : nil
+        case .rehearsal: return nil
+        }
+    }
+
+    private func ensureSearchIndex() {
+        guard searchIndex == nil, let selection = trustedSearchSelection else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake { return }
+        #endif
+        do {
+            searchIndex = try NativeSearchIndex(selection: selection) { [weak self] outcome, count in
+                self?.searchIndexEvent(outcome, count: count)
+            }
+            searchIndexWithdrawn = true
+        } catch { searchPublicationError = label("settings.iosSearchFailed") }
+    }
+
+    private func searchIndexEvent(_ outcome: String, count: Int) {
+        searchPublicationError = outcome == "failed" ? label("settings.iosSearchFailed") : nil
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake { searchTestState = outcome + ":" + String(count) }
+        #endif
+        guard let observed = host else { return }
+        Task {
+            guard self.host === observed else { return }
+            _ = try? await observed.call("logLine", argumentsJSON: self.json([
+                "Native iOS system search",
+                try self.json(["releaseCheck": "v1.3.5/ios-search-publication", "outcome": outcome, "count": count]),
+            ]))
+        }
+    }
+
+    private func withdrawSearchIndex() {
+        guard !searchIndexWithdrawn else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake {
+            searchIndexWithdrawn = true
+            searchIndexEvent("removalQueued", count: 0)
+            return
+        }
+        #endif
+        guard searchIndex != nil else { return }
+        searchIndexWithdrawn = true
+        searchIndex?.withdraw()
+    }
+
+    private func replaceSearchIndex(_ snapshot: NativeSearchSnapshot) {
+        searchIndexWithdrawn = false
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake, let selection = trustedSearchSelection {
+            searchTestIdentifiers = Dictionary(uniqueKeysWithValues: snapshot.items.compactMap { item in
+                guard let identifier = try? NativeSearchIndex.identifier(taskID: item.id, selection: selection) else { return nil }
+                return (identifier, item.id)
+            })
+            searchIndexEvent("publicationQueued", count: snapshot.items.count)
+            return
+        }
+        #endif
+        searchIndex?.replace(snapshot)
+    }
+
+    func saveSearchConsent(_ enabled: Bool) async {
+        guard !searchConsentBusy, let observed = host, let token = completedStartupToken,
+              startupSyncCompletedHost === observed, ready, !busy, !retryNeeded,
+              searchConsentPending == enabled || (searchConsentPending == nil && searchConsentCanChange) else { return }
+        searchConsentPending = enabled
+        searchConsentBusy = true
+        searchConsentError = nil
+        searchPolicyChanged()
+        defer {
+            if host === observed {
+                searchConsentBusy = false
+                requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true)
+            }
+        }
+        do {
+            try await observed.setSearchConsent(enabled)
+            guard host === observed, completedStartupToken == token else { return }
+            searchConsentEnabled = enabled
+            searchConsentKnown = true
+            searchConsentPending = nil
+        } catch {
+            guard host === observed else { return }
+            searchConsentError = label("settings.iosSearchFailed")
+        }
+    }
+
+    func retrySearchConsent() async {
+        if let pending = searchConsentPending { await saveSearchConsent(pending) }
+        else { requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true) }
+    }
+
+    func retrySearchPublication() {
+        searchIndex?.retry()
+        requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true)
+    }
+
+    func requestSearchLifecycle(token: UUID?, active: Bool, force: Bool = false) {
+        ensureSearchIndex()
+        if !searchPolicyAdmitted { withdrawSearchIndex() }
+        guard let token, token == completedStartupToken else { return }
+        guard active, UIApplication.shared.applicationState == .active else { cancelSearchLifecycle(); return }
+        if !searchSceneActive || force {
+            searchWakeTicket &+= 1
+            searchForceSnapshot = true
+            searchIndex?.retry()
+        }
+        searchSceneActive = true
+        admitSearchLifecycle()
+    }
+
+    func cancelSearchLifecycle() {
+        searchSceneActive = false
+        searchPublicationGeneration &+= 1
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchLifecycleTask?.cancel()
+    }
+
+    func searchPolicyChanged(suspendNavigation: Bool = true) {
+        searchPublicationGeneration &+= 1
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchLifecycleTask?.cancel()
+        if !searchPolicyAdmitted {
+            withdrawSearchIndex()
+            if suspendNavigation && entityLinkPending?.input.isSearch == true { suspendEntityLinks() }
+        }
+        searchWakeTicket &+= 1
+        admitSearchLifecycle()
+    }
+
+    private func retireSearchHost(_ previous: CoreHost?) {
+        cancelSearchLifecycle()
+        withdrawSearchIndex()
+        let observed = searchObservationHost
+        searchObservationHost = nil; searchObservationToken = nil; searchObservationClaim = UUID()
+        searchObservationInstalled = false
+        searchLastObservation = nil
+        searchLastSnapshot = nil
+        searchConsentKnown = false; searchConsentEnabled = false
+        searchConsentPending = nil; searchConsentBusy = false; searchConsentError = nil
+        searchWakeTicket &+= 1; searchAttemptedTicket = searchWakeTicket
+        searchForceSnapshot = true
+        if let previous, observed === previous { Task { try? await previous.setSearchObservationHandler(nil) } }
+    }
+
+    func searchClockChanged() {
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchWakeTicket &+= 1
+        searchForceSnapshot = true
+        admitSearchLifecycle()
+    }
+
+    private func searchOwnerCurrent(_ owner: SearchLifecycleOwner) -> Bool {
+        host === owner.host && startupSyncCompletedHost === owner.host && completedStartupToken == owner.token
+            && searchPublicationGeneration == owner.generation && searchSceneActive && ready && !retryNeeded
+            && !settingsSyncRestartRequired && UIApplication.shared.applicationState == .active && !Task.isCancelled
+    }
+
+    private func sameSearchObservation(_ a: NativeSearchObservation?, _ b: NativeSearchObservation) -> Bool {
+        a?.ready == b.ready && a?.revision == b.revision && a?.nextAt == b.nextAt
+    }
+
+    private func searchObserved(_ observation: NativeSearchObservation, host observed: CoreHost, token: UUID, claim: UUID) {
+        guard host === observed, searchObservationHost === observed,
+              completedStartupToken == token, searchObservationClaim == claim else { return }
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchWakeTicket &+= 1
+        admitSearchLifecycle()
+    }
+
+    private func installSearchDeadline(_ deadline: Double?, owner: SearchLifecycleOwner) {
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        guard let deadline, searchPolicyAdmitted else { return }
+        searchDeadlineTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, (deadline - Date().timeIntervalSince1970 * 1000) / 1000))) }
+            catch { return }
+            guard let self, self.searchOwnerCurrent(owner), self.searchPolicyAdmitted else { return }
+            self.searchDeadlineTask = nil
+            self.searchClockChanged()
+        }
+    }
+
+    private func admitSearchLifecycle() {
+        guard searchAvailable, searchLifecycleTask == nil, searchWakeTicket != searchAttemptedTicket,
+              searchSceneActive, UIApplication.shared.applicationState == .active,
+              let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
+              ready, !busy, !retryNeeded, !settingsSyncRestartRequired, !searchConsentBusy,
+              searchConsentPending == nil else { return }
+        let owner = SearchLifecycleOwner(id: UUID(), host: observed, token: token, generation: searchPublicationGeneration)
+        searchAttemptedTicket = searchWakeTicket
+        searchLifecycleOwner = owner
+        searchLifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.searchLifecycleOwner?.id == owner.id {
+                    self.searchLifecycleTask = nil; self.searchLifecycleOwner = nil
+                    self.admitSearchLifecycle()
+                    self.admitEntityLinks()
+                }
+            }
+            do {
+                if self.searchObservationHost !== observed || self.searchObservationToken != token || !self.searchObservationInstalled {
+                    self.searchObservationHost = observed; self.searchObservationToken = token
+                    self.searchObservationClaim = UUID()
+                    let claim = self.searchObservationClaim
+                    try await observed.setSearchObservationHandler { [weak self, weak observed] observation in
+                        Task { @MainActor in
+                            guard let self, let observed else { return }
+                            self.searchObserved(observation, host: observed, token: token, claim: claim)
+                        }
+                    }
+                    guard self.host === observed, self.completedStartupToken == token,
+                          self.searchObservationClaim == claim else { return }
+                    self.searchObservationInstalled = true
+                    guard self.searchOwnerCurrent(owner) else { return }
+                }
+                if !self.searchConsentKnown {
+                    let enabled = try await observed.readSearchConsent()
+                    guard self.searchOwnerCurrent(owner) else { return }
+                    self.searchConsentEnabled = enabled; self.searchConsentKnown = true
+                    self.searchConsentError = nil
+                }
+                guard self.searchOwnerCurrent(owner) else { return }
+                guard self.searchPolicyAdmitted else { self.withdrawSearchIndex(); return }
+                let observation = try await observed.searchObservation()
+                guard self.searchOwnerCurrent(owner), self.searchPolicyAdmitted else { return }
+                guard observation.ready else { return }
+                let force = self.searchForceSnapshot
+                self.searchForceSnapshot = false
+                if force || !self.sameSearchObservation(self.searchLastObservation, observation) {
+                    let snapshot = try await observed.searchSnapshot()
+                    guard self.searchOwnerCurrent(owner), self.searchPolicyAdmitted else { return }
+                    let settled = try await observed.searchObservation()
+                    guard self.searchOwnerCurrent(owner), self.searchPolicyAdmitted,
+                          self.sameSearchObservation(observation, settled) else { return }
+                    self.searchLastObservation = observation
+                    self.searchLastSnapshot = snapshot
+                    self.replaceSearchIndex(snapshot)
+                } else if self.searchIndexWithdrawn, let snapshot = self.searchLastSnapshot {
+                    self.replaceSearchIndex(snapshot)
+                }
+                self.installSearchDeadline(observation.nextAt, owner: owner)
+            } catch {
+                guard self.host === observed else { return }
+                if !self.searchConsentKnown {
+                    self.searchConsentError = self.label("settings.iosSearchFailed")
+                    self.withdrawSearchIndex()
+                } else if !(error is CancellationError) {
+                    self.searchPublicationError = self.label("settings.iosSearchFailed")
+                }
             }
         }
     }
@@ -8120,6 +8497,10 @@ final class CoreModel: ObservableObject {
 
     private func readAppLock(justEnabled: Bool = false) async throws {
         let currentHost = host
+        searchAppLockReadPending = true
+        // A guarded search route may own this read; validate its saved result before cancelling navigation.
+        searchPolicyChanged(suspendNavigation: false)
+        defer { searchAppLockReadPending = false; searchPolicyChanged() }
         do {
             let options = try await query("appLockOptions", ["{}"])
             guard currentHost != nil, host === currentHost,
@@ -8175,6 +8556,9 @@ final class CoreModel: ObservableObject {
 
     func saveAppLock(_ value: Bool) async {
         guard appLockCanChange, !appLock.concealed else { return }
+        searchAppLockWritePending = true
+        searchPolicyChanged()
+        defer { searchAppLockWritePending = false; searchPolicyChanged() }
         let expected = appLockExpected
         busy = true
         appLockError = nil
@@ -8249,6 +8633,7 @@ final class CoreModel: ObservableObject {
                     "settings.backupMobile.failedToRestoreBackup", "settings.backupMobile.restoreFailed", "settings.backupMobile.importFailed", "settings.importDiagnostics.limitExceeded", "settings.recoverySnapshotsEmpty",
                     "appLock.title", "appLock.description", "appLock.prompt", "appLock.enablePrompt", "appLock.unlock",
                     "appLock.authenticating", "appLock.useDevicePasscode", "appLock.unavailable", "appLock.cancelled", "appLock.failed",
+                    "settings.iosSearchLabel", "settings.iosSearchDesc", "settings.iosSearchPaused", "settings.iosSearchFailed",
                     "common.all", "common.close", "common.cancel", "common.done", "common.retry", "common.loading", "common.ok", "common.noMatches",
                     "common.play", "common.pause", "quickAdd.audioNoteTitle", "audio.loading",
                     "attachments.title", "attachments.missing", "attachments.download", "attachments.addLink", "attachments.addFile",
@@ -28110,7 +28495,7 @@ final class CoreModel: ObservableObject {
     }
     private func finishOperation() {
         defer {
-            admitReminderLifecycle(); admitNotificationResponses()
+            admitReminderLifecycle(); admitSearchLifecycle(); admitNotificationResponses()
             if entityLinkTask == nil { requestEntityLinks() }
         }
         busy = false
