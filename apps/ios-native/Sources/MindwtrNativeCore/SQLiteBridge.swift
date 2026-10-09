@@ -117,6 +117,57 @@ final class SQLiteBridge {
         _ = try execute("PRAGMA foreign_keys = ON")
     }
 
+    func readCalendarPushMapping(taskID: String) throws -> NativeCalendarPushMapping? {
+        guard NativeCalendarWriteValidation.id(taskID) else { throw NativeCalendarWriteError.invalid }
+        let parameters = try calendarPushParameters([taskID, "ios"])
+        let raw = try execute("SELECT task_id, calendar_event_id, calendar_id, platform, last_synced_at FROM calendar_sync WHERE task_id = ? AND platform = ?", parametersJSON: parameters)
+        guard let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], rows.count <= 1 else {
+            throw NativeCalendarWriteError.invalid
+        }
+        guard let row = rows.first else { return nil }
+        guard let task = row["task_id"] as? String, let event = row["calendar_event_id"] as? String,
+              let calendar = row["calendar_id"] as? String, let platform = row["platform"] as? String,
+              let stamp = row["last_synced_at"] as? String,
+              NativeCalendarWriteValidation.equalID(task, taskID) else { throw NativeCalendarWriteError.invalid }
+        return try NativeCalendarPushMapping(taskId: task, calendarEventId: event, calendarId: calendar,
+                                            platform: platform, lastSyncedAt: stamp)
+    }
+
+    /// The push owner persists its acknowledging effect before this call, then clears it after success.
+    func compareAndSetCalendarPushMapping(taskID: String, expected: NativeCalendarPushMapping?, next: NativeCalendarPushMapping?) throws {
+        guard NativeCalendarWriteValidation.id(taskID),
+              expected.map({ NativeCalendarWriteValidation.equalID($0.taskId, taskID) }) ?? true,
+              next.map({ NativeCalendarWriteValidation.equalID($0.taskId, taskID) }) ?? true else {
+            throw NativeCalendarWriteError.invalid
+        }
+        guard let database, sqlite3_get_autocommit(database) != 0 else {
+            throw HostFailure("Calendar mapping transaction is unavailable")
+        }
+        do {
+            _ = try execute("BEGIN IMMEDIATE")
+            let current = try readCalendarPushMapping(taskID: taskID)
+            // A committed mapping with a lost reply is already acknowledged; never write it again.
+            if current != next {
+                guard current == expected else { throw HostFailure("Calendar mapping changed") }
+                if let next {
+                    _ = try execute("INSERT INTO calendar_sync (task_id, calendar_event_id, calendar_id, platform, last_synced_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, platform) DO UPDATE SET calendar_event_id = excluded.calendar_event_id, calendar_id = excluded.calendar_id, last_synced_at = excluded.last_synced_at",
+                        parametersJSON: calendarPushParameters([next.taskId, next.calendarEventId, next.calendarId, next.platform, next.lastSyncedAt]))
+                } else {
+                    _ = try execute("DELETE FROM calendar_sync WHERE task_id = ? AND platform = ?", parametersJSON: calendarPushParameters([taskID, "ios"]))
+                }
+                guard try readCalendarPushMapping(taskID: taskID) == next else { throw HostFailure("Calendar mapping changed") }
+            }
+            _ = try execute("COMMIT")
+        } catch {
+            if sqlite3_get_autocommit(database) == 0 { _ = try? execute("ROLLBACK") }
+            throw error
+        }
+    }
+
+    private func calendarPushParameters(_ values: [String]) throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: values), as: UTF8.self)
+    }
+
     func execute(_ sql: String, parametersJSON: String = "[]") throws -> String {
         #if DEBUG
         try faults?.beforeSQL?(sql)
