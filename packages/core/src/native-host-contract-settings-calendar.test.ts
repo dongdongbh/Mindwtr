@@ -525,6 +525,222 @@ describe('native host contract: Settings › Calendar', () => {
         }
     });
 
+    describe('Task483 owned calendar push', () => {
+        const deferred = () => {
+            let release!: () => void;
+            let reject!: (error: Error) => void;
+            const promise = new Promise<void>((resolve, refuse) => { release = resolve; reject = refuse; });
+            return { promise, release, reject };
+        };
+
+        it('forwards coalesced edits once to admission without provider work and cancels a pending handoff on disable', async () => {
+            await seed({});
+            await useTaskStore.getState().addTask('First task', { status: 'next', dueDate: '2026-10-10' });
+            await useTaskStore.getState().addTask('Second task', { status: 'next', dueDate: '2026-10-11' });
+            await flushPendingSave();
+            const [first, second] = useTaskStore.getState()._allTasks;
+            const handset = phone({ os: 'ios', calendars: ['primary'], storage: { [KEYS.pushTarget]: 'g-primary' } });
+            const requestPartialSync = vi.fn();
+            handset.host.requestPartialSync = requestPartialSync;
+            const contract = await openHost(handset.host);
+            value(await contract.openCalendarSettings());
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            value(await contract.setCalendarSetting({ requestId: generateUUID(), edit: value(contract.getCalendarSettings()).push.toggle }));
+            await vi.advanceTimersByTimeAsync(0);
+            handset.state.calendarWrites.length = 0;
+            try {
+                value(await contract.openCalendarSettings());
+                await useTaskStore.getState().updateTask(first!.id, { title: 'First change' });
+                await vi.advanceTimersByTimeAsync(2000);
+                await useTaskStore.getState().updateTask(first!.id, { title: 'Latest change' });
+                await useTaskStore.getState().updateTask(second!.id, { title: 'Second change' });
+                await vi.advanceTimersByTimeAsync(2499);
+                expect(requestPartialSync).not.toHaveBeenCalled();
+                await vi.advanceTimersByTimeAsync(1);
+                expect(requestPartialSync.mock.calls).toEqual([[[first!.id, second!.id]]]);
+                expect(handset.state.calendarWrites).toEqual([]);
+
+                await useTaskStore.getState().updateTask(first!.id, { title: 'Pending at disable' });
+                value(await contract.setCalendarSetting({ requestId: generateUUID(), edit: value(contract.getCalendarSettings()).push.toggle }));
+                await vi.advanceTimersByTimeAsync(2500);
+                expect(requestPartialSync).toHaveBeenCalledTimes(1);
+                expect(handset.state.calendarWrites).toEqual([]);
+            } finally {
+                const view = value(contract.getCalendarSettings());
+                if (view.push.enabled) value(await contract.setCalendarSetting({ requestId: generateUUID(), edit: view.push.toggle }));
+                value(contract.closeCalendarSettings());
+            }
+        });
+
+        it.each([true, false])('waits for enable\'s full provider call only when owner admission is bound: %s', async (owned) => {
+            await seed({});
+            await useTaskStore.getState().addTask('Owned full sync', { status: 'next', dueDate: '2026-10-10' });
+            await flushPendingSave();
+            const handset = phone({ os: 'ios', calendars: ['primary'], storage: { [KEYS.pushTarget]: 'g-primary' } });
+            const requestPartialSync = vi.fn();
+            if (owned) handset.host.requestPartialSync = requestPartialSync;
+            const entered = deferred(), gate = deferred();
+            const createEvent = handset.host.calendars.createEvent!;
+            const create = vi.spyOn(handset.host.calendars, 'createEvent').mockImplementation(async (...args) => {
+                entered.release();
+                await gate.promise;
+                return createEvent(...args);
+            });
+            const contract = await openHost(handset.host);
+            value(await contract.openCalendarSettings());
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            const change = value(contract.getCalendarSettings()).push.toggle;
+            const requestId = generateUUID();
+            let completed = false;
+            const pending = contract.setCalendarSetting({ requestId, edit: change }).then((answer) => { completed = true; return answer; });
+            try {
+                await entered.promise;
+                await vi.advanceTimersByTimeAsync(0);
+                expect(completed).toBe(!owned);
+                expect(requestPartialSync).not.toHaveBeenCalled();
+                expect(handset.state.calendarWrites).toEqual([]);
+
+                gate.release();
+                const answer = value(await pending);
+                await vi.advanceTimersByTimeAsync(0);
+                expect(answer).toMatchObject({ changed: true, open: 'push' });
+                expect(create).toHaveBeenCalledTimes(1);
+                expect(value(await contract.setCalendarSetting({ requestId, edit: change }))).toEqual({ ...answer, toasts: [] });
+                expect(create).toHaveBeenCalledTimes(1);
+                expect(requestPartialSync).not.toHaveBeenCalled();
+            } finally {
+                gate.release();
+                await pending;
+                await vi.advanceTimersByTimeAsync(0);
+                value(await contract.setCalendarSetting({ requestId: generateUUID(), edit: value(contract.getCalendarSettings()).push.toggle }));
+                value(contract.closeCalendarSettings());
+            }
+        });
+
+        it.each([true, false])('waits for a target change\'s full provider call only when owner admission is bound: %s', async (owned) => {
+            await seed({});
+            await useTaskStore.getState().addTask('Owned target sync', { status: 'next', dueDate: '2026-10-10' });
+            await flushPendingSave();
+            const handset = phone({ os: 'ios', calendars: ['primary', 'phone'],
+                storage: { [KEYS.pushEnabled]: '1', [KEYS.pushTarget]: 'g-primary' } });
+            const requestPartialSync = vi.fn();
+            if (owned) handset.host.requestPartialSync = requestPartialSync;
+            const entered = deferred(), gate = deferred();
+            const createEvent = handset.host.calendars.createEvent!;
+            const create = vi.spyOn(handset.host.calendars, 'createEvent').mockImplementation(async (...args) => {
+                entered.release();
+                await gate.promise;
+                return createEvent(...args);
+            });
+            const contract = await openHost(handset.host);
+            value(await contract.openCalendarSettings());
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            const change = value(contract.getCalendarSettings()).push.target!.options.find((option) => option.key === 'local-phone')!.edit;
+            const requestId = generateUUID();
+            let completed = false;
+            const pending = contract.setCalendarSetting({ requestId, edit: change }).then((answer) => { completed = true; return answer; });
+            try {
+                await entered.promise;
+                await vi.advanceTimersByTimeAsync(0);
+                expect(completed).toBe(!owned);
+                expect(requestPartialSync).not.toHaveBeenCalled();
+                expect(handset.state.calendarWrites).toEqual([]);
+
+                gate.release();
+                const answer = value(await pending);
+                await vi.advanceTimersByTimeAsync(0);
+                expect(answer).toMatchObject({ changed: true, open: null });
+                expect(handset.state.calendarWrites).toEqual([['createEvent', 'local-phone', 'Owned target sync']]);
+                expect(value(await contract.setCalendarSetting({ requestId, edit: change }))).toEqual({ ...answer, toasts: [] });
+                expect(create).toHaveBeenCalledTimes(1);
+                expect(requestPartialSync).not.toHaveBeenCalled();
+            } finally {
+                gate.release();
+                await pending;
+                await vi.advanceTimersByTimeAsync(0);
+                value(await contract.setCalendarSetting({ requestId: generateUUID(), edit: value(contract.getCalendarSettings()).push.toggle }));
+                value(contract.closeCalendarSettings());
+            }
+        });
+
+        it('logs a rejected owned enable full run, refreshes the shown calendar revision and settles its receipt', async () => {
+            await seed({});
+            const handset = phone({ os: 'ios', calendars: ['primary'], storage: { [KEYS.pushTarget]: 'g-primary' } });
+            const requestPartialSync = vi.fn();
+            handset.host.requestPartialSync = requestPartialSync;
+            const entered = deferred(), gate = deferred();
+            const inventory = vi.spyOn(handset.host.syncEntries!, 'getAll').mockImplementation(async () => {
+                entered.release();
+                await gate.promise;
+                return [];
+            });
+            const logError = vi.spyOn(handset.host.log, 'error');
+            const contract = await openHost(handset.host);
+            value(await contract.openCalendarSettings());
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            const requestId = generateUUID(), change = value(contract.getCalendarSettings()).push.toggle;
+            let completed = false;
+            const pending = contract.setCalendarSetting({ requestId, edit: change }).then((answer) => { completed = true; return answer; });
+            try {
+                await entered.promise;
+                await vi.advanceTimersByTimeAsync(0);
+                expect(completed).toBe(false);
+                handset.state.storage.set(KEYS.pushCalendar, 'g-primary');
+                const failure = new Error('Calendar inventory unavailable');
+                gate.reject(failure);
+                const answer = value(await pending);
+                expect(answer).toMatchObject({ changed: true, open: 'push' });
+                expect(logError.mock.calls).toEqual([[failure, { scope: 'calendar-settings', extra: {} }]]);
+                expect(value(contract.getCalendarSettings()).push.target!.delete.edit).toMatchObject({ calendarId: 'g-primary' });
+                expect(value(await contract.setCalendarSetting({ requestId, edit: change }))).toEqual({ ...answer, toasts: [] });
+                expect(inventory).toHaveBeenCalledTimes(1);
+                expect(requestPartialSync).not.toHaveBeenCalled();
+            } finally {
+                gate.release();
+                await pending;
+                value(await contract.setCalendarSetting({ requestId: generateUUID(), edit: value(contract.getCalendarSettings()).push.toggle }));
+                value(contract.closeCalendarSettings());
+            }
+        });
+
+        it('settles a rejected owned target full run through the existing failure boundary and retries its saved target without another run', async () => {
+            await seed({});
+            const handset = phone({ os: 'ios', calendars: ['primary', 'phone'],
+                storage: { [KEYS.pushEnabled]: '1', [KEYS.pushTarget]: 'g-primary' } });
+            const requestPartialSync = vi.fn();
+            handset.host.requestPartialSync = requestPartialSync;
+            const entered = deferred(), gate = deferred();
+            const inventory = vi.spyOn(handset.host.syncEntries!, 'getAll').mockImplementation(async () => {
+                entered.release();
+                await gate.promise;
+                return [];
+            });
+            const contract = await openHost(handset.host);
+            value(await contract.openCalendarSettings());
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            const requestId = generateUUID();
+            const change = value(contract.getCalendarSettings()).push.target!.options.find((option) => option.key === 'local-phone')!.edit;
+            let completed = false;
+            const pending = contract.setCalendarSetting({ requestId, edit: change }).then((answer) => { completed = true; return answer; });
+            try {
+                await entered.promise;
+                await vi.advanceTimersByTimeAsync(0);
+                expect(completed).toBe(false);
+                gate.reject(new Error('Calendar inventory unavailable'));
+                expect(await pending).toEqual({ ok: false, error: { code: 'ACTION_FAILED', message: 'Calendar inventory unavailable' } });
+                expect(handset.state.storage.get(KEYS.pushTarget)).toBe('local-phone');
+                expect(value(await contract.setCalendarSetting({ requestId, edit: change }))).toMatchObject({ changed: false, toasts: [] });
+                expect(inventory).toHaveBeenCalledTimes(1);
+                expect(requestPartialSync).not.toHaveBeenCalled();
+            } finally {
+                gate.release();
+                await pending;
+                value(await contract.setCalendarSetting({ requestId: generateUUID(), edit: value(contract.getCalendarSettings()).push.toggle }));
+                value(contract.closeCalendarSettings());
+            }
+        });
+    });
+
     describe('a replay after a restart writes nothing wrong', () => {
         const boot = async (device: Device, settings: AppSettings = {}) => {
             freezeClock();

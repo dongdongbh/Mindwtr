@@ -145,6 +145,8 @@ export type NativeCalendarHost = {
     calendars: DeviceCalendarReader & Partial<Omit<DeviceCalendarWriter, keyof DeviceCalendarReader>>;
     /** This device's pushed-event map (the calendar_sync table); absent until the host has calendar push. */
     syncEntries?: CalendarPushServiceHost['syncEntries'];
+    /** Synchronous native owner-admission notification for debounced push work. */
+    requestPartialSync?: CalendarPushServiceHost['requestPartialSync'];
     /** The app log; no line carries a URL or an event title. */
     log: CalendarPushServiceHost['log'];
 };
@@ -497,6 +499,7 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 syncEntries,
                 log: host.log,
                 store: useTaskStore,
+                requestPartialSync: host.requestPartialSync,
             }),
         };
         return bound;
@@ -829,11 +832,12 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 await push.setCalendarPushEnabled(true);
                 current.push.enabled = true;
                 push.startCalendarPushSync();
-                // As on React Native, the first push runs on without the answer waiting for it.
-                void push.runFullCalendarSync()
+                const fullSync = push.runFullCalendarSync()
                     .catch((error: unknown) => logError(current, error))
                     .then(() => refreshShownRevision(current.host))
                     .catch(() => undefined);
+                // Native keeps this run inside the Settings owner already held by the command.
+                if (current.host.requestPartialSync) await fullSync;
                 await refreshShownRevision(current.host);
                 return result(true, { open: 'push' });
             }
@@ -843,7 +847,10 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 if (stored !== edit.before) return fail('STALE_REVISION', 'The push calendar changed since the view showed it; read the view again');
                 await push.setCalendarPushTargetCalendarId(edit.calendarId);
                 current.push.targetId = edit.calendarId;
-                if (current.push.enabled && pushAvailable) void push.runFullCalendarSync();
+                if (current.push.enabled && pushAvailable) {
+                    const fullSync = push.runFullCalendarSync();
+                    if (current.host.requestPartialSync) await fullSync;
+                }
                 showToast(toastsOf.pushTargetUpdated());
                 await refreshShownRevision(current.host);
                 return result(true);
