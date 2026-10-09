@@ -179,6 +179,8 @@ export type CalendarPushServiceHost = {
     };
     /** The task store the push reads and watches (React Native passes its own import, so its tests can replace it). */
     store: Pick<typeof useTaskStore, 'getState' | 'subscribe'>;
+    /** Synchronous, nonthrowing admission notification; the owner later calls runPartialCalendarSync. */
+    requestPartialSync?: (taskIds: string[]) => void;
 };
 
 export function normalizeCalendarPushColor(value: string | null | undefined): string {
@@ -981,12 +983,17 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
     const calendarPushScheduler = createCalendarPushScheduler({
         runFull: () => runFullCalendarSyncUnsafe(),
         runPartial: (taskIds) => runPartialCalendarSyncUnsafe(taskIds),
+        onPartialDue: host.requestPartialSync,
     });
 
     const enqueueCalendarSync = calendarPushScheduler.enqueue;
 
     const runFullCalendarSync = (): Promise<void> => (
         isSandboxMode() ? Promise.resolve() : calendarPushScheduler.runFull()
+    );
+
+    const runPartialCalendarSync = (taskIds: readonly string[]): Promise<void> => (
+        isSandboxMode() ? Promise.resolve() : calendarPushScheduler.runPartial(taskIds)
     );
 
     const scheduleSyncDebounced = (taskIds: string[]): void => {
@@ -1163,6 +1170,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         updateMindwtrCalendarColor,
         deleteMindwtrCalendar,
         runFullCalendarSync,
+        runPartialCalendarSync,
         scheduleSyncDebounced,
         startCalendarPushSync,
         stopCalendarPushSync,
