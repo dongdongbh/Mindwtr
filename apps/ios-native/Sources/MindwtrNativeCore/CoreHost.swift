@@ -1588,7 +1588,7 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
+        "iosEntityOpen": 1, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
         "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
@@ -15174,6 +15174,13 @@ private final class Engine: @unchecked Sendable {
 
     private func arguments(_ method: String, _ json: String, allowPreparedDates: Bool = true) throws -> [Any] {
         try validateArgumentTransportSize(method, json)
+        if method == "iosEntityOpen" {
+            guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
+                  args.count == 1, args[0].utf16.count <= 16_000 else {
+                throw HostFailure("INVALID_INPUT: Entity open requires one bounded URL string")
+            }
+            return args
+        }
         guard let count = Self.methods[method],
               let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [Any], args.count == count else {
             throw HostFailure("Invalid or unavailable core method arguments")
@@ -15256,6 +15263,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateArgumentTransportSize(_ method: String, _ json: String) throws {
+        if method == "iosEntityOpen", json.utf8.count > 128_000 {
+            throw HostFailure("INVALID_INPUT: Entity open request is too large")
+        }
         if method == "iosNotificationOpen", json.utf8.count > 400_000 {
             throw HostFailure("INVALID_INPUT: Notification open request is too large")
         }

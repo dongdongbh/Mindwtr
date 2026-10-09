@@ -147,6 +147,15 @@ assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https:/
 // A context automation link names a context with a space as "+" (core's parseContextAutomationUrl reads the query).
 assert.equal(new consoleState.URL('mindwtr://contexts?token=home+office&contextAction=activate').searchParams.get('token'), 'home office');
 assert.equal(new consoleState.URL('mindwtr://activate-context?name=%40home+office%2Bgym').searchParams.get('name'), '@home office+gym');
+// Query decoding is forgiving like the platform URL parser; response-body decoding stays fatal by default.
+for (const init of ['?task=%', '?task=%A', '?task=%GG', '?task=%E0%A4%A', '?task=%E0%A4', '?task=%80',
+    '?task=%C0%AF', '?task=%ED%A0%80', '?task=%F4%90%80%80', '?task=%F0%9F%98%80',
+    '?task=home+office%2Bgym', '?task=漢😀', '?task=%EF%BB%BFtask', '?task=\uD800',
+    '?task=%E0%A4%A&task=valid&project=p', '?ta%73k=first&task=second']) {
+    const expected = JSON.stringify([...new URLSearchParams(init)]);
+    assert.equal(JSON.stringify([...new consoleState.URLSearchParams(init)]), expected, `query decode ${JSON.stringify(init)}`);
+    assert.equal(JSON.stringify([...new consoleState.URL('mindwtr://open' + init).searchParams]), expected, `URL query decode ${JSON.stringify(init)}`);
+}
 // URLSearchParams.toString() has no "?", as WHATWG writes it: core posts it as a form body (dropbox-auth-tokens.ts) and puts
 // its own "?" before it (sync-helpers.ts); String(url) still writes the "?" before a query.
 for (const init of ['?a=1&b=x+y', 'a=1', '', { grant_type: 'refresh_token', refresh_token: 'r t+s' }, { a: 'x y', b: '1+1' }]) {
@@ -3717,6 +3726,8 @@ export const NATIVE_REMINDER_STATE_STORAGE_KEY = 'mindwtr:native:reminders:v1';
 export const NATIVE_HOST_CONTRACT_VERSION = 1;
 export function buildImmediateNotificationDetails(title, message, data) { return { title, message, channel: 'mindwtr_reminders_v2', data: { kind: 'pomodoro', ...data } }; }
 export function isSandboxMode() { return globalThis.sandbox === true; }
+export const isEntityOpenUrl = () => false;
+export const parseEntityOpenUrl = () => null;
 export function isWorkspaceTransitionActive() { return globalThis.workspaceTransition === true; }
 // The debug net check's WebDAV calls: bundled, never run here.
 export const [cloudHeadJson, webdavDeleteFile, webdavGetFile, webdavGetJson, webdavGetSyncDocument, webdavHeadFile, webdavMakeDirectory, webdavPutFile, webdavPutJson] = Array(9).fill(async () => null);

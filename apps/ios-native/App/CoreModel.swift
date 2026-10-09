@@ -1237,6 +1237,35 @@ final class CoreModel: ObservableObject {
     private var notificationResponseDeferredUntilClean = false
     private var notificationResponseRetryRequested = false
     private var notificationResponseRetry: NotificationResponseRetry?
+    private struct EntityLinkDelivery {
+        let token: UInt64
+        let url: String
+    }
+    private struct EntityLinkOwner {
+        let id: UUID
+        let host: CoreHost
+        let startupToken: UUID
+        let delivery: EntityLinkDelivery
+    }
+    private var entityLinkPending: EntityLinkDelivery?
+    private var entityLinkDeliveryToken: UInt64 = 0
+    private var entityLinkLastURL: String?
+    private var entityLinkLastReceived = -Double.infinity
+    private var entityLinkWake: UInt64 = 0
+    private var entityLinkAttemptedWake: UInt64 = 0
+    private var entityLinkTask: Task<Void, Never>?
+    private var entityLinkTaskID: UUID?
+    private var entityLinkBusyOwner: UUID?
+    private var entityLinkPreview: (owner: UUID, delivery: UInt64, session: String)?
+    private var entityLinkCleanupDelivery: UInt64?
+    #if DEBUG && targetEnvironment(simulator)
+    private var entityLinkDeferredTestDelivered = false
+    private var entityLinkTestReadFailures = 0
+    private(set) var entityLinkTestReadEnabled = false
+    @Published private(set) var entityLinkTestReadState = ""
+    private var entityLinkTestHeldOnce = false
+    private var entityLinkTestReadWaiter: CheckedContinuation<Void, Never>?
+    #endif
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var startupSyncTestThrowOnce = false
     private var resumeSyncTestThrowOnce = false
@@ -1250,6 +1279,8 @@ final class CoreModel: ObservableObject {
                 if oldValue != nil {
                     notificationResponseTask?.cancel()
                     notificationResponseBusyOwner = nil
+                    suspendEntityLinks()
+                    entityLinkBusyOwner = nil
                 }
                 cancelForegroundSync()
                 foregroundSyncIntent = nil
@@ -1433,6 +1464,7 @@ final class CoreModel: ObservableObject {
     private var taskRecoveryGeneration = 0
     @Published private(set) var taskRecoveryCheckpointedGeneration = 0
     private var taskRecoveryCheckpointTask: Task<Void, Never>?
+    private var taskRecoveryCheckpointTaskID: UUID?
     private var taskAttachmentCheckpointFailed: EditorDraftSnapshot?
     private var taskAttachmentCheckpointDesired: EditorDraftSnapshot?
     private var taskRecoveryBackgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -3632,7 +3664,15 @@ final class CoreModel: ObservableObject {
             taskRecoverySnapshot = snapshot
             if owned { taskAttachmentCheckpointDesired = snapshot }
             let previous = taskRecoveryCheckpointTask
+            let checkpointID = UUID()
+            taskRecoveryCheckpointTaskID = checkpointID
             taskRecoveryCheckpointTask = Task {
+                defer {
+                    if taskRecoveryCheckpointTaskID == checkpointID {
+                        taskRecoveryCheckpointTask = nil
+                        taskRecoveryCheckpointTaskID = nil
+                    }
+                }
                 await previous?.value
                 if owned, taskAttachmentCheckpointFailed != nil { return }
                 do {
@@ -3713,7 +3753,15 @@ final class CoreModel: ObservableObject {
                 generation: taskRecoveryGeneration, payloadJSON: snapshot.payloadJSON)
             taskRecoverySnapshot = retry
             let previous = taskRecoveryCheckpointTask
+            let checkpointID = UUID()
+            taskRecoveryCheckpointTaskID = checkpointID
             taskRecoveryCheckpointTask = Task {
+                defer {
+                    if taskRecoveryCheckpointTaskID == checkpointID {
+                        taskRecoveryCheckpointTask = nil
+                        taskRecoveryCheckpointTaskID = nil
+                    }
+                }
                 await previous?.value
                 do {
                     try await host.checkpointEditorDraft(retry)
@@ -4367,6 +4415,9 @@ final class CoreModel: ObservableObject {
                     preferenceDefaults = isolatedDefaults
                     #if targetEnvironment(simulator)
                     notificationContextTestReadFailures = arguments.contains("--native-response-context-read-failure") ? 2 : 0
+                    entityLinkTestReadFailures = arguments.contains("--native-entity-read-failure") ? 2 : 0
+                    entityLinkTestReadEnabled = ["read-latest", "read-background"].contains(
+                        ProcessInfo.processInfo.environment["MINDWTR_ENTITY_TEST_DELIVERY"] ?? "")
                     taskOwnedCheckpointTestFailure = arguments.contains("--native-owned-checkpoint-failure")
                     if let position = arguments.firstIndex(of: "--native-app-lock-auth"), position + 1 < arguments.count {
                         appLock.testOutcomes = arguments[position + 1].split(separator: ",").map(String.init)
@@ -4791,6 +4842,7 @@ final class CoreModel: ObservableObject {
                     ? ForegroundSyncIntent(id: UUID(), host: currentHost, startupToken: token, reason: .startup) : nil
             }
             requestNotificationResponses()
+            requestEntityLinks()
         } catch is CoreHostProjectFileAvailabilityRecovery {
             guard let currentHost = startingHost, host === currentHost else { return }
             ready = false
@@ -4901,7 +4953,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func admitNotificationResponses() {
-        guard notificationResponseTask == nil, notificationResponseWakePending, !busy,
+        guard notificationResponseTask == nil, entityLinkTask == nil, notificationResponseWakePending, !busy,
               !settingsSyncRestartRequired, !appLockRecoveryPending,
               !retryNeeded || notificationResponseRetryRequested,
               !notificationResponseDeferredUntilClean || notificationResponseContextClean else { return }
@@ -4923,6 +4975,7 @@ final class CoreModel: ObservableObject {
                     self.notificationResponseLease = .invalid
                     self.notificationResponseTaskID = nil; self.notificationResponseTask = nil
                     self.admitNotificationResponses()
+                    self.admitEntityLinks()
                 }
             }
             if !self.ready { await self.start() }
@@ -4995,6 +5048,201 @@ final class CoreModel: ObservableObject {
     private var notificationResponseForeground: Bool {
         UIApplication.shared.applicationState == .active && !appLock.concealed && !appLock.authenticating
     }
+
+    func receiveEntityLink(_ url: URL) {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return }
+        switch selection {
+        case .standard, .isolated: break
+        case .rehearsal: return
+        }
+        let value = url.absoluteString
+        guard value.utf16.count <= 16_000 else { return }
+        let received = ProcessInfo.processInfo.systemUptime
+        guard entityLinkLastURL != value || received - entityLinkLastReceived >= 1 else { return }
+        entityLinkLastURL = value
+        entityLinkLastReceived = received
+        withdrawEntityLinkPreview()
+        entityLinkDeliveryToken += 1
+        entityLinkPending = .init(token: entityLinkDeliveryToken, url: value)
+        requestEntityLinks()
+    }
+
+    func requestEntityLinks() {
+        entityLinkCleanupDelivery = nil
+        entityLinkWake += 1
+        admitEntityLinks()
+    }
+
+    func externalContextBecameClean() {
+        // Withdrawing an untouched URL preview is not a new external wake.
+        if let delivery = entityLinkCleanupDelivery, entityLinkPending?.token == delivery { return }
+        requestNotificationResponses()
+        requestEntityLinks()
+    }
+
+    func suspendEntityLinks() {
+        withdrawEntityLinkPreview()
+        entityLinkTask?.cancel()
+        #if DEBUG && targetEnvironment(simulator)
+        if let waiter = entityLinkTestReadWaiter {
+            entityLinkTestReadWaiter = nil
+            entityLinkTestReadState = "released-background"
+            waiter.resume()
+        }
+        #endif
+    }
+
+    private func withdrawEntityLinkPreview(_ id: UUID? = nil) {
+        guard let preview = entityLinkPreview, id == nil || preview.owner == id else { return }
+        entityLinkPreview = nil
+        guard taskPresented, taskRecoverySession == preview.session, taskInitialTab == "view",
+              taskView.isEmpty, !taskDirty, taskRecoveryGeneration == 0,
+              taskRecoverySnapshot == nil, taskRecoveryTouched.isEmpty,
+              !taskRecoveryChecklistTouched, !taskRecoveryAttachmentsOwned,
+              !taskHasActiveAttachmentOwner else { return }
+        entityLinkCleanupDelivery = preview.delivery
+        dismissTask(refreshCaller: false)
+    }
+
+    private func entityLinkCurrent(_ owner: EntityLinkOwner) -> Bool {
+        entityLinkTaskID == owner.id && entityLinkDeliveryToken == owner.delivery.token
+            && host === owner.host && startupSyncCompletedHost === owner.host
+            && completedStartupToken == owner.startupToken && ready && !retryNeeded
+            && !settingsSyncRestartRequired && !appLockRecoveryPending && !Task.isCancelled
+            && notificationResponseForeground
+    }
+
+    private func releaseEntityLinkBusy(_ id: UUID, settling: Bool = true) {
+        guard entityLinkBusyOwner == id else { return }
+        entityLinkBusyOwner = nil
+        if settling { finishOperation() } else { busy = false }
+    }
+
+    private func admitEntityLinks() {
+        guard entityLinkTask == nil, notificationResponseTask == nil,
+              entityLinkWake != entityLinkAttemptedWake, let delivery = entityLinkPending,
+              ready, !busy, !retryNeeded, !settingsSyncRestartRequired, !appLockRecoveryPending,
+              notificationResponseForeground, notificationResponseContextClean,
+              let currentHost = host, startupSyncCompletedHost === currentHost,
+              let startupToken = completedStartupToken else { return }
+        let owner = EntityLinkOwner(id: UUID(), host: currentHost, startupToken: startupToken, delivery: delivery)
+        entityLinkAttemptedWake = entityLinkWake
+        entityLinkTaskID = owner.id
+        busy = true
+        entityLinkBusyOwner = owner.id
+        entityLinkTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.entityLinkTaskID == owner.id {
+                    self.withdrawEntityLinkPreview(owner.id)
+                    self.releaseEntityLinkBusy(owner.id)
+                    self.entityLinkTaskID = nil
+                    self.entityLinkTask = nil
+                    self.admitNotificationResponses()
+                    self.admitEntityLinks()
+                }
+            }
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if self.entityLinkTestReadFailures > 0 {
+                    self.entityLinkTestReadFailures -= 1
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                #endif
+                let route = try self.decode(try await owner.host.call("iosEntityOpen", argumentsJSON: self.json([delivery.url])))
+                guard self.entityLinkCurrent(owner), self.notificationResponseContextClean else { return }
+                let type = route.text("type")
+                let identifier = type == "task" ? "taskId" : "projectId"
+                let fields: Set<String> = ["task", "project"].contains(type) ? ["type", identifier] : ["type"]
+                guard ["none", "inbox", "task", "project"].contains(type), Set(route.keys) == fields,
+                      route.values.allSatisfy({ $0 is String }),
+                      fields.count == 1 || (!route.text(identifier).isEmpty && route.text(identifier).utf16.count <= 500) else {
+                    self.entityLinkPending = nil
+                    await self.recordEntityLink(owner, kind: "none", outcome: "refused")
+                    return
+                }
+                if type == "none" {
+                    self.entityLinkPending = nil
+                    await self.recordEntityLink(owner, kind: "none", outcome: "refused")
+                    return
+                }
+                self.releaseEntityLinkBusy(owner.id, settling: false)
+                switch type {
+                case "task":
+                    await self.selectSurface(.focus)
+                    guard self.entityLinkCurrent(owner), self.notificationResponseContextClean,
+                          self.selectedSurface == .focus, !self.busy else {
+                        return
+                    }
+                    self.prepareTaskPresentation(route.text("taskId"), initialTab: "view")
+                    self.taskOpeningIntent = nil
+                    let session = self.taskRecoverySession
+                    self.entityLinkPreview = (owner.id, owner.delivery.token, session)
+                    await self.readTaskView(ownedGuard: {
+                        self.entityLinkCurrent(owner) && self.taskRecoverySession == session
+                    })
+                case "project": await self.presentProject(["id": route.text("projectId")], caller: .projects,
+                    ownedGuard: { self.entityLinkCurrent(owner) })
+                case "inbox": await self.selectSurface(.inbox)
+                default: return
+                }
+                guard self.entityLinkCurrent(owner) else { return }
+                let acknowledged: Bool
+                switch type {
+                case "task": acknowledged = self.selectedSurface == .focus && self.taskPresented
+                    && self.viewedTaskID == route.text("taskId") && self.taskInitialTab == "view"
+                    && self.taskView.text("id") == route.text("taskId") && self.taskError == nil
+                case "project": acknowledged = self.selectedSurface == .project && self.projectCurrent
+                    && self.projectHeader.text("id") == route.text("projectId") && self.projectError == nil
+                default: acknowledged = self.selectedSurface == .inbox && !self.busy && self.error == nil
+                }
+                guard acknowledged else { return }
+                self.entityLinkPreview = nil
+                self.entityLinkPending = nil
+                await self.recordEntityLink(owner, kind: type, outcome: "opened")
+            } catch is CoreHostRejection {
+                guard self.entityLinkCurrent(owner), self.notificationResponseContextClean else { return }
+                self.entityLinkPending = nil
+                await self.recordEntityLink(owner, kind: "none", outcome: "refused")
+            } catch {
+                // A read failure retains the latest link until a fresh external wake.
+            }
+        }
+    }
+
+    private func recordEntityLink(_ owner: EntityLinkOwner, kind: String, outcome: String) async {
+        guard entityLinkCurrent(owner) else { return }
+        _ = try? await owner.host.call("logLine", argumentsJSON: json([
+            "Native iOS entity link",
+            try json(["releaseCheck": "v1.3.5/ios-entity-link", "kind": kind, "outcome": outcome]),
+        ]))
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    func deliverEntityLinkTestInput(_ trigger: String) {
+        guard let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return }
+        let mode = ProcessInfo.processInfo.environment["MINDWTR_ENTITY_TEST_DELIVERY"] ?? ""
+        var links: [String] = []
+        if trigger == "more", morePresented {
+            switch mode {
+            case "repeat-task": links = ["open?task=task454-a"]
+            case "more-latest" where !entityLinkDeferredTestDelivered:
+                links = ["open?task=task454-a", "open?task=task454-b"]
+            case "more-echo" where !entityLinkDeferredTestDelivered:
+                links = ["open?task=task454-a", "open?task=task454-a"]
+            default: break
+            }
+            entityLinkDeferredTestDelivered = true
+        } else if trigger == "dirty", mode == "dirty-latest", taskDirty,
+                  taskTitleDraft == "Task454 retained local draft", !entityLinkDeferredTestDelivered {
+            entityLinkDeferredTestDelivered = true
+            links = ["open?task=task454-a", "open?task=task454-b"]
+        }
+        for link in links {
+            if let url = URL(string: "mindwtr-native-dev://" + link) { receiveEntityLink(url) }
+        }
+    }
+    #endif
 
     private func recordNotificationResponse(_ owner: NotificationResponseOwner, action: String, outcome: String) async {
         guard notificationResponseCurrent(owner) else { return }
@@ -9423,10 +9671,11 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func readProjectRenameOptions() async throws {
+    private func readProjectRenameOptions(ownedGuard: (() -> Bool)? = nil) async throws {
         projectRenameOptionsCurrent = false
         let id = projectHeader.text("id")
         let options = try await query("projectRenameOptions", [try json(["projectId": id])])
+        guard ownedGuard?() != false else { throw CancellationError() }
         let project = options.object("project")
         guard options.count == 3, !options.text("revision").isEmpty,
               let canRename = options["canRename"] as? NSNumber,
@@ -19123,7 +19372,8 @@ final class CoreModel: ObservableObject {
         await presentProject(row, caller: selectedSurface)
     }
 
-    private func presentProject(_ row: CoreObject, caller: Surface) async {
+    private func presentProject(_ row: CoreObject, caller: Surface, ownedGuard: (() -> Bool)? = nil) async {
+        guard ownedGuard?() != false else { return }
         projectTaskOrderPresented = false
         projectTaskOrderView = [:]
         projectTaskOrderError = nil
@@ -19268,7 +19518,7 @@ final class CoreModel: ObservableObject {
         selectedSurface = .project
         busy = true
         defer { finishOperation() }
-        await readProjectDetail()
+        await readProjectDetail(ownedGuard: ownedGuard)
     }
 
     func closeProject() async {
@@ -19824,8 +20074,8 @@ final class CoreModel: ObservableObject {
                 guard ownedGuard?() != false else { return false }
                 // Reference labels may be aliases; resolve the destination header through core.
                 if projectHeader["title"] == nil {
-                    guard ownedGuard == nil else { return false }
-                    try await readProjectRenameOptions()
+                    try await readProjectRenameOptions(ownedGuard: ownedGuard)
+                    guard ownedGuard?() != false else { return false }
                 }
                 var next = try await projectDetailWindow(projectID: id, offset: 0, limit: pageSize,
                     showCompleted: showCompleted, collapsed: collapsed, filters: filters,
@@ -22340,6 +22590,8 @@ final class CoreModel: ObservableObject {
         // that reset into a new checkpoint or replace a Keep-for-later draft.
         taskRecoveryHydrating = true
         taskPresented = false
+        taskEditor = [:]
+        taskOpeningIntent = nil
         resetTaskDestination()
         resetTaskTokens()
         resetTaskSchedule()
@@ -24222,18 +24474,19 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func refreshTaskDestination() async throws {
+    private func refreshTaskDestination(ownedGuard: (() -> Bool)? = nil) async throws {
         invalidateTaskDestinationRead()
         taskDestinationError = nil
-        try await readTaskDestination(generation: taskDestinationGeneration)
+        try await readTaskDestination(generation: taskDestinationGeneration, ownedGuard: ownedGuard)
     }
 
-    private func readTaskDestination(generation: Int) async throws {
+    private func readTaskDestination(generation: Int, ownedGuard: (() -> Bool)? = nil) async throws {
         let id = viewedTaskID
         let queryText = taskDestinationQuery
         let draft = taskDraft
         let identity = try json(draft)
         let next = try await query("destinationPicker", [try json(["id": id, "draft": draft, "query": queryText])])
+        guard ownedGuard?() != false else { throw CancellationError() }
         guard taskPresented, viewedTaskID == id, generation == taskDestinationGeneration else { return }
         guard queryText == taskDestinationQuery, identity == (try json(taskDraft)) else {
             requestTaskDestinationRead(delay: 0)
@@ -24277,8 +24530,8 @@ final class CoreModel: ObservableObject {
         strings.merge(translated) { _, new in new }
     }
 
-    func readTaskView(more: Bool = false) async {
-        guard ready, taskPresented, !busy, !retryNeeded, taskChecklistWriteKind == nil,
+    func readTaskView(more: Bool = false, ownedGuard: (() -> Bool)? = nil) async {
+        guard ownedGuard?() != false, ready, taskPresented, !busy, !retryNeeded, taskChecklistWriteKind == nil,
               !taskChecklistReadPending else { return }
         let id = viewedTaskID
         let session = taskChecklistSession
@@ -24290,14 +24543,16 @@ final class CoreModel: ObservableObject {
         var attempt = 0
         while attempt < 2 {
             do {
+                guard ownedGuard?() != false else { return }
                 if taskEditor.isEmpty {
                     let editor = try await query("editorModel", [id])
+                    guard ownedGuard?() != false else { return }
                     try await readTaskEditorLabels(editor)
-                    guard taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
+                    guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
                     if var intent = taskOpeningIntent {
                         intent["readOnly"] = editor.flag("readOnly")
                         let opening = try await query("taskOpenTab", [try json(intent)])
-                        guard taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
+                        guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
                         // Resolve before publishing the editor. A manual/recovered tab is already user intent.
                         if taskOpeningIntent != nil {
                             taskInitialTab = opening.text("tab")
@@ -24321,9 +24576,17 @@ final class CoreModel: ObservableObject {
                 let readOnly = taskEditor.flag("readOnly")
                 if !readOnly {
                     try await resolveTaskEditorInputs()
-                    try await refreshTaskDestination()
-                    if taskSchedulePending { try await resolveTaskEditorInputs() }
-                    if taskChecklistLoaded { try await flushTaskChecklistInputs(id: id, session: session) }
+                    guard ownedGuard?() != false else { return }
+                    try await refreshTaskDestination(ownedGuard: ownedGuard)
+                    guard ownedGuard?() != false else { return }
+                    if taskSchedulePending {
+                        try await resolveTaskEditorInputs()
+                        guard ownedGuard?() != false else { return }
+                    }
+                    if taskChecklistLoaded {
+                        try await flushTaskChecklistInputs(id: id, session: session)
+                        guard ownedGuard?() != false else { return }
+                    }
                 }
                 var draft = taskDraft
                 // Archived-project previews use the saved core projection. Do
@@ -24335,13 +24598,14 @@ final class CoreModel: ObservableObject {
                     if taskChecklistLoaded { firstInput["attachments"] = taskAttachments }
                 }
                 var next = try await query("taskView", [try json(firstInput)])
+                guard ownedGuard?() != false else { return }
                 // Reactivation requires a fresh opening; this retained session
                 // must not acquire editable rows through its saved-view read.
                 guard !readOnly || (next.text("id") == id && next["readOnly"] as? Bool == true) else {
                     throw CocoaError(.coderReadCorrupt)
                 }
                 if !taskChecklistLoaded || readOnly {
-                    guard taskPresented, viewedTaskID == id, taskChecklistSession == session,
+                    guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session,
                           next["checklistBase"] is [CoreObject],
                           let openingAttachments = next["attachmentsBase"] as? [CoreObject] else {
                         throw CocoaError(.coderReadCorrupt)
@@ -24350,14 +24614,19 @@ final class CoreModel: ObservableObject {
                     taskChecklist = taskOriginalChecklist
                     taskOriginalAttachments = openingAttachments
                     taskAttachments = openingAttachments
-                    try await refreshTaskAttachmentRows()
-                    if !readOnly { _ = try await applyTaskChecklistEdit(nil, id: id, session: session) }
+                    try await refreshTaskAttachmentRows(ownedGuard: ownedGuard)
+                    guard ownedGuard?() != false else { return }
+                    if !readOnly {
+                        _ = try await applyTaskChecklistEdit(nil, id: id, session: session)
+                        guard ownedGuard?() != false else { return }
+                    }
                     taskChecklistLoaded = true
                     if !readOnly {
                         draft = taskDraft
                         next = try await query("taskView", [try json([
                             "id": id, "draft": draft, "checklist": taskChecklist,
                             "attachments": taskAttachments, "offset": 0, "limit": pageSize])])
+                        guard ownedGuard?() != false else { return }
                     }
                 }
                 let checklist = taskChecklist
@@ -24377,6 +24646,7 @@ final class CoreModel: ObservableObject {
                             input["attachments"] = attachments
                         }
                         let window = try await query("taskView", [try json(input)])
+                        guard ownedGuard?() != false else { return }
                         let checklist = window.objects("rows").first { $0.text("type") == "checklist" } ?? [:]
                         let page = checklist.objects("items")
                         guard window.text("revision") == revision, window.text("id") == id,
@@ -24389,7 +24659,7 @@ final class CoreModel: ObservableObject {
                     rows[index]["items"] = entries
                     next["rows"] = rows
                 }
-                guard taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
+                guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
                 let draftChanged = (try json(draft)) != (try json(taskDraft))
                 if !readOnly && (taskSchedulePending || draftChanged || !taskDraftValuesEqual(checklist, taskChecklist)
                     || !taskChecklistInputs.isEmpty || !taskChecklistAppendInput.isEmpty
@@ -24397,15 +24667,23 @@ final class CoreModel: ObservableObject {
                     // A final native input callback may arrive during the view
                     // or checklist reads. Regenerate before publishing Preview.
                     try await resolveTaskEditorInputs()
+                    guard ownedGuard?() != false else { return }
                     try await flushTaskChecklistInputs(id: id, session: session)
+                    guard ownedGuard?() != false else { return }
                     continue
                 }
                 taskView = next
+                #if DEBUG && targetEnvironment(simulator)
+                if ownedGuard != nil, entityLinkTestHeldOnce {
+                    entityLinkTestReadState += id == "task454-a" ? ";published-first" : ";published-second"
+                }
+                #endif
                 if readOnly {
                     NSLog("Native iOS read-only task preview loaded releaseCheck=v1.3.4/ios-readonly-task-preview outcome=loaded checklistCount=\(taskChecklist.count) attachmentCount=\(taskAttachments.count)")
                 }
                 return
             } catch {
+                guard ownedGuard?() != false else { return }
                 attempt += 1
                 if attempt == 2, taskPresented, viewedTaskID == id, taskChecklistSession == session {
                     taskError = error.localizedDescription
@@ -27751,6 +28029,24 @@ final class CoreModel: ObservableObject {
         #endif
         let result = try await host.call(method, argumentsJSON: json(args))
         #if DEBUG && targetEnvironment(simulator)
+        if method == "taskView", entityLinkPreview != nil, !entityLinkTestHeldOnce,
+           let encoded = args.first as? String, try decode(encoded).text("id") == "task454-a",
+           let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection {
+            let mode = ProcessInfo.processInfo.environment["MINDWTR_ENTITY_TEST_DELIVERY"] ?? ""
+            if ["read-latest", "read-background"].contains(mode) {
+                entityLinkTestHeldOnce = true
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    entityLinkTestReadState = "held"
+                    if mode == "read-latest" {
+                        receiveEntityLink(URL(string: "mindwtr-native-dev://open?task=task454-b")!)
+                        entityLinkTestReadState = "held;replaced"
+                        continuation.resume()
+                    } else {
+                        entityLinkTestReadWaiter = continuation
+                    }
+                }
+            }
+        }
         if let read = removeTestRead {
             let captured = try decode(result)
             guard captured.text("list") == "reference", captured.object("picker").text("kind") == "removeTag",
@@ -27813,7 +28109,10 @@ final class CoreModel: ObservableObject {
         return error is CoreHostRejection
     }
     private func finishOperation() {
-        defer { admitReminderLifecycle(); admitNotificationResponses() }
+        defer {
+            admitReminderLifecycle(); admitNotificationResponses()
+            if entityLinkTask == nil { requestEntityLinks() }
+        }
         busy = false
         if projectFileAvailabilityPending {
             retryNeeded = true

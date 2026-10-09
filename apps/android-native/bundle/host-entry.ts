@@ -73,6 +73,8 @@ import {
     isSupportedLanguage,
     isDiagnosticsLoggingEnabled,
     isSandboxMode,
+    isEntityOpenUrl,
+    parseEntityOpenUrl,
     isWorkspaceTransitionActive,
     legacyImportMismatch,
     assertNativeLegacyBackupSafe,
@@ -2080,6 +2082,21 @@ globalThis.MindwtrHost = {
     },
     gtdWorkflowCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedGtdWorkflow(JSON.parse(json))));
+    },
+    iosEntityOpen(url: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof url !== 'string' || url.length > 16_000) {
+                throw new Error('INVALID_INPUT: Invalid entity open URL');
+            }
+            const scheme = 'mindwtr-native-dev';
+            if (url.slice(0, scheme.length + 1).toLowerCase() !== `${scheme}:`) return { type: 'none' };
+            const normalized = `mindwtr:${url.slice(scheme.length + 1)}`;
+            if (!isEntityOpenUrl(normalized) || parseEntityOpenUrl(normalized)?.kind === 'area') return { type: 'none' };
+            const target = unwrap(contract.resolveNativeEntryPoint({ kind: 'link', url, scheme }));
+            if (target.taskId) return target.taskId.length <= 500 ? { type: 'task', taskId: target.taskId } : { type: 'none' };
+            if (target.projectId) return target.projectId.length <= 500 ? { type: 'project', projectId: target.projectId } : { type: 'none' };
+            return { type: target.route === '/inbox' ? 'inbox' : 'none' };
+        });
     },
     iosNotificationOpen(rawJSON: string): string {
         return submit(async () => {

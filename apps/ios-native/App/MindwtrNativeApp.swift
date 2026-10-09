@@ -205,6 +205,7 @@ struct MindwtrNativeApp: App {
                 .environment(\.nativeExternalLinkDiagnostic, { outcome, surface in
                     Task { await model.recordUpNoteHandoff(outcome, surface: surface) }
                 })
+                .onOpenURL { model.receiveEntityLink($0) }
                 .task { await model.start() }
         }
     }
@@ -482,6 +483,7 @@ private struct AppLockRoot: View {
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestNotificationResponses()
+            model.requestEntityLinks()
         }
         .onReceive(NotificationCenter.default.publisher(for: NativeNotificationResponses.changed)) { _ in
             model.requestNotificationResponses()
@@ -490,12 +492,14 @@ private struct AppLockRoot: View {
             observedApplicationActive = true
             model.notificationSettingsDidBecomeActive()
             model.requestNotificationResponses()
+            model.requestEntityLinks()
             guard !lock.concealed else { return }
             model.requestForegroundSync(token: model.completedStartupToken, active: true)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             observedApplicationActive = false
+            model.suspendEntityLinks()
             model.notificationSettingsWillResignActive()
             model.cancelForegroundSync()
             model.cancelReminderLifecycle()
@@ -515,6 +519,7 @@ private struct AppLockRoot: View {
             if next == .background { model.cancelNotificationSettingsIntent() }
             model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
+                model.suspendEntityLinks()
                 model.cancelForegroundSync()
                 model.cancelReminderLifecycle()
                 model.cancelProjectAttachmentDownload()
@@ -533,6 +538,7 @@ private struct AppLockRoot: View {
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
+                model.suspendEntityLinks()
                 model.cancelNotificationSettingsIntent()
                 model.cancelForegroundSync()
                 model.cancelReminderLifecycle()
@@ -549,14 +555,19 @@ private struct AppLockRoot: View {
             model.requestForegroundSync(token: next.token, active: next.active)
             model.requestReminderLifecycle(token: next.token, active: next.active)
             if next.active && !next.concealed { model.requestNotificationResponses() }
+            if next.active && !next.concealed { model.requestEntityLinks() }
         }
         .onChange(of: model.notificationResponseContextClean) { clean in
-            if clean { model.requestNotificationResponses() }
+            if clean { model.externalContextBecameClean() }
         }
         #if DEBUG && targetEnvironment(simulator)
         .onChange(of: model.morePresented) { presented in
-            if presented { Task { try? await NativeNotificationResponses.shared.captureMoreTestResponse() } }
+            if presented {
+                model.deliverEntityLinkTestInput("more")
+                Task { try? await NativeNotificationResponses.shared.captureMoreTestResponse() }
+            }
         }
+        .onChange(of: model.taskTitleDraft) { _ in model.deliverEntityLinkTestInput("dirty") }
         #endif
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             model.reminderClockChanged()

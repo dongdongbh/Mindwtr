@@ -1,6 +1,191 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    // Warm fixed inputs exercise deferred model ingress; cold cases use the actual OS URL callback.
+    private func task454App(_ suffix: String, delivery: String = "") throws -> XCUIApplication {
+        let library = try task371Library(suffix, prefix: "MINDWTR_ENTITY_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        if !delivery.isEmpty { app.launchEnvironment["MINDWTR_ENTITY_TEST_DELIVERY"] = delivery }
+        return app
+    }
+
+    private func task454Preview(_ app: XCUIApplication, title expected: String) {
+        let title = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 40))
+        XCTAssertTrue(title.label.contains(expected))
+        XCTAssertTrue(app.buttons["task-mode-view"].isSelected)
+        XCTAssertFalse(app.textFields["task-editor-title"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    private func task454Open(_ app: XCUIApplication, _ url: String) throws {
+        guard #available(iOS 16.4, *) else { throw XCTSkip("OS URL launching requires iOS 16.4") }
+        app.open(URL(string: url)!)
+    }
+
+    func testNativeEntityLinkColdTaskUsesViewAndPreservesSavedEditPreference() throws {
+        let app = try task454App("TASK")
+        try task454Open(app, "mindwtr-native-dev://open?task=task454-a"); defer { app.terminate() }
+        task454Preview(app, title: "Task454 first preview")
+        boardTap(app, "task-view-close")
+        XCTAssertTrue(app.buttons["tab-focus"].isSelected)
+        boardTap(app, "task-title-task454-a")
+        let edit = app.buttons["task-mode-edit"]
+        expectation(for: NSPredicate(format: "selected == true AND enabled == true"), evaluatedWith: edit)
+        waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.textFields["task-editor-title"].exists)
+        boardTap(app, "task-view-close")
+        XCUIDevice.shared.press(.home); app.activate()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.exists)
+    }
+
+    func testNativeEntityLinkColdProjectOpensProjectsDetail() throws {
+        let app = try task454App("PROJECT")
+        try task454Open(app, "mindwtr-native-dev://open?project=project454"); defer { app.terminate() }
+        let title = app.staticTexts["project-detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 40))
+        XCTAssertEqual(title.label, "Task454 project")
+        boardEnabled(app.buttons["project-back"], timeout: 30)
+        boardTap(app, "project-back")
+        XCTAssertTrue(app.scrollViews["projects-scroll"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
+    private func task454InboxFallback(_ suffix: String, identifier: String) throws {
+        let app = try task454App(suffix)
+        try task454Open(app, "mindwtr-native-dev://open?task=" + identifier); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-inbox"], timeout: 40)
+        XCTAssertTrue(app.buttons["tab-inbox"].isSelected)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        boardTap(app, "tab-focus")
+        XCUIDevice.shared.press(.home); app.activate()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertTrue(app.buttons["tab-focus"].isSelected)
+    }
+
+    func testNativeEntityLinkMissingTaskFallsBackAfterStartup() throws {
+        try task454InboxFallback("MISSING", identifier: "task454-missing")
+    }
+
+    func testNativeEntityLinkDeletedTaskFallsBackAfterStartup() throws {
+        try task454InboxFallback("DELETED", identifier: "task454-deleted")
+    }
+
+    func testNativeEntityLinkLatestDeliveryWaitsForMoreToClose() throws {
+        let app = try task454App("MORELATEST", delivery: "more-latest")
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardTap(app, "tab-menu")
+        XCTAssertTrue(app.buttons["menu-dismiss"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+        boardTap(app, "menu-dismiss")
+        task454Preview(app, title: "Task454 second preview")
+        boardTap(app, "task-view-close")
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-dismiss")
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+    }
+
+    func testNativeEntityLinkImmediateEchoIsConsumedOnce() throws {
+        let app = try task454App("ECHO", delivery: "more-echo")
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        boardTap(app, "tab-menu"); boardTap(app, "menu-dismiss")
+        task454Preview(app, title: "Task454 first preview")
+        boardTap(app, "task-view-close")
+        XCUIDevice.shared.press(.home); app.activate()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+    }
+
+    func testNativeEntityLinkLaterIdenticalDeliveryOpensAgain() throws {
+        let app = try task454App("REPEAT", delivery: "repeat-task")
+        app.launch(); defer { app.terminate() }
+        for _ in 0..<2 {
+            boardEnabled(app.buttons["tab-menu"], timeout: 40)
+            boardTap(app, "tab-menu")
+            // Holding More beyond the echo window makes the next identical event a fresh delivery.
+            XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+            boardTap(app, "menu-dismiss")
+            task454Preview(app, title: "Task454 first preview")
+            boardTap(app, "task-view-close")
+        }
+    }
+
+    func testNativeEntityLinkDirtyEditorRetainsDraftUntilExplicitDiscard() throws {
+        let app = try task454App("DIRTY", delivery: "dirty-latest")
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-focus"], timeout: 40)
+        boardTap(app, "tab-focus"); boardTap(app, "task-title-task454-a")
+        boardTap(app, "task-mode-edit")
+        let title = app.textFields["task-editor-title"]
+        boardEnabled(title, timeout: 30)
+        replaceProjectNotesText(title, with: "Task454 retained local draft")
+        XCTAssertEqual(title.value as? String, "Task454 retained local draft")
+        boardTap(app, "task-mode-view")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Task454 second preview")).firstMatch.waitForExistence(timeout: 2))
+        boardTap(app, "task-mode-edit")
+        XCTAssertEqual(title.value as? String, "Task454 retained local draft")
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-discard")
+        task454Preview(app, title: "Task454 second preview")
+        boardTap(app, "task-view-close")
+        boardTap(app, "task-title-task454-a"); boardTap(app, "task-mode-edit")
+        XCTAssertEqual(title.value as? String, "Task454 first preview")
+        boardTap(app, "task-view-close")
+    }
+
+    func testNativeEntityLinkReadFailureWaitsForFreshForegroundWake() throws {
+        let app = try task454App("READFAIL")
+        app.launchArguments.append("--native-entity-read-failure")
+        try task454Open(app, "mindwtr-native-dev://open?task=task454-a"); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        let title = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
+        // A retry triggered by its own busy release would exhaust both failures and open here.
+        XCTAssertFalse(title.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        // Each of the two injected failures may need its own external foreground wake.
+        for _ in 0..<2 {
+            XCUIDevice.shared.press(.home); app.activate()
+            if title.waitForExistence(timeout: 3) { break }
+        }
+        task454Preview(app, title: "Task454 first preview")
+        boardTap(app, "task-view-close")
+    }
+
+    func testNativeEntityLinkNewDeliveryDuringTaskReadReplacesUnpublishedPreview() throws {
+        let app = try task454App("READLATEST", delivery: "read-latest")
+        try task454Open(app, "mindwtr-native-dev://open?task=task454-a"); defer { app.terminate() }
+        task454Preview(app, title: "Task454 second preview")
+        let state = app.staticTexts["entity-link-test-read-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        XCTAssertEqual(state.value as? String, "held;replaced;published-second")
+        boardTap(app, "task-view-close")
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+    }
+
+    func testNativeEntityLinkBackgroundDuringTaskReadRetainsDeliveryUntilForeground() throws {
+        let app = try task454App("READBACKGROUND", delivery: "read-background")
+        try task454Open(app, "mindwtr-native-dev://open?task=task454-a"); defer { app.terminate() }
+        let state = app.staticTexts["entity-link-test-read-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 40))
+        expectation(for: NSPredicate(format: "value == %@", "held"), evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.exists)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        task454Preview(app, title: "Task454 first preview")
+        XCTAssertEqual(state.value as? String, "released-background;published-first")
+        boardTap(app, "task-view-close")
+        XCUIDevice.shared.press(.home); app.activate()
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+    }
+
     func testNativeReminderResponseContextReadFailureWaitsForFreshWake() throws {
         let library = try task371Library("CONTEXTFAIL", prefix: "MINDWTR_RESPONSE_UI_")
         continueAfterFailure = false

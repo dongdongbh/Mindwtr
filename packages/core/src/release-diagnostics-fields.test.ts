@@ -13,6 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // ios-entity-link reuses releaseCheck, kind, and outcome below.
     // obsidian-inline-tag reuses releaseCheck and count below.
     // webdav-host-upload-limit and webdav-host-download-limit reuse releaseCheck, operation, and outcome below.
     // ios-local-attachment-host, ios-attachment-draft-owned, ios-http-transport, ios-secure-storage, ios-sync-crypto, ios-device-storage and ios-legacy-secret-retirement reuse releaseCheck, operation, and outcome below.

@@ -418,8 +418,23 @@
     }
 
     if (typeof global.URLSearchParams !== 'function') {
-        // A query name or value as WHATWG's form-urlencoded parser reads it (and RN's URL shim): "+" is a space.
-        var decodeQuery = function (text) { return decodeURIComponent(text.replace(/\+/g, ' ')); };
+        // WHATWG form decoding keeps malformed percent literals and replaces malformed UTF-8.
+        var decodeQuery = function (text) {
+            var bytes = new global.TextEncoder().encode(text.replace(/\+/g, ' '));
+            var decoded = [];
+            for (var i = 0; i < bytes.length; i += 1) {
+                if (bytes[i] === 0x25 && i + 2 < bytes.length) {
+                    var hex = String.fromCharCode(bytes[i + 1], bytes[i + 2]);
+                    if (/^[0-9a-f]{2}$/i.test(hex)) {
+                        decoded.push(parseInt(hex, 16));
+                        i += 2;
+                        continue;
+                    }
+                }
+                decoded.push(bytes[i]);
+            }
+            return new global.TextDecoder('utf-8', { fatal: false, ignoreBOM: true }).decode(new Uint8Array(decoded));
+        };
         global.URLSearchParams = function URLSearchParams(init) {
             var pairs = [];
             if (typeof init === 'string') {
