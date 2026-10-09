@@ -375,14 +375,18 @@ try {
     row = await write('(f) Area', async () => {
         await tap(tagged(await revealTag('project-area-picker'), 'project-area-picker'));
         nodes = await waitFor('the area picker', (current) => Boolean(tagged(current, 'project-area-sheet')), 15_000);
-        // The development data has many areas: scroll the picker's list until the fixture's shows.
+        // The development data has many areas: scroll the picker's list until the fixture's shows. Each drag covers half
+        // the list, slowly: the full-height 500 ms drag flung past the fixture's row to the end of 47 areas (10-09).
         for (let step = 0; step < 30 && !textNode(nodes, names.area); step += 1) {
             const list = nodes.find((node) => node.scrollable === 'true' && box(node)[1] >= box(tagged(nodes, 'project-area-sheet'))[1]);
             const [x1, y1, x2, y2] = box(list ?? fail('the area picker has no list'));
             requireAppFront();
-            sh(`input swipe ${Math.round((x1 + x2) / 2)} ${y2 - 40} ${Math.round((x1 + x2) / 2)} ${y1 + 40} 500`);
+            sh(`input swipe ${Math.round((x1 + x2) / 2)} ${Math.round(y1 + (y2 - y1) * 0.75)} ${Math.round((x1 + x2) / 2)} ${Math.round(y1 + (y2 - y1) * 0.25)} 800`);
             await sleep(500);
-            nodes = await screen();
+            const next = await screen();
+            const shown = (current) => current.map((node) => node.text).join('|');
+            if (shown(next) === shown(nodes)) break;
+            nodes = next;
         }
         await tap(textNode(nodes, names.area) ?? fail(`${names.area} is not in the area picker`));
     }, (current) => current.areaId === ids.area);
