@@ -1,6 +1,213 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    private func task496App(_ suffix: String, largest: Bool = false) throws -> XCUIApplication {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_PUSH_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-calendar-push-fixture", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch()
+        task496OpenSettings(app)
+        task496Wait(app) { ($0["runs"] as? [Any])?.count == 1 && ($0["owner"] as? Bool) == false }
+        return app
+    }
+
+    private func task496OpenSettings(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        let settings = app.buttons["menu-settings"]
+        boardEnabled(settings)
+        if !settings.isHittable {
+            task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+        }
+        boardTap(app, "menu-settings")
+        task442Reveal(app, app.buttons["settings-advanced"], in: app.scrollViews["settings-scroll"])
+        boardTap(app, "settings-advanced")
+        task442Reveal(app, app.buttons["settings-calendar"], in: app.scrollViews["advanced-scroll"])
+        boardTap(app, "settings-calendar")
+        boardEnabled(app.switches["calendar-push-enabled"], timeout: 30)
+    }
+
+    private func task496State(_ app: XCUIApplication) -> [String: Any] {
+        guard let bytes = app.staticTexts["calendar-push-fixture-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+
+    private func task496Wait(_ app: XCUIApplication, _ predicate: @escaping ([String: Any]) -> Bool) {
+        let state = app.staticTexts["calendar-push-fixture-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate { [weak self] _, _ in
+            guard let self else { return false }
+            return predicate(self.task496State(app))
+        }, evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+    }
+
+    private func task496Command(_ app: XCUIApplication, _ command: String) {
+        let button = app.buttons["calendar-push-fixture-" + command]
+        task442Reveal(app, button, in: app.scrollViews["calendar-settings-scroll"])
+        boardTap(app, "calendar-push-fixture-" + command)
+    }
+
+    private func task496PartialIDs(_ app: XCUIApplication, _ index: Int) -> Set<Data> {
+        let runs = task496State(app)["runs"] as? [Any] ?? []
+        guard runs.indices.contains(index), let ids = runs[index] as? [String] else { return [] }
+        return Set(ids.map { Data($0.utf8) })
+    }
+
+    func testNativeCalendarPushFixtureKeepsNewerChangesAndExactUnicodeIDs() throws {
+        let app = try task496App("BATCH"); defer { app.terminate() }
+        task496Command(app, "hold"); task496Command(app, "due")
+        task496Wait(app) { ($0["held"] as? Bool) == true }
+        task496Command(app, "newer")
+        XCTAssertEqual((task496State(app)["runs"] as? [Any])?.count, 2)
+        task496Command(app, "release")
+        task496Wait(app) { ($0["runs"] as? [Any])?.count == 3 && ($0["owner"] as? Bool) == false }
+        XCTAssertEqual(task496PartialIDs(app, 1), Set([Data("fixture-é".utf8), Data("fixture-e\u{0301}".utf8)]))
+        XCTAssertEqual(task496PartialIDs(app, 2), [Data("fixture-next".utf8)])
+    }
+
+    func testNativeCalendarPushFixtureStopDrainsAndForegroundRunsFull() throws {
+        let app = try task496App("STOP"); defer { app.terminate() }
+        task496Command(app, "hold"); task496Command(app, "due")
+        task496Wait(app) { ($0["held"] as? Bool) == true }
+        task496Command(app, "stop")
+        task496Wait(app) { ($0["cancelled"] as? Int) == 1 && ($0["draining"] as? Bool) == false && ($0["owner"] as? Bool) == false }
+        let stoppedCount = (task496State(app)["runs"] as? [Any])?.count
+        task496Command(app, "newer"); task496Command(app, "release")
+        XCTAssertEqual((task496State(app)["runs"] as? [Any])?.count, stoppedCount)
+        task496Command(app, "activate")
+        task496Wait(app) { ($0["runs"] as? [Any])?.count == 3 && ($0["owner"] as? Bool) == false }
+        XCTAssertTrue((task496State(app)["runs"] as? [Any])?.last is NSNull)
+    }
+
+    func testNativeCalendarPushFixtureBusyInterruptsThenReadmitsFullOnce() throws {
+        let app = try task496App("BUSY"); defer { app.terminate() }
+        task496Command(app, "hold"); task496Command(app, "due")
+        task496Wait(app) { ($0["held"] as? Bool) == true }
+        task496Command(app, "busy")
+        task496Wait(app) { ($0["cancelled"] as? Int) == 1 && ($0["draining"] as? Bool) == false && ($0["owner"] as? Bool) == false }
+        XCTAssertEqual((task496State(app)["runs"] as? [Any])?.count, 2)
+        // The real shared task writer saves while Stop has retired the watcher; there is no App due callback.
+        task496Command(app, "save")
+        task496Wait(app) { ($0["saves"] as? Int) == 1 && ($0["busy"] as? Bool) == true }
+        task496Command(app, "idle")
+        task496Wait(app) { ($0["runs"] as? [Any])?.count == 3 && ($0["owner"] as? Bool) == false }
+        XCTAssertTrue((task496State(app)["runs"] as? [Any])?.last is NSNull)
+        XCTAssertEqual(task496State(app)["retry"] as? Bool, false)
+    }
+
+    func testNativeCalendarPushFixtureFailureDoesNotSpinOrBlockOrdinaryTasks() throws {
+        let app = try task496App("FAILURE"); defer { app.terminate() }
+        task496Command(app, "fail"); task496Command(app, "due")
+        task496Wait(app) { ($0["runs"] as? [Any])?.count == 2 && ($0["owner"] as? Bool) == false }
+        task496Command(app, "idle")
+        let noSpin = expectation(for: NSPredicate { [weak self] _, _ in
+            ((self?.task496State(app)["runs"] as? [Any])?.count ?? 0) > 2
+        }, evaluatedWith: app.staticTexts["calendar-push-fixture-state"])
+        noSpin.isInverted = true; waitForExpectations(timeout: 1)
+        XCTAssertEqual(task496State(app)["retry"] as? Bool, false)
+        boardTap(app, "calendar-settings-back"); boardTap(app, "advanced-back"); boardTap(app, "settings-back")
+        boardEnabled(app.buttons["capture-open"], timeout: 30); boardTap(app, "capture-open")
+        app.textViews["capture-input"].typeText("Task496 ordinary task after push failure")
+        boardTap(app, "capture-save")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.textViews["capture-input"])
+        waitForExpectations(timeout: 30)
+        task496OpenSettings(app)
+        XCTAssertEqual((task496State(app)["runs"] as? [Any])?.count, 2)
+        XCTAssertEqual(task496State(app)["retry"] as? Bool, false)
+        task496Command(app, "newer")
+        task496Wait(app) { ($0["runs"] as? [Any])?.count == 3 && ($0["owner"] as? Bool) == false }
+        XCTAssertEqual(task496PartialIDs(app, 2), Set([Data("fixture-é".utf8), Data("fixture-e\u{0301}".utf8), Data("fixture-next".utf8)]))
+    }
+
+    func testNativeCalendarPushFixturePromotesCountAndUTF8OverflowToFull() throws {
+        let app = try task496App("BOUNDS"); defer { app.terminate() }
+        for (index, command) in ["oversize", "bytes", "full"].enumerated() {
+            task496Command(app, command)
+            task496Wait(app) { ($0["runs"] as? [Any])?.count == index + 2 && ($0["owner"] as? Bool) == false }
+            XCTAssertTrue((task496State(app)["runs"] as? [Any])?.last is NSNull)
+        }
+    }
+
+    func testNativeCalendarPushFixtureHostReplacementIgnoresOldObserver() throws {
+        let app = try task496App("HOST"); defer { app.terminate() }
+        task496Command(app, "claim"); task496Command(app, "hold"); task496Command(app, "due")
+        task496Wait(app) { ($0["held"] as? Bool) == true }
+        task496Command(app, "host")
+        boardEnabled(app.buttons["settings-calendar"], timeout: 30)
+        boardTap(app, "settings-calendar")
+        task496Wait(app) {
+            (($0["runs"] as? [Any])?.count ?? 0) >= 3 && ($0["owner"] as? Bool) == false
+                && ($0["registered"] as? Bool) == true && ($0["cancelled"] as? Int) == 1
+        }
+        XCTAssertTrue((task496State(app)["runs"] as? [Any])?.last is NSNull)
+        let runsBeforeStale = (task496State(app)["runs"] as? [Any])?.count
+        task496Command(app, "stale")
+        XCTAssertEqual((task496State(app)["runs"] as? [Any])?.count, runsBeforeStale)
+    }
+
+    private func task496Layout(_ suffix: String, largest: Bool) throws {
+        let app = try task496App(suffix, largest: largest); defer { app.terminate() }
+        let scroll = app.scrollViews["calendar-settings-scroll"]
+        let managed = app.buttons["calendar-push-target-0"], account = app.buttons["calendar-push-target-1"]
+        task442Reveal(app, managed, in: scroll); XCTAssertGreaterThanOrEqual(managed.frame.height, 44 - 0.001); managed.tap()
+        task496Wait(app) { $0["target"] is NSNull && ($0["busy"] as? Bool) == false }
+        let color = app.buttons["calendar-push-color-1"]
+        task496Wait(app) { ($0["owner"] as? Bool) == false }
+        let runsBeforeColor = (task496State(app)["runs"] as? [Any])?.count ?? 0
+        task442Reveal(app, color, in: scroll); XCTAssertGreaterThanOrEqual(color.frame.height, 44 - 0.001); color.tap()
+        task496Wait(app) {
+            ($0["settings"] as? Int) == 2 && ($0["busy"] as? Bool) == false
+                && ($0["owner"] as? Bool) == false && ($0["runs"] as? [Any])?.count == runsBeforeColor + 1
+        }
+        XCTAssertTrue((task496State(app)["runs"] as? [Any])?.last is NSNull)
+        task442Reveal(app, account, in: scroll); account.tap()
+        task496Wait(app) { ($0["target"] as? String) == "fixture-B" && ($0["busy"] as? Bool) == false }
+        let deletion = app.buttons["calendar-push-delete"]
+        task442Reveal(app, deletion, in: scroll); deletion.tap(); boardTap(app, "calendar-push-delete-cancel")
+        XCTAssertEqual(task496State(app)["settings"] as? Int, 3)
+        task442Reveal(app, deletion, in: scroll); deletion.tap(); boardTap(app, "calendar-push-delete-confirm")
+        task496Wait(app) { ($0["settings"] as? Int) == 4 && ($0["busy"] as? Bool) == false }
+        XCTAssertEqual(task496State(app)["target"] as? String, "fixture-B")
+        task442Reveal(app, app.switches["calendar-push-enabled"], in: scroll)
+        XCTAssertEqual(app.switches["calendar-push-enabled"].value as? String, "0")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = largest ? "Calendar push fixture largest" : "Calendar push fixture normal"
+        shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testNativeCalendarPushFixtureSettingsNormal() throws { try task496Layout("NORMAL", largest: false) }
+    func testNativeCalendarPushFixtureSettingsLargest() throws { try task496Layout("LARGEST", largest: true) }
+
+    func testNativeCalendarPushFixtureSettingsFailureTypedRetryAndCancel() throws {
+        let app = try task496App("SETTING"); defer { app.terminate() }
+        task496Command(app, "fail")
+        let toggle = app.switches["calendar-push-enabled"]
+        task442Reveal(app, toggle, in: app.scrollViews["calendar-settings-scroll"]); toggle.tap()
+        task496Wait(app) { ($0["settings"] as? Int) == 1 && ($0["busy"] as? Bool) == false }
+        XCTAssertEqual(task496State(app)["retry"] as? Bool, false)
+        let retry = app.buttons["calendar-settings-retry"]
+        task442Reveal(app, retry, in: app.scrollViews["calendar-settings-scroll"]); retry.tap()
+        task496Wait(app) { ($0["settings"] as? Int) == 2 && ($0["busy"] as? Bool) == false }
+        task442Reveal(app, toggle, in: app.scrollViews["calendar-settings-scroll"])
+        XCTAssertEqual(toggle.value as? String, "0")
+        XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+        // A separate accepted target edit is held, then cancelled through the actual App button.
+        app.terminate(); app.launch()
+        // Reopening the fixture deliberately starts from its in-memory enabled model.
+        task496OpenSettings(app)
+        task496Command(app, "hold")
+        let target = app.buttons["calendar-push-target-0"]
+        task442Reveal(app, target, in: app.scrollViews["calendar-settings-scroll"]); target.tap()
+        task496Wait(app) { ($0["held"] as? Bool) == true }
+        let cancel = app.buttons["calendar-push-operation-cancel"]
+        task442Reveal(app, cancel, in: app.scrollViews["calendar-settings-scroll"]); cancel.tap()
+        task496Wait(app) { ($0["cancelled"] as? Int) == 1 && ($0["busy"] as? Bool) == false }
+        XCTAssertEqual(task496State(app)["retry"] as? Bool, false)
+        XCTAssertEqual(task496State(app)["target"] as? String, "fixture-B")
+    }
+
     private func task456App(_ suffix: String, delivery: String = "") throws -> XCUIApplication {
         let library = try task371Library(suffix, prefix: "MINDWTR_SEARCH_UI_")
         continueAfterFailure = false

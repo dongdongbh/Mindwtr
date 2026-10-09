@@ -686,10 +686,15 @@ final class CoreModel: ObservableObject {
     private var calendarFileImportTestSource: URL?
     private var calendarFileImportTestCancelOnce = false
     #endif
-    private enum CalendarSettingKind { case device, subscription, subscriptionAdd }
+    private enum CalendarSettingKind { case device, subscription, subscriptionAdd, push }
     private var calendarSettingKind: CalendarSettingKind = .device
     private var calendarSubscriptionRuntimeRecovery: (host: CoreHost, request: String, kind: CalendarSettingKind)?
     @Published private(set) var calendarSettingError: String?
+    @Published private(set) var calendarPushSettingToasts: [CoreObject] = []
+    @Published private(set) var calendarPushLifecycleError: String?
+    @Published private(set) var calendarPushDeleteConfirmation: CoreObject = [:]
+    private var calendarPushDeleteClaim: (host: CoreHost, session: UUID, edit: CoreObject)?
+    private var calendarPushSettingRetry: (host: CoreHost, request: String, session: UUID)?
     @Published private(set) var calendarSettingReadError: String?
     @Published private(set) var calendarSettingAwaitingRefresh = false
     private var calendarSettingsSession = UUID()
@@ -740,6 +745,17 @@ final class CoreModel: ObservableObject {
         calendarSettingEnabled && calendarSettingsReadTask == nil && calendarSettingsApplicationActive
             && UIApplication.shared.applicationState == .active
             && !calendarSettings.object("feeds").object("test").text("label").isEmpty
+    }
+    var calendarPushSettingEnabled: Bool {
+        calendarSettingEnabled && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+    var calendarPushSettingCanRetry: Bool {
+        calendarPushSettingRetry != nil && !busy && !retryNeeded && calendarPushSettingEnabled
+    }
+    var calendarPushSettingWorking: Bool { calendarSettingOwner != nil && calendarSettingKind == .push }
+    var calendarPushDeleteCanConfirm: Bool {
+        guard let claim = calendarPushDeleteClaim else { return false }
+        return calendarPushSettingEnabled && calendarSettingsPageCurrent(claim.host, session: claim.session)
     }
 
     @Published private(set) var settingsGeneralPresented = false
@@ -1139,7 +1155,23 @@ final class CoreModel: ObservableObject {
     @Published private(set) var currentLanguage = ""
     @Published private(set) var capture: CoreObject = [:]
     @Published private(set) var ready = false
-    @Published private(set) var busy = false
+    @Published private(set) var busy = false {
+        didSet {
+            if busy && !oldValue, calendarPushLifecycleOwner != nil {
+                calendarPushReadmitAfterBusy = true
+                stopCalendarPushLifecycle()
+            } else if !busy && oldValue, calendarPushReadmitAfterBusy {
+                calendarPushReadmitAfterBusy = false
+                if calendarPushSceneActive && !calendarPushSettingSuspended {
+                    calendarPushRestartRequested = true
+                    // Stop retires the shared watcher, so task changes during ordinary work may have no due callback.
+                    calendarPushFullPending = true; calendarPushIDsPending.removeAll()
+                    calendarPushWakeTicket &+= 1
+                    admitCalendarPushLifecycle()
+                }
+            }
+        }
+    }
     @Published private(set) var retryNeeded = false
     @Published private(set) var error: String?
     @Published var capturePresented = false {
@@ -1331,6 +1363,51 @@ final class CoreModel: ObservableObject {
     private var reminderDebounceReady = true
     private var reminderDrainLease: UIBackgroundTaskIdentifier = .invalid
     private var reminderDrainOwner: UUID?
+    private struct CalendarPushLifecycleOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+        let generation: Int
+    }
+    private var calendarPushObservationHost: CoreHost?
+    private var calendarPushObservationID: UUID?
+    private var calendarPushObservationToken: UUID?
+    private var calendarPushObservationClaim = UUID()
+    private var calendarPushLifecycleOwner: CalendarPushLifecycleOwner?
+    private var calendarPushLifecycleTask: Task<Void, Never>?
+    private var calendarPushStopTask: Task<Void, Never>?
+    private var calendarPushStopID: UUID?
+    private var calendarPushGeneration = 0
+    private var calendarPushSceneActive = false
+    private var calendarPushSettingSuspended = false
+    private var calendarPushReadmitAfterBusy = false
+    private var calendarPushRestartRequested = false
+    private var calendarPushFullPending = false
+    private var calendarPushIDsPending: [Data: String] = [:]
+    private var calendarPushWakeTicket: UInt64 = 0
+    private var calendarPushAttemptedTicket: UInt64 = 0
+    private var calendarPushDrainLease: UIBackgroundTaskIdentifier = .invalid
+    private var calendarPushDrainOwner: UUID?
+    #if DEBUG && targetEnvironment(simulator)
+    var calendarPushFixtureEnabled: Bool {
+        guard let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
+        return NativeAppLaunch.arguments.contains("--native-calendar-push-fixture")
+    }
+    @Published private(set) var calendarPushFixtureState = ""
+    private var calendarPushFixtureEnabledValue = true
+    private var calendarPushFixtureTarget: String? = "fixture-B"
+    private var calendarPushFixtureColor = "#3B82F6"
+    private var calendarPushFixtureRuns: [Any] = []
+    private var calendarPushFixtureStarts = 0
+    private var calendarPushFixtureStops = 0
+    private var calendarPushFixtureSettings = 0
+    private var calendarPushFixtureSaves = 0
+    private var calendarPushFixtureCancelled = 0
+    private var calendarPushFixtureHoldNext = false
+    private var calendarPushFixtureFailNext = false
+    private var calendarPushFixtureWaiter: CheckedContinuation<Void, Never>?
+    private var calendarPushFixtureStale: (host: CoreHost, token: UUID, claim: UUID)?
+    #endif
     private struct SearchLifecycleOwner {
         let id: UUID
         let host: CoreHost
@@ -1434,6 +1511,7 @@ final class CoreModel: ObservableObject {
                 calendarEventTaskPending = nil
                 calendarEventTaskRecoveredResult = nil
                 retireReminderLifecycleHost(oldValue)
+                retireCalendarPushHost(oldValue)
                 retireSearchHost(oldValue)
                 if oldValue != nil {
                     notificationResponseTask?.cancel()
@@ -5940,6 +6018,351 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    func requestCalendarPushLifecycle(token: UUID?, active: Bool) {
+        guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        guard active, UIApplication.shared.applicationState == .active, !appLock.concealed else {
+            cancelCalendarPushLifecycle(); return
+        }
+        if !calendarPushSceneActive {
+            calendarPushSceneActive = true
+            calendarPushRestartRequested = true
+            calendarPushFullPending = true; calendarPushIDsPending.removeAll()
+            calendarPushWakeTicket &+= 1
+        }
+        admitCalendarPushLifecycle()
+    }
+
+    func cancelCalendarPushLifecycle() {
+        calendarPushSceneActive = false
+        calendarPushRestartRequested = false
+        stopCalendarPushLifecycle()
+    }
+
+    private func endCalendarPushDrain(_ id: UUID) {
+        guard calendarPushDrainOwner == id else { return }
+        if calendarPushDrainLease != .invalid { UIApplication.shared.endBackgroundTask(calendarPushDrainLease) }
+        calendarPushDrainLease = .invalid; calendarPushDrainOwner = nil
+    }
+
+    private func stopCalendarPushLifecycle() {
+        calendarPushGeneration += 1
+        calendarPushLifecycleTask?.cancel()
+        guard calendarPushStopTask == nil, let observed = calendarPushObservationHost ?? calendarPushLifecycleOwner?.host else { return }
+        let invocation = calendarPushLifecycleTask, stopID = UUID()
+        calendarPushStopID = stopID
+        if calendarPushDrainLease == .invalid {
+            calendarPushDrainOwner = stopID
+            calendarPushDrainLease = UIApplication.shared.beginBackgroundTask(withName: "Calendar push callback drain") { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.calendarPushDrainOwner == stopID else { return }
+                    self.calendarPushLifecycleTask?.cancel(); self.endCalendarPushDrain(stopID)
+                }
+            }
+        }
+        calendarPushStopTask = Task { [weak self] in
+            await invocation?.value
+            guard let self else { return }
+            _ = try? await self.invokeCalendarPush(observed, .stop)
+            guard self.calendarPushStopID == stopID else { return }
+            self.endCalendarPushDrain(stopID)
+            self.calendarPushStopTask = nil; self.calendarPushStopID = nil
+            #if DEBUG && targetEnvironment(simulator)
+            self.publishCalendarPushFixtureState()
+            #endif
+            self.admitCalendarPushLifecycle()
+        }
+    }
+
+    private func retireCalendarPushHost(_ previous: CoreHost?) {
+        cancelCalendarPushLifecycle()
+        let observed = calendarPushObservationHost, registration = calendarPushObservationID
+        let drain = calendarPushStopTask
+        calendarPushObservationHost = nil; calendarPushObservationID = nil
+        calendarPushObservationToken = nil; calendarPushObservationClaim = UUID()
+        calendarPushFullPending = false; calendarPushIDsPending.removeAll()
+        calendarPushWakeTicket &+= 1; calendarPushAttemptedTicket = calendarPushWakeTicket
+        calendarPushSettingRetry = nil; calendarPushSettingToasts = []; calendarPushLifecycleError = nil
+        calendarPushReadmitAfterBusy = false
+        if let previous, observed === previous, let registration {
+            Task { await drain?.value; try? await previous.removeCalendarPushObserver(registration) }
+        }
+    }
+
+    private func calendarPushSourceChanged(_ ids: [String]?, host observed: CoreHost, token: UUID, claim: UUID) {
+        guard host === observed, calendarPushObservationHost === observed, completedStartupToken == token,
+              calendarPushObservationClaim == claim, calendarPushSceneActive else { return }
+        mergeCalendarPushBatch(ids)
+        calendarPushWakeTicket &+= 1
+        admitCalendarPushLifecycle()
+    }
+
+    private func mergeCalendarPushBatch(_ ids: [String]?) {
+        guard let ids, !calendarPushFullPending else {
+            calendarPushFullPending = true; calendarPushIDsPending.removeAll(); return
+        }
+        for id in ids {
+            guard !id.trimmingCharacters(in: Self.ecmaScriptWhitespace).isEmpty, id.utf16.count <= 500,
+                  id.utf8.count <= 1024 else {
+                calendarPushFullPending = true; calendarPushIDsPending.removeAll(); return
+            }
+            calendarPushIDsPending[Data(id.utf8)] = id
+            if calendarPushIDsPending.count > 10_000 {
+                calendarPushFullPending = true; calendarPushIDsPending.removeAll(); return
+            }
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: ["ids": Array(calendarPushIDsPending.values)]),
+           data.count <= 1024 * 1024 { return }
+        calendarPushFullPending = true; calendarPushIDsPending.removeAll()
+    }
+
+    private func calendarPushLifecycleCurrent(_ owner: CalendarPushLifecycleOwner) -> Bool {
+        host === owner.host && startupSyncCompletedHost === owner.host && completedStartupToken == owner.token
+            && calendarPushLifecycleOwner?.id == owner.id && calendarPushGeneration == owner.generation
+            && calendarPushSceneActive && !calendarPushSettingSuspended && ready && !retryNeeded
+            && !settingsSyncRestartRequired && !appLockRecoveryPending && !appLock.concealed && !appLock.authenticating
+            && UIApplication.shared.applicationState == .active && !Task.isCancelled
+    }
+
+    private func ensureCalendarPushObservation(_ observed: CoreHost, token: UUID) async throws {
+        if calendarPushObservationHost === observed, calendarPushObservationID != nil, calendarPushObservationToken == token { return }
+        if let previous = calendarPushObservationHost, let registration = calendarPushObservationID {
+            try await previous.removeCalendarPushObserver(registration)
+        }
+        calendarPushObservationHost = observed; calendarPushObservationID = nil
+        calendarPushObservationToken = token; calendarPushObservationClaim = UUID()
+        let claim = calendarPushObservationClaim
+        let registration = try await observed.observeCalendarPush { [weak self, weak observed] ids in
+            Task { @MainActor in
+                guard let self, let observed else { return }
+                self.calendarPushSourceChanged(ids, host: observed, token: token, claim: claim)
+            }
+        }
+        guard host === observed, completedStartupToken == token, calendarPushObservationClaim == claim, !Task.isCancelled else {
+            try? await observed.removeCalendarPushObserver(registration); throw CancellationError()
+        }
+        calendarPushObservationID = registration
+        #if DEBUG && targetEnvironment(simulator)
+        publishCalendarPushFixtureState()
+        #endif
+    }
+
+    private func invokeCalendarPush(_ observed: CoreHost, _ operation: NativeCalendarPushOperation,
+                                    argumentsJSON: String = "{}") async throws -> String {
+        #if DEBUG && targetEnvironment(simulator)
+        if calendarPushFixtureEnabled { return try await invokeCalendarPushFixture(operation, argumentsJSON: argumentsJSON) }
+        #endif
+        return try await observed.calendarPush(operation, argumentsJSON: argumentsJSON)
+    }
+
+    private func admitCalendarPushLifecycle() {
+        guard calendarPushLifecycleTask == nil, calendarPushStopTask == nil, !calendarPushSettingSuspended,
+              calendarPushRestartRequested || calendarPushWakeTicket != calendarPushAttemptedTicket,
+              let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
+              calendarPushSceneActive, UIApplication.shared.applicationState == .active, ready, !retryNeeded,
+              !settingsSyncRestartRequired, !appLockRecoveryPending, !appLock.concealed, !appLock.authenticating,
+              !busy, !taskSavePending, !taskRecoverySaving, !taskRecoveryHydrating, !taskRecoveryStartupCorrupt,
+              !projectFileAddPending, !projectFileAvailabilityPending, !projectNotesWritePending,
+              projectNotesFlushTask == nil, projectAttachmentDownloadOwner == nil, !calendarSettingActive else { return }
+        let owner = CalendarPushLifecycleOwner(id: UUID(), host: observed, token: token, generation: calendarPushGeneration)
+        let full = calendarPushFullPending, ids = Array(calendarPushIDsPending.values)
+        let hasBatch = calendarPushWakeTicket != calendarPushAttemptedTicket && (full || !ids.isEmpty)
+        calendarPushFullPending = false; calendarPushIDsPending.removeAll()
+        calendarPushAttemptedTicket = calendarPushWakeTicket; calendarPushRestartRequested = false
+        calendarPushLifecycleOwner = owner
+        calendarPushLifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.calendarPushLifecycleOwner?.id == owner.id {
+                    self.calendarPushLifecycleTask = nil; self.calendarPushLifecycleOwner = nil
+                    #if DEBUG && targetEnvironment(simulator)
+                    self.publishCalendarPushFixtureState()
+                    #endif
+                    self.admitCalendarPushLifecycle()
+                }
+            }
+            do {
+                guard self.calendarPushLifecycleCurrent(owner) else { throw CancellationError() }
+                try await self.ensureCalendarPushObservation(owner.host, token: owner.token)
+                guard self.calendarPushLifecycleCurrent(owner) else { throw CancellationError() }
+                let raw = try await self.invokeCalendarPush(owner.host, .start)
+                guard self.calendarPushLifecycleCurrent(owner), let value = raw.data(using: .utf8),
+                      let enabled = try JSONSerialization.jsonObject(with: value, options: .fragmentsAllowed) as? NSNumber,
+                      CFGetTypeID(enabled) == CFBooleanGetTypeID() else { throw CocoaError(.coderReadCorrupt) }
+                if enabled.boolValue && hasBatch {
+                    let request = try self.json(["ids": full ? NSNull() : ids as Any])
+                    let result = try await self.invokeCalendarPush(owner.host, .run, argumentsJSON: request)
+                    guard self.calendarPushLifecycleCurrent(owner), result == "null" else { throw CocoaError(.coderReadCorrupt) }
+                }
+                guard self.calendarPushLifecycleCurrent(owner) else { throw CancellationError() }
+                self.calendarPushLifecycleError = nil
+                _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
+                    "Native iOS calendar push lifecycle completed",
+                    #"{"releaseCheck":"v1.3.5/ios-calendar-push-lifecycle","outcome":"confirmed"}"#,
+                ]))
+            } catch {
+                guard self.host === owner.host, self.completedStartupToken == owner.token else { return }
+                // Keep the failed frozen work without generating another admission ticket.
+                if hasBatch { self.mergeCalendarPushBatch(full ? nil : ids) }
+                if !Task.isCancelled, self.calendarPushLifecycleCurrent(owner) {
+                    self.calendarPushLifecycleError = self.label("settings.feedback.actionFailed")
+                }
+            }
+        }
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    // Isolated App orchestration fixture only. It never changes the native EventKit provider.
+    private func publishCalendarPushFixtureState() {
+        guard calendarPushFixtureEnabled else { return }
+        calendarPushFixtureState = (try? json(["fixture": true, "starts": calendarPushFixtureStarts,
+            "stops": calendarPushFixtureStops, "settings": calendarPushFixtureSettings, "saves": calendarPushFixtureSaves,
+            "runs": calendarPushFixtureRuns, "cancelled": calendarPushFixtureCancelled,
+            "held": calendarPushFixtureWaiter != nil, "owner": calendarPushLifecycleOwner != nil,
+            "draining": calendarPushStopTask != nil, "busy": busy, "retry": retryNeeded,
+            "registered": calendarPushObservationID != nil,
+            "target": calendarPushFixtureTarget.map { $0 as Any } ?? NSNull()])) ?? "fixture-error"
+    }
+
+    private func releaseCalendarPushFixtureHold() {
+        let waiter = calendarPushFixtureWaiter; calendarPushFixtureWaiter = nil
+        waiter?.resume(); publishCalendarPushFixtureState()
+    }
+
+    private func invokeCalendarPushFixture(_ operation: NativeCalendarPushOperation, argumentsJSON: String) async throws -> String {
+        try Task.checkCancellation()
+        if operation == .stop { calendarPushFixtureStops += 1; publishCalendarPushFixtureState(); return "null" }
+        if operation == .start {
+            calendarPushFixtureStarts += 1; publishCalendarPushFixtureState()
+            return calendarPushFixtureEnabledValue ? "true" : "false"
+        }
+        if operation == .run {
+            let request = try decode(argumentsJSON)
+            calendarPushFixtureRuns.append(request["ids"] ?? NSNull())
+        } else { calendarPushFixtureSettings += 1 }
+        if calendarPushFixtureFailNext {
+            calendarPushFixtureFailNext = false; publishCalendarPushFixtureState(); throw CocoaError(.fileWriteUnknown)
+        }
+        if calendarPushFixtureHoldNext {
+            calendarPushFixtureHoldNext = false
+            await withTaskCancellationHandler(operation: {
+                await withCheckedContinuation { continuation in
+                    if Task.isCancelled { continuation.resume(); return }
+                    self.calendarPushFixtureWaiter = continuation; self.publishCalendarPushFixtureState()
+                }
+            }, onCancel: { [weak self] in
+                Task { @MainActor in self?.releaseCalendarPushFixtureHold() }
+            })
+            if Task.isCancelled {
+                calendarPushFixtureCancelled += 1; publishCalendarPushFixtureState(); throw CancellationError()
+            }
+        }
+        if operation == .setting {
+            let edit = try decode(argumentsJSON).object("edit")
+            switch edit.text("type") {
+            case "push": calendarPushFixtureEnabledValue = edit.flag("enabled")
+            case "pushTarget": calendarPushFixtureTarget = edit["calendarId"] as? String
+            case "pushColor": calendarPushFixtureColor = edit.text("color")
+            case "deleteMindwtrCalendar": calendarPushFixtureEnabledValue = false // Unrelated fixture B stays selected.
+            default: throw CocoaError(.coderReadCorrupt)
+            }
+            publishCalendarPushFixtureState()
+            return try json(["changed": true, "clearDraft": false, "open": NSNull(), "toasts": [[
+                "title": "Calendar fixture saved", "message": "App orchestration fixture; no EventKit mutation.",
+                "tone": "info", "durationMs": NSNull(),
+            ]]])
+        }
+        publishCalendarPushFixtureState(); return "null"
+    }
+
+    private func calendarPushFixtureView(_ source: CoreObject) -> CoreObject {
+        var view = source, push = source.object("push")
+        guard calendarPushFixtureEnabled, !push.isEmpty else { return source }
+        push["enabled"] = calendarPushFixtureEnabledValue
+        push["toggle"] = ["type": "push", "before": calendarPushFixtureEnabledValue, "enabled": !calendarPushFixtureEnabledValue]
+        push["denied"] = NSNull()
+        let targetID = calendarPushFixtureTarget.map { $0 as Any } ?? NSNull()
+        let options: [CoreObject] = [
+            ["name": "Mindwtr Calendar", "description": "Dedicated local calendar", "color": calendarPushFixtureColor,
+             "selected": calendarPushFixtureTarget == nil, "accessibilityLabel": "Mindwtr Calendar. Dedicated local calendar",
+             "edit": ["type": "pushTarget", "before": targetID, "calendarId": NSNull()]],
+            ["name": "Fixture B", "description": "Dedicated account calendar", "color": "#00AA66",
+             "selected": calendarPushFixtureTarget == "fixture-B", "accessibilityLabel": "Fixture B. Dedicated account calendar",
+             "edit": ["type": "pushTarget", "before": targetID, "calendarId": "fixture-B"]],
+        ]
+        let colors: CoreObject = ["title": "Mindwtr calendar color", "description": "Choose a color for the dedicated calendar.",
+            "options": ["#3B82F6", "#EF4444"].map { color -> CoreObject in
+                ["color": color, "selected": color == calendarPushFixtureColor, "accessibilityLabel": "Color " + color,
+                 "edit": ["type": "pushColor", "before": calendarPushFixtureColor, "color": color]]
+            }]
+        push["target"] = calendarPushFixtureEnabledValue ? ["title": "Sync target", "description": "Isolated App layout fixture; no provider writes.",
+            "options": options, "loading": false, "colors": calendarPushFixtureTarget == nil ? colors as Any : NSNull(),
+            "refresh": ["label": "Refresh calendars", "description": "Reload calendar choices."],
+            "delete": ["label": "Delete Mindwtr Calendar", "description": "Remove the dedicated calendar and its pushed events.",
+                "confirm": ["title": "Delete Mindwtr Calendar", "message": "Remove the dedicated calendar and its pushed events.", "cancel": "Cancel", "confirm": "Delete"],
+                "edit": ["type": "deleteMindwtrCalendar", "calendarId": "fixture-A", "creationIntentRevision": NSNull()]]] as Any : NSNull()
+        view["push"] = push; return view
+    }
+
+    func calendarPushFixtureCommand(_ command: String) {
+        guard calendarPushFixtureEnabled else { return }
+        switch command {
+        case "hold": calendarPushFixtureHoldNext = true
+        case "release": releaseCalendarPushFixtureHold()
+        case "fail": calendarPushFixtureFailNext = true
+        case "stop": cancelCalendarPushLifecycle()
+        case "activate": requestCalendarPushLifecycle(token: completedStartupToken, active: true)
+        case "busy": busy = true
+        case "idle": finishOperation()
+        case "save":
+            guard busy, calendarPushLifecycleOwner == nil, calendarPushStopTask == nil else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let capture = try await self.query("captureOpen")
+                    _ = try await self.query("captureSubmit", [self.json([
+                        "text": "Task496 ordinary save while push watcher stopped", "options": capture.object("options"),
+                        "captureId": UUID().uuidString.lowercased(), "openAfterSave": false,
+                    ])])
+                    self.calendarPushFixtureSaves += 1
+                    self.publishCalendarPushFixtureState()
+                } catch { self.calendarPushFixtureState = "fixture-save-error" }
+            }
+        case "claim":
+            if let host, let token = completedStartupToken { calendarPushFixtureStale = (host, token, calendarPushObservationClaim) }
+        case "stale":
+            if let captured = calendarPushFixtureStale {
+                calendarPushSourceChanged(["fixture-stale"], host: captured.host, token: captured.token, claim: captured.claim)
+            }
+        case "due", "newer", "full", "oversize", "bytes":
+            guard let observed = host, let token = completedStartupToken else { return }
+            let ids: [String]?
+            if command == "full" { ids = nil }
+            else if command == "oversize" { ids = (0...10_000).map { "fixture-\($0)" } }
+            else if command == "bytes" { ids = (0..<2100).map { String(repeating: "é", count: 256) + String($0) } }
+            else { ids = command == "newer" ? ["fixture-next"] : ["fixture-é", "fixture-e\u{0301}"] }
+            calendarPushSourceChanged(ids, host: observed, token: token, claim: calendarPushObservationClaim)
+        case "host":
+            Task { [weak self] in
+                guard let self, let selection = try? NativeAppLaunch.selection.get(),
+                      case let .isolated(_, directory, namespace, identifier) = selection,
+                      let bundle = Bundle.main.url(forResource: "core-host", withExtension: "js") else { return }
+                let replacement = CoreHost(databaseURL: directory.appendingPathComponent("calendar-push-replacement.sqlite"),
+                    bundleURL: bundle, deviceStorage: (directory, namespace + ".calendar-push-replacement"), isolatedTestID: identifier)
+                do {
+                    _ = try await replacement.start()
+                    self.host = replacement
+                    self.startupSyncCompletedHost = replacement; self.completedStartupToken = UUID(); self.ready = true
+                    self.selectedSurface = .settings; self.settingsAdvancedPresented = true
+                    self.requestCalendarPushLifecycle(token: self.completedStartupToken, active: true)
+                    self.publishCalendarPushFixtureState()
+                } catch { self.calendarPushFixtureState = "fixture-host-error" }
+            }
+        default: return
+        }
+        publishCalendarPushFixtureState()
+    }
+    #endif
+
     private var trustedSearchSelection: NativeLaunchSelection? {
         guard let selection = try? NativeAppLaunch.selection.get() else { return nil }
         switch selection {
@@ -8525,6 +8948,8 @@ final class CoreModel: ObservableObject {
         calendarSettingError = nil
         calendarSettingReadError = nil
         calendarSettingsTestResult = [:]
+        calendarPushSettingToasts = []
+        calendarPushSettingRetry = nil
         calendarSettings = [:]
         calendarSubscriptionName = ""
         calendarSubscriptionURL = ""
@@ -8553,6 +8978,8 @@ final class CoreModel: ObservableObject {
         calendarSubscriptionReadError = nil
         calendarSettingReadError = nil
         calendarSettingAwaitingRefresh = false
+        calendarPushSettingRetry = nil; calendarPushSettingToasts = []
+        cancelCalendarPushDelete()
         guard let pageHost else { return }
         let previous = calendarSettingsCloseTask, closeID = UUID()
         calendarSettingsCloseID = closeID
@@ -8591,6 +9018,7 @@ final class CoreModel: ObservableObject {
     func cancelCalendarSettingsIntent() {
         calendarSettingsApplicationActive = false
         calendarSettingsSession = UUID()
+        cancelCalendarPushDelete()
         cancelCalendarFileImport()
         calendarSettingsTestResult = [:]
         calendarSettingTask?.cancel()
@@ -8668,7 +9096,11 @@ final class CoreModel: ObservableObject {
         let view = response.object("calendar"), device = view.object("device")
         if !view.text("title").isEmpty, !device.text("title").isEmpty,
            device["toggle"] is CoreObject, device["calendars"] is [CoreObject] {
+            #if DEBUG && targetEnvironment(simulator)
+            calendarSettings = calendarPushFixtureView(view)
+            #else
             calendarSettings = view
+            #endif
             let failures = view.objects("toasts").filter { $0.text("tone") == "error" }
             let failureText = failures.map { [$0.text("title"), $0.text("message")].filter { !$0.isEmpty }.joined(separator: "\n") }.joined(separator: "\n")
             calendarSettingReadError = failureText.isEmpty ? nil : failureText
@@ -8744,6 +9176,53 @@ final class CoreModel: ObservableObject {
             calendarSettingKind = .device
             beginCalendarSettingOperation(retry: false)
         } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    func saveCalendarPushSetting(_ edit: CoreObject) {
+        guard calendarPushSettingEnabled, ["push", "pushTarget", "pushColor", "deleteMindwtrCalendar"].contains(edit.text("type")),
+              let currentHost = host, calendarSettingsPageHost === currentHost else { return }
+        do {
+            calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit])
+            calendarSettingHost = currentHost; calendarSettingKind = .push
+            calendarPushSettingRetry = nil; calendarPushSettingToasts = []
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    func prepareCalendarPushDelete() -> Bool {
+        guard calendarPushSettingEnabled, let currentHost = host else { return false }
+        let deletion = calendarSettings.object("push").object("target").object("delete")
+        guard deletion.object("edit").text("type") == "deleteMindwtrCalendar", !deletion.object("confirm").isEmpty else { return false }
+        calendarPushDeleteClaim = (currentHost, calendarSettingsSession, deletion.object("edit"))
+        calendarPushDeleteConfirmation = deletion.object("confirm")
+        return true
+    }
+
+    func cancelCalendarPushDelete() {
+        calendarPushDeleteClaim = nil; calendarPushDeleteConfirmation = [:]
+    }
+
+    func confirmCalendarPushDelete() {
+        guard calendarPushDeleteCanConfirm, let claim = calendarPushDeleteClaim else { cancelCalendarPushDelete(); return }
+        cancelCalendarPushDelete()
+        saveCalendarPushSetting(claim.edit)
+    }
+
+    func refreshCalendarPushTargets() async {
+        guard calendarPushSettingEnabled else { return }
+        busy = true
+        defer { finishOperation() }
+        await refreshCalendarSettings()
+    }
+
+    func cancelCalendarPushSetting() {
+        guard calendarPushSettingWorking else { return }
+        calendarSettingTask?.cancel()
+    }
+
+    func grantCalendarPushAccess() {
+        guard calendarPushSettingEnabled, !calendarSettings.object("push").isEmpty else { return }
+        beginCalendarSettingOperation(retry: false, grantOnly: true, pushGrant: true)
     }
 
     func saveCalendarSubscriptionSetting(_ edit: CoreObject) {
@@ -8853,13 +9332,13 @@ final class CoreModel: ObservableObject {
         beginCalendarSettingOperation(retry: false, grantOnly: true)
     }
 
-    private func beginCalendarSettingOperation(retry: Bool, grantOnly: Bool = false,
+    private func beginCalendarSettingOperation(retry: Bool, grantOnly: Bool = false, pushGrant: Bool = false,
                                                localFile: (url: URL, claim: CalendarFileImportClaim)? = nil) {
         guard !busy, calendarSettingOwner == nil, ready, !appLock.concealed,
               let currentHost = localFile?.claim.host ?? (grantOnly ? calendarSettingsPageHost : calendarSettingHost),
               host === currentHost, grantOnly || localFile != nil || calendarSettingRequest != nil else { return }
         let capturedRequest = calendarSettingRequest
-        let kind: CalendarSettingKind = localFile == nil ? calendarSettingKind : .subscriptionAdd
+        let kind: CalendarSettingKind = grantOnly ? (pushGrant ? .push : .device) : (localFile == nil ? calendarSettingKind : .subscriptionAdd)
         let owner = UUID(), session = calendarSettingsSession
         calendarSettingOwner = owner
         calendarSettingOwnerHost = currentHost
@@ -8882,7 +9361,11 @@ final class CoreModel: ObservableObject {
                         self.calendarSettingWaiter = nil
                         waiter.continuation.resume(returning: false)
                     }
+                    if kind == .push { self.calendarPushSettingSuspended = false }
                     self.finishOperation()
+                    #if DEBUG && targetEnvironment(simulator)
+                    self.publishCalendarPushFixtureState()
+                    #endif
                     if let pending = self.calendarSubscriptionRuntimeRecovery,
                        self.host === pending.host, pending.request == request {
                         Task { [weak self] in
@@ -8896,6 +9379,28 @@ final class CoreModel: ObservableObject {
             do {
                 var grant = grantOnly
                 var reply: String?
+                if kind == .push {
+                    self.calendarPushReadmitAfterBusy = false
+                    self.calendarPushSettingSuspended = true
+                    self.calendarPushRestartRequested = false
+                    self.stopCalendarPushLifecycle()
+                    await self.calendarPushStopTask?.value
+                    guard !Task.isCancelled, self.calendarSettingsCurrent(owner: owner),
+                          self.calendarSettingsPageCurrent(currentHost, session: session),
+                          let token = self.completedStartupToken else { throw CancellationError() }
+                    try await self.ensureCalendarPushObservation(currentHost, token: token)
+                    guard !Task.isCancelled, self.calendarSettingsCurrent(owner: owner) else { throw CancellationError() }
+                    if let request, !grantOnly {
+                        let edit = try self.decode(request).object("edit")
+                        if edit.text("type") == "push", edit.flag("enabled"), self.calendarSettings.object("push").object("target").isEmpty {
+                            try await currentHost.grantDeviceCalendarAccess(readmission: { [weak self] in
+                                guard let self else { return false }
+                                return await self.waitForCalendarSettingsReadmission(owner: owner, session: session)
+                            })
+                            guard !Task.isCancelled, self.calendarSettingsCurrent(owner: owner) else { throw CancellationError() }
+                        }
+                    }
+                }
                 if let localFile {
                     // A picker may stay open across an external edit. Refresh the actual saved witness now.
                     try await self.readCalendarSettings()
@@ -8921,7 +9426,8 @@ final class CoreModel: ObservableObject {
                         throw failure
                     }
                 } else if let request, !grantOnly {
-                    if retry {
+                    if kind == .push { reply = try await self.invokeCalendarPush(currentHost, .setting, argumentsJSON: request) }
+                    else if retry {
                         if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
                         else if kind == .subscriptionAdd { reply = try await currentHost.probeCalendarSubscriptionAddOutcome(requestJSON: request) }
                         else if kind == .subscription { reply = try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: request) }
@@ -8934,19 +9440,45 @@ final class CoreModel: ObservableObject {
                     let result = try self.decode(reply)
                     try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session, kind: kind)
                     grant = kind == .device && !retry && result.text("open") == "device"
+                    if kind == .push, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                        self.calendarPushRestartRequested = true
+                        self.calendarPushFullPending = true; self.calendarPushIDsPending.removeAll()
+                        self.calendarPushWakeTicket &+= 1
+                    }
                 }
                 if grant, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
                     try await currentHost.grantDeviceCalendarAccess(readmission: { [weak self] in
                         guard let self else { return false }
                         return await self.waitForCalendarSettingsReadmission(owner: owner, session: session)
                     })
+                    if kind == .push, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                        self.calendarPushRestartRequested = true
+                        self.calendarPushFullPending = true; self.calendarPushIDsPending.removeAll()
+                        self.calendarPushWakeTicket &+= 1
+                    }
                 }
                 if !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
                     await self.refreshCalendarSettings()
                 }
             } catch {
+                if kind == .push {
+                    if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost {
+                        self.calendarSettingRequest = nil; self.calendarSettingHost = nil
+                        if !self.isDefiniteRejection(error), !Task.isCancelled,
+                           self.calendarSettingsPageCurrent(currentHost, session: session) {
+                            self.calendarPushSettingRetry = (currentHost, request, session)
+                        }
+                    }
+                    if !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                        self.calendarSettingError = error.localizedDescription
+                        self.calendarSettingAwaitingRefresh = true
+                        await self.refreshCalendarSettings()
+                    }
+                    // The native effect fence retains uncertain push work. Ordinary tasks remain available.
+                    return
+                }
                 if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost, self.host === currentHost {
-                    if kind != .device,
+                    if kind == .subscription || kind == .subscriptionAdd,
                        error.localizedDescription == "SAVE_FAILED: Calendar subscription save requires fresh runtime recovery" {
                         await self.prepareCalendarSubscriptionRuntimeRecovery(currentHost, request: request, kind: kind)
                         guard self.host === currentHost, self.calendarSettingHost === currentHost,
@@ -9032,6 +9564,24 @@ final class CoreModel: ObservableObject {
     }
 
     private func validateDeviceCalendarSettingResult(_ result: CoreObject, kind: CalendarSettingKind = .device) throws {
+        if kind == .push {
+            guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
+                  let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+                  let clear = result["clearDraft"] as? NSNumber, CFGetTypeID(clear) == CFBooleanGetTypeID(), !clear.boolValue,
+                  result["open"] is NSNull || result.text("open") == "push", let toasts = result["toasts"] as? [CoreObject] else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            for toast in toasts {
+                guard Set(toast.keys) == Set(["title", "message", "tone", "durationMs"]),
+                      toast["title"] is String, toast["message"] is String,
+                      ["success", "warning", "info"].contains(toast.text("tone")) else { throw CocoaError(.coderReadCorrupt) }
+                if !(toast["durationMs"] is NSNull) {
+                    guard let duration = toast["durationMs"] as? NSNumber, CFGetTypeID(duration) != CFBooleanGetTypeID(),
+                          duration.doubleValue.isFinite, duration.doubleValue >= 0 else { throw CocoaError(.coderReadCorrupt) }
+                }
+            }
+            return
+        }
         guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
               let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
               let clearDraft = result["clearDraft"] as? NSNumber, CFGetTypeID(clearDraft) == CFBooleanGetTypeID(),
@@ -9043,6 +9593,12 @@ final class CoreModel: ObservableObject {
     private func acknowledgeDeviceCalendarSetting(_ result: CoreObject, request: String, from currentHost: CoreHost, session: UUID, kind: CalendarSettingKind = .device) throws {
         guard calendarSettingRequest == request, calendarSettingHost === currentHost else { throw CocoaError(.coderReadCorrupt) }
         try validateDeviceCalendarSettingResult(result, kind: kind)
+        if kind == .push {
+            calendarPushSettingRetry = nil
+            if !Task.isCancelled, calendarSettingsPageCurrent(currentHost, session: session) {
+                calendarPushSettingToasts = result.objects("toasts")
+            }
+        }
         if kind == .subscriptionAdd, let draft = calendarSubscriptionAddDraft, draft.request == request {
             if draft.draft == calendarSubscriptionDraftID, calendarSettingsPageCurrent(currentHost, session: session) {
                 calendarSubscriptionName = ""
@@ -9055,8 +9611,7 @@ final class CoreModel: ObservableObject {
         calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: session)
         if host === currentHost {
             calendarSettingError = nil
-            retryNeeded = false
-            error = nil
+            if kind != .push { retryNeeded = false; error = nil }
         }
     }
 
@@ -9074,6 +9629,12 @@ final class CoreModel: ObservableObject {
 
     func retryCalendarSettings() {
         guard !busy, calendarSettingOwner == nil, !appLock.concealed else { return }
+        if let retry = calendarPushSettingRetry, calendarSettingsPageCurrent(retry.host, session: retry.session) {
+            calendarSettingRequest = retry.request; calendarSettingHost = retry.host; calendarSettingKind = .push
+            calendarPushSettingRetry = nil
+            beginCalendarSettingOperation(retry: true)
+            return
+        }
         if let pending = calendarSubscriptionRuntimeRecovery, host === pending.host {
             Task { [weak self] in await self?.start() }
             return
@@ -30013,7 +30574,7 @@ final class CoreModel: ObservableObject {
     }
     private func finishOperation() {
         defer {
-            admitReminderLifecycle(); admitSearchLifecycle(); admitNotificationResponses()
+            admitReminderLifecycle(); admitCalendarPushLifecycle(); admitSearchLifecycle(); admitNotificationResponses()
             if entityLinkTask == nil { requestEntityLinks() }
         }
         busy = false

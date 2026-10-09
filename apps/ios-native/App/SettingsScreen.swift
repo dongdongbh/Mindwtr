@@ -29,11 +29,12 @@ struct SettingsScreen: View {
     @State private var notificationDayDraft = 0
     @State private var notificationTimeDraft = Date()
     @State private var calendarAreaPicker: Data?
+    @State private var calendarPushDeletePresented = false
     private enum CalendarSubscriptionField: Hashable { case name, url }
     @FocusState private var calendarSubscriptionField: CalendarSubscriptionField?
 
 
-    var body: some View {
+    private var settingsBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Button {
@@ -117,6 +118,19 @@ struct SettingsScreen: View {
             else { menuContent }
         }
         .background(palette.bg)
+    }
+
+    var body: some View {
+        settingsBody
+        .alert(model.calendarPushDeleteConfirmation.text("title"), isPresented: $calendarPushDeletePresented) {
+            Button(model.calendarPushDeleteConfirmation.text("cancel"), role: .cancel) { model.cancelCalendarPushDelete() }
+                .accessibilityIdentifier("calendar-push-delete-cancel")
+            Button(model.calendarPushDeleteConfirmation.text("confirm"), role: .destructive) { model.confirmCalendarPushDelete() }
+                .disabled(!model.calendarPushDeleteCanConfirm).accessibilityIdentifier("calendar-push-delete-confirm")
+        } message: { Text(model.calendarPushDeleteConfirmation.text("message")) }
+        .onChange(of: model.settingsCalendarPresented) { presented in
+            if !presented { calendarPushDeletePresented = false; model.cancelCalendarPushDelete() }
+        }
         .alert("Reload saved settings?", isPresented: $syncReloadConfirmPresented) {
             Button("Continue", role: .destructive) {
                 syncField = nil
@@ -1174,6 +1188,7 @@ struct SettingsScreen: View {
         let calendars = device.objects("calendars")
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if !model.calendarSettings.object("push").isEmpty { calendarPushContent }
                 if !device.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
                         Toggle(isOn: Binding(get: { device.flag("enabled") }, set: { _ in
@@ -1236,7 +1251,7 @@ struct SettingsScreen: View {
                 if let failure = model.calendarSettingError ?? model.calendarSubscriptionReadError ?? model.calendarSettingReadError {
                     Text(failure).rnFont(14).foregroundStyle(palette.danger)
                         .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("calendar-settings-error")
-                    if model.retryNeeded || model.calendarSettingReadError != nil || model.calendarSubscriptionReadError != nil || model.calendarSettingAwaitingRefresh {
+                    if model.retryNeeded || model.calendarPushSettingCanRetry || model.calendarSettingReadError != nil || model.calendarSubscriptionReadError != nil || model.calendarSettingAwaitingRefresh {
                         Button { model.retryCalendarSettings() } label: {
                             Text(model.label("common.retry")).rnFont(15, .semibold)
                                 .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
@@ -1245,8 +1260,137 @@ struct SettingsScreen: View {
                         .disabled(model.busy).accessibilityIdentifier("calendar-settings-retry")
                     }
                 }
+                #if DEBUG && targetEnvironment(simulator)
+                if model.calendarPushFixtureEnabled {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("App orchestration fixture; no EventKit proof.").rnFont(12)
+                        Text(model.calendarPushFixtureState).rnFont(12).accessibilityIdentifier("calendar-push-fixture-state")
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))]) {
+                            ForEach(["hold", "release", "fail", "stop", "activate", "busy", "idle", "save", "due", "newer", "full", "oversize", "bytes", "claim", "host", "stale"], id: \.self) { command in
+                                Button(command) { model.calendarPushFixtureCommand(command) }
+                                    .frame(minHeight: 44).accessibilityIdentifier("calendar-push-fixture-" + command)
+                            }
+                        }
+                    }
+                }
+                #endif
             }.padding(16)
         }.scrollDismissesKeyboard(.interactively).accessibilityIdentifier("calendar-settings-scroll")
+    }
+
+    private var calendarPushContent: some View {
+        let push = model.calendarSettings.object("push")
+        let target = push.object("target")
+        return VStack(alignment: .leading, spacing: 0) {
+            Toggle(isOn: Binding(get: { push.flag("enabled") }, set: { _ in model.saveCalendarPushSetting(push.object("toggle")) })) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(push.text("title")).rnFont(15).foregroundStyle(palette.text)
+                    Text(push.text("description")).rnFont(12).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(palette.tint).padding(14).frame(minHeight: 48)
+            .disabled(!model.calendarPushSettingEnabled).accessibilityIdentifier("calendar-push-enabled")
+            if push.flag("enabled"), target.isEmpty {
+                palette.border.frame(height: 0.5)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(push.text("denied").isEmpty ? model.label("settings.calendarAccessRequired") : push.text("denied"))
+                        .rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("calendar-push-access")
+                    Button { model.grantCalendarPushAccess() } label: {
+                        Text(model.label("settings.grantCalendarAccess")).rnFont(15, .semibold)
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }.disabled(!model.calendarPushSettingEnabled).accessibilityIdentifier("calendar-push-grant")
+                }.padding(14)
+            }
+            if !target.isEmpty {
+                palette.border.frame(height: 0.5)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(target.text("title")).rnFont(15, .semibold).accessibilityAddTraits(.isHeader)
+                    Text(target.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(["localHint", "sharedAccountHint"], id: \.self) { field in
+                        if !target.text(field).isEmpty {
+                            Text(target.text(field)).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if target.flag("loading") { ProgressView().frame(maxWidth: .infinity).padding(8) }
+                    let options = target.objects("options")
+                    ForEach(options.indices, id: \.self) { index in
+                        let option = options[index]
+                        Button { model.saveCalendarPushSetting(option.object("edit")) } label: {
+                            HStack(spacing: 10) {
+                                if !option.text("color").isEmpty {
+                                    Circle().fill(Color(hex: option.text("color"))).frame(width: 16, height: 16).accessibilityHidden(true)
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(option.text("name")).rnFont(15).foregroundStyle(palette.text)
+                                    Text(option.text("description")).rnFont(12).foregroundStyle(palette.secondary)
+                                }.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                                if option.flag("selected") { Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true) }
+                            }.frame(minHeight: 48).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!model.calendarPushSettingEnabled || option.object("edit").isEmpty)
+                        .accessibilityLabel(option.text("accessibilityLabel"))
+                        .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                        .accessibilityIdentifier("calendar-push-target-" + String(index))
+                    }
+                    if !target.object("colors").isEmpty { calendarPushColors(target.object("colors")) }
+                    Button { Task { await model.refreshCalendarPushTargets() } } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(target.object("refresh").text("label")).rnFont(15)
+                            Text(target.object("refresh").text("description")).rnFont(12).foregroundStyle(palette.secondary)
+                        }.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
+                    }.disabled(!model.calendarPushSettingEnabled).accessibilityIdentifier("calendar-push-refresh")
+                    Button(role: .destructive) { calendarPushDeletePresented = model.prepareCalendarPushDelete() } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(target.object("delete").text("label")).rnFont(15)
+                            Text(target.object("delete").text("description")).rnFont(12)
+                        }.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
+                    }.disabled(!model.calendarPushSettingEnabled).accessibilityIdentifier("calendar-push-delete")
+                }.padding(14)
+            }
+            if model.calendarPushSettingWorking {
+                HStack(spacing: 10) { ProgressView(); Text(model.label("common.loading")).rnFont(14) }.padding(14)
+                Button(model.label("common.cancel")) { model.cancelCalendarPushSetting() }
+                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle()).accessibilityIdentifier("calendar-push-operation-cancel")
+            }
+            ForEach(model.calendarPushSettingToasts.indices, id: \.self) { index in
+                let toast = model.calendarPushSettingToasts[index]
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(toast.text("title")).rnFont(15, .semibold)
+                    Text(toast.text("message")).rnFont(13)
+                }.fixedSize(horizontal: false, vertical: true).padding(14)
+                    .foregroundStyle(toast.text("tone") == "warning" ? palette.danger : palette.text)
+                    .accessibilityElement(children: .combine).accessibilityIdentifier("calendar-push-toast-" + String(index))
+            }
+            if let failure = model.calendarPushLifecycleError {
+                Text(failure).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true).padding(14)
+                    .accessibilityIdentifier("calendar-push-lifecycle-error")
+            }
+        }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func calendarPushColors(_ colors: CoreObject) -> some View {
+        let options = colors.objects("options")
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(colors.text("title")).rnFont(15, .semibold)
+            Text(colors.text("description")).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 8)], spacing: 8) {
+                ForEach(options.indices, id: \.self) { index in
+                    let color = options[index]
+                    Button { model.saveCalendarPushSetting(color.object("edit")) } label: {
+                        RoundedRectangle(cornerRadius: 8).fill(Color(hex: color.text("color"))).frame(minHeight: 48)
+                            .overlay {
+                                if color.flag("selected") { Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.text, palette.card).accessibilityHidden(true) }
+                            }
+                    }.buttonStyle(.plain).disabled(!model.calendarPushSettingEnabled || color.object("edit").isEmpty)
+                        .accessibilityLabel(color.text("accessibilityLabel"))
+                        .accessibilityAddTraits(color.flag("selected") ? .isSelected : [])
+                        .accessibilityIdentifier("calendar-push-color-" + String(index))
+                }
+            }
+        }
     }
 
     private var calendarSubscriptionContent: some View {

@@ -494,6 +494,7 @@ private struct AppLockRoot: View {
             if applicationActive { model.notificationSettingsDidBecomeActive(); model.calendarSettingsDidBecomeActive(); model.calendarFeedDidBecomeActive() }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestNotificationResponses()
             model.requestEntityLinks()
@@ -512,6 +513,7 @@ private struct AppLockRoot: View {
             guard !lock.concealed else { return }
             model.requestForegroundSync(token: model.completedStartupToken, active: true)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
+            model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             observedApplicationActive = false
@@ -521,6 +523,7 @@ private struct AppLockRoot: View {
             model.calendarFeedWillResignActive()
             model.cancelForegroundSync()
             model.cancelReminderLifecycle()
+            model.cancelCalendarPushLifecycle()
             model.cancelSearchLifecycle()
             model.cancelProjectAttachmentDownload()
             model.clearSettingsSyncForPrivacy()
@@ -543,6 +546,7 @@ private struct AppLockRoot: View {
                 model.suspendEntityLinks()
                 model.cancelForegroundSync()
                 model.cancelReminderLifecycle()
+                model.cancelCalendarPushLifecycle()
                 model.cancelSearchLifecycle()
                 model.cancelProjectAttachmentDownload()
                 model.cancelProjectFileAvailabilityRecovery()
@@ -557,6 +561,7 @@ private struct AppLockRoot: View {
             if next == .active && !lock.concealed { Task { await model.refresh() } }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
         }
         .onChange(of: lock.concealed) { concealed in
@@ -567,6 +572,7 @@ private struct AppLockRoot: View {
                 model.retireCalendarFeed()
                 model.cancelForegroundSync()
                 model.cancelReminderLifecycle()
+                model.cancelCalendarPushLifecycle()
                 model.cancelProjectAttachmentDownload()
                 model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
@@ -582,6 +588,7 @@ private struct AppLockRoot: View {
         .onChange(of: foreground) { next in
             model.requestForegroundSync(token: next.token, active: next.active)
             model.requestReminderLifecycle(token: next.token, active: next.active)
+            model.requestCalendarPushLifecycle(token: next.token, active: next.active)
             model.requestSearchLifecycle(token: next.token, active: next.active)
             if next.active && !next.concealed { model.requestNotificationResponses() }
             if next.active && !next.concealed { model.requestEntityLinks() }
