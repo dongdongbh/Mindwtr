@@ -189,6 +189,30 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(await contract.isAboutUpdateCheckDue({ mode: 'later' as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
+    it('a check Play was not asked for (its preflight failed) neither falls back to GitHub nor writes the dot', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(NOW);
+        const bound = device({ storage: { 'mindwtr-update-last-check': String(NOW - 25 * 60 * 60 * 1000) }, github: [{ status: 200, body: { tag_name: 'v9.9.9' } }] });
+        const getItem = bound.host.storage.getItem;
+        let failNext = true;
+        bound.host.storage.getItem = async (key) => {
+            if (failNext) { failNext = false; throw new Error('storage busy'); }
+            return getItem(key);
+        };
+        const contract = await openContract(bound);
+        // The host's preflight read fails: not due, so the host asks no Play and sends play = null.
+        expect(await contract.isAboutUpdateCheckDue({ mode: 'silent' })).toMatchObject({ ok: false });
+        for (const mode of ['silent', 'manual'] as const) {
+            expect(value(await contract.runAboutUpdateCheck({ mode, installerSource: 'play-store', play: null, marketAvailable: true }))).toEqual({ badge: null, notices: [] });
+        }
+        expect(bound.events).toEqual([]);
+        // Within the day the stored dot still answers without Play.
+        bound.storage.set('mindwtr-update-last-check', String(NOW - 60_000));
+        bound.storage.set('mindwtr-update-available', 'true');
+        expect(value(await contract.runAboutUpdateCheck({ mode: 'silent', installerSource: 'unknown', play: null, marketAvailable: true }))).toEqual({ badge: true, notices: [] });
+        expect(bound.events).toEqual([]);
+    });
+
     it('reads the install from Play\'s installer and the referrer, as RN does', async () => {
         let contract = await openContract(device());
         const source = (referrer: string | null, installerPackageName: string | null) => value(contract.getAboutInstallerSource({ referrer, installerPackageName })).source;

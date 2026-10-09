@@ -194,7 +194,12 @@ export function createAboutMethods(deps: Deps) {
             if (!isObjectRecord(input) || (input.mode !== 'silent' && input.mode !== 'manual')) return fail('INVALID_INPUT', 'A mode is required');
             if (host.app.isFossBuild) return { ok: true, value: { due: false } };
             if (input.mode === 'manual') return { ok: true, value: { due: true } };
-            return { ok: true, value: { due: shouldCheckForAppUpdate(await host.storage.getItem(UPDATE_BADGE_LAST_CHECK_KEY), Date.now()) } };
+            try {
+                return { ok: true, value: { due: shouldCheckForAppUpdate(await host.storage.getItem(UPDATE_BADGE_LAST_CHECK_KEY), Date.now()) } };
+            } catch {
+                // The host then asks no Play, and runAboutUpdateCheck refuses to check without it.
+                return fail('ACTION_FAILED', 'The last update check could not be read');
+            }
         },
 
         /** Settings › About for `installerSource` (see the module doc). */
@@ -248,6 +253,20 @@ export function createAboutMethods(deps: Deps) {
             const play = isObjectRecord(input) ? readPlay(input.play) : undefined;
             if (!source || play === undefined || (input.mode !== 'silent' && input.mode !== 'manual') || typeof input.marketAvailable !== 'boolean') {
                 return fail('INVALID_INPUT', 'A mode, an installer source, the Play answer (or null) and whether a market link opens are required');
+            }
+            // Play was not asked on a Play (or unknown) install: the host's preflight said not due, or failed. A check that would
+            // ask the channel now must not run, or it would fall back to GitHub and store a GitHub answer as Play's dot; within the
+            // day the silent check still answers the stored dot.
+            if (play === null && !host.app.isFossBuild && host.app.platform === 'android' && source !== 'sideload') {
+                const due = input.mode === 'manual' || await host.storage.getItem(UPDATE_BADGE_LAST_CHECK_KEY)
+                    .then((raw) => shouldCheckForAppUpdate(raw, Date.now()), () => true);
+                if (due) {
+                    try {
+                        host.logInfo('Native About update check', { releaseCheck: 'v1.3.5/native-about-update-check', mode: input.mode, source,
+                            play: 'not-asked', badge: 'unchanged', notice: 'none' });
+                    } catch { /* a diagnostic line must never fail its caller */ }
+                    return { ok: true, value: { badge: null, notices: [] } };
+                }
             }
             let badge: boolean | null = null;
             const notices: NativeAboutNotice[] = [];

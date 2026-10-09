@@ -3,6 +3,7 @@ package tech.dongdongbh.mindwtr.pilot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.json.JSONObject
 
 class AboutEndpointsTest {
     private val built = "https://feedback.example.test/submit"
@@ -28,5 +29,18 @@ class AboutEndpointsTest {
 
     @Test fun thisVariantFollowsTheRule() {
         if (BuildConfig.BUILD_TYPE != "release") assertEquals("", aboutFeedbackEndpoint(BuildConfig.BUILD_TYPE, BuildConfig.FEEDBACK_ENDPOINT_URL, null))
+    }
+
+    @Test fun asksPlayOnlyAfterCoreSaysTheCheckIsDueAndNeverUnderTheStub() {
+        var asked = 0
+        val play = { asked += 1; JSONObject().put("value", JSONObject().put("updateAvailable", true)) }
+        assertNull(aboutPlayAnswer("play-store", due = false, stubbed = false, askPlay = play))
+        assertNull(aboutPlayAnswer("sideload", due = true, stubbed = false, askPlay = play))
+        assertEquals(0, asked)
+        val stubbed = aboutPlayAnswer("play-store", due = true, stubbed = true, askPlay = play)
+        assertEquals(0, asked)
+        assertEquals(true, stubbed!!.has("error"))
+        assertEquals(true, aboutPlayAnswer("unknown", due = true, stubbed = false, askPlay = play)!!.has("value"))
+        assertEquals(1, asked)
     }
 }

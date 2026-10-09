@@ -815,6 +815,15 @@ assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnSt
 // Once the guard passes, it copies RN's RKStorage before it returns, so before RnKeyValue (or anything) opens it: an open can
 // checkpoint RN's WAL away when it closes.
 assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
+// About asks Google Play only through aboutPlayAnswer (AboutEndpointsTest), after core's preflight answered; a device check's stub
+// never reaches Play's referrer.
+{
+    const about = source('AboutSettings.kt');
+    assert.equal(about.match(/PlayServices\.updateInfo\(/g)?.length, 1);
+    assert.match(about, /val due = runtime\.aboutRequest\("isAboutUpdateCheckDue", [^\n]*\)\.getBoolean\("due"\)\n\s*val play = aboutPlayAnswer\(source, due, stubbed\) \{ PlayServices\.updateInfo\(app\) \}/);
+    assert.equal(about.match(/PlayServices\.installReferrer\(/g)?.length, 1);
+    assert.match(about, /if \(stubbed\) debugProperty\("about_referrer"\) else PlayServices\.installReferrer\(app\)/);
+}
 // RN's installer journal recovery runs at boot after the validated load and before the journal's replay, the first write that
 // can reach files/attachments (pass A2); it is RN's own Kotlin, compiled as it is.
 assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*(?:\/\/[^\n]*\n\s*)*recoverInstalls\(installer\)\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);

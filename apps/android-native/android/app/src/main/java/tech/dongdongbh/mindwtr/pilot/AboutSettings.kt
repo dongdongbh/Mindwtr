@@ -122,6 +122,17 @@ internal fun aboutFeedbackEndpoint(buildType: String, builtEndpoint: String, stu
     else -> stub?.let { "$it/feedback" } ?: ""
 }
 
+/**
+ * Google Play's update answer for core's update check (its `play` input): asked only on a Play (or unknown) install and only after
+ * core's preflight said the check is [due]; a device check's stub ([stubbed]) answers a failure instead of calling Play. Null:
+ * Play not asked.
+ */
+internal fun aboutPlayAnswer(source: String, due: Boolean, stubbed: Boolean, askPlay: () -> JSONObject?): JSONObject? = when {
+    source == "sideload" || !due -> null
+    stubbed -> JSONObject().put("error", "Google Play is stubbed in a device check")
+    else -> askPlay()
+}
+
 /** Settings › About's state and requests: the screen, its update checks, the alert, Rate, the links and the feedback modal. */
 class AboutSettingsModel(private val menu: MenuModel) {
     private companion object {
@@ -207,14 +218,9 @@ class AboutSettingsModel(private val menu: MenuModel) {
         Thread({
             val answer = runCatching {
                 val source = installerSource(runtime)
-                // A failed answer reads as not due: Play is asked only after core says so.
-                val due = runCatching { runtime.aboutRequest("isAboutUpdateCheckDue", JSONObject().put("mode", mode).toString()).optBoolean("due") }
-                    .getOrDefault(false)
-                val play = when {
-                    source == "sideload" || !due -> null
-                    stubbed -> JSONObject().put("error", "Google Play is stubbed in a device check")
-                    else -> PlayServices.updateInfo(app)
-                }
+                // Core's preflight first; when it fails the check does not run (no Play, no GitHub, nothing stored).
+                val due = runtime.aboutRequest("isAboutUpdateCheckDue", JSONObject().put("mode", mode).toString()).getBoolean("due")
+                val play = aboutPlayAnswer(source, due, stubbed) { PlayServices.updateInfo(app) }
                 val market = Intent(Intent.ACTION_VIEW, "market://details?id=${BuildConfig.RN_PACKAGE}".toUri()).resolveActivity(app.packageManager) != null
                 runtime.aboutRequest("runAboutUpdateCheck", JSONObject().put("mode", mode).put("installerSource", source)
                     .put("play", play ?: JSONObject.NULL).put("marketAvailable", market).toString())
