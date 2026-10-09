@@ -45,6 +45,7 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
     const calendars = [...(options.calendars ?? [PRIMARY])];
     const entries = new Map((options.entries ?? []).map((entry) => [entry.taskId, entry]));
     const writes: unknown[][] = [];
+    const eventContexts: [string, string, { taskId: string; calendarId: string } | undefined][] = [];
     let nextId = 0;
     let tasks = options.tasks ?? [];
     const listeners: ((tasks: Task[]) => void)[] = [];
@@ -98,13 +99,18 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
                 const index = calendars.findIndex((calendar) => calendar.id === id);
                 if (index >= 0) calendars.splice(index, 1);
             },
-            createEvent: async (calendarId, details) => {
+            createEvent: async (calendarId, details, context?: { taskId: string; calendarId: string }) => {
                 tick();
                 writes.push(['createEvent', calendarId, details]);
+                eventContexts.push(['createEvent', calendarId, context]);
                 return `event-${writes.length}`;
             },
-            updateEvent: async (id, details) => { tick(); writes.push(['updateEvent', id, details.title]); },
-            deleteEvent: async (id) => { tick(); writes.push(['deleteEvent', id]); },
+            updateEvent: async (id, details, context?: { taskId: string; calendarId: string }) => {
+                tick(); writes.push(['updateEvent', id, details.title]); eventContexts.push(['updateEvent', id, context]);
+            },
+            deleteEvent: async (id, context?: { taskId: string; calendarId: string }) => {
+                tick(); writes.push(['deleteEvent', id]); eventContexts.push(['deleteEvent', id, context]);
+            },
         },
         syncEntries: {
             ensureReady: async () => undefined,
@@ -117,7 +123,7 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
         store: store as unknown as CalendarPushServiceHost['store'],
     };
     return {
-        host, storage, calendars, entries, writes, life,
+        host, storage, calendars, entries, writes, eventContexts, life,
         setTasks: (next: Task[]) => {
             tasks = next;
             listeners.forEach((listener) => listener(next));
@@ -702,6 +708,68 @@ describe('calendar push behind the host ports', () => {
         await vi.advanceTimersByTimeAsync(1);
         expect(phone.writes.map(([name, id, title]) => [name, id, title])).toEqual([['updateEvent', phone.entries.get('t1')!.calendarEventId, 'Renamed']]);
         service.stopCalendarPushSync();
+    });
+
+    it('supplies exact task and calendar context to create, update, and stale-task delete callbacks', async () => {
+        const taskId = 'task-é';
+        const calendarId = 'calendar-e\u0301';
+        const dated = task(taskId, { dueDate: '2026-09-10' });
+        const phone = device({
+            calendars: [{ ...PRIMARY, id: calendarId }],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_TARGET_ID_KEY]: calendarId },
+            tasks: [dated],
+        });
+        const service = createCalendarPushService(phone.host);
+        await service.runFullCalendarSync();
+        const eventId = phone.entries.get(taskId)!.calendarEventId;
+        phone.setTasks([{ ...dated, title: 'Changed fields', updatedAt: '2026-09-02T00:00:00.000Z' }]);
+        await service.runFullCalendarSync();
+        phone.setTasks([]);
+        await service.runFullCalendarSync();
+        expect(phone.eventContexts).toEqual([
+            ['createEvent', calendarId, { taskId, calendarId }],
+            ['updateEvent', eventId, { taskId, calendarId }],
+            ['deleteEvent', eventId, { taskId, calendarId }],
+        ]);
+        expect(phone.writes.map(([method]) => method)).toEqual(['createEvent', 'updateEvent', 'deleteEvent', 'deleteSyncEntry']);
+        expect(phone.entries.size).toBe(0);
+    });
+
+    it('keeps migration deletion bound to the old mapping and creation bound to the new target', async () => {
+        const taskId = 'task-unchanged';
+        const oldCalendarId = 'calendar-é';
+        const newCalendarId = 'calendar-e\u0301';
+        const oldEntry = { taskId, calendarEventId: 'old-event', calendarId: oldCalendarId, platform: 'android', lastSyncedAt: '' };
+        const phone = device({
+            calendars: [{ ...PRIMARY, id: oldCalendarId }, { ...PRIMARY, id: newCalendarId }],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_TARGET_ID_KEY]: newCalendarId },
+            entries: [oldEntry], tasks: [task(taskId, { dueDate: '2026-09-10' })],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.eventContexts).toEqual([
+            ['deleteEvent', 'old-event', { taskId: oldEntry.taskId, calendarId: oldCalendarId }],
+            ['createEvent', newCalendarId, { taskId, calendarId: newCalendarId }],
+        ]);
+        expect(phone.writes.map(([method]) => method)).toEqual(['deleteEvent', 'deleteSyncEntry', 'createEvent']);
+        expect(phone.entries.get(taskId)).toMatchObject({ taskId, calendarId: newCalendarId });
+        expect(oldEntry).toEqual({ taskId, calendarEventId: 'old-event', calendarId: oldCalendarId, platform: 'android', lastSyncedAt: '' });
+    });
+
+    it('supplies the projected occurrence task identity without rewriting its source task', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
+        const source = task('recurring-task', {
+            dueDate: '2026-09-10', recurrence: { rule: 'monthly', strategy: 'strict' }, showFutureRecurrence: true,
+        });
+        const original = structuredClone(source);
+        const phone = device({ storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_TARGET_ID_KEY]: PRIMARY.id }, tasks: [source] });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.eventContexts).toEqual([
+            ['createEvent', PRIMARY.id, { taskId: source.id, calendarId: PRIMARY.id }],
+            ['createEvent', PRIMARY.id, { taskId: source.id + ':projected-recurrence', calendarId: PRIMARY.id }],
+        ]);
+        expect([...phone.entries.keys()]).toEqual([source.id, source.id + ':projected-recurrence']);
+        expect(source).toEqual(original);
     });
 
     it('logs one v1.3.4/calendar-push-owned-only line per proving point, with no titles', async () => {

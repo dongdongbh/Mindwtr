@@ -136,6 +136,9 @@ export type CalendarPushEventDetails = {
     endTimeZone?: string;
 };
 
+/** Exact task/calendar identity for hosts that fence pushed-event writes. */
+export type CalendarPushEventIdentity = { taskId: string; calendarId: string };
+
 /** The device calendar writes the push needs, besides the reads (expo-calendar on React Native). */
 export type DeviceCalendarWriter = DeviceCalendarReader & {
     /** The calendar accounts (iOS: where a new calendar goes). */
@@ -144,9 +147,9 @@ export type DeviceCalendarWriter = DeviceCalendarReader & {
     /** Absent where the platform cannot recolor a calendar. */
     updateCalendar?: (calendarId: string, details: { color: string; title?: string }) => Promise<unknown>;
     deleteCalendar(calendarId: string): Promise<unknown>;
-    createEvent(calendarId: string, details: CalendarPushEventDetails & { calendarId: string }): Promise<string>;
-    updateEvent(eventId: string, details: CalendarPushEventDetails): Promise<unknown>;
-    deleteEvent(eventId: string): Promise<unknown>;
+    createEvent(calendarId: string, details: CalendarPushEventDetails & { calendarId: string }, context?: CalendarPushEventIdentity): Promise<string>;
+    updateEvent(eventId: string, details: CalendarPushEventDetails, context?: CalendarPushEventIdentity): Promise<unknown>;
+    deleteEvent(eventId: string, context?: CalendarPushEventIdentity): Promise<unknown>;
 };
 
 export type CalendarPushServiceHost = {
@@ -862,11 +865,11 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         nowIso: () => new Date().toISOString(),
         createEvent: async (task) => {
             const details = buildEventDetails(task);
-            return device.createEvent(target.id, { ...details, calendarId: target.id });
+            return device.createEvent(target.id, { ...details, calendarId: target.id }, { taskId: task.id, calendarId: target.id });
         },
         updateEvent: async (entry, task) => {
             try {
-                await device.updateEvent(entry.calendarEventId, buildEventDetails(task));
+                await device.updateEvent(entry.calendarEventId, buildEventDetails(task), { taskId: entry.taskId, calendarId: entry.calendarId });
                 return { status: 'updated', eventId: entry.calendarEventId };
             } catch (error) {
                 if (isCalendarEventMissingError(error)) {
@@ -885,7 +888,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         },
         deleteEvent: async (entry) => {
             try {
-                await device.deleteEvent(entry.calendarEventId);
+                await device.deleteEvent(entry.calendarEventId, { taskId: entry.taskId, calendarId: entry.calendarId });
             } catch (error) {
                 if (isCalendarEventMissingError(error)) {
                     return;

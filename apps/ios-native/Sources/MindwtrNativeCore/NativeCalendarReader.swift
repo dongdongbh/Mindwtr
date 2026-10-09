@@ -27,7 +27,7 @@ import EventKit
 import CoreGraphics
 
 /// Created, used and released by NativeCalendarJobs' one serial worker.
-final class NativeCalendarReader: NativeCalendarReading {
+final class NativeCalendarReader: NativeCalendarWriting {
     private var ownedStore: EKEventStore?
     private let formatter: DateFormatter = {
         let value = DateFormatter()
@@ -135,13 +135,134 @@ final class NativeCalendarReader: NativeCalendarReading {
         return String(format: "#%02X%02X%02X", Int((rgb[0] * 255).rounded()),
                       Int((rgb[1] * 255).rounded()), Int((rgb[2] * 255).rounded()))
     }
+
+    private func writeProvider() -> EventKitCalendarWriteProvider {
+        EventKitCalendarWriteProvider(store: { self.store })
+    }
+    func sources() throws -> [NativeCalendarSource] {
+        try NativeCalendarWritePolicy.sources(writeProvider())
+    }
+    func createCalendar(_ details: NativeCalendarCreateDetails) throws -> String {
+        try NativeCalendarWritePolicy.createCalendar(details, using: writeProvider())
+    }
+    func updateCalendar(calendarID: String, details: NativeCalendarUpdateDetails) throws {
+        try NativeCalendarWritePolicy.updateCalendar(calendarID: calendarID, details: details, using: writeProvider())
+    }
+    func deleteCalendar(calendarID: String) throws {
+        try NativeCalendarWritePolicy.deleteCalendar(calendarID: calendarID, using: writeProvider())
+    }
+    func createEvent(calendarID: String, details: NativeCalendarEventDetails) throws -> String {
+        try NativeCalendarWritePolicy.createEvent(calendarID: calendarID, details: details, using: writeProvider())
+    }
+    func updateEvent(eventID: String, calendarID: String, details: NativeCalendarEventDetails) throws {
+        try NativeCalendarWritePolicy.updateEvent(eventID: eventID, calendarID: calendarID, details: details, using: writeProvider())
+    }
+    func deleteEvent(eventID: String, calendarID: String) throws {
+        try NativeCalendarWritePolicy.deleteEvent(eventID: eventID, calendarID: calendarID, using: writeProvider())
+    }
+}
+
+/// A per-call view of the reader's retained store, used only on its serial worker.
+private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding {
+    private let retainedStore: () -> EKEventStore
+    private var store: EKEventStore { retainedStore() }
+    init(store: @escaping () -> EKEventStore) { retainedStore = store }
+    func permissions() throws -> NativeCalendarPermission {
+        NativeCalendarReader.permission(EKEventStore.authorizationStatus(for: .event))
+    }
+    func sources() throws -> [EKSource] { store.sources }
+    func source(_ value: EKSource) -> NativeCalendarSource {
+        let type: NativeCalendarSourceType
+        switch value.sourceType {
+        case .local: type = .local
+        case .exchange: type = .exchange
+        case .calDAV: type = .caldav
+        case .mobileMe: type = .mobileme
+        case .subscribed: type = .subscribed
+        case .birthdays: type = .birthdays
+        @unknown default: type = .unknown
+        }
+        return NativeCalendarSource(id: value.sourceIdentifier, name: value.title, type: type)
+    }
+    func calendars() throws -> [EKCalendar] { store.calendars(for: .event) }
+    func target(_ value: EKCalendar) -> NativeCalendarWriteTarget {
+        NativeCalendarWriteTarget(id: value.calendarIdentifier, allowsEvents: value.allowedEntityTypes.contains(.event),
+            allowsModifications: value.allowsContentModifications, immutable: value.isImmutable)
+    }
+    func events(eventID: String, calendar: EKCalendar) throws -> [EKEvent] {
+        guard let item = store.calendarItem(withIdentifier: eventID) else { return [] }
+        guard let event = item as? EKEvent else { throw NativeCalendarWriteError.invalid }
+        guard let value = identity(event), NativeCalendarWriteValidation.equalID(value.id, eventID),
+              NativeCalendarWriteValidation.equalID(value.calendarID, calendar.calendarIdentifier), !value.recurring,
+              let start = event.startDate else { return [event] }
+        let queryStart = Date(timeIntervalSince1970: max(NativeCalendarEventOpenRequest.minimumSeconds, start.timeIntervalSince1970 - 1))
+        let queryEnd = Date(timeIntervalSince1970: min(NativeCalendarEventOpenRequest.maximumSeconds, start.timeIntervalSince1970 + 1))
+        guard queryEnd > queryStart else { throw NativeCalendarWriteError.invalid }
+        let predicate = store.predicateForEvents(withStart: queryStart, end: queryEnd, calendars: [calendar])
+        let matches = store.events(matching: predicate).filter {
+            NativeCalendarWriteValidation.equalID($0.calendarItemIdentifier, eventID)
+        }
+        // A lookup that exists but cannot be confirmed is uncertainty, not absence.
+        guard !matches.isEmpty else { throw NativeCalendarWriteError.invalid }
+        return matches
+    }
+    func identity(_ value: EKEvent) -> NativeCalendarWriteEventIdentity? {
+        guard let calendar = value.calendar, let start = value.startDate, let end = value.endDate,
+              NativeCalendarEventOpenRequest.validDate(start), NativeCalendarEventOpenRequest.validDate(end), end > start else { return nil }
+        return NativeCalendarWriteEventIdentity(id: value.calendarItemIdentifier, calendarID: calendar.calendarIdentifier,
+            recurring: value.isDetached || !(value.recurrenceRules ?? []).isEmpty)
+    }
+    private func color(_ raw: String) -> CGColor {
+        let value = UInt32(raw.dropFirst(), radix: 16)!
+        return CGColor(red: CGFloat((value >> 16) & 255) / 255,
+            green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
+    }
+    func createCalendar(_ details: NativeCalendarCreateDetails, source: EKSource) throws -> String {
+        let calendar = EKCalendar(for: .event, eventStore: store)
+        calendar.source = source; calendar.title = details.title; calendar.cgColor = color(details.color)
+        try store.saveCalendar(calendar, commit: true)
+        return calendar.calendarIdentifier
+    }
+    func updateCalendar(_ details: NativeCalendarUpdateDetails, calendar: EKCalendar) throws {
+        calendar.cgColor = color(details.color)
+        if let title = details.title { calendar.title = title }
+        try store.saveCalendar(calendar, commit: true)
+    }
+    func deleteCalendar(_ calendar: EKCalendar) throws { try store.removeCalendar(calendar, commit: true) }
+    private func apply(_ details: NativeCalendarEventDetails, to event: EKEvent) {
+        event.title = details.title; event.startDate = details.start; event.endDate = details.end
+        event.isAllDay = details.allDay; event.notes = details.notes; event.location = details.location
+        // Expo iOS has one event timeZone and ignores endTimeZone; both were validated.
+        if let zone = details.timeZone { event.timeZone = TimeZone(identifier: zone) }
+        if let url = details.url { event.url = URL(string: url) }
+        event.alarms = []
+        event.availability = .notSupported
+    }
+    func createEvent(_ details: NativeCalendarEventDetails, calendar: EKCalendar) throws -> String {
+        let event = EKEvent(eventStore: store); event.calendar = calendar
+        apply(details, to: event)
+        try store.save(event, span: .thisEvent, commit: true)
+        return event.calendarItemIdentifier
+    }
+    func updateEvent(_ details: NativeCalendarEventDetails, event: EKEvent) throws {
+        apply(details, to: event)
+        try store.save(event, span: .thisEvent, commit: true)
+    }
+    func deleteEvent(_ event: EKEvent) throws { try store.remove(event, span: .thisEvent, commit: true) }
 }
 #else
-final class NativeCalendarReader: NativeCalendarReading {
+final class NativeCalendarReader: NativeCalendarWriting {
     func permissions() throws -> NativeCalendarPermission { throw NativeCalendarReadError.unavailable }
     func calendars() throws -> [[String: Any]] { throw NativeCalendarReadError.unavailable }
     func events(calendarIds: [String], start: Date, end: Date) throws -> [[String: Any]] {
         throw NativeCalendarReadError.unavailable
     }
+    func sources() throws -> [NativeCalendarSource] { throw NativeCalendarWriteError.unavailable }
+    func createCalendar(_ details: NativeCalendarCreateDetails) throws -> String { throw NativeCalendarWriteError.unavailable }
+    func updateCalendar(calendarID: String, details: NativeCalendarUpdateDetails) throws { throw NativeCalendarWriteError.unavailable }
+    func deleteCalendar(calendarID: String) throws { throw NativeCalendarWriteError.unavailable }
+    func createEvent(calendarID: String, details: NativeCalendarEventDetails) throws -> String { throw NativeCalendarWriteError.unavailable }
+    func updateEvent(eventID: String, calendarID: String, details: NativeCalendarEventDetails) throws { throw NativeCalendarWriteError.unavailable }
+    func deleteEvent(eventID: String, calendarID: String) throws { throw NativeCalendarWriteError.unavailable }
 }
 #endif

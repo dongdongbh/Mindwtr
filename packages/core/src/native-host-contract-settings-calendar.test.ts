@@ -487,6 +487,44 @@ describe('native host contract: Settings › Calendar', () => {
             expect(observed).toEqual(fixture.observations[name]);
         },
     );
+    it.each(['create', 'update', 'delete'] as const)('forwards exact event identity through the native settings wrapper: %s', async (operation) => {
+        freezeClock();
+        await seed({});
+        await useTaskStore.getState().addTask('Calendar identity fixture', {
+            status: operation === 'delete' ? 'done' : 'next', dueDate: '2026-10-10',
+        });
+        await flushPendingSave();
+        const task = useTaskStore.getState()._allTasks[0]!;
+        const handset = phone({ os: 'ios', calendars: ['primary'], storage: { [KEYS.pushTarget]: 'g-primary' } });
+        const entries = new Map(operation === 'create' ? [] : [[task.id, {
+            taskId: task.id, calendarId: 'g-primary', calendarEventId: 'owned-event',
+            platform: 'ios', lastSyncedAt: fixture.now,
+        }]]);
+        handset.host.syncEntries = {
+            ensureReady: async () => undefined,
+            get: async (id) => entries.get(id) ?? null,
+            getAll: async () => [...entries.values()],
+            upsert: async (entry) => { entries.set(entry.taskId, entry); },
+            delete: async (id) => { entries.delete(id); },
+        };
+        const create = vi.spyOn(handset.host.calendars, 'createEvent');
+        const update = vi.spyOn(handset.host.calendars, 'updateEvent');
+        const remove = vi.spyOn(handset.host.calendars, 'deleteEvent');
+        const contract = await openHost(handset.host);
+        value(await contract.openCalendarSettings());
+        try {
+            value(await edit(contract, value(contract.getCalendarSettings()).push.toggle));
+            const context = { taskId: task.id, calendarId: 'g-primary' };
+            if (operation === 'create') expect(create).toHaveBeenCalledWith('g-primary', expect.objectContaining({ title: task.title }), context);
+            if (operation === 'update') expect(update).toHaveBeenCalledWith('owned-event', expect.objectContaining({ title: task.title }), context);
+            if (operation === 'delete') expect(remove).toHaveBeenCalledWith('owned-event', context);
+        } finally {
+            const view = value(contract.getCalendarSettings());
+            if (view.push.enabled) value(await edit(contract, view.push.toggle));
+            value(contract.closeCalendarSettings());
+        }
+    });
+
     describe('a replay after a restart writes nothing wrong', () => {
         const boot = async (device: Device, settings: AppSettings = {}) => {
             freezeClock();
