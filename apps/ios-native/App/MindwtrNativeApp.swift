@@ -132,6 +132,17 @@ actor NativeNotificationResponses {
 }
 
 final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let options = NativeReminderResponse.foregroundPresentation(notification.request,
+            selection: try? NativeAppLaunch.selection.get())
+        completionHandler(options)
+        guard !options.isEmpty else { return }
+        Task { @MainActor in
+            await NativeAppModel.shared.recordForegroundReminderPresentation(sound: options.contains(.sound))
+        }
+    }
+
     func application(_ application: UIApplication,
                      willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         guard let selection = try? NativeAppLaunch.selection.get() else { return true }

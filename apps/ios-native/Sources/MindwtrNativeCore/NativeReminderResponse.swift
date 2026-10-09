@@ -39,6 +39,21 @@ public struct NativeReminderResponse: Codable, Equatable, Sendable {
     public let requestedAtMs: Int64
     public let payloadJSON: String
 
+    public static func foregroundPresentation(_ request: UNNotificationRequest,
+                                              selection: NativeLaunchSelection?) -> UNNotificationPresentationOptions {
+        let namespace: String
+        switch selection {
+        case let .standard(_, _, selectedNamespace), let .isolated(_, _, selectedNamespace, _):
+            namespace = selectedNamespace
+        case nil, .rehearsal:
+            return []
+        }
+        guard NativeReminderRequest.ownedID(identifier: request.identifier,
+                                            metadata: request.content.userInfo["mindwtrNativeReminder"],
+                                            namespace: namespace) != nil else { return [] }
+        return request.content.sound == nil ? [.banner, .list] : [.banner, .list, .sound]
+    }
+
     public static func capture(_ request: UNNotificationRequest, deliveredAt: Date, receivedAt: Date,
                                actionIdentifier: String, namespace: String) -> NativeReminderResponse? {
         guard NativeReminderRequest.ownedID(identifier: request.identifier,

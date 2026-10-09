@@ -5004,6 +5004,14 @@ final class CoreModel: ObservableObject {
         ]))
     }
 
+    func recordForegroundReminderPresentation(sound: Bool) async {
+        guard ready, let currentHost = host else { return }
+        _ = try? await currentHost.call("logLine", argumentsJSON: json([
+            "Native iOS foreground reminder presentation requested",
+            try json(["releaseCheck": "v1.3.5/ios-reminder-present", "outcome": sound ? "sound" : "silent"]),
+        ]))
+    }
+
     private func drainNotificationResponse(_ captured: NativeReminderInbox.Item, owner: NotificationResponseOwner) async throws -> Bool {
         let action = captured.response.action
         let finishing = notificationResponseRetry?.item?.response.requestID == captured.response.requestID

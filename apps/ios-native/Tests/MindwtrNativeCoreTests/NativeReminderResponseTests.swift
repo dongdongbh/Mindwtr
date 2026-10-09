@@ -18,12 +18,12 @@ final class NativeReminderResponseTests: XCTestCase {
          "unknown": ["nested": ["\u{FEFF}value", "e\u{301}", NSNull()]]]
     }
 
-    private func request(_ original: Any? = nil, snoozed: Bool = false) throws -> UNNotificationRequest {
+    private func request(_ original: Any? = nil, snoozed: Bool = false, namespace: String? = nil) throws -> UNNotificationRequest {
         try NativeReminderRequest.make(alarm: [
             "key": snoozed ? "snooze:\(publication)" : "task:synthetic-450",
             "id": snoozed ? 1_073_741_824 : 450, "fireAtMs": 1_900_000_000_123,
             "repeat": "once", "details": original ?? details(),
-        ], namespace: namespace)
+        ], namespace: namespace ?? self.namespace)
     }
 
     private func changing(_ request: UNNotificationRequest, _ change: (UNMutableNotificationContent) -> Void,
@@ -41,6 +41,88 @@ final class NativeReminderResponseTests: XCTestCase {
 
     private func payload(_ response: NativeReminderResponse) throws -> NSDictionary {
         try XCTUnwrap(NativeJSON.jsonObject(with: Data(response.payloadJSON.utf8)) as? NSDictionary)
+    }
+
+    private func assertForeground(_ request: UNNotificationRequest, selection: NativeLaunchSelection?,
+                                  options: UNNotificationPresentationOptions,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let identifier = request.identifier
+        let content = request.content.mutableCopy() as! UNMutableNotificationContent
+        let trigger = request.trigger
+        XCTAssertEqual(NativeReminderResponse.foregroundPresentation(request, selection: selection), options, file: file, line: line)
+        XCTAssertEqual(request.identifier, identifier, file: file, line: line)
+        XCTAssertEqual(request.content, content, file: file, line: line)
+        XCTAssertTrue(request.trigger === trigger, file: file, line: line)
+    }
+
+    func testForegroundPresentationUsesTrustedSelectionsAndSuppliedSound() throws {
+        let container = URL(fileURLWithPath: "/synthetic453", isDirectory: true)
+        let database = container.appendingPathComponent("mindwtr.sqlite")
+        let identifier = try XCTUnwrap(UUID(uuidString: publication))
+        let standardNamespace = "tech.dongdongbh.mindwtr.native.dev"
+        let isolatedNamespace = "tech.dongdongbh.mindwtr.native-ui." + publication
+        let selections: [(NativeLaunchSelection, String)] = [
+            (.standard(databaseURL: database, containerURL: container, namespace: standardNamespace), standardNamespace),
+            (.isolated(databaseURL: database, containerURL: container, namespace: isolatedNamespace, identifier: identifier), isolatedNamespace),
+        ]
+        for (selection, namespace) in selections {
+            for sounding in [false, true] {
+                var original = details(); original["play_sound"] = sounding
+                let request = try request(original, namespace: namespace)
+                assertForeground(request, selection: selection, options: sounding ? [.banner, .list, .sound] : [.banner, .list])
+                assertForeground(try self.request(original, namespace: namespace + ".other"), selection: selection, options: [])
+            }
+        }
+    }
+
+    func testForegroundPresentationRefusesUnavailableAndRehearsalSelections() throws {
+        let container = URL(fileURLWithPath: "/synthetic453", isDirectory: true)
+        let rehearsal = NativeLaunchSelection.rehearsal(containerURL: container,
+            databaseURL: container.appendingPathComponent("mindwtr.sqlite"), bundleIdentifier: namespace)
+        let request = try request()
+        assertForeground(request, selection: nil, options: [])
+        assertForeground(request, selection: rehearsal, options: [])
+    }
+
+    func testForegroundPresentationRequiresExactClosedNativeOwnership() throws {
+        let container = URL(fileURLWithPath: "/synthetic453", isDirectory: true)
+        let selection = NativeLaunchSelection.standard(databaseURL: container.appendingPathComponent("mindwtr.sqlite"),
+            containerURL: container, namespace: namespace)
+        let request = try request()
+        for identifier in [request.identifier + "0", "mindwtr-native:\(namespace):0450", "foreign"] {
+            assertForeground(changing(request, { _ in }, identifier: identifier), selection: selection, options: [])
+        }
+        for (field, value) in [("version", true as Any), ("version", 2), ("version", "1"), ("id", true),
+                               ("id", 451), ("id", "450"), ("namespace", 1), ("namespace", "foreign"), ("extra", 1)] {
+            let malformed = changing(request) { content in
+                var owner = content.userInfo["mindwtrNativeReminder"] as! [String: Any]
+                owner[field] = value; content.userInfo["mindwtrNativeReminder"] = owner
+            }
+            assertForeground(malformed, selection: selection, options: [])
+        }
+        for field in ["version", "namespace", "id"] {
+            assertForeground(changing(request) { content in
+                var owner = content.userInfo["mindwtrNativeReminder"] as! [String: Any]
+                owner.removeValue(forKey: field); content.userInfo["mindwtrNativeReminder"] = owner
+            }, selection: selection, options: [])
+        }
+        assertForeground(changing(request) { $0.userInfo.removeValue(forKey: "mindwtrNativeReminder") }, selection: selection, options: [])
+        assertForeground(changing(request) { $0.userInfo["mindwtrNativeReminder"] = "invalid" }, selection: selection, options: [])
+    }
+
+    func testForegroundPresentationIgnoresResponseSidecarAndCategoryForLegacyOwnedRequests() throws {
+        let container = URL(fileURLWithPath: "/synthetic453", isDirectory: true)
+        let selection = NativeLaunchSelection.standard(databaseURL: container.appendingPathComponent("mindwtr.sqlite"),
+            containerURL: container, namespace: namespace)
+        let request = try request()
+        for sidecar in [nil, "invalid"] as [Any?] {
+            let legacy = changing(request) { content in
+                content.userInfo["mindwtrNativeResponse"] = sidecar
+                content.categoryIdentifier = "FOREIGN_CATEGORY"
+            }
+            assertForeground(legacy, selection: selection, options: [.banner, .list, .sound])
+            assertForeground(changing(legacy) { $0.sound = nil }, selection: selection, options: [.banner, .list])
+        }
     }
 
     func testOpenCompleteSnoozeAndDismissUseExactSharedPayloadsAndCodableValues() throws {
