@@ -61,6 +61,7 @@ import {
     formatI18nTemplate,
     canSaveTaskListTag,
     createNativeHostContract,
+    createDeviceCalendarSettingsMethods,
     diagnosticsEntryFromLogPayload,
     getGeneralSettingsDeviceWrites,
     getPersistenceStatus,
@@ -149,6 +150,9 @@ type NativeBridge = {
     kvMultiGet(keysJson: string): string;
     kvMultiSet(pairsJson: string): string | null;
     kvMultiRemove(keysJson: string): string | null;
+    /** iOS only: fixed calendar choice and private mutation proof, admitted by its journal owner. */
+    calendarSettingRead?(): string;
+    calendarSettingCAS?(expectedJson: string, nextJson: string): string | null;
     /** An event for Kotlin (CoreHost's event listener): sync's badge and cycle count, an automatic sync's warning. */
     hostEvent(json: string): string | null;
     /** Android only: opens an android.os.Trace section named `name`, or closes the open one for "". */
@@ -676,6 +680,29 @@ const requireSaved = () => {
     if (failure) throw new Error('SAVE_FAILED: Previous changes could not be saved; retry before continuing');
 };
 
+const deviceCalendarStorage = {
+    read: async (): Promise<[string | null, string | null]> => {
+        const values: unknown = JSON.parse(checked(native().calendarSettingRead!()));
+        if (!Array.isArray(values) || values.length !== 2 || values.some((value) => value !== null && typeof value !== 'string'))
+            throw new Error('Native calendar setting storage is unavailable');
+        return values as [string | null, string | null];
+    },
+    compareAndSet: async (expected: [string | null, string | null], next: [string, string]): Promise<void> => {
+        checked(native().calendarSettingCAS!(JSON.stringify(expected), JSON.stringify(next)));
+    },
+};
+const deviceCalendarSettings = createDeviceCalendarSettingsMethods({
+    readiness: () => {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
+            || isSandboxMode() || isWorkspaceTransitionActive()
+            || typeof native().calendarSettingRead !== 'function' || typeof native().calendarSettingCAS !== 'function')
+            return { ok: false, error: { code: 'NOT_READY', message: 'Native calendar settings are unavailable' } };
+        return contract.getDataSettings().ok ? { ok: true, value: null }
+            : { ok: false, error: { code: 'NOT_READY', message: 'Native calendar settings are unavailable' } };
+    },
+    storage: () => deviceCalendarStorage,
+});
+
 /** host-polyfills.js's secret calls (SecretStore.kt). */
 type HostSecrets = {
     getSecret(key: string): Promise<string | null>;
@@ -1105,7 +1132,7 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     // a journal keeps its receipts in memory, as before.
     traceStep('js:receipts');
     if (journaled) await loadNativeRequestReceipts(sqlite);
-    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
+    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
     // The legacy import plans from a validated full read. Any other boot needs only the schema here: the activation's own read
     // is validated before anything saves.
     traceStep('js:schema');
@@ -2294,6 +2321,30 @@ globalThis.MindwtrHost = {
                 message: 'Native iOS reminder completion acknowledged',
                 context: { releaseCheck: 'v1.3.5/ios-reminder-complete', outcome: 'confirmed' },
             }, { force: true }); } catch { /* Logging cannot change an acknowledged durable command result. */ }
+            return null;
+        });
+    },
+    deviceCalendarSettingPrepare(json: string): string {
+        return submit(async () => unwrap(await deviceCalendarSettings.prepareDeviceCalendarSetting(completionJson(json, 1_048_576))));
+    },
+    deviceCalendarSettingValidate(json: string): string {
+        return submit(async () => unwrap(deviceCalendarSettings.validatePreparedDeviceCalendarSetting(completionJson(json, 4_194_304))));
+    },
+    deviceCalendarSettingCommit(json: string): string {
+        return submit(async () => unwrap(await deviceCalendarSettings.commitPreparedDeviceCalendarSetting(completionJson(json, 4_194_304))));
+    },
+    deviceCalendarSettingRetryOutcome(json: string): string {
+        return submit(async () => unwrap(deviceCalendarSettings.probeDeviceCalendarSettingOutcome(completionJson(json, 1_048_576))));
+    },
+    deviceCalendarSettingAcknowledged(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') return null;
+            try {
+                await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                    message: 'Native iOS device calendar setting saved',
+                    context: { releaseCheck: 'v1.3.5/ios-calendar-setting', outcome: 'saved' },
+                }, { force: true });
+            } catch { /* Diagnostics cannot change an acknowledged durable result. */ }
             return null;
         });
     },

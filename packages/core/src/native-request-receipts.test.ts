@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NativeHostResult } from './native-host-contract';
-import { createNativeRequestReceipts, loadNativeRequestReceipts, pruneNativeRequestReceipts, resetNativeRequestReceipts,
+import { createNativeRequestReceipts, isNativeRequestReceiptDurable, loadNativeRequestReceipts, pruneNativeRequestReceipts, resetNativeRequestReceipts,
     runStoreWrite, settleWrite } from './native-request-receipts';
 import type { SqliteClient } from './sqlite-adapter';
 import { resetForTests, useTaskStore } from './store';
@@ -26,6 +26,21 @@ function createSave() {
 }
 
 describe('native request receipts', () => {
+    it('reports loaded exact-command durable readiness without granting unjournaled commands', async () => {
+        const client: SqliteClient = { run: async () => undefined, all: async () => [], get: async () => undefined };
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(false);
+        await loadNativeRequestReceipts(client, { durableCommands: ['notificationSetting'] });
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(false);
+        await loadNativeRequestReceipts(client, { durableCommands: ['deviceCalendarSetting', 'calendarFeedAdd'] });
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(true);
+        expect(isNativeRequestReceiptDurable('calendarFeedAdd')).toBe(false);
+        await loadNativeRequestReceipts(client);
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(true);
+        expect(isNativeRequestReceiptDurable('calendarFeedAdd')).toBe(false);
+        resetNativeRequestReceipts();
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(false);
+    });
+
     it.each([false, true])('retains unfinished reminder IDs or commands in SQLite and replay memory (scoped=%s)', async (scoped) => {
         const directory = mkdtempSync(join(tmpdir(), 'mindwtr-retention-'));
         const sqlite = openScratchSqlite(join(directory, 'receipts.sqlite'));

@@ -166,6 +166,14 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    public func setDeviceCalendarSetting(requestJSON: String) async throws -> String {
+        try await perform { try $0.setDeviceCalendarSetting(requestJSON: requestJSON) }
+    }
+
+    public func probeDeviceCalendarSettingOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeDeviceCalendarSettingOutcome(requestJSON: requestJSON) }
+    }
+
     /// Passive permission observation followed by a fresh, read-only shared plan.
     public func readReminderPlan() async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
@@ -261,6 +269,7 @@ public final class CoreHost: @unchecked Sendable {
         }
         guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         guard !Engine.notificationSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade") }
+        guard !Engine.deviceCalendarSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Device Calendar Settings require their explicit facade") }
         return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
@@ -1360,6 +1369,24 @@ private final class Engine: @unchecked Sendable {
     }
     private var notificationSettingTurn: NotificationSettingTurn?
     private var notificationSettingOwnerAccess = false
+    private final class DeviceCalendarSettingTurn {
+        let runtime: JSContext
+        let storage: NativeDeviceKV
+        let generation: UInt64
+        var envelopeJSON: String?
+        var preparing = false
+        var committing = false
+        init(runtime: JSContext, storage: NativeDeviceKV, generation: UInt64) {
+            self.runtime = runtime; self.storage = storage; self.generation = generation
+        }
+    }
+    private var deviceCalendarSettingTurn: DeviceCalendarSettingTurn?
+    fileprivate static let deviceCalendarSettingMethods: Set<String> = ["deviceCalendarSetting", "deviceCalendarSettingPrepare",
+        "deviceCalendarSettingValidate", "deviceCalendarSettingCommit", "deviceCalendarSettingRetryOutcome", "deviceCalendarSettingAcknowledged"]
+    private static let deviceCalendarSettingCellLimit = 1024 * 1024
+    private static let deviceCalendarSettingEnvelopeLimit = 4 * 1024 * 1024
+    private static let deviceCalendarSettingArgumentsLimit = 12_000_000
+    private static let deviceCalendarSettingJournalLimit = 24_000_000
     fileprivate static let notificationSettingMethods: Set<String> = ["notificationSetting", "notificationSettingOptions",
         "notificationSettingPrepare", "notificationSettingValidate", "notificationSettingCommit", "notificationSettingRetryOutcome",
         "notificationSettingAcknowledged"]
@@ -1577,6 +1604,7 @@ private final class Engine: @unchecked Sendable {
     private var startupDataSettingResult: String?
     private var startupGeneralPreferenceResult: String?
     private var startupNotificationSettingResult: String?
+    private var startupDeviceCalendarSettingResult: String?
     private var startupReminderCompletionResult: String?
     private var startupReminderSnoozeResult: String?
     private var startupTaxonomyResult: String?
@@ -1636,7 +1664,7 @@ private final class Engine: @unchecked Sendable {
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
         "iosEntityOpen": 1, "iosSearchSnapshot": 0, "iosSearchObservation": 0, "iosSearchOpen": 1, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
-        "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
+        "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1, "deviceCalendarSetting": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
         "managePersonDeleteOptions": 1, "managePersonDelete": 1, "managePersonDeleteRetryOutcome": 1,
@@ -1702,7 +1730,7 @@ private final class Engine: @unchecked Sendable {
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -1767,6 +1795,12 @@ private final class Engine: @unchecked Sendable {
             throw HostFailure("Invalid pending command journal")
         }
         guard saved.version == 2 else { throw HostFailure("Unsupported pending command journal; raw captures cannot be safely replanned") }
+        if saved.method == "deviceCalendarSettingCommit" {
+            guard journalData.count <= Self.deviceCalendarSettingJournalLimit,
+                  try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared Device Calendar setting journal")
+            }
+        }
         if saved.method == Self.ownedDiscardMethod {
             _ = try decodeOwnedDiscardJournal(journalData, checkingNative: true)
         } else if saved.method == Self.cleanupMethod {
@@ -2080,6 +2114,10 @@ private final class Engine: @unchecked Sendable {
                 _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateNotificationSettingAcknowledgment(command, value: value) }
             }
+            if let command = pending, command.method == "deviceCalendarSettingCommit" {
+                _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateDeviceCalendarSettingAcknowledgment(command, value: value) }
+            }
             if let command = pending, command.method == "generalPreferenceCommit" {
                 _ = try invoke("generalPreferenceValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateGeneralPreferenceAcknowledgment(command, value: value) }
@@ -2367,6 +2405,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringDataSetting = pending?.method == "dataSetting"
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
         let recoveringNotificationSetting = pending?.method == "notificationSettingCommit"
+        let recoveringDeviceCalendarSetting = pending?.method == "deviceCalendarSettingCommit"
         let recoveringReminderCompletion = pending?.method == "reminderCompletionCommit"
         let recoveringReminderSnooze = pending?.method == "reminderSnoozeCommit"
         let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
@@ -2479,6 +2518,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringDataSetting, let terminal, case .success(let value) = terminal { startupDataSettingResult = value }
         if recoveringGeneralPreference, let terminal, case .success(let value) = terminal { startupGeneralPreferenceResult = value }
         if recoveringNotificationSetting, let terminal, case .success(let value) = terminal { startupNotificationSettingResult = value }
+        if recoveringDeviceCalendarSetting, let terminal, case .success(let value) = terminal { startupDeviceCalendarSettingResult = value }
         if recoveringTaxonomy, let terminal, case .success(let value) = terminal { startupTaxonomyResult = value }
         if recoveringPersonEdit, let terminal, case .success(let value) = terminal { startupPersonEditResult = value }
         if recoveringPersonDelete, let terminal, case .success(let value) = terminal { startupPersonDeleteResult = value }
@@ -2535,7 +2575,7 @@ private final class Engine: @unchecked Sendable {
             ?? startupSomedaySectionDeleteResult ?? startupSomedaySectionOrderResult
             ?? startupSomedaySectionTaskResult
         let recoveredSettings = startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult
-            ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupNotificationSettingResult
+            ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupNotificationSettingResult ?? startupDeviceCalendarSettingResult
         let recoveredManage = recoveredSettings ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
             ?? startupPersonDeleteResult ?? startupPersonEditResult ?? startupTaxonomyResult
         let recoveredDoneRows = startupDoneTaskCompletedAtResult ?? startupDoneTaskStatusResult
@@ -2624,6 +2664,7 @@ private final class Engine: @unchecked Sendable {
                 : startupDataSettingResult != nil ? "dataSetting"
                 : startupGeneralPreferenceResult != nil ? "generalPreferenceCommit"
                 : startupNotificationSettingResult != nil ? "notificationSettingCommit"
+                : startupDeviceCalendarSettingResult != nil ? "deviceCalendarSettingCommit"
                 : startupTaxonomyResult != nil ? "manageTaxonomyCommit"
                 : startupPersonEditResult != nil ? "managePersonEditCommit"
                 : startupPersonDeleteResult != nil ? "managePersonDeleteCommit"
@@ -2729,6 +2770,7 @@ private final class Engine: @unchecked Sendable {
         startupDataSettingResult = nil
         startupGeneralPreferenceResult = nil
         startupNotificationSettingResult = nil
+        startupDeviceCalendarSettingResult = nil
         startupReminderCompletionResult = nil
         startupReminderSnoozeResult = nil
         startupTaxonomyResult = nil
@@ -3403,6 +3445,164 @@ private final class Engine: @unchecked Sendable {
         catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: failure.message) }
         let args = String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self)
         return try call("reminderCompletionCommit", argumentsJSON: args, editorAttempt: nil, reminderCompletionOwned: true)
+    }
+
+    private static func deviceCalendarSettingObject(_ raw: String, maximum: Int) throws -> [String: Any] {
+        guard raw.utf8.count <= maximum,
+              let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              try NativeJSON.hasUniqueObjectKeys(raw) else {
+            throw HostFailure("INVALID_INPUT: Device Calendar setting requires a bounded object with unique members")
+        }
+        return object
+    }
+    private static func deviceCalendarSettingsShape(_ value: Any?) -> Bool {
+        guard let settings = value as? [String: Any],
+              Set(settings.keys) == Set(["enabled", "selectAll", "selectedCalendarIds"])
+                || Set(settings.keys) == Set(["enabled", "selectAll", "selectedCalendarIds", "areaIdsByCalendar"]),
+              isBoolean(settings["enabled"]), isBoolean(settings["selectAll"]),
+              let ids = settings["selectedCalendarIds"] as? [String], ids.allSatisfy({ $0.utf16.count <= 500 }) else { return false }
+        if let raw = settings["areaIdsByCalendar"] {
+            guard let areas = raw as? NSDictionary, areas.allValues.allSatisfy({
+                ($0 as? [String]).map { $0.allSatisfy { $0.utf16.count <= 200 } } == true
+            }) else { return false }
+        }
+        return true
+    }
+    private static func deviceCalendarSettingRequest(_ raw: String) throws -> [String: Any] {
+        let input = try deviceCalendarSettingObject(raw, maximum: deviceCalendarSettingCellLimit)
+        guard Set(input.keys) == Set(["requestId", "edit"]),
+              let id = input["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let edit = input["edit"] as? [String: Any], Set(edit.keys) == Set(["type", "before", "value"]),
+              edit["type"] as? String == "deviceCalendars",
+              deviceCalendarSettingsShape(edit["before"]), deviceCalendarSettingsShape(edit["value"]) else {
+            throw HostFailure("INVALID_INPUT: Device Calendar setting needs an exact device edit and lowercase UUID")
+        }
+        return input
+    }
+    private static func deviceCalendarSettingResult(_ result: [String: Any], changed: Bool? = nil) throws {
+        guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
+              isBoolean(result["changed"]), changed == nil || result["changed"] as? Bool == changed,
+              let toasts = result["toasts"] as? [Any], toasts.isEmpty,
+              result["open"] is NSNull || result["open"] as? String == "device",
+              isBoolean(result["clearDraft"]), result["clearDraft"] as? Bool == false else {
+            throw HostFailure("Malformed Device Calendar setting result")
+        }
+    }
+    private static func deviceCalendarSettingEnvelope(_ raw: String) throws -> [String: Any] {
+        let envelope = try deviceCalendarSettingObject(raw, maximum: deviceCalendarSettingEnvelopeLimit)
+        guard Set(envelope.keys) == Set(["request", "prepared"]),
+              let request = envelope["request"] as? [String: Any], let prepared = envelope["prepared"] as? [String: Any],
+              Set(prepared.keys) == Set(["version", "request", "storedBefore", "markerBefore", "storedAfter", "markerAfter", "result"]),
+              isInteger(prepared["version"], equalTo: 1), equalJSON(request, prepared["request"]),
+              ["storedBefore", "markerBefore"].allSatisfy({ field in
+                  prepared[field] is NSNull || (prepared[field] as? String).map { $0.utf8.count <= deviceCalendarSettingCellLimit } == true
+              }),
+              ["storedAfter", "markerAfter"].allSatisfy({ field in
+                  (prepared[field] as? String).map { $0.utf8.count <= deviceCalendarSettingCellLimit } == true
+              }), let result = prepared["result"] as? [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Malformed prepared Device Calendar setting")
+        }
+        _ = try deviceCalendarSettingRequest(String(decoding:
+            JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self))
+        try deviceCalendarSettingResult(result, changed: true)
+        return envelope
+    }
+    private func withDeviceCalendarSettingOwner<T>(_ work: () throws -> T) throws -> T {
+        guard deviceCalendarSettingTurn == nil, started, !closed, !localRequests.isClosing, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == "deviceCalendarSettingCommit",
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0,
+              let runtime = context, let storage = deviceStorage else { throw Self.deviceStorageUnavailable }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        deviceCalendarSettingTurn = .init(runtime: runtime, storage: storage, generation: attachmentGeneration)
+        defer { deviceCalendarSettingTurn = nil }
+        return try work()
+    }
+    private func requireDeviceCalendarSettingTurn() throws -> DeviceCalendarSettingTurn {
+        guard let turn = deviceCalendarSettingTurn, context === turn.runtime, deviceStorage === turn.storage,
+              attachmentGeneration == turn.generation, started, !closed, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == "deviceCalendarSettingCommit",
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
+              providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              !cleanupOwed, !foregroundCleanupActive, !attachmentDraftEvidence else { throw Self.deviceStorageUnavailable }
+        if let pending {
+            guard pending.method == "deviceCalendarSettingCommit", let raw = try journalArguments(pending).first as? String,
+                  let frozen = turn.envelopeJSON, Self.ownedEqual(raw, frozen) else { throw Self.deviceStorageUnavailable }
+        } else { guard turn.envelopeJSON == nil else { throw Self.deviceStorageUnavailable } }
+        return turn
+    }
+    func setDeviceCalendarSetting(requestJSON: String) throws -> String {
+        let request: [String: Any]
+        do { request = try Self.deviceCalendarSettingRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let pending {
+            guard pending.method == "deviceCalendarSettingCommit", let raw = try journalArguments(pending).first as? String,
+                  Self.equalJSON(try Self.deviceCalendarSettingEnvelope(raw)["request"], request) else {
+                throw HostFailure("Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw HostFailure("Device Calendar save still requires exact retry") }
+            try resumeActivationIfNeeded()
+            return try publicValue(terminal, method: pending.method)
+        }
+        return try withDeviceCalendarSettingOwner {
+            deviceCalendarSettingTurn?.preparing = true
+            return try call("deviceCalendarSetting", argumentsJSON: Self.ownedJSON([requestJSON]))
+        }
+    }
+    func probeDeviceCalendarSettingOutcome(requestJSON: String) throws -> String {
+        try requireCalendarAdmission()
+        do {
+            _ = try Self.deviceCalendarSettingRequest(requestJSON)
+            let value = try invoke("deviceCalendarSettingRetryOutcome", arguments: [requestJSON])
+            try Self.deviceCalendarSettingResult(Self.deviceCalendarSettingObject(value, maximum: 1024), changed: true)
+            return value
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+            throw CoreHostRejection(message: error.message)
+        }
+    }
+    private func deviceCalendarSettingJournalRequest(_ command: PendingCommand) throws -> String {
+        guard let raw = try journalArguments(command).first as? String,
+              let request = try Self.deviceCalendarSettingEnvelope(raw)["request"] else {
+            throw HostFailure("Malformed Device Calendar setting journal")
+        }
+        return try Self.ownedJSON(request)
+    }
+    private func validateDeviceCalendarSettingAcknowledgment(_ command: PendingCommand, value: String) throws {
+        guard let raw = try journalArguments(command).first as? String,
+              let prepared = try Self.deviceCalendarSettingEnvelope(raw)["prepared"] as? [String: Any] else {
+            throw HostFailure("Malformed Device Calendar setting acknowledgment")
+        }
+        let result = try Self.deviceCalendarSettingObject(value, maximum: 1024)
+        try Self.deviceCalendarSettingResult(result, changed: true)
+        guard Self.equalJSON(result, prepared["result"]) else { throw HostFailure("Malformed Device Calendar setting acknowledgment") }
+    }
+    private func invokeDeviceCalendarSettingCommit(_ command: PendingCommand) throws -> String {
+        let args = try journalArguments(command)
+        guard let raw = args.first as? String, let turn = deviceCalendarSettingTurn else { throw Self.deviceStorageUnavailable }
+        turn.envelopeJSON = raw
+        _ = try invoke("deviceCalendarSettingValidate", arguments: args)
+        do {
+            let replay = try invoke("deviceCalendarSettingRetryOutcome", arguments: [deviceCalendarSettingJournalRequest(command)])
+            try validateDeviceCalendarSettingAcknowledgment(command, value: replay)
+            return replay
+        } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") { }
+        let owned = try requireDeviceCalendarSettingTurn()
+        owned.committing = true
+        defer { owned.committing = false }
+        if owned.storage.hasPendingCalendarSettingMutation {
+            let envelope = try Self.deviceCalendarSettingEnvelope(raw)
+            guard let prepared = envelope["prepared"] as? [String: Any],
+                  let after = prepared["storedAfter"] as? String, let marker = prepared["markerAfter"] as? String else {
+                throw Self.deviceStorageInvalid
+            }
+            // Pure validation above must precede settling an ambiguously acknowledged native mutation.
+            try owned.storage.compareAndSetCalendarSetting(expected: [prepared["storedBefore"] as? String, prepared["markerBefore"] as? String],
+                next: [after, marker])
+        }
+        return try invoke("deviceCalendarSettingCommit", arguments: args)
     }
 
     private static let notificationSettingFields = Set(["notificationsEnabled", "startDateNotificationsEnabled",
@@ -7455,6 +7655,10 @@ private final class Engine: @unchecked Sendable {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
         }
         guard reminderEffectsTurn == nil, !Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard (deviceCalendarSettingTurn == nil || method == "deviceCalendarSetting"),
+              !Self.deviceCalendarSettingMethods.contains(method) || (method == "deviceCalendarSetting" && deviceCalendarSettingTurn != nil) else {
+            throw CoreHostRejection(message: "NOT_READY: Device Calendar Settings require their current explicit owner")
+        }
         guard (notificationSettingTurn == nil || notificationSettingOwnerAccess),
               !Self.notificationSettingMethods.contains(method) || (method == "notificationSetting" && notificationSettingOwnerAccess) else {
             throw CoreHostRejection(message: "NOT_READY: Notification Settings require their current explicit owner")
@@ -7576,7 +7780,7 @@ private final class Engine: @unchecked Sendable {
             // Mind Sweep has no journal or write before argument validation.
             // Its UI may release an oversized draft only on a definite refusal.
             // With an older command still owed, keep every error uncertain.
-            if ["mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            if ["mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
             throw error
         }
         guard pending == nil else { throw HostFailure("SAVE_FAILED: A pending command requires exact retry") }
@@ -8912,6 +9116,30 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "notificationSettingCommit", argumentsJSON: encoded)
                 _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "deviceCalendarSetting" {
+            do {
+                let value = try invoke("deviceCalendarSettingPrepare", arguments: args)
+                deviceCalendarSettingTurn?.preparing = false
+                let response = try Self.deviceCalendarSettingObject(value, maximum: Self.deviceCalendarSettingEnvelopeLimit)
+                guard let kind = response["kind"] as? String, let original = args.first as? String else {
+                    throw HostFailure("Malformed Device Calendar setting preparation")
+                }
+                if kind == "noop" {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
+                        throw HostFailure("Malformed no-write Device Calendar setting result")
+                    }
+                    try Self.deviceCalendarSettingResult(result)
+                    return try Self.ownedJSON(result)
+                }
+                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any],
+                      let request = prepared["request"], Self.equalJSON(request, try Self.deviceCalendarSettingRequest(original)) else {
+                    throw HostFailure("Malformed prepared Device Calendar setting write")
+                }
+                let commit = try Self.ownedJSON(["request": request, "prepared": prepared])
+                command = PendingCommand(version: 2, method: "deviceCalendarSettingCommit", argumentsJSON: try Self.ownedJSON([commit]))
+                _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "generalPreference" {
             do {
                 let value = try invoke("generalPreferencePrepare", arguments: args)
@@ -9884,7 +10112,8 @@ private final class Engine: @unchecked Sendable {
             if command.method == "backupDocumentCommit" { replay = try backupDocumentArguments(command) }
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
-            terminal = .success(try invoke(command.method, arguments: replay))
+            terminal = .success(try command.method == "deviceCalendarSettingCommit"
+                ? invokeDeviceCalendarSettingCommit(command) : invoke(command.method, arguments: replay))
         } catch {
             // These codes prove the first attempt stopped before its write. A
             // replay rejection cannot prove an earlier uncertain attempt did not.
@@ -9905,7 +10134,7 @@ private final class Engine: @unchecked Sendable {
 
     func retryPending() throws -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
-        guard notificationSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Notification edit is still awaiting its owner") }
+        guard notificationSettingTurn == nil, deviceCalendarSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Settings edit is still awaiting its owner") }
         let command = pending
         let method = command?.method
         let terminal = try resolvePending()
@@ -9997,6 +10226,16 @@ private final class Engine: @unchecked Sendable {
             try attachmentDraftHooks?.boundary?(.afterSaveCommit)
             #endif
             return try finishOwnedSave(command, with: .success(value))
+        }
+        if command.method == "deviceCalendarSettingCommit" {
+            return try withDeviceCalendarSettingOwner {
+                guard let raw = try journalArguments(command).first as? String else { throw Self.deviceStorageInvalid }
+                deviceCalendarSettingTurn?.envelopeJSON = raw
+                _ = try invoke("deviceCalendarSettingValidate", arguments: [raw])
+                if let terminal = command.terminal { return try finish(command, with: terminal) }
+                try persist(command)
+                return try finish(command, with: .success(invokeDeviceCalendarSettingCommit(command)))
+            }
         }
         _ = try beginRetainedOrdinaryTurn(command: command)
         ordinaryMutationDepth += 1
@@ -10355,6 +10594,18 @@ private final class Engine: @unchecked Sendable {
                 guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
                                      try NativeJSON.jsonObject(with: Data(value.utf8))) else {
                     throw HostFailure("SAVE_FAILED: Notification setting outcome cannot be verified")
+                }
+            }
+        }
+        if command.method == "deviceCalendarSettingCommit" {
+            _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal {
+                let proven = try invoke("deviceCalendarSettingRetryOutcome", arguments: [deviceCalendarSettingJournalRequest(command)])
+                try validateDeviceCalendarSettingAcknowledgment(command, value: proven)
+                try validateDeviceCalendarSettingAcknowledgment(command, value: value)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
+                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Device Calendar setting outcome cannot be verified")
                 }
             }
         }
@@ -10916,6 +11167,9 @@ private final class Engine: @unchecked Sendable {
         if command.method == "notificationSettingCommit", case .success = terminal {
             _ = try? invoke("notificationSettingAcknowledged", arguments: [])
         }
+        if command.method == "deviceCalendarSettingCommit", case .success = terminal {
+            _ = try? invoke("deviceCalendarSettingAcknowledged", arguments: [])
+        }
         if command.method == "reminderSnoozeCommit", case .success = terminal {
             _ = try? invoke("reminderSnoozeAcknowledged", arguments: [])
         }
@@ -11193,7 +11447,7 @@ private final class Engine: @unchecked Sendable {
             || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "referenceTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "deviceCalendarSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -14294,6 +14548,19 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("gtdWorkflow", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
+        if command.method == "deviceCalendarSettingCommit" {
+            guard !retainedOrdinary, command.editorDraft == nil,
+                  command.argumentsJSON.utf8.count <= Self.deviceCalendarSettingArgumentsLimit,
+                  try JSONEncoder().encode(command).count <= Self.deviceCalendarSettingJournalLimit,
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared Device Calendar setting journal")
+            }
+            _ = try Self.deviceCalendarSettingEnvelope(args[0])
+            if case .success(let value) = command.terminal {
+                try Self.deviceCalendarSettingResult(Self.deviceCalendarSettingObject(value, maximum: 1024), changed: true)
+            }
+            return args
+        }
         if command.method == "notificationSettingCommit" {
             guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
             guard command.argumentsJSON.utf8.count <= 49_152,
@@ -16529,6 +16796,12 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateSettingsAndAreaArguments(_ method: String, _ args: [Any], _ json: String, allowPreparedDates: Bool) throws {
+        if method == "deviceCalendarSetting" {
+            guard json.utf8.count <= Self.deviceCalendarSettingArgumentsLimit, let raw = args.first as? String else {
+                throw HostFailure("INVALID_INPUT: Device Calendar setting requires one bounded request")
+            }
+            _ = try Self.deviceCalendarSettingRequest(raw)
+        }
         if method == "notificationSetting" {
             guard let encoded = args.first as? String else { throw HostFailure("INVALID_INPUT: Notification setting requires one request") }
             _ = try Self.notificationSettingRequest(encoded)
@@ -19536,6 +19809,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func persist(_ command: PendingCommand, mixedGuard: (() throws -> Void)? = nil) throws {
+        if command.method == "deviceCalendarSettingCommit" { _ = try journalArguments(command) }
         if command.method == "taskCancellationUndoCommit", try cancellationUndoIsComplete(command) {
             // The same selected reader reserves future terminal capacity and
             // bounds an actual terminal before generic persistence can write it.
@@ -20193,6 +20467,7 @@ private final class Engine: @unchecked Sendable {
     private static let deviceStorageFrameLimit = 12 * 1024 * 1024
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
+        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil else { throw Self.deviceStorageUnavailable }
@@ -20274,7 +20549,7 @@ private final class Engine: @unchecked Sendable {
         do {
             let result = try work()
             try requireEncryptionUnlockTurn()
-            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil || reminderEffectsTurn != nil { return result }
+            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil || reminderEffectsTurn != nil || deviceCalendarSettingTurn != nil { return result }
             let retiredSecret = legacySecretRemoval()
             guard let runtime = context else { throw Self.deviceStorageUnavailable }
             let generation = attachmentGeneration
@@ -20303,6 +20578,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireHTTPAdmission(_ input: String) throws {
+        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -20331,6 +20607,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireSecretAdmission(_ input: String) throws {
+        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -20368,13 +20645,14 @@ private final class Engine: @unchecked Sendable {
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
               projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
               encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil,
-              notificationSettingTurn == nil, !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
+              notificationSettingTurn == nil, deviceCalendarSettingTurn == nil, !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
             throw HostFailure("Calendar bridge is unavailable")
         }
         try requireNoAttachmentDraft()
     }
 
     private func requireCryptoAdmission(_ input: String) throws {
+        guard deviceCalendarSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -20683,6 +20961,34 @@ private final class Engine: @unchecked Sendable {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
         }
         if deviceStorageLocation != nil {
+            let calendarSettingRead: @convention(block) () -> String = { [weak self] in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let turn = try self.requireDeviceCalendarSettingTurn()
+                    guard turn.preparing || turn.committing else { throw Self.deviceStorageUnavailable }
+                    let values = try turn.storage.readCalendarSettingState()
+                    return try Self.deviceStorageJSON(values.map { $0.map { $0 as Any } ?? NSNull() }, strings: values.compactMap { $0 })
+                } ?? "!MindwtrNativeError:Device settings storage is unavailable"
+            }
+            let calendarSettingCAS: @convention(block) (JSValue, JSValue) -> String? = { [weak self] expected, next in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let turn = try self.requireDeviceCalendarSettingTurn()
+                    guard turn.committing, let frozen = turn.envelopeJSON,
+                          let prepared = try Self.deviceCalendarSettingEnvelope(frozen)["prepared"] as? [String: Any],
+                          expected.isString, next.isString, let expectedJSON = expected.toString(), let nextJSON = next.toString(),
+                          expectedJSON.utf8.count <= Self.deviceStorageFrameLimit, nextJSON.utf8.count <= Self.deviceStorageFrameLimit,
+                          let before = try NativeJSON.jsonObject(with: Data(expectedJSON.utf8)) as? [Any], before.count == 2,
+                          before.allSatisfy({ $0 is String || $0 is NSNull }),
+                          let after = try NativeJSON.jsonObject(with: Data(nextJSON.utf8)) as? [String], after.count == 2,
+                          Self.equalJSON(before, [prepared["storedBefore"]!, prepared["markerBefore"]!]),
+                          Self.equalJSON(after, [prepared["storedAfter"]!, prepared["markerAfter"]!]) else { throw Self.deviceStorageInvalid }
+                    try turn.storage.compareAndSetCalendarSetting(expected: before.map { $0 as? String }, next: after)
+                    return nil
+                }
+            }
+            bridge.setObject(calendarSettingRead, forKeyedSubscript: "calendarSettingRead" as NSString)
+            bridge.setObject(calendarSettingCAS, forKeyedSubscript: "calendarSettingCAS" as NSString)
             let get: @convention(block) (JSValue) -> String = { [weak self] key in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
@@ -20811,6 +21117,8 @@ private final class Engine: @unchecked Sendable {
         reminderAdmissions.clearOrdinaryReadyWake()
         reminderEffectsTurn = nil
         notificationSettingTurn = nil; notificationSettingOwnerAccess = false
+        deviceCalendarSettingTurn = nil
+        startupDeviceCalendarSettingResult = nil
         reminderOwnerAccess = false
         reminderSourceStale = false
         foregroundCleanupCancellation = nil

@@ -36,9 +36,10 @@ afterEach(async () => {
     for (const f of fixtures.splice(0)) { await f.state.fixture.flush(); f.state.fixture.reset(); f.database.close(); }
 });
 
-const fixture = (options: { channel?: boolean; permission?: string; failCalendars?: boolean } = {}) => {
+const fixture = (options: { channel?: boolean; permission?: string; failCalendars?: boolean; deviceSettings?: boolean } = {}) => {
     const database = new Database(':memory:');
     const writes: string[] = [], calls: Record<string, any>[] = [], reads: { sql: string; params: unknown[] }[] = [], lines: string[] = [];
+    const cellReads: unknown[] = [], cellWrites: unknown[] = [];
     const kv = new Map([['mindwtr-system-calendar-settings', JSON.stringify({ enabled: true, selectAll: false,
         selectedCalendarIds: selected, areaIdsByCalendar: {} })]]);
     let logText = '', events = [event('external')];
@@ -79,6 +80,17 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
                 if (op === 'delete') { logText = ''; return '1'; }
                 throw new Error('Unexpected diagnostic operation');
             },
+            ...(options.deviceSettings ? {
+                calendarSettingRead: () => { cellReads.push(true); return JSON.stringify([
+                    kv.get('mindwtr-system-calendar-settings') ?? null, kv.get('mindwtr:native:calendar-setting:v1') ?? null]); },
+                calendarSettingCAS: (beforeJSON: string, afterJSON: string) => {
+                    const names = ['mindwtr-system-calendar-settings', 'mindwtr:native:calendar-setting:v1'];
+                    if (JSON.stringify(names.map((name) => kv.get(name) ?? null)) !== beforeJSON)
+                        return '!MindwtrNativeError:STALE_REVISION: Calendar setting changed';
+                    const after = JSON.parse(afterJSON) as string[];
+                    names.forEach((name, i) => kv.set(name, after[i])); cellWrites.push(after); return null;
+                },
+            } : {}),
             rnStateCommit: () => null, kvGet: (key: string) => JSON.stringify([kv.get(key) ?? null]),
             kvSet: (key: string, value: string) => { writes.push('kvSet'); kv.set(key, value); return null; },
             kvRemove: (key: string) => { writes.push('kvRemove'); kv.delete(key); return null; },
@@ -94,7 +106,7 @@ const fixture = (options: { channel?: boolean; permission?: string; failCalendar
         }
         throw new Error('Host operation did not settle');
     };
-    const f = { state, database, writes, calls, reads, kv, lines, poll, logText: () => logText,
+    const f = { state, database, writes, calls, reads, kv, lines, poll, cellReads, cellWrites, logText: () => logText,
         setEvents: (value: typeof events) => { events = value; },
         read: (value: unknown = request()) => poll(state.MindwtrHost.iosCalendarRead(JSON.stringify(value))),
         boot: async () => {
@@ -228,5 +240,61 @@ describe('actual exported iOS calendar read transport', () => {
         await gate.accepted; change(late); gate.release();
         expect(await late.poll(ticket)).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
         expect(late.logText()).not.toContain('v1.3.5/ios-calendar-read'); expect(late.writes).toEqual([]);
+    });
+});
+
+const calendarEdit = (f: ReturnType<typeof fixture>) => {
+    const before = JSON.parse(f.kv.get('mindwtr-system-calendar-settings')!);
+    return { requestId: '33333333-3333-4333-8333-333333333333',
+        edit: { type: 'deviceCalendars', before, value: { ...before, enabled: false } } };
+};
+const settingCall = (f: ReturnType<typeof fixture>, method: string, value: unknown) =>
+    f.poll(f.state.MindwtrHost[method](JSON.stringify(value)));
+
+describe('actual exported iOS device-calendar prepared setting', () => {
+    it('requires boot and its fixed native capability before any storage access', async () => {
+        const f = fixture({ deviceSettings: true });
+        expect(await settingCall(f, 'deviceCalendarSettingPrepare', calendarEdit(f))).toMatchObject({ ok: false });
+        expect(f.cellReads).toEqual([]); expect(f.cellWrites).toEqual([]);
+        const absent = fixture(); await absent.boot();
+        expect(await settingCall(absent, 'deviceCalendarSettingPrepare', calendarEdit(absent))).toMatchObject({ ok: false });
+        expect(absent.cellReads).toEqual([]); expect(absent.cellWrites).toEqual([]);
+    });
+
+    it('loads the production durable receipt command and saves only the proven receipt', async () => {
+        const f = fixture({ deviceSettings: true }); await f.boot();
+        const request = calendarEdit(f), before = f.state.fixture.canonical();
+        const planned = await settingCall(f, 'deviceCalendarSettingPrepare', request);
+        expect(planned).toMatchObject({ ok: true, value: { kind: 'prepared' } });
+        const envelope = { request, prepared: planned.value.prepared };
+        expect(await settingCall(f, 'deviceCalendarSettingValidate', envelope)).toMatchObject({ ok: true });
+        const committed = await settingCall(f, 'deviceCalendarSettingCommit', envelope);
+        expect(committed).toEqual({ ok: true, value: { changed: true, toasts: [], open: null, clearDraft: false } });
+        expect(f.cellWrites).toHaveLength(1); expect(f.calls).toEqual([]);
+        expect(f.database.query('SELECT COUNT(*) AS n FROM native_request_receipts').get()).toEqual({ n: 1 });
+        expect(f.database.query('SELECT COUNT(*) AS n FROM tasks').get()).toEqual({ n: 0 });
+        for (const field of ['tasks', 'projects', 'sections', 'areas', 'settings'])
+            expect(f.state.fixture.canonical()[field]).toBe(before[field]);
+        const reads = f.cellReads.length;
+        f.kv.set('mindwtr-system-calendar-settings', 'later unrelated choice');
+        expect(await settingCall(f, 'deviceCalendarSettingRetryOutcome', request)).toEqual(committed);
+        expect(await settingCall(f, 'deviceCalendarSettingCommit', envelope)).toEqual(committed);
+        expect(f.cellReads).toHaveLength(reads); expect(f.cellWrites).toHaveLength(1);
+        expect(f.kv.get('mindwtr-system-calendar-settings')).toBe('later unrelated choice');
+        expect(f.logText()).not.toContain('ios-calendar-setting');
+        expect(await f.poll(f.state.MindwtrHost.deviceCalendarSettingAcknowledged())).toEqual({ ok: true, value: null });
+        expect(f.logText()).toContain('v1.3.5/ios-calendar-setting');
+        expect(f.logText()).not.toContain(selected[2]); expect(f.logText()).not.toContain(request.requestId);
+    });
+
+    it('refuses stale cells without a receipt or provider operation', async () => {
+        const f = fixture({ deviceSettings: true }); await f.boot();
+        const request = calendarEdit(f), planned = await settingCall(f, 'deviceCalendarSettingPrepare', request);
+        expect(planned.ok).toBe(true);
+        f.kv.set('mindwtr:native:calendar-setting:v1', 'later marker');
+        expect(await settingCall(f, 'deviceCalendarSettingCommit', { request, prepared: planned.value.prepared }))
+            .toMatchObject({ ok: false, error: expect.stringContaining('STALE_REVISION') });
+        expect(f.cellWrites).toEqual([]); expect(f.calls).toEqual([]);
+        expect(f.database.query('SELECT COUNT(*) AS n FROM native_request_receipts').get()).toEqual({ n: 0 });
     });
 });

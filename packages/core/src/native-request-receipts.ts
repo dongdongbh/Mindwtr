@@ -317,6 +317,10 @@ type PendingReceipt = { fingerprint: string; reply: unknown; generation: number 
 let durableReceipts: Map<string, StoredReceipt> | null = null;
 /** null selects Android's existing all-command mode; a set scopes iOS durable replies and writes. */
 let durableCommands: Set<string> | null = null;
+/** Whether boot loaded durable receipt ownership for this exact command. */
+export const isNativeRequestReceiptDurable = (command: string): boolean => durableReceipts !== null
+    && (durableCommands === null || durableCommands.has(command))
+    && !NATIVE_UNJOURNALED_COMMANDS.has(command);
 /** Every request ID a receipts instance holds, and its payload: one ID belongs to one action across the contract's modules. */
 const requestPayloads = new Map<string, string>();
 /** Landed, not committed yet; `generation` is the store's when it landed (every change it made is saved at or before it). */
@@ -681,9 +685,7 @@ export function createNativeRequestReceipts(options: {
 }): NativeRequestReceipts {
     const limit = options.limit ?? 50;
     const receipts = new Map<string, Receipt>();
-    const durableFor = (payload: string) => durableReceipts !== null
-        && (durableCommands === null || durableCommands.has(commandOf(payload)))
-        && !NATIVE_UNJOURNALED_COMMANDS.has(commandOf(payload));
+    const durableFor = (payload: string) => isNativeRequestReceiptDurable(commandOf(payload));
 
     const checkIdentity = (requestId: unknown, payload: string): NativeHostResult<null> => {
         if (typeof requestId !== 'string' || !REQUEST_ID_PATTERN.test(requestId)) {

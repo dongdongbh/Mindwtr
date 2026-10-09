@@ -103,6 +103,7 @@ import {
 } from './external-calendar-feeds';
 import { resolveI18nText, type I18nTemplateValues } from './i18n';
 import type { Language } from './i18n/i18n-types';
+import { taskEditValuesEqual } from './json-value-equality';
 import type { ExternalCalendarSubscription } from './ics';
 import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-host-contract';
 import type { NativeCalendarFeed } from './native-host-contract-calendar';
@@ -282,12 +283,29 @@ type Draft = { name?: string; url?: string };
 const DEVICE_CALENDAR_SOURCE = (calendarId: string) => `system:${calendarId}`;
 const sameJson = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 
-function isSystemCalendarSettings(value: unknown): value is SystemCalendarSettings {
+export function isSystemCalendarSettings(value: unknown): value is SystemCalendarSettings {
     if (!isObjectRecord(value) || typeof value.enabled !== 'boolean' || typeof value.selectAll !== 'boolean'
         || !Array.isArray(value.selectedCalendarIds) || !value.selectedCalendarIds.every((id) => isText(id, 500))) return false;
     const areas = value.areaIdsByCalendar;
     return areas === undefined || (isObjectRecord(areas)
         && Object.values(areas).every((ids) => Array.isArray(ids) && ids.every((id) => isText(id, 200))));
+}
+
+export type NativeDeviceCalendarSettingsEdit = Extract<NativeCalendarSettingsEdit, { type: 'deviceCalendars' }>;
+
+/** Shared RN/native device-choice plan; provider access and storage are caller-owned. */
+export function planDeviceCalendarSetting(stored: SystemCalendarSettings, edit: NativeDeviceCalendarSettingsEdit): NativeHostResult<{
+    settings: SystemCalendarSettings; result: NativeCalendarCommandResult;
+}> {
+    const current = normalizeSystemCalendarSettings(stored);
+    const settings = normalizeSystemCalendarSettings(edit.value);
+    const changed = !taskEditValuesEqual(current, settings);
+    if (changed && !taskEditValuesEqual(current, normalizeSystemCalendarSettings(edit.before))) {
+        return fail('STALE_REVISION', 'The device calendar choices changed since the view showed them; read the view again');
+    }
+    return { ok: true, value: { settings, result: {
+        changed, toasts: [], open: changed && settings.enabled && !current.enabled ? 'device' : null, clearDraft: false,
+    } } };
 }
 
 function isEdit(edit: unknown): edit is NativeCalendarSettingsEdit {
@@ -824,17 +842,14 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 return result(true);
             }
             case 'deviceCalendars': {
-                const stored = normalizeSystemCalendarSettings(await feeds.getSystemCalendarSettings());
-                const value = normalizeSystemCalendarSettings(edit.value);
-                if (sameJson(stored, value)) return result(false);
-                if (!sameJson(stored, normalizeSystemCalendarSettings(edit.before))) {
-                    return fail('STALE_REVISION', 'The device calendar choices changed since the view showed them; read the view again');
-                }
+                const planned = planDeviceCalendarSetting(await feeds.getSystemCalendarSettings(), edit);
+                if (!planned.ok) return planned;
+                if (!planned.value.result.changed) return { ok: true, value: planned.value.result };
                 current.device.settings = { ...edit.value, areaIdsByCalendar: edit.value.areaIdsByCalendar ?? {} };
                 await feeds.saveSystemCalendarSettings(edit.value);
-                const turnedOn = value.enabled && !stored.enabled;
+                const turnedOn = planned.value.result.open === 'device';
                 if (turnedOn && current.device.permission !== 'granted') await loadDevice(current, true);
-                return result(true, turnedOn ? { open: 'device' } : {});
+                return { ok: true, value: planned.value.result };
             }
             case 'removeFeed': {
                 const shown = shownFeeds(current);

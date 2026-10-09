@@ -204,6 +204,11 @@ export function normalizeSystemCalendarSettings(raw: Partial<SystemCalendarSetti
     };
 }
 
+/** Decode the device-local cell with the same legacy defaults as the RN binding. */
+export function decodeSystemCalendarSettings(raw: string | null): SystemCalendarSettings {
+    return normalizeSystemCalendarSettings(safeJsonParse<Partial<SystemCalendarSettings> | null>(raw, null));
+}
+
 function normalizePermissionStatus(status: unknown): SystemCalendarPermissionStatus {
     if (status === 'granted' || status === 'denied' || status === 'undetermined') {
         return status;
@@ -365,8 +370,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
     const getSystemCalendarSettings = async (): Promise<SystemCalendarSettings> => {
         if (isSandboxMode()) return normalizeSystemCalendarSettings(null);
         const raw = await host.storage.getItem(SYSTEM_CALENDAR_SETTINGS_KEY);
-        const parsed = safeJsonParse<Partial<SystemCalendarSettings> | null>(raw, null);
-        return normalizeSystemCalendarSettings(parsed);
+        return decodeSystemCalendarSettings(raw);
     };
 
     const saveSystemCalendarSettings = async (settings: SystemCalendarSettings): Promise<void> => {

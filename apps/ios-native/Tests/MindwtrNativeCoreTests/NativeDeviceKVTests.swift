@@ -11,6 +11,8 @@ final class NativeDeviceKVTests: XCTestCase {
     private let backend = "@mindwtr_sync_backend"
     private let path = "@mindwtr_sync_path"
     private let webdav = "@mindwtr_webdav_url"
+    private let calendarSetting = "mindwtr-system-calendar-settings"
+    private let calendarMarker = "mindwtr:native:calendar-setting:v1"
     private var namespace: URL {
         container.appendingPathComponent("Library/Application Support/\(bundle)/RCTAsyncLocalStorage_V1")
     }
@@ -178,6 +180,170 @@ final class NativeDeviceKVTests: XCTestCase {
         store.faults.afterPromotion = nil
         XCTAssertThrowsError(try store.compareAndSetReminderMaps(expected: before, next: before, confirmUnchanged: true))
         XCTAssertEqual(try Data(contentsOf: manifest), foreign)
+    }
+
+    func testCalendarStateReadsMissingEmptyAndRawLegacyCellsWithoutWriting() throws {
+        let missing = try open()
+        XCTAssertEqual(try missing.readCalendarSettingState(), [nil, nil])
+        XCTAssertFalse(missing.hasPendingCalendarSettingMutation)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: manifest.path))
+        missing.close(); current = nil
+        try seed("{\"mindwtr-system-calendar-settings\":\"\\uFEFF  { \\\"enabled\\\": true } 🧠\\n\",\"mindwtr:native:calendar-setting:v1\":\"\",\"unknown\":\"preserved\"}")
+        let store = try open(), before = try bytes()
+        let values = try store.readCalendarSettingState()
+        XCTAssertEqual(values.map { $0.map { Data($0.utf8) } }, [Data("\u{FEFF}  { \"enabled\": true } 🧠\n".utf8), Data()])
+        XCTAssertEqual(try bytes(), before)
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: [values[0], nil], next: ["after", "proof"]))
+        XCTAssertEqual(try bytes(), before)
+        store.close(); current = nil
+        try seed("{\"mindwtr-system-calendar-settings\":null,\"mindwtr:native:calendar-setting:v1\":null}")
+        // RN's exact MD5 filenames for the two fixed cells.
+        let files = ["c1b1171d3d70d708dabbaa00e835028d", "2730d01cc73c83d46a0f156b83ff7f95"].map { namespace.appendingPathComponent($0) }
+        let raw = [Data([0xEF, 0xBB, 0xBF]) + Data("raw external choice 🧠".utf8), Data("\u{FEFF}\u{FEFF}raw external proof".utf8)]
+        for (url, data) in zip(files, raw) { try data.write(to: url) }
+        let external = try open(), externalBefore = try bytes()
+        let decoded = try files.map { url -> Data? in
+            var encoding: UInt = 0
+            return Data((try NSString(contentsOfFile: url.path, usedEncoding: &encoding) as String).utf8)
+        }
+        XCTAssertEqual(try external.readCalendarSettingState().map { $0.map { Data($0.utf8) } }, decoded)
+        XCTAssertEqual(try bytes(), externalBefore)
+    }
+
+    func testCalendarCASCommitsBothCellsTogetherAndPreservesUnknownAndExternalRecords() throws {
+        try seed("{\"@mindwtr_sync_path\":null,\"é\":\"composed\",\"e\\u0301\":\"decomposed\",\"unknown\":\"\\uFEFFkeep 🧠\"}")
+        let external = namespace.appendingPathComponent("3841382bf18a349689a3256aa5be82e1")
+        let raw = Data("external path bytes 🧠".utf8); try raw.write(to: external)
+        let externalBefore = try externalBytes(), externalInode = try inode(external)
+        let store = try open(), before = try store.readCalendarSettingState()
+        let next = ["\u{FEFF}{\"enabled\":true,\"selectedCalendarIds\":[\"é\",\"e\\u0301\"]}\n", "\u{FEFF}exact mutation proof e\u{301}"]
+        var promotions = 0; store.faults.beforePromotion = { promotions += 1 }
+        try store.compareAndSetCalendarSetting(expected: before, next: next)
+        XCTAssertEqual(promotions, 1); XCTAssertFalse(store.hasPendingCalendarSettingMutation)
+        XCTAssertEqual(try store.readCalendarSettingState().map { $0.map { Data($0.utf8) } }, next.map { Data($0.utf8) })
+        let written = try XCTUnwrap(NativeJSON.jsonObject(with: Data(contentsOf: manifest)) as? NSDictionary)
+        XCTAssertEqual(written[calendarSetting] as? String, next[0]); XCTAssertEqual(written[calendarMarker] as? String, next[1])
+        XCTAssertEqual(written["é"] as? String, "composed"); XCTAssertEqual(written["e\u{301}"] as? String, "decomposed")
+        XCTAssertEqual(try store.get("unknown"), "\u{FEFF}keep 🧠")
+        XCTAssertEqual(try externalBytes(), externalBefore); XCTAssertEqual(try inode(external), externalInode)
+        store.close(); current = nil
+        let cold = try open()
+        XCTAssertEqual(try cold.readCalendarSettingState().map { $0.map { Data($0.utf8) } }, next.map { Data($0.utf8) })
+        XCTAssertEqual(try cold.get(path), "external path bytes 🧠"); XCTAssertEqual(try Data(contentsOf: external), raw)
+    }
+
+    func testCalendarCASRejectsStaleSettingOrMarkerIncludingABAWithoutPublication() throws {
+        try seed("{\"mindwtr-system-calendar-settings\":\"old choice\",\"mindwtr:native:calendar-setting:v1\":\"first proof\"}")
+        let store = try open(), initial = try store.readCalendarSettingState()
+        try store.set(calendarSetting, "newer ordinary pruning")
+        let pruned = try bytes()
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: initial, next: ["requested choice", "request proof"]))
+        XCTAssertEqual(try bytes(), pruned)
+        try store.compareAndSetCalendarSetting(expected: try store.readCalendarSettingState(), next: ["old choice", "newer proof"])
+        let aba = try bytes()
+        var promotions = 0; store.faults.beforePromotion = { promotions += 1 }
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: initial, next: ["requested choice", "request proof"]))
+        XCTAssertEqual(promotions, 0); XCTAssertEqual(try bytes(), aba)
+        XCTAssertEqual(try store.readCalendarSettingState(), ["old choice", "newer proof"])
+    }
+
+    func testCalendarCASUsesExactUnicodeBytesInBothWitnesses() throws {
+        try seed("{\"mindwtr-system-calendar-settings\":\"café\",\"mindwtr:native:calendar-setting:v1\":\"proof café\"}")
+        let store = try open(), before = try bytes()
+        let expected = try store.readCalendarSettingState()
+        XCTAssertEqual(expected[0], "cafe\u{301}"); XCTAssertEqual(expected[1], "proof cafe\u{301}")
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: ["cafe\u{301}", expected[1]], next: ["after", "proof-after"]))
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: [expected[0], "proof cafe\u{301}"], next: ["after", "proof-after"]))
+        XCTAssertEqual(try bytes(), before)
+        let next = ["\u{FEFF}cafe\u{301}", "\u{FEFF}proof cafe\u{301}"]
+        try store.compareAndSetCalendarSetting(expected: expected, next: next)
+        let committed = try store.readCalendarSettingState().map { $0.map { Data($0.utf8) } }
+        XCTAssertEqual(committed, next.map { Data($0.utf8) })
+    }
+
+    func testCalendarPrivateMarkerCannotBeWrittenOrRemovedThroughGenericKV() throws {
+        try seed("{\"mindwtr-system-calendar-settings\":\"choice\",\"mindwtr:native:calendar-setting:v1\":\"proof\",\"unknown\":\"keep\"}")
+        let store = try open(), before = try bytes()
+        XCTAssertThrowsError(try store.set(calendarMarker, "forged"))
+        XCTAssertThrowsError(try store.remove(calendarMarker))
+        XCTAssertThrowsError(try store.multiSet([(calendarSetting, "new choice"), (calendarMarker, "forged")]))
+        XCTAssertThrowsError(try store.multiRemove([calendarSetting, calendarMarker]))
+        XCTAssertEqual(try bytes(), before)
+        try store.set(calendarSetting, "ordinary prune")
+        XCTAssertEqual(try store.readCalendarSettingState(), ["ordinary prune", "proof"])
+        try store.remove(calendarSetting)
+        XCTAssertEqual(try store.readCalendarSettingState(), [nil, "proof"])
+    }
+
+    func testCalendarCASCountsAndUTF8CellCapsRefuseBeforeIOAndExactCapsAreAccepted() throws {
+        try seed("{}")
+        let store = try open(), before = try bytes()
+        var promotions = 0; store.faults.beforePromotion = { promotions += 1 }
+        for count in [0, 1, 3] {
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: Array(repeating: nil, count: count), next: ["choice", "proof"]))
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: [nil, nil], next: Array(repeating: "", count: count)))
+        }
+        let over = String(repeating: "🧠", count: 256 * 1024 + 1)
+        for slot in 0..<2 {
+            var expected: [String?] = [nil, nil]; expected[slot] = over
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: expected, next: ["choice", "proof"]))
+            var next = ["choice", "proof"]; next[slot] = over
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: [nil, nil], next: next))
+        }
+        XCTAssertEqual(promotions, 0); XCTAssertEqual(try bytes(), before)
+        let boundary = String(repeating: "🧠", count: 256 * 1024)
+        try store.compareAndSetCalendarSetting(expected: [nil, nil], next: [boundary, boundary])
+        XCTAssertEqual(try store.readCalendarSettingState().map { $0?.utf8.count }, [1024 * 1024, 1024 * 1024])
+        let unchanged = try bytes(), unchangedInode = try inode(manifest)
+        try store.compareAndSetCalendarSetting(expected: [boundary, boundary], next: [boundary, boundary])
+        XCTAssertEqual(promotions, 1); XCTAssertEqual(try bytes(), unchanged); XCTAssertEqual(try inode(manifest), unchangedInode)
+    }
+
+    func testCalendarCASRetainsExactBaselineAcrossLostPromotionOrReadbackAcknowledgment() throws {
+        for promotionCut in [true, false] {
+            try seed("{\"mindwtr-system-calendar-settings\":\"before\",\"unknown\":\"keep\"}")
+            let store = try open(), before = try store.readCalendarSettingState(), next = ["after", "proof"]
+            var promotions = 0; store.faults.beforePromotion = { promotions += 1 }
+            if promotionCut { store.faults.afterPromotion = { throw Injected.failure } }
+            else { store.faults.beforeReadback = { throw Injected.failure } }
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: before, next: next))
+            XCTAssertTrue(store.hasPendingCalendarSettingMutation); XCTAssertFalse(store.hasPendingReminderMutation)
+            let promoted = try bytes(), promotedInode = try inode(manifest)
+            XCTAssertThrowsError(try store.readCalendarSettingState()); XCTAssertThrowsError(try store.get("unknown"))
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: before, next: ["different", "proof"]))
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: before, next: ["after", "different proof"]))
+            XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: [next[0], next[1]], next: next))
+            XCTAssertThrowsError(try store.set(calendarSetting, "after"))
+            XCTAssertTrue(store.hasPendingCalendarSettingMutation); XCTAssertEqual(try bytes(), promoted)
+            store.faults.afterPromotion = nil; store.faults.beforeReadback = nil
+            try store.compareAndSetCalendarSetting(expected: before, next: next)
+            XCTAssertFalse(store.hasPendingCalendarSettingMutation); XCTAssertEqual(promotions, 1)
+            XCTAssertEqual(try bytes(), promoted); XCTAssertEqual(try inode(manifest), promotedInode)
+            XCTAssertEqual(try store.readCalendarSettingState(), ["after", "proof"])
+            store.close(); current = nil
+            let cold = try open()
+            XCTAssertEqual(try cold.readCalendarSettingState(), ["after", "proof"]); XCTAssertEqual(try cold.get("unknown"), "keep")
+            cold.close(); current = nil
+        }
+    }
+
+    func testCalendarCASCannotReplaceDifferentPendingMutationAndForeignAfterManifest() throws {
+        try seed("{\"@mindwtr_sync_backend\":\"off\"}")
+        let store = try open()
+        store.faults.afterPromotion = { throw Injected.failure }
+        XCTAssertThrowsError(try store.set(backend, "webdav"))
+        XCTAssertFalse(store.hasPendingCalendarSettingMutation)
+        let held = try bytes()
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: [nil, nil], next: ["choice", "proof"]))
+        XCTAssertEqual(try bytes(), held)
+        store.faults.afterPromotion = nil; try store.set(backend, "webdav")
+        let before = try store.readCalendarSettingState()
+        store.faults.afterPromotion = { throw Injected.failure }
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: before, next: ["choice", "proof"]))
+        try sameByteReplacement(manifest); let foreign = try bytes()
+        store.faults.afterPromotion = nil
+        XCTAssertThrowsError(try store.compareAndSetCalendarSetting(expected: before, next: ["choice", "proof"]))
+        XCTAssertEqual(try bytes(), foreign); XCTAssertThrowsError(try store.readCalendarSettingState())
     }
 
     func testLostPromotionAcknowledgmentRetainsExactOperationAndColdRows() throws {
