@@ -738,7 +738,9 @@ const scenarioJsonAhead = async () => {
     const storedAgain = rows(again, `SELECT rev, updatedAt FROM tasks WHERE id = '${extra.id}'`);
     check(storedAgain.length === 1 && storedAgain[0].rev === stored[0].rev && storedAgain[0].updatedAt === stored[0].updatedAt
         && counts(again).tasks === counts(postDb).tasks, `(2) relaunch imported nothing: the task keeps rev ${stored[0].rev}, ${counts(postDb).tasks} task rows`);
-    check(relaunch.get(ASYNC_STORAGE) === after.get(ASYNC_STORAGE), '(2) relaunch left RKStorage unchanged');
+    // Rows, not file bytes: every first paint rewrites RN's prompt state (the same day: the same value), as RN's first paint does.
+    const relaunchAsync = asyncStorage('2-relaunch-rkstorage');
+    check(isDeepStrictEqual(relaunchAsync, postAsync), `(2) relaunch left every RKStorage row unchanged${shortList(asyncChanges(postAsync, relaunchAsync))}`);
     return { t, id: extra.id, stored: stored[0], post: readState(again) };
 };
 
