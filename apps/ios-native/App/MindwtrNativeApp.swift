@@ -1,6 +1,46 @@
 import SwiftUI
 import LocalAuthentication
 import UIKit
+import MindwtrNativeCore
+
+/// One immutable process snapshot, shared by startup and future early native response capture.
+enum NativeAppLaunch {
+    static let arguments = ProcessInfo.processInfo.arguments
+    static let selection: Result<NativeLaunchSelection, Error> = {
+        #if targetEnvironment(simulator) || (DEBUG && NATIVE_DEVICE_TEST)
+        let identifier = Bundle.main.bundleIdentifier
+        #if !targetEnvironment(simulator)
+        guard identifier == "tech.dongdongbh.mindwtr.native.dev" else {
+            return .failure(LaunchFailure.developmentBundleRequired)
+        }
+        let mode = NativeLaunchSelection.BuildMode.deviceTest
+        #elseif DEBUG
+        let mode = NativeLaunchSelection.BuildMode.simulatorDebug
+        #else
+        let mode = NativeLaunchSelection.BuildMode.simulatorRelease
+        #endif
+        return Result {
+            let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: false)
+            return try NativeLaunchSelection.resolve(arguments: arguments, bundleIdentifier: identifier,
+                supportURL: support, homeURL: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), mode: mode)
+        }
+        #else
+        return .failure(LaunchFailure.unavailable)
+        #endif
+    }()
+
+    private enum LaunchFailure: LocalizedError {
+        case developmentBundleRequired
+        case unavailable
+        var errorDescription: String? {
+            switch self {
+            case .developmentBundleRequired: return "Physical testing requires the isolated native development app."
+            case .unavailable: return "This build is not enabled for physical-device testing."
+            }
+        }
+    }
+}
 
 @main
 struct MindwtrNativeApp: App {

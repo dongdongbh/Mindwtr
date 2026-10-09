@@ -2658,3 +2658,10 @@ Final core85 and bridge46 suites, native-host typecheck, scoped lint, boot gates
 The ios-reminder-snooze diagnostic proves durable intent acceptance after terminal journal clear, not OS scheduling or delivery. Effects remain intercepted; categories, callback capture, response routing, physical actions and legacy ownership migration remain open. No real permission prompt, device authentication or app installation ran for this slice.
 
 The final simulator SDK build-for-testing passed with bundle `1af60623c25f76269de832a15c5fb3baa016faffcb6543dda353f53ed48a0667`. Both initial review blockers are closed by the bounded corrections and runtime evidence above.
+
+
+### Task448: trusted native launch selection (2026-10-09)
+
+Startup now consumes one immutable process selection, available to the upcoming early notification-response handler. The pure resolver retains standard, isolated UUID and staged RN rehearsal behavior, compile-time device restrictions, and the isolated Keychain/defaults identity. It reads no preferences and creates no directories; existing startup code still owns filesystem checks and host admission. Notification payloads cannot select a library.
+
+All 12 actual Mac resolver tests pass, with 26 notification/settings neighbors passing in the initial run. The Unicode fixture initially failed because macOS normalized both file-path inputs before resolution; byte-preserving URL construction corrected the fixture without weakening its assertions. The simulator SDK test build, four diagnostic field tests, diff check and independent source review pass. The `ios-launch-selection` marker proves successful current-host startup through this selection, not response capture or delivery. No app installation, physical notification, permission prompt or device-authentication test ran. Response capture, durable inbox, action routing and device acceptance remain open.

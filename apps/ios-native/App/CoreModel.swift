@@ -4310,13 +4310,6 @@ final class CoreModel: ObservableObject {
             return
         }
         #if targetEnvironment(simulator) || (DEBUG && NATIVE_DEVICE_TEST)
-        #if !targetEnvironment(simulator)
-        // Device alpha builds must never open under the installed RN identity.
-        guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev" else {
-            error = "Physical testing requires the isolated native development app."
-            return
-        }
-        #endif
         areaManagerPresented = false
         areaManagerProjectID = nil
         busy = true
@@ -4329,32 +4322,18 @@ final class CoreModel: ObservableObject {
         }
         do {
             if host == nil {
+                let selection = try NativeAppLaunch.selection.get()
                 guard let bundle = Bundle.main.url(forResource: "core-host", withExtension: "js") else {
                     throw CocoaError(.fileNoSuchFile)
                 }
-                let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                    appropriateFor: nil, create: true)
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                let arguments = ProcessInfo.processInfo.arguments
-                #if !targetEnvironment(simulator)
-                guard !arguments.contains("--native-app-lock-auth"), !arguments.contains("--native-rn-rehearsal") else {
-                    throw CocoaError(.fileReadCorruptFile)
-                }
-                #endif
-                let testLibraryPositions = arguments.indices.filter { arguments[$0] == "--native-ui-test-library" }
-                if let position = testLibraryPositions.first {
-                    guard testLibraryPositions.count == 1, !arguments.contains("--native-rn-rehearsal"),
-                          position + 1 < arguments.count,
-                          let identifier = UUID(uuidString: arguments[position + 1]),
-                          identifier.uuidString.lowercased() == arguments[position + 1] else {
-                        throw CocoaError(.fileReadCorruptFile)
-                    }
-                    let testRoot = support.appendingPathComponent("NativeUITests", isDirectory: true)
+                let arguments = NativeAppLaunch.arguments
+                if case let .isolated(database, directory, namespace, identifier) = selection {
+                    let testRoot = directory.deletingLastPathComponent()
                     try FileManager.default.createDirectory(at: testRoot, withIntermediateDirectories: true)
                     guard try testRoot.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
                         throw CocoaError(.fileReadCorruptFile)
                     }
-                    let directory = testRoot.appendingPathComponent(identifier.uuidString.lowercased(), isDirectory: true)
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                     guard try directory.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
                         throw CocoaError(.fileReadCorruptFile)
@@ -4445,8 +4424,8 @@ final class CoreModel: ObservableObject {
                     taskAttachmentDownloadTestThrowOnce = arguments.contains("--native-task-download-command-throw-once")
                     taskAttachmentDownloadTestDelayOnce = arguments.contains("--native-task-download-delay-reply-once")
                     taskAttachmentDownloadTestMalformedOnce = arguments.contains("--native-task-download-malformed-reply-once")
-                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
-                        deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
+                    host = CoreHost(databaseURL: database, bundleURL: bundle,
+                        deviceStorage: (directory, namespace),
                         isolatedTestID: identifier)
                     let metadataOnlyDownloadFixture = arguments.contains("--native-project-download-stop-after-metadata-intent-once")
                     if arguments.contains("--native-project-download-stop-after-filled-once") || metadataOnlyDownloadFixture {
@@ -4454,16 +4433,14 @@ final class CoreModel: ObservableObject {
                         selectedSurface = .projects // Isolated recovery fixture must not prefetch through Inbox startup Sync.
                     }
                     settingsSyncAvailable = true
-                } else if arguments.contains("--native-rn-rehearsal") {
+                } else if case let .rehearsal(container, database, identifier) = selection {
                     // An explicitly staged copy only. Never select the live RN container.
-                    let container = support.appendingPathComponent("NativeRNRehearsal", isDirectory: true)
-                    let database = container.appendingPathComponent("Documents/SQLite/mindwtr.db")
+                    try FileManager.default.createDirectory(at: container.deletingLastPathComponent(), withIntermediateDirectories: true)
                     guard try container.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
                           try database.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey]).isSymbolicLink != true,
                           try database.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true,
                           database.resolvingSymlinksInPath().path == container.resolvingSymlinksInPath()
-                            .appendingPathComponent("Documents/SQLite/mindwtr.db").path,
-                          let identifier = Bundle.main.bundleIdentifier else { throw CocoaError(.fileReadCorruptFile) }
+                            .appendingPathComponent("Documents/SQLite/mindwtr.db").path else { throw CocoaError(.fileReadCorruptFile) }
                     let legacy = try LegacyRNStorage(containerURL: container, bundleIdentifier: identifier)
                     storedLanguage = try legacy.value(forKey: "mindwtr-language") ?? ""
                     storedTheme = try legacy.value(forKey: "@mindwtr_theme") ?? ""
@@ -4527,16 +4504,14 @@ final class CoreModel: ObservableObject {
                     host = CoreHost(databaseURL: database, bundleURL: bundle, legacyStorage: legacy)
                 }
                 #endif
-                if host == nil {
-                    let directory = support.appendingPathComponent("NativeFoundation", isDirectory: true)
+                if case let .standard(database, container, namespace) = selection {
+                    let directory = database.deletingLastPathComponent()
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    guard let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty else {
-                        throw CocoaError(.fileReadCorruptFile)
-                    }
-                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
-                        deviceStorage: (URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), identifier))
+                    host = CoreHost(databaseURL: database, bundleURL: bundle,
+                        deviceStorage: (container, namespace))
                     settingsSyncAvailable = true
                 }
+                guard host != nil else { throw CocoaError(.fileReadCorruptFile) }
             }
             storedLanguage = preferenceDefaults.object(forKey: devicePreferencePrefix + "mindwtr-language") as? String ?? storedLanguage
             storedTheme = preferenceDefaults.object(forKey: devicePreferencePrefix + "@mindwtr_theme") as? String ?? storedTheme
@@ -4590,6 +4565,11 @@ final class CoreModel: ObservableObject {
             guard host === currentHost else { throw CancellationError() }
             // Preserve the acknowledged domain result before any later App read.
             stageTaskStartupSaveReceipt(startup)
+            _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                "Native iOS launch selection admitted",
+                #"{"releaseCheck":"v1.3.5/ios-launch-selection","outcome":"confirmed"}"#,
+            ]))
+            guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             try await readProjectFileAddInventory(currentHost)
             taskRecoveryStartupCorrupt = false
             do {
