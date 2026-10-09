@@ -15,6 +15,7 @@ export type PlayStoreUpdateInfo = {
 
 interface PlayStoreUpdatesModule extends NativeModule {
   getUpdateInfoAsync(): Promise<PlayStoreUpdateInfo>;
+  getInstallerPackageName(): string | null;
 }
 
 let PlayStoreUpdates: PlayStoreUpdatesModule | null = null;
@@ -34,4 +35,13 @@ export const getPlayStoreUpdateInfoAsync = async (): Promise<PlayStoreUpdateInfo
     throw new Error('Play Store updates module unavailable');
   }
   return PlayStoreUpdates.getUpdateInfoAsync();
+};
+
+/** The package that installed the app (com.android.vending for Google Play), or null when unknown or without the module (FOSS). */
+export const getInstallerPackageName = (): string | null => {
+  try {
+    return PlayStoreUpdates?.getInstallerPackageName() ?? null;
+  } catch {
+    return null;
+  }
 };

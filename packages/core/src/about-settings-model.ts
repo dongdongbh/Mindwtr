@@ -35,8 +35,16 @@ export const ABOUT_LICENSE = 'AGPL-3.0';
 /** How the Android app was installed, as RN reads it: the Play install referrer is non-empty for a Play install. */
 export type AndroidInstallerSource = 'play-store' | 'sideload' | 'unknown';
 
-/** RN's reading of expo-application's getInstallReferrerAsync answer (a rejected call reads as 'unknown'). */
-export const resolveAndroidInstallerSource = (referrer: string | null | undefined): AndroidInstallerSource => {
+/** Google Play's package: the installer of every Play install, testing tracks included. */
+export const ANDROID_PLAY_INSTALLER_PACKAGE = 'com.android.vending';
+
+/**
+ * How the app was installed: Google Play as its installer (PackageManager's installing package) is a Play install, else a
+ * non-empty install referrer (expo-application's getInstallReferrerAsync) is. A testing-track install has an empty referrer, so
+ * the referrer alone read it as a sideload and sent its update check to GitHub. A rejected referrer call reads as 'unknown'.
+ */
+export const resolveAndroidInstallerSource = (referrer: string | null | undefined, installerPackageName?: string | null): AndroidInstallerSource => {
+    if ((installerPackageName ?? '').trim() === ANDROID_PLAY_INSTALLER_PACKAGE) return 'play-store';
     const normalized = (referrer || '').trim().toLowerCase();
     return normalized ? 'play-store' : 'sideload';
 };

@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
     buildAboutFeedbackSubmission,
+    ANDROID_PLAY_INSTALLER_PACKAGE,
     buildAboutSettingsModel,
     createAboutUpdateChecks,
     getAboutInstallChannel,
@@ -18,9 +19,9 @@ import {
 } from '@mindwtr/core';
 import { useToast } from '@/contexts/toast-context';
 import { getDeviceLocale, resolveMobileAnalyticsVersion } from '@/lib/analytics-heartbeat';
-import { collectFeedbackDiagnostics } from '@/lib/app-log';
+import { collectFeedbackDiagnostics, logInfo } from '@/lib/app-log';
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { getPlayStoreUpdateInfoAsync } from '@/lib/play-store-updates';
+import { getInstallerPackageName, getPlayStoreUpdateInfoAsync } from '@/lib/play-store-updates';
 import { logSettingsError, logSettingsWarn } from '@/lib/settings-utils';
 
 import { MobileExtraConfig } from './settings.constants';
@@ -69,7 +70,13 @@ export function AboutSettingsScreen({
         Application.getInstallReferrerAsync()
             .then((referrer) => {
                 if (cancelled) return;
-                setAndroidInstallerSource(resolveAndroidInstallerSource(referrer));
+                const installer = getInstallerPackageName();
+                const source = resolveAndroidInstallerSource(referrer, installer);
+                setAndroidInstallerSource(source);
+                void logInfo('Android installer source', { scope: 'about', extra: {
+                    releaseCheck: 'v1.3.5/android-installer-source', source,
+                    installer: installer === ANDROID_PLAY_INSTALLER_PACKAGE ? 'play' : installer ? 'other' : 'none',
+                } });
             })
             .catch((error) => {
                 if (!cancelled) {

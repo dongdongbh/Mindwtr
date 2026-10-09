@@ -172,6 +172,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // native-about-update-check, native-about-feedback, native-analytics-heartbeat, native-analytics-opt-out and
     // native-store-review (v1.3.5) reuse releaseCheck, mode and outcome above.
     'source', 'play', 'badge', 'notice', 'diagnostics', 'channel', 'request', 'optedOut',
+    // android-installer-source (v1.3.5) reuses source above.
+    'installer',
 ];
 
 describe('release diagnostics field names', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildFeedbackSubmissionPayload } from './feedback';
-import { FEEDBACK_MESSAGE_MAX_LENGTH, getFeedbackMessageMaxLength, getFeedbackDraftState, planFeedbackSubmit } from './about-settings-model';
+import { FEEDBACK_MESSAGE_MAX_LENGTH, getFeedbackMessageMaxLength, getFeedbackDraftState, planFeedbackSubmit, resolveAndroidInstallerSource } from './about-settings-model';
 import { getTranslator, resolveI18nText } from './i18n';
 
 const t = getTranslator('en');
@@ -26,5 +26,15 @@ describe('the feedback modal\'s rules', () => {
         if ('error' in plan) throw new Error(plan.error);
         expect(plan.input.message.length).toBe(FEEDBACK_MESSAGE_MAX_LENGTH);
         expect(buildFeedbackSubmissionPayload(plan.input)).toMatchObject({ ok: true });
+    });
+});
+
+describe('the Android installer source', () => {
+    it('reads a Play install from its installer, so an empty referrer (a testing-track install) is still Play', () => {
+        expect(resolveAndroidInstallerSource('', 'com.android.vending')).toBe('play-store');
+        expect(resolveAndroidInstallerSource(null, 'com.android.vending')).toBe('play-store');
+        expect(resolveAndroidInstallerSource('utm_source=google-play', null)).toBe('play-store');
+        expect(resolveAndroidInstallerSource('', null)).toBe('sideload');
+        expect(resolveAndroidInstallerSource('', 'com.google.android.packageinstaller')).toBe('sideload');
     });
 });

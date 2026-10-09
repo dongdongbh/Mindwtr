@@ -38,6 +38,7 @@ const harness = vi.hoisted(() => ({
   feedbackEndpointUrl: '',
   releaseVersion: '',
   referrer: { value: '' as string } as { value?: string; error?: string },
+  installer: null as string | null,
   play: [] as ({ value: unknown } | { error: string })[],
   github: [] as ({ status: number; body?: unknown })[],
   feedbackStatus: 200,
@@ -103,6 +104,7 @@ vi.mock('@/contexts/toast-context', () => ({
   useToast: () => ({ showToast: (toast: unknown) => record('toast', toast) }),
 }));
 vi.mock('@/lib/play-store-updates', () => ({
+  getInstallerPackageName: () => harness.installer,
   getPlayStoreUpdateInfoAsync: async () => {
     const next = harness.play.shift();
     if (!next) throw new Error('No Play answer queued');
@@ -146,6 +148,8 @@ type Scenario = {
   releaseVersion?: string;
   feedbackEndpointUrl?: string;
   referrer?: { value?: string; error?: string };
+  /** PackageManager's installing package (not in the frozen scenarios: RN read only the referrer then). */
+  installer?: string;
   storage?: Record<string, string>;
   play?: ({ value: unknown } | { error: string })[];
   github?: { status: number; body?: unknown }[];
@@ -252,6 +256,7 @@ async function run(scenario: Scenario) {
   harness.releaseVersion = scenario.releaseVersion ?? '';
   harness.feedbackEndpointUrl = scenario.feedbackEndpointUrl ?? '';
   harness.referrer = scenario.referrer ?? { value: '' };
+  harness.installer = scenario.installer ?? null;
   harness.play = [...(scenario.play ?? [])];
   harness.github = [...(scenario.github ?? [])];
   harness.feedbackStatus = scenario.feedbackStatus ?? 200;
@@ -414,5 +419,13 @@ describe('Settings › About, the heartbeat and the store review prompt parity w
     const frozen = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
     expect(frozen.scenarios).toEqual(JSON.parse(JSON.stringify(SCENARIOS)));
     expect(JSON.parse(JSON.stringify(observed))).toEqual(frozen.observations);
+  });
+
+  it('checks a Play testing-track install (Play installed it, the referrer is empty) with Play, not GitHub', async () => {
+    const result = await run({ name: 'play testing track', referrer: { value: '' }, installer: 'com.android.vending',
+      storage: { 'mindwtr-update-last-check': String(NOW) }, play: [playInfo(true)], steps: [{ tap: 'settings.checkForUpdates' }] });
+    expect(result.events.filter((event) => event[0] === 'fetch')).toEqual([]);
+    expect(harness.play).toEqual([]);
+    expect(result.events).toContainEqual(['badge', true]);
   });
 });
