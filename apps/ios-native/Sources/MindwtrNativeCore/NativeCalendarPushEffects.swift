@@ -24,11 +24,15 @@ final class NativeCalendarPushEffects {
     func prepare(id: UUID, requestJSON: String, taskID: String?) throws -> NativeCalendarPushEffect {
         let snapshot = try read()
         guard snapshot.effect == nil else { throw NativeCalendarWriteError.unavailable }
-        _ = try NativeCalendarWriteRequest(json: requestJSON)
+        let request = try NativeCalendarWriteRequest(json: requestJSON)
+        let frozenRequest: String
+        if case .createEvent = request {
+            frozenRequest = try NativeCalendarPushWitness.markCreateEvent(requestJSON: requestJSON, id: id)
+        } else { frozenRequest = requestJSON }
         let before: NativeCalendarPushMapping?
         if let taskID { before = try database.readCalendarPushMapping(taskID: taskID) }
         else { before = nil }
-        let effect = try NativeCalendarPushEffect(id: id, libraryID: libraryID, requestJSON: requestJSON,
+        let effect = try NativeCalendarPushEffect(id: id, libraryID: libraryID, requestJSON: frozenRequest,
                                                  taskID: taskID, beforeMapping: before)
         _ = try publish(effect, replacing: snapshot.state)
         return effect

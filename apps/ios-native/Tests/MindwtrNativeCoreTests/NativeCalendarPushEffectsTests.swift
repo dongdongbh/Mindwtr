@@ -101,7 +101,9 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
         let raw = try request(), next = try mapping(event: "created", stamp: "after")
         let prepared = try effects.prepare(id: id, requestJSON: raw, taskID: "task")
         XCTAssertEqual(prepared.id, id); XCTAssertEqual(prepared.phase, .prepared)
-        XCTAssertEqual(Data(prepared.requestJSON.utf8), Data(raw.utf8)); XCTAssertNil(prepared.beforeMapping)
+        guard case .createEvent(_, let details) = prepared.request else { return XCTFail("Expected create") }
+        XCTAssertEqual(details.notes, "\n\n[Mindwtr native calendar operation: \(id.uuidString.lowercased())]")
+        XCTAssertNil(prepared.beforeMapping)
         try assertUnrelatedPreserved()
         XCTAssertEqual(try effects.markStarted(id: id).phase, .started)
         try effects.acceptCompletion(id: id, outcome: .succeeded(.identifier("created")))
@@ -113,6 +115,25 @@ final class NativeCalendarPushEffectsTests: XCTestCase {
         try assertUnrelatedPreserved()
         try effects.retryPublication()
         try reopen(); XCTAssertNil(try coordinator().current()); try assertUnrelatedPreserved()
+    }
+
+    func testCreatedEventWitnessIsFrozenBeforeStartAndSurvivesColdRestart() throws {
+        var value = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(request().utf8)) as? [String: Any])
+        var details = try XCTUnwrap(value["details"] as? [String: Any])
+        let notes = "e\u{301} 🧠\n[Mindwtr task: task]"
+        details["notes"] = notes; value["details"] = details
+        let raw = String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        let effects = try coordinator()
+        let prepared = try effects.prepare(id: id, requestJSON: raw, taskID: "task")
+        let started = try effects.markStarted(id: id)
+        try reopen()
+        let recovered = try XCTUnwrap(coordinator().current())
+        XCTAssertEqual(Data(recovered.requestJSON.utf8), Data(prepared.requestJSON.utf8))
+        XCTAssertEqual(Data(recovered.requestJSON.utf8), Data(started.requestJSON.utf8))
+        guard case .createEvent(_, let frozen) = recovered.request else { return XCTFail("Expected create") }
+        XCTAssertEqual(Data(frozen.notes.utf8), Data((notes + "\n\n[Mindwtr native calendar operation: \(id.uuidString.lowercased())]").utf8))
+        XCTAssertEqual(recovered.phase, .started)
+        try assertUnrelatedPreserved()
     }
 
     func testPrepareCapturesActualFullRowAndRefusesCreateOrMismatchedUpdate() throws {
