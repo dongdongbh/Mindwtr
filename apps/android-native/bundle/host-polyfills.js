@@ -795,6 +795,9 @@
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarCall === 'function') {
         global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');
     }
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarPushCall === 'function') {
+        global.__mindwtrCalendarPushCall = fileChannel('calendarPushCall', 'calendarPushAbort');
+    }
 
     // --- sync crypto --------------------------------------------------------
     // Sync encryption's Argon2id and AES-256-GCM (HostCrypto.kt, through host-sync.ts): each call runs on the host's crypto

@@ -767,13 +767,18 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             });
         }
 
-        if (selectedTargetId && (goneIds.has(selectedTargetId)
-            || !calendars.some((calendar) => calendar.id === selectedTargetId && isWritableCalendar(calendar)))) {
+        if (selectedTargetId && goneIds.has(selectedTargetId)) {
             await setCalendarPushTargetCalendarId(null);
         }
         await storage.removeItem(CALENDAR_PUSH_PENDING_KEY);
         await storage.removeItem(CALENDAR_PUSH_CALENDAR_ID_KEY);
         if (intent) await storage.removeItem(CALENDAR_PUSH_CREATION_INTENT_KEY);
+
+        if (selectedTargetId && !goneIds.has(selectedTargetId)) {
+            void log.info('Calendar deletion kept the selected target', {
+                scope: 'calendar-push', extra: { releaseCheck: 'v1.3.5/calendar-delete-target', outcome: 'preserved' },
+            });
+        }
 
         void log.info('Deleted Mindwtr calendar', {
             scope: 'calendar-push',
@@ -1094,7 +1099,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
     let unsubscribeStore: (() => void) | null = null;
 
     const stopCalendarPushSync = (): void => {
-        if (isSandboxMode()) return;
         unsubscribeStore?.();
         unsubscribeStore = null;
         calendarPushScheduler.cancelPending();

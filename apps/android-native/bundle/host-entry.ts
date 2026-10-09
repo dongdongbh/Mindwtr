@@ -122,6 +122,7 @@ import {
 } from '@mindwtr/core';
 import { createNativeAI } from './host-ai';
 import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundle/host-calendar';
+import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
     prepareNativeTaskAttachmentAvailability, prepareNativeProjectFileAvailability, nativeProjectFileAvailabilityInitialURL,
     createNativeReadOnlySelfHostedAttachments, assertNativeSelfHostedAttachmentEncryptionAdmission } from './host-attachments';
@@ -157,6 +158,8 @@ type NativeBridge = {
     calendarSettingRead?(): string;
     calendarSubscriptionRead?(): string;
     calendarSettingCAS?(expectedJson: string, nextJson: string): string | null;
+    /** Private iOS admission notification; the native owner later invokes the shared run. */
+    calendarPushDue?(idsJSON: string): string | null;
     /** An event for Kotlin (CoreHost's event listener): sync's badge and cycle count, an automatic sync's warning. */
     hostEvent(json: string): string | null;
     /** Android only: opens an android.os.Trace section named `name`, or closes the open one for "". */
@@ -471,6 +474,11 @@ const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwt
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
 const calendarCall = (globalThis as typeof globalThis & { __mindwtrCalendarCall?: CalendarCall }).__mindwtrCalendarCall;
+const calendarPushCall = (globalThis as typeof globalThis & { __mindwtrCalendarPushCall?: CalendarCall }).__mindwtrCalendarPushCall;
+const calendarPushAvailable = globalThis.__mindwtrHostPlatform === 'ios' && Boolean(calendarPushCall)
+    && typeof native().calendarPushDue === 'function';
+let iosCalendarPushLifecycle: NativeCalendarPushLifecycle | null = null;
+let iosCalendarPushOwner: (() => void) | null = null;
 const iosCalendar = globalThis.__mindwtrHostPlatform === 'ios' && calendarCall ? createIOSCalendarHost({
     call: calendarCall,
     storage: { getItem: keyValue.get, setItem: keyValue.set, removeItem: keyValue.remove, multiGet: keyValue.multiGet },
@@ -482,12 +490,28 @@ const iosCalendar = globalThis.__mindwtrHostPlatform === 'ios' && calendarCall ?
         return bootAdapter;
     },
     fetch: (...args) => globalThis.fetch(...args),
+    ...(calendarPushAvailable ? { push: {
+        call: async (request: Record<string, unknown>) => {
+            const assertReady = iosCalendarPushOwner;
+            assertReady?.();
+            const value = await calendarPushCall!(request);
+            assertReady?.();
+            return value;
+        },
+        requestPartialSync: (ids: string[]) => {
+            try { checked(native().calendarPushDue!(JSON.stringify(ids))); }
+            catch { /* Native admission owns refusal and any required full retry. */ }
+        },
+    } } : {}),
     log: {
         info: (message, context) => logInfo(message, { scope: context?.scope, context: context?.extra }),
         warn: (message, context) => logWarn(message, { scope: context.scope, context: context.extra }),
         error: () => logWarn('Native iOS calendar provider failed', { scope: 'calendar-settings' }),
     },
 }) : undefined;
+if (calendarPushAvailable && iosCalendar) {
+    iosCalendar.bindPushLifecycle = (lifecycle) => { iosCalendarPushLifecycle = lifecycle; };
+}
 const contract = createNativeHostContract({ reminderPlatform: globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android', get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
     calendar: iosCalendar,
     get attachments() {
@@ -1487,6 +1511,44 @@ let iosSearchPrevious: { inputs: unknown[]; ready: boolean; now: number; day: st
     revision: number; nextAt: number | null } | null = null;
 const requireReminderSignal = (signal: AbortSignal) => {
     if (signal.aborted) throw new Error('CANCELLED: Reminder reconciliation was cancelled');
+};
+
+const iosCalendarPushCapture = (signal: AbortSignal) => {
+    const adapter = bootAdapter, generation = getPersistenceStatus().generation;
+    const assertReady = () => {
+        if (signal.aborted) throw new Error('CANCELLED: Calendar push was cancelled');
+        if (!calendarPushAvailable || !iosCalendarPushLifecycle || !adapter || bootAdapter !== adapter
+            || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) {
+            throw new Error('NOT_READY: Calendar push is unavailable');
+        }
+        requireSaved();
+        const status = getPersistenceStatus();
+        if (status.generation !== generation || status.failed || status.queued || status.inFlight
+            || status.immediate || status.retrying || !contract.getDataSettings().ok) {
+            throw new Error('NOT_READY: Calendar push requires settled storage');
+        }
+    };
+    assertReady();
+    return assertReady;
+};
+const iosCalendarPushOwned = async (signal: AbortSignal, work: () => Promise<unknown>) => {
+    const assertReady = iosCalendarPushCapture(signal);
+    if (iosCalendarPushOwner) throw new Error('NOT_READY: Calendar push is already owned');
+    iosCalendarPushOwner = assertReady;
+    try {
+        const result = await work();
+        assertReady();
+        return result;
+    } finally { if (iosCalendarPushOwner === assertReady) iosCalendarPushOwner = null; }
+};
+const iosCalendarPushInput = (json: string): Record<string, unknown> => {
+    const invalid = () => new Error('INVALID_INPUT: Invalid Calendar push request');
+    if (typeof json !== 'string' || json.length > 1024 * 1024
+        || new TextEncoder().encode(json).byteLength > 1024 * 1024) throw invalid();
+    let input: unknown;
+    try { input = JSON.parse(json); } catch { throw invalid(); }
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid();
+    return input as Record<string, unknown>;
 };
 
 const iosReminderSnooze = createIosReminderSnoozeMethods({
@@ -4738,6 +4800,62 @@ globalThis.MindwtrHost = {
                 }, { force: true });
             } catch { /* Diagnostics cannot replace an acknowledged submission. */ }
             return { status: 'sent' };
+        });
+    },
+    /** Private native owners; never exported through generic CoreHost.call. */
+    iosCalendarPushStart(): string {
+        return submit((signal) => iosCalendarPushOwned(signal, () => iosCalendarPushLifecycle!.start()));
+    },
+    iosCalendarPushStop(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !calendarPushAvailable || !iosCalendarPushLifecycle) {
+                throw new Error('NOT_READY: Calendar push is unavailable');
+            }
+            iosCalendarPushLifecycle.stop();
+            return null;
+        });
+    },
+    iosCalendarPushRun(json: string): string {
+        return submit((signal) => iosCalendarPushOwned(signal, async () => {
+            const input = iosCalendarPushInput(json);
+            if (Object.keys(input).join(',') !== 'ids' || input.ids !== null
+                && (!Array.isArray(input.ids) || input.ids.length > 10_000
+                    || input.ids.some((id) => typeof id !== 'string' || !id.trim() || id.length > 500
+                        || new TextEncoder().encode(id).byteLength > 1024)
+                    || new Set(input.ids).size !== input.ids.length)) {
+                throw new Error('INVALID_INPUT: Invalid Calendar push run');
+            }
+            await iosCalendarPushLifecycle!.run(input.ids === null ? undefined : input.ids as string[]);
+            return null;
+        }));
+    },
+    iosCalendarPushSetting(json: string): string {
+        return submit((signal) => iosCalendarPushOwned(signal, async () => {
+            const input = iosCalendarPushInput(json), edit = input.edit;
+            if (Object.keys(input).sort().join(',') !== 'edit,requestId'
+                || !edit || typeof edit !== 'object' || Array.isArray(edit)
+                || typeof (edit as Record<string, unknown>).type !== 'string'
+                || !['push', 'pushTarget', 'pushColor', 'deleteMindwtrCalendar'].includes((edit as Record<string, unknown>).type as string)) {
+                throw new Error('INVALID_INPUT: Invalid Calendar push setting');
+            }
+            return unwrap(await contract.setCalendarSetting(input as Parameters<typeof contract.setCalendarSetting>[0]));
+        }));
+    },
+    iosCalendarPushDiagnostic(json: string): string {
+        return submit(async () => {
+            const input = iosCalendarPushInput(json);
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !calendarPushAvailable
+                || Object.keys(input).sort().join(',') !== 'operation,outcome'
+                || typeof input.operation !== 'string' || typeof input.outcome !== 'string'
+                || !['createCalendar', 'updateCalendar', 'deleteCalendar', 'createEvent', 'updateEvent', 'deleteEvent', 'restore'].includes(input.operation)
+                || !['saved', 'recovered', 'blocked', 'rejected'].includes(input.outcome)) {
+                throw new Error('INVALID_INPUT: Invalid Calendar push diagnostic');
+            }
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS calendar push outcome',
+                context: { releaseCheck: 'v1.3.5/ios-calendar-push', operation: input.operation, outcome: input.outcome },
+            }, { force: true }); } catch { /* Diagnostics cannot change a settled native result. */ }
+            return null;
         });
     },
     iosCalendarRead(requestJSON: string): string {

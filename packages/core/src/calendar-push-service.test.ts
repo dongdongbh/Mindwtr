@@ -202,6 +202,34 @@ describe('calendar push behind the host ports', () => {
         expect([...phone.entries.keys()]).toEqual(['t2']);
     });
 
+    it.each([
+        { os: 'android', availability: 'absent' }, { os: 'android', availability: 'read-only' },
+        { os: 'ios', availability: 'absent' }, { os: 'ios', availability: 'read-only' },
+    ])('keeps an unrelated selected target during owned-calendar deletion: $os/$availability', async ({ os, availability }) => {
+        const phone = device({
+            os,
+            calendars: [PRIMARY, { ...PRIMARY, id: 'saved', title: 'Mindwtr' },
+                ...(availability === 'read-only' ? [{ id: 'selected', title: 'Personal', allowsModifications: false }] : [])],
+            storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'selected' },
+            entries: [
+                { taskId: 'owned-task', calendarEventId: 'owned-event', calendarId: 'saved', platform: 'android', lastSyncedAt: '' },
+                { taskId: 'selected-task', calendarEventId: 'selected-event', calendarId: 'selected', platform: 'android', lastSyncedAt: '' },
+            ],
+        });
+        const proof: unknown[] = [];
+        phone.host.log.info = (message, context) => {
+            if (context.extra?.releaseCheck === 'v1.3.5/calendar-delete-target') proof.push([message, context.extra]);
+        };
+        await createCalendarPushService(phone.host).deleteMindwtrCalendar();
+        expect(phone.writes).toEqual([['deleteCalendar', 'saved'], ['deleteSyncEntry', 'owned-task']]);
+        expect(phone.storage.get(CALENDAR_PUSH_TARGET_ID_KEY)).toBe('selected');
+        expect(phone.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
+        expect([...phone.entries.keys()]).toEqual(['selected-task']);
+        expect(proof).toEqual([['Calendar deletion kept the selected target', {
+            releaseCheck: 'v1.3.5/calendar-delete-target', outcome: 'preserved',
+        }]]);
+    });
+
     it('makes exactly one Mindwtr calendar however its creation is cut short', async () => {
         await everyDeath(
             () => device(),
@@ -823,6 +851,29 @@ describe('calendar push behind the host ports', () => {
         expect(requestPartialSync.mock.calls).toEqual([[['t2']]]);
         expect(phone.writes).toEqual([]);
         service.stopCalendarPushSync();
+    });
+
+    it('retires an existing watcher and pending handoff while sandbox is active', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const sandboxMode = vi.spyOn(sandbox, 'isSandboxMode').mockReturnValue(false);
+        const phone = device({ tasks: [task('t1')] });
+        const requestPartialSync = vi.fn(); phone.host.requestPartialSync = requestPartialSync;
+        const unsubscribe = vi.fn();
+        const subscribe = phone.host.store.subscribe;
+        vi.spyOn(phone.host.store, 'subscribe').mockImplementation((...args) => {
+            const stop = subscribe(...args);
+            return () => { unsubscribe(); stop(); };
+        });
+        const service = createCalendarPushService(phone.host);
+        service.startCalendarPushSync();
+        phone.setTasks([task('t1', { title: 'Pending change' })]);
+        sandboxMode.mockReturnValue(true);
+        service.stopCalendarPushSync();
+        expect(unsubscribe).toHaveBeenCalledOnce();
+        sandboxMode.mockReturnValue(false);
+        phone.setTasks([task('t1', { title: 'While stopped' })]);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(requestPartialSync).not.toHaveBeenCalled(); expect(phone.writes).toEqual([]);
     });
 
     it('neither requests admission nor runs full or partial calendar work in sandbox', async () => {
