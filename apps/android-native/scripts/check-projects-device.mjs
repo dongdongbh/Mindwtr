@@ -246,9 +246,9 @@ const core = (db, mode, extra = {}) => JSON.parse(execFileSync('bun', ['-e', `
                 await flushPendingSave();
                 pruned += 1;
             }
-            // The settings and editor check's per-run area (69, a 12-digit run id, 2) goes too, and the Mind Sweep and saved search
+            // The settings and editor check's per-run area (70, a 12-digit run id, 2) goes too, and the Mind Sweep and saved search
             // check's (75, a 12-digit run id, 4).
-            for (const area of live(store()._allAreas).filter((item) => (/^Area[0-9]{12}$/.test(item.name) && !item.name.endsWith(names.run)) || /^69[0-9]{12}2$/.test(item.name)
+            for (const area of live(store()._allAreas).filter((item) => (/^Area[0-9]{12}$/.test(item.name) && !item.name.endsWith(names.run)) || /^70[0-9]{12}2$/.test(item.name)
                 || /^75[0-9]{12}4$/.test(item.name))) {
                 const result = await store().deleteArea(area.id);
                 if (!result.success) throw new Error('prune failed: ' + result.error);
