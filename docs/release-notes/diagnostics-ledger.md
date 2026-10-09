@@ -30,6 +30,8 @@ Convention: a release-specific line carries `extra.releaseCheck = "<version>/<sl
 
 ## v1.3.5 (add before tagging, trim in the release after)
 
+- **`v1.3.5/ios-calendar-access`** — `apps/android-native/bundle/host-entry.ts`. Fixed message: `Native iOS calendar access request returned`; `outcome=returned` means the explicit Settings permission callback completed and the same page, host and saved choice were readmitted. It does not mean permission was granted or events were visible. Cancelled/stale callbacks emit no marker. No calendar identifiers, choices, permission errors or content are logged.
+
 - **`v1.3.5/ios-calendar-setting`** — `apps/android-native/bundle/host-entry.ts`. Fixed message: `Native iOS device calendar setting saved`; `outcome=saved` follows native journal acknowledgment of a device-calendar choice and its durable receipt. Retry uses the original prepared operation and atomically stored mutation proof; it does not request permission or reload providers. This marker does not prove permission, feed rendering or task-to-calendar export. No calendar IDs, choice objects, request IDs or content are logged.
 
 - **`v1.3.5/ios-calendar-read`** — `apps/android-native/bundle/host-entry.ts`. Fixed message: `Native iOS calendar read delivered`; `outcome` is `openSettings`, `getSettings`, `closeSettings` or `feed`. It proves the requested shared-calendar result passed the native library and cancellation checks. A delivered feed can contain a visible provider error or partial-source warning; this marker does not prove EventKit permission, complete source availability or UI rendering. No calendar/event identifiers, titles, notes, locations, dates, URLs or raw errors are logged.

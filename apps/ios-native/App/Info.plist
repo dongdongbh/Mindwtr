@@ -22,6 +22,10 @@
         <string>mind water</string>
       </dict>
     </array>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Mindwtr needs calendar access to show your events alongside tasks.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Mindwtr needs calendar access to show your events alongside tasks.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to unlock Mindwtr.</string>
 	<key>CFBundleLocalizations</key>

@@ -77,6 +77,7 @@ public final class CoreHost: @unchecked Sendable {
     private let localAttachmentRequests = NativeAttachmentLocalRequests()
     private let reminderEffects = NativeReminderEffects()
     private let notificationAuthorization = NativeNotificationAuthorization()
+    private let calendarAuthorization = NativeCalendarAuthorization()
 
     public init(databaseURL: URL, bundleURL: URL,
                 deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
@@ -172,6 +173,46 @@ public final class CoreHost: @unchecked Sendable {
 
     public func probeDeviceCalendarSettingOutcome(requestJSON: String) async throws -> String {
         try await perform { try $0.probeDeviceCalendarSettingOutcome(requestJSON: requestJSON) }
+    }
+
+    public func grantDeviceCalendarAccess(readmission: @escaping @Sendable () async -> Bool) async throws {
+        let owner: UUID
+        do { owner = try calendarAuthorization.begin() }
+        catch { throw CoreHostRejection(message: "NOT_READY: Calendar access is unavailable") }
+        let cancellation = NativeAttachmentCancellation()
+        localAttachmentRequests.register(cancellation, id: owner)
+        defer { localAttachmentRequests.remove(owner); calendarAuthorization.finish(owner) }
+        if Task.isCancelled { cancellation.cancel() }
+        try await withTaskCancellationHandler {
+            let result: Result<Void, Error>
+            do {
+                let request = try await perform { try $0.beginCalendarAccess(owner, cancellation: cancellation) }
+                guard !cancellation.isCancelled,
+                      await calendarAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                    throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current")
+                }
+                try await perform { try $0.validateCalendarAccess(owner) }
+                do { try await request() }
+                catch {
+                    if cancellation.isCancelled { throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current") }
+                    throw CoreHostRejection(message: "ACTION_FAILED: Calendar authorization is unavailable")
+                }
+                guard !cancellation.isCancelled,
+                      await calendarAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                    throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current")
+                }
+                try await perform { try $0.acknowledgeCalendarAccess(owner) }
+                result = .success(())
+            } catch is CancellationError {
+                result = .failure(CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current"))
+            } catch {
+                result = .failure(cancellation.isCancelled
+                    ? CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current") : error)
+            }
+            // Accepted OS callbacks drain before this cancellation-independent owner retirement.
+            _ = try? await perform(reminderOwned: true) { $0.retireCalendarAccess(owner) }
+            try result.get()
+        } onCancel: { cancellation.cancel(); self.calendarAuthorization.cancelReadmission(owner) }
     }
 
     /// Passive permission observation followed by a fresh, read-only shared plan.
@@ -270,6 +311,7 @@ public final class CoreHost: @unchecked Sendable {
         guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         guard !Engine.notificationSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade") }
         guard !Engine.deviceCalendarSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Device Calendar Settings require their explicit facade") }
+        guard !Engine.calendarAccessMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Calendar access requires its explicit facade") }
         return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
@@ -878,6 +920,7 @@ public final class CoreHost: @unchecked Sendable {
         _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(nil) }
         await reminderEffects.closeAndDrain()
         await notificationAuthorization.closeAndDrain()
+        await calendarAuthorization.closeAndDrain()
         await withCheckedContinuation { continuation in
             queue.async { [engine] in
                 engine.shutdown()
@@ -1381,6 +1424,21 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var deviceCalendarSettingTurn: DeviceCalendarSettingTurn?
+    private final class CalendarAccessTurn {
+        let id: UUID
+        let runtime: JSContext
+        let storage: NativeDeviceKV
+        let generation: UInt64
+        let expected: [String?]
+        let cancellation: NativeAttachmentCancellation
+        init(id: UUID, runtime: JSContext, storage: NativeDeviceKV, generation: UInt64,
+             expected: [String?], cancellation: NativeAttachmentCancellation) {
+            self.id = id; self.runtime = runtime; self.storage = storage; self.generation = generation
+            self.expected = expected; self.cancellation = cancellation
+        }
+    }
+    private var calendarAccessTurn: CalendarAccessTurn?
+    fileprivate static let calendarAccessMethods: Set<String> = ["grantDeviceCalendarAccess", "deviceCalendarAccessAcknowledged"]
     fileprivate static let deviceCalendarSettingMethods: Set<String> = ["deviceCalendarSetting", "deviceCalendarSettingPrepare",
         "deviceCalendarSettingValidate", "deviceCalendarSettingCommit", "deviceCalendarSettingRetryOutcome", "deviceCalendarSettingAcknowledged"]
     private static let deviceCalendarSettingCellLimit = 1024 * 1024
@@ -3447,6 +3505,44 @@ private final class Engine: @unchecked Sendable {
         return try call("reminderCompletionCommit", argumentsJSON: args, editorAttempt: nil, reminderCompletionOwned: true)
     }
 
+    func beginCalendarAccess(_ id: UUID, cancellation: NativeAttachmentCancellation) throws -> NativeCalendarAuthorization.Requester {
+        do {
+            try requireCalendarAdmission()
+            let storage = try requireDeviceStorageAdmission(), expected = try storage.readCalendarSettingState()
+            guard !cancellation.isCancelled, let runtime = context else { throw Self.deviceStorageUnavailable }
+            calendarAccessTurn = .init(id: id, runtime: runtime, storage: storage, generation: attachmentGeneration,
+                expected: expected, cancellation: cancellation)
+            var request: NativeCalendarAuthorization.Requester = { try await NativeCalendarAuthorization.request() }
+            #if DEBUG
+            if let injected = faults?.calendarAuthorizationRequest { request = injected }
+            #endif
+            return request
+        } catch { throw CoreHostRejection(message: "NOT_READY: Calendar access is unavailable") }
+    }
+    func validateCalendarAccess(_ id: UUID) throws {
+        do {
+            guard let turn = calendarAccessTurn, turn.id == id, context === turn.runtime, deviceStorage === turn.storage,
+                  attachmentGeneration == turn.generation, started, !closed, !localRequests.isClosing,
+                  !turn.cancellation.isCancelled, !recoveryActivationPending, pending == nil, lockFD >= 0,
+                  deviceCalendarSettingTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
+                  retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+                  taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
+                  providerCopy == nil, !cleanupOwed, !foregroundCleanupActive, !attachmentDraftEvidence else {
+                throw Self.deviceStorageUnavailable
+            }
+            let current = try turn.storage.readCalendarSettingState()
+            guard current.map({ $0.map { Data($0.utf8) } }) == turn.expected.map({ $0.map { Data($0.utf8) } }),
+                  !turn.cancellation.isCancelled else { throw Self.deviceStorageUnavailable }
+        } catch { throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current") }
+    }
+    func acknowledgeCalendarAccess(_ id: UUID) throws {
+        try validateCalendarAccess(id)
+        _ = try? invoke("deviceCalendarAccessAcknowledged", arguments: [])
+    }
+    func retireCalendarAccess(_ id: UUID) {
+        if calendarAccessTurn?.id == id { calendarAccessTurn = nil }
+    }
+
     private static func deviceCalendarSettingObject(_ raw: String, maximum: Int) throws -> [String: Any] {
         guard raw.utf8.count <= maximum,
               let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
@@ -3777,6 +3873,7 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
         guard notificationSettingTurn == nil || notificationSettingOwnerAccess else { throw HostFailure("Notification edit is still awaiting its owner") }
         guard reminderEffectsTurn == nil || reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
@@ -7645,6 +7742,9 @@ private final class Engine: @unchecked Sendable {
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
         reminderCompletionOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard calendarAccessTurn == nil, !Self.calendarAccessMethods.contains(method) else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar access requires its current explicit owner")
+        }
         guard method != "iosPruneReceipts" else {
             throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
         }
@@ -10134,6 +10234,7 @@ private final class Engine: @unchecked Sendable {
 
     func retryPending() throws -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
         guard notificationSettingTurn == nil, deviceCalendarSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Settings edit is still awaiting its owner") }
         let command = pending
         let method = command?.method
@@ -20284,6 +20385,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil) throws -> String {
+        guard calendarAccessTurn == nil || method == "deviceCalendarAccessAcknowledged" else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner")
+        }
         guard reminderEffectsTurn == nil || reminderOwnerAccess && Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
@@ -21118,6 +21222,7 @@ private final class Engine: @unchecked Sendable {
         reminderEffectsTurn = nil
         notificationSettingTurn = nil; notificationSettingOwnerAccess = false
         deviceCalendarSettingTurn = nil
+        calendarAccessTurn = nil
         startupDeviceCalendarSettingResult = nil
         reminderOwnerAccess = false
         reminderSourceStale = false

@@ -2336,6 +2336,18 @@ globalThis.MindwtrHost = {
     deviceCalendarSettingRetryOutcome(json: string): string {
         return submit(async () => unwrap(deviceCalendarSettings.probeDeviceCalendarSettingOutcome(completionJson(json, 1_048_576))));
     },
+    deviceCalendarAccessAcknowledged(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') return null;
+            try {
+                await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                    message: 'Native iOS calendar access request returned',
+                    context: { releaseCheck: 'v1.3.5/ios-calendar-access', outcome: 'returned' },
+                }, { force: true });
+            } catch { /* Diagnostics cannot change a completed permission request. */ }
+            return null;
+        });
+    },
     deviceCalendarSettingAcknowledged(): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios') return null;

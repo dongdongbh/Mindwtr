@@ -102,6 +102,7 @@ enum DurableFile {
 final class HostIOFaults {
     var notificationPermissionRead: NativeNotificationPermission.Reader?
     var notificationAuthorizationRequest: NativeNotificationAuthorization.Requester?
+    var calendarAuthorizationRequest: NativeCalendarAuthorization.Requester?
     var reminderPort: (any NativeReminderPort)?
     var beforeSQL: ((String) throws -> Void)?
     var afterSQL: ((String) throws -> Void)?

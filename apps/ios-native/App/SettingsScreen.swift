@@ -28,6 +28,7 @@ struct SettingsScreen: View {
     @State private var notificationPicker: String?
     @State private var notificationDayDraft = 0
     @State private var notificationTimeDraft = Date()
+    @State private var calendarAreaPicker: Data?
 
 
     var body: some View {
@@ -41,8 +42,10 @@ struct SettingsScreen: View {
                     else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
                     else if model.settingsAboutPresented { model.closeAboutSettings() }
                     else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
+                    else if model.settingsCalendarPresented { model.closeCalendarSettings() }
                     else if model.settingsGeneralPresented { model.closeGeneralSettings() }
                     else if model.settingsManagePresented { model.closeManageSettings() }
+                    else if model.settingsAdvancedPresented { model.closeAdvancedSettings() }
                     else { Task { await model.closeSettings() } }
                 } label: {
                     Image(systemName: "chevron.left")
@@ -50,14 +53,14 @@ struct SettingsScreen: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.settingsSyncChecking || model.settingsSyncRestartRequired || (!model.settingsDataPresented && ((model.busy && !model.settingsAboutCanCancel) || model.retryNeeded || model.somedaySectionRenamePending
+                .disabled(model.settingsSyncChecking || model.settingsSyncRestartRequired || (!model.settingsDataPresented && ((model.busy && !model.settingsAboutCanCancel && !model.settingsCalendarCanCancel) || model.retryNeeded || model.somedaySectionRenamePending
                           || model.somedaySectionRenameAwaitingRefresh
                           || model.somedaySectionDeletePending || model.somedaySectionDeleteAwaitingRefresh
                           || model.somedaySectionOrderActive || model.unassignedAreaColorActive
-                          || model.notificationSettingActive || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
+                          || model.notificationSettingActive || (model.calendarSettingActive && !model.settingsCalendarCanCancel) || (model.settingsGtdPresented ? model.gtdWorkflowPending : model.generalPreferenceActive) || model.settingsTaxonomyActive || model.settingsPersonDeleteActive || model.settingsAreaDeleteActive || model.settingsAreaEditActive
                           || model.settingsPersonCreatePresented || model.settingsPersonEditPresented)))
                 .accessibilityLabel(model.label("common.back"))
-                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsFeedbackPresented ? "feedback-back" : model.settingsAboutPresented ? "about-back" : model.settingsNotificationsPresented ? "notifications-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : "settings-back")
+                .accessibilityIdentifier(model.settingsSyncPresented ? "sync-back" : model.settingsDataPresented ? "diagnostics-back" : model.settingsGtdArchivePresented ? "gtd-archive-back" : model.settingsGtdTaskEditorPresented ? "gtd-taskEditor-back" : model.settingsGtdCapturePresented ? "gtd-capture-back" : model.settingsGtdInboxPresented ? "gtd-inbox-back" : model.settingsGtdReviewPresented ? "gtd-review-back" : model.settingsGtdPresented ? "gtd-back" : model.settingsFeedbackPresented ? "feedback-back" : model.settingsAboutPresented ? "about-back" : model.settingsNotificationsPresented ? "notifications-back" : model.settingsCalendarPresented ? "calendar-settings-back" : model.settingsGeneralPresented ? "general-back" : model.settingsManagePresented ? "manage-back" : model.settingsAdvancedPresented ? "advanced-back" : "settings-back")
                 if model.settingsSyncPresented {
                     Text(model.settingsSync.text("title").isEmpty ? "Sync" : model.settingsSync.text("title"))
                         .rnFont(20, .bold).foregroundStyle(palette.text)
@@ -72,6 +75,18 @@ struct SettingsScreen: View {
                         .lineLimit(1).minimumScaleFactor(0.5)
                         .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("notifications-title")
+                } else if model.settingsCalendarPresented {
+                    Text(model.calendarSettings.text("title").isEmpty ? model.label("settings.calendar") : model.calendarSettings.text("title"))
+                        .rnFont(20, .bold).foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("calendar-settings-title")
+                } else if model.settingsAdvancedPresented {
+                    Text(model.settingsMenu.object("advanced").text("title").isEmpty ? model.label("settings.advanced") : model.settingsMenu.object("advanced").text("title"))
+                        .rnFont(20, .bold).foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("advanced-title")
                 } else {
                 Text(model.settingsDataPresented ? model.dataSettings.text("title") : model.settingsGtdArchivePresented ? (model.gtdArchive.text("title").isEmpty ? model.label("settings.autoArchive") : model.gtdArchive.text("title")) : model.settingsGtdTaskEditorPresented ? model.gtdTaskEditor.text("title") : model.settingsGtdCapturePresented ? (model.gtdCapture.text("title").isEmpty ? model.label("settings.captureSettings") : model.gtdCapture.text("title")) : model.settingsGtdInboxPresented ? (model.gtdInbox.text("title").isEmpty ? model.label("settings.inboxProcessing") : model.gtdInbox.text("title")) : model.settingsGtdReviewPresented ? (model.gtdReview.text("title").isEmpty ? model.label("settings.reviewSettings") : model.gtdReview.text("title")) : model.settingsGtdPresented ? (model.gtdWorkflow.text("title").isEmpty ? model.label("settings.gtd") : model.gtdWorkflow.text("title")) : model.settingsGeneralPresented ? (model.generalSettings.text("title").isEmpty ? model.label("settings.general") : model.generalSettings.text("title")) : model.settingsManagePresented ? model.manageSettings.text("title") : model.settingsMenu.text("title"))
                     .rnFont(20, .bold).foregroundStyle(palette.text)
@@ -93,8 +108,10 @@ struct SettingsScreen: View {
             else if model.settingsGtdPresented { gtdContent }
             else if model.settingsAboutPresented { AboutSettingsCard(model: model, palette: palette) }
             else if model.settingsNotificationsPresented { notificationsContent }
+            else if model.settingsCalendarPresented { calendarSettingsContent }
             else if model.settingsGeneralPresented { generalContent }
             else if model.settingsManagePresented { manageContent }
+            else if model.settingsAdvancedPresented { advancedContent }
             else { menuContent }
         }
         .background(palette.bg)
@@ -250,8 +267,10 @@ struct SettingsScreen: View {
             else if model.settingsFeedbackPresented { model.closeFeedbackSettings() }
             else if model.settingsAboutPresented { model.closeAboutSettings() }
             else if model.settingsNotificationsPresented { model.closeNotificationSettings() }
-                    else if model.settingsGeneralPresented { model.closeGeneralSettings() }
+            else if model.settingsCalendarPresented { model.closeCalendarSettings() }
+            else if model.settingsGeneralPresented { model.closeGeneralSettings() }
             else if model.settingsManagePresented { model.closeManageSettings() }
+            else if model.settingsAdvancedPresented { model.closeAdvancedSettings() }
             else { Task { await model.closeSettings() } }
         }
     }
@@ -1133,6 +1152,115 @@ struct SettingsScreen: View {
         .accessibilityIdentifier("general-option-" + option.text("value"))
     }
 
+    private var calendarSettingsContent: some View {
+        let device = model.calendarSettings.object("device")
+        let calendars = device.objects("calendars")
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if !device.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Toggle(isOn: Binding(get: { device.flag("enabled") }, set: { _ in
+                            model.saveDeviceCalendarSetting(device.object("toggle"))
+                        })) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(device.text("title")).rnFont(15).foregroundStyle(palette.text)
+                                Text(device.text("description")).rnFont(12).foregroundStyle(palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .tint(palette.tint).padding(14).frame(minHeight: 48)
+                        .disabled(!model.calendarSettingEnabled)
+                        .accessibilityIdentifier("calendar-device-enabled")
+                        if !device.object("access").isEmpty {
+                            let access = device.object("access")
+                            palette.border.frame(height: 0.5)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(access.text("text")).rnFont(13).foregroundStyle(palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("calendar-device-access")
+                                Button { model.grantDeviceCalendarAccess() } label: {
+                                    Text(access.text("grantLabel")).rnFont(15, .semibold)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(minHeight: 44).contentShape(Rectangle())
+                                }
+                                .disabled(!model.calendarSettingEnabled).accessibilityIdentifier("calendar-device-grant")
+                            }.padding(14)
+                        }
+                        if device.flag("loading") { ProgressView().frame(maxWidth: .infinity).padding(14) }
+                        if !device.text("empty").isEmpty {
+                            Text(device.text("empty")).rnFont(13).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true).padding(14)
+                                .accessibilityIdentifier("calendar-device-empty")
+                        }
+                        // Swift String equality merges Unicode-equivalent calendar IDs.
+                        ForEach(calendars.indices, id: \.self) { index in
+                            let calendar = calendars[index]
+                            palette.border.frame(height: 0.5)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Toggle(isOn: Binding(get: { calendar.flag("selected") }, set: { _ in
+                                    model.saveDeviceCalendarSetting(calendar.object("edit"))
+                                })) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(calendar.text("name")).rnFont(15).foregroundStyle(palette.text)
+                                        Text(calendar.text("subtitle")).rnFont(12).foregroundStyle(palette.secondary)
+                                    }.fixedSize(horizontal: false, vertical: true)
+                                }
+                                .tint(palette.tint).frame(minHeight: 48)
+                                .disabled(calendar.object("edit").isEmpty || !model.calendarSettingEnabled)
+                                .opacity(calendar.object("edit").isEmpty ? 0.55 : 1)
+                                .accessibilityIdentifier("calendar-device-selection-" + String(index))
+                                if !calendar.object("areas").isEmpty {
+                                    calendarAreaChoices(calendar.object("areas"), row: index)
+                                }
+                            }.padding(14)
+                        }
+                    }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                } else if model.busy { ProgressView().frame(maxWidth: .infinity).padding(14) }
+                if let failure = model.calendarSettingReadError ?? model.calendarSettingError {
+                    Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("calendar-settings-error")
+                    if model.retryNeeded || model.calendarSettingReadError != nil || model.calendarSettingAwaitingRefresh {
+                        Button { model.retryCalendarSettings() } label: {
+                            Text(model.label("common.retry")).rnFont(15, .semibold)
+                                .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                        }
+                        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                        .disabled(model.busy).accessibilityIdentifier("calendar-settings-retry")
+                    }
+                }
+            }.padding(16)
+        }.accessibilityIdentifier("calendar-settings-scroll")
+    }
+
+    private func calendarAreaChoices(_ choice: CoreObject, row: Int) -> some View {
+        let identity = Data(choice.text("key").utf8)
+        let options = choice.objects("options")
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { calendarAreaPicker = calendarAreaPicker == identity ? nil : identity } label: {
+                HStack(spacing: 8) {
+                    Text(choice.text("label")).rnFont(13).foregroundStyle(palette.tint)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: calendarAreaPicker == identity ? "chevron.up" : "chevron.down")
+                        .foregroundStyle(palette.secondary).accessibilityHidden(true)
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(!model.calendarSettingEnabled)
+            .accessibilityIdentifier("calendar-device-areas-" + String(row))
+            if calendarAreaPicker == identity {
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
+                    Toggle(isOn: Binding(get: { option.flag("checked") }, set: { _ in
+                        model.saveDeviceCalendarSetting(option.object("edit"))
+                    })) {
+                        Text(option.text("label")).rnFont(13).foregroundStyle(palette.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .tint(palette.tint).frame(minHeight: 44).disabled(!model.calendarSettingEnabled)
+                    .accessibilityIdentifier("calendar-device-area-" + String(row) + "-" + String(index))
+                }
+            }
+        }
+    }
+
     private var notificationsContent: some View {
         let task = model.notificationSettings.object("task")
         let weekly = model.notificationSettings.object("weekly")
@@ -1301,42 +1429,7 @@ struct SettingsScreen: View {
                         VStack(spacing: 0) {
                             ForEach(groups[groupIndex].indices, id: \.self) { rowIndex in
                                 let row = groups[groupIndex][rowIndex]
-                                Button {
-                                    if row.text("id") == "manage" { Task { await model.openManageSettings() } }
-                                    else if row.text("id") == "general" { Task { await model.openGeneralSettings() } }
-                                    else if row.text("id") == "notifications" { Task { await model.openNotificationSettings() } }
-                                    else if row.text("id") == "data" { Task { await model.openDataSettings() } }
-                                    else if row.text("id") == "gtd" { Task { await model.openGtdSettings() } }
-                                    else if row.text("id") == "sync" { Task { await model.openSyncSettings() } }
-                                    else if row.text("id") == "about" { model.openAboutSettings() }
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: settingsSymbol(row.text("icon")))
-                                            .font(.system(size: 20)).foregroundStyle(palette.tint)
-                                            .frame(width: 32).accessibilityHidden(true)
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(row.text("title")).rnFont(15, .semibold).foregroundStyle(palette.text)
-                                            if !row.text("description").isEmpty {
-                                                Text(row.text("description")).rnFont(12)
-                                                    .foregroundStyle(palette.secondary)
-                                                    .fixedSize(horizontal: false, vertical: true)
-                                            }
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        if row.flag("showIndicator") {
-                                            Circle().fill(row.text("indicatorColor").isEmpty ? palette.danger : Color(hex: row.text("indicatorColor")))
-                                                .frame(width: 8, height: 8).accessibilityHidden(true)
-                                                .accessibilityIdentifier("settings-indicator-" + row.text("id"))
-                                        }
-                                        Image(systemName: "chevron.right").font(.system(size: 12))
-                                            .foregroundStyle(palette.secondary).accessibilityHidden(true)
-                                    }
-                                    .padding(.horizontal, 14).frame(minHeight: 60).contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain).disabled(!["manage", "general", "notifications", "gtd", "data", "sync", "about"].contains(row.text("id")) || model.busy || model.retryNeeded)
-                                .opacity(["manage", "general", "notifications", "gtd", "data", "sync", "about"].contains(row.text("id")) ? 1 : 0.55)
-                                .accessibilityLabel(row.text("accessibilityLabel").isEmpty ? row.text("title") : row.text("accessibilityLabel"))
-                                .accessibilityIdentifier("settings-" + row.text("id"))
+                                settingsMenuRow(row)
                                 if rowIndex < groups[groupIndex].count - 1 { palette.border.frame(height: 0.5) }
                             }
                         }
@@ -1355,6 +1448,71 @@ struct SettingsScreen: View {
             .padding(16)
         }
         .accessibilityIdentifier("settings-scroll")
+    }
+
+    private var advancedContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                let rows = model.settingsMenu.object("advanced").objects("rows")
+                VStack(spacing: 0) {
+                    ForEach(rows.indices, id: \.self) { index in
+                        settingsMenuRow(rows[index])
+                        if index < rows.count - 1 { palette.border.frame(height: 0.5) }
+                    }
+                }
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                if let failure = model.settingsReadError {
+                    errorBlock(failure, id: "settings-read-error") { Task { await model.retryManageSettingsRead() } }
+                }
+                if model.busy { ProgressView().padding(12) }
+            }
+            .padding(16)
+        }
+        .accessibilityIdentifier("advanced-scroll")
+    }
+
+    private func settingsMenuRow(_ row: CoreObject) -> some View {
+        let available = model.settingsAdvancedPresented
+            ? row.text("id") == "calendar"
+            : ["manage", "general", "notifications", "advanced", "gtd", "data", "sync", "about"].contains(row.text("id"))
+        return Button {
+            if row.text("id") == "manage" { Task { await model.openManageSettings() } }
+            else if row.text("id") == "general" { Task { await model.openGeneralSettings() } }
+            else if row.text("id") == "notifications" { Task { await model.openNotificationSettings() } }
+            else if row.text("id") == "calendar" { Task { await model.openCalendarSettings() } }
+            else if row.text("id") == "advanced" { model.openAdvancedSettings() }
+            else if row.text("id") == "data" { Task { await model.openDataSettings() } }
+            else if row.text("id") == "gtd" { Task { await model.openGtdSettings() } }
+            else if row.text("id") == "sync" { Task { await model.openSyncSettings() } }
+            else if row.text("id") == "about" { model.openAboutSettings() }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: settingsSymbol(row.text("icon")))
+                    .font(.system(size: 20)).foregroundStyle(palette.tint)
+                    .frame(width: 32).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.text("title")).rnFont(15, .semibold).foregroundStyle(palette.text)
+                    if !row.text("description").isEmpty {
+                        Text(row.text("description")).rnFont(12)
+                            .foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if row.flag("showIndicator") {
+                    Circle().fill(row.text("indicatorColor").isEmpty ? palette.danger : Color(hex: row.text("indicatorColor")))
+                        .frame(width: 8, height: 8).accessibilityHidden(true)
+                        .accessibilityIdentifier("settings-indicator-" + row.text("id"))
+                }
+                Image(systemName: "chevron.right").font(.system(size: 12))
+                    .foregroundStyle(palette.secondary).accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 60).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!available || model.busy || model.retryNeeded || model.calendarSettingActive)
+        .opacity(available ? 1 : 0.55)
+        .accessibilityLabel(row.text("accessibilityLabel").isEmpty ? row.text("title") : row.text("accessibilityLabel"))
+        .accessibilityIdentifier("settings-" + row.text("id"))
     }
 
     private var manageContent: some View {

@@ -219,6 +219,8 @@ final class CoreModel: ObservableObject {
             }
             if oldValue == .settings && selectedSurface != .settings {
                 retireNotificationSettingsPage()
+                retireCalendarSettingsPage()
+                settingsAdvancedPresented = false
                 invalidateDiagnostics()
                 settingsDataPresented = false
             }
@@ -309,6 +311,7 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsMenu: CoreObject = [:]
     @Published private(set) var settingsSearch = ""
     @Published private(set) var settingsManagePresented = false
+    @Published private(set) var settingsAdvancedPresented = false
     @Published private(set) var settingsAboutPresented = false
     @Published private(set) var settingsAboutOpening = false
     @Published private(set) var settingsAboutChecking = false
@@ -649,6 +652,37 @@ final class CoreModel: ObservableObject {
         ready && selectedSurface == .settings && settingsNotificationsPresented && !appLock.concealed
             && !busy && !retryNeeded && !notificationSettingActive && notificationSettingReadError == nil
             && !notificationSettings.isEmpty
+    }
+
+    @Published private(set) var settingsCalendarPresented = false
+    @Published private(set) var calendarSettings: CoreObject = [:]
+    @Published private(set) var calendarSettingError: String?
+    @Published private(set) var calendarSettingReadError: String?
+    @Published private(set) var calendarSettingAwaitingRefresh = false
+    private var calendarSettingsSession = UUID()
+    private var calendarSettingsPageHost: CoreHost?
+    private var calendarSettingRequest: String?
+    private var calendarSettingHost: CoreHost?
+    private var calendarSettingOwner: UUID?
+    private var calendarSettingOwnerHost: CoreHost?
+    private var calendarSettingTask: Task<Void, Never>?
+    private var calendarSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
+    private var calendarSettingsReadTask: Task<String, Error>?
+    private var calendarSettingsReadID: UUID?
+    @Published private var calendarSettingsCloseTask: Task<Void, Never>?
+    private var calendarSettingsCloseID: UUID?
+    private var calendarSettingsApplicationActive = false
+    var calendarSettingActive: Bool {
+        calendarSettingOwner != nil || calendarSettingRequest != nil || calendarSettingAwaitingRefresh
+            || calendarSettingsCloseTask != nil
+    }
+    var calendarSettingEnabled: Bool {
+        ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+            && !busy && !retryNeeded && !calendarSettingActive && calendarSettingReadError == nil
+            && !calendarSettings.isEmpty
+    }
+    var settingsCalendarCanCancel: Bool {
+        settingsCalendarPresented && calendarSettingRequest == nil && !retryNeeded
     }
 
     @Published private(set) var settingsGeneralPresented = false
@@ -1337,6 +1371,8 @@ final class CoreModel: ObservableObject {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
                 retireNotificationSettingsPage()
+                retireCalendarSettingsPage()
+                settingsAdvancedPresented = false
                 retireReminderLifecycleHost(oldValue)
                 retireSearchHost(oldValue)
                 if oldValue != nil {
@@ -4827,6 +4863,16 @@ final class CoreModel: ObservableObject {
             } else if recovery.text("method") == "dataSetting" {
                 selectedSurface = .settings
                 settingsDataPresented = true
+            } else if recovery.text("method") == "deviceCalendarSettingCommit" {
+                try validateDeviceCalendarSettingResult(recovery.object("result"))
+                selectedSurface = .settings
+                settingsAdvancedPresented = true
+                settingsCalendarPresented = true
+                calendarSettingsPageHost = host
+                calendarSettingsApplicationActive = UIApplication.shared.applicationState == .active
+                calendarSettingRequest = nil
+                calendarSettingHost = nil
+                calendarSettingAwaitingRefresh = true
             } else if recovery.text("method") == "notificationSettingCommit" {
                 selectedSurface = .settings
                 settingsNotificationsPresented = true
@@ -4894,6 +4940,10 @@ final class CoreModel: ObservableObject {
             }
             mindSweepRecoveredResult = nil
             appLockRecoveryPending = false
+            if recovery.text("method") == "deviceCalendarSettingCommit", !retryNeeded, !Task.isCancelled,
+               calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession) {
+                await refreshCalendarSettings()
+            }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             if startupSyncCompletedHost !== currentHost {
                 // ready precedes recovery adoption; only this terminal tail can
@@ -4988,7 +5038,7 @@ final class CoreModel: ObservableObject {
             && projectAttachmentDownloadOwner == nil
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
-            && !settingsAboutPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsAboutPresented && !settingsCalendarPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
     var notificationResponseContextClean: Bool {
@@ -6108,7 +6158,8 @@ final class CoreModel: ObservableObject {
     }
 
     func refresh() async {
-        guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired else { return }
+        guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired,
+              calendarSettingsCloseTask == nil else { return }
         if taskStartupSaveReceipt != nil {
             guard !busy else { refreshRequested = true; return }
             await reconcileTaskAttachmentPresentation()
@@ -6214,7 +6265,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openSettings() async {
-        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
+        guard !settingsSyncPresented, !settingsSyncRestartRequired, !calendarSettingActive else { return }
         guard ready, !busy, !retryNeeded, !somedaySectionRenamePending,
               !somedaySectionRenameAwaitingRefresh, !somedaySectionDeleteActive,
               !somedaySectionOrderActive, !settingsAreaDeleteActive, !unassignedAreaColorActive,
@@ -6222,10 +6273,12 @@ final class CoreModel: ObservableObject {
         settingsCaller = selectedSurface
         morePresented = false
         settingsManagePresented = false
+        settingsAdvancedPresented = false
         settingsManageRequested = false
         settingsReadError = nil
         settingsSearch = ""
         retireNotificationSettingsPage()
+        retireCalendarSettingsPage()
         settingsGeneralPresented = false
         settingsAboutPresented = false
         invalidateAboutLinkOpening()
@@ -6248,7 +6301,7 @@ final class CoreModel: ObservableObject {
     }
 
     func closeSettings() async {
-        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
+        guard !settingsSyncPresented, !settingsSyncRestartRequired, !calendarSettingActive else { return }
         guard selectedSurface == .settings, !busy, !retryNeeded,
               !somedaySectionRenamePending, !somedaySectionRenameAwaitingRefresh,
               !somedaySectionDeleteActive, !somedaySectionOrderActive, !settingsAreaDeleteActive,
@@ -6256,6 +6309,7 @@ final class CoreModel: ObservableObject {
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsManagePresented = false
+        settingsAdvancedPresented = false
         settingsManageRequested = false
         settingsAboutPresented = false
         invalidateAboutLinkOpening()
@@ -6266,8 +6320,29 @@ final class CoreModel: ObservableObject {
         catch { self.error = error.localizedDescription }
     }
 
+    func openAdvancedSettings() {
+        guard ready, selectedSurface == .settings, !settingsAdvancedPresented, !busy, !retryNeeded,
+              !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented,
+              !settingsDataPresented, !settingsSyncPresented, !settingsSyncRestartRequired, !appLock.concealed,
+              !settingsMenu.object("advanced").text("title").isEmpty else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        settingsAdvancedPresented = true
+        settingsReadError = nil
+    }
+
+    func closeAdvancedSettings() {
+        guard selectedSurface == .settings, settingsAdvancedPresented, !settingsCalendarPresented,
+              !busy, !retryNeeded, !calendarSettingActive, !appLock.concealed else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        settingsAdvancedPresented = false
+        setSettingsSearch(settingsSearch)
+    }
+
     func setSettingsSearch(_ value: String) {
-        guard !settingsNotificationsPresented, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
+        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
         settingsSearch = value
         settingsReadError = nil
         settingsSearchGeneration += 1
@@ -6285,11 +6360,14 @@ final class CoreModel: ObservableObject {
     private func readSettingsMenu(generation: Int? = nil) async throws {
         guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
         let search = settingsSearch, capturedGeneration = generation ?? settingsSearchGeneration
+        let advanced = settingsAdvancedPresented
         func current() -> Bool {
             host === currentHost && !settingsAboutPresented && settingsAboutTask == nil
+                && !settingsCalendarPresented && calendarSettingsCloseTask == nil
                 && !settingsSyncPresented && !settingsSyncRestartRequired && selectedSurface == .settings
                 && !appLock.concealed && !Task.isCancelled
                 && settingsSearchGeneration == capturedGeneration && settingsSearch == search
+                && settingsAdvancedPresented == advanced
         }
         guard current() else { return }
         do {
@@ -6297,7 +6375,8 @@ final class CoreModel: ObservableObject {
             guard current() else { return }
             let result = try await query("menuRead", ["settingsMenu", try json(["query": search, "updateAvailable": state.available])])
             guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
-                  result["searchPlaceholder"] is String else { throw CocoaError(.coderReadCorrupt) }
+                  result["searchPlaceholder"] is String, !result.object("advanced").text("title").isEmpty,
+                  result.object("advanced")["rows"] is [CoreObject] else { throw CocoaError(.coderReadCorrupt) }
             guard current() else { return }
             settingsMenu = result
             settingsReadError = nil
@@ -6414,7 +6493,7 @@ final class CoreModel: ObservableObject {
 
     func openSyncSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncPresented,
-              !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
               !settingsSyncRestartRequired, !appLock.concealed, settingsSyncEncryptionOwner == nil else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
@@ -6824,7 +6903,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openGtdSettings() async {
-        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
+        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGtdPresented = true
@@ -7639,7 +7718,7 @@ final class CoreModel: ObservableObject {
 
     func openDataSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !appLock.concealed,
-              !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
+              !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsDataPresented = true
@@ -7815,7 +7894,7 @@ final class CoreModel: ObservableObject {
 
     func openAboutSettings() {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncRestartRequired,
-              !settingsAboutPresented, !settingsManagePresented, !settingsNotificationsPresented, !settingsGeneralPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented,
               !settingsGtdPresented, !settingsDataPresented, !settingsSyncPresented, !appLock.concealed else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
@@ -8230,10 +8309,267 @@ final class CoreModel: ObservableObject {
         openOwnedAboutURL(url, host: currentHost)
     }
 
+    func openCalendarSettings() async {
+        guard ready, selectedSurface == .settings, settingsAdvancedPresented, !settingsCalendarPresented, !settingsNotificationsPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented,
+              !settingsDataPresented, !settingsSyncPresented, !busy, !retryNeeded, !calendarSettingActive,
+              !appLock.concealed, let currentHost = host else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        calendarSettingsSession = UUID()
+        calendarSettingsPageHost = currentHost
+        settingsCalendarPresented = true
+        calendarSettingsApplicationActive = UIApplication.shared.applicationState == .active
+        calendarSettingError = nil
+        calendarSettingReadError = nil
+        calendarSettings = [:]
+        busy = true
+        defer { finishOperation() }
+        await refreshCalendarSettings()
+    }
+
+    func closeCalendarSettings() {
+        guard settingsCalendarCanCancel else { return }
+        retireCalendarSettingsPage()
+    }
+
+    private func retireCalendarSettingsPage() {
+        let pageHost = calendarSettingsPageHost
+        let operation = calendarSettingTask, read = calendarSettingsReadTask
+        cancelCalendarSettingsIntent()
+        settingsCalendarPresented = false
+        calendarSettingsPageHost = nil
+        calendarSettings = [:]
+        calendarSettingReadError = nil
+        calendarSettingAwaitingRefresh = false
+        guard let pageHost else { return }
+        let previous = calendarSettingsCloseTask, closeID = UUID()
+        calendarSettingsCloseID = closeID
+        calendarSettingsCloseTask = Task { [weak self] in
+            await operation?.value
+            _ = try? await read?.value
+            await previous?.value
+            _ = try? await pageHost.calendarRead(requestJSON: "{\"op\":\"closeSettings\"}")
+            guard let self, self.calendarSettingsCloseID == closeID else { return }
+            self.calendarSettingsCloseTask = nil
+            self.calendarSettingsCloseID = nil
+            if self.host === pageHost, self.ready, self.selectedSurface == .settings, !self.appLock.concealed {
+                self.setSettingsSearch(self.settingsSearch)
+            }
+        }
+    }
+
+    func calendarSettingsWillResignActive() {
+        calendarSettingsApplicationActive = false
+    }
+
+    func calendarSettingsDidBecomeActive() {
+        calendarSettingsApplicationActive = true
+        guard let waiter = calendarSettingWaiter else { return }
+        calendarSettingWaiter = nil
+        let current = calendarSettingsCurrent(owner: waiter.owner)
+        waiter.continuation.resume(returning: current)
+        if !current { calendarSettingTask?.cancel() }
+    }
+
+    func cancelCalendarSettingsIntent() {
+        calendarSettingsApplicationActive = false
+        calendarSettingsSession = UUID()
+        calendarSettingTask?.cancel()
+        calendarSettingsReadTask?.cancel()
+        if let waiter = calendarSettingWaiter {
+            calendarSettingWaiter = nil
+            waiter.continuation.resume(returning: false)
+        }
+    }
+
+    private func calendarSettingsPageCurrent(_ currentHost: CoreHost, session: UUID) -> Bool {
+        host === currentHost && calendarSettingsPageHost === currentHost && calendarSettingsSession == session
+            && ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+    }
+
+    private func calendarSettingsCurrent(owner: UUID) -> Bool {
+        calendarSettingOwner == owner && host === calendarSettingOwnerHost && ready
+            && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+            && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+
+    private func waitForCalendarSettingsReadmission(owner: UUID, session: UUID) async -> Bool {
+        guard !Task.isCancelled, let currentHost = calendarSettingOwnerHost,
+              calendarSettingOwner == owner, calendarSettingsPageCurrent(currentHost, session: session) else { return false }
+        if calendarSettingsCurrent(owner: owner) { return true }
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, self.calendarSettingOwner == owner,
+                      self.calendarSettingsPageCurrent(currentHost, session: session) else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                if self.calendarSettingsCurrent(owner: owner) { continuation.resume(returning: true) }
+                else { self.calendarSettingWaiter = (owner, continuation) }
+            }
+        }, onCancel: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.calendarSettingWaiter?.owner == owner else { return }
+                let waiter = self.calendarSettingWaiter
+                self.calendarSettingWaiter = nil
+                waiter?.continuation.resume(returning: false)
+            }
+        })
+    }
+
+    private func readCalendarSettings() async throws {
+        guard let currentHost = host, calendarSettingsCloseTask == nil, calendarSettingsReadTask == nil else {
+            throw CocoaError(.userCancelled)
+        }
+        let session = calendarSettingsSession, readID = UUID()
+        guard calendarSettingsPageCurrent(currentHost, session: session), !Task.isCancelled else { throw CancellationError() }
+        calendarSettingsReadID = readID
+        let read = Task { try await currentHost.calendarRead(requestJSON: "{\"op\":\"openSettings\"}") }
+        calendarSettingsReadTask = read
+        defer {
+            if calendarSettingsReadID == readID { calendarSettingsReadTask = nil; calendarSettingsReadID = nil }
+        }
+        let view = try decode(await read.value)
+        guard !Task.isCancelled, calendarSettingsPageCurrent(currentHost, session: session) else { throw CancellationError() }
+        guard !view.text("title").isEmpty, let device = view["device"] as? CoreObject,
+              !device.text("title").isEmpty, device["toggle"] is CoreObject, device["calendars"] is [CoreObject] else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        calendarSettings = view
+        let failures = view.objects("toasts").filter { $0.text("tone") == "error" }
+        let failureText = failures.map { [$0.text("title"), $0.text("message")].filter { !$0.isEmpty }.joined(separator: "\n") }.joined(separator: "\n")
+        calendarSettingReadError = failureText.isEmpty ? nil : failureText
+        calendarSettingAwaitingRefresh = !failures.isEmpty
+    }
+
+    func saveDeviceCalendarSetting(_ edit: CoreObject) {
+        guard calendarSettingEnabled, edit.text("type") == "deviceCalendars", let currentHost = host else { return }
+        do {
+            // Keep nested NSDictionary maps intact; Swift String keys merge Unicode-equivalent IDs.
+            calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit])
+            calendarSettingHost = currentHost
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    func grantDeviceCalendarAccess() {
+        guard calendarSettingEnabled, !calendarSettings.object("device").object("access").isEmpty else { return }
+        beginCalendarSettingOperation(retry: false, grantOnly: true)
+    }
+
+    private func beginCalendarSettingOperation(retry: Bool, grantOnly: Bool = false) {
+        guard !busy, calendarSettingOwner == nil, ready, !appLock.concealed,
+              let currentHost = grantOnly ? calendarSettingsPageHost : calendarSettingHost,
+              host === currentHost, grantOnly || calendarSettingRequest != nil else { return }
+        let request = calendarSettingRequest, owner = UUID(), session = calendarSettingsSession
+        calendarSettingOwner = owner
+        calendarSettingOwnerHost = currentHost
+        calendarSettingError = nil
+        busy = true
+        calendarSettingTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.calendarSettingOwner == owner {
+                    self.calendarSettingOwner = nil
+                    self.calendarSettingOwnerHost = nil
+                    self.calendarSettingTask = nil
+                    if let waiter = self.calendarSettingWaiter, waiter.owner == owner {
+                        self.calendarSettingWaiter = nil
+                        waiter.continuation.resume(returning: false)
+                    }
+                    self.finishOperation()
+                }
+            }
+            do {
+                var grant = grantOnly
+                if let request, !grantOnly {
+                    let reply: String
+                    if retry {
+                        if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
+                        else { reply = try await currentHost.probeDeviceCalendarSettingOutcome(requestJSON: request) }
+                    } else { reply = try await currentHost.setDeviceCalendarSetting(requestJSON: request) }
+                    let result = try self.decode(reply)
+                    try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session)
+                    grant = !retry && result.text("open") == "device"
+                }
+                if grant, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                    try await currentHost.grantDeviceCalendarAccess(readmission: { [weak self] in
+                        guard let self else { return false }
+                        return await self.waitForCalendarSettingsReadmission(owner: owner, session: session)
+                    })
+                }
+                if !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                    await self.refreshCalendarSettings()
+                }
+            } catch {
+                if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost, self.host === currentHost {
+                    self.calendarSettingError = error.localizedDescription
+                    if self.isDefiniteRejection(error) {
+                        self.calendarSettingRequest = nil
+                        self.calendarSettingHost = nil
+                        self.retryNeeded = false
+                        self.error = nil
+                        self.calendarSettingAwaitingRefresh = self.calendarSettingsPageCurrent(currentHost, session: session)
+                    } else { self.retryNeeded = true; self.error = error.localizedDescription }
+                } else if !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                    self.calendarSettingError = error.localizedDescription
+                }
+                if !Task.isCancelled, self.calendarSettingRequest == nil,
+                   self.calendarSettingsPageCurrent(currentHost, session: session) { await self.refreshCalendarSettings() }
+            }
+        }
+    }
+
+    private func validateDeviceCalendarSettingResult(_ result: CoreObject) throws {
+        guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+              let clearDraft = result["clearDraft"] as? NSNumber, CFGetTypeID(clearDraft) == CFBooleanGetTypeID(),
+              !clearDraft.boolValue, let toasts = result["toasts"] as? [Any], toasts.isEmpty,
+              result["open"] is NSNull || result.text("open") == "device" else { throw CocoaError(.coderReadCorrupt) }
+    }
+
+    private func acknowledgeDeviceCalendarSetting(_ result: CoreObject, request: String, from currentHost: CoreHost, session: UUID) throws {
+        guard calendarSettingRequest == request, calendarSettingHost === currentHost else { throw CocoaError(.coderReadCorrupt) }
+        try validateDeviceCalendarSettingResult(result)
+        calendarSettingRequest = nil
+        calendarSettingHost = nil
+        calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: session)
+        if host === currentHost {
+            calendarSettingError = nil
+            retryNeeded = false
+            error = nil
+        }
+    }
+
+    private func refreshCalendarSettings() async {
+        guard let currentHost = host, calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession),
+              calendarSettingRequest == nil else { return }
+        let session = calendarSettingsSession
+        do { try await readCalendarSettings() }
+        catch {
+            if !Task.isCancelled, calendarSettingsPageCurrent(currentHost, session: session) {
+                calendarSettingReadError = error.localizedDescription
+            }
+        }
+    }
+
+    func retryCalendarSettings() {
+        guard !busy, calendarSettingOwner == nil, !appLock.concealed else { return }
+        if calendarSettingRequest != nil { beginCalendarSettingOperation(retry: true); return }
+        guard settingsCalendarPresented else { return }
+        busy = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.finishOperation() }
+            await self.refreshCalendarSettings()
+        }
+    }
+
     func openNotificationSettings() async {
-        guard ready, selectedSurface == .settings, !settingsNotificationsPresented, !settingsAboutPresented,
+        guard ready, selectedSurface == .settings, !settingsCalendarPresented, !settingsNotificationsPresented, !settingsAboutPresented,
               !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
-              !settingsSyncPresented, !busy, !retryNeeded, !notificationSettingActive, !appLock.concealed else { return }
+              !settingsSyncPresented, !busy, !retryNeeded, !notificationSettingActive, !calendarSettingActive, !appLock.concealed else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         notificationSettingsSession = UUID()
@@ -8444,7 +8780,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openGeneralSettings() async {
-        guard !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded else { return }
+        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGeneralPresented = true
@@ -8805,7 +9141,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openManageSettings() async {
-        guard !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded,
+        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded,
               !somedaySectionDeleteActive, !somedaySectionOrderActive, !settingsAreaDeleteActive,
               !unassignedAreaColorActive else { return }
         settingsSearchTask?.cancel()
@@ -20977,7 +21313,7 @@ final class CoreModel: ObservableObject {
             && projectDuplicateRequest == nil && projectLifecycleRequest == nil
             && projectDeleteRequest == nil && projectDeleteUndoRequest == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsSyncChecking
-            && !settingsManagePresented && !settingsAboutPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsManagePresented && !settingsAboutPresented && !settingsCalendarPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
     func downloadProjectAttachment(_ attachmentID: String) {
@@ -25878,6 +26214,7 @@ final class CoreModel: ObservableObject {
     func retry() async {
         if notificationResponseRetry != nil { await retryNotificationResponses(); return }
         if notificationSettingRequest != nil { retryNotificationSettings(); return }
+        if calendarSettingRequest != nil { retryCalendarSettings(); return }
         if projectFileAvailabilityPending {
             await retryProjectFileAvailability()
             return
@@ -28045,6 +28382,10 @@ final class CoreModel: ObservableObject {
     private func readSelectedSurface() async throws {
         guard !settingsSyncRestartRequired else { return }
         if selectedSurface == .settings && settingsAboutPresented { return }
+        if selectedSurface == .settings && settingsCalendarPresented {
+            await refreshCalendarSettings()
+            return
+        }
         if selectedSurface == .settings && settingsSyncPresented {
             if !settingsSyncNeedsReload && !settingsSyncChecking { await readSettingsSyncModel() }
             return

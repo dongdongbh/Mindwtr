@@ -9707,6 +9707,88 @@ final class FoundationUITests: XCTestCase {
     func testNativeNotificationsSettingsNormalDrafts() throws { try task442Notifications("NORMAL", largest: false) }
     func testNativeNotificationsSettingsLargestDrafts() throws { try task442Notifications("LARGEST", largest: true) }
 
+    // Root stages an isolated library with device calendars OFF and App Lock OFF.
+    // Opening and reopening stay passive; these cases never request OS access.
+    private func task464CalendarSettings(_ suffix: String, largest: Bool) throws {
+        let library = try task371Library(suffix, prefix: "MINDWTR_CALENDAR_SETTINGS_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 30); boardTap(app, "tab-menu")
+        let settings = app.buttons["menu-settings"]
+        if !settings.isHittable {
+            task442Reveal(app, settings, in: app.scrollViews.containing(.button, identifier: "menu-settings").firstMatch)
+        }
+        boardTap(app, "menu-settings")
+        let advanced = app.buttons["settings-advanced"]
+        task442Reveal(app, advanced, in: app.scrollViews["settings-scroll"])
+        boardEnabled(advanced, timeout: 30); advanced.tap()
+        XCTAssertEqual(app.staticTexts["advanced-title"].label, "Advanced")
+        XCTAssertTrue(app.buttons["settings-ai"].exists)
+        XCTAssertFalse(app.buttons["settings-ai"].isEnabled)
+        for _ in 0..<2 {
+            let row = app.buttons["settings-calendar"]
+            task442Reveal(app, row, in: app.scrollViews["advanced-scroll"])
+            boardEnabled(row, timeout: 30); row.tap()
+            let enabled = app.switches["calendar-device-enabled"]
+            boardEnabled(enabled, timeout: 30)
+            task442Reveal(app, enabled, in: app.scrollViews["calendar-settings-scroll"])
+            XCTAssertEqual(enabled.value as? String, "0")
+            XCTAssertGreaterThanOrEqual(enabled.frame.height, 44 - 0.001)
+            XCTAssertEqual(app.staticTexts["calendar-settings-title"].label, "External Calendar")
+            XCTAssertFalse(app.buttons["calendar-device-grant"].exists)
+            XCTAssertFalse(app.switches["calendar-device-selection-0"].exists)
+            XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = largest ? "Calendar settings largest" : "Calendar settings normal"
+            shot.lifetime = .keepAlways; add(shot)
+            boardTap(app, "calendar-settings-back")
+            XCTAssertEqual(app.staticTexts["advanced-title"].label, "Advanced")
+            boardEnabled(row, timeout: 30)
+        }
+        boardTap(app, "advanced-back")
+        boardEnabled(advanced, timeout: 30)
+        boardTap(app, "settings-back")
+        XCTAssertTrue(app.buttons["tab-menu"].exists)
+    }
+
+    func testNativeCalendarSettingsNormalPassiveOpen() throws { try task464CalendarSettings("NORMAL", largest: false) }
+    func testNativeCalendarSettingsLargestPassiveOpen() throws { try task464CalendarSettings("LARGEST", largest: true) }
+
+    // Root stages an actual prepared turn-on journal in this isolated library; no prompt is requested.
+    func testNativeCalendarSettingsStartupRecoveryPassiveOpen() throws {
+        let library = try task371Library("RECOVERY", prefix: "MINDWTR_CALENDAR_SETTINGS_UI_")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        let enabled = app.switches["calendar-device-enabled"]
+        boardEnabled(enabled, timeout: 30)
+        task442Reveal(app, enabled, in: app.scrollViews["calendar-settings-scroll"])
+        XCTAssertEqual(app.staticTexts["calendar-settings-title"].label, "External Calendar")
+        XCTAssertEqual(enabled.value as? String, "1")
+        XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Calendar settings recovered enabled choice"; shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "calendar-settings-back")
+        XCTAssertEqual(app.staticTexts["advanced-title"].label, "Advanced")
+        let row = app.buttons["settings-calendar"]
+        boardEnabled(row, timeout: 30)
+        task442Reveal(app, row, in: app.scrollViews["advanced-scroll"])
+        row.tap()
+        boardEnabled(enabled, timeout: 30)
+        task442Reveal(app, enabled, in: app.scrollViews["calendar-settings-scroll"])
+        XCTAssertEqual(app.staticTexts["calendar-settings-title"].label, "External Calendar")
+        XCTAssertEqual(enabled.value as? String, "1")
+        XCTAssertFalse(app.staticTexts["calendar-settings-error"].exists)
+        boardTap(app, "calendar-settings-back")
+        boardEnabled(row, timeout: 30)
+        boardTap(app, "advanced-back")
+        boardEnabled(app.buttons["settings-advanced"], timeout: 30)
+    }
+
     private func task97Normal(_ library: String) {
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]
         app.launch(); task97Open(app)
