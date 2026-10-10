@@ -7,7 +7,8 @@
 //
 // A new iOS method: add it to host-entry.ts only. A new Android method: add it to host-entry.ts and its name below.
 // check-boot-gates.mjs fails while Kotlin, or the Node harness that runs the shipped bundle (sync-harness.mjs), calls a name
-// missing here, and while a name here is missing from host-entry.ts.
+// missing here, while Kotlin passes a method name in a variable anywhere but KOTLIN_FORWARDING_SITES, while the journal
+// replays a name missing here, and while a name here is missing from host-entry.ts.
 import ts from 'typescript';
 
 export const ANDROID_HOST_METHODS = [
@@ -103,4 +104,76 @@ export function androidHostEntry(source, keep = ANDROID_HOST_METHODS) {
     // Each kept method with its leading comments; the commas between them are written again.
     const kept = literal.properties.filter((property) => keep.includes(property.name.text)).map((property) => property.getFullText(file));
     return `${source.slice(0, literal.getStart(file))}{${kept.join(',')},\n}${source.slice(literal.end)}`;
+}
+
+/**
+ * The only Kotlin sites that pass a host method's name in a variable, each read by hand. A new one fails the gate until it is
+ * listed here with why every name that reaches it is in the table.
+ */
+export const KOTLIN_FORWARDING_SITES = [
+    { site: 'CoreHost.kt: getJSFunction(method)', count: 1, why: 'call() looks its method up in the table: every call() is literal or below' },
+    { site: 'CoreHost.kt: getJSFunction(name)', count: 1, why: 'global() looks up a polyfill global (__pumpTimers), never the table; its callers are literal' },
+    { site: 'CoreHost.kt: call(method, *args)', count: 2, why: 'callLong() and answer() hand their own method on: their callers are literal or below' },
+    { site: 'CoreHost.kt: answer(method, args, deadlineMs)', count: 1, why: 'callAsync() hands its own method on: its callers are literal' },
+    { site: 'CoreHost.kt: answer(entry.method, entry.args.toTypedArray(), deadlineOf(entry.method, entry.args))', count: 1,
+        why: 'the journal replay: an entry replays only under a WriteJournal.SHAPES name (journalReplayMethods, checked against the table)' },
+];
+
+/** The text of the call's arguments: from just past [open] (its opening parenthesis) to the matching closing one. */
+const argumentsAt = (text, open) => {
+    let depth = 0;
+    for (let at = open; at < text.length; at += 1) {
+        const char = text[at];
+        if (char === '"') { for (at += 1; at < text.length && text[at] !== '"'; at += text[at] === '\\' ? 2 : 1); continue; }
+        if (char === '(') depth += 1;
+        else if (char === ')' && --depth === 0) return text.slice(open + 1, at);
+    }
+    return text.slice(open + 1);
+};
+
+/**
+ * Kotlin's host dispatches in [files] ({ path, text }). [names]: every method named literally. [unverified]: every dispatch
+ * whose method is not a literal and is not one of KOTLIN_FORWARDING_SITES (or one past its count), and every way around them.
+ * The dispatchers are CoreHost.kt's private `call`, `callAsync`, `callLong` and `answer` (never a member such as a JSFunction's
+ * `.call`), so only CoreHost.kt can use them; the table itself is reached only through CoreHost.kt's `getJSObject("MindwtrHost")`,
+ * and any `.getJSFunction` with a name that is not a literal (a literal one is one of the bundle's globals, __pumpTimers) counts.
+ */
+export function kotlinHostCalls(files) {
+    const names = new Set();
+    const variable = [];
+    const bypass = [];
+    for (const { path, text } of files) {
+        const file = path.split('/').pop();
+        const line = (index) => text.slice(0, index).split('\n').length;
+        if (file === 'CoreHost.kt') {
+            for (const name of ['call', 'callAsync', 'callLong', 'answer']) {
+                if (!new RegExp(`\\bprivate fun ${name}\\(`).test(text)) bypass.push({ site: `${file}: ${name} is not private`, line: 0 });
+            }
+        } else if (text.includes('"MindwtrHost"')) {
+            bypass.push({ site: `${file}: reaches "MindwtrHost" outside CoreHost.kt`, line: line(text.indexOf('"MindwtrHost"')) });
+        }
+        const pattern = file === 'CoreHost.kt' ? /(?<![\w.])(call|callAsync|callLong|answer)\(|\.(getJSFunction)\(/g : /\.(getJSFunction)\(/g;
+        for (const match of text.matchAll(pattern)) {
+            const callee = match[1] ?? match[2];
+            // The dispatchers' own declarations.
+            if (/\bfun\b[^\n(=]*$/.test(text.slice(Math.max(0, match.index - 80), match.index))) continue;
+            const args = argumentsAt(text, match.index + match[0].length - 1).replace(/\s+/g, ' ').trim();
+            const literal = /^"([A-Za-z0-9_]+)"/.exec(args);
+            if (literal) { if (callee !== 'getJSFunction') names.add(literal[1]); continue; }
+            variable.push({ site: `${file}: ${callee}(${args})`, line: line(match.index) });
+        }
+    }
+    const seen = new Map();
+    const unverified = variable.filter(({ site }) => {
+        seen.set(site, (seen.get(site) ?? 0) + 1);
+        return seen.get(site) > (KOTLIN_FORWARDING_SITES.find((listed) => listed.site === site)?.count ?? 0);
+    });
+    return { names: [...names].sort(), unverified: [...bypass, ...unverified] };
+}
+
+/** WriteJournal.kt's SHAPES keys: the host methods a journal entry replays under (CoreHost's replay passes entry.method on). */
+export function journalReplayMethods(writeJournal) {
+    const block = /val SHAPES = mapOf\(([\s\S]*?)\n\s*\)/.exec(writeJournal)?.[1];
+    if (!block) throw new Error('WriteJournal.kt: no SHAPES = mapOf(…)');
+    return [...block.matchAll(/"([A-Za-z0-9_]+)" to listOf\(/g)].map((match) => match[1]).sort();
 }

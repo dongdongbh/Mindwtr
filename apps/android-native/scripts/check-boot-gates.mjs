@@ -7952,11 +7952,28 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 // name the Node harness calls on the shipped bundle, is in it; every name in it is a host-entry.ts method; and the shipped
 // bundle exposes exactly those names, while host-entry.ts as iOS builds it keeps every method.
 {
-    const { ANDROID_HOST_METHODS, hostTable } = await import('./android-host-table.mjs');
+    const { ANDROID_HOST_METHODS, hostTable, kotlinHostCalls, journalReplayMethods } = await import('./android-host-table.mjs');
     const kotlinFiles = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
         ? (entry.name === 'build' ? [] : kotlinFiles(resolve(dir, entry.name))) : entry.name.endsWith('.kt') ? [resolve(dir, entry.name)] : []));
     const named = (files, pattern) => [...new Set(files.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(pattern)].map((match) => match[1])))].sort();
-    const kotlin = named(kotlinFiles(resolve(app, 'android')), /\b(?:call|callAsync|callLong|answer)\(\s*"([A-Za-z0-9_]+)"/g);
+    const sources = kotlinFiles(resolve(app, 'android')).map((path) => ({ path, text: readFileSync(path, 'utf8') }));
+    // A method name that reaches the table through a variable is caught too: only CoreHost's own forwarding and the journal's
+    // replay may pass one (KOTLIN_FORWARDING_SITES), and the replay's names are the journal's SHAPES, checked below.
+    const coreHost = sources.find((source) => source.path.endsWith('/core/CoreHost.kt'));
+    const withCoreHost = (text) => sources.map((source) => (source === coreHost ? { ...source, text: source.text + text } : source));
+    const adversarial = kotlinHostCalls(withCoreHost('\nfun inboxView(): JSONObject { val method = "inboxView"; return callAsync(method) }\n'));
+    assert.deepEqual(adversarial.unverified.map((site) => site.site), ['CoreHost.kt: callAsync(method)'], 'a dispatch through a variable fails the guard');
+    assert.deepEqual(kotlinHostCalls(withCoreHost('\nfun forward(name: String) = callLong(name, 1)\n')).unverified.map((site) => site.site),
+        ['CoreHost.kt: callLong(name, 1)'], 'so does one through a parameter');
+    assert.deepEqual(kotlinHostCalls(withCoreHost('\nfun forward(name: String) = answer(name, arrayOf(), 1L)\n')).unverified.map((site) => site.site),
+        ['CoreHost.kt: answer(name, arrayOf(), 1L)'], 'and one more copy of a listed forwarding shape');
+    assert.deepEqual(kotlinHostCalls([...sources, { path: 'Other.kt', text: 'val f = engine.globalObject.getJSObject("MindwtrHost").getJSFunction(name)' }])
+        .unverified.map((site) => site.site), ['Other.kt: reaches "MindwtrHost" outside CoreHost.kt', 'Other.kt: getJSFunction(name)'], 'and a table reached outside CoreHost.kt');
+    const { names: kotlin, unverified } = kotlinHostCalls(sources);
+    assert.deepEqual(unverified, [], 'every Kotlin host dispatch names its method literally or is a listed forwarding site');
+    const replayed = journalReplayMethods(sources.find((source) => source.path.endsWith('/core/WriteJournal.kt')).text);
+    assert(replayed.length >= 20 && replayed.includes('captureSubmit') && replayed.includes('menuCommand'), 'the journal\'s replayed methods were found');
+    assert.deepEqual(replayed.filter((name) => !ANDROID_HOST_METHODS.includes(name)), [], 'every method the journal replays is in Android\'s host table');
     const scripts = readdirSync(resolve(app, 'scripts')).filter((name) => name === 'sync-harness.mjs' || /^check-[\w-]+-(device|dry-run)\.mjs$/.test(name));
     const harness = named(scripts.map((name) => resolve(app, 'scripts', name)), /\bcall\(\s*'([A-Za-z0-9_]+)'/g);
     assert(kotlin.length > 50 && kotlin.includes('boot') && harness.includes('window'), 'the call sites were found');
@@ -7979,6 +7996,6 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     }
     assert.deepEqual(Object.keys(makeState(0, [], 'ios').MindwtrHost), names, 'host-entry.ts as iOS builds it exposes every method of its table');
     assert(names.length > ANDROID_HOST_METHODS.length * 4, 'host-entry.ts keeps every platform\'s methods');
-    console.log(`Android host table: ${ANDROID_HOST_METHODS.length} of host-entry.ts's ${names.length} methods, every Kotlin and harness call among them`);
+    console.log(`Android host table: ${ANDROID_HOST_METHODS.length} of host-entry.ts's ${names.length} methods, every Kotlin, journal-replay and harness call among them, no unlisted variable dispatch`);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
