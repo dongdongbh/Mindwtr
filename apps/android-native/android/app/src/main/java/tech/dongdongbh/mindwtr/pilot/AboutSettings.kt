@@ -549,17 +549,22 @@ private fun Notice(title: String, description: String?, color: Color, wash: Int)
     }
 }
 
-/** RN's feedbackPrimaryButton in the filled-button colors (useFilledButtonColors), half faded while off, with RN's spinner while sending. */
+/**
+ * RN's feedbackPrimaryButton in the filled-button colors (useFilledButtonColors), half faded while off, with RN's spinner while
+ * sending. RN's Android opacity fades the fill and the label each on its own (no offscreen layer: needsOffscreenAlphaCompositing
+ * is off), so the label shows through its faded fill; one faded layer would draw it darker.
+ */
 @Composable
 private fun PrimaryButton(label: String, enabled: Boolean, spinning: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(12.dp)
-    Row(modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = 44.dp).clip(shape).background(theme.filledBg)
+    val alpha = if (enabled) 1f else 0.5f
+    Row(modifier.heightIn(min = 44.dp).clip(shape).background(theme.filledBg.copy(alpha = theme.filledBg.alpha * alpha))
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { onClick(); true } else disabled() }
         .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-        if (spinning) CircularProgressIndicator(Modifier.size(20.dp), color = theme.filledText, strokeWidth = 2.dp)
-        Text(label, style = padded(rnText(14, 700)), color = theme.filledText)
+        if (spinning) CircularProgressIndicator(Modifier.size(20.dp), color = theme.filledText.copy(alpha = theme.filledText.alpha * alpha), strokeWidth = 2.dp)
+        Text(label, style = padded(rnText(14, 700)), color = theme.filledText.copy(alpha = theme.filledText.alpha * alpha))
     }
 }
 
