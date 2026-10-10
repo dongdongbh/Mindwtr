@@ -55,6 +55,18 @@ describe('sandbox workspace isolation', () => {
         expect(parseSandboxBootRequest('{"version":1,"requestedAt":100000,"settings":{"theme":"dark","syncPath":"secret"}}', now)).toEqual({ theme: 'dark' });
     });
 
+    it('preserves only an explicit boolean logging opt-in through the sandbox handoff', () => {
+        for (const loggingEnabled of [true, false]) {
+            const settings = { diagnostics: { loggingEnabled, privateValue: 'secret', tracing: 'private' } } as unknown as AppSettings;
+            expect(pickSandboxDisplaySettings(settings)).toEqual({ diagnostics: { loggingEnabled } });
+            expect(parseSandboxBootRequest(createSandboxBootRequest(settings, 100), 100))
+                .toEqual({ diagnostics: { loggingEnabled } });
+        }
+        for (const diagnostics of [undefined, {}, { loggingEnabled: undefined }, { loggingEnabled: 'true' }, { loggingEnabled: null }]) {
+            expect(pickSandboxDisplaySettings({ diagnostics } as AppSettings)).toEqual({});
+        }
+    });
+
     it('isolates both saved snapshots and reset fixtures from live edits', async () => {
         const seed = fixture();
         const storage = createSandboxStorage(seed);

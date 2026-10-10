@@ -47,6 +47,10 @@ const themes: readonly AppTheme[] = [
 export function pickSandboxDisplaySettings(settings: AppSettings): AppSettings {
     const source = settings && typeof settings === 'object' ? settings : {};
     const result: AppSettings = {};
+    // Keep the existing explicit logging opt-in so sandbox-only crashes remain diagnosable.
+    if (typeof source.diagnostics?.loggingEnabled === 'boolean') {
+        result.diagnostics = { loggingEnabled: source.diagnostics.loggingEnabled };
+    }
     if (source.language === 'system' || isSupportedLanguage(source.language)) result.language = source.language;
     if (themes.includes(source.theme as AppTheme)) result.theme = source.theme;
     if (typeof source.dateFormat === 'string') result.dateFormat = normalizeDateFormatSetting(source.dateFormat);
@@ -70,7 +74,7 @@ export function pickSandboxDisplaySettings(settings: AppSettings): AppSettings {
 
 const BOOT_REQUEST_MAX_AGE_MS = 60_000;
 
-/** One-shot handoff to the next app runtime, containing display preferences only. */
+/** One-shot handoff with allowlisted display preferences and the existing logging opt-in. */
 export function createSandboxBootRequest(settings: AppSettings, now = Date.now()): string {
     return JSON.stringify({ version: 1, requestedAt: now, settings: pickSandboxDisplaySettings(settings) });
 }

@@ -13,6 +13,10 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // renderer-navigation: fixed route categories, a runtime token, and coarse library sizes.
+    'rendererRun', 'navigationSequence', 'previousView', 'nextView', 'actualView',
+    'taskCountBucket', 'projectCountBucket', 'trashCountBucket', 'historyCountBucket',
+    'referenceCountBucket', 'boardCountBucket', 'density', 'showDetails', 'editorOpen', 'documentVisibility',
     // task-copy-diagnostics reuses releaseCheck and outcome below; source is the menu/shortcut category.
     'source', 'documentFocused', 'activationSupported', 'activationActive', 'clipboardAvailable', 'errorKind',
     // ios-search-publication reuses releaseCheck, operation, outcome, enabled, and count below.

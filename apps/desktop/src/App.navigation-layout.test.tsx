@@ -1,10 +1,11 @@
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTaskStore } from '@mindwtr/core';
 
 import { LanguageProvider } from './contexts/language-context';
 import { useUiStore } from './store/ui-store';
+import * as appLog from './lib/app-log';
 
 type SettingsModule = typeof import('./components/views/SettingsView');
 type ReviewModule = typeof import('./components/views/ReviewView');
@@ -48,7 +49,9 @@ const getContentWrapper = (container: HTMLElement) => (
 );
 
 describe('App deferred navigation layout', () => {
+    afterEach(() => vi.restoreAllMocks());
     beforeEach(() => {
+        vi.spyOn(appLog, 'logInfo').mockResolvedValue(null);
         window.localStorage.clear();
         window.history.replaceState(null, '', '?view=calendar');
         useTaskStore.setState((state) => ({
@@ -65,7 +68,7 @@ describe('App deferred navigation layout', () => {
             _projectsById: new Map(),
             _sectionsById: new Map(),
             _areasById: new Map(),
-            settings: {},
+            settings: { diagnostics: { loggingEnabled: true } },
             isLoading: false,
             error: null,
         }));
@@ -99,6 +102,12 @@ describe('App deferred navigation layout', () => {
         expect(reviewButton).toHaveAttribute('aria-current', 'page');
         expect(getContentHeading('Calendar')).toBeInTheDocument();
         expect(content()).toHaveClass('max-w-screen-2xl');
+        const navigation = () => vi.mocked(appLog.logInfo).mock.calls
+            .filter(([, context]) => context?.scope === 'renderer-navigation')
+            .map(([, context]) => context!.extra!);
+        expect(navigation().map((entry) => [entry.stage, entry.nextView])).toEqual([
+            ['requested', 'settings'], ['requested', 'review'],
+        ]);
 
         await act(async () => {
             lazyViews.resolveSettings({
@@ -110,6 +119,7 @@ describe('App deferred navigation layout', () => {
         expect(queryContentHeading('Deferred Settings')).not.toBeInTheDocument();
         expect(getContentHeading('Calendar')).toBeInTheDocument();
         expect(content()).toHaveClass('max-w-screen-2xl');
+        expect(navigation().every((entry) => entry.stage === 'requested')).toBe(true);
 
         await act(async () => {
             lazyViews.resolveReview({
@@ -123,5 +133,8 @@ describe('App deferred navigation layout', () => {
             expect(content()).toHaveClass('max-w-6xl');
             expect(content()).not.toHaveClass('max-w-screen-2xl');
         });
+        const committed = navigation().filter((entry) => entry.stage === 'content-committed');
+        expect(committed).toHaveLength(1);
+        expect(committed[0]).toMatchObject({ actualView: 'review', nextView: 'review', navigationSequence: navigation()[1].navigationSequence });
     }, 20_000);
 });
