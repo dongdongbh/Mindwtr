@@ -46,7 +46,7 @@
     "test:coverage": "bun test --coverage --coverage-reporter=lcov"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "zod": "^3.24.1"
   },
   "optionalDependencies": {

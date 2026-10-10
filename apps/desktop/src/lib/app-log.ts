@@ -46,7 +46,7 @@ async function ensureLogDir(): Promise<string> {
     return logDir;
 }
 
-function isLoggingEnabled(): boolean {
+export function isLoggingEnabled(): boolean {
     if (isDiagnosticsEnabled()) return true;
     const diagnostics: DiagnosticsSettings | undefined = useTaskStore.getState().settings.diagnostics;
     return diagnostics?.loggingEnabled === true;
