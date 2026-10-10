@@ -13,6 +13,7 @@ import ts from 'typescript';
 
 export const ANDROID_HOST_METHODS = [
     'abort',
+    'aboutRequest',
     'aiRequest',
     'appLock',
     'areaFilter',
