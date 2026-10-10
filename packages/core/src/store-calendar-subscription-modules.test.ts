@@ -18,6 +18,7 @@ afterEach(async () => {
     vi.resetModules();
 });
 
+// Each test imports the store from scratch: about 4 s alone, more under a full parallel run.
 describe('Calendar subscription store registration', () => {
     it('direct store producers fail closed when helpers have not registered', async () => {
         vi.resetModules();
@@ -38,7 +39,7 @@ describe('Calendar subscription store registration', () => {
             expect(store.getPersistenceStatus().queued).toBe(0);
             expect(store.getPersistenceStatus().generation).toBe(0);
         } finally { unsubscribe(); }
-    });
+    }, 30_000);
 
     it.each(['store-first', 'facade-first'] as const)('actual core exports commit and replay with %s import order', async (order) => {
         vi.resetModules();
@@ -103,5 +104,5 @@ describe('Calendar subscription store registration', () => {
         });
         expect(sql.filter((statement) => /^(INSERT|UPDATE|DELETE)/.test(statement))).toEqual([]);
         expect(await adapter.getData({ rawTasks: true })).toEqual(saved);
-    });
+    }, 30_000);
 });
