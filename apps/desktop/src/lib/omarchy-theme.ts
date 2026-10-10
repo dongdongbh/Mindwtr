@@ -11,6 +11,15 @@
  * colors.toml consumer, so the app agrees with the terminal and the shell
  * instead of inventing a second reading of the same file.
  */
+import {
+    applyNativeTheme,
+    applyThemeMode,
+    resolveNativeTheme,
+    setSystemSchemeOverride,
+    type DesktopThemeMode,
+    type SystemThemePreference,
+} from './theme';
+import { isLinuxRuntime, isTauriRuntime } from './runtime';
 
 export type OmarchyScheme = 'light' | 'dark';
 
@@ -95,6 +104,11 @@ export type OmarchyCssVariable = (typeof OMARCHY_CSS_VARIABLES)[number];
 
 /** Minimum contrast ratio for a hue the app renders as text (WCAG AA). */
 const MIN_TEXT_CONTRAST = 4.5;
+/** Minimum contrast ratio for a hue the app renders as a non-text UI component. */
+const MIN_UI_CONTRAST = 3;
+
+/** How many steps the readability blend takes before it gives up on a hue. */
+const READABILITY_STEPS = 20;
 
 const HEX_PATTERN = /^#[0-9a-f]{6}$/i;
 
@@ -145,13 +159,18 @@ const channelLuminance = (value: number): number => {
 const relativeLuminance = ({ r, g, b }: Rgb): number =>
     0.2126 * channelLuminance(r) + 0.7152 * channelLuminance(g) + 0.0722 * channelLuminance(b);
 
-/** WCAG contrast ratio between two hex colors, from 1 (identical) to 21. */
+/** WCAG contrast ratio between two colors, from 1 (identical) to 21. */
+export const contrastRgb = (a: Rgb, b: Rgb): number => {
+    const ratios = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+    return (ratios[0] + 0.05) / (ratios[1] + 0.05);
+};
+
+/** WCAG contrast ratio between two hex colors. */
 export const contrastRatio = (a: string, b: string): number => {
     const first = parseHex(a);
     const second = parseHex(b);
     if (!first || !second) throw new Error(`Not a hex color: ${a} / ${b}`);
-    const ratios = [relativeLuminance(first), relativeLuminance(second)].sort((x, y) => y - x);
-    return (ratios[0] + 0.05) / (ratios[1] + 0.05);
+    return contrastRgb(first, second);
 };
 
 /**
@@ -171,16 +190,43 @@ export const ensureReadable = (
     minRatio = MIN_TEXT_CONTRAST,
 ): string => {
     const source = parseHex(hue);
-    const foreground = parseHex(palette.foreground);
-    if (!source || !foreground) throw new Error(`Not a hex color: ${hue}`);
-    if (contrastRatio(hue, palette.background) >= minRatio) return hue;
+    if (!source) throw new Error(`Not a hex color: ${hue}`);
+    // Measured as the stylesheet will read it, not as the hex it starts from:
+    // the triple's rounding is the one step that can drop a color back under
+    // the threshold after this gate has passed it.
+    const background = asEmitted(palette.background);
+    const clears = (candidate: string) => contrastRgb(asEmitted(candidate), background) >= minRatio;
+    if (clears(hue)) return hue;
 
-    const STEPS = 20;
-    for (let step = 1; step <= STEPS; step += 1) {
-        const candidate = toHex(mixRgb(source, foreground, step / STEPS));
-        if (contrastRatio(candidate, palette.background) >= minRatio) return candidate;
-    }
-    return palette.foreground;
+    const blendToward = (target: Rgb): string | null => {
+        for (let step = 1; step <= READABILITY_STEPS; step += 1) {
+            const candidate = toHex(mixRgb(source, target, step / READABILITY_STEPS));
+            if (clears(candidate)) return candidate;
+        }
+        return null;
+    };
+
+    const foreground = parseHex(palette.foreground);
+    if (!foreground) throw new Error(`Not a hex color: ${palette.foreground}`);
+    // The foreground is the highest contrast color a theme is guaranteed to
+    // have, so it is the first target. A theme whose own foreground falls short
+    // of the target still gets a readable hue, at the cost of leaving that one
+    // color behind the palette.
+    return blendToward(foreground) ?? blendToward(extremeContrast(palette.background)) ?? palette.foreground;
+};
+
+/** A color as the `H S% L%` triple the stylesheet composes will render it. */
+const asEmitted = (hex: string): Rgb => {
+    const quantized = hslTripleToRgb(toHslTriple(hex));
+    if (!quantized) throw new Error(`Not a hex color: ${hex}`);
+    return quantized;
+};
+
+/** Black or white, whichever contrasts more with `background`. */
+const extremeContrast = (background: string): Rgb => {
+    const rgb = parseHex(background);
+    if (!rgb) throw new Error(`Not a hex color: ${background}`);
+    return relativeLuminance(rgb) > 0.5 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 };
 };
 
 /** Whichever of the palette's two text colors reads better on `color`. */
@@ -218,6 +264,39 @@ export const toHslTriple = (hex: string): string => {
     }
 
     return `${Math.round(hue)} ${Math.round(clamp(saturation, 0, 1) * 100)}% ${Math.round(lightness * 100)}%`;
+};
+
+/** Inverse of `toHslTriple`, so a color can be checked as it will be emitted. */
+export const hslTripleToRgb = (triple: string): Rgb | null => {
+    const match = triple.match(/^(\d+) (\d+)% (\d+)%$/);
+    if (!match) return null;
+    const hue = Number(match[1]) / 360;
+    const saturation = Number(match[2]) / 100;
+    const lightness = Number(match[3]) / 100;
+    if (saturation === 0) {
+        const grey = Math.round(lightness * 255);
+        return { r: grey, g: grey, b: grey };
+    }
+
+    const max = lightness < 0.5
+        ? lightness * (1 + saturation)
+        : lightness + saturation - lightness * saturation;
+    const min = 2 * lightness - max;
+    const channel = (offset: number) => {
+        let position = (offset + hue) % 1;
+        if (position < 0) position += 1;
+        if (position < 1 / 6) return min + (max - min) * 6 * position;
+        if (position < 1 / 2) return max;
+        if (position < 2 / 3) return min + (max - min) * (2 / 3 - position) * 6;
+        return min;
+    };
+    // Rounded to 8 bits because that is the color a display ends up showing;
+    // the gate has to clear its threshold on that value, not on the float.
+    return {
+        r: Math.round(channel(1 / 3) * 255),
+        g: Math.round(channel(0) * 255),
+        b: Math.round(channel(-1 / 3) * 255),
+    };
 };
 
 /**
@@ -318,6 +397,7 @@ export const resolveOmarchyPalette = (
 const paletteSources = (palette: ResolvedOmarchyPalette): Record<OmarchyCssVariable, string> => {
     const surface = (amount: number) => mixHex(palette.background, palette.foreground, amount);
     const text = (hue: string) => ensureReadable(hue, palette);
+    const ui = (hue: string) => ensureReadable(hue, palette, MIN_UI_CONTRAST);
     const tint = (hue: string, amount: number) => mixHex(palette.background, hue, amount);
 
     return {
@@ -332,7 +412,10 @@ const paletteSources = (palette: ResolvedOmarchyPalette): Record<OmarchyCssVaria
         'secondary': surface(0.12),
         'secondary-foreground': palette.foreground,
         'muted': surface(0.08),
-        'muted-foreground': surface(0.58),
+        // Omarchy's muted is a deliberate de-emphasis color, as low as 1.5:1 on
+        // its own background. The app renders secondary text with it, so it has
+        // to clear the text threshold like any other text role.
+        'muted-foreground': text(surface(0.58)),
         'accent': surface(0.12),
         'accent-foreground': palette.foreground,
         'destructive': text(palette.red),
@@ -343,8 +426,10 @@ const paletteSources = (palette: ResolvedOmarchyPalette): Record<OmarchyCssVaria
         'warning-foreground': pickContrastText(palette.yellow, palette),
         'info': text(palette.blue),
         'info-foreground': pickContrastText(palette.blue, palette),
-        'focus-star': text(palette.yellow),
-        'focus-star-outline': text(palette.orange),
+        // The star is a filled icon with its own outline, not text, so it takes
+        // the non-text threshold the app's own bright star already sits under.
+        'focus-star': ui(palette.yellow),
+        'focus-star-outline': ui(palette.orange),
         'status-inbox': text(palette.blue),
         'status-next': text(palette.green),
         'status-waiting': text(palette.yellow),
@@ -384,3 +469,221 @@ export const paletteToCssVariables = (
 };
 
 export const toCustomProperty = (name: OmarchyCssVariable): string => `--${name}`;
+
+/**
+ * Omarchy 4 moved the active theme out of `~/.config` into the state directory.
+ * Both are tried so an Omarchy 3 session still themes; neither existing is not
+ * an error, it just means this is not Omarchy.
+ */
+const OMARCHY_CURRENT_DIRECTORIES = [
+    '.local/state/omarchy/current',
+    '.config/omarchy/current',
+] as const;
+
+// The palette lives one level down, inside `theme/`, while the name of the
+// active theme sits beside that directory. Both hang off the same `current`.
+const COLORS_RELATIVE_PATH = 'theme/colors.toml';
+const LIGHT_MODE_RELATIVE_PATH = 'theme/light.mode';
+const THEME_NAME_RELATIVE_PATH = 'theme.name';
+const PALETTE_CACHE_KEY = 'mindwtr-omarchy-palette';
+
+export type OmarchyThemeErrorStep = 'read' | 'watch';
+
+/**
+ * `null` and `'system'` both mean "follow the desktop" — `applyThemeMode`
+ * resolves the two the same way, and the startup path can hold either.
+ */
+const isSystemMode = (mode: DesktopThemeMode | null): boolean => mode === 'system' || mode === null;
+
+/** What gets written to the document root, and to the startup cache. */
+export type OmarchyThemeState = {
+    scheme: OmarchyScheme;
+    variables: Record<OmarchyCssVariable, string>;
+};
+
+const resolveOmarchyDirectory = async (): Promise<string | null> => {
+    const { BaseDirectory, exists } = await import('@tauri-apps/plugin-fs');
+    for (const directory of OMARCHY_CURRENT_DIRECTORIES) {
+        if (await exists(`${directory}/${COLORS_RELATIVE_PATH}`, { baseDir: BaseDirectory.Home })) return directory;
+    }
+    return null;
+};
+
+const isCachedState = (value: unknown): value is OmarchyThemeState => {
+    if (typeof value !== 'object' || value === null) return false;
+    const candidate = value as { scheme?: unknown; variables?: unknown };
+    if (candidate.scheme !== 'light' && candidate.scheme !== 'dark') return false;
+    if (typeof candidate.variables !== 'object' || candidate.variables === null) return false;
+    const variables = candidate.variables as Record<string, unknown>;
+    return OMARCHY_CSS_VARIABLES.every((name) => typeof variables[name] === 'string');
+};
+
+/**
+ * The last palette applied, cached so the first frame after launch is already
+ * the Omarchy theme. Without it the synchronous startup path uses the platform
+ * scheme and the palette lands a file read later, which reads as a flash.
+ */
+const readCachedState = (): OmarchyThemeState | null => {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+        const raw = localStorage.getItem(PALETTE_CACHE_KEY);
+        if (!raw) return null;
+        const parsed: unknown = JSON.parse(raw);
+        return isCachedState(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+};
+
+const writeCachedState = (state: OmarchyThemeState): void => {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        localStorage.setItem(PALETTE_CACHE_KEY, JSON.stringify(state));
+    } catch {
+        // Storage being full or blocked costs a flash on the next launch, not the theme.
+    }
+};
+
+/** Reads the live palette, or null when this session is not Omarchy. */
+export const readOmarchyTheme = async (): Promise<OmarchyThemeState | null> => {
+    if (!isTauriRuntime() || !isLinuxRuntime()) return null;
+
+    const { BaseDirectory, exists, readTextFile } = await import('@tauri-apps/plugin-fs');
+    const directory = await resolveOmarchyDirectory();
+    if (!directory) return null;
+
+    const options = { baseDir: BaseDirectory.Home };
+    const colorsToml = await readTextFile(`${directory}/${COLORS_RELATIVE_PATH}`, options);
+    const lightMode = await exists(`${directory}/${LIGHT_MODE_RELATIVE_PATH}`, options);
+    const palette = resolveOmarchyPalette(parseColorsToml(colorsToml), { lightModeHint: lightMode });
+    return palette ? { scheme: palette.scheme, variables: paletteToCssVariables(palette) } : null;
+};
+
+/** Puts the palette on the document root and hands it the light/dark decision. */
+export const applyOmarchyPalette = (state: OmarchyThemeState): void => {
+    const root = document.documentElement;
+    for (const name of OMARCHY_CSS_VARIABLES) {
+        root.style.setProperty(toCustomProperty(name), state.variables[name]);
+    }
+    root.style.colorScheme = state.scheme;
+    setSystemSchemeOverride(state.scheme);
+    writeCachedState(state);
+};
+
+/** Returns the document root to the app's own palette and the platform scheme. */
+export const clearOmarchyPalette = (): void => {
+    const root = document.documentElement;
+    for (const name of OMARCHY_CSS_VARIABLES) {
+        root.style.removeProperty(toCustomProperty(name));
+    }
+    root.style.removeProperty('color-scheme');
+    setSystemSchemeOverride(null);
+};
+
+/**
+ * Re-reads the palette and puts the document back in sync with it. Runs on
+ * startup, whenever the theme setting changes, and on each theme file change.
+ *
+ * Every failure path clears the palette instead of throwing: a missing,
+ * unreadable, or unparseable theme leaves the app on its own System palette
+ * rather than a half-applied one.
+ */
+export const syncOmarchyTheme = async (
+    mode: DesktopThemeMode | null,
+    onError?: (step: OmarchyThemeErrorStep, error: unknown) => void,
+): Promise<void> => {
+    if (!isSystemMode(mode)) {
+        clearOmarchyPalette();
+        applyThemeMode(mode);
+        return;
+    }
+
+    try {
+        const state = await readOmarchyTheme();
+        if (state) applyOmarchyPalette(state);
+        else clearOmarchyPalette();
+    } catch (error) {
+        clearOmarchyPalette();
+        onError?.('read', error);
+    }
+    // The palette may have changed the scheme, so the dark class is re-decided
+    // after the override moved, not before.
+    applyThemeMode(mode);
+    applyNativeScheme(mode);
+};
+
+/**
+ * The GTK titlebar resolves its scheme through the same override, so it has to
+ * move with the palette too. Without this, a live theme switch leaves a light
+ * titlebar sitting over a dark app.
+ */
+const applyNativeScheme = (mode: DesktopThemeMode | null): void => {
+    if (!isTauriRuntime()) return;
+    void applyNativeTheme(
+        resolveNativeTheme(mode),
+        () => import('@tauri-apps/api/app'),
+        () => import('@tauri-apps/api/window'),
+    );
+};
+
+/**
+ * The desktop theme entry point: applies the mode, then layers the Omarchy
+ * palette on top when System is active. Everything else about the theme system
+ * keeps calling `applyThemeMode` directly.
+ */
+export const applyDesktopTheme = (
+    mode: DesktopThemeMode | null,
+    systemTheme?: SystemThemePreference,
+    onError?: (step: OmarchyThemeErrorStep, error: unknown) => void,
+): void => {
+    if (!isSystemMode(mode)) {
+        clearOmarchyPalette();
+        applyThemeMode(mode, systemTheme);
+        return;
+    }
+
+    const cached = readCachedState();
+    if (cached) applyOmarchyPalette(cached);
+    applyThemeMode(mode, systemTheme);
+    void syncOmarchyTheme(mode, onError);
+};
+
+/**
+ * Follows the live theme so switching themes repaints the app without a
+ * restart. `theme.name` is the file Omarchy rewrites on every theme set, and
+ * watching it costs one small file instead of the whole theme directory.
+ */
+export const watchOmarchyTheme = (
+    mode: DesktopThemeMode | null,
+    onError?: (step: OmarchyThemeErrorStep, error: unknown) => void,
+): (() => void) => {
+    if (!isSystemMode(mode) || !isTauriRuntime() || !isLinuxRuntime()) return () => { };
+
+    let cancelled = false;
+    let stopWatching = () => { };
+
+    void (async () => {
+        try {
+            const { BaseDirectory, watch } = await import('@tauri-apps/plugin-fs');
+            const directory = await resolveOmarchyDirectory();
+            if (!directory) return;
+
+            const unwatch = await watch(
+                `${directory}/${THEME_NAME_RELATIVE_PATH}`,
+                () => {
+                    void syncOmarchyTheme(mode, onError);
+                },
+                { baseDir: BaseDirectory.Home, delayMs: 150 },
+            );
+            if (cancelled) unwatch();
+            else stopWatching = unwatch;
+        } catch (error) {
+            if (!cancelled) onError?.('watch', error);
+        }
+    })();
+
+    return () => {
+        cancelled = true;
+        stopWatching();
+    };
+};

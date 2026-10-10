@@ -1,17 +1,43 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The palette path is the part a pure-function test cannot see, and getting it
+// wrong fails silently: the app just stays on its own palette. Omarchy keeps
+// the palette at `current/theme/colors.toml` and the active name at
+// `current/theme.name`.
+const fsMock = vi.hoisted(() => ({
+    exists: vi.fn(),
+    readTextFile: vi.fn(),
+    watch: vi.fn(),
+}));
+vi.mock('@tauri-apps/plugin-fs', () => ({
+    BaseDirectory: { Home: 'Home' },
+    exists: fsMock.exists,
+    readTextFile: fsMock.readTextFile,
+    watch: fsMock.watch,
+}));
+
 import {
+    applyDesktopTheme,
+    applyOmarchyPalette,
+    clearOmarchyPalette,
     contrastRatio,
+    contrastRgb,
     ensureReadable,
+    hslTripleToRgb,
     mixHex,
     OMARCHY_CSS_VARIABLES,
     paletteToCssVariables,
     parseColorsToml,
     pickContrastText,
+    readOmarchyTheme,
     resolveOmarchyPalette,
     toCustomProperty,
     toHslTriple,
+    watchOmarchyTheme,
+    type OmarchyThemeState,
     type ResolvedOmarchyPalette,
 } from './omarchy-theme';
+import { resolveSystemThemePreference } from './theme';
 
 // A real Omarchy 4 theme, trimmed to the keys the app reads. Omarchy 4 replaced
 // the ANSI color0..color15 spellings with semantic names.
@@ -251,5 +277,204 @@ describe('paletteToCssVariables', () => {
 
     it('prefixes names into custom properties', () => {
         expect(toCustomProperty('status-inbox')).toBe('--status-inbox');
+    });
+});
+
+describe('applying the palette', () => {
+    const state = (): OmarchyThemeState => {
+        const palette = resolve(FLEXOKI_LIGHT);
+        return { scheme: palette.scheme, variables: paletteToCssVariables(palette) };
+    };
+
+    const resetDocument = () => {
+        document.documentElement.removeAttribute('style');
+        document.documentElement.className = '';
+    };
+
+    afterEach(() => {
+        clearOmarchyPalette();
+        resetDocument();
+        localStorage.clear();
+    });
+
+    it('writes every variable to the document root', () => {
+        const applied = state();
+        applyOmarchyPalette(applied);
+        const root = document.documentElement;
+        for (const name of OMARCHY_CSS_VARIABLES) {
+            expect(root.style.getPropertyValue(toCustomProperty(name)), name).toBe(applied.variables[name]);
+        }
+        expect(root.style.colorScheme).toBe('light');
+    });
+
+    it('hands the light/dark decision to the palette', () => {
+        applyOmarchyPalette(state());
+        expect(resolveSystemThemePreference('dark')).toBe('light');
+    });
+
+    it('clears every variable and returns the decision to the platform', () => {
+        applyOmarchyPalette(state());
+        clearOmarchyPalette();
+        const root = document.documentElement;
+        for (const name of OMARCHY_CSS_VARIABLES) {
+            expect(root.style.getPropertyValue(toCustomProperty(name)), name).toBe('');
+        }
+        expect(root.style.colorScheme).toBe('');
+        expect(resolveSystemThemePreference('dark')).toBe('dark');
+    });
+
+    it('applies the cached palette synchronously so the first frame is already themed', () => {
+        const cached = state();
+        applyOmarchyPalette(cached);
+        // Simulate the next launch: fresh document, palette only in storage.
+        resetDocument();
+        clearOmarchyPalette();
+
+        applyDesktopTheme('system');
+
+        expect(document.documentElement.style.getPropertyValue('--background')).toBe(cached.variables.background);
+        expect(resolveSystemThemePreference('dark')).toBe('light');
+    });
+
+    it('drops the palette when the mode stops being system', () => {
+        applyOmarchyPalette(state());
+        applyDesktopTheme('nord');
+        expect(document.documentElement.style.getPropertyValue('--background')).toBe('');
+        expect(resolveSystemThemePreference('dark')).toBe('dark');
+    });
+});
+
+// Real Omarchy themes, kept as fixtures because they break a naive mapping:
+// Rose Pine Dawn's muted is 1.48:1 on its own background and its cyan 2.60:1,
+// Tokyo Night's muted is 1.91:1. Both are fine in a terminal and not in a list.
+const ROSE_PINE_DAWN = `
+mode = "light"
+accent = "#56949f"
+muted = "#cecacd"
+background = "#faf4ed"
+foreground = "#575279"
+red = "#b4637a"
+yellow = "#ea9d34"
+orange = "#cf8057"
+green = "#286983"
+cyan = "#d7827e"
+blue = "#56949f"
+magenta = "#907aa9"
+`;
+
+const TOKYO_NIGHT = `
+mode = "dark"
+accent = "#7aa2f7"
+muted = "#414868"
+background = "#1a1b26"
+foreground = "#a9b1d6"
+red = "#f7768e"
+yellow = "#e0af68"
+orange = "#eb927b"
+green = "#9ece6a"
+cyan = "#449dab"
+blue = "#7aa2f7"
+magenta = "#ad8ee6"
+`;
+
+describe('readability of the emitted palette', () => {
+    const TEXT_ROLES = [
+        'foreground',
+        'muted-foreground',
+        'destructive',
+        'success',
+        'warning',
+        'info',
+        'status-inbox',
+        'status-next',
+        'status-waiting',
+        'status-someday',
+        'status-reference',
+        'status-done',
+        'status-archived',
+        'badge-project-fg',
+        'badge-context-fg',
+        'badge-priority-fg',
+        'badge-estimate-fg',
+        'badge-age-fg',
+    ] as const;
+    const UI_ROLES = ['focus-star', 'focus-star-outline'] as const;
+
+    const emittedRgb = (triple: string) => {
+        const rgb = hslTripleToRgb(triple);
+        if (!rgb) throw new Error(`Not an emitted triple: ${triple}`);
+        return rgb;
+    };
+
+    // The threshold is checked against the color the stylesheet renders, which
+    // is the rounded triple, not the hex the mapping started from.
+    for (const [name, fixture] of [['Rose Pine Dawn', ROSE_PINE_DAWN], ['Tokyo Night', TOKYO_NIGHT]] as const) {
+        it(`keeps every text role at or above 4.5:1 on ${name}`, () => {
+            const variables = paletteToCssVariables(resolve(fixture));
+            const background = emittedRgb(variables.background);
+            for (const role of TEXT_ROLES) {
+                expect(contrastRgb(emittedRgb(variables[role]), background), role).toBeGreaterThanOrEqual(4.5);
+            }
+        });
+
+        it(`keeps every non-text role at or above 3:1 on ${name}`, () => {
+            const variables = paletteToCssVariables(resolve(fixture));
+            const background = emittedRgb(variables.background);
+            for (const role of UI_ROLES) {
+                expect(contrastRgb(emittedRgb(variables[role]), background), role).toBeGreaterThanOrEqual(3);
+            }
+        });
+    }
+});
+
+describe('reading and watching the live theme', () => {
+    const COLORS_PATH = '.local/state/omarchy/current/theme/colors.toml';
+
+    beforeEach(() => {
+        fsMock.exists.mockReset();
+        fsMock.readTextFile.mockReset();
+        fsMock.watch.mockReset();
+        (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Linux');
+    });
+
+    afterEach(() => {
+        delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+        vi.restoreAllMocks();
+    });
+
+    const foundTheme = () => {
+        fsMock.exists.mockImplementation(async (path: string) => path === COLORS_PATH);
+        fsMock.readTextFile.mockResolvedValue(FLEXOKI_LIGHT);
+    };
+
+    it('reads the palette from inside theme/, not from current/', async () => {
+        foundTheme();
+        const state = await readOmarchyTheme();
+        expect(state?.scheme).toBe('light');
+        expect(fsMock.readTextFile).toHaveBeenCalledWith(COLORS_PATH, expect.anything());
+    });
+
+    it('returns null when the palette is not where Omarchy keeps it', async () => {
+        fsMock.exists.mockResolvedValue(false);
+        expect(await readOmarchyTheme()).toBeNull();
+    });
+
+    it('watches the theme name beside the theme directory, not inside it', async () => {
+        foundTheme();
+        fsMock.watch.mockResolvedValue(vi.fn());
+
+        const stop = watchOmarchyTheme('system');
+        await vi.waitFor(() => expect(fsMock.watch).toHaveBeenCalled());
+
+        expect(fsMock.watch.mock.calls[0][0]).toBe('.local/state/omarchy/current/theme.name');
+        stop();
+    });
+
+    it('does not read or watch outside a system theme mode', async () => {
+        const stop = watchOmarchyTheme('nord');
+        stop();
+        expect(fsMock.watch).not.toHaveBeenCalled();
+        expect(fsMock.exists).not.toHaveBeenCalled();
     });
 });
