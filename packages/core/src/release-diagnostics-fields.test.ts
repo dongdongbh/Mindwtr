@@ -13,6 +13,8 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // task-copy-diagnostics reuses releaseCheck and outcome below; source is the menu/shortcut category.
+    'source', 'documentFocused', 'activationSupported', 'activationActive', 'clipboardAvailable', 'errorKind',
     // ios-search-publication reuses releaseCheck, operation, outcome, enabled, and count below.
     // ios-search-snapshot reuses releaseCheck and count below.
     // ios-entity-link reuses releaseCheck, kind, and outcome below.

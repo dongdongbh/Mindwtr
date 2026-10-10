@@ -839,7 +839,7 @@ export function TaskQuickActionMenu({
                     icon: <Copy className="h-4 w-4" />,
                     label: tFallback(t, 'task.copyTitle', 'Copy Title'),
                     onClick: () => {
-                        void copyTaskTitles([task], t);
+                        void copyTaskTitles([task], t, false, 'menu');
                         onClose();
                     },
                 })}
