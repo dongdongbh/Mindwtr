@@ -444,7 +444,8 @@ describe('TimelineView (#1111)', () => {
             renderTimeline();
 
             expect(projectBarFor('p1')?.style.backgroundColor).toBe('rgb(0, 255, 0)');
-            const groupButton = screen.getByRole('button', { name: /Rebuild the deck.*Start date: .+Due date: .+/ });
+            const groupButton = screen.getByTestId('timeline-group');
+            expect(groupButton).toHaveAccessibleName(/Rebuild the deck.*Start date: .+Due date: .+/);
             expect(groupButton.dataset.projectId).toBe('p1');
 
             const navigations: string[] = [];
@@ -703,6 +704,6 @@ describe('TimelineView (#1111)', () => {
         const taskActions = screen.getAllByRole('button').filter((button) => button.dataset.taskId === 'accessible');
         expect(taskActions).toHaveLength(1);
         expect(taskActions[0]).toHaveAccessibleName(/Accessible task.*Start date: .+Due date: .+/);
-        expect(barFor('accessible')).toHaveAttribute('aria-hidden', 'true');
+        expect(barFor('accessible')?.querySelector('[data-testid="timeline-move-task"]')).toHaveAccessibleName(/Move task dates.*Accessible task.*Start date/);
     });
 });

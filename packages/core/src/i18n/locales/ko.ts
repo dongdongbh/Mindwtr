@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const koOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "작업 날짜 이동",
+    'timeline.moveProjectDates': "프로젝트 날짜 이동",
+    'timeline.resizeStart': "시작일 조정",
+    'timeline.resizeDue': "마감일 조정",
+    'timeline.datesUpdated': "날짜가 업데이트되었습니다",
+    'timeline.dateEditConflict': "다른 곳에서 날짜가 변경되었습니다. 다시 시도하세요.",
+    'timeline.dateEditFailed': "날짜를 업데이트하지 못했습니다. 날짜 범위를 확인하고 다시 시도하세요.",
+    'timeline.dateUndoConflict': "편집 후 날짜가 변경되어 실행 취소를 건너뛰었습니다.",
+    'timeline.dateUndoFailed': "날짜 변경을 취소하지 못했습니다. 다시 시도하세요.",
     "task.expandChecklist": "체크리스트 항목을 프로젝트 할 일로 전환",
     "task.keepChecklistDescription": "원래 할 일과 체크리스트를 프로젝트 안에 유지합니다.",
     "task.expandChecklistDescription": "순서와 체크 상태를 유지하여 항목마다 할 일을 만듭니다. 메모, 첨부파일, 날짜는 프로젝트로 옮기고 태그와 맥락은 새 할 일에 유지합니다. 원본은 휴지통으로 이동합니다. 집중 표시는 복사하지 않습니다. 전환을 되돌릴 수 있습니다.",

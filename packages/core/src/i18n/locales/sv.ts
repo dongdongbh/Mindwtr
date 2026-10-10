@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const svOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Flytta uppgiftens datum",
+    'timeline.moveProjectDates': "Flytta projektets datum",
+    'timeline.resizeStart': "Justera startdatum",
+    'timeline.resizeDue': "Justera slutdatum",
+    'timeline.datesUpdated': "Datum uppdaterade",
+    'timeline.dateEditConflict': "Datumen ändrades på annat håll. Försök igen.",
+    'timeline.dateEditFailed': "Det gick inte att uppdatera datumen. Kontrollera intervallet och försök igen.",
+    'timeline.dateUndoConflict': "Datumen har ändrats sedan redigeringen. Ångra hoppades över.",
+    'timeline.dateUndoFailed': "Det gick inte att ångra datumändringarna. Försök igen.",
     "task.expandChecklist": "Gör checklistans punkter till projektuppgifter",
     "task.keepChecklistDescription": "Behåll den ursprungliga uppgiften och checklistan i projektet.",
     "task.expandChecklistDescription": "Skapa en uppgift per punkt med samma ordning och bockar. Anteckningar, bilagor och datum flyttas till projektet; taggar och sammanhang följer de nya uppgifterna. Originalet flyttas till papperskorgen. Fokus kopieras inte. Omvandlingen kan ångras.",

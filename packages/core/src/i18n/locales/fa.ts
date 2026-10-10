@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const faOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "جابه‌جایی تاریخ‌های کار",
+    'timeline.moveProjectDates': "جابه‌جایی تاریخ‌های پروژه",
+    'timeline.resizeStart': "تنظیم تاریخ شروع",
+    'timeline.resizeDue': "تنظیم موعد",
+    'timeline.datesUpdated': "تاریخ‌ها به‌روزرسانی شدند",
+    'timeline.dateEditConflict': "تاریخ‌ها جای دیگری تغییر کرده‌اند. دوباره تلاش کنید.",
+    'timeline.dateEditFailed': "به‌روزرسانی تاریخ‌ها ممکن نشد. بازه را بررسی کنید و دوباره تلاش کنید.",
+    'timeline.dateUndoConflict': "تاریخ‌ها پس از ویرایش تغییر کرده‌اند. تغییر برگردانده نشد.",
+    'timeline.dateUndoFailed': "بازگرداندن تاریخ‌ها ممکن نشد. دوباره تلاش کنید.",
     "task.expandChecklist": "تبدیل موارد چک‌لیست به کارهای پروژه",
     "task.keepChecklistDescription": "کار اصلی و چک‌لیست آن در پروژه نگه داشته می‌شوند.",
     "task.expandChecklistDescription": "برای هر مورد یک کار با حفظ ترتیب و وضعیت انجام ساخته می‌شود. یادداشت‌ها، پیوست‌ها و تاریخ‌ها به پروژه و برچسب‌ها و زمینه‌ها به کارهای جدید منتقل می‌شوند. اصل کار به زباله‌دان می‌رود. تمرکز کپی نمی‌شود. تبدیل قابل واگردانی است.",

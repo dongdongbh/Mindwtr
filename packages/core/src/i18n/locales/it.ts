@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const itOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Sposta le date dell’attività",
+    'timeline.moveProjectDates': "Sposta le date del progetto",
+    'timeline.resizeStart': "Modifica la data di inizio",
+    'timeline.resizeDue': "Modifica la scadenza",
+    'timeline.datesUpdated': "Date aggiornate",
+    'timeline.dateEditConflict': "Le date sono state modificate altrove. Riprova.",
+    'timeline.dateEditFailed': "Impossibile aggiornare le date. Controlla l’intervallo e riprova.",
+    'timeline.dateUndoConflict': "Le date sono cambiate dopo questa modifica. Annullamento saltato.",
+    'timeline.dateUndoFailed': "Impossibile annullare le modifiche alle date. Riprova.",
     'task.doneTagOutcomeUnknown': "Impossibile confermare la modifica dei tag. Riavvia Mindwtr per ricaricare i dati salvati.",
     'task.doneCompletedAtOutcomeUnknown': "Impossibile confermare la modifica della data di completamento. Riavvia Mindwtr per ricaricare i dati salvati.",
     'task.destinationOutcomeUnknown': "Impossibile confermare la modifica della destinazione. Riavvia Mindwtr per ricaricare i dati salvati.",

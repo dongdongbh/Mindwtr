@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHant: Record<string, string> = {
+    'timeline.moveTaskDates': "移動任務日期",
+    'timeline.moveProjectDates': "移動專案日期",
+    'timeline.resizeStart': "調整開始日期",
+    'timeline.resizeDue': "調整截止日期",
+    'timeline.datesUpdated': "日期已更新",
+    'timeline.dateEditConflict': "日期已在其他位置變更。請重試。",
+    'timeline.dateEditFailed': "無法更新日期。請檢查日期範圍後重試。",
+    'timeline.dateUndoConflict': "日期在本次編輯後發生變更，已略過復原。",
+    'timeline.dateUndoFailed': "無法復原日期變更。請重試。",
     "task.expandChecklist": "將清單項目轉換為專案任務",
     "task.keepChecklistDescription": "將原任務及其清單保留在專案中。",
     "task.expandChecklistDescription": "每個清單項目建立一個任務，保留順序和勾選狀態。備註、附件和日期移至新專案；標籤和情境保留在新任務中。原任務移至垃圾桶，不複製專注標記。可以復原此次轉換。",

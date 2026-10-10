@@ -1,5 +1,14 @@
 // Ukrainian app strings. Keep placeholders and slash-command syntax in sync with en.ts.
 export const ukOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Зсунути дати завдання",
+    'timeline.moveProjectDates': "Зсунути дати проєкту",
+    'timeline.resizeStart': "Змінити дату початку",
+    'timeline.resizeDue': "Змінити термін",
+    'timeline.datesUpdated': "Дати оновлено",
+    'timeline.dateEditConflict': "Дати змінено в іншому місці. Спробуйте ще раз.",
+    'timeline.dateEditFailed': "Не вдалося оновити дати. Перевірте період і спробуйте ще раз.",
+    'timeline.dateUndoConflict': "Дати змінилися після редагування. Скасування пропущено.",
+    'timeline.dateUndoFailed': "Не вдалося скасувати зміну дат. Спробуйте ще раз.",
     "task.expandChecklist": "Перетворити пункти списку на завдання проєкту",
     "task.keepChecklistDescription": "Зберегти початкове завдання та його список у проєкті.",
     "task.expandChecklistDescription": "Створити завдання для кожного пункту, зберігши порядок і позначки. Нотатки, вкладення й дати переходять до проєкту; теги й контексти — до завдань. Оригінал потрапляє в кошик. Фокус не копіюється. Перетворення можна скасувати.",

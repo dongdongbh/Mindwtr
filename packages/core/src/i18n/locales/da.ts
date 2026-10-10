@@ -1,5 +1,14 @@
 // Danish translation. Keep at full key parity with en.ts.
 export const daOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Flyt opgavens datoer",
+    'timeline.moveProjectDates': "Flyt projektets datoer",
+    'timeline.resizeStart': "Juster startdato",
+    'timeline.resizeDue': "Juster frist",
+    'timeline.datesUpdated': "Datoer opdateret",
+    'timeline.dateEditConflict': "Datoerne blev ændret et andet sted. Prøv igen.",
+    'timeline.dateEditFailed': "Kunne ikke opdatere datoerne. Kontroller intervallet og prøv igen.",
+    'timeline.dateUndoConflict': "Datoerne er ændret siden redigeringen. Fortryd blev sprunget over.",
+    'timeline.dateUndoFailed': "Kunne ikke fortryde datoændringerne. Prøv igen.",
     "task.expandChecklist": "Gør tjeklistens punkter til projektopgaver",
     "task.keepChecklistDescription": "Behold den oprindelige opgave og dens tjekliste i projektet.",
     "task.expandChecklistDescription": "Opret en opgave pr. punkt med samme rækkefølge og afkrydsning. Noter, bilag og datoer flyttes til projektet; mærker og kontekster følger de nye opgaver. Originalen flyttes til papirkurven. Fokus kopieres ikke. Konverteringen kan fortrydes.",

@@ -5,6 +5,8 @@ import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     compareProjectsByOrder,
+    canEditTimelineTaskDates,
+    canEditTimelineProjectDates,
     getCalendarDayOfMonth,
     getCalendarMonthIndex,
     getWeekStartsOnIndex,
@@ -23,6 +25,8 @@ import {
 } from '@mindwtr/core';
 
 import { ErrorBoundary } from '../ErrorBoundary';
+import type { TimelineDateEditTarget } from '../../lib/timeline-date-edit';
+import { useTimelineDateEditing } from './timeline/useTimelineDateEditing';
 import { TASK_STATUS_ICONS } from '../../lib/task-status-icons';
 import { useDropdownPosition } from '../ui/use-dropdown-position';
 import { cn } from '../../lib/utils';
@@ -500,7 +504,7 @@ export function TimelineView() {
 
     const { rows, earlierOmitted, laterOmitted } = timelineRows;
     const omittedCount = earlierOmitted + laterOmitted;
-    const taskRowCount = rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0);
+    const taskRowCount = React.useMemo(() => rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0), [rows]);
     const hasDatedWork = datedTasks.length > 0 || projectSpans.size > 0;
     const hasRows = Boolean(range) && rows.length > 0;
     const { dayWidth, trackWidth, fitted } = resolveTimelineTrack(
@@ -508,6 +512,12 @@ export function TimelineView() {
         DAY_WIDTH[zoom],
         Math.max(0, viewportWidth - GUTTER_WIDTH),
     );
+    const dateEditing = useTimelineDateEditing({
+        dayWidth,
+        geometryKey: `${zoom}:${range?.from.getTime()}:${range?.days}:${statuses.join(',')}`,
+        scrollRef,
+        t,
+    });
     const contentWidth = GUTTER_WIDTH + trackWidth + (fitted ? 0 : TRACK_TAIL);
     const todayIndex = range ? differenceInCalendarDays(today, range.from) : -1;
     const todayVisible = range ? todayIndex >= 0 && todayIndex < range.days : false;
@@ -622,9 +632,73 @@ export function TimelineView() {
         dispatchNavigateEvent('projects');
     }, [setProjectView]);
 
+    const previewSpan = (target: TimelineDateEditTarget) => {
+        const preview = dateEditing.preview;
+        if (!range || !preview?.dates || preview.target.kind !== target.kind) return null;
+        const id = target.kind === 'task' ? target.task.id : target.project.id;
+        const previewId = preview.target.kind === 'task' ? preview.target.task.id : preview.target.project.id;
+        if (id !== previewId) return null;
+        const start = safeParseDate(preview.dates.start);
+        const due = safeParseDate(preview.dates.due);
+        const a = differenceInCalendarDays(start ?? due!, range.from);
+        const b = differenceInCalendarDays(due ?? start!, range.from);
+        return { lo: Math.min(a, b), hi: Math.max(a, b) };
+    };
+    const renderDateControls = (
+        target: TimelineDateEditTarget,
+        dates: { start?: string; due?: string },
+        resizeStart: boolean,
+        resizeDue: boolean,
+        open: () => void,
+    ) => {
+        const editable = target.kind === 'task'
+            ? canEditTimelineTaskDates(target.task, target.project)
+            : canEditTimelineProjectDates(target.project);
+        if (!editable) return null;
+        const label = target.kind === 'task' ? target.task.title : target.project.title;
+        const spokenDates = describeDates(t, dates.start, dates.due);
+        const actionLabel = (key: string) => `${t(`timeline.${key}`)}: ${label}. ${spokenDates}`;
+        return (
+            <>
+                <button
+                    type="button"
+                    data-testid={`timeline-move-${target.kind}`}
+                    aria-label={actionLabel(target.kind === 'task' ? 'moveTaskDates' : 'moveProjectDates')}
+                    title={actionLabel(target.kind === 'task' ? 'moveTaskDates' : 'moveProjectDates')}
+                    disabled={dateEditing.pending}
+                    onPointerDown={(event) => dateEditing.onPointerDown(event, target, 'move')}
+                    onKeyDown={(event) => dateEditing.onKeyDown(event, target, 'move')}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        if (!dateEditing.consumeClick(target)) open();
+                    }}
+                    className="absolute inset-0 rounded-[inherit] cursor-grab touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-wait"
+                />
+                {(['start', 'due'] as const).map((edge) => (edge === 'start' ? resizeStart : resizeDue) && (
+                    <button
+                        key={edge}
+                        type="button"
+                        data-testid={`timeline-resize-${edge}`}
+                        aria-label={actionLabel(edge === 'start' ? 'resizeStart' : 'resizeDue')}
+                        title={actionLabel(edge === 'start' ? 'resizeStart' : 'resizeDue')}
+                        disabled={dateEditing.pending}
+                        onPointerDown={(event) => dateEditing.onPointerDown(event, target, edge)}
+                        onKeyDown={(event) => dateEditing.onKeyDown(event, target, edge)}
+                        onClick={(event) => { event.stopPropagation(); dateEditing.consumeClick(target); }}
+                        style={{ top: -8, [edge === 'start' ? 'left' : 'right']: 0, width: 10, height: 8 }}
+                        className="absolute z-20 cursor-ew-resize rounded-sm border border-border bg-background opacity-0 touch-none group-hover/timeline-row:opacity-100 group-hover/timeline-bar:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-wait"
+                    />
+                ))}
+            </>
+        );
+    };
+
     const renderRow = (row: TimelineRow, index: number) => {
         if (row.kind === 'group') {
             const project = row.project;
+            const target: TimelineDateEditTarget | null = project ? { kind: 'project', project } : null;
+            const displayedSpan = target ? previewSpan(target) ?? row.span : row.span;
+            const editable = project ? canEditTimelineProjectDates(project) : false;
             const groupDates = project ? describeDates(t, project.startDate, project.dueDate) : '';
             const groupActionLabel = groupDates ? `${row.label}. ${groupDates}` : row.label;
             const gutterClassName = 'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-muted pl-3 pr-2 text-left text-xs font-semibold text-foreground';
@@ -677,22 +751,27 @@ export function TimelineView() {
                         </div>
                     )}
                     <div className="relative min-w-0 flex-1 bg-muted/60">
-                        {row.span && project && (
+                        {displayedSpan && project && target && (
                             <div
                                 data-testid="timeline-project-bar"
                                 data-project-id={project.id}
                                 title={row.label}
-                                aria-hidden="true"
-                                onClick={() => goToProject(project.id)}
-                                className="absolute z-10 cursor-pointer rounded-[3px] shadow-sm transition-[filter] hover:brightness-110"
+                                aria-hidden={editable ? undefined : true}
+                                onClick={editable ? undefined : () => goToProject(project.id)}
+                                className="group/timeline-bar absolute z-10 cursor-pointer rounded-[3px] shadow-sm transition-[filter] hover:brightness-110"
                                 style={{
-                                    left: row.span.lo * dayWidth,
-                                    width: Math.max(MIN_BAR_WIDTH, (row.span.hi - row.span.lo + 1) * dayWidth),
+                                    left: Math.max(0, displayedSpan.lo) * dayWidth,
+                                    width: Math.max(MIN_BAR_WIDTH, (Math.min(range!.days - 1, displayedSpan.hi) - Math.max(0, displayedSpan.lo) + 1) * dayWidth),
                                     height: PROJECT_BAR_HEIGHT,
                                     top: (ROW_HEIGHT - PROJECT_BAR_HEIGHT) / 2,
                                     backgroundColor: row.color || 'hsl(var(--primary))',
                                 }}
-                            />
+                            >
+                                {renderDateControls(target, { start: project.startDate, due: project.dueDate },
+                                    Boolean(project.startDate && differenceInCalendarDays(safeParseDate(project.startDate)!, range!.from) >= 0),
+                                    Boolean(project.dueDate && differenceInCalendarDays(safeParseDate(project.dueDate)!, range!.from) < range!.days),
+                                    () => goToProject(project.id))}
+                            </div>
                         )}
                     </div>
                 </div>
@@ -700,8 +779,12 @@ export function TimelineView() {
         }
         // Keep each task's source dates intact for labels and ordering, but draw
         // only the part that intersects the bounded axis.
-        const drawingLo = Math.max(0, row.lo);
-        const drawingHi = Math.min(range!.days - 1, row.hi);
+        const project = row.task.projectId ? projectById.get(row.task.projectId) : undefined;
+        const target: TimelineDateEditTarget = { kind: 'task', task: row.task, project };
+        const displayedSpan = previewSpan(target) ?? row;
+        const editable = canEditTimelineTaskDates(row.task, project);
+        const drawingLo = Math.max(0, displayedSpan.lo);
+        const drawingHi = Math.min(range!.days - 1, displayedSpan.hi);
         const naturalWidth = row.single
             ? MARKER_WIDTH
             : Math.max(MIN_BAR_WIDTH, (drawingHi - drawingLo + 1) * dayWidth);
@@ -752,11 +835,11 @@ export function TimelineView() {
                         data-task-id={row.task.id}
                         data-variant={row.single ? 'mini' : 'bar'}
                         title={row.task.title}
-                        aria-hidden="true"
-                        onClick={() => setOpenTaskId(row.task.id)}
+                        aria-hidden={editable ? undefined : true}
+                        onClick={editable ? undefined : () => setOpenTaskId(row.task.id)}
                         // No title on the bar: the sticky name column already
                         // carries it, and the tooltip repeats it on hover.
-                        className="absolute z-10 cursor-pointer rounded-full transition-[filter] hover:brightness-110"
+                        className="group/timeline-bar absolute z-10 cursor-pointer rounded-full transition-[filter] hover:brightness-110"
                         style={{
                             left,
                             width,
@@ -765,7 +848,11 @@ export function TimelineView() {
                             backgroundColor: tint.fill,
                             border: `1px solid ${tint.border}`,
                         }}
-                    />
+                    >
+                        {renderDateControls(target, { start: row.task.startTime, due: row.task.dueDate },
+                            !row.single && row.lo >= 0, !row.single && row.hi < range!.days,
+                            () => setOpenTaskId(row.task.id))}
+                    </div>
                 </div>
             </div>
         );
@@ -881,6 +968,13 @@ export function TimelineView() {
                     </div>
                 </div>
 
+                {dateEditing.preview && (
+                    <div role="status" className="mb-2 text-xs text-muted-foreground">
+                        {dateEditing.preview.dates
+                            ? describeDates(t, dateEditing.preview.dates.start, dateEditing.preview.dates.due)
+                            : t('timeline.dateEditFailed')}
+                    </div>
+                )}
                 {!hasDatedWork ? (
                     <div>
                         <ListEmptyState

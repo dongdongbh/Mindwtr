@@ -2,6 +2,15 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Hungarian.
 export const huOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Feladat dátumainak mozgatása",
+    'timeline.moveProjectDates': "Projekt dátumainak mozgatása",
+    'timeline.resizeStart': "Kezdődátum módosítása",
+    'timeline.resizeDue': "Határidő módosítása",
+    'timeline.datesUpdated': "Dátumok frissítve",
+    'timeline.dateEditConflict': "A dátumokat máshol módosították. Próbálja újra.",
+    'timeline.dateEditFailed': "A dátumok nem frissíthetők. Ellenőrizze az időszakot, és próbálja újra.",
+    'timeline.dateUndoConflict': "A dátumok azóta megváltoztak. A visszavonás kimaradt.",
+    'timeline.dateUndoFailed': "A dátumváltozások nem vonhatók vissza. Próbálja újra.",
     "task.expandChecklist": "Ellenőrzőlista elemeinek átalakítása projektfeladatokká",
     "task.keepChecklistDescription": "Az eredeti feladat és ellenőrzőlistája megmarad a projektben.",
     "task.expandChecklistDescription": "Elemenként egy feladat készül, a sorrend és a jelölések megőrzésével. A jegyzetek, mellékletek és dátumok a projekthez, a címkék és kontextusok az új feladatokhoz kerülnek. Az eredeti a kukába kerül. A fókuszjelölés nem másolódik. A művelet visszavonható.",

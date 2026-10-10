@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const hiOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "कार्य की तारीखें बदलें",
+    'timeline.moveProjectDates': "परियोजना की तारीखें बदलें",
+    'timeline.resizeStart': "आरंभ तारीख समायोजित करें",
+    'timeline.resizeDue': "नियत तारीख समायोजित करें",
+    'timeline.datesUpdated': "तारीखें अपडेट की गईं",
+    'timeline.dateEditConflict': "तारीखें कहीं और बदली गई हैं। फिर कोशिश करें।",
+    'timeline.dateEditFailed': "तारीखें अपडेट नहीं हो सकीं। अवधि जाँचें और फिर कोशिश करें।",
+    'timeline.dateUndoConflict': "संपादन के बाद तारीखें बदली गई हैं। बदलाव वापस नहीं किया गया।",
+    'timeline.dateUndoFailed': "तारीखों के बदलाव वापस नहीं हो सके। फिर कोशिश करें।",
     'task.doneTagOutcomeUnknown': "टैग में बदलाव की पुष्टि नहीं हो सकी। सहेजे गए डेटा को फिर से लोड करने के लिए Mindwtr को पुनः प्रारंभ करें।",
     'task.doneCompletedAtOutcomeUnknown': "पूरा होने के समय में बदलाव की पुष्टि नहीं हो सकी। सहेजे गए डेटा को फिर से लोड करने के लिए Mindwtr को पुनः शुरू करें।",
     'task.destinationOutcomeUnknown': "गंतव्य में बदलाव की पुष्टि नहीं हो सकी। सहेजा गया डेटा फिर से लोड करने के लिए Mindwtr को पुनः शुरू करें।",

@@ -74,6 +74,7 @@ export * from './store-helpers';
 export * from './sync';
 export * from './tombstone-compaction';
 export * from './task-date-coherence';
+export * from './timeline-date-edit';
 export * from './sync-normalization';
 export * from './sync-document';
 export * from './sync-helpers';

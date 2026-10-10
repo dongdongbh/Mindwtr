@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHans: Record<string, string> = {
+    'timeline.moveTaskDates': "移动任务日期",
+    'timeline.moveProjectDates': "移动项目日期",
+    'timeline.resizeStart': "调整开始日期",
+    'timeline.resizeDue': "调整截止日期",
+    'timeline.datesUpdated': "日期已更新",
+    'timeline.dateEditConflict': "日期已在其他位置更改。请重试。",
+    'timeline.dateEditFailed': "无法更新日期。请检查日期范围后重试。",
+    'timeline.dateUndoConflict': "日期在本次编辑后发生更改，已跳过撤销。",
+    'timeline.dateUndoFailed': "无法撤销日期更改。请重试。",
     "task.expandChecklist": "将清单项转换为项目任务",
     "task.keepChecklistDescription": "将原任务及其清单保留在项目中。",
     "task.expandChecklistDescription": "每个清单项创建一个任务，保留顺序和勾选状态。备注、附件和日期移至新项目；标签和情境保留在新任务中。原任务移至回收站，不复制专注标记。可以撤销此次转换。",
