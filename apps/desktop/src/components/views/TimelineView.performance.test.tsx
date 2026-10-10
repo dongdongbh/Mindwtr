@@ -70,7 +70,14 @@ describePerf('TimelineView large-store performance budget', () => {
         });
     });
 
-    it('computes and virtualizes 5,000 dated tasks within budget', () => {
+    it.each(['active', 'completed'] as const)('computes and virtualizes 5,000 %s dated tasks within budget', (scope) => {
+        if (scope === 'completed') {
+            window.localStorage.setItem('mindwtr:view:timeline:v1', JSON.stringify({ statuses: ['done'] }));
+            useTaskStore.setState({
+                _allTasks: tasks.map((task) => ({ ...task, status: 'archived' as const })),
+                _allProjects: projects.map((project) => ({ ...project, status: 'archived' as const })),
+            });
+        }
         let bestMs = Number.POSITIVE_INFINITY;
 
         for (let attempt = 0; attempt < 3; attempt += 1) {

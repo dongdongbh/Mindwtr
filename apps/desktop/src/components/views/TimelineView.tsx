@@ -1,4 +1,6 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronDown } from 'lucide-react';
 import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -8,6 +10,9 @@ import {
     getWeekStartsOnIndex,
     hasTimeComponent,
     isTaskVisibleInArea,
+    isTaskCompleted,
+    isTaskFinished,
+    taskMatchesAreaFilterSelection,
     projectMatchesAreaFilterSelection,
     safeFormatDate,
     safeParseDate,
@@ -18,6 +23,8 @@ import {
 } from '@mindwtr/core';
 
 import { ErrorBoundary } from '../ErrorBoundary';
+import { TASK_STATUS_ICONS } from '../../lib/task-status-icons';
+import { useDropdownPosition } from '../ui/use-dropdown-position';
 import { cn } from '../../lib/utils';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { useUiStore } from '../../store/ui-store';
@@ -62,11 +69,16 @@ const MAX_SPAN_DAYS = 400;
 /** Below this, rendering every row outright is cheaper than measuring them. */
 const VIRTUALIZE_ABOVE_ROWS = 100;
 
+const TIMELINE_STATUSES = ['inbox', 'next', 'waiting', 'someday', 'done'] as const;
+type TimelineStatus = (typeof TIMELINE_STATUSES)[number];
 type TimelinePersistedViewState = {
     zoom: TimelineZoom;
+    statuses: TimelineStatus[];
 };
 
-const DEFAULT_TIMELINE_VIEW_STATE: TimelinePersistedViewState = { zoom: 'week' };
+const DEFAULT_TIMELINE_VIEW_STATE: TimelinePersistedViewState = {
+    zoom: 'week', statuses: ['inbox', 'next', 'waiting', 'someday'],
+};
 
 function sanitizeTimelineViewState(
     value: unknown,
@@ -75,7 +87,12 @@ function sanitizeTimelineViewState(
     const parsed = value && typeof value === 'object' && !Array.isArray(value)
         ? value as Partial<TimelinePersistedViewState>
         : {};
+    const statuses = Array.isArray(parsed.statuses)
+        ? TIMELINE_STATUSES.filter((status) => parsed.statuses?.includes(status))
+        : fallback.statuses;
     return {
+        statuses: statuses.length > 0 || (Array.isArray(parsed.statuses) && parsed.statuses.length === 0)
+            ? statuses : fallback.statuses,
         zoom: ZOOM_LEVELS.includes(parsed.zoom as TimelineZoom) ? parsed.zoom as TimelineZoom : fallback.zoom,
     };
 }
@@ -194,7 +211,8 @@ type TimelineRow =
 
 export function TimelineView() {
     const perf = usePerformanceMonitor('TimelineView');
-    const tasks = useTaskStore((state) => state.tasks);
+    const activeTasks = useTaskStore((state) => state.tasks);
+    const allTasks = useTaskStore((state) => state._allTasks);
     const weekStart = useTaskStore((state) => state.settings?.weekStart);
     const calendarSystem = useTaskStore((state) => state.settings?.calendarSystem);
     const dateFormat = useTaskStore((state) => state.settings?.dateFormat);
@@ -208,6 +226,42 @@ export function TimelineView() {
         sanitizeTimelineViewState,
     );
     const zoom = persistedViewState.zoom;
+    const statuses = persistedViewState.statuses;
+    const tasks = statuses.includes('done') ? allTasks : activeTasks;
+    const statusLabel = (status: TimelineStatus) => t(status === 'done' ? 'list.done' : `status.${status}`);
+    const statusFilterLabel = t('taskEdit.statusLabel');
+    const [statusFilterOpen, setStatusFilterOpen] = React.useState(false);
+    const statusFilterRef = React.useRef<HTMLDivElement>(null);
+    const statusTriggerRef = React.useRef<HTMLButtonElement>(null);
+    const statusPanelRef = React.useRef<HTMLDivElement>(null);
+    const statusPanelId = React.useId();
+    const { fixedDropdownStyle, listMaxHeight } = useDropdownPosition({
+        open: statusFilterOpen, containerRef: statusFilterRef, dropdownRef: statusPanelRef,
+    });
+    React.useEffect(() => {
+        if (!statusFilterOpen) return;
+        statusPanelRef.current?.querySelector<HTMLInputElement>('input')?.focus();
+        const onPointer = (event: MouseEvent) => {
+            const target = event.target as Node;
+            if (!statusFilterRef.current?.contains(target) && !statusPanelRef.current?.contains(target)) {
+                setStatusFilterOpen(false);
+            }
+        };
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            setStatusFilterOpen(false);
+            statusTriggerRef.current?.focus();
+        };
+        document.addEventListener('mousedown', onPointer);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onPointer);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [statusFilterOpen]);
+    const hasStatusFilter = statuses.length !== DEFAULT_TIMELINE_VIEW_STATE.statuses.length
+        || DEFAULT_TIMELINE_VIEW_STATE.statuses.some((status) => !statuses.includes(status));
     const weekStartsOn = getWeekStartsOnIndex(weekStart);
     const calendarLocale = React.useMemo(() => resolveCalendarLocale({
         language,
@@ -246,27 +300,27 @@ export function TimelineView() {
 
     const today = React.useMemo(() => startOfDay(new Date()), [localDayKey]);
 
-    // Same scope as the board: no deleted tasks, no tasks parked out of the
-    // active area filter. Finished and filed work has no place on a plan, so
-    // done/archived/reference drop out too.
     const datedTasks = React.useMemo(() => {
         perf.trackUseMemo();
         return tasks.filter((task) => {
-            if (task.deletedAt) return false;
-            if (task.status === 'done' || task.status === 'archived' || task.status === 'reference') return false;
-            if (!task.startTime && !task.dueDate) return false;
-            return isTaskVisibleInArea(task, visibility);
+            if (task.deletedAt || task.purgedAt) return false;
+            const completed = isTaskCompleted(task);
+            if (!statuses.includes(completed ? 'done' : task.status as TimelineStatus)) return false;
+            if (!safeParseDate(task.startTime) && !safeParseDate(task.dueDate)) return false;
+            // History keeps parked-project context without reactivating its work.
+            return completed
+                ? taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById)
+                : isTaskVisibleInArea(task, visibility);
         });
-    }, [tasks, visibility]);
+    }, [tasks, statuses, visibility, resolvedAreaFilter, projectById, areaById]);
 
-    // A dated project is plan-worthy on its own: a project whose steps have no
-    // dates yet still gets its span drawn. Same scope as the task filter —
-    // nothing deleted, nothing archived, nothing outside the area filter.
     const projectSpans = React.useMemo(() => {
         perf.trackUseMemo();
+        const historicalProjectIds = new Set(datedTasks.filter(isTaskCompleted).map((task) => task.projectId));
         const spans = new Map<string, { start: Date | null; due: Date | null }>();
         for (const project of projectById.values()) {
-            if (project.deletedAt || project.status === 'archived') continue;
+            if (project.deletedAt || project.purgedAt) continue;
+            if (project.status === 'archived' && !historicalProjectIds.has(project.id)) continue;
             const start = safeParseDate(project.startDate);
             const due = safeParseDate(project.dueDate);
             if (!start && !due) continue;
@@ -277,7 +331,7 @@ export function TimelineView() {
             });
         }
         return spans;
-    }, [areaById, projectById, resolvedAreaFilter]);
+    }, [areaById, datedTasks, projectById, resolvedAreaFilter]);
 
     const range = React.useMemo(() => {
         perf.trackUseMemo();
@@ -358,7 +412,7 @@ export function TimelineView() {
                 continue;
             }
             const color = getTaskAccentColor(task, projectById, areaById);
-            const key = task.projectId ?? '';
+            const key = task.projectId && projectById.has(task.projectId) ? task.projectId : '';
             const list = byProject.get(key);
             const row: TimelineRow = { kind: 'task', key: task.id, task, color, lo, hi, single };
             if (list) list.push(row);
@@ -557,8 +611,8 @@ export function TimelineView() {
     }, [laterOmitted, range]);
 
     const openTask = React.useMemo(
-        () => (openTaskId ? tasks.find((task) => task.id === openTaskId) ?? null : null),
-        [openTaskId, tasks],
+        () => (openTaskId ? allTasks.find((task) => task.id === openTaskId) ?? null : null),
+        [openTaskId, allTasks],
     );
     const openProject = openTask?.projectId ? projectById.get(openTask.projectId) : undefined;
 
@@ -663,9 +717,12 @@ export function TimelineView() {
         // under it is drawn as a tint of the same one. Mini markers included.
         const tint = taskBarTint(row.color);
         const dateDescription = describeDates(t, row.task.startTime, row.task.dueDate);
+        const status = isTaskCompleted(row.task) ? 'done' : row.task.status as TimelineStatus;
+        const label = statusLabel(status);
+        const StatusIcon = TASK_STATUS_ICONS[status];
         const taskActionLabel = dateDescription
-            ? `${row.task.title}. ${dateDescription}`
-            : row.task.title;
+            ? `${row.task.title}. ${label}. ${dateDescription}`
+            : `${row.task.title}. ${label}`;
         return (
             <div className="group/timeline-row flex border-b border-border/40" style={{ height: ROW_HEIGHT }}>
                 {/* The name column is the row's primary click target; the bar is a
@@ -678,12 +735,15 @@ export function TimelineView() {
                     aria-label={taskActionLabel}
                     onClick={() => setOpenTaskId(row.task.id)}
                     className={cn(
-                        'sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card pl-6 pr-3 text-left',
+                        'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-card pl-6 pr-3 text-left',
                         'text-xs text-foreground transition-colors hover:bg-muted group-hover/timeline-row:bg-muted',
                         'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                     )}
                     style={{ width: GUTTER_WIDTH }}
                 >
+                    <span role="img" aria-label={label} title={label} className="shrink-0 text-muted-foreground">
+                        <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                    </span>
                     <span className="min-w-0 truncate">{row.task.title}</span>
                 </button>
                 <div className="relative min-w-0 flex-1 transition-colors group-hover/timeline-row:bg-muted/40">
@@ -728,6 +788,65 @@ export function TimelineView() {
                         </span>
                     </div>
                     <div className="flex items-center gap-2">
+                        <div ref={statusFilterRef}>
+                            <button
+                                ref={statusTriggerRef}
+                                type="button"
+                                aria-haspopup="dialog"
+                                aria-expanded={statusFilterOpen}
+                                aria-controls={statusFilterOpen ? statusPanelId : undefined}
+                                aria-label={statusFilterLabel}
+                                onClick={() => setStatusFilterOpen((open) => !open)}
+                                className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                            >
+                                {statusFilterLabel}
+                                {hasStatusFilter && <span className="text-muted-foreground">{statuses.length}</span>}
+                                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                            {statusFilterOpen && createPortal(
+                                <div
+                                    ref={statusPanelRef}
+                                    id={statusPanelId}
+                                    role="dialog"
+                                    aria-label={statusFilterLabel}
+                                    style={{ ...fixedDropdownStyle, width: 180, maxHeight: listMaxHeight }}
+                                    className="z-50 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg"
+                                    onBlur={(event) => {
+                                        const target = event.relatedTarget as Node | null;
+                                        if (target && !event.currentTarget.contains(target) && !statusFilterRef.current?.contains(target)) {
+                                            setStatusFilterOpen(false);
+                                        }
+                                    }}
+                                >
+                                    {TIMELINE_STATUSES.map((status) => {
+                                        const Icon = TASK_STATUS_ICONS[status];
+                                        return (
+                                            <label key={status} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs text-foreground hover:bg-muted focus-within:bg-muted">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={statuses.includes(status)}
+                                                    onChange={() => setPersistedViewState((current) => ({
+                                                        ...current,
+                                                        statuses: TIMELINE_STATUSES.filter((value) => value === status
+                                                            ? !current.statuses.includes(value) : current.statuses.includes(value)),
+                                                    }))}
+                                                    className="accent-primary"
+                                                />
+                                                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                                                {statusLabel(status)}
+                                            </label>
+                                        );
+                                    })}
+                                    <button
+                                        type="button"
+                                        onClick={() => setPersistedViewState((current) => ({ ...current, statuses: DEFAULT_TIMELINE_VIEW_STATE.statuses }))}
+                                        className="mt-1 w-full rounded border-t border-border px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                    >
+                                        {t('common.reset')}
+                                    </button>
+                                </div>, document.body,
+                            )}
+                        </div>
                         {todayVisible && (
                             <button
                                 type="button"
@@ -747,7 +866,7 @@ export function TimelineView() {
                                     key={level}
                                     type="button"
                                     aria-pressed={zoom === level}
-                                    onClick={() => setPersistedViewState({ zoom: level })}
+                                    onClick={() => setPersistedViewState((current) => ({ ...current, zoom: level }))}
                                     className={cn(
                                         'rounded px-2.5 py-1 text-xs font-medium transition-colors',
                                         zoom === level
@@ -765,7 +884,7 @@ export function TimelineView() {
                 {!hasDatedWork ? (
                     <div>
                         <ListEmptyState
-                            hasFilters={false}
+                            hasFilters={hasStatusFilter}
                             emptyState={{
                                 title: tFallback(t, 'timeline.empty', 'Nothing scheduled yet'),
                                 body: tFallback(t, 'timeline.emptyHint', 'Projects and tasks with a start or due date appear here as bars.'),
@@ -927,6 +1046,8 @@ export function TimelineView() {
                 )}
             </div>
             <CalendarOpenTaskModal
+                readOnly={Boolean(openTask && (isTaskFinished(openTask)
+                    || (openProject && openProject.status !== 'active')))}
                 controller={{
                     closeOpenTask: () => setOpenTaskId(null),
                     openProject,

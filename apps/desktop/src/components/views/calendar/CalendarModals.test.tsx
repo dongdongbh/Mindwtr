@@ -7,8 +7,8 @@ import { LanguageProvider } from '../../../contexts/language-context';
 const editTrigger = vi.fn();
 
 vi.mock('../../TaskItem', () => ({
-    TaskItem: () => (
-        <div data-task-id="task-1">
+    TaskItem: ({ readOnly, interactionDisabled }: { readOnly: boolean; interactionDisabled: boolean }) => (
+        <div data-task-id="task-1" data-read-only={String(readOnly)} data-interaction-disabled={String(interactionDisabled)}>
             <button type="button" data-task-edit-trigger onClick={editTrigger}>edit</button>
             <input aria-label="note" />
         </div>
@@ -34,6 +34,16 @@ describe('CalendarOpenTaskModal', () => {
 
         fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Enter', shiftKey: true });
         expect(editTrigger).toHaveBeenCalledTimes(2);
+    });
+
+    it('passes read-only through and disables edit shortcuts for history', () => {
+        editTrigger.mockClear();
+        render(<CalendarOpenTaskModal controller={controller} readOnly />);
+        expect(document.querySelector('[data-task-id="task-1"]')).toHaveAttribute('data-read-only', 'true');
+        expect(document.querySelector('[data-task-id="task-1"]')).toHaveAttribute('data-interaction-disabled', 'true');
+        fireEvent.keyDown(screen.getByRole('dialog'), { key: 'e' });
+        fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Enter', shiftKey: true });
+        expect(editTrigger).not.toHaveBeenCalled();
     });
 
     it('leaves the key alone while typing in a field or with a modifier held', () => {
