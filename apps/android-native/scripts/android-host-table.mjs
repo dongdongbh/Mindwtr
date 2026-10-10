@@ -116,6 +116,9 @@ export const KOTLIN_FORWARDING_SITES = [
     { site: 'CoreHost.kt: getJSFunction(name)', count: 1, why: 'global() looks up a polyfill global (__pumpTimers), never the table; its callers are literal' },
     { site: 'CoreHost.kt: call(method, *args)', count: 2, why: 'callLong() and answer() hand their own method on: their callers are literal or below' },
     { site: 'CoreHost.kt: answer(method, args, deadlineMs)', count: 1, why: 'callAsync() hands its own method on: its callers are literal' },
+    { site: 'CoreHost.kt: begin(method, args, deadlineMs, done)', count: 2, why: 'callAsync() hands its own method to its queued write\'s Call' },
+    { site: 'CoreHost.kt: Call(method, args, deadlineMs, entry, stop, done)', count: 1, why: 'begin() hands its own method on; Call is private and made only here' },
+    { site: 'CoreHost.kt: call(call.method, *call.args)', count: 1, why: 'start(): a Call\'s method is a val that only begin() sets' },
     { site: 'CoreHost.kt: answer(entry.method, entry.args.toTypedArray(), deadlineOf(entry.method, entry.args))', count: 1,
         why: 'the journal replay: an entry replays only under a WriteJournal.SHAPES name (journalReplayMethods, checked against the table)' },
 ];
@@ -135,8 +138,8 @@ const argumentsAt = (text, open) => {
 /**
  * Kotlin's host dispatches in [files] ({ path, text }). [names]: every method named literally. [unverified]: every dispatch
  * whose method is not a literal and is not one of KOTLIN_FORWARDING_SITES (or one past its count), and every way around them.
- * The dispatchers are CoreHost.kt's private `call`, `callAsync`, `callLong` and `answer` (never a member such as a JSFunction's
- * `.call`), so only CoreHost.kt can use them; the table itself is reached only through CoreHost.kt's `getJSObject("MindwtrHost")`,
+ * The dispatchers are CoreHost.kt's private `call`, `callAsync`, `callLong`, `answer` and `begin`, and its private `Call` (a
+ * queued write, whose method `start` dispatches), never a member such as a JSFunction's `.call`, so only CoreHost.kt can use them; the table itself is reached only through CoreHost.kt's `getJSObject("MindwtrHost")`,
  * and any `.getJSFunction` with a name that is not a literal (a literal one is one of the bundle's globals, __pumpTimers) counts.
  */
 export function kotlinHostCalls(files) {
@@ -147,17 +150,18 @@ export function kotlinHostCalls(files) {
         const file = path.split('/').pop();
         const line = (index) => text.slice(0, index).split('\n').length;
         if (file === 'CoreHost.kt') {
-            for (const name of ['call', 'callAsync', 'callLong', 'answer']) {
+            for (const name of ['call', 'callAsync', 'callLong', 'answer', 'begin']) {
                 if (!new RegExp(`\\bprivate fun ${name}\\(`).test(text)) bypass.push({ site: `${file}: ${name} is not private`, line: 0 });
             }
+            if (!/\bprivate class Call\(val method: String,/.test(text)) bypass.push({ site: `${file}: Call is not private with a val method`, line: 0 });
         } else if (text.includes('"MindwtrHost"')) {
             bypass.push({ site: `${file}: reaches "MindwtrHost" outside CoreHost.kt`, line: line(text.indexOf('"MindwtrHost"')) });
         }
-        const pattern = file === 'CoreHost.kt' ? /(?<![\w.])(call|callAsync|callLong|answer)\(|\.(getJSFunction)\(/g : /\.(getJSFunction)\(/g;
+        const pattern = file === 'CoreHost.kt' ? /(?<![\w.])(call|callAsync|callLong|answer|begin|Call)\(|\.(getJSFunction)\(/g : /\.(getJSFunction)\(/g;
         for (const match of text.matchAll(pattern)) {
             const callee = match[1] ?? match[2];
             // The dispatchers' own declarations.
-            if (/\bfun\b[^\n(=]*$/.test(text.slice(Math.max(0, match.index - 80), match.index))) continue;
+            if (/\b(fun|class)\b[^\n(=]*$/.test(text.slice(Math.max(0, match.index - 80), match.index))) continue;
             const args = argumentsAt(text, match.index + match[0].length - 1).replace(/\s+/g, ' ').trim();
             const literal = /^"([A-Za-z0-9_]+)"/.exec(args);
             if (literal) { if (callee !== 'getJSFunction') names.add(literal[1]); continue; }

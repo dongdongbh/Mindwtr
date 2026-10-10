@@ -7967,6 +7967,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         ['CoreHost.kt: callLong(name, 1)'], 'so does one through a parameter');
     assert.deepEqual(kotlinHostCalls(withCoreHost('\nfun forward(name: String) = answer(name, arrayOf(), 1L)\n')).unverified.map((site) => site.site),
         ['CoreHost.kt: answer(name, arrayOf(), 1L)'], 'and one more copy of a listed forwarding shape');
+    assert.deepEqual(kotlinHostCalls(withCoreHost('\nfun queue(name: String) = Call(name, arrayOf(), 1L, null, "", CompletableFuture())\n')).unverified.map((site) => site.site),
+        ['CoreHost.kt: Call(name, arrayOf(), 1L, null, "", CompletableFuture())'], 'and a queued write made around begin()');
     assert.deepEqual(kotlinHostCalls([...sources, { path: 'Other.kt', text: 'val f = engine.globalObject.getJSObject("MindwtrHost").getJSFunction(name)' }])
         .unverified.map((site) => site.site), ['Other.kt: reaches "MindwtrHost" outside CoreHost.kt', 'Other.kt: getJSFunction(name)'], 'and a table reached outside CoreHost.kt');
     const { names: kotlin, unverified } = kotlinHostCalls(sources);
