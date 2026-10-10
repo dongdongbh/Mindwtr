@@ -23,6 +23,13 @@ private struct SimulatedManageAreaRefusal: LocalizedError {
 }
 #endif
 
+struct AboutAppStoreNotice {
+    let currentVersion: String
+    let latestVersion: String
+    let updateAvailable: Bool
+    let listing: String?
+}
+
 struct DiagnosticsSharePayload: Identifiable {
     let id: UUID
     let owner: UUID
@@ -210,7 +217,12 @@ final class CoreModel: ObservableObject {
                 invalidateProjectAttachmentOpen()
                 cancelProjectFileImport()
             }
+            if oldValue == .calendar && selectedSurface != .calendar { retireCalendarFeed() }
             if oldValue == .settings && selectedSurface != .settings {
+                retireNotificationSettingsPage()
+                retireCalendarSettingsPage()
+                calendarSubscriptionRuntimeRecovery = nil
+                settingsAdvancedPresented = false
                 invalidateDiagnostics()
                 settingsDataPresented = false
             }
@@ -279,6 +291,8 @@ final class CoreModel: ObservableObject {
     @Published private(set) var calendarComposerPresented = false
     @Published private(set) var calendarComposerError: String?
     @Published private(set) var calendarNotice: String?
+    @Published private(set) var calendarEventOpenPresentation: NativeCalendarEventEditorPresentation?
+    @Published private(set) var calendarEventOpenPresented = false
     @Published var calendarComposerQueryInput = ""
     @Published var calendarComposerTitleInput = ""
     @Published var calendarComposerStartInput = ""
@@ -301,6 +315,30 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsMenu: CoreObject = [:]
     @Published private(set) var settingsSearch = ""
     @Published private(set) var settingsManagePresented = false
+    @Published private(set) var settingsAdvancedPresented = false
+    @Published private(set) var settingsAboutPresented = false
+    @Published private(set) var settingsAboutOpening = false
+    @Published private(set) var settingsAboutChecking = false
+    @Published private(set) var settingsAboutError: String?
+    @Published private(set) var settingsAboutUpdate: AboutAppStoreNotice?
+    private var settingsAboutSession = UUID()
+    @Published private var settingsAboutTask: Task<Void, Never>?
+    private var settingsAboutBusySession: UUID?
+    @Published private(set) var settingsFeedbackPresented = false
+    @Published private(set) var settingsFeedbackConfigured: Bool?
+    @Published private(set) var settingsFeedbackLoading = false
+    @Published private(set) var settingsFeedbackSending = false
+    @Published private(set) var settingsFeedbackSent = false
+    @Published private(set) var settingsFeedbackError: String?
+    @Published private(set) var settingsFeedbackCategory = "bug"
+    @Published private(set) var settingsFeedbackLocation = ""
+    @Published private(set) var settingsFeedbackMessage = ""
+    @Published private(set) var settingsFeedbackEmail = ""
+    @Published private(set) var settingsFeedbackIncludeDiagnostics = false
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var settingsAboutTestUnavailable = false
+    private var settingsFeedbackTestUnavailable = false
+    #endif
     @Published private(set) var settingsReadError: String?
     @Published private(set) var settingsSyncPresented = false
     @Published private(set) var settingsSync: CoreObject = [:]
@@ -597,17 +635,161 @@ final class CoreModel: ObservableObject {
             && diagnosticsCacheIsCurrent && diagnosticsReadError == nil && !backupTransferActive
     }
 
+    @Published private(set) var settingsNotificationsPresented = false
+    @Published private(set) var notificationSettings: CoreObject = [:]
+    @Published private(set) var notificationSettingError: String?
+    @Published private(set) var notificationSettingReadError: String?
+    @Published private(set) var notificationSettingAwaitingRefresh = false
+    private var notificationSettingExpected: CoreObject = [:]
+    private var notificationSettingsSession = UUID()
+    private var notificationSettingRequest: String?
+    private var notificationSettingEdit: CoreObject = [:]
+    private var notificationSettingHost: CoreHost?
+    private var notificationSettingOwner: UUID?
+    private var notificationSettingTask: Task<Void, Never>?
+    private var notificationSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
+    private var notificationSettingsApplicationActive = false
+    var notificationSettingActive: Bool {
+        notificationSettingOwner != nil || notificationSettingRequest != nil || notificationSettingAwaitingRefresh
+    }
+    var notificationSettingEnabled: Bool {
+        ready && selectedSurface == .settings && settingsNotificationsPresented && !appLock.concealed
+            && !busy && !retryNeeded && !notificationSettingActive && notificationSettingReadError == nil
+            && !notificationSettings.isEmpty
+    }
+
+    @Published private(set) var settingsCalendarPresented = false
+    @Published private(set) var calendarSettings: CoreObject = [:]
+    @Published private(set) var calendarSubscriptions: CoreObject = [:]
+    @Published private(set) var calendarSubscriptionReadError: String?
+    private var calendarSubscriptionExpected: CoreObject = [:]
+    @Published var calendarSubscriptionName = "" {
+        didSet { if !oldValue.utf8.elementsEqual(calendarSubscriptionName.utf8) { calendarSubscriptionDraftID = UUID() } }
+    }
+    @Published var calendarSubscriptionURL = "" {
+        didSet { if !oldValue.utf8.elementsEqual(calendarSubscriptionURL.utf8) { calendarSubscriptionDraftID = UUID() } }
+    }
+    private var calendarSubscriptionDraftID = UUID()
+    private var calendarSubscriptionAddDraft: (request: String, draft: UUID)?
+    private struct CalendarFileImportClaim {
+        let id: UUID
+        let host: CoreHost
+        let session: UUID
+        let draft: UUID
+        let name: String
+        let defaultName: String
+    }
+    @Published private(set) var calendarFileImporterID: UUID?
+    @Published private(set) var calendarFileImporterPresented = false
+    private var calendarFileImportClaim: CalendarFileImportClaim?
+    #if DEBUG && targetEnvironment(simulator)
+    private var calendarFileImportTestSource: URL?
+    private var calendarFileImportTestCancelOnce = false
+    #endif
+    private enum CalendarSettingKind { case device, subscription, subscriptionAdd, push }
+    private var calendarSettingKind: CalendarSettingKind = .device
+    private var calendarSubscriptionRuntimeRecovery: (host: CoreHost, request: String, kind: CalendarSettingKind)?
+    @Published private(set) var calendarSettingError: String?
+    @Published private(set) var calendarPushSettingToasts: [CoreObject] = []
+    @Published private(set) var calendarPushLifecycleError: String?
+    @Published private(set) var calendarPushDeleteConfirmation: CoreObject = [:]
+    private var calendarPushDeleteClaim: (host: CoreHost, session: UUID, edit: CoreObject)?
+    private var calendarPushSettingRetry: (host: CoreHost, request: String, session: UUID)?
+    @Published private(set) var calendarSettingReadError: String?
+    @Published private(set) var calendarSettingAwaitingRefresh = false
+    private var calendarSettingsSession = UUID()
+    private var calendarSettingsPageHost: CoreHost?
+    private var calendarSettingRequest: String?
+    private var calendarSettingHost: CoreHost?
+    private var calendarSettingOwner: UUID?
+    private var calendarSettingOwnerHost: CoreHost?
+    private var calendarSettingTask: Task<Void, Never>?
+    private var calendarSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
+    private var calendarSettingsReadTask: Task<String, Error>?
+    private var calendarSettingsReadID: UUID?
+    @Published private(set) var calendarSettingsTesting = false
+    @Published private(set) var calendarSettingsTestResult: CoreObject = [:]
+    @Published private var calendarSettingsCloseTask: Task<Void, Never>?
+    private var calendarSettingsCloseID: UUID?
+    private var calendarSettingsApplicationActive = false
+    var calendarSettingActive: Bool {
+        calendarSettingOwner != nil || calendarSettingRequest != nil || calendarSettingAwaitingRefresh
+            || calendarSettingsCloseTask != nil || calendarFileImportClaim != nil
+    }
+    var calendarSettingEnabled: Bool {
+        ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+            && !busy && !retryNeeded && !calendarSettingActive && calendarSettingReadError == nil
+            && !calendarSettings.isEmpty
+    }
+    var calendarSubscriptionEnabled: Bool {
+        ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+            && !busy && !retryNeeded && calendarSettingOwner == nil && calendarSettingRequest == nil
+            && calendarSettingsCloseTask == nil && calendarSubscriptionReadError == nil
+            && calendarFileImportClaim == nil && !calendarSubscriptions.isEmpty && !calendarSubscriptionExpected.isEmpty
+    }
+    var settingsCalendarCanCancel: Bool {
+        settingsCalendarPresented && calendarSettingRequest == nil && !retryNeeded
+    }
+    var calendarSubscriptionAddEnabled: Bool {
+        calendarSubscriptionEnabled && calendarSettingsApplicationActive
+            && UIApplication.shared.applicationState == .active
+            && !calendarSubscriptionURL.trimmingCharacters(in: Self.ecmaScriptWhitespace).isEmpty
+            && !calendarSettings.object("feeds").object("add").text("label").isEmpty
+    }
+    var calendarSubscriptionChooseFileEnabled: Bool {
+        calendarSubscriptionEnabled && calendarSettingsApplicationActive
+            && UIApplication.shared.applicationState == .active
+            && !calendarSettings.object("feeds").object("chooseFile").text("label").isEmpty
+    }
+    var calendarSettingsTestEnabled: Bool {
+        calendarSettingEnabled && calendarSettingsReadTask == nil && calendarSettingsApplicationActive
+            && UIApplication.shared.applicationState == .active
+            && !calendarSettings.object("feeds").object("test").text("label").isEmpty
+    }
+    var calendarPushSettingEnabled: Bool {
+        calendarSettingEnabled && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+    var calendarPushSettingCanRetry: Bool {
+        calendarPushSettingRetry != nil && !busy && !retryNeeded && calendarPushSettingEnabled
+    }
+    var calendarPushSettingWorking: Bool { calendarSettingOwner != nil && calendarSettingKind == .push }
+    var calendarPushDeleteCanConfirm: Bool {
+        guard let claim = calendarPushDeleteClaim else { return false }
+        return calendarPushSettingEnabled && calendarSettingsPageCurrent(claim.host, session: claim.session)
+    }
+
     @Published private(set) var settingsGeneralPresented = false
     @Published private(set) var generalSettings: CoreObject = [:]
     let appLock = AppLockController()
     @Published private(set) var appLockRow: CoreObject = [:]
-    @Published private(set) var appLockRecoveryPending = false
+    @Published private(set) var appLockRecoveryPending = false {
+        didSet { if oldValue != appLockRecoveryPending { searchPolicyChanged() } }
+    }
     @Published private(set) var appLockError: String?
-    @Published private(set) var appLockAwaitingRefresh = false
+    @Published private(set) var appLockAwaitingRefresh = false {
+        didSet { if oldValue != appLockAwaitingRefresh { searchPolicyChanged() } }
+    }
     private var appLockExpected: CoreObject = [:]
     private var appLockRequest: String?
     var appLockActive: Bool { appLockRequest != nil || appLockAwaitingRefresh || appLock.authenticating }
     var appLockCanChange: Bool { generalPreferenceEnabled && !appLockActive && !appLockRow.isEmpty }
+    @Published private(set) var searchConsentEnabled = false
+    @Published private(set) var searchConsentKnown = false
+    @Published private(set) var searchConsentBusy = false
+    @Published private(set) var searchConsentPending: Bool?
+    @Published private(set) var searchConsentError: String?
+    @Published private(set) var searchPublicationError: String?
+    private var searchAppLockReadPending = false
+    private var searchAppLockWritePending = false
+    var searchAvailable: Bool { trustedSearchSelection != nil }
+    var searchConsentCanChange: Bool {
+        generalPreferenceEnabled && searchConsentKnown && !searchConsentBusy && searchConsentPending == nil
+    }
+    private var searchPolicyAdmitted: Bool {
+        searchAvailable && searchConsentKnown && searchConsentEnabled && searchConsentPending == nil
+            && !searchConsentBusy && appLock.enabled == false && !appLockActive && !appLockRecoveryPending
+            && !searchAppLockReadPending && !searchAppLockWritePending
+    }
     @Published private(set) var generalPreferenceError: String?
     @Published private(set) var generalPreferenceReadError: String?
     @Published private(set) var generalPreferenceAwaitingRefresh = false
@@ -973,7 +1155,23 @@ final class CoreModel: ObservableObject {
     @Published private(set) var currentLanguage = ""
     @Published private(set) var capture: CoreObject = [:]
     @Published private(set) var ready = false
-    @Published private(set) var busy = false
+    @Published private(set) var busy = false {
+        didSet {
+            if busy && !oldValue, calendarPushLifecycleOwner != nil {
+                calendarPushReadmitAfterBusy = true
+                stopCalendarPushLifecycle()
+            } else if !busy && oldValue, calendarPushReadmitAfterBusy {
+                calendarPushReadmitAfterBusy = false
+                if calendarPushSceneActive && !calendarPushSettingSuspended {
+                    calendarPushRestartRequested = true
+                    // Stop retires the shared watcher, so task changes during ordinary work may have no due callback.
+                    calendarPushFullPending = true; calendarPushIDsPending.removeAll()
+                    calendarPushWakeTicket &+= 1
+                    admitCalendarPushLifecycle()
+                }
+            }
+        }
+    }
     @Published private(set) var retryNeeded = false
     @Published private(set) var error: String?
     @Published var capturePresented = false {
@@ -1140,8 +1338,164 @@ final class CoreModel: ObservableObject {
     private var foregroundSyncOwner: ForegroundSyncOwner?
     private var foregroundSyncTask: Task<Void, Never>?
     private var foregroundSyncGeneration = 0
-    private var foregroundSyncSceneActive = false
+    @Published private var foregroundSyncSceneActive = false
     private var foregroundSyncBackgroundObserved = false
+    private struct ReminderLifecycleOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+        let generation: Int
+    }
+    private var reminderObservationHost: CoreHost?
+    private var reminderRegistration: NativeReminderObserverRegistration?
+    private var reminderObservationClaim = UUID()
+    private var reminderObservationToken: UUID?
+    private var reminderLifecycleOwner: ReminderLifecycleOwner?
+    private var reminderLifecycleTask: Task<Void, Never>?
+    private var reminderDebounceTask: Task<Void, Never>?
+    private var reminderTopUpTask: Task<Void, Never>?
+    private var reminderGeneration = 0
+    private var reminderSceneActive = false
+    private var reminderRevision: UInt64 = 0
+    private var reminderConfirmedRevision: UInt64 = 0
+    private var reminderWakeTicket: UInt64 = 0
+    private var reminderAttemptedTicket: UInt64 = 0
+    private var reminderDebounceReady = true
+    private var reminderDrainLease: UIBackgroundTaskIdentifier = .invalid
+    private var reminderDrainOwner: UUID?
+    private struct CalendarPushLifecycleOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+        let generation: Int
+    }
+    private var calendarPushObservationHost: CoreHost?
+    private var calendarPushObservationID: UUID?
+    private var calendarPushObservationToken: UUID?
+    private var calendarPushObservationClaim = UUID()
+    private var calendarPushLifecycleOwner: CalendarPushLifecycleOwner?
+    private var calendarPushLifecycleTask: Task<Void, Never>?
+    private var calendarPushStopTask: Task<Void, Never>?
+    private var calendarPushStopID: UUID?
+    private var calendarPushGeneration = 0
+    private var calendarPushSceneActive = false
+    private var calendarPushSettingSuspended = false
+    private var calendarPushReadmitAfterBusy = false
+    private var calendarPushRestartRequested = false
+    private var calendarPushFullPending = false
+    private var calendarPushIDsPending: [Data: String] = [:]
+    private var calendarPushWakeTicket: UInt64 = 0
+    private var calendarPushAttemptedTicket: UInt64 = 0
+    private var calendarPushDrainLease: UIBackgroundTaskIdentifier = .invalid
+    private var calendarPushDrainOwner: UUID?
+    #if DEBUG && targetEnvironment(simulator)
+    var calendarPushFixtureEnabled: Bool {
+        guard let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
+        return NativeAppLaunch.arguments.contains("--native-calendar-push-fixture")
+    }
+    @Published private(set) var calendarPushFixtureState = ""
+    private var calendarPushFixtureEnabledValue = true
+    private var calendarPushFixtureTarget: String? = "fixture-B"
+    private var calendarPushFixtureColor = "#3B82F6"
+    private var calendarPushFixtureRuns: [Any] = []
+    private var calendarPushFixtureStarts = 0
+    private var calendarPushFixtureStops = 0
+    private var calendarPushFixtureSettings = 0
+    private var calendarPushFixtureSaves = 0
+    private var calendarPushFixtureCancelled = 0
+    private var calendarPushFixtureHoldNext = false
+    private var calendarPushFixtureFailNext = false
+    private var calendarPushFixtureWaiter: CheckedContinuation<Void, Never>?
+    private var calendarPushFixtureStale: (host: CoreHost, token: UUID, claim: UUID)?
+    #endif
+    private struct SearchLifecycleOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+        let generation: UInt64
+    }
+    private var searchIndex: NativeSearchIndex?
+    private var searchIndexWithdrawn = false
+    private var searchObservationHost: CoreHost?
+    private var searchObservationInstalled = false
+    private var searchObservationToken: UUID?
+    private var searchObservationClaim = UUID()
+    private var searchLastObservation: NativeSearchObservation?
+    private var searchLastSnapshot: NativeSearchSnapshot?
+    private var searchLifecycleOwner: SearchLifecycleOwner?
+    private var searchLifecycleTask: Task<Void, Never>?
+    private var searchDeadlineTask: Task<Void, Never>?
+    private var searchSceneActive = false
+    private var searchPublicationGeneration: UInt64 = 0
+    private var searchWakeTicket: UInt64 = 0
+    private var searchAttemptedTicket: UInt64 = 0
+    private var searchForceSnapshot = true
+    #if DEBUG && targetEnvironment(simulator)
+    private var searchTestFake: Bool {
+        guard let selection = trustedSearchSelection, case .isolated = selection else { return false }
+        return ProcessInfo.processInfo.arguments.contains("--native-search-fake-index")
+    }
+    private var searchTestDeliverySent = false
+    private var searchTestIdentifiers: [String: String] = [:]
+    @Published private(set) var searchTestState = ""
+    #endif
+    private struct NotificationResponseOwner {
+        let id: UUID
+        let host: CoreHost
+        let token: UUID
+    }
+    private struct NotificationResponseRetry {
+        var item: NativeReminderInbox.Item?
+        var terminalOutcome: String?
+    }
+    private struct NotificationRouteRejection: Error {}
+    private var notificationResponseTask: Task<Void, Never>?
+    private var notificationResponseTaskID: UUID?
+    private var notificationResponseBusyOwner: UUID?
+    private var notificationResponseLease: UIBackgroundTaskIdentifier = .invalid
+    private var notificationResponseWakePending = false
+    private var notificationResponseDeferredUntilClean = false
+    private var notificationResponseRetryRequested = false
+    private var notificationResponseRetry: NotificationResponseRetry?
+    private enum EntityLinkInput {
+        case url(String), searchTask(String)
+        var bytes: Data {
+            switch self {
+            case .url(let value): return Data([0]) + Data(value.utf8)
+            case .searchTask(let value): return Data([1]) + Data(value.utf8)
+            }
+        }
+        var isSearch: Bool { if case .searchTask = self { return true }; return false }
+    }
+    private struct EntityLinkDelivery {
+        let token: UInt64
+        let input: EntityLinkInput
+    }
+    private struct EntityLinkOwner {
+        let id: UUID
+        let host: CoreHost
+        let startupToken: UUID
+        let delivery: EntityLinkDelivery
+    }
+    private var entityLinkPending: EntityLinkDelivery?
+    private var entityLinkDeliveryToken: UInt64 = 0
+    private var entityLinkLastInput: Data?
+    private var entityLinkLastReceived = -Double.infinity
+    private var entityLinkWake: UInt64 = 0
+    private var entityLinkAttemptedWake: UInt64 = 0
+    private var entityLinkTask: Task<Void, Never>?
+    private var entityLinkTaskID: UUID?
+    private var entityLinkBusyOwner: UUID?
+    private var entityLinkPreview: (owner: UUID, delivery: UInt64, session: String)?
+    private var entityLinkCleanupDelivery: UInt64?
+    #if DEBUG && targetEnvironment(simulator)
+    private var entityLinkDeferredTestDelivered = false
+    private var entityLinkTestReadFailures = 0
+    private(set) var entityLinkTestReadEnabled = false
+    @Published private(set) var entityLinkTestReadState = ""
+    private var entityLinkTestHeldOnce = false
+    private var entityLinkTestReadWaiter: CheckedContinuation<Void, Never>?
+    #endif
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var startupSyncTestThrowOnce = false
     private var resumeSyncTestThrowOnce = false
@@ -1150,6 +1504,21 @@ final class CoreModel: ObservableObject {
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
+                retireNotificationSettingsPage()
+                retireCalendarSettingsPage()
+                settingsAdvancedPresented = false
+                retireCalendarFeed(clear: true)
+                calendarEventTaskPending = nil
+                calendarEventTaskRecoveredResult = nil
+                retireReminderLifecycleHost(oldValue)
+                retireCalendarPushHost(oldValue)
+                retireSearchHost(oldValue)
+                if oldValue != nil {
+                    notificationResponseTask?.cancel()
+                    notificationResponseBusyOwner = nil
+                    suspendEntityLinks()
+                    entityLinkBusyOwner = nil
+                }
                 cancelForegroundSync()
                 foregroundSyncIntent = nil
                 startupSyncCompletedHost = nil
@@ -1169,6 +1538,8 @@ final class CoreModel: ObservableObject {
                 taskOwnedMenuSelection = nil
                 clearSettingsSyncForPrivacy()
                 settingsSyncPresented = false
+                settingsAboutPresented = false
+                invalidateAboutLinkOpening()
                 invalidateDiagnostics(dropCache: true)
             }
         }
@@ -1235,8 +1606,68 @@ final class CoreModel: ObservableObject {
     private var calendarLoadedDepth = 50
     private var calendarNeedsRead = false
     private var calendarReadTask: Task<Void, Never>?
+    private struct CalendarFeedRange: Equatable {
+        let start: String
+        let end: String
+        init(_ range: CoreObject) throws {
+            start = range.text("start")
+            end = range.text("end")
+            guard !start.isEmpty, !end.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+        }
+    }
+    private var calendarPageSession = UUID()
+    private var calendarReadGeneration = 0
+    private var calendarViewHost: CoreHost?
+    private var calendarFeedRange: CalendarFeedRange?
+    private var calendarFeed: CoreObject = [:]
+    private var calendarViewFeed: CoreObject = [:]
+    private var calendarFeedTask: Task<Void, Never>?
+    private var calendarFeedOwner: UUID?
+    private var calendarFeedDrainID: UUID?
+    private var calendarCoreCallsInFlight = 0
+    private var calendarProjectionInFlight = 0
+    private var calendarFeedGeneration = UUID()
+    private var calendarViewFeedGeneration = UUID()
+    private var calendarFeedLoggedGeneration: UUID?
+    private var calendarFeedRefreshRequested = true
+    private var calendarFeedApplicationActive = false
+    private var calendarItemFeed: CoreObject = [:]
+    private var calendarComposerFeed: CoreObject = [:]
+    private var calendarComposerHost: CoreHost?
     private var calendarItemTaskID = ""
     private var calendarItemWriteRequest: (method: String, payload: String)?
+    private struct CalendarEventIntent {
+        let id: UUID
+        let host: CoreHost
+        let pageSession: UUID
+        let feedGeneration: UUID
+        let revision: String
+        let state: CoreObject
+        let reference: CoreObject
+        let event: CoreObject
+        let calendarName: String
+        let openRequest: NativeCalendarEventOpenRequest?
+        let successTitle: String
+        let successMessage: String
+    }
+    private struct CalendarEventTaskPending {
+        let host: CoreHost
+        let requestId: String
+        let requestJSON: String
+        let viewMode: String
+        let intent: CalendarEventIntent
+    }
+    private var calendarEventIntent: CalendarEventIntent?
+    private var calendarEventTemplateJSON: String?
+    private var calendarEventReadGeneration = UUID()
+    private var calendarEventTaskPending: CalendarEventTaskPending?
+    private var calendarEventTaskRecoveredResult: (host: CoreHost, result: CoreObject)?
+    private struct CalendarEventOpenSession {
+        let id: UUID
+        let intent: CalendarEventIntent
+        var retired = false
+    }
+    private var calendarEventOpenSession: CalendarEventOpenSession?
     private var calendarPreferenceValues: CoreObject = [:]
     private var calendarPreferencePending = false
     private var calendarPreferenceTarget: CoreObject?
@@ -1330,6 +1761,7 @@ final class CoreModel: ObservableObject {
     private var taskRecoveryGeneration = 0
     @Published private(set) var taskRecoveryCheckpointedGeneration = 0
     private var taskRecoveryCheckpointTask: Task<Void, Never>?
+    private var taskRecoveryCheckpointTaskID: UUID?
     private var taskAttachmentCheckpointFailed: EditorDraftSnapshot?
     private var taskAttachmentCheckpointDesired: EditorDraftSnapshot?
     private var taskRecoveryBackgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -1364,7 +1796,12 @@ final class CoreModel: ObservableObject {
     @Published private var focusRefusedLocationID: Int?
     #if DEBUG && targetEnvironment(simulator)
     // Response faults are enabled only for an explicitly isolated UI-test library.
+    private var notificationContextTestReadFailures = 0
     private var taskRecoveryResolverTestFailure = false
+    private var startupInventoryReadTestFailureOnce = false
+    private var calendarEventTaskPredispatchTestHoldOnce = false
+    @Published private(set) var calendarEventTaskDispatchTestState = ""
+    private var calendarEventTaskDispatchTestWaiter: (intentID: UUID, continuation: CheckedContinuation<Void, Never>)?
     private var projectAreaTestReadFailure = false
     private var projectAreaTestBlockedWrite = false
     private var projectTagTestReadFailure = false
@@ -1763,7 +2200,17 @@ final class CoreModel: ObservableObject {
     var calendarActionsEnabled: Bool {
         ready && selectedSurface == .calendar && calendarCurrent && !busy && !retryNeeded
             && !taskPresented && !areaPickerPresented && !calendarItemPresented && !calendarComposerPresented
-            && !capturePresented && !morePresented
+            && !capturePresented && !morePresented && !appLock.concealed && calendarFeedApplicationActive
+            && calendarEventOpenPresentation == nil
+    }
+    var calendarComposerOpeningEnabled: Bool {
+        calendarActionsEnabled && calendarViewHost === host && calendarViewFeed.text("status") == "ready"
+            && calendarError == nil && !appLock.concealed && calendarFeedApplicationActive
+    }
+    var calendarFeedRetryEnabled: Bool {
+        ready && selectedSurface == .calendar && !busy && !retryNeeded && !appLock.concealed
+            && !taskPresented && !calendarItemPresented && !calendarComposerPresented && calendarFeedApplicationActive
+            && calendarEventOpenPresentation == nil
     }
     var calendarComposerCanSave: Bool {
         let composer = calendarComposerView.object("composer")
@@ -1774,14 +2221,40 @@ final class CoreModel: ObservableObject {
             && calendarComposerStartInput == composer.text("startTimeValue")
             && calendarComposerEndInput == composer.text("endTimeValue")
             && !busy && !retryNeeded && calendarComposerSaveRequest == nil
+            && calendarComposerHost === host && calendarComposerFeed.text("status") == "ready"
+            && !appLock.concealed && calendarFeedApplicationActive
+            && calendarEventOpenPresentation == nil
     }
     var calendarComposerEditPending: Bool { calendarComposerEditing || !calendarComposerEdits.isEmpty }
     var calendarItems: [CoreObject] {
         calendarView.objects("items").compactMap { $0.text("type") == "item" ? $0.object("item") : nil }
     }
+    func calendarItemOpeningEnabled(_ item: CoreObject) -> Bool {
+        guard calendarActionsEnabled, item.flag("pressable") else { return false }
+        if item.text("kind") == "event" {
+            return calendarViewHost === host && calendarViewFeed.text("status") == "ready"
+                && calendarError == nil && (try? captureCalendarEvent(item)) != nil
+        }
+        return !item.text("taskId").isEmpty && calendarItems.contains {
+            $0.text("id").utf8.elementsEqual(item.text("id").utf8)
+                && $0.text("taskId").utf8.elementsEqual(item.text("taskId").utf8) && $0.flag("pressable")
+        }
+    }
+    func calendarItemActionEnabled(_ action: String) -> Bool {
+        guard calendarItemPresented, !busy, !retryNeeded, !taskPresented,
+              calendarEventOpenPresentation == nil,
+              calendarItemSheet.objects("buttons").contains(where: { $0.text("id") == action }) else { return false }
+        if ["cancel", "ok"].contains(action) { return true }
+        if calendarItemSheet.text("kind") == "event" {
+            guard calendarEventTaskPending == nil, calendarEventTemplateJSON != nil, calendarItemError == nil,
+                  let intent = calendarEventIntent, calendarEventIntentCurrent(intent) else { return false }
+            return action == "createTask" || (action == "openInCalendar" && intent.openRequest != nil)
+        }
+        return calendarItemSheet.text("kind") == "task" && calendarEditableTask(calendarItemTaskID)
+    }
     private func calendarEditableTask(_ id: String) -> Bool {
-        calendarItems.contains { $0.text("taskId") == id && $0.flag("pressable") && !$0.flag("projected")
-            && $0.object("row").text("id") == id && !$0.object("row").flag("readOnly") }
+        calendarItems.contains { $0.text("taskId").utf8.elementsEqual(id.utf8) && $0.flag("pressable") && !$0.flag("projected")
+            && $0.object("row").text("id").utf8.elementsEqual(id.utf8) && !$0.object("row").flag("readOnly") }
     }
     var focusActionsEnabled: Bool { focusControlsEnabled && focusCurrent && focusPanel.isEmpty }
     var focusPickerMatchesQuery: Bool {
@@ -3528,7 +4001,15 @@ final class CoreModel: ObservableObject {
             taskRecoverySnapshot = snapshot
             if owned { taskAttachmentCheckpointDesired = snapshot }
             let previous = taskRecoveryCheckpointTask
+            let checkpointID = UUID()
+            taskRecoveryCheckpointTaskID = checkpointID
             taskRecoveryCheckpointTask = Task {
+                defer {
+                    if taskRecoveryCheckpointTaskID == checkpointID {
+                        taskRecoveryCheckpointTask = nil
+                        taskRecoveryCheckpointTaskID = nil
+                    }
+                }
                 await previous?.value
                 if owned, taskAttachmentCheckpointFailed != nil { return }
                 do {
@@ -3609,7 +4090,15 @@ final class CoreModel: ObservableObject {
                 generation: taskRecoveryGeneration, payloadJSON: snapshot.payloadJSON)
             taskRecoverySnapshot = retry
             let previous = taskRecoveryCheckpointTask
+            let checkpointID = UUID()
+            taskRecoveryCheckpointTaskID = checkpointID
             taskRecoveryCheckpointTask = Task {
+                defer {
+                    if taskRecoveryCheckpointTaskID == checkpointID {
+                        taskRecoveryCheckpointTask = nil
+                        taskRecoveryCheckpointTaskID = nil
+                    }
+                }
                 await previous?.value
                 do {
                     try await host.checkpointEditorDraft(retry)
@@ -4229,13 +4718,6 @@ final class CoreModel: ObservableObject {
             return
         }
         #if targetEnvironment(simulator) || (DEBUG && NATIVE_DEVICE_TEST)
-        #if !targetEnvironment(simulator)
-        // Device alpha builds must never open under the installed RN identity.
-        guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev" else {
-            error = "Physical testing requires the isolated native development app."
-            return
-        }
-        #endif
         areaManagerPresented = false
         areaManagerProjectID = nil
         busy = true
@@ -4248,32 +4730,18 @@ final class CoreModel: ObservableObject {
         }
         do {
             if host == nil {
+                let selection = try NativeAppLaunch.selection.get()
                 guard let bundle = Bundle.main.url(forResource: "core-host", withExtension: "js") else {
                     throw CocoaError(.fileNoSuchFile)
                 }
-                let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                    appropriateFor: nil, create: true)
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                let arguments = ProcessInfo.processInfo.arguments
-                #if !targetEnvironment(simulator)
-                guard !arguments.contains("--native-app-lock-auth"), !arguments.contains("--native-rn-rehearsal") else {
-                    throw CocoaError(.fileReadCorruptFile)
-                }
-                #endif
-                let testLibraryPositions = arguments.indices.filter { arguments[$0] == "--native-ui-test-library" }
-                if let position = testLibraryPositions.first {
-                    guard testLibraryPositions.count == 1, !arguments.contains("--native-rn-rehearsal"),
-                          position + 1 < arguments.count,
-                          let identifier = UUID(uuidString: arguments[position + 1]),
-                          identifier.uuidString.lowercased() == arguments[position + 1] else {
-                        throw CocoaError(.fileReadCorruptFile)
-                    }
-                    let testRoot = support.appendingPathComponent("NativeUITests", isDirectory: true)
+                let arguments = NativeAppLaunch.arguments
+                if case let .isolated(database, directory, namespace, identifier) = selection {
+                    let testRoot = directory.deletingLastPathComponent()
                     try FileManager.default.createDirectory(at: testRoot, withIntermediateDirectories: true)
                     guard try testRoot.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
                         throw CocoaError(.fileReadCorruptFile)
                     }
-                    let directory = testRoot.appendingPathComponent(identifier.uuidString.lowercased(), isDirectory: true)
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                     guard try directory.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
                         throw CocoaError(.fileReadCorruptFile)
@@ -4283,6 +4751,10 @@ final class CoreModel: ObservableObject {
                     }
                     preferenceDefaults = isolatedDefaults
                     #if targetEnvironment(simulator)
+                    notificationContextTestReadFailures = arguments.contains("--native-response-context-read-failure") ? 2 : 0
+                    entityLinkTestReadFailures = arguments.contains("--native-entity-read-failure") ? 2 : 0
+                    entityLinkTestReadEnabled = ["read-latest", "read-background"].contains(
+                        ProcessInfo.processInfo.environment["MINDWTR_ENTITY_TEST_DELIVERY"] ?? "")
                     taskOwnedCheckpointTestFailure = arguments.contains("--native-owned-checkpoint-failure")
                     if let position = arguments.firstIndex(of: "--native-app-lock-auth"), position + 1 < arguments.count {
                         appLock.testOutcomes = arguments[position + 1].split(separator: ",").map(String.init)
@@ -4351,6 +4823,8 @@ final class CoreModel: ObservableObject {
                     backupExportTestHoldOnce = arguments.contains("--native-backup-export-hold-once")
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
+                    settingsAboutTestUnavailable = arguments.contains("--native-about-lookup-unavailable")
+                    settingsFeedbackTestUnavailable = arguments.contains("--native-feedback-unavailable")
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
                     settingsSyncEncryptionTypedThrowOnce = arguments.contains("--native-encryption-typed-throw-once")
                     settingsSyncEncryptionTypedDelayOnce = arguments.contains("--native-encryption-typed-delay-once")
@@ -4362,25 +4836,37 @@ final class CoreModel: ObservableObject {
                     taskAttachmentDownloadTestThrowOnce = arguments.contains("--native-task-download-command-throw-once")
                     taskAttachmentDownloadTestDelayOnce = arguments.contains("--native-task-download-delay-reply-once")
                     taskAttachmentDownloadTestMalformedOnce = arguments.contains("--native-task-download-malformed-reply-once")
-                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
-                        deviceStorage: (directory, "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased()),
+                    host = CoreHost(databaseURL: database, bundleURL: bundle,
+                        deviceStorage: (directory, namespace),
                         isolatedTestID: identifier)
+                    #if DEBUG && targetEnvironment(simulator)
+                    startupInventoryReadTestFailureOnce = arguments.contains("--native-startup-inventory-read-failure-once")
+                    calendarEventTaskPredispatchTestHoldOnce = arguments.contains("--native-calendar-event-task-predispatch-hold-once")
+                    calendarEventTaskDispatchTestState = ""
+                    calendarFileImportTestSource = arguments.contains("--native-calendar-local-file-picker-fixture")
+                        ? directory.appendingPathComponent("Synthetic local calendar.ICS") : nil
+                    calendarFileImportTestCancelOnce = arguments.contains("--native-calendar-local-file-picker-cancel-once")
+                    if arguments.contains("--native-calendar-subscription-commit-reply-failure-once") {
+                        try await host!.configureIsolatedCalendarSubscriptionCommitReplyFailureOnce()
+                    }
+                    if arguments.contains("--native-calendar-event-task-terminal-failure-once") {
+                        try await host!.configureIsolatedCalendarEventTaskTerminalFailureOnce()
+                    }
+                    #endif
                     let metadataOnlyDownloadFixture = arguments.contains("--native-project-download-stop-after-metadata-intent-once")
                     if arguments.contains("--native-project-download-stop-after-filled-once") || metadataOnlyDownloadFixture {
                         try await host!.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnlyDownloadFixture)
                         selectedSurface = .projects // Isolated recovery fixture must not prefetch through Inbox startup Sync.
                     }
                     settingsSyncAvailable = true
-                } else if arguments.contains("--native-rn-rehearsal") {
+                } else if case let .rehearsal(container, database, identifier) = selection {
                     // An explicitly staged copy only. Never select the live RN container.
-                    let container = support.appendingPathComponent("NativeRNRehearsal", isDirectory: true)
-                    let database = container.appendingPathComponent("Documents/SQLite/mindwtr.db")
+                    try FileManager.default.createDirectory(at: container.deletingLastPathComponent(), withIntermediateDirectories: true)
                     guard try container.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
                           try database.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey]).isSymbolicLink != true,
                           try database.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true,
                           database.resolvingSymlinksInPath().path == container.resolvingSymlinksInPath()
-                            .appendingPathComponent("Documents/SQLite/mindwtr.db").path,
-                          let identifier = Bundle.main.bundleIdentifier else { throw CocoaError(.fileReadCorruptFile) }
+                            .appendingPathComponent("Documents/SQLite/mindwtr.db").path else { throw CocoaError(.fileReadCorruptFile) }
                     let legacy = try LegacyRNStorage(containerURL: container, bundleIdentifier: identifier)
                     storedLanguage = try legacy.value(forKey: "mindwtr-language") ?? ""
                     storedTheme = try legacy.value(forKey: "@mindwtr_theme") ?? ""
@@ -4444,16 +4930,14 @@ final class CoreModel: ObservableObject {
                     host = CoreHost(databaseURL: database, bundleURL: bundle, legacyStorage: legacy)
                 }
                 #endif
-                if host == nil {
-                    let directory = support.appendingPathComponent("NativeFoundation", isDirectory: true)
+                if case let .standard(database, container, namespace) = selection {
+                    let directory = database.deletingLastPathComponent()
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    guard let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty else {
-                        throw CocoaError(.fileReadCorruptFile)
-                    }
-                    host = CoreHost(databaseURL: directory.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle,
-                        deviceStorage: (URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), identifier))
+                    host = CoreHost(databaseURL: database, bundleURL: bundle,
+                        deviceStorage: (container, namespace))
                     settingsSyncAvailable = true
                 }
+                guard host != nil else { throw CocoaError(.fileReadCorruptFile) }
             }
             storedLanguage = preferenceDefaults.object(forKey: devicePreferencePrefix + "mindwtr-language") as? String ?? storedLanguage
             storedTheme = preferenceDefaults.object(forKey: devicePreferencePrefix + "@mindwtr_theme") as? String ?? storedTheme
@@ -4503,10 +4987,24 @@ final class CoreModel: ObservableObject {
             }
             let currentHost = host!
             startingHost = currentHost
-            let startup = try decode(await currentHost.start())
+            let reminderResponses = try? await NativeNotificationResponses.shared.pending()
+            guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
+            let startup = try decode(await currentHost.start(
+                retainingReminderResponseIDs: reminderResponses?.map { $0.response.requestID }))
             guard host === currentHost else { throw CancellationError() }
+            let eventRecovery = startup.object("recovery")
+            if eventRecovery.text("method") == "calendarEventTaskCommit" {
+                // Native startup has already consumed the journal. Retain its acknowledgment
+                // before any later App inventory/read can fail, then present only after ready.
+                calendarEventTaskRecoveredResult = (currentHost, eventRecovery.object("result"))
+            }
             // Preserve the acknowledged domain result before any later App read.
             stageTaskStartupSaveReceipt(startup)
+            _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                "Native iOS launch selection admitted",
+                #"{"releaseCheck":"v1.3.5/ios-launch-selection","outcome":"confirmed"}"#,
+            ]))
+            guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             try await readProjectFileAddInventory(currentHost)
             taskRecoveryStartupCorrupt = false
             do {
@@ -4623,6 +5121,27 @@ final class CoreModel: ObservableObject {
             } else if recovery.text("method") == "dataSetting" {
                 selectedSurface = .settings
                 settingsDataPresented = true
+            } else if ["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "calendarSubscriptionAddCommit"].contains(recovery.text("method")) {
+                let kind: CalendarSettingKind = recovery.text("method") == "calendarSubscriptionAddCommit" ? .subscriptionAdd
+                    : recovery.text("method") == "calendarSubscriptionSettingCommit" ? .subscription : .device
+                try validateDeviceCalendarSettingResult(recovery.object("result"), kind: kind)
+                selectedSurface = .settings
+                settingsAdvancedPresented = true
+                settingsCalendarPresented = true
+                calendarSettingsPageHost = host
+                calendarSettingsApplicationActive = UIApplication.shared.applicationState == .active
+                if kind == .subscriptionAdd, calendarSettingKind == .subscriptionAdd,
+                   calendarSettingHost === currentHost, let request = calendarSettingRequest {
+                    // Probe the original intent before clearing a live draft after runtime recovery.
+                    calendarSubscriptionRuntimeRecovery = (currentHost, request, kind)
+                } else {
+                    calendarSettingRequest = nil
+                    calendarSettingHost = nil
+                }
+                calendarSettingAwaitingRefresh = true
+            } else if recovery.text("method") == "notificationSettingCommit" {
+                selectedSurface = .settings
+                settingsNotificationsPresented = true
             } else if ["generalPreferenceCommit", "appLockCommit"].contains(recovery.text("method")) {
                 selectedSurface = .settings
                 settingsGeneralPresented = true
@@ -4643,6 +5162,7 @@ final class CoreModel: ObservableObject {
             try await readAppLock()
             if boardRecoveredResult != nil { selectedSurface = .board }
             if calendarComposerRecoveredResult != nil { selectedSurface = .calendar }
+            if let recovered = calendarEventTaskRecoveredResult, host === recovered.host { selectedSurface = .calendar }
             if mindSweepRecoveredResult != nil { selectedSurface = .inbox }
             if taskPromotionRecoveredResult != nil { selectedSurface = .projects }
             if projectDuplicateRecoveredResult != nil { selectedSurface = .projects }
@@ -4664,6 +5184,11 @@ final class CoreModel: ObservableObject {
             if let result = calendarComposerRecoveredResult {
                 await acknowledgeCalendarComposerSave(result)
                 calendarComposerRecoveredResult = nil
+            }
+            if let recovered = calendarEventTaskRecoveredResult {
+                guard host === currentHost, recovered.host === currentHost else { throw CancellationError() }
+                try await acknowledgeRecoveredCalendarEventTask(recovered.result, from: recovered.host)
+                if calendarEventTaskRecoveredResult?.host === recovered.host { calendarEventTaskRecoveredResult = nil }
             }
             if let result = taskPromotionRecoveredResult {
                 guard !result.text("id").isEmpty, result["reused"] is Bool else {
@@ -4687,6 +5212,11 @@ final class CoreModel: ObservableObject {
             }
             mindSweepRecoveredResult = nil
             appLockRecoveryPending = false
+            let resumedCalendarSubscription = try await settleCalendarSubscriptionRuntimeRecovery(currentHost)
+            if (["deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "calendarSubscriptionAddCommit"].contains(recovery.text("method")) || resumedCalendarSubscription), !retryNeeded, !Task.isCancelled,
+               calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession) {
+                await refreshCalendarSettings()
+            }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             if startupSyncCompletedHost !== currentHost {
                 // ready precedes recovery adoption; only this terminal tail can
@@ -4697,6 +5227,9 @@ final class CoreModel: ObservableObject {
                 foregroundSyncIntent = recovery.isEmpty && foregroundSyncInboxClean
                     ? ForegroundSyncIntent(id: UUID(), host: currentHost, startupToken: token, reason: .startup) : nil
             }
+            requestNotificationResponses()
+            requestEntityLinks()
+            if selectedSurface == .calendar { calendarNeedsRead = true; scheduleCalendarRead() }
         } catch is CoreHostProjectFileAvailabilityRecovery {
             guard let currentHost = startingHost, host === currentHost else { return }
             ready = false
@@ -4740,6 +5273,10 @@ final class CoreModel: ObservableObject {
             appLockRecoveryPending = error is CoreHostAppLockRecovery
             taskRecoveryStartupCorrupt = error is EditorDraftStoreError
             self.error = taskRecoveryStartupCorrupt ? "Saved editor draft is unreadable" : error.localizedDescription
+            if let pending = calendarSubscriptionRuntimeRecovery, host === pending.host {
+                ready = false
+                retryNeeded = true
+            }
             if let currentHost = host {
                 if startingHost === currentHost {
                     do { try await readProjectFileAvailabilityInventory(currentHost) }
@@ -4755,7 +5292,12 @@ final class CoreModel: ObservableObject {
     }
 
     private var foregroundSyncInboxClean: Bool {
-        selectedSurface == .inbox && !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
+        selectedSurface == .inbox && operationContextClean
+    }
+
+    private var operationContextClean: Bool {
+        !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
+            && calendarEventOpenPresentation == nil
             && !processInboxPresented && processInboxRequest == nil && !processInboxTransitioning
             && !mindSweepPresented && mindSweepRequest == nil && mindSweepDraft.isEmpty
             && !morePresented && !areaPickerPresented && !areaManagerPresented && bulkConfirm.isEmpty
@@ -4775,7 +5317,1311 @@ final class CoreModel: ObservableObject {
             && projectAttachmentDownloadOwner == nil
             && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && projectNotesFlushTask == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsManagePresented
-            && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsAboutPresented && !settingsCalendarPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+    }
+
+    var notificationResponseContextClean: Bool {
+        operationContextClean && !reviewGuidePresented && !reviewPickerPresented && !reviewFinishPending
+            && !boardFiltersPresented && !calendarItemPresented && !calendarComposerPresented
+            && !focusOrderPresented && !focusSavedFilterPresented && !contextPickerPresented
+            && !projectRenameEditing && !projectTaskOrderPresented && !projectTaskSortPresented
+            && !projectViewOptionsPresented && !projectFiltersPresented && !projectStatusOpen && projectDateField == nil
+            && !projectAreaPresented && !projectAreaCreatePresented && !projectTagsPresented && !projectTagsAddPresented
+            && !projectSectionsPresented && !projectSectionEditing && !projectAttachmentLinkPresented
+            && !projectAttachmentOpening && !projectAttachmentEditOpening && !projectAttachmentWritePending
+            && projectFileOpenPresentation == nil && !projectFileAddOpening
+            && !referenceBulkTagPresented && !referenceBulkRemovePresented && !doneBulkTagPresented && !doneBulkRemovePresented
+            && !referenceProjectNextActionPresented && !taskStatusMenuPresented && somedayPanel.isEmpty
+            && !settingsFeedbackPresented && !backupImportPickerPresented && !settingsPersonCreatePresented
+            && !settingsPersonEditPresented && !settingsPersonDeleteActive && !settingsAreaCreatePresented
+            && !settingsAreaEditActive && !settingsTaxonomyActive && !generalPreferenceActive
+            && managePendingCandidate == nil && managePendingInventoryDepths == nil
+    }
+
+    func requestNotificationResponses() {
+        notificationResponseWakePending = true
+        notificationResponseDeferredUntilClean = false
+        admitNotificationResponses()
+    }
+
+    private func admitNotificationResponses() {
+        guard notificationResponseTask == nil, entityLinkTask == nil, notificationResponseWakePending, !busy,
+              !settingsSyncRestartRequired, !appLockRecoveryPending,
+              !retryNeeded || notificationResponseRetryRequested,
+              !notificationResponseDeferredUntilClean || notificationResponseContextClean else { return }
+        let id = UUID()
+        notificationResponseWakePending = false
+        notificationResponseTaskID = id
+        notificationResponseLease = UIApplication.shared.beginBackgroundTask(withName: "Native reminder response") { [weak self] in
+            Task { @MainActor in
+                guard let self, self.notificationResponseTaskID == id else { return }
+                self.notificationResponseTask?.cancel()
+            }
+        }
+        notificationResponseTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.notificationResponseTaskID == id {
+                    self.releaseNotificationResponseBusy(id)
+                    if self.notificationResponseLease != .invalid { UIApplication.shared.endBackgroundTask(self.notificationResponseLease) }
+                    self.notificationResponseLease = .invalid
+                    self.notificationResponseTaskID = nil; self.notificationResponseTask = nil
+                    self.admitNotificationResponses()
+                    self.admitEntityLinks()
+                }
+            }
+            if !self.ready { await self.start() }
+            guard !Task.isCancelled, self.notificationResponseTaskID == id, self.ready,
+                  let currentHost = self.host, let token = self.completedStartupToken,
+                  self.startupSyncCompletedHost === currentHost, !self.busy else { return }
+            let owner = NotificationResponseOwner(id: id, host: currentHost, token: token)
+            let retrying = self.notificationResponseRetryRequested
+            self.notificationResponseRetryRequested = false
+            guard !self.retryNeeded || retrying else { return }
+            self.busy = true; self.notificationResponseBusyOwner = id
+            if retrying { self.retryNeeded = false; self.error = nil }
+            do {
+                for diagnostic in await NativeNotificationResponses.shared.takeDiagnostics() {
+                    guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                    await self.recordNotificationResponse(owner, action: diagnostic.action, outcome: diagnostic.outcome)
+                }
+                if retrying, let original = self.notificationResponseRetry?.item {
+                    if !(try await self.drainNotificationResponse(original, owner: owner)) {
+                        self.retryNeeded = true
+                        self.error = "The notification action could not be confirmed. Try again."
+                        self.deferNotificationResponses(); return
+                    }
+                }
+                guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                let pending = try await NativeNotificationResponses.shared.pending()
+                guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                self.notificationResponseRetry = nil
+                for item in pending {
+                    guard self.notificationResponseCurrent(owner) else { throw CancellationError() }
+                    if !self.busy { self.busy = true; self.notificationResponseBusyOwner = id }
+                    guard self.notificationResponseBusyOwner == id else { self.deferNotificationResponses(); return }
+                    if !(try await self.drainNotificationResponse(item, owner: owner)) {
+                        if item.response.action == .open && !self.notificationResponseForeground { continue }
+                        self.deferNotificationResponses()
+                    }
+                }
+            } catch {
+                guard self.host === owner.host, self.completedStartupToken == owner.token else { return }
+                if self.notificationResponseRetry == nil && error is CancellationError { return }
+                if self.notificationResponseRetry == nil { self.notificationResponseRetry = .init(item: nil, terminalOutcome: nil) }
+                self.retryNeeded = true
+                self.error = "The notification action could not be confirmed. Try again."
+                if Task.isCancelled, let action = self.notificationResponseRetry?.item?.response.action {
+                    await NativeNotificationResponses.shared.record(action, outcome: "uncertain")
+                } else {
+                    await self.recordNotificationResponse(owner,
+                        action: self.notificationResponseRetry?.item?.response.action.rawValue ?? "unknown", outcome: "uncertain")
+                }
+            }
+        }
+    }
+
+    private func deferNotificationResponses() {
+        notificationResponseDeferredUntilClean = true
+    }
+
+    private func releaseNotificationResponseBusy(_ id: UUID, settling: Bool = true) {
+        guard notificationResponseBusyOwner == id else { return }
+        notificationResponseBusyOwner = nil
+        if settling { finishOperation() } else { busy = false }
+    }
+
+    private func notificationResponseCurrent(_ owner: NotificationResponseOwner) -> Bool {
+        notificationResponseTaskID == owner.id && host === owner.host && startupSyncCompletedHost === owner.host
+            && completedStartupToken == owner.token && ready && !settingsSyncRestartRequired
+            && !appLockRecoveryPending && !Task.isCancelled
+    }
+
+    private var notificationResponseForeground: Bool {
+        UIApplication.shared.applicationState == .active && !appLock.concealed && !appLock.authenticating
+    }
+
+    func receiveEntityLink(_ url: URL) {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return }
+        switch selection {
+        case .standard, .isolated: break
+        case .rehearsal: return
+        }
+        let value = url.absoluteString
+        guard value.utf16.count <= 16_000 else { return }
+        receiveEntityInput(.url(value))
+    }
+
+    func receiveSearchIdentifier(_ identifier: String) {
+        guard searchAvailable, identifier.utf16.count <= 8_000 else { return }
+        ensureSearchIndex()
+        let taskID: String?
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake { taskID = searchTestIdentifiers[identifier] }
+        else { taskID = searchIndex?.taskID(for: identifier) }
+        #else
+        taskID = searchIndex?.taskID(for: identifier)
+        #endif
+        guard let taskID, !taskID.isEmpty, taskID.utf16.count <= 500 else { return }
+        receiveEntityInput(.searchTask(taskID))
+    }
+
+    private func receiveEntityInput(_ input: EntityLinkInput) {
+        if input.isSearch && searchConsentKnown && !searchPolicyAdmitted { return }
+        let received = ProcessInfo.processInfo.systemUptime
+        guard entityLinkLastInput != input.bytes || received - entityLinkLastReceived >= 1 else { return }
+        entityLinkLastInput = input.bytes
+        entityLinkLastReceived = received
+        withdrawEntityLinkPreview()
+        entityLinkDeliveryToken += 1
+        entityLinkPending = .init(token: entityLinkDeliveryToken, input: input)
+        requestEntityLinks()
+    }
+
+    func requestEntityLinks() {
+        entityLinkCleanupDelivery = nil
+        entityLinkWake += 1
+        admitEntityLinks()
+    }
+
+    func externalContextBecameClean() {
+        // Withdrawing an untouched URL preview is not a new external wake.
+        if let delivery = entityLinkCleanupDelivery, entityLinkPending?.token == delivery { return }
+        requestNotificationResponses()
+        requestEntityLinks()
+    }
+
+    func suspendEntityLinks() {
+        withdrawEntityLinkPreview()
+        entityLinkTask?.cancel()
+        #if DEBUG && targetEnvironment(simulator)
+        if let waiter = entityLinkTestReadWaiter {
+            entityLinkTestReadWaiter = nil
+            entityLinkTestReadState = "released-background"
+            waiter.resume()
+        }
+        #endif
+    }
+
+    private func withdrawEntityLinkPreview(_ id: UUID? = nil) {
+        guard let preview = entityLinkPreview, id == nil || preview.owner == id else { return }
+        entityLinkPreview = nil
+        guard taskPresented, taskRecoverySession == preview.session, taskInitialTab == "view",
+              taskView.isEmpty, !taskDirty, taskRecoveryGeneration == 0,
+              taskRecoverySnapshot == nil, taskRecoveryTouched.isEmpty,
+              !taskRecoveryChecklistTouched, !taskRecoveryAttachmentsOwned,
+              !taskHasActiveAttachmentOwner else { return }
+        entityLinkCleanupDelivery = preview.delivery
+        dismissTask(refreshCaller: false)
+    }
+
+    private func entityLinkCurrent(_ owner: EntityLinkOwner) -> Bool {
+        entityLinkTaskID == owner.id && entityLinkDeliveryToken == owner.delivery.token
+            && host === owner.host && startupSyncCompletedHost === owner.host
+            && completedStartupToken == owner.startupToken && ready && !retryNeeded
+            && !settingsSyncRestartRequired && !appLockRecoveryPending && !Task.isCancelled
+            && notificationResponseForeground
+            && (!owner.delivery.input.isSearch || searchPolicyAdmitted)
+    }
+
+    private func releaseEntityLinkBusy(_ id: UUID, settling: Bool = true) {
+        guard entityLinkBusyOwner == id else { return }
+        entityLinkBusyOwner = nil
+        if settling { finishOperation() } else { busy = false }
+    }
+
+    private func admitEntityLinks() {
+        guard entityLinkTask == nil, notificationResponseTask == nil,
+              entityLinkWake != entityLinkAttemptedWake, let delivery = entityLinkPending,
+              ready, !busy, !retryNeeded, !settingsSyncRestartRequired, !appLockRecoveryPending,
+              notificationResponseForeground, notificationResponseContextClean,
+              let currentHost = host, startupSyncCompletedHost === currentHost,
+              let startupToken = completedStartupToken else { return }
+        guard !delivery.input.isSearch || searchPolicyAdmitted else { return }
+        let owner = EntityLinkOwner(id: UUID(), host: currentHost, startupToken: startupToken, delivery: delivery)
+        entityLinkAttemptedWake = entityLinkWake
+        entityLinkTaskID = owner.id
+        busy = true
+        entityLinkBusyOwner = owner.id
+        entityLinkTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.entityLinkTaskID == owner.id {
+                    self.withdrawEntityLinkPreview(owner.id)
+                    self.releaseEntityLinkBusy(owner.id)
+                    self.entityLinkTaskID = nil
+                    self.entityLinkTask = nil
+                    self.admitNotificationResponses()
+                    self.admitEntityLinks()
+                }
+            }
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if self.entityLinkTestReadFailures > 0 {
+                    self.entityLinkTestReadFailures -= 1
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                #endif
+                let command: String, value: String
+                switch delivery.input {
+                case .url(let url): command = "iosEntityOpen"; value = url
+                case .searchTask(let taskID): command = "iosSearchOpen"; value = taskID
+                }
+                let route = try self.decode(try await owner.host.call(command, argumentsJSON: self.json([value])))
+                guard self.entityLinkCurrent(owner), self.notificationResponseContextClean else { return }
+                let type = route.text("type")
+                let identifier = type == "task" ? "taskId" : "projectId"
+                let fields: Set<String> = ["task", "project"].contains(type) ? ["type", identifier] : ["type"]
+                let types = delivery.input.isSearch ? ["inbox", "task"] : ["none", "inbox", "task", "project"]
+                guard types.contains(type), Set(route.keys) == fields,
+                      route.values.allSatisfy({ $0 is String }),
+                      fields.count == 1 || (!route.text(identifier).isEmpty && route.text(identifier).utf16.count <= 500) else {
+                    self.entityLinkPending = nil
+                    await self.recordEntityLink(owner, kind: "none", outcome: "refused")
+                    return
+                }
+                if type == "none" {
+                    self.entityLinkPending = nil
+                    await self.recordEntityLink(owner, kind: "none", outcome: "refused")
+                    return
+                }
+                self.releaseEntityLinkBusy(owner.id, settling: false)
+                switch type {
+                case "task":
+                    await self.selectSurface(.focus)
+                    guard self.entityLinkCurrent(owner), self.notificationResponseContextClean,
+                          self.selectedSurface == .focus, !self.busy else {
+                        return
+                    }
+                    self.prepareTaskPresentation(route.text("taskId"), initialTab: "view")
+                    self.taskOpeningIntent = nil
+                    let session = self.taskRecoverySession
+                    self.entityLinkPreview = (owner.id, owner.delivery.token, session)
+                    await self.readTaskView(ownedGuard: {
+                        self.entityLinkCurrent(owner) && self.taskRecoverySession == session
+                    })
+                case "project": await self.presentProject(["id": route.text("projectId")], caller: .projects,
+                    ownedGuard: { self.entityLinkCurrent(owner) })
+                case "inbox": await self.selectSurface(.inbox)
+                default: return
+                }
+                guard self.entityLinkCurrent(owner) else { return }
+                let acknowledged: Bool
+                switch type {
+                case "task": acknowledged = self.selectedSurface == .focus && self.taskPresented
+                    && self.viewedTaskID == route.text("taskId") && self.taskInitialTab == "view"
+                    && self.taskView.text("id") == route.text("taskId") && self.taskError == nil
+                case "project": acknowledged = self.selectedSurface == .project && self.projectCurrent
+                    && self.projectHeader.text("id") == route.text("projectId") && self.projectError == nil
+                default: acknowledged = self.selectedSurface == .inbox && !self.busy && self.error == nil
+                }
+                guard acknowledged else { return }
+                self.entityLinkPreview = nil
+                self.entityLinkPending = nil
+                await self.recordEntityLink(owner, kind: type, outcome: "opened")
+            } catch is CoreHostRejection {
+                guard self.entityLinkCurrent(owner), self.notificationResponseContextClean else { return }
+                self.entityLinkPending = nil
+                await self.recordEntityLink(owner, kind: "none", outcome: "refused")
+            } catch {
+                // A read failure retains the latest link until a fresh external wake.
+            }
+        }
+    }
+
+    private func recordEntityLink(_ owner: EntityLinkOwner, kind: String, outcome: String) async {
+        guard entityLinkCurrent(owner) else { return }
+        if owner.delivery.input.isSearch {
+            _ = try? await owner.host.call("logLine", argumentsJSON: json([
+                "Native iOS system search route",
+                try json(["releaseCheck": "v1.3.5/ios-search-publication", "kind": kind, "outcome": outcome]),
+            ]))
+            return
+        }
+        _ = try? await owner.host.call("logLine", argumentsJSON: json([
+            "Native iOS entity link",
+            try json(["releaseCheck": "v1.3.5/ios-entity-link", "kind": kind, "outcome": outcome]),
+        ]))
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    func deliverEntityLinkTestInput(_ trigger: String) {
+        guard let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return }
+        let mode = ProcessInfo.processInfo.environment["MINDWTR_ENTITY_TEST_DELIVERY"] ?? ""
+        var links: [String] = []
+        if trigger == "more", morePresented {
+            switch mode {
+            case "repeat-task": links = ["open?task=task454-a"]
+            case "more-latest" where !entityLinkDeferredTestDelivered:
+                links = ["open?task=task454-a", "open?task=task454-b"]
+            case "more-echo" where !entityLinkDeferredTestDelivered:
+                links = ["open?task=task454-a", "open?task=task454-a"]
+            default: break
+            }
+            entityLinkDeferredTestDelivered = true
+        } else if trigger == "dirty", mode == "dirty-latest", taskDirty,
+                  taskTitleDraft == "Task454 retained local draft", !entityLinkDeferredTestDelivered {
+            entityLinkDeferredTestDelivered = true
+            links = ["open?task=task454-a", "open?task=task454-b"]
+        }
+        for link in links {
+            if let url = URL(string: "mindwtr-native-dev://" + link) { receiveEntityLink(url) }
+        }
+    }
+
+    func deliverSearchTestInput(_ trigger: String) {
+        guard searchTestFake, !searchTestDeliverySent, searchPolicyAdmitted,
+              !searchIndexWithdrawn, !searchTestIdentifiers.isEmpty,
+              let selection = trustedSearchSelection else { return }
+        let mode = ProcessInfo.processInfo.environment["MINDWTR_SEARCH_TEST_DELIVERY"] ?? ""
+        let ids: [String]
+        if trigger == "more", morePresented, ["more", "foreign"].contains(mode) {
+            ids = ["task454-b"]
+        } else if trigger == "dirty", mode == "dirty", taskDirty,
+                  taskTitleDraft == "Task456 retained local draft" {
+            ids = ["task454-b"]
+        } else { return }
+        searchTestDeliverySent = true
+        for id in ids {
+            guard let identifier = try? NativeSearchIndex.identifier(taskID: id, selection: selection) else { continue }
+            receiveSearchIdentifier(mode == "foreign" ? "foreign." + identifier : identifier)
+        }
+    }
+    #endif
+
+    private func recordNotificationResponse(_ owner: NotificationResponseOwner, action: String, outcome: String) async {
+        guard notificationResponseCurrent(owner) else { return }
+        _ = try? await owner.host.call("logLine", argumentsJSON: json([
+            "Native iOS reminder response",
+            try json(["releaseCheck": "v1.3.5/ios-reminder-response", "action": action, "outcome": outcome]),
+        ]))
+    }
+
+    func recordForegroundReminderPresentation(sound: Bool) async {
+        guard ready, let currentHost = host else { return }
+        _ = try? await currentHost.call("logLine", argumentsJSON: json([
+            "Native iOS foreground reminder presentation requested",
+            try json(["releaseCheck": "v1.3.5/ios-reminder-present", "outcome": sound ? "sound" : "silent"]),
+        ]))
+    }
+
+    private func drainNotificationResponse(_ captured: NativeReminderInbox.Item, owner: NotificationResponseOwner) async throws -> Bool {
+        let action = captured.response.action
+        let finishing = notificationResponseRetry?.item?.response.requestID == captured.response.requestID
+            ? notificationResponseRetry?.terminalOutcome : nil
+        if finishing == nil && action != .dismiss && !notificationResponseContextClean { return false }
+        if finishing == nil && action == .open && !notificationResponseForeground { return false }
+        if notificationResponseRetry?.item?.response.requestID != captured.response.requestID {
+            notificationResponseRetry = .init(item: captured, terminalOutcome: nil)
+        }
+        let item: NativeReminderInbox.Item
+        if let finishing {
+            item = captured
+            notificationResponseRetry?.terminalOutcome = finishing
+        } else {
+            item = try await NativeNotificationResponses.shared.markAdmitting(captured.response.requestID)
+            notificationResponseRetry?.item = item
+            guard notificationResponseCurrent(owner) else { throw CancellationError() }
+            await recordNotificationResponse(owner, action: action.rawValue, outcome: "admitting")
+            guard notificationResponseCurrent(owner) else { throw CancellationError() }
+            switch action {
+            case .dismiss: notificationResponseRetry?.terminalOutcome = "confirmed"
+            case .complete, .snooze:
+                guard notificationResponseContextClean else { notificationResponseRetry = nil; return false }
+                do {
+                    if action == .complete { _ = try await owner.host.completeReminderTask(requestJSON: item.response.payloadJSON) }
+                    else { _ = try await owner.host.snoozeReminder(requestJSON: item.response.payloadJSON) }
+                } catch is CoreHostRejection { notificationResponseRetry?.terminalOutcome = "refused" }
+                if notificationResponseRetry?.terminalOutcome == nil {
+                    guard notificationResponseCurrent(owner) else { throw CancellationError() }
+                    let reconciled = try await owner.host.reconcileReminders()
+                    guard notificationResponseCurrent(owner) else { throw CancellationError() }
+                    _ = try validateReminderLifecycleReply(reconciled)
+                    notificationResponseRetry?.terminalOutcome = "confirmed"
+                    if notificationResponseForeground { refreshRequested = true }
+                }
+            case .open:
+                guard notificationResponseForeground, notificationResponseContextClean else {
+                    notificationResponseRetry = nil; return false
+                }
+                do {
+                    let route = try await query("iosNotificationOpen", [item.response.payloadJSON])
+                    guard notificationResponseCurrent(owner), notificationResponseForeground, notificationResponseContextClean else {
+                        notificationResponseRetry = nil; return false
+                    }
+                    if !(try await presentNotificationRoute(route, owner: owner)) {
+                        notificationResponseRetry = nil; return false
+                    }
+                    notificationResponseRetry?.terminalOutcome = "confirmed"
+                } catch is CoreHostRejection {
+                    notificationResponseRetry?.terminalOutcome = "refused"
+                } catch is NotificationRouteRejection {
+                    notificationResponseRetry?.terminalOutcome = "refused"
+                }
+            }
+        }
+        guard notificationResponseCurrent(owner) else { throw CancellationError() }
+        let outcome = notificationResponseRetry?.terminalOutcome ?? "confirmed"
+        try await NativeNotificationResponses.shared.finish(item)
+        guard notificationResponseCurrent(owner) else { throw CancellationError() }
+        notificationResponseRetry = nil
+        await recordNotificationResponse(owner, action: action.rawValue, outcome: outcome)
+        return true
+    }
+
+    private func presentNotificationRoute(_ route: CoreObject, owner: NotificationResponseOwner) async throws -> Bool {
+        let type = route.text("type")
+        var fields: Set<String> = ["type"]
+        var identifierField: String?
+        switch type {
+        case "none": break
+        case "task": fields.formUnion(["taskId", "openToken"]); identifierField = "taskId"
+        case "project": fields.insert("projectId"); identifierField = "projectId"
+        case "contexts": fields.insert("token"); identifierField = "token"
+        case "review":
+            fields.insert("openToken")
+            if route["taskId"] != nil { fields.insert("taskId") }
+            if route["projectId"] != nil { fields.insert("projectId") }
+        case "daily-review", "weekly-review": fields.insert("openToken")
+        default: throw NotificationRouteRejection()
+        }
+        guard Set(route.keys) == fields, route.values.allSatisfy({ $0 is String }),
+              fields.subtracting(["type"]).allSatisfy({ !route.text($0).isEmpty && route.text($0).utf16.count <= 65_536 }) else {
+            throw NotificationRouteRejection()
+        }
+        if let identifierField, route.text(identifierField).utf16.count > 500 {
+            throw NotificationRouteRejection()
+        }
+        guard notificationResponseCurrent(owner), notificationResponseForeground, notificationResponseContextClean else { return false }
+        if type == "none" { return true }
+        releaseNotificationResponseBusy(owner.id, settling: false)
+        switch type {
+        case "task":
+            prepareTaskPresentation(route.text("taskId"), initialTab: "view")
+            taskOpeningIntent = nil
+            await readTaskView()
+        case "project": await presentProject(["id": route.text("projectId")], caller: .projects)
+        case "contexts":
+            contextsIntents.append(["kind": "focus", "value": route.text("token")])
+            contextsLoadedDepth = pageSize
+            await openContexts()
+        case "review", "daily-review", "weekly-review":
+            // RN's generic Review destination intentionally ignores notification entity parameters.
+            await openReview()
+            guard notificationResponseCurrent(owner), notificationResponseForeground,
+                  selectedSurface == .review, !busy, !retryNeeded, !reviewGuidePresented else { return false }
+            if type != "review" { await openReviewGuide(type == "daily-review" ? "daily" : "weekly") }
+        default: return false
+        }
+        guard notificationResponseCurrent(owner), notificationResponseForeground else { return false }
+        switch type {
+        case "task": return taskPresented && viewedTaskID == route.text("taskId") && taskInitialTab == "view"
+        case "project": return selectedSurface == .project && projectHeader.text("id") == route.text("projectId")
+        case "contexts": return selectedSurface == .contexts && contextsCurrent && contextsIntents.isEmpty
+        case "review": return selectedSurface == .review && !reviewGuidePresented
+        case "daily-review", "weekly-review": return selectedSurface == .review && reviewGuidePresented && reviewKind == (type == "daily-review" ? "daily" : "weekly")
+        default: return false
+        }
+    }
+
+    private func retryNotificationResponses() async {
+        guard !busy, notificationResponseTask == nil else { return }
+        notificationResponseRetryRequested = true
+        notificationResponseWakePending = true
+        notificationResponseDeferredUntilClean = false
+        admitNotificationResponses()
+        if let task = notificationResponseTask { await task.value }
+    }
+
+    // Independent from the Inbox-only Sync opportunity. App Lock may be enabled and authenticated.
+    func requestReminderLifecycle(token: UUID?, active: Bool) {
+        guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        guard active, UIApplication.shared.applicationState == .active, !appLock.concealed else {
+            cancelReminderLifecycle(); return
+        }
+        if !reminderSceneActive {
+            reminderSceneActive = true
+            reminderWakeTicket &+= 1; reminderDebounceReady = true
+            reminderDebounceTask?.cancel(); reminderDebounceTask = nil
+            reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        }
+        admitReminderLifecycle()
+    }
+
+    func cancelReminderLifecycle() {
+        reminderSceneActive = false; reminderGeneration += 1
+        reminderDebounceTask?.cancel(); reminderDebounceTask = nil
+        reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        reminderLifecycleTask?.cancel()
+        if let owner = reminderLifecycleOwner, reminderDrainLease == .invalid {
+            reminderDrainOwner = owner.id
+            reminderDrainLease = UIApplication.shared.beginBackgroundTask(withName: "Reminder callback drain") { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.reminderDrainOwner == owner.id else { return }
+                    self.reminderLifecycleTask?.cancel(); self.endReminderDrain(owner.id)
+                }
+            }
+        }
+    }
+
+    private func endReminderDrain(_ id: UUID) {
+        guard reminderDrainOwner == id else { return }
+        if reminderDrainLease != .invalid { UIApplication.shared.endBackgroundTask(reminderDrainLease) }
+        reminderDrainLease = .invalid; reminderDrainOwner = nil
+    }
+
+    private func retireReminderLifecycleHost(_ previous: CoreHost?) {
+        cancelReminderLifecycle()
+        let registration = reminderRegistration, observed = reminderObservationHost
+        reminderRegistration = nil; reminderObservationHost = nil
+        reminderObservationClaim = UUID(); reminderObservationToken = nil
+        reminderRevision = 0; reminderConfirmedRevision = 0
+        reminderWakeTicket &+= 1; reminderAttemptedTicket = reminderWakeTicket
+        if let previous, observed === previous, let registration {
+            Task { await previous.removeReminderObserver(registration.id) }
+        }
+        // The captured invocation remains installed until accepted callbacks drain.
+    }
+
+    func reminderClockChanged() {
+        reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        reminderWakeTicket &+= 1
+        debounceReminderLifecycle()
+    }
+
+    private func reminderSourceChanged(_ event: NativeReminderWake, host observed: CoreHost, token: UUID, claim: UUID) {
+        guard host === observed, reminderObservationHost === observed,
+              completedStartupToken == token, reminderObservationClaim == claim else { return }
+        switch event {
+        case .sourceChanged(let revision):
+            guard revision > reminderRevision else { return }
+            reminderRevision = revision; reminderWakeTicket &+= 1
+            reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+            debounceReminderLifecycle()
+        case .admissionReady(let revision):
+            reminderRevision = max(reminderRevision, revision)
+            reminderWakeTicket &+= 1
+            admitReminderLifecycle()
+        }
+    }
+
+    private func debounceReminderLifecycle() {
+        reminderDebounceTask?.cancel(); reminderDebounceTask = nil
+        reminderDebounceReady = false
+        guard reminderSceneActive, let registration = reminderRegistration,
+              let observed = reminderObservationHost, let token = completedStartupToken else { return }
+        let generation = reminderGeneration
+        reminderDebounceTask = Task { [weak self, weak observed] in
+            do { try await Task.sleep(nanoseconds: registration.rescheduleDelayMs * 1_000_000) } catch { return }
+            guard let self, let observed, self.host === observed, self.reminderObservationHost === observed,
+                  self.completedStartupToken == token, self.reminderGeneration == generation, !Task.isCancelled else { return }
+            self.reminderDebounceTask = nil; self.reminderDebounceReady = true
+            self.admitReminderLifecycle()
+        }
+    }
+
+    private func reminderLifecycleCurrent(_ owner: ReminderLifecycleOwner) -> Bool {
+        host === owner.host && startupSyncCompletedHost === owner.host && completedStartupToken == owner.token
+            && reminderGeneration == owner.generation && reminderSceneActive && ready && !retryNeeded
+            && !settingsSyncRestartRequired && !appLockRecoveryPending && !appLock.concealed && !appLock.authenticating
+            && UIApplication.shared.applicationState == .active && !Task.isCancelled
+    }
+
+    private func validateReminderLifecycleReply(_ raw: String) throws -> Double? {
+        let value = try decode(raw)
+        guard Set(value.keys) == Set(["mode", "scheduled", "cancelled", "topUpAtMs"]),
+              ["active", "inactive", "revoked"].contains(value.text("mode")) else { throw CocoaError(.coderReadCorrupt) }
+        for (name, maximum) in [("scheduled", 64), ("cancelled", 4096)] {
+            guard let count = value[name] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+                  count.doubleValue.rounded() == count.doubleValue, (0...Double(maximum)).contains(count.doubleValue) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+        }
+        if value["topUpAtMs"] is NSNull { return nil }
+        guard let deadline = value["topUpAtMs"] as? NSNumber, CFGetTypeID(deadline) != CFBooleanGetTypeID(),
+              deadline.doubleValue.isFinite, deadline.doubleValue.rounded() == deadline.doubleValue,
+              abs(deadline.doubleValue) <= 8_640_000_000_000_000 else { throw CocoaError(.coderReadCorrupt) }
+        return deadline.doubleValue
+    }
+
+    private func installReminderTopUp(_ deadline: Double?, owner: ReminderLifecycleOwner) {
+        reminderTopUpTask?.cancel(); reminderTopUpTask = nil
+        guard let deadline else { return }
+        reminderTopUpTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, (deadline - Date().timeIntervalSince1970 * 1000) / 1000))) }
+            catch { return }
+            guard let self, self.reminderLifecycleCurrent(owner), !Task.isCancelled else { return }
+            self.reminderTopUpTask = nil; self.reminderWakeTicket &+= 1
+            self.reminderDebounceReady = true
+            self.admitReminderLifecycle()
+        }
+    }
+
+    private func admitReminderLifecycle() {
+        guard reminderLifecycleTask == nil, reminderDebounceReady, reminderWakeTicket != reminderAttemptedTicket,
+              let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
+              reminderSceneActive, UIApplication.shared.applicationState == .active,
+              ready, !retryNeeded, !settingsSyncRestartRequired, !appLockRecoveryPending,
+              !appLock.concealed, !appLock.authenticating, !busy, !taskSavePending,
+              !taskRecoverySaving, !taskRecoveryHydrating, !taskRecoveryStartupCorrupt,
+              !projectFileAddPending, !projectFileAvailabilityPending, !projectNotesWritePending,
+              projectNotesFlushTask == nil, projectAttachmentDownloadOwner == nil else { return }
+        let owner = ReminderLifecycleOwner(id: UUID(), host: observed, token: token,
+            generation: reminderGeneration)
+        reminderAttemptedTicket = reminderWakeTicket
+        reminderLifecycleOwner = owner
+        reminderLifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.reminderLifecycleOwner?.id == owner.id {
+                    self.endReminderDrain(owner.id)
+                    self.reminderLifecycleTask = nil; self.reminderLifecycleOwner = nil
+                    self.admitReminderLifecycle()
+                }
+            }
+            do {
+                guard self.reminderLifecycleCurrent(owner) else { throw CancellationError() }
+                if self.reminderObservationHost !== owner.host || self.reminderRegistration == nil || self.reminderObservationToken != token {
+                    if let previous = self.reminderObservationHost, let registration = self.reminderRegistration {
+                        await previous.removeReminderObserver(registration.id)
+                    }
+                    self.reminderObservationHost = owner.host
+                    self.reminderObservationClaim = UUID(); self.reminderObservationToken = token
+                    let claim = self.reminderObservationClaim
+                    let registration = try await owner.host.observeReminders { [weak self, weak observed = owner.host] event in
+                        Task { @MainActor in
+                            guard let self, let observed else { return }
+                            self.reminderSourceChanged(event, host: observed, token: token, claim: claim)
+                        }
+                    }
+                    guard self.reminderLifecycleCurrent(owner) else {
+                        await owner.host.removeReminderObserver(registration.id); throw CancellationError()
+                    }
+                    self.reminderRegistration = registration
+                    self.reminderRevision = max(self.reminderRevision, registration.revision)
+                }
+                let revision = self.reminderRevision, ticket = self.reminderWakeTicket
+                self.reminderAttemptedTicket = ticket
+                let result = try await owner.host.reconcileReminders()
+                guard self.reminderLifecycleCurrent(owner) else { throw CancellationError() }
+                let deadline = try self.validateReminderLifecycleReply(result)
+                self.reminderConfirmedRevision = max(self.reminderConfirmedRevision, revision)
+                guard self.reminderWakeTicket == ticket else { return }
+                self.installReminderTopUp(deadline, owner: owner)
+                _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
+                    "Native iOS reminder lifecycle reconciled",
+                    #"{"releaseCheck":"v1.3.5/ios-reminder-lifecycle","outcome":"confirmed"}"#,
+                ]))
+            } catch {
+                // Retain dirty work, but only a new source/activation/foreign settlement may retry.
+            }
+        }
+    }
+
+    func requestCalendarPushLifecycle(token: UUID?, active: Bool) {
+        guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        guard active, UIApplication.shared.applicationState == .active, !appLock.concealed else {
+            cancelCalendarPushLifecycle(); return
+        }
+        if !calendarPushSceneActive {
+            calendarPushSceneActive = true
+            calendarPushRestartRequested = true
+            calendarPushFullPending = true; calendarPushIDsPending.removeAll()
+            calendarPushWakeTicket &+= 1
+        }
+        admitCalendarPushLifecycle()
+    }
+
+    func cancelCalendarPushLifecycle() {
+        calendarPushSceneActive = false
+        calendarPushRestartRequested = false
+        stopCalendarPushLifecycle()
+    }
+
+    private func endCalendarPushDrain(_ id: UUID) {
+        guard calendarPushDrainOwner == id else { return }
+        if calendarPushDrainLease != .invalid { UIApplication.shared.endBackgroundTask(calendarPushDrainLease) }
+        calendarPushDrainLease = .invalid; calendarPushDrainOwner = nil
+    }
+
+    private func stopCalendarPushLifecycle() {
+        calendarPushGeneration += 1
+        calendarPushLifecycleTask?.cancel()
+        guard calendarPushStopTask == nil, let observed = calendarPushObservationHost ?? calendarPushLifecycleOwner?.host else { return }
+        let invocation = calendarPushLifecycleTask, stopID = UUID()
+        calendarPushStopID = stopID
+        if calendarPushDrainLease == .invalid {
+            calendarPushDrainOwner = stopID
+            calendarPushDrainLease = UIApplication.shared.beginBackgroundTask(withName: "Calendar push callback drain") { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.calendarPushDrainOwner == stopID else { return }
+                    self.calendarPushLifecycleTask?.cancel(); self.endCalendarPushDrain(stopID)
+                }
+            }
+        }
+        calendarPushStopTask = Task { [weak self] in
+            await invocation?.value
+            guard let self else { return }
+            _ = try? await self.invokeCalendarPush(observed, .stop)
+            guard self.calendarPushStopID == stopID else { return }
+            self.endCalendarPushDrain(stopID)
+            self.calendarPushStopTask = nil; self.calendarPushStopID = nil
+            #if DEBUG && targetEnvironment(simulator)
+            self.publishCalendarPushFixtureState()
+            #endif
+            self.admitCalendarPushLifecycle()
+        }
+    }
+
+    private func retireCalendarPushHost(_ previous: CoreHost?) {
+        cancelCalendarPushLifecycle()
+        let observed = calendarPushObservationHost, registration = calendarPushObservationID
+        let drain = calendarPushStopTask
+        calendarPushObservationHost = nil; calendarPushObservationID = nil
+        calendarPushObservationToken = nil; calendarPushObservationClaim = UUID()
+        calendarPushFullPending = false; calendarPushIDsPending.removeAll()
+        calendarPushWakeTicket &+= 1; calendarPushAttemptedTicket = calendarPushWakeTicket
+        calendarPushSettingRetry = nil; calendarPushSettingToasts = []; calendarPushLifecycleError = nil
+        calendarPushReadmitAfterBusy = false
+        if let previous, observed === previous, let registration {
+            Task { await drain?.value; try? await previous.removeCalendarPushObserver(registration) }
+        }
+    }
+
+    private func calendarPushSourceChanged(_ ids: [String]?, host observed: CoreHost, token: UUID, claim: UUID) {
+        guard host === observed, calendarPushObservationHost === observed, completedStartupToken == token,
+              calendarPushObservationClaim == claim, calendarPushSceneActive else { return }
+        mergeCalendarPushBatch(ids)
+        calendarPushWakeTicket &+= 1
+        admitCalendarPushLifecycle()
+    }
+
+    private func mergeCalendarPushBatch(_ ids: [String]?) {
+        guard let ids, !calendarPushFullPending else {
+            calendarPushFullPending = true; calendarPushIDsPending.removeAll(); return
+        }
+        for id in ids {
+            guard !id.trimmingCharacters(in: Self.ecmaScriptWhitespace).isEmpty, id.utf16.count <= 500,
+                  id.utf8.count <= 1024 else {
+                calendarPushFullPending = true; calendarPushIDsPending.removeAll(); return
+            }
+            calendarPushIDsPending[Data(id.utf8)] = id
+            if calendarPushIDsPending.count > 10_000 {
+                calendarPushFullPending = true; calendarPushIDsPending.removeAll(); return
+            }
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: ["ids": Array(calendarPushIDsPending.values)]),
+           data.count <= 1024 * 1024 { return }
+        calendarPushFullPending = true; calendarPushIDsPending.removeAll()
+    }
+
+    private func calendarPushLifecycleCurrent(_ owner: CalendarPushLifecycleOwner) -> Bool {
+        host === owner.host && startupSyncCompletedHost === owner.host && completedStartupToken == owner.token
+            && calendarPushLifecycleOwner?.id == owner.id && calendarPushGeneration == owner.generation
+            && calendarPushSceneActive && !calendarPushSettingSuspended && ready && !retryNeeded
+            && !settingsSyncRestartRequired && !appLockRecoveryPending && !appLock.concealed && !appLock.authenticating
+            && UIApplication.shared.applicationState == .active && !Task.isCancelled
+    }
+
+    private func ensureCalendarPushObservation(_ observed: CoreHost, token: UUID) async throws {
+        if calendarPushObservationHost === observed, calendarPushObservationID != nil, calendarPushObservationToken == token { return }
+        if let previous = calendarPushObservationHost, let registration = calendarPushObservationID {
+            try await previous.removeCalendarPushObserver(registration)
+        }
+        calendarPushObservationHost = observed; calendarPushObservationID = nil
+        calendarPushObservationToken = token; calendarPushObservationClaim = UUID()
+        let claim = calendarPushObservationClaim
+        let registration = try await observed.observeCalendarPush { [weak self, weak observed] ids in
+            Task { @MainActor in
+                guard let self, let observed else { return }
+                self.calendarPushSourceChanged(ids, host: observed, token: token, claim: claim)
+            }
+        }
+        guard host === observed, completedStartupToken == token, calendarPushObservationClaim == claim, !Task.isCancelled else {
+            try? await observed.removeCalendarPushObserver(registration); throw CancellationError()
+        }
+        calendarPushObservationID = registration
+        #if DEBUG && targetEnvironment(simulator)
+        publishCalendarPushFixtureState()
+        #endif
+    }
+
+    private func invokeCalendarPush(_ observed: CoreHost, _ operation: NativeCalendarPushOperation,
+                                    argumentsJSON: String = "{}") async throws -> String {
+        #if DEBUG && targetEnvironment(simulator)
+        if calendarPushFixtureEnabled { return try await invokeCalendarPushFixture(operation, argumentsJSON: argumentsJSON) }
+        #endif
+        return try await observed.calendarPush(operation, argumentsJSON: argumentsJSON)
+    }
+
+    private func admitCalendarPushLifecycle() {
+        guard calendarPushLifecycleTask == nil, calendarPushStopTask == nil, !calendarPushSettingSuspended,
+              calendarPushRestartRequested || calendarPushWakeTicket != calendarPushAttemptedTicket,
+              let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
+              calendarPushSceneActive, UIApplication.shared.applicationState == .active, ready, !retryNeeded,
+              !settingsSyncRestartRequired, !appLockRecoveryPending, !appLock.concealed, !appLock.authenticating,
+              !busy, !taskSavePending, !taskRecoverySaving, !taskRecoveryHydrating, !taskRecoveryStartupCorrupt,
+              !projectFileAddPending, !projectFileAvailabilityPending, !projectNotesWritePending,
+              projectNotesFlushTask == nil, projectAttachmentDownloadOwner == nil, !calendarSettingActive else { return }
+        let owner = CalendarPushLifecycleOwner(id: UUID(), host: observed, token: token, generation: calendarPushGeneration)
+        let full = calendarPushFullPending, ids = Array(calendarPushIDsPending.values)
+        let hasBatch = calendarPushWakeTicket != calendarPushAttemptedTicket && (full || !ids.isEmpty)
+        calendarPushFullPending = false; calendarPushIDsPending.removeAll()
+        calendarPushAttemptedTicket = calendarPushWakeTicket; calendarPushRestartRequested = false
+        calendarPushLifecycleOwner = owner
+        calendarPushLifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.calendarPushLifecycleOwner?.id == owner.id {
+                    self.calendarPushLifecycleTask = nil; self.calendarPushLifecycleOwner = nil
+                    #if DEBUG && targetEnvironment(simulator)
+                    self.publishCalendarPushFixtureState()
+                    #endif
+                    self.admitCalendarPushLifecycle()
+                }
+            }
+            do {
+                guard self.calendarPushLifecycleCurrent(owner) else { throw CancellationError() }
+                try await self.ensureCalendarPushObservation(owner.host, token: owner.token)
+                guard self.calendarPushLifecycleCurrent(owner) else { throw CancellationError() }
+                let raw = try await self.invokeCalendarPush(owner.host, .start)
+                guard self.calendarPushLifecycleCurrent(owner), let value = raw.data(using: .utf8),
+                      let enabled = try JSONSerialization.jsonObject(with: value, options: .fragmentsAllowed) as? NSNumber,
+                      CFGetTypeID(enabled) == CFBooleanGetTypeID() else { throw CocoaError(.coderReadCorrupt) }
+                if enabled.boolValue && hasBatch {
+                    let request = try self.json(["ids": full ? NSNull() : ids as Any])
+                    let result = try await self.invokeCalendarPush(owner.host, .run, argumentsJSON: request)
+                    guard self.calendarPushLifecycleCurrent(owner), result == "null" else { throw CocoaError(.coderReadCorrupt) }
+                }
+                guard self.calendarPushLifecycleCurrent(owner) else { throw CancellationError() }
+                self.calendarPushLifecycleError = nil
+                _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
+                    "Native iOS calendar push lifecycle completed",
+                    #"{"releaseCheck":"v1.3.5/ios-calendar-push-lifecycle","outcome":"confirmed"}"#,
+                ]))
+            } catch {
+                guard self.host === owner.host, self.completedStartupToken == owner.token else { return }
+                // Keep the failed frozen work without generating another admission ticket.
+                if hasBatch { self.mergeCalendarPushBatch(full ? nil : ids) }
+                if !Task.isCancelled, self.calendarPushLifecycleCurrent(owner) {
+                    self.calendarPushLifecycleError = self.label("settings.feedback.actionFailed")
+                }
+            }
+        }
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    // Isolated App orchestration fixture only. It never changes the native EventKit provider.
+    private func publishCalendarPushFixtureState() {
+        guard calendarPushFixtureEnabled else { return }
+        calendarPushFixtureState = (try? json(["fixture": true, "starts": calendarPushFixtureStarts,
+            "stops": calendarPushFixtureStops, "settings": calendarPushFixtureSettings, "saves": calendarPushFixtureSaves,
+            "runs": calendarPushFixtureRuns, "cancelled": calendarPushFixtureCancelled,
+            "held": calendarPushFixtureWaiter != nil, "owner": calendarPushLifecycleOwner != nil,
+            "draining": calendarPushStopTask != nil, "busy": busy, "retry": retryNeeded,
+            "registered": calendarPushObservationID != nil,
+            "target": calendarPushFixtureTarget.map { $0 as Any } ?? NSNull()])) ?? "fixture-error"
+    }
+
+    private func releaseCalendarPushFixtureHold() {
+        let waiter = calendarPushFixtureWaiter; calendarPushFixtureWaiter = nil
+        waiter?.resume(); publishCalendarPushFixtureState()
+    }
+
+    private func invokeCalendarPushFixture(_ operation: NativeCalendarPushOperation, argumentsJSON: String) async throws -> String {
+        try Task.checkCancellation()
+        if operation == .stop { calendarPushFixtureStops += 1; publishCalendarPushFixtureState(); return "null" }
+        if operation == .start {
+            calendarPushFixtureStarts += 1; publishCalendarPushFixtureState()
+            return calendarPushFixtureEnabledValue ? "true" : "false"
+        }
+        if operation == .run {
+            let request = try decode(argumentsJSON)
+            calendarPushFixtureRuns.append(request["ids"] ?? NSNull())
+        } else { calendarPushFixtureSettings += 1 }
+        if calendarPushFixtureFailNext {
+            calendarPushFixtureFailNext = false; publishCalendarPushFixtureState(); throw CocoaError(.fileWriteUnknown)
+        }
+        if calendarPushFixtureHoldNext {
+            calendarPushFixtureHoldNext = false
+            await withTaskCancellationHandler(operation: {
+                await withCheckedContinuation { continuation in
+                    if Task.isCancelled { continuation.resume(); return }
+                    self.calendarPushFixtureWaiter = continuation; self.publishCalendarPushFixtureState()
+                }
+            }, onCancel: { [weak self] in
+                Task { @MainActor in self?.releaseCalendarPushFixtureHold() }
+            })
+            if Task.isCancelled {
+                calendarPushFixtureCancelled += 1; publishCalendarPushFixtureState(); throw CancellationError()
+            }
+        }
+        if operation == .setting {
+            let edit = try decode(argumentsJSON).object("edit")
+            switch edit.text("type") {
+            case "push": calendarPushFixtureEnabledValue = edit.flag("enabled")
+            case "pushTarget": calendarPushFixtureTarget = edit["calendarId"] as? String
+            case "pushColor": calendarPushFixtureColor = edit.text("color")
+            case "deleteMindwtrCalendar": calendarPushFixtureEnabledValue = false // Unrelated fixture B stays selected.
+            default: throw CocoaError(.coderReadCorrupt)
+            }
+            publishCalendarPushFixtureState()
+            return try json(["changed": true, "clearDraft": false, "open": NSNull(), "toasts": [[
+                "title": "Calendar fixture saved", "message": "App orchestration fixture; no EventKit mutation.",
+                "tone": "info", "durationMs": NSNull(),
+            ]]])
+        }
+        publishCalendarPushFixtureState(); return "null"
+    }
+
+    private func calendarPushFixtureView(_ source: CoreObject) -> CoreObject {
+        var view = source, push = source.object("push")
+        guard calendarPushFixtureEnabled, !push.isEmpty else { return source }
+        push["enabled"] = calendarPushFixtureEnabledValue
+        push["toggle"] = ["type": "push", "before": calendarPushFixtureEnabledValue, "enabled": !calendarPushFixtureEnabledValue]
+        push["denied"] = NSNull()
+        let targetID = calendarPushFixtureTarget.map { $0 as Any } ?? NSNull()
+        let options: [CoreObject] = [
+            ["name": "Mindwtr Calendar", "description": "Dedicated local calendar", "color": calendarPushFixtureColor,
+             "selected": calendarPushFixtureTarget == nil, "accessibilityLabel": "Mindwtr Calendar. Dedicated local calendar",
+             "edit": ["type": "pushTarget", "before": targetID, "calendarId": NSNull()]],
+            ["name": "Fixture B", "description": "Dedicated account calendar", "color": "#00AA66",
+             "selected": calendarPushFixtureTarget == "fixture-B", "accessibilityLabel": "Fixture B. Dedicated account calendar",
+             "edit": ["type": "pushTarget", "before": targetID, "calendarId": "fixture-B"]],
+        ]
+        let colors: CoreObject = ["title": "Mindwtr calendar color", "description": "Choose a color for the dedicated calendar.",
+            "options": ["#3B82F6", "#EF4444"].map { color -> CoreObject in
+                ["color": color, "selected": color == calendarPushFixtureColor, "accessibilityLabel": "Color " + color,
+                 "edit": ["type": "pushColor", "before": calendarPushFixtureColor, "color": color]]
+            }]
+        push["target"] = calendarPushFixtureEnabledValue ? ["title": "Sync target", "description": "Isolated App layout fixture; no provider writes.",
+            "options": options, "loading": false, "colors": calendarPushFixtureTarget == nil ? colors as Any : NSNull(),
+            "refresh": ["label": "Refresh calendars", "description": "Reload calendar choices."],
+            "delete": ["label": "Delete Mindwtr Calendar", "description": "Remove the dedicated calendar and its pushed events.",
+                "confirm": ["title": "Delete Mindwtr Calendar", "message": "Remove the dedicated calendar and its pushed events.", "cancel": "Cancel", "confirm": "Delete"],
+                "edit": ["type": "deleteMindwtrCalendar", "calendarId": "fixture-A", "creationIntentRevision": NSNull()]]] as Any : NSNull()
+        view["push"] = push; return view
+    }
+
+    func calendarPushFixtureCommand(_ command: String) {
+        guard calendarPushFixtureEnabled else { return }
+        switch command {
+        case "hold": calendarPushFixtureHoldNext = true
+        case "release": releaseCalendarPushFixtureHold()
+        case "fail": calendarPushFixtureFailNext = true
+        case "stop": cancelCalendarPushLifecycle()
+        case "activate": requestCalendarPushLifecycle(token: completedStartupToken, active: true)
+        case "busy": busy = true
+        case "idle": finishOperation()
+        case "save":
+            guard busy, calendarPushLifecycleOwner == nil, calendarPushStopTask == nil else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let capture = try await self.query("captureOpen")
+                    _ = try await self.query("captureSubmit", [self.json([
+                        "text": "Task496 ordinary save while push watcher stopped", "options": capture.object("options"),
+                        "captureId": UUID().uuidString.lowercased(), "openAfterSave": false,
+                    ])])
+                    self.calendarPushFixtureSaves += 1
+                    self.publishCalendarPushFixtureState()
+                } catch { self.calendarPushFixtureState = "fixture-save-error" }
+            }
+        case "claim":
+            if let host, let token = completedStartupToken { calendarPushFixtureStale = (host, token, calendarPushObservationClaim) }
+        case "stale":
+            if let captured = calendarPushFixtureStale {
+                calendarPushSourceChanged(["fixture-stale"], host: captured.host, token: captured.token, claim: captured.claim)
+            }
+        case "due", "newer", "full", "oversize", "bytes":
+            guard let observed = host, let token = completedStartupToken else { return }
+            let ids: [String]?
+            if command == "full" { ids = nil }
+            else if command == "oversize" { ids = (0...10_000).map { "fixture-\($0)" } }
+            else if command == "bytes" { ids = (0..<2100).map { String(repeating: "é", count: 256) + String($0) } }
+            else { ids = command == "newer" ? ["fixture-next"] : ["fixture-é", "fixture-e\u{0301}"] }
+            calendarPushSourceChanged(ids, host: observed, token: token, claim: calendarPushObservationClaim)
+        case "host":
+            Task { [weak self] in
+                guard let self, let selection = try? NativeAppLaunch.selection.get(),
+                      case let .isolated(_, directory, namespace, identifier) = selection,
+                      let bundle = Bundle.main.url(forResource: "core-host", withExtension: "js") else { return }
+                let replacement = CoreHost(databaseURL: directory.appendingPathComponent("calendar-push-replacement.sqlite"),
+                    bundleURL: bundle, deviceStorage: (directory, namespace + ".calendar-push-replacement"), isolatedTestID: identifier)
+                do {
+                    _ = try await replacement.start()
+                    self.host = replacement
+                    self.startupSyncCompletedHost = replacement; self.completedStartupToken = UUID(); self.ready = true
+                    self.selectedSurface = .settings; self.settingsAdvancedPresented = true
+                    self.requestCalendarPushLifecycle(token: self.completedStartupToken, active: true)
+                    self.publishCalendarPushFixtureState()
+                } catch { self.calendarPushFixtureState = "fixture-host-error" }
+            }
+        default: return
+        }
+        publishCalendarPushFixtureState()
+    }
+    #endif
+
+    private var trustedSearchSelection: NativeLaunchSelection? {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return nil }
+        switch selection {
+        case .standard(_, _, let namespace):
+            return namespace == "tech.dongdongbh.mindwtr.native.dev" ? selection : nil
+        case .isolated(_, _, let namespace, let identifier):
+            return namespace == "tech.dongdongbh.mindwtr.native-ui." + identifier.uuidString.lowercased() ? selection : nil
+        case .rehearsal: return nil
+        }
+    }
+
+    private func ensureSearchIndex() {
+        guard searchIndex == nil, let selection = trustedSearchSelection else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake { return }
+        #endif
+        do {
+            searchIndex = try NativeSearchIndex(selection: selection) { [weak self] outcome, count in
+                self?.searchIndexEvent(outcome, count: count)
+            }
+            searchIndexWithdrawn = true
+        } catch { searchPublicationError = label("settings.iosSearchFailed") }
+    }
+
+    private func searchIndexEvent(_ outcome: String, count: Int) {
+        searchPublicationError = outcome == "failed" ? label("settings.iosSearchFailed") : nil
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake { searchTestState = outcome + ":" + String(count) }
+        #endif
+        guard let observed = host else { return }
+        Task {
+            guard self.host === observed else { return }
+            _ = try? await observed.call("logLine", argumentsJSON: self.json([
+                "Native iOS system search",
+                try self.json(["releaseCheck": "v1.3.5/ios-search-publication", "outcome": outcome, "count": count]),
+            ]))
+        }
+    }
+
+    private func withdrawSearchIndex() {
+        guard !searchIndexWithdrawn else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake {
+            searchIndexWithdrawn = true
+            searchIndexEvent("removalQueued", count: 0)
+            return
+        }
+        #endif
+        guard searchIndex != nil else { return }
+        searchIndexWithdrawn = true
+        searchIndex?.withdraw()
+    }
+
+    private func replaceSearchIndex(_ snapshot: NativeSearchSnapshot) {
+        searchIndexWithdrawn = false
+        #if DEBUG && targetEnvironment(simulator)
+        if searchTestFake, let selection = trustedSearchSelection {
+            searchTestIdentifiers = Dictionary(uniqueKeysWithValues: snapshot.items.compactMap { item in
+                guard let identifier = try? NativeSearchIndex.identifier(taskID: item.id, selection: selection) else { return nil }
+                return (identifier, item.id)
+            })
+            searchIndexEvent("publicationQueued", count: snapshot.items.count)
+            return
+        }
+        #endif
+        searchIndex?.replace(snapshot)
+    }
+
+    func saveSearchConsent(_ enabled: Bool) async {
+        guard !searchConsentBusy, let observed = host, let token = completedStartupToken,
+              startupSyncCompletedHost === observed, ready, !busy, !retryNeeded,
+              searchConsentPending == enabled || (searchConsentPending == nil && searchConsentCanChange) else { return }
+        searchConsentPending = enabled
+        searchConsentBusy = true
+        searchConsentError = nil
+        searchPolicyChanged()
+        defer {
+            if host === observed {
+                searchConsentBusy = false
+                requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true)
+            }
+        }
+        do {
+            try await observed.setSearchConsent(enabled)
+            guard host === observed, completedStartupToken == token else { return }
+            searchConsentEnabled = enabled
+            searchConsentKnown = true
+            searchConsentPending = nil
+        } catch {
+            guard host === observed else { return }
+            searchConsentError = label("settings.iosSearchFailed")
+        }
+    }
+
+    func retrySearchConsent() async {
+        if let pending = searchConsentPending { await saveSearchConsent(pending) }
+        else { requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true) }
+    }
+
+    func retrySearchPublication() {
+        searchIndex?.retry()
+        requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true)
+    }
+
+    func requestSearchLifecycle(token: UUID?, active: Bool, force: Bool = false) {
+        ensureSearchIndex()
+        if !searchPolicyAdmitted { withdrawSearchIndex() }
+        guard let token, token == completedStartupToken else { return }
+        guard active, UIApplication.shared.applicationState == .active else { cancelSearchLifecycle(); return }
+        if !searchSceneActive || force {
+            searchWakeTicket &+= 1
+            searchForceSnapshot = true
+            searchIndex?.retry()
+        }
+        searchSceneActive = true
+        admitSearchLifecycle()
+    }
+
+    func cancelSearchLifecycle() {
+        searchSceneActive = false
+        searchPublicationGeneration &+= 1
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchLifecycleTask?.cancel()
+    }
+
+    func searchPolicyChanged(suspendNavigation: Bool = true) {
+        searchPublicationGeneration &+= 1
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchLifecycleTask?.cancel()
+        if !searchPolicyAdmitted {
+            withdrawSearchIndex()
+            if suspendNavigation && entityLinkPending?.input.isSearch == true { suspendEntityLinks() }
+        }
+        searchWakeTicket &+= 1
+        admitSearchLifecycle()
+    }
+
+    private func retireSearchHost(_ previous: CoreHost?) {
+        cancelSearchLifecycle()
+        withdrawSearchIndex()
+        let observed = searchObservationHost
+        searchObservationHost = nil; searchObservationToken = nil; searchObservationClaim = UUID()
+        searchObservationInstalled = false
+        searchLastObservation = nil
+        searchLastSnapshot = nil
+        searchConsentKnown = false; searchConsentEnabled = false
+        searchConsentPending = nil; searchConsentBusy = false; searchConsentError = nil
+        searchWakeTicket &+= 1; searchAttemptedTicket = searchWakeTicket
+        searchForceSnapshot = true
+        if let previous, observed === previous { Task { try? await previous.setSearchObservationHandler(nil) } }
+    }
+
+    func searchClockChanged() {
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchWakeTicket &+= 1
+        searchForceSnapshot = true
+        admitSearchLifecycle()
+    }
+
+    private func searchOwnerCurrent(_ owner: SearchLifecycleOwner) -> Bool {
+        host === owner.host && startupSyncCompletedHost === owner.host && completedStartupToken == owner.token
+            && searchPublicationGeneration == owner.generation && searchSceneActive && ready && !retryNeeded
+            && !settingsSyncRestartRequired && UIApplication.shared.applicationState == .active && !Task.isCancelled
+    }
+
+    private func sameSearchObservation(_ a: NativeSearchObservation?, _ b: NativeSearchObservation) -> Bool {
+        a?.ready == b.ready && a?.revision == b.revision && a?.nextAt == b.nextAt
+    }
+
+    private func searchObserved(_ observation: NativeSearchObservation, host observed: CoreHost, token: UUID, claim: UUID) {
+        guard host === observed, searchObservationHost === observed,
+              completedStartupToken == token, searchObservationClaim == claim else { return }
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        searchWakeTicket &+= 1
+        admitSearchLifecycle()
+    }
+
+    private func installSearchDeadline(_ deadline: Double?, owner: SearchLifecycleOwner) {
+        searchDeadlineTask?.cancel(); searchDeadlineTask = nil
+        guard let deadline, searchPolicyAdmitted else { return }
+        searchDeadlineTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, (deadline - Date().timeIntervalSince1970 * 1000) / 1000))) }
+            catch { return }
+            guard let self, self.searchOwnerCurrent(owner), self.searchPolicyAdmitted else { return }
+            self.searchDeadlineTask = nil
+            self.searchClockChanged()
+        }
+    }
+
+    private func admitSearchLifecycle() {
+        guard searchAvailable, searchLifecycleTask == nil, searchWakeTicket != searchAttemptedTicket,
+              searchSceneActive, UIApplication.shared.applicationState == .active,
+              let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
+              ready, !busy, !retryNeeded, !settingsSyncRestartRequired, !searchConsentBusy,
+              searchConsentPending == nil else { return }
+        let owner = SearchLifecycleOwner(id: UUID(), host: observed, token: token, generation: searchPublicationGeneration)
+        searchAttemptedTicket = searchWakeTicket
+        searchLifecycleOwner = owner
+        searchLifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.searchLifecycleOwner?.id == owner.id {
+                    self.searchLifecycleTask = nil; self.searchLifecycleOwner = nil
+                    self.admitSearchLifecycle()
+                    self.admitEntityLinks()
+                }
+            }
+            do {
+                if self.searchObservationHost !== observed || self.searchObservationToken != token || !self.searchObservationInstalled {
+                    self.searchObservationHost = observed; self.searchObservationToken = token
+                    self.searchObservationClaim = UUID()
+                    let claim = self.searchObservationClaim
+                    try await observed.setSearchObservationHandler { [weak self, weak observed] observation in
+                        Task { @MainActor in
+                            guard let self, let observed else { return }
+                            self.searchObserved(observation, host: observed, token: token, claim: claim)
+                        }
+                    }
+                    guard self.host === observed, self.completedStartupToken == token,
+                          self.searchObservationClaim == claim else { return }
+                    self.searchObservationInstalled = true
+                    guard self.searchOwnerCurrent(owner) else { return }
+                }
+                if !self.searchConsentKnown {
+                    let enabled = try await observed.readSearchConsent()
+                    guard self.searchOwnerCurrent(owner) else { return }
+                    self.searchConsentEnabled = enabled; self.searchConsentKnown = true
+                    self.searchConsentError = nil
+                }
+                guard self.searchOwnerCurrent(owner) else { return }
+                guard self.searchPolicyAdmitted else { self.withdrawSearchIndex(); return }
+                let observation = try await observed.searchObservation()
+                guard self.searchOwnerCurrent(owner), self.searchPolicyAdmitted else { return }
+                guard observation.ready else { return }
+                let force = self.searchForceSnapshot
+                self.searchForceSnapshot = false
+                if force || !self.sameSearchObservation(self.searchLastObservation, observation) {
+                    let snapshot = try await observed.searchSnapshot()
+                    guard self.searchOwnerCurrent(owner), self.searchPolicyAdmitted else { return }
+                    let settled = try await observed.searchObservation()
+                    guard self.searchOwnerCurrent(owner), self.searchPolicyAdmitted,
+                          self.sameSearchObservation(observation, settled) else { return }
+                    self.searchLastObservation = observation
+                    self.searchLastSnapshot = snapshot
+                    self.replaceSearchIndex(snapshot)
+                } else if self.searchIndexWithdrawn, let snapshot = self.searchLastSnapshot {
+                    self.replaceSearchIndex(snapshot)
+                }
+                self.installSearchDeadline(observation.nextAt, owner: owner)
+            } catch {
+                guard self.host === observed else { return }
+                if !self.searchConsentKnown {
+                    self.searchConsentError = self.label("settings.iosSearchFailed")
+                    self.withdrawSearchIndex()
+                } else if !(error is CancellationError) {
+                    self.searchPublicationError = self.label("settings.iosSearchFailed")
+                }
+            }
+        }
     }
 
     // Observe the actual scene episode before concealment clears presentation.
@@ -4802,8 +6648,23 @@ final class CoreModel: ObservableObject {
     // changes to busy or the view tree cannot abandon an admitted invocation.
     func requestForegroundSync(token: UUID?, active: Bool) {
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
+        let wasActive = foregroundSyncSceneActive
         foregroundSyncSceneActive = active && UIApplication.shared.applicationState == .active
         guard foregroundSyncSceneActive else { cancelForegroundSync(); return }
+        if !wasActive && !appLock.concealed, let currentHost = host {
+            let generation = foregroundSyncGeneration
+            Task { [weak self, weak currentHost] in
+                guard let self, let currentHost, self.host === currentHost,
+                      self.completedStartupToken == token, self.foregroundSyncGeneration == generation,
+                      self.foregroundSyncSceneActive, !self.appLock.concealed,
+                      UIApplication.shared.applicationState == .active else { return }
+                _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                    "Native iOS foreground activation refreshed",
+                    #"{"releaseCheck":"v1.3.5/ios-foreground-activation","outcome":"refreshed"}"#,
+                ]))
+            }
+        }
+        if resumeFeedbackConfigurationIfNeeded() { return }
         guard foregroundSyncIntent != nil else { return }
         foregroundSyncIntent?.foregroundRequested = true
         admitForegroundSync()
@@ -4921,14 +6782,16 @@ final class CoreModel: ObservableObject {
     }
 
     func refresh() async {
-        guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired else { return }
+        if selectedSurface == .calendar { calendarFeedRefreshRequested = true }
+        guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired,
+              calendarSettingsCloseTask == nil else { return }
         if taskStartupSaveReceipt != nil {
             guard !busy else { refreshRequested = true; return }
             await reconcileTaskAttachmentPresentation()
         }
         if selectedSurface == .project { guard await flushProjectNotesEdit() else { return } }
         guard ready, !retryNeeded, !capturePresented, !taskPresented, !taskStatusMenuPresented, !referenceProjectNextActionPresented, !calendarItemPresented,
-              !calendarComposerPresented, !mindSweepPresented, !processInboxPresented,
+              !calendarComposerPresented, calendarEventOpenPresentation == nil, !mindSweepPresented, !processInboxPresented,
               !projectRenameEditing, somedaySectionRenameIndex == nil,
               somedaySectionRenameOpeningIndex == nil, managePendingCandidate == nil, managePendingInventoryDepths == nil,
               !somedaySectionRenamePending, !somedaySectionRenameAwaitingRefresh,
@@ -5027,7 +6890,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openSettings() async {
-        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
+        guard !settingsSyncPresented, !settingsSyncRestartRequired, !calendarSettingActive else { return }
         guard ready, !busy, !retryNeeded, !somedaySectionRenamePending,
               !somedaySectionRenameAwaitingRefresh, !somedaySectionDeleteActive,
               !somedaySectionOrderActive, !settingsAreaDeleteActive, !unassignedAreaColorActive,
@@ -5035,10 +6898,15 @@ final class CoreModel: ObservableObject {
         settingsCaller = selectedSurface
         morePresented = false
         settingsManagePresented = false
+        settingsAdvancedPresented = false
         settingsManageRequested = false
         settingsReadError = nil
         settingsSearch = ""
+        retireNotificationSettingsPage()
+        retireCalendarSettingsPage()
         settingsGeneralPresented = false
+        settingsAboutPresented = false
+        invalidateAboutLinkOpening()
         settingsDataPresented = false
         invalidateDiagnostics()
         settingsGtdPresented = false
@@ -5058,7 +6926,7 @@ final class CoreModel: ObservableObject {
     }
 
     func closeSettings() async {
-        guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
+        guard !settingsSyncPresented, !settingsSyncRestartRequired, !calendarSettingActive else { return }
         guard selectedSurface == .settings, !busy, !retryNeeded,
               !somedaySectionRenamePending, !somedaySectionRenameAwaitingRefresh,
               !somedaySectionDeleteActive, !somedaySectionOrderActive, !settingsAreaDeleteActive,
@@ -5066,7 +6934,10 @@ final class CoreModel: ObservableObject {
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsManagePresented = false
+        settingsAdvancedPresented = false
         settingsManageRequested = false
+        settingsAboutPresented = false
+        invalidateAboutLinkOpening()
         selectedSurface = settingsCaller
         busy = true
         defer { finishOperation() }
@@ -5074,8 +6945,29 @@ final class CoreModel: ObservableObject {
         catch { self.error = error.localizedDescription }
     }
 
+    func openAdvancedSettings() {
+        guard ready, selectedSurface == .settings, !settingsAdvancedPresented, !busy, !retryNeeded,
+              !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented,
+              !settingsDataPresented, !settingsSyncPresented, !settingsSyncRestartRequired, !appLock.concealed,
+              !settingsMenu.object("advanced").text("title").isEmpty else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        settingsAdvancedPresented = true
+        settingsReadError = nil
+    }
+
+    func closeAdvancedSettings() {
+        guard selectedSurface == .settings, settingsAdvancedPresented, !settingsCalendarPresented,
+              !busy, !retryNeeded, !calendarSettingActive, !appLock.concealed else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        settingsAdvancedPresented = false
+        setSettingsSearch(settingsSearch)
+    }
+
     func setSettingsSearch(_ value: String) {
-        guard selectedSurface == .settings, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
+        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
         settingsSearch = value
         settingsReadError = nil
         settingsSearchGeneration += 1
@@ -5083,7 +6975,7 @@ final class CoreModel: ObservableObject {
         settingsSearchTask?.cancel()
         settingsSearchTask = Task {
             do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
-            guard !Task.isCancelled, selectedSurface == .settings, !settingsManagePresented,
+            guard !Task.isCancelled, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented,
                   settingsSearchGeneration == generation else { return }
             do { try await readSettingsMenu(generation: generation) }
             catch { if settingsSearchGeneration == generation { settingsReadError = error.localizedDescription } }
@@ -5091,13 +6983,32 @@ final class CoreModel: ObservableObject {
     }
 
     private func readSettingsMenu(generation: Int? = nil) async throws {
-        let result = try await query("menuRead", ["settingsMenu", try json(["query": settingsSearch])])
-        guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
-              result["searchPlaceholder"] is String else { throw CocoaError(.coderReadCorrupt) }
-        guard !settingsSyncPresented, !settingsSyncRestartRequired, selectedSurface == .settings,
-              generation == nil || settingsSearchGeneration == generation else { return }
-        settingsMenu = result
-        settingsReadError = nil
+        guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
+        let search = settingsSearch, capturedGeneration = generation ?? settingsSearchGeneration
+        let advanced = settingsAdvancedPresented
+        func current() -> Bool {
+            host === currentHost && !settingsAboutPresented && settingsAboutTask == nil
+                && !settingsCalendarPresented && calendarSettingsCloseTask == nil
+                && !settingsSyncPresented && !settingsSyncRestartRequired && selectedSurface == .settings
+                && !appLock.concealed && !Task.isCancelled
+                && settingsSearchGeneration == capturedGeneration && settingsSearch == search
+                && settingsAdvancedPresented == advanced
+        }
+        guard current() else { return }
+        do {
+            let state = try await readAboutUpdateState(host: currentHost)
+            guard current() else { return }
+            let result = try await query("menuRead", ["settingsMenu", try json(["query": search, "updateAvailable": state.available])])
+            guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
+                  result["searchPlaceholder"] is String, !result.object("advanced").text("title").isEmpty,
+                  result.object("advanced")["rows"] is [CoreObject] else { throw CocoaError(.coderReadCorrupt) }
+            guard current() else { return }
+            settingsMenu = result
+            settingsReadError = nil
+        } catch {
+            guard current() else { return }
+            throw error
+        }
     }
 
     private func settingsSyncCurrent(_ capturedHost: CoreHost, _ session: UUID) -> Bool {
@@ -5207,7 +7118,7 @@ final class CoreModel: ObservableObject {
 
     func openSyncSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncPresented,
-              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
               !settingsSyncRestartRequired, !appLock.concealed, settingsSyncEncryptionOwner == nil else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
@@ -5617,7 +7528,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openGtdSettings() async {
-        guard ready, selectedSurface == .settings, !settingsManagePresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
+        guard ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGtdPresented = true
@@ -6432,7 +8343,7 @@ final class CoreModel: ObservableObject {
 
     func openDataSettings() async {
         guard ready, selectedSurface == .settings, !busy, !retryNeeded, !appLock.concealed,
-              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
+              !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented, !settingsGtdPresented else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsDataPresented = true
@@ -6571,8 +8482,1388 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    private func settingsAboutCurrent(host capturedHost: CoreHost, session: UUID) -> Bool {
+        host === capturedHost && settingsAboutSession == session && ready
+            && selectedSurface == .settings && settingsAboutPresented
+            && (!busy || settingsAboutBusySession == session) && !retryNeeded
+            && !settingsSyncRestartRequired && !appLock.concealed
+            && UIApplication.shared.applicationState == .active
+    }
+
+    var settingsAboutCanCancel: Bool { settingsAboutPresented && settingsAboutBusySession != nil }
+
+    var settingsAboutLinksEnabled: Bool {
+        guard let currentHost = host else { return false }
+        return settingsAboutCurrent(host: currentHost, session: settingsAboutSession)
+            && !settingsFeedbackPresented && settingsAboutTask == nil && !settingsAboutChecking && !settingsAboutOpening
+    }
+
+    var settingsAboutUpdateTitle: String {
+        label(settingsAboutUpdate?.updateAvailable == true ? "settings.updateAvailable" : "settings.aboutMobile.upToDate")
+    }
+
+    var settingsAboutUpdateMessage: String {
+        guard let notice = settingsAboutUpdate else { return "" }
+        return notice.updateAvailable
+            ? label("settings.aboutMobile.appStoreUpdateAvailableWithVersions")
+                .replacingOccurrences(of: "{{currentVersion}}", with: notice.currentVersion)
+                .replacingOccurrences(of: "{{latestVersion}}", with: notice.latestVersion)
+            : label("settings.aboutMobile.youAreUsingTheLatestAppStoreVersion")
+    }
+
+    var settingsAboutUpdateCanOpen: Bool {
+        guard settingsAboutLinksEnabled, let notice = settingsAboutUpdate,
+              notice.updateAvailable, let listing = notice.listing else { return false }
+        return Self.aboutAppleListing(listing) != nil
+    }
+
+    func openAboutSettings() {
+        guard ready, selectedSurface == .settings, !busy, !retryNeeded, !settingsSyncRestartRequired,
+              !settingsAboutPresented, !settingsManagePresented, !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsGeneralPresented,
+              !settingsGtdPresented, !settingsDataPresented, !settingsSyncPresented, !appLock.concealed else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        invalidateAboutLinkOpening()
+        settingsAboutPresented = true
+        lookupAboutAppStore(automatic: true)
+    }
+
+    func closeAboutSettings() {
+        guard settingsAboutPresented else { return }
+        invalidateAboutLinkOpening(retireFeedback: true)
+        settingsAboutPresented = false
+        // A canceled owner must drain before menu reads can observe stored state.
+        if settingsAboutTask != nil || busy { refreshRequested = true }
+        else { setSettingsSearch(settingsSearch) }
+    }
+
+    func invalidateAboutLinkOpening(retireFeedback: Bool = false) {
+        settingsAboutSession = UUID()
+        settingsAboutTask?.cancel()
+        // Keep the task until it drains so reopening cannot overlap an old lookup.
+        settingsAboutChecking = false
+        settingsAboutOpening = false
+        settingsAboutError = nil
+        settingsAboutUpdate = nil
+        settingsFeedbackLoading = false
+        settingsFeedbackSending = false
+        if retireFeedback || !settingsAboutPresented || selectedSurface != .settings {
+            settingsFeedbackPresented = false
+            settingsFeedbackConfigured = nil
+            clearFeedbackDraft()
+        }
+        if !settingsFeedbackPresented { settingsFeedbackSent = false; settingsFeedbackError = nil }
+    }
+
+    static let feedbackCategories = ["bug", "feature", "other"]
+    static let feedbackLocations = ["inbox", "focus", "projects", "review", "settings", "sync", "importExport", "notifications", "other"]
+
+    func feedbackCategoryLabel(_ value: String) -> String {
+        label(["bug": "settings.feedbackCategoryBug", "feature": "settings.feedbackCategoryFeature", "other": "settings.feedbackCategoryOther"][value] ?? "settings.feedbackCategoryOther")
+    }
+
+    func feedbackLocationLabel(_ value: String) -> String {
+        label(["inbox": "settings.feedbackWhereInbox", "focus": "settings.feedbackWhereFocus", "projects": "settings.feedbackWhereProjects",
+               "review": "settings.feedbackWhereReview", "settings": "settings.feedbackWhereSettings", "sync": "settings.feedbackWhereSync",
+               "importExport": "settings.feedbackWhereImportExport", "notifications": "settings.feedbackWhereNotifications", "other": "settings.feedbackWhereOther"][value] ?? "settings.feedbackWherePlaceholder")
+    }
+
+    var settingsFeedbackPlaceholder: String {
+        label(["bug": "settings.feedbackMessagePlaceholderBug", "feature": "settings.feedbackMessagePlaceholderFeature", "other": "settings.feedbackMessagePlaceholderOther"][settingsFeedbackCategory] ?? "settings.feedbackMessagePlaceholder")
+    }
+
+    // Match JavaScript trim/\s rather than Foundation's broader whitespace set.
+    private static let ecmaScriptWhitespace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+    private var feedbackSubmittedMessage: String {
+        let message = settingsFeedbackMessage.trimmingCharacters(in: Self.ecmaScriptWhitespace)
+        return settingsFeedbackCategory == "bug" && !settingsFeedbackLocation.isEmpty
+            ? label("settings.feedbackWhereMessagePrefix") + ": " + feedbackLocationLabel(settingsFeedbackLocation) + "\n\n" + message : message
+    }
+    var settingsFeedbackMessageCount: Int { feedbackSubmittedMessage.utf16.count }
+    var settingsFeedbackEmailValid: Bool {
+        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.ecmaScriptWhitespace)
+        if email.isEmpty { return true }
+        let parts = email.components(separatedBy: "@")
+        guard email.utf16.count <= 254, parts.count == 2, !parts[0].isEmpty,
+              !email.unicodeScalars.contains(where: { Self.ecmaScriptWhitespace.contains($0) }),
+              !parts[1].isEmpty else { return false }
+        let domain = Array(parts[1].unicodeScalars)
+        return domain.enumerated().contains { index, scalar in
+            scalar.value == 46 && index > 0 && index < domain.count - 1
+        }
+    }
+    var settingsFeedbackEditable: Bool {
+        guard let currentHost = host else { return false }
+        return settingsAboutCurrent(host: currentHost, session: settingsAboutSession) && settingsFeedbackPresented
+            && settingsAboutTask == nil && !settingsFeedbackSent
+    }
+    var settingsFeedbackCanSubmit: Bool {
+        settingsFeedbackEditable && settingsFeedbackConfigured == true && settingsFeedbackEmailValid
+            && !settingsFeedbackMessage.trimmingCharacters(in: Self.ecmaScriptWhitespace).isEmpty && settingsFeedbackMessageCount <= 4_000
+    }
+    var settingsFeedbackVisibleError: String? {
+        settingsFeedbackError ?? (!settingsFeedbackEmailValid ? label("settings.feedbackInvalidEmail") : nil)
+    }
+
+    private var feedbackEndpointURL: String {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsFeedbackTestUnavailable { return "" }
+        #endif
+        return (Bundle.main.object(forInfoDictionaryKey: "MindwtrFeedbackEndpointURL") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func openFeedbackSettings() {
+        guard settingsAboutLinksEnabled else { return }
+        settingsAboutError = nil
+        settingsAboutUpdate = nil
+        settingsFeedbackPresented = true
+        settingsFeedbackConfigured = nil
+        settingsFeedbackError = nil
+        settingsFeedbackSent = false
+        loadFeedbackConfiguration()
+    }
+
+    func closeFeedbackSettings() {
+        guard settingsFeedbackPresented else { return }
+        // Canceling an in-flight POST cannot undo a request already received.
+        settingsFeedbackPresented = false
+        invalidateAboutLinkOpening()
+        settingsFeedbackConfigured = nil
+    }
+
+    private func clearFeedbackDraft(resetCategory: Bool = true) {
+        if resetCategory { settingsFeedbackCategory = "bug" }
+        settingsFeedbackLocation = ""
+        settingsFeedbackMessage = ""
+        settingsFeedbackEmail = ""
+        settingsFeedbackIncludeDiagnostics = false
+    }
+
+    func setFeedbackCategory(_ value: String) {
+        guard settingsFeedbackEditable, Self.feedbackCategories.contains(value) else { return }
+        settingsFeedbackCategory = value
+        if value != "bug" { settingsFeedbackLocation = ""; settingsFeedbackIncludeDiagnostics = false }
+        settingsFeedbackError = nil
+    }
+    func setFeedbackLocation(_ value: String) {
+        guard settingsFeedbackEditable, settingsFeedbackCategory == "bug", Self.feedbackLocations.contains(value) else { return }
+        settingsFeedbackLocation = settingsFeedbackLocation == value ? "" : value
+        settingsFeedbackError = nil
+    }
+    func setFeedbackMessage(_ value: String) {
+        guard settingsFeedbackEditable else { return }
+        var bounded = "", count = 0
+        for character in value {
+            let size = String(character).utf16.count
+            if count + size > 4_000 { break }
+            bounded.append(character); count += size
+        }
+        settingsFeedbackMessage = bounded
+        settingsFeedbackError = nil
+    }
+    func setFeedbackEmail(_ value: String) {
+        guard settingsFeedbackEditable else { return }
+        settingsFeedbackEmail = value
+        settingsFeedbackError = nil
+    }
+    func setFeedbackIncludeDiagnostics(_ value: Bool) {
+        guard settingsFeedbackEditable, settingsFeedbackCategory == "bug" else { return }
+        settingsFeedbackIncludeDiagnostics = value
+    }
+
+    @discardableResult private func resumeFeedbackConfigurationIfNeeded() -> Bool {
+        guard settingsFeedbackPresented, settingsFeedbackConfigured == nil, settingsFeedbackError == nil,
+              settingsFeedbackEditable else { return false }
+        loadFeedbackConfiguration()
+        return settingsFeedbackLoading
+    }
+
+    func loadFeedbackConfiguration() {
+        guard settingsFeedbackEditable, let currentHost = host else { return }
+        let session = settingsAboutSession, endpoint = feedbackEndpointURL
+        settingsFeedbackLoading = true
+        settingsFeedbackError = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer { finishFeedbackOperation(session: session) }
+            do {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                let result = try decode(await currentHost.feedbackConfiguration(endpointURL: endpoint))
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                guard Set(result.keys) == Set(["configured", "categories"]),
+                      let configured = result["configured"] as? NSNumber, CFGetTypeID(configured) == CFBooleanGetTypeID(),
+                      let categories = result["categories"] as? [String], categories == Self.feedbackCategories else { throw CocoaError(.coderReadCorrupt) }
+                settingsFeedbackConfigured = configured.boolValue
+            } catch {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                settingsFeedbackError = label("settings.feedback.actionFailed")
+            }
+        }
+    }
+
+    private func finishFeedbackOperation(session: UUID) {
+        settingsAboutTask = nil
+        if settingsAboutSession == session { settingsFeedbackLoading = false; settingsFeedbackSending = false }
+        if settingsAboutBusySession == session { settingsAboutBusySession = nil; finishOperation() }
+    }
+
+    func submitFeedbackSettings() {
+        guard settingsFeedbackCanSubmit, let currentHost = host else { return }
+        let session = settingsAboutSession, endpoint = feedbackEndpointURL
+        var input: CoreObject = ["category": settingsFeedbackCategory, "message": feedbackSubmittedMessage,
+                                 "includeDiagnostics": settingsFeedbackCategory == "bug" && settingsFeedbackIncludeDiagnostics]
+        let email = settingsFeedbackEmail.trimmingCharacters(in: Self.ecmaScriptWhitespace)
+        if !email.isEmpty { input["email"] = email }
+        guard let request = try? json(input) else { settingsFeedbackError = label("settings.feedbackFailed"); return }
+        settingsFeedbackSending = true
+        settingsFeedbackError = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer { finishFeedbackOperation(session: session) }
+            do {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                let result = try decode(await currentHost.submitFeedback(requestJSON: request, endpointURL: endpoint))
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                guard Set(result.keys) == Set(["status"]), result["status"] as? String == "sent" else { throw CocoaError(.coderReadCorrupt) }
+                clearFeedbackDraft(resetCategory: false)
+                settingsFeedbackSent = true
+            } catch {
+                guard settingsAboutCurrent(host: currentHost, session: session), settingsFeedbackPresented, !Task.isCancelled else { return }
+                switch (error as? CoreHostRejection)?.message ?? error.localizedDescription {
+                case "message_required": settingsFeedbackError = label("settings.feedbackRequired")
+                case "invalid_email": settingsFeedbackError = label("settings.feedbackInvalidEmail")
+                case "feedback_not_configured": settingsFeedbackConfigured = false
+                default: settingsFeedbackError = label("settings.feedbackFailed")
+                }
+            }
+        }
+    }
+
+    func openFeedbackGitHub() {
+        guard settingsFeedbackEditable, let currentHost = host,
+              let url = URL(string: settingsFeedbackCategory == "other"
+                ? "https://github.com/dongdongbh/Mindwtr/discussions/new"
+                : "https://github.com/dongdongbh/Mindwtr/issues/new/choose") else { return }
+        openOwnedAboutURL(url, host: currentHost)
+    }
+
+    func dismissAboutUpdate() { settingsAboutUpdate = nil }
+
+    private func readAboutUpdateState(host currentHost: CoreHost) async throws -> (available: Bool, shouldCheck: Bool) {
+        let state = try decode(await currentHost.readAboutUpdateState())
+        guard Set(state.keys) == Set(["updateAvailable", "shouldCheck"]),
+              let available = state["updateAvailable"] as? NSNumber, CFGetTypeID(available) == CFBooleanGetTypeID(),
+              let shouldCheck = state["shouldCheck"] as? NSNumber, CFGetTypeID(shouldCheck) == CFBooleanGetTypeID() else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return (available.boolValue, shouldCheck.boolValue)
+    }
+
+    private static func aboutCheckTimestamp() throws -> String {
+        let milliseconds = (Date().timeIntervalSince1970 * 1_000).rounded(.towardZero)
+        guard milliseconds.isFinite, milliseconds >= 0, milliseconds <= 9_007_199_254_740_991 else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        return String(Int64(milliseconds))
+    }
+
+    func checkAboutUpdates() { lookupAboutAppStore() }
+    func rateAboutApp() { lookupAboutAppStore(rating: true) }
+
+    private func lookupAboutAppStore(rating: Bool = false, automatic: Bool = false) {
+        guard settingsAboutLinksEnabled, let currentHost = host else { return }
+        let session = settingsAboutSession
+        settingsAboutChecking = true
+        settingsAboutError = nil
+        settingsAboutUpdate = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer {
+                settingsAboutTask = nil
+                if settingsAboutSession == session {
+                    settingsAboutChecking = false
+                    settingsAboutOpening = false
+                }
+                if settingsAboutBusySession == session {
+                    settingsAboutBusySession = nil
+                    finishOperation()
+                }
+            }
+            do {
+                guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled,
+                      let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty,
+                      let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                      !currentVersion.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+                if automatic {
+                    let state = try await readAboutUpdateState(host: currentHost)
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled,
+                          state.shouldCheck else { return }
+                } else if !rating {
+                    let timestamp = try Self.aboutCheckTimestamp()
+                    do { try await currentHost.recordAboutUpdateCheck(timestamp: timestamp) }
+                    catch {
+                        // Even a lost reply may follow manifest publication.
+                        requireSettingsSyncRestart(currentHost)
+                        return
+                    }
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                }
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if settingsAboutTestUnavailable { throw CocoaError(.fileReadUnknown) }
+                #endif
+                let result = try decode(await currentHost.aboutAppStoreInfo(bundleIdentifier: identifier, currentVersion: currentVersion))
+                guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                guard Set(result.keys) == Set(["version", "trackViewUrl", "updateAvailable"]),
+                      let version = result["version"] as? String, !version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      version.utf16.count <= 200, !version.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                      let available = result["updateAvailable"] as? NSNumber, CFGetTypeID(available) == CFBooleanGetTypeID(),
+                      result["trackViewUrl"] is NSNull || result["trackViewUrl"] is String else { throw CocoaError(.coderReadCorrupt) }
+                let listing = (result["trackViewUrl"] as? String).flatMap(Self.aboutAppleListing)?.url.absoluteString
+                if rating {
+                    guard let listing, let destination = Self.aboutStoreDestination(listing, rating: true) else { throw CocoaError(.coderReadCorrupt) }
+                    settingsAboutChecking = false
+                    settingsAboutOpening = true
+                    try await handoffAboutURL(destination, host: currentHost, session: session)
+                } else {
+                    let checkedAt: String?
+                    if automatic { checkedAt = try Self.aboutCheckTimestamp() }
+                    else { checkedAt = nil }
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                    do {
+                        try await currentHost.storeAboutUpdateResult(available: available.boolValue,
+                            latestVersion: version, checkedAt: checkedAt)
+                    } catch {
+                        // Page invalidation cannot hide an uncertain local write.
+                        requireSettingsSyncRestart(currentHost)
+                        return
+                    }
+                    guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                    if !automatic {
+                        settingsAboutUpdate = AboutAppStoreNotice(currentVersion: currentVersion, latestVersion: version,
+                            updateAvailable: available.boolValue, listing: listing)
+                    }
+                }
+            } catch {
+                guard !automatic, settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+                settingsAboutError = label(rating
+                    ? "settings.aboutMobile.couldNotOpenTheAppStoreRatingPagePleaseTry" : "settings.checkFailed")
+            }
+        }
+    }
+
+    // Validate the original authority before Foundation can normalize userinfo,
+    // escapes or ports. Only a validated Apple listing can mint a store deep link.
+    private static func aboutAppleListing(_ value: String) -> (url: URL, id: String)? {
+        guard !value.isEmpty, value.utf8.count <= 2_048, !value.contains("\\"),
+              !value.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 }),
+              value.range(of: #"^https://(?:apps|itunes)\.apple\.com(?::443)?/"#, options: [.regularExpression, .caseInsensitive]) != nil,
+              let components = URLComponents(string: value), components.scheme?.lowercased() == "https",
+              ["apps.apple.com", "itunes.apple.com"].contains(components.host?.lowercased() ?? ""),
+              components.user == nil, components.password == nil, components.port == nil || components.port == 443,
+              components.percentEncodedPath.range(of: #"^/(?:[a-z]{2}/)?app/(?:[^/]+/)?id[0-9]+/?$"#,
+                  options: [.regularExpression, .caseInsensitive]) != nil,
+              let idPart = components.percentEncodedPath.split(separator: "/").last,
+              idPart.lowercased().hasPrefix("id"), let url = components.url else { return nil }
+        let id = String(idPart.dropFirst(2))
+        guard !id.isEmpty, id.allSatisfy({ $0 >= "0" && $0 <= "9" }) else { return nil }
+        return (url, id)
+    }
+
+    private static func aboutStoreDestination(_ listing: String, rating: Bool) -> URL? {
+        guard let validated = aboutAppleListing(listing),
+              let deepLink = URL(string: rating
+                ? "itms-apps://itunes.apple.com/app/id\(validated.id)?action=write-review"
+                : "itms-apps://apps.apple.com/app/id\(validated.id)") else { return nil }
+        return UIApplication.shared.canOpenURL(deepLink) ? deepLink : validated.url
+    }
+
+    func openAboutUpdate() {
+        guard settingsAboutUpdateCanOpen, let currentHost = host,
+              let listing = settingsAboutUpdate?.listing,
+              let destination = Self.aboutStoreDestination(listing, rating: false) else { return }
+        openOwnedAboutURL(destination, host: currentHost)
+    }
+
+    private func handoffAboutURL(_ url: URL, host currentHost: CoreHost, session: UUID) async throws {
+        guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+        let opened = await withCheckedContinuation { continuation in
+            UIApplication.shared.open(url, options: [:]) { continuation.resume(returning: $0) }
+        }
+        guard settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled else { return }
+        if !opened { throw CocoaError(.fileReadUnknown) }
+    }
+
+    private func openOwnedAboutURL(_ url: URL, host currentHost: CoreHost) {
+        let session = settingsAboutSession
+        settingsAboutOpening = true
+        settingsAboutError = nil
+        settingsAboutBusySession = session
+        busy = true
+        settingsAboutTask = Task {
+            defer {
+                settingsAboutTask = nil
+                if settingsAboutSession == session { settingsAboutOpening = false }
+                if settingsAboutBusySession == session {
+                    settingsAboutBusySession = nil
+                    finishOperation()
+                }
+            }
+            do { try await handoffAboutURL(url, host: currentHost, session: session) }
+            catch {
+                if settingsAboutCurrent(host: currentHost, session: session), !Task.isCancelled {
+                    if settingsFeedbackPresented { settingsFeedbackError = label("attachments.openLinkFailed") }
+                    else { settingsAboutError = label("attachments.openLinkFailed") }
+                }
+            }
+        }
+    }
+
+    func openAboutLink(_ link: String) {
+        let destinations = [
+            "website": "https://mindwtr.app",
+            "tutorials": "https://youtube.com/playlist?list=PLLwV6zeTfB_k",
+            "privacy": "https://mindwtr.app/privacy",
+            "terms": "https://mindwtr.app/terms",
+            "donate": "https://mindwtr.app/donate?src=app_about"
+        ]
+        guard settingsAboutLinksEnabled, let currentHost = host,
+              let destination = destinations[link], let url = URL(string: destination) else { return }
+        openOwnedAboutURL(url, host: currentHost)
+    }
+
+    func openCalendarSettings() async {
+        guard ready, selectedSurface == .settings, settingsAdvancedPresented, !settingsCalendarPresented, !settingsNotificationsPresented,
+              !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented,
+              !settingsDataPresented, !settingsSyncPresented, !busy, !retryNeeded, !calendarSettingActive,
+              !appLock.concealed, let currentHost = host else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        calendarSettingsSession = UUID()
+        calendarSettingsPageHost = currentHost
+        settingsCalendarPresented = true
+        calendarSettingsApplicationActive = UIApplication.shared.applicationState == .active
+        calendarSettingError = nil
+        calendarSettingReadError = nil
+        calendarSettingsTestResult = [:]
+        calendarPushSettingToasts = []
+        calendarPushSettingRetry = nil
+        calendarSettings = [:]
+        calendarSubscriptionName = ""
+        calendarSubscriptionURL = ""
+        calendarSubscriptions = [:]
+        calendarSubscriptionExpected = [:]
+        calendarSubscriptionReadError = nil
+        busy = true
+        defer { finishOperation() }
+        await refreshCalendarSettings()
+    }
+
+    func closeCalendarSettings() {
+        guard settingsCalendarCanCancel else { return }
+        retireCalendarSettingsPage()
+    }
+
+    private func retireCalendarSettingsPage() {
+        let pageHost = calendarSettingsPageHost
+        let operation = calendarSettingTask, read = calendarSettingsReadTask
+        cancelCalendarSettingsIntent()
+        settingsCalendarPresented = false
+        calendarSettingsPageHost = nil
+        calendarSettings = [:]
+        calendarSubscriptions = [:]
+        calendarSubscriptionExpected = [:]
+        calendarSubscriptionReadError = nil
+        calendarSettingReadError = nil
+        calendarSettingAwaitingRefresh = false
+        calendarPushSettingRetry = nil; calendarPushSettingToasts = []
+        cancelCalendarPushDelete()
+        guard let pageHost else { return }
+        let previous = calendarSettingsCloseTask, closeID = UUID()
+        calendarSettingsCloseID = closeID
+        calendarSettingsCloseTask = Task { [weak self] in
+            await operation?.value
+            _ = try? await read?.value
+            await previous?.value
+            _ = try? await pageHost.calendarRead(requestJSON: "{\"op\":\"closeSettings\"}")
+            guard let self, self.calendarSettingsCloseID == closeID else { return }
+            self.calendarSettingsCloseTask = nil
+            self.calendarSettingsCloseID = nil
+            if self.host === pageHost, self.ready, self.selectedSurface == .settings, !self.appLock.concealed {
+                self.setSettingsSearch(self.settingsSearch)
+            }
+        }
+    }
+
+    func calendarSettingsWillResignActive() {
+        calendarSettingsApplicationActive = false
+        cancelCalendarFileImport()
+        if calendarSettingsTesting {
+            calendarSettingsReadTask?.cancel()
+            calendarSettingsTestResult = [:]
+        }
+    }
+
+    func calendarSettingsDidBecomeActive() {
+        calendarSettingsApplicationActive = true
+        guard let waiter = calendarSettingWaiter else { return }
+        calendarSettingWaiter = nil
+        let current = calendarSettingsCurrent(owner: waiter.owner)
+        waiter.continuation.resume(returning: current)
+        if !current { calendarSettingTask?.cancel() }
+    }
+
+    func cancelCalendarSettingsIntent() {
+        calendarSettingsApplicationActive = false
+        calendarSettingsSession = UUID()
+        cancelCalendarPushDelete()
+        cancelCalendarFileImport()
+        calendarSettingsTestResult = [:]
+        calendarSettingTask?.cancel()
+        calendarSettingsReadTask?.cancel()
+        if let waiter = calendarSettingWaiter {
+            calendarSettingWaiter = nil
+            waiter.continuation.resume(returning: false)
+        }
+    }
+
+    private func calendarSettingsPageCurrent(_ currentHost: CoreHost, session: UUID) -> Bool {
+        host === currentHost && calendarSettingsPageHost === currentHost && calendarSettingsSession == session
+            && ready && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+    }
+
+    private func calendarSettingsCurrent(owner: UUID) -> Bool {
+        calendarSettingOwner == owner && host === calendarSettingOwnerHost && ready
+            && selectedSurface == .settings && settingsCalendarPresented && !appLock.concealed
+            && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+
+    private func waitForCalendarSettingsReadmission(owner: UUID, session: UUID) async -> Bool {
+        guard !Task.isCancelled, let currentHost = calendarSettingOwnerHost,
+              calendarSettingOwner == owner, calendarSettingsPageCurrent(currentHost, session: session) else { return false }
+        if calendarSettingsCurrent(owner: owner) { return true }
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, self.calendarSettingOwner == owner,
+                      self.calendarSettingsPageCurrent(currentHost, session: session) else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                if self.calendarSettingsCurrent(owner: owner) { continuation.resume(returning: true) }
+                else { self.calendarSettingWaiter = (owner, continuation) }
+            }
+        }, onCancel: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.calendarSettingWaiter?.owner == owner else { return }
+                let waiter = self.calendarSettingWaiter
+                self.calendarSettingWaiter = nil
+                waiter?.continuation.resume(returning: false)
+            }
+        })
+    }
+
+    private func readCalendarSettings() async throws {
+        guard let currentHost = host, calendarSettingsCloseTask == nil, calendarSettingsReadTask == nil else {
+            throw CocoaError(.userCancelled)
+        }
+        let session = calendarSettingsSession, readID = UUID()
+        guard calendarSettingsPageCurrent(currentHost, session: session), !Task.isCancelled else { throw CancellationError() }
+        calendarSettingsReadID = readID
+        let read = Task {
+            var response: CoreObject = [:]
+            do { response["calendar"] = try self.decode(await currentHost.calendarRead(requestJSON: "{\"op\":\"openSettings\"}")) }
+            catch {
+                try Task.checkCancellation()
+                response["calendarError"] = error.localizedDescription
+            }
+            try Task.checkCancellation()
+            do { response["subscriptions"] = try self.decode(await currentHost.getCalendarSubscriptionOptions()) }
+            catch {
+                try Task.checkCancellation()
+                response["subscriptionError"] = error.localizedDescription
+            }
+            try Task.checkCancellation()
+            return try self.json(response)
+        }
+        calendarSettingsReadTask = read
+        defer {
+            if calendarSettingsReadID == readID { calendarSettingsReadTask = nil; calendarSettingsReadID = nil }
+        }
+        let response = try decode(await read.value)
+        guard !Task.isCancelled, calendarSettingsPageCurrent(currentHost, session: session) else { throw CancellationError() }
+        let view = response.object("calendar"), device = view.object("device")
+        if !view.text("title").isEmpty, !device.text("title").isEmpty,
+           device["toggle"] is CoreObject, device["calendars"] is [CoreObject] {
+            #if DEBUG && targetEnvironment(simulator)
+            calendarSettings = calendarPushFixtureView(view)
+            #else
+            calendarSettings = view
+            #endif
+            let failures = view.objects("toasts").filter { $0.text("tone") == "error" }
+            let failureText = failures.map { [$0.text("title"), $0.text("message")].filter { !$0.isEmpty }.joined(separator: "\n") }.joined(separator: "\n")
+            calendarSettingReadError = failureText.isEmpty ? nil : failureText
+        } else {
+            calendarSettings = [:]
+            calendarSettingReadError = (response["calendarError"] as? String) ?? CocoaError(.coderReadCorrupt).localizedDescription
+        }
+        let subscriptions = response.object("subscriptions"), model = subscriptions.object("model")
+        if Set(subscriptions.keys) == Set(["model", "expected"]), !model.text("title").isEmpty,
+           model["items"] is [CoreObject], !subscriptions.object("expected").isEmpty {
+            calendarSubscriptions = model
+            calendarSubscriptionExpected = subscriptions.object("expected")
+            calendarSubscriptionReadError = nil
+        } else {
+            calendarSubscriptions = [:]
+            calendarSubscriptionExpected = [:]
+            calendarSubscriptionReadError = (response["subscriptionError"] as? String) ?? CocoaError(.coderReadCorrupt).localizedDescription
+        }
+        calendarSettingAwaitingRefresh = calendarSettingReadError != nil
+    }
+
+    func testCalendarSettings() async {
+        guard calendarSettingsTestEnabled, !Task.isCancelled, let currentHost = host else { return }
+        let session = calendarSettingsSession, readID = UUID()
+        calendarSettingsReadID = readID
+        calendarSettingsTestResult = [:]
+        calendarSettingsTesting = true
+        busy = true
+        let read = Task { try await currentHost.calendarRead(requestJSON: "{\"op\":\"testSettings\"}") }
+        calendarSettingsReadTask = read
+        defer {
+            if calendarSettingsReadID == readID {
+                calendarSettingsReadTask = nil
+                calendarSettingsReadID = nil
+                calendarSettingsTesting = false
+                if host === currentHost { finishOperation() }
+            }
+        }
+        func current() -> Bool {
+            calendarSettingsReadID == readID && !read.isCancelled && !Task.isCancelled
+                && calendarSettingsPageCurrent(currentHost, session: session)
+                && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+        }
+        do {
+            let result = try decode(await read.value)
+            guard current() else { return }
+            guard Set(result.keys) == Set(["toasts"]), let toasts = result["toasts"] as? [CoreObject], toasts.count == 1,
+                  let toast = toasts.first, Set(toast.keys) == Set(["title", "message", "tone", "durationMs"]),
+                  let title = toast["title"] as? String, title.utf8.count <= 4096,
+                  let message = toast["message"] as? String, message.utf8.count <= 16384,
+                  let tone = toast["tone"] as? String, ["success", "warning", "info"].contains(tone) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            if !(toast["durationMs"] is NSNull) {
+                guard let duration = toast["durationMs"] as? NSNumber, CFGetTypeID(duration) != CFBooleanGetTypeID(),
+                      duration.doubleValue.isFinite, duration.doubleValue.rounded() == duration.doubleValue,
+                      (0...60000).contains(duration.doubleValue) else { throw CocoaError(.coderReadCorrupt) }
+            }
+            calendarSettingsTestResult = toast
+        } catch {
+            guard current() else { return }
+            calendarSettingsTestResult = ["title": label("settings.syncMobile.error"),
+                "message": label("settings.calendarMobile.failedToLoadEvents"), "tone": "warning", "durationMs": NSNull()]
+        }
+    }
+
+    func saveDeviceCalendarSetting(_ edit: CoreObject) {
+        guard calendarSettingEnabled, edit.text("type") == "deviceCalendars", let currentHost = host else { return }
+        do {
+            // Keep nested NSDictionary maps intact; Swift String keys merge Unicode-equivalent IDs.
+            calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit])
+            calendarSettingHost = currentHost
+            calendarSettingKind = .device
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    func saveCalendarPushSetting(_ edit: CoreObject) {
+        guard calendarPushSettingEnabled, ["push", "pushTarget", "pushColor", "deleteMindwtrCalendar"].contains(edit.text("type")),
+              let currentHost = host, calendarSettingsPageHost === currentHost else { return }
+        do {
+            calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit])
+            calendarSettingHost = currentHost; calendarSettingKind = .push
+            calendarPushSettingRetry = nil; calendarPushSettingToasts = []
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    func prepareCalendarPushDelete() -> Bool {
+        guard calendarPushSettingEnabled, let currentHost = host else { return false }
+        let deletion = calendarSettings.object("push").object("target").object("delete")
+        guard deletion.object("edit").text("type") == "deleteMindwtrCalendar", !deletion.object("confirm").isEmpty else { return false }
+        calendarPushDeleteClaim = (currentHost, calendarSettingsSession, deletion.object("edit"))
+        calendarPushDeleteConfirmation = deletion.object("confirm")
+        return true
+    }
+
+    func cancelCalendarPushDelete() {
+        calendarPushDeleteClaim = nil; calendarPushDeleteConfirmation = [:]
+    }
+
+    func confirmCalendarPushDelete() {
+        guard calendarPushDeleteCanConfirm, let claim = calendarPushDeleteClaim else { cancelCalendarPushDelete(); return }
+        cancelCalendarPushDelete()
+        saveCalendarPushSetting(claim.edit)
+    }
+
+    func refreshCalendarPushTargets() async {
+        guard calendarPushSettingEnabled else { return }
+        busy = true
+        defer { finishOperation() }
+        await refreshCalendarSettings()
+    }
+
+    func cancelCalendarPushSetting() {
+        guard calendarPushSettingWorking else { return }
+        calendarSettingTask?.cancel()
+    }
+
+    func grantCalendarPushAccess() {
+        guard calendarPushSettingEnabled, !calendarSettings.object("push").isEmpty else { return }
+        beginCalendarSettingOperation(retry: false, grantOnly: true, pushGrant: true)
+    }
+
+    func saveCalendarSubscriptionSetting(_ edit: CoreObject) {
+        guard calendarSubscriptionEnabled, ["feed", "removeFeed"].contains(edit.text("type")),
+              let currentHost = host, calendarSettingsPageHost === currentHost else { return }
+        do {
+            calendarSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit,
+                "expected": calendarSubscriptionExpected])
+            calendarSettingHost = currentHost
+            calendarSettingKind = .subscription
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    func addCalendarSubscription() {
+        guard calendarSubscriptionAddEnabled, let currentHost = host,
+              calendarSettingsPageHost === currentHost else { return }
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(),
+                "name": calendarSubscriptionName, "url": calendarSubscriptionURL,
+                "defaultName": label("nav.calendar"), "expected": calendarSubscriptionExpected])
+            calendarSettingRequest = request
+            calendarSettingHost = currentHost
+            calendarSettingKind = .subscriptionAdd
+            calendarSubscriptionAddDraft = (request, calendarSubscriptionDraftID)
+            calendarSettingsTestResult = [:]
+            beginCalendarSettingOperation(retry: false)
+        } catch { calendarSettingError = error.localizedDescription }
+    }
+
+    private func calendarFileImportCurrent(_ claim: CalendarFileImportClaim) -> Bool {
+        calendarFileImportClaim?.id == claim.id && calendarFileImporterID == claim.id
+            && calendarSubscriptionDraftID == claim.draft && !Task.isCancelled
+            && calendarSettingsPageCurrent(claim.host, session: claim.session)
+            && calendarSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+
+    func prepareCalendarFileImport() {
+        guard calendarSubscriptionChooseFileEnabled, !Task.isCancelled, let currentHost = host,
+              calendarSettingsPageHost === currentHost else { return }
+        let claim = CalendarFileImportClaim(id: UUID(), host: currentHost, session: calendarSettingsSession,
+            draft: calendarSubscriptionDraftID, name: calendarSubscriptionName, defaultName: label("nav.calendar"))
+        calendarFileImportClaim = claim
+        calendarFileImporterID = claim.id
+        calendarSettingError = nil
+        #if DEBUG && targetEnvironment(simulator)
+        if let source = calendarFileImportTestSource {
+            // An isolated simulator fixture exercises the same callback and native capture, not Files UI.
+            let cancelled = calendarFileImportTestCancelOnce
+            calendarFileImportTestCancelOnce = false
+            Task { await self.completeCalendarFileImport(cancelled ? .failure(CocoaError(.userCancelled))
+                : .success([source]), pickerID: claim.id) }
+            return
+        }
+        #endif
+        calendarFileImporterPresented = true
+    }
+
+    func setCalendarFileImporterPresented(_ value: Bool, pickerID: UUID?) {
+        guard pickerID == calendarFileImporterID else { return }
+        if !value { calendarFileImporterPresented = false }
+    }
+
+    private func cancelCalendarFileImport() {
+        guard calendarFileImportClaim != nil else { return }
+        calendarFileImportClaim = nil
+        calendarFileImporterID = nil
+        calendarFileImporterPresented = false
+        // The shared Calendar operation stays owned until native capture has physically drained.
+        calendarSettingTask?.cancel()
+    }
+
+    func completeCalendarFileImport(_ result: Result<[URL], Error>, pickerID: UUID) async {
+        guard let claim = calendarFileImportClaim, claim.id == pickerID, calendarSettingOwner == nil else { return }
+        guard calendarFileImportCurrent(claim), !busy, !retryNeeded, calendarSettingRequest == nil else {
+            cancelCalendarFileImport()
+            return
+        }
+        calendarFileImporterPresented = false
+        let selectedURL: URL
+        switch result {
+        case .success(let urls):
+            guard urls.count == 1, let selected = urls.first else { cancelCalendarFileImport(); return }
+            selectedURL = selected
+        case .failure(let failure):
+            let failure = failure as NSError
+            if failure.domain != NSCocoaErrorDomain || failure.code != NSUserCancelledError {
+                calendarSettingError = label("settings.calendarMobile.failedToLoadSavedCalendars")
+            }
+            cancelCalendarFileImport()
+            return
+        }
+        calendarSettingsTestResult = [:]
+        beginCalendarSettingOperation(retry: false, localFile: (selectedURL, claim))
+    }
+
+    private func retainCalendarFileAddRequest(_ request: String, claim: CalendarFileImportClaim) {
+        guard host === claim.host else { return }
+        calendarSettingRequest = request
+        calendarSettingHost = claim.host
+        calendarSettingKind = .subscriptionAdd
+        calendarSubscriptionAddDraft = (request, claim.draft)
+    }
+
+    func grantDeviceCalendarAccess() {
+        guard calendarSettingEnabled, !calendarSettings.object("device").object("access").isEmpty else { return }
+        beginCalendarSettingOperation(retry: false, grantOnly: true)
+    }
+
+    private func beginCalendarSettingOperation(retry: Bool, grantOnly: Bool = false, pushGrant: Bool = false,
+                                               localFile: (url: URL, claim: CalendarFileImportClaim)? = nil) {
+        guard !busy, calendarSettingOwner == nil, ready, !appLock.concealed,
+              let currentHost = localFile?.claim.host ?? (grantOnly ? calendarSettingsPageHost : calendarSettingHost),
+              host === currentHost, grantOnly || localFile != nil || calendarSettingRequest != nil else { return }
+        let capturedRequest = calendarSettingRequest
+        let kind: CalendarSettingKind = grantOnly ? (pushGrant ? .push : .device) : (localFile == nil ? calendarSettingKind : .subscriptionAdd)
+        let owner = UUID(), session = calendarSettingsSession
+        calendarSettingOwner = owner
+        calendarSettingOwnerHost = currentHost
+        calendarSettingError = nil
+        busy = true
+        calendarSettingTask = Task { [weak self] in
+            guard let self else { return }
+            var request = capturedRequest
+            defer {
+                if self.calendarSettingOwner == owner {
+                    if let localFile, self.calendarFileImportClaim?.id == localFile.claim.id {
+                        self.calendarFileImportClaim = nil
+                        self.calendarFileImporterID = nil
+                        self.calendarFileImporterPresented = false
+                    }
+                    self.calendarSettingOwner = nil
+                    self.calendarSettingOwnerHost = nil
+                    self.calendarSettingTask = nil
+                    if let waiter = self.calendarSettingWaiter, waiter.owner == owner {
+                        self.calendarSettingWaiter = nil
+                        waiter.continuation.resume(returning: false)
+                    }
+                    if kind == .push { self.calendarPushSettingSuspended = false }
+                    self.finishOperation()
+                    #if DEBUG && targetEnvironment(simulator)
+                    self.publishCalendarPushFixtureState()
+                    #endif
+                    if let pending = self.calendarSubscriptionRuntimeRecovery,
+                       self.host === pending.host, pending.request == request {
+                        Task { [weak self] in
+                            guard let self, self.host === pending.host,
+                                  self.calendarSubscriptionRuntimeRecovery?.request == pending.request else { return }
+                            await self.start()
+                        }
+                    }
+                }
+            }
+            do {
+                var grant = grantOnly
+                var reply: String?
+                if kind == .push {
+                    self.calendarPushReadmitAfterBusy = false
+                    self.calendarPushSettingSuspended = true
+                    self.calendarPushRestartRequested = false
+                    self.stopCalendarPushLifecycle()
+                    await self.calendarPushStopTask?.value
+                    guard !Task.isCancelled, self.calendarSettingsCurrent(owner: owner),
+                          self.calendarSettingsPageCurrent(currentHost, session: session),
+                          let token = self.completedStartupToken else { throw CancellationError() }
+                    try await self.ensureCalendarPushObservation(currentHost, token: token)
+                    guard !Task.isCancelled, self.calendarSettingsCurrent(owner: owner) else { throw CancellationError() }
+                    if let request, !grantOnly {
+                        let edit = try self.decode(request).object("edit")
+                        if edit.text("type") == "push", edit.flag("enabled"), self.calendarSettings.object("push").object("target").isEmpty {
+                            try await currentHost.grantDeviceCalendarAccess(readmission: { [weak self] in
+                                guard let self else { return false }
+                                return await self.waitForCalendarSettingsReadmission(owner: owner, session: session)
+                            })
+                            guard !Task.isCancelled, self.calendarSettingsCurrent(owner: owner) else { throw CancellationError() }
+                        }
+                    }
+                }
+                if let localFile {
+                    // A picker may stay open across an external edit. Refresh the actual saved witness now.
+                    try await self.readCalendarSettings()
+                    guard self.calendarFileImportCurrent(localFile.claim), self.calendarSettingOwner == owner,
+                          self.calendarSubscriptionReadError == nil, !self.calendarSubscriptionExpected.isEmpty else {
+                        throw CancellationError()
+                    }
+                    let input = try self.json(["requestId": UUID().uuidString.lowercased(), "name": localFile.claim.name,
+                        "defaultName": localFile.claim.defaultName, "expected": self.calendarSubscriptionExpected])
+                    do {
+                        let added = try await currentHost.addLocalCalendarSubscription(selectedURL: localFile.url, requestJSON: input)
+                        request = added.requestJSON
+                        self.retainCalendarFileAddRequest(added.requestJSON, claim: localFile.claim)
+                        guard self.calendarFileImportCurrent(localFile.claim), self.calendarSettingOwner == owner else {
+                            throw CancellationError()
+                        }
+                        reply = added.resultJSON
+                    } catch let failure as NativeCalendarFileAddFailure {
+                        if let frozen = failure.requestJSON {
+                            request = frozen
+                            self.retainCalendarFileAddRequest(frozen, claim: localFile.claim)
+                        }
+                        throw failure
+                    }
+                } else if let request, !grantOnly {
+                    if kind == .push { reply = try await self.invokeCalendarPush(currentHost, .setting, argumentsJSON: request) }
+                    else if retry {
+                        if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
+                        else if kind == .subscriptionAdd { reply = try await currentHost.probeCalendarSubscriptionAddOutcome(requestJSON: request) }
+                        else if kind == .subscription { reply = try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: request) }
+                        else { reply = try await currentHost.probeDeviceCalendarSettingOutcome(requestJSON: request) }
+                    } else if kind == .subscriptionAdd { reply = try await currentHost.addCalendarSubscription(requestJSON: request) }
+                    else if kind == .subscription { reply = try await currentHost.setCalendarSubscriptionSetting(requestJSON: request) }
+                    else { reply = try await currentHost.setDeviceCalendarSetting(requestJSON: request) }
+                }
+                if let reply, let request, !grantOnly {
+                    let result = try self.decode(reply)
+                    try self.acknowledgeDeviceCalendarSetting(result, request: request, from: currentHost, session: session, kind: kind)
+                    grant = kind == .device && !retry && result.text("open") == "device"
+                    if kind == .push, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                        self.calendarPushRestartRequested = true
+                        self.calendarPushFullPending = true; self.calendarPushIDsPending.removeAll()
+                        self.calendarPushWakeTicket &+= 1
+                    }
+                }
+                if grant, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                    try await currentHost.grantDeviceCalendarAccess(readmission: { [weak self] in
+                        guard let self else { return false }
+                        return await self.waitForCalendarSettingsReadmission(owner: owner, session: session)
+                    })
+                    if kind == .push, !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                        self.calendarPushRestartRequested = true
+                        self.calendarPushFullPending = true; self.calendarPushIDsPending.removeAll()
+                        self.calendarPushWakeTicket &+= 1
+                    }
+                }
+                if !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                    await self.refreshCalendarSettings()
+                }
+            } catch {
+                if kind == .push {
+                    if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost {
+                        self.calendarSettingRequest = nil; self.calendarSettingHost = nil
+                        if !self.isDefiniteRejection(error), !Task.isCancelled,
+                           self.calendarSettingsPageCurrent(currentHost, session: session) {
+                            self.calendarPushSettingRetry = (currentHost, request, session)
+                        }
+                    }
+                    if !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                        self.calendarSettingError = error.localizedDescription
+                        self.calendarSettingAwaitingRefresh = true
+                        await self.refreshCalendarSettings()
+                    }
+                    // The native effect fence retains uncertain push work. Ordinary tasks remain available.
+                    return
+                }
+                if let request, self.calendarSettingRequest == request, self.calendarSettingHost === currentHost, self.host === currentHost {
+                    if kind == .subscription || kind == .subscriptionAdd,
+                       error.localizedDescription == "SAVE_FAILED: Calendar subscription save requires fresh runtime recovery" {
+                        await self.prepareCalendarSubscriptionRuntimeRecovery(currentHost, request: request, kind: kind)
+                        guard self.host === currentHost, self.calendarSettingHost === currentHost,
+                              self.calendarSettingRequest == request else { return }
+                    }
+                    self.calendarSettingError = error.localizedDescription
+                    if self.isDefiniteRejection(error) {
+                        self.calendarSettingRequest = nil
+                        self.calendarSettingHost = nil
+                        if self.calendarSubscriptionAddDraft?.request == request { self.calendarSubscriptionAddDraft = nil }
+                        self.retryNeeded = false
+                        self.error = nil
+                        self.calendarSettingAwaitingRefresh = self.calendarSettingsPageCurrent(currentHost, session: session)
+                    } else { self.retryNeeded = true; self.error = error.localizedDescription }
+                } else if !Task.isCancelled, self.calendarSettingsPageCurrent(currentHost, session: session) {
+                    self.calendarSettingError = error.localizedDescription
+                }
+                if !Task.isCancelled, self.calendarSettingRequest == nil,
+                   self.calendarSettingsPageCurrent(currentHost, session: session) { await self.refreshCalendarSettings() }
+            }
+        }
+    }
+
+    private func prepareCalendarSubscriptionRuntimeRecovery(_ currentHost: CoreHost, request: String, kind: CalendarSettingKind) async {
+        guard host === currentHost, calendarSettingHost === currentHost, calendarSettingRequest == request else { return }
+        calendarSubscriptionRuntimeRecovery = (currentHost, request, kind)
+        ready = false
+        retryNeeded = true
+        let reminder = reminderLifecycleTask, search = searchLifecycleTask, sync = foregroundSyncTask
+        let notifications = notificationResponseTask, links = entityLinkTask
+        // The native runtime already removed its observers. Do not enqueue a
+        // late unregister that could remove the fresh startup's registrations.
+        retireReminderLifecycleHost(nil)
+        retireSearchHost(nil)
+        notificationResponseTask?.cancel()
+        notificationResponseBusyOwner = nil
+        suspendEntityLinks()
+        entityLinkBusyOwner = nil
+        cancelForegroundSync()
+        foregroundSyncIntent = nil
+        foregroundSyncBackgroundObserved = false
+        startupSyncCompletedHost = nil
+        completedStartupToken = nil
+        retireCalendarFeed(clear: true)
+        await reminder?.value
+        await search?.value
+        await sync?.value
+        await notifications?.value
+        await links?.value
+    }
+
+    private func settleCalendarSubscriptionRuntimeRecovery(_ currentHost: CoreHost) async throws -> Bool {
+        guard let pending = calendarSubscriptionRuntimeRecovery else { return false }
+        guard host === currentHost, pending.host === currentHost, !Task.isCancelled else { throw CancellationError() }
+        if calendarSettingRequest != nil {
+            guard calendarSettingRequest == pending.request, calendarSettingHost === currentHost else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            do {
+                let reply = pending.kind == .subscriptionAdd
+                    ? try await currentHost.probeCalendarSubscriptionAddOutcome(requestJSON: pending.request)
+                    : try await currentHost.probeCalendarSubscriptionSettingOutcome(requestJSON: pending.request)
+                guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
+                try acknowledgeDeviceCalendarSetting(try decode(reply), request: pending.request,
+                    from: currentHost, session: calendarSettingsSession, kind: pending.kind)
+            } catch {
+                guard isDefiniteRejection(error), host === currentHost, !Task.isCancelled else { throw error }
+                calendarSettingRequest = nil
+                calendarSettingHost = nil
+                if calendarSubscriptionAddDraft?.request == pending.request { calendarSubscriptionAddDraft = nil }
+                calendarSettingError = error.localizedDescription
+                calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession)
+                retryNeeded = false
+                self.error = nil
+            }
+        } else {
+            calendarSettingError = nil
+            retryNeeded = false
+            error = nil
+        }
+        calendarSubscriptionRuntimeRecovery = nil
+        return true
+    }
+
+    private func validateDeviceCalendarSettingResult(_ result: CoreObject, kind: CalendarSettingKind = .device) throws {
+        if kind == .push {
+            guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
+                  let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+                  let clear = result["clearDraft"] as? NSNumber, CFGetTypeID(clear) == CFBooleanGetTypeID(), !clear.boolValue,
+                  result["open"] is NSNull || result.text("open") == "push", let toasts = result["toasts"] as? [CoreObject] else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            for toast in toasts {
+                guard Set(toast.keys) == Set(["title", "message", "tone", "durationMs"]),
+                      toast["title"] is String, toast["message"] is String,
+                      ["success", "warning", "info"].contains(toast.text("tone")) else { throw CocoaError(.coderReadCorrupt) }
+                if !(toast["durationMs"] is NSNull) {
+                    guard let duration = toast["durationMs"] as? NSNumber, CFGetTypeID(duration) != CFBooleanGetTypeID(),
+                          duration.doubleValue.isFinite, duration.doubleValue >= 0 else { throw CocoaError(.coderReadCorrupt) }
+                }
+            }
+            return
+        }
+        guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+              let clearDraft = result["clearDraft"] as? NSNumber, CFGetTypeID(clearDraft) == CFBooleanGetTypeID(),
+              clearDraft.boolValue == (kind == .subscriptionAdd), kind != .subscriptionAdd || changed.boolValue,
+              let toasts = result["toasts"] as? [Any], toasts.isEmpty,
+              result["open"] is NSNull || (kind == .device && result.text("open") == "device") else { throw CocoaError(.coderReadCorrupt) }
+    }
+
+    private func acknowledgeDeviceCalendarSetting(_ result: CoreObject, request: String, from currentHost: CoreHost, session: UUID, kind: CalendarSettingKind = .device) throws {
+        guard calendarSettingRequest == request, calendarSettingHost === currentHost else { throw CocoaError(.coderReadCorrupt) }
+        try validateDeviceCalendarSettingResult(result, kind: kind)
+        if kind == .push {
+            calendarPushSettingRetry = nil
+            if !Task.isCancelled, calendarSettingsPageCurrent(currentHost, session: session) {
+                calendarPushSettingToasts = result.objects("toasts")
+            }
+        }
+        if kind == .subscriptionAdd, let draft = calendarSubscriptionAddDraft, draft.request == request {
+            if draft.draft == calendarSubscriptionDraftID, calendarSettingsPageCurrent(currentHost, session: session) {
+                calendarSubscriptionName = ""
+                calendarSubscriptionURL = ""
+            }
+            calendarSubscriptionAddDraft = nil
+        }
+        calendarSettingRequest = nil
+        calendarSettingHost = nil
+        calendarSettingAwaitingRefresh = calendarSettingsPageCurrent(currentHost, session: session)
+        if host === currentHost {
+            calendarSettingError = nil
+            if kind != .push { retryNeeded = false; error = nil }
+        }
+    }
+
+    private func refreshCalendarSettings() async {
+        guard let currentHost = host, calendarSettingsPageCurrent(currentHost, session: calendarSettingsSession),
+              calendarSettingRequest == nil else { return }
+        let session = calendarSettingsSession
+        do { try await readCalendarSettings() }
+        catch {
+            if !Task.isCancelled, calendarSettingsPageCurrent(currentHost, session: session) {
+                calendarSettingReadError = error.localizedDescription
+            }
+        }
+    }
+
+    func retryCalendarSettings() {
+        guard !busy, calendarSettingOwner == nil, !appLock.concealed else { return }
+        if let retry = calendarPushSettingRetry, calendarSettingsPageCurrent(retry.host, session: retry.session) {
+            calendarSettingRequest = retry.request; calendarSettingHost = retry.host; calendarSettingKind = .push
+            calendarPushSettingRetry = nil
+            beginCalendarSettingOperation(retry: true)
+            return
+        }
+        if let pending = calendarSubscriptionRuntimeRecovery, host === pending.host {
+            Task { [weak self] in await self?.start() }
+            return
+        }
+        if calendarSettingRequest != nil { beginCalendarSettingOperation(retry: true); return }
+        guard settingsCalendarPresented else { return }
+        busy = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.finishOperation() }
+            await self.refreshCalendarSettings()
+        }
+    }
+
+    func openNotificationSettings() async {
+        guard ready, selectedSurface == .settings, !settingsCalendarPresented, !settingsNotificationsPresented, !settingsAboutPresented,
+              !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented, !settingsDataPresented,
+              !settingsSyncPresented, !busy, !retryNeeded, !notificationSettingActive, !calendarSettingActive, !appLock.concealed else { return }
+        settingsSearchTask?.cancel()
+        settingsSearchGeneration += 1
+        notificationSettingsSession = UUID()
+        settingsNotificationsPresented = true
+        notificationSettingsApplicationActive = UIApplication.shared.applicationState == .active
+        notificationSettingError = nil
+        notificationSettingReadError = nil
+        notificationSettings = [:]
+        notificationSettingExpected = [:]
+        busy = true
+        defer { finishOperation() }
+        do { try await readNotificationSettings() }
+        catch { notificationSettingReadError = error.localizedDescription }
+    }
+
+    func closeNotificationSettings() {
+        guard settingsNotificationsPresented, !busy, !retryNeeded, !notificationSettingActive else { return }
+        retireNotificationSettingsPage()
+    }
+
+    private func retireNotificationSettingsPage() {
+        cancelNotificationSettingsIntent()
+        settingsNotificationsPresented = false
+        notificationSettings = [:]
+        notificationSettingExpected = [:]
+        notificationSettingReadError = nil
+        notificationSettingAwaitingRefresh = false
+    }
+
+    func notificationSettingsWillResignActive() {
+        notificationSettingsApplicationActive = false
+    }
+
+    func notificationSettingsDidBecomeActive() {
+        notificationSettingsApplicationActive = true
+        guard let waiter = notificationSettingWaiter else { return }
+        notificationSettingWaiter = nil
+        let current = notificationSettingsCurrent(owner: waiter.owner)
+        waiter.continuation.resume(returning: current)
+        if !current { notificationSettingTask?.cancel() }
+    }
+
+    func cancelNotificationSettingsIntent() {
+        notificationSettingsApplicationActive = false
+        notificationSettingsSession = UUID()
+        notificationSettingTask?.cancel()
+        if let waiter = notificationSettingWaiter {
+            notificationSettingWaiter = nil
+            waiter.continuation.resume(returning: false)
+        }
+        // The accepted native callback owns busy until it drains, even after page retirement.
+    }
+
+    private func notificationSettingsCurrent(owner: UUID) -> Bool {
+        notificationSettingOwner == owner && host === notificationSettingHost && ready
+            && selectedSurface == .settings && settingsNotificationsPresented && !appLock.concealed
+            && notificationSettingsApplicationActive && UIApplication.shared.applicationState == .active
+    }
+
+    private func waitForNotificationSettingsReadmission(owner: UUID, session: UUID) async -> Bool {
+        guard !Task.isCancelled, notificationSettingsSession == session,
+              notificationSettingOwner == owner, host === notificationSettingHost,
+              ready, selectedSurface == .settings, settingsNotificationsPresented, !appLock.concealed else { return false }
+        if notificationSettingsCurrent(owner: owner) { return true }
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, notificationSettingsSession == session,
+                      notificationSettingOwner == owner, host === notificationSettingHost,
+                      ready, selectedSurface == .settings, settingsNotificationsPresented, !appLock.concealed else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                if notificationSettingsCurrent(owner: owner) { continuation.resume(returning: true) }
+                else { notificationSettingWaiter = (owner, continuation) }
+            }
+        }, onCancel: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.notificationSettingWaiter?.owner == owner else { return }
+                let waiter = self.notificationSettingWaiter
+                self.notificationSettingWaiter = nil
+                waiter?.continuation.resume(returning: false)
+            }
+        })
+    }
+
+    private func readNotificationSettings() async throws {
+        guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
+        let session = notificationSettingsSession
+        let options = try decode(try await currentHost.readNotificationSettingsOptions())
+        guard host === currentHost, settingsNotificationsPresented, selectedSurface == .settings,
+              session == notificationSettingsSession, !appLock.concealed else { throw CocoaError(.userCancelled) }
+        let model = options.object("model"), expected = options.object("expected")
+        let fields: Set<String> = ["notificationsEnabled", "startDateNotificationsEnabled", "dueDateNotificationsEnabled",
+            "weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled", "weeklyReviewDay",
+            "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime"]
+        guard Set(options.keys) == Set(["model", "expected"]), !model.text("title").isEmpty,
+              model["task"] is CoreObject, model["weekly"] is CoreObject, model["digest"] is CoreObject,
+              model["text"] is CoreObject, Set(expected.keys) == fields,
+              expected.values.allSatisfy({ value in
+                  guard let witness = value as? CoreObject, Set(witness.keys) == Set(["present", "value"]),
+                        let present = witness["present"] as? NSNumber, CFGetTypeID(present) == CFBooleanGetTypeID() else { return false }
+                  return present.boolValue || witness["value"] is NSNull
+              }) else { throw CocoaError(.coderReadCorrupt) }
+        notificationSettings = model
+        notificationSettingExpected = expected
+        notificationSettingReadError = nil
+        notificationSettingAwaitingRefresh = false
+    }
+
+    func saveNotificationSetting(_ edit: CoreObject) {
+        guard notificationSettingEnabled, let currentHost = host,
+              let expected = notificationSettingExpected[edit.text("type")] as? CoreObject else { return }
+        do {
+            notificationSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected])
+            notificationSettingEdit = edit
+            notificationSettingHost = currentHost
+            beginNotificationSettingOperation(retry: false)
+        } catch { notificationSettingError = error.localizedDescription }
+    }
+
+    private func beginNotificationSettingOperation(retry: Bool) {
+        guard !busy, notificationSettingOwner == nil, let request = notificationSettingRequest,
+              let currentHost = notificationSettingHost, host === currentHost, ready, !appLock.concealed else { return }
+        let owner = UUID(), session = notificationSettingsSession
+        notificationSettingOwner = owner
+        notificationSettingError = nil
+        busy = true
+        notificationSettingTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.notificationSettingOwner == owner {
+                    self.notificationSettingOwner = nil
+                    self.notificationSettingTask = nil
+                    if let waiter = self.notificationSettingWaiter, waiter.owner == owner {
+                        self.notificationSettingWaiter = nil
+                        waiter.continuation.resume(returning: false)
+                    }
+                    self.finishOperation()
+                }
+            }
+            do {
+                let reply: String
+                if retry {
+                    if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
+                    else { reply = try await currentHost.probeNotificationSettingOutcome(requestJSON: request) }
+                } else {
+                    reply = try await currentHost.setNotificationSetting(requestJSON: request, readmission: { [weak self] in
+                        guard let self else { return false }
+                        return await self.waitForNotificationSettingsReadmission(owner: owner, session: session)
+                    })
+                }
+                try self.acknowledgeNotificationSetting(self.decode(reply), request: request, from: currentHost)
+                if !Task.isCancelled { await self.refreshNotificationSettings() }
+            } catch { await self.handleNotificationSettingError(error, request: request, from: currentHost) }
+        }
+    }
+
+    private func acknowledgeNotificationSetting(_ result: CoreObject, request: String, from currentHost: CoreHost) throws {
+        guard notificationSettingRequest == request, notificationSettingHost === currentHost,
+              Set(result.keys) == Set(["type", "value", "changed"]), result.text("type") == notificationSettingEdit.text("type"),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+              try json(["value": result["value"] ?? NSNull()]) == json(["value": notificationSettingEdit["value"] ?? NSNull()]) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        notificationSettingRequest = nil
+        notificationSettingHost = nil
+        notificationSettingEdit = [:]
+        notificationSettingAwaitingRefresh = settingsNotificationsPresented
+        notificationSettingError = nil
+        retryNeeded = false
+        error = nil
+    }
+
+    private func handleNotificationSettingError(_ failure: Error, request: String, from currentHost: CoreHost) async {
+        guard notificationSettingRequest == request, notificationSettingHost === currentHost else { return }
+        notificationSettingError = failure.localizedDescription
+        if isDefiniteRejection(failure) {
+            notificationSettingRequest = nil
+            notificationSettingHost = nil
+            notificationSettingEdit = [:]
+            notificationSettingAwaitingRefresh = settingsNotificationsPresented
+            retryNeeded = false
+            error = nil
+            if !Task.isCancelled { await refreshNotificationSettings() }
+        } else {
+            retryNeeded = true
+            error = failure.localizedDescription
+        }
+    }
+
+    private func refreshNotificationSettings() async {
+        guard settingsNotificationsPresented, selectedSurface == .settings, !appLock.concealed,
+              notificationSettingRequest == nil else { return }
+        do { try await readNotificationSettings() }
+        catch { notificationSettingReadError = error.localizedDescription }
+    }
+
+    func retryNotificationSettings() {
+        guard !busy, notificationSettingOwner == nil, !appLock.concealed else { return }
+        if notificationSettingRequest != nil { beginNotificationSettingOperation(retry: true); return }
+        guard settingsNotificationsPresented else { return }
+        busy = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.finishOperation() }
+            await self.refreshNotificationSettings()
+        }
+    }
+
     func openGeneralSettings() async {
-        guard ready, selectedSurface == .settings, !settingsManagePresented, !busy, !retryNeeded else { return }
+        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
         settingsGeneralPresented = true
@@ -6625,6 +9916,10 @@ final class CoreModel: ObservableObject {
 
     private func readAppLock(justEnabled: Bool = false) async throws {
         let currentHost = host
+        searchAppLockReadPending = true
+        // A guarded search route may own this read; validate its saved result before cancelling navigation.
+        searchPolicyChanged(suspendNavigation: false)
+        defer { searchAppLockReadPending = false; searchPolicyChanged() }
         do {
             let options = try await query("appLockOptions", ["{}"])
             guard currentHost != nil, host === currentHost,
@@ -6680,6 +9975,9 @@ final class CoreModel: ObservableObject {
 
     func saveAppLock(_ value: Bool) async {
         guard appLockCanChange, !appLock.concealed else { return }
+        searchAppLockWritePending = true
+        searchPolicyChanged()
+        defer { searchAppLockWritePending = false; searchPolicyChanged() }
         let expected = appLockExpected
         busy = true
         appLockError = nil
@@ -6754,6 +10052,7 @@ final class CoreModel: ObservableObject {
                     "settings.backupMobile.failedToRestoreBackup", "settings.backupMobile.restoreFailed", "settings.backupMobile.importFailed", "settings.importDiagnostics.limitExceeded", "settings.recoverySnapshotsEmpty",
                     "appLock.title", "appLock.description", "appLock.prompt", "appLock.enablePrompt", "appLock.unlock",
                     "appLock.authenticating", "appLock.useDevicePasscode", "appLock.unavailable", "appLock.cancelled", "appLock.failed",
+                    "settings.iosSearchLabel", "settings.iosSearchDesc", "settings.iosSearchPaused", "settings.iosSearchFailed",
                     "common.all", "common.close", "common.cancel", "common.done", "common.retry", "common.loading", "common.ok", "common.noMatches",
                     "common.play", "common.pause", "quickAdd.audioNoteTitle", "audio.loading",
                     "attachments.title", "attachments.missing", "attachments.download", "attachments.addLink", "attachments.addFile",
@@ -6761,6 +10060,9 @@ final class CoreModel: ObservableObject {
                     "attachments.remove", "attachments.linkPlaceholder", "attachments.linkBatchHint",
                     "task.aria.changeStatus", "task.aria.changeStatusHint", "taskStatus.changeStatus", "quickAdd.audioRecord",
                     "common.more", "agenda.reviewDueProjects", "agenda.laterToday",
+                    "calendar.eventTaskCreatedTitle", "calendar.eventTaskCreated",
+                    "calendar.cannotOpenEventTitle", "calendar.openUnsupported", "calendar.openFromCalendarApp",
+                    "taskEdit.textDirection.auto",
                     "agenda.addToFocus", "agenda.removeFromFocus",
                     "agenda.collapseOtherSections", "agenda.expandOtherSections", "markdown.expand", "markdown.collapse",
                     "projects.areaFilter", "filters.excluded", "taskEdit.tab.view", "common.notSet", "status.active", "status.waiting", "status.someday",
@@ -6798,7 +10100,20 @@ final class CoreModel: ObservableObject {
                     "taskEdit.locationLabel", "taskEdit.locationPlaceholder", "reference.title", "nav.history", "nav.trash",
                     "filters.matchAny", "filters.contextMatchMode", "filters.tagMatchMode",
                     "sort.label", "list.groupBy", "taskEdit.moreOptions", "dailyReview.completeDesc",
+                    "settings.about", "settings.officialWebsite", "settings.videoTutorials", "settings.privacy", "settings.terms",
+                    "settings.sponsorProject", "settings.donateLinkValue", "settings.license", "attachments.openLinkFailed",
+                    "settings.checkForUpdates", "settings.checking", "settings.checkFailed", "settings.updateAvailable", "settings.later", "attachments.open",
+                    "settings.aboutMobile.tapToCheck", "settings.aboutMobile.rateOurApp", "settings.aboutMobile.upToDate",
+                    "settings.aboutMobile.appStoreUpdateAvailableWithVersions", "settings.aboutMobile.youAreUsingTheLatestAppStoreVersion",
+                    "settings.aboutMobile.couldNotOpenTheAppStoreRatingPagePleaseTry",
                     "settings.feedback.saveFailed", "settings.feedback.actionFailed",
+                    "settings.feedback", "settings.feedbackDesc", "settings.feedbackCategory", "settings.feedbackCategoryBug", "settings.feedbackCategoryFeature", "settings.feedbackCategoryOther",
+                    "settings.feedbackMessage", "settings.feedbackMessagePlaceholder", "settings.feedbackMessagePlaceholderBug", "settings.feedbackMessagePlaceholderFeature", "settings.feedbackMessagePlaceholderOther",
+                    "settings.feedbackWhere", "settings.feedbackWherePlaceholder", "settings.feedbackWhereMessagePrefix", "settings.feedbackWhereInbox", "settings.feedbackWhereFocus", "settings.feedbackWhereProjects",
+                    "settings.feedbackWhereReview", "settings.feedbackWhereSettings", "settings.feedbackWhereSync", "settings.feedbackWhereImportExport", "settings.feedbackWhereNotifications", "settings.feedbackWhereOther",
+                    "settings.feedbackEmail", "settings.feedbackEmailPlaceholder", "settings.feedbackIncludeDiagnostics", "settings.feedbackIncludeDiagnosticsDesc", "settings.feedbackPrivacy",
+                    "settings.feedbackSubmit", "settings.feedbackSending", "settings.feedbackSent", "settings.feedbackFailed", "settings.feedbackUnavailable", "settings.feedbackUnavailableDesc",
+                    "settings.feedbackOpenGitHubIssue", "settings.feedbackGitHubDesc", "settings.feedbackOpenGitHubDiscussion", "settings.feedbackRequired", "settings.feedbackInvalidEmail",
                     "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "viewSections.updateFailed"]
         let result = try await query("strings", [try json(keys)])
         guard let translated = result["strings"] as? CoreObject, translated.values.allSatisfy({ $0 is String }) else {
@@ -6912,7 +10227,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openManageSettings() async {
-        guard ready, selectedSurface == .settings, !settingsManagePresented, !busy, !retryNeeded,
+        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, ready, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !busy, !retryNeeded,
               !somedaySectionDeleteActive, !somedaySectionOrderActive, !settingsAreaDeleteActive,
               !unassignedAreaColorActive else { return }
         settingsSearchTask?.cancel()
@@ -8163,10 +11478,11 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func readProjectRenameOptions() async throws {
+    private func readProjectRenameOptions(ownedGuard: (() -> Bool)? = nil) async throws {
         projectRenameOptionsCurrent = false
         let id = projectHeader.text("id")
         let options = try await query("projectRenameOptions", [try json(["projectId": id])])
+        guard ownedGuard?() != false else { throw CancellationError() }
         let project = options.object("project")
         guard options.count == 3, !options.text("revision").isEmpty,
               let canRename = options["canRename"] as? NSNumber,
@@ -12526,7 +15842,7 @@ final class CoreModel: ObservableObject {
 
     func setCalendarQuery(_ text: String) {
         guard selectedSurface == .calendar, !retryNeeded, !taskPresented, !calendarItemPresented,
-              !calendarComposerPresented, text != calendarQuery else { return }
+              !calendarComposerPresented, calendarEventOpenPresentation == nil, text != calendarQuery else { return }
         calendarScrollAnchor = "calendar-list-top"
         calendarNotice = nil
         calendarQuery = text
@@ -12539,12 +15855,15 @@ final class CoreModel: ObservableObject {
 
     private func scheduleCalendarRead() {
         guard selectedSurface == .calendar, !busy, !retryNeeded, !taskPresented, !calendarItemPresented,
-              !calendarComposerPresented else { return }
+              !calendarComposerPresented, calendarEventOpenPresentation == nil, calendarCoreCallsInFlight == 0, ready,
+              !appLock.concealed, calendarFeedApplicationActive else { return }
         calendarReadTask?.cancel()
         calendarReadTask = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
             guard let self, self.selectedSurface == .calendar, !self.busy, !self.retryNeeded,
-                  !self.taskPresented, !self.calendarItemPresented, !self.calendarComposerPresented else { return }
+                  !self.taskPresented, !self.calendarItemPresented, !self.calendarComposerPresented,
+                  self.calendarEventOpenPresentation == nil,
+                  self.ready, !self.appLock.concealed, self.calendarFeedApplicationActive else { return }
             self.calendarReadTask = nil
             self.busy = true
             defer { self.finishOperation() }
@@ -12552,9 +15871,10 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    func retryCalendar() async {
+    func retryCalendar(refreshFeed: Bool = true) async {
         guard selectedSurface == .calendar, !busy, !retryNeeded, !taskPresented, !calendarItemPresented,
-              !calendarComposerPresented else { return }
+              !calendarComposerPresented, calendarEventOpenPresentation == nil else { return }
+        if refreshFeed { calendarFeedRefreshRequested = true }
         busy = true
         defer { finishOperation() }
         await readCalendar()
@@ -12563,18 +15883,21 @@ final class CoreModel: ObservableObject {
     func loadMoreCalendar() async {
         guard calendarActionsEnabled, calendarView.objects("items").count < calendarView.number("total") else { return }
         calendarLoadedDepth = calendarView.objects("items").count + pageSize
-        await retryCalendar()
+        await retryCalendar(refreshFeed: false)
     }
 
     func openCalendarComposer(_ entry: CoreObject) async {
+        guard let openingHost = host else { return }
+        let openingSession = calendarPageSession
+        let openingFeed = calendarViewFeed
         let openingState = calendarView.object("state")
         let day = openingState.text("selectedDate")
         let openingQuery = calendarQuery
         let openingRevision = calendarView.text("revision")
-        guard calendarActionsEnabled, entry.text("type") == "task", !day.isEmpty,
+        guard calendarComposerOpeningEnabled, entry.text("type") == "task", !day.isEmpty,
               !entry.text("taskId").isEmpty,
               calendarView.objects("items").contains(where: {
-                  $0.text("type") == "task" && $0.text("taskId") == entry.text("taskId")
+                  $0.text("type") == "task" && $0.text("taskId").utf8.elementsEqual(entry.text("taskId").utf8)
                       && $0.text("list") == entry.text("list") && $0.text("title") == entry.text("title")
               }) else { return }
         busy = true
@@ -12582,10 +15905,10 @@ final class CoreModel: ObservableObject {
         calendarComposerError = nil
         defer { finishOperation() }
         do {
-            let result = try await query("calendarComposerOpen", [try json([
-                "day": day, "scheduleTaskId": entry.text("taskId")
+            let result = try await query("calendarComposerOpen", [try calendarInputJSON([
+                "day": day, "scheduleTaskId": entry.text("taskId"), "calendar": openingFeed
             ])])
-            guard calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) else { return }
+            guard calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) else { return }
             let view = result.object("composer")
             if view.isEmpty {
                 let toast = result.object("toast")
@@ -12594,19 +15917,24 @@ final class CoreModel: ObservableObject {
                 return
             }
             guard view.object("composer").text("mode") == "existing" else { throw CocoaError(.coderReadCorrupt) }
+            calendarComposerHost = openingHost
+            calendarComposerFeed = openingFeed
             calendarComposerGeneration += 1
             calendarComposerEdits = []
             calendarComposerView = view
             syncCalendarComposerInputs()
             calendarComposerPresented = true
         } catch {
-            if calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) {
+            if calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) {
                 calendarError = error.localizedDescription
             }
         }
     }
 
     func openNewCalendarComposer(day: String, rawMinutes: Double? = nil) async {
+        guard let openingHost = host else { return }
+        let openingSession = calendarPageSession
+        let openingFeed = calendarViewFeed
         let openingState = calendarView.object("state")
         let openingQuery = calendarQuery
         let openingRevision = calendarView.text("revision")
@@ -12623,16 +15951,16 @@ final class CoreModel: ObservableObject {
             validTarget = day == calendarView.object("content").text("dayKey")
                 && (rawMinutes.map { $0.isFinite && $0 >= 0 && $0 <= 1440 } ?? true)
         } else { validTarget = false }
-        guard calendarActionsEnabled, validTarget, !day.isEmpty else { return }
+        guard calendarComposerOpeningEnabled, validTarget, !day.isEmpty else { return }
         busy = true
         calendarNotice = nil
         calendarComposerError = nil
         defer { finishOperation() }
         do {
-            var input: CoreObject = ["day": day, "mode": "new"]
+            var input: CoreObject = ["day": day, "mode": "new", "calendar": openingFeed]
             if let rawMinutes { input["rawMinutes"] = rawMinutes }
-            let result = try await query("calendarComposerOpen", [try json(input)])
-            guard calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) else { return }
+            let result = try await query("calendarComposerOpen", [try calendarInputJSON(input)])
+            guard calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) else { return }
             let next = result.object("composer")
             if next.isEmpty {
                 let toast = result.object("toast")
@@ -12641,21 +15969,25 @@ final class CoreModel: ObservableObject {
                 return
             }
             guard next.object("composer").text("mode") == "new" else { throw CocoaError(.coderReadCorrupt) }
+            calendarComposerHost = openingHost
+            calendarComposerFeed = openingFeed
             calendarComposerGeneration += 1
             calendarComposerEdits = []
             calendarComposerView = next
             syncCalendarComposerInputs()
             calendarComposerPresented = true
         } catch {
-            if calendarComposerOpeningCurrent(query: openingQuery, revision: openingRevision, state: openingState) {
+            if calendarComposerOpeningCurrent(host: openingHost, session: openingSession, query: openingQuery, revision: openingRevision, state: openingState) {
                 calendarError = error.localizedDescription
             }
         }
     }
 
-    private func calendarComposerOpeningCurrent(query: String, revision: String, state: CoreObject) -> Bool {
+    private func calendarComposerOpeningCurrent(host currentHost: CoreHost, session: UUID, query: String, revision: String, state: CoreObject) -> Bool {
         let current = calendarView.object("state")
-        return selectedSurface == .calendar && calendarCurrent && calendarQuery == query
+        return host === currentHost && calendarViewHost === currentHost && calendarPageSession == session
+            && !appLock.concealed && calendarFeedApplicationActive && !Task.isCancelled
+            && selectedSurface == .calendar && calendarCurrent && calendarQuery == query
             && calendarView.text("revision") == revision
             && current.text("selectedDate") == state.text("selectedDate")
             && current.text("visibleMonth") == state.text("visibleMonth")
@@ -12667,6 +15999,8 @@ final class CoreModel: ObservableObject {
         calendarComposerGeneration += 1
         calendarComposerPresented = false
         calendarComposerView = [:]
+        calendarComposerFeed = [:]
+        calendarComposerHost = nil
         calendarComposerEdits = []
         calendarComposerError = nil
         if calendarNeedsRead { scheduleCalendarRead() }
@@ -12709,7 +16043,7 @@ final class CoreModel: ObservableObject {
 
     func selectCalendarComposerTask(_ id: String) {
         guard calendarComposerPresented, !calendarComposerEditPending, !busy, !retryNeeded,
-              calendarComposerView.objects("candidates").contains(where: { $0.text("id") == id }) else { return }
+              calendarComposerView.objects("candidates").contains(where: { $0.text("id").utf8.elementsEqual(id.utf8) }) else { return }
         queueCalendarComposerEdit(["type": "selectTask", "taskId": id])
     }
 
@@ -12739,11 +16073,13 @@ final class CoreModel: ObservableObject {
     }
 
     private func pumpCalendarComposerEdits() async {
-        guard !calendarComposerEditing, calendarComposerPresented, !busy, !retryNeeded else { return }
+        guard !calendarComposerEditing, calendarComposerPresented, !busy, !retryNeeded,
+              calendarComposerHost === host, calendarComposerFeed.text("status") == "ready",
+              !appLock.concealed, calendarFeedApplicationActive, let currentHost = host else { return }
         calendarComposerEditing = true
         defer {
             calendarComposerEditing = false
-            if calendarComposerPresented && !calendarComposerEdits.isEmpty && calendarComposerError == nil {
+            if calendarComposerPresented && !calendarComposerEdits.isEmpty && calendarComposerError == nil && calendarFeedApplicationActive && !appLock.concealed {
                 Task { await pumpCalendarComposerEdits() }
             }
         }
@@ -12752,10 +16088,14 @@ final class CoreModel: ObservableObject {
             let edit = calendarComposerEdits.removeFirst()
             let previousMode = calendarComposerView.object("composer").text("mode")
             do {
-                let next = try await query("calendarComposerEdit", [try json([
-                    "composer": calendarComposerView.object("composer"), "edit": edit
+                let next = try await query("calendarComposerEdit", [try calendarInputJSON([
+                    "composer": calendarComposerView.object("composer"), "edit": edit, "calendar": calendarComposerFeed
                 ])])
-                guard calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard host === currentHost, calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard !appLock.concealed, calendarFeedApplicationActive else {
+                    calendarComposerEdits.insert(edit, at: 0)
+                    return
+                }
                 let returnedMode = next.object("composer").text("mode")
                 guard ["new", "existing"].contains(returnedMode),
                       returnedMode == (edit.text("type") == "mode" ? edit.text("mode") : previousMode) else {
@@ -12765,7 +16105,11 @@ final class CoreModel: ObservableObject {
                 syncCalendarComposerInputs()
                 calendarComposerError = nil
             } catch {
-                guard calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard host === currentHost, calendarComposerPresented, generation == calendarComposerGeneration else { return }
+                guard !appLock.concealed, calendarFeedApplicationActive else {
+                    calendarComposerEdits.insert(edit, at: 0)
+                    return
+                }
                 if calendarComposerEdits.first?.text("type") == edit.text("type") {
                     // A newer raw value superseded the refused in-flight value.
                     continue
@@ -12797,8 +16141,8 @@ final class CoreModel: ObservableObject {
         guard calendarComposerCanSave else { return }
         let request: String
         do {
-            request = try json(["requestId": UUID().uuidString.lowercased(),
-                "composer": calendarComposerView.object("composer")])
+            request = try calendarInputJSON(["requestId": UUID().uuidString.lowercased(),
+                "composer": calendarComposerView.object("composer"), "calendar": calendarComposerFeed])
         } catch { calendarComposerError = error.localizedDescription; return }
         calendarComposerSaveRequest = request
         busy = true
@@ -12844,6 +16188,8 @@ final class CoreModel: ObservableObject {
         calendarComposerGeneration += 1
         calendarComposerPresented = false
         calendarComposerView = [:]
+        calendarComposerFeed = [:]
+        calendarComposerHost = nil
         calendarComposerEdits = []
         calendarComposerError = nil
         calendarComposerNavigation = (next, minute.doubleValue)
@@ -12899,15 +16245,154 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    private func calendarInputJSON(_ input: CoreObject) throws -> String {
+        let value = try json(input)
+        guard value.utf8.count <= 2_000_000 else {
+            throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.coderInvalidValue.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: label("settings.calendarMobile.failedToLoadEvents")])
+        }
+        return value
+    }
+
+    private func calendarReadCurrent(_ currentHost: CoreHost, session: UUID, generation: Int, query: String) -> Bool {
+        host === currentHost && calendarPageSession == session && calendarReadGeneration == generation
+            && selectedSurface == .calendar && calendarQuery == query && !appLock.concealed
+            && calendarFeedApplicationActive && !Task.isCancelled
+    }
+
+    func retireCalendarFeed(clear: Bool = false) {
+        retireCalendarEventOpen()
+        retireCalendarEventIntent()
+        calendarPageSession = UUID()
+        calendarReadGeneration += 1
+        calendarReadTask?.cancel()
+        calendarFeedTask?.cancel()
+        calendarFeedTask = nil
+        calendarFeedOwner = nil
+        calendarFeedDrainID = nil
+        calendarFeedGeneration = UUID()
+        calendarFeedRefreshRequested = true
+        if clear {
+            calendarFeedRange = nil
+            calendarFeed = [:]
+            calendarViewFeed = [:]
+            calendarViewHost = nil
+            calendarComposerFeed = [:]
+            calendarComposerHost = nil
+            calendarItemFeed = [:]
+        }
+    }
+
+    func calendarFeedDidBecomeActive() {
+        let returning = !calendarFeedApplicationActive
+        calendarFeedApplicationActive = true
+        guard returning, ready, selectedSurface == .calendar, !appLock.concealed else { return }
+        calendarFeedRefreshRequested = true
+        calendarNeedsRead = true
+        if calendarComposerPresented { Task { await pumpCalendarComposerEdits() } }
+        else { scheduleCalendarRead() }
+    }
+
+    func calendarFeedWillResignActive() {
+        calendarFeedApplicationActive = false
+        retireCalendarFeed()
+    }
+
+    private func beginCalendarFeedRead(_ range: CalendarFeedRange) {
+        guard ready, selectedSurface == .calendar, !appLock.concealed, calendarFeedApplicationActive,
+              calendarEventOpenPresentation == nil,
+              calendarFeedTask == nil, calendarCoreCallsInFlight == 0, calendarFeedDrainID == nil,
+              calendarFeedRange == range, calendarFeed.text("status") == "loading",
+              let currentHost = host else { return }
+        let owner = UUID(), session = calendarPageSession
+        let refresh = calendarFeedRefreshRequested
+        calendarFeedRefreshRequested = false
+        calendarFeedOwner = owner
+        calendarFeedGeneration = owner
+        calendarFeedTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.calendarFeedOwner == owner { self.calendarFeedTask = nil; self.calendarFeedOwner = nil }
+            }
+            @MainActor func current() -> Bool {
+                self.host === currentHost && self.calendarPageSession == session && self.calendarFeedOwner == owner
+                    && self.calendarFeedRange == range && self.selectedSurface == .calendar && self.ready
+                    && self.calendarFeedApplicationActive && !self.appLock.concealed && !Task.isCancelled
+            }
+            do {
+                var input: CoreObject = ["op": "feed", "slot": "calendar", "start": range.start, "end": range.end]
+                if refresh { input["refresh"] = true }
+                guard current() else { return }
+                let result = try self.decode(await currentHost.calendarRead(requestJSON: self.json(input)))
+                guard current() else { return }
+                guard ["ready", "error"].contains(result.text("status")) else { throw CocoaError(.coderReadCorrupt) }
+                // Shared projection validates every source/event and the full request byte bound.
+                self.calendarFeed = result
+            } catch {
+                guard current() else { return }
+                self.calendarFeed = ["status": "error", "message": self.label("settings.calendarMobile.failedToLoadEvents")]
+                self.calendarError = error.localizedDescription
+            }
+            guard current() else { return }
+            self.calendarNeedsRead = true
+            self.scheduleCalendarRead()
+        }
+    }
+
+    private func drainCalendarFeedForCoreCall() async {
+        guard let read = calendarFeedTask else { return }
+        // invoke owns the serial engine queue while HTTP is pending. Signal its cancellation
+        // before queueing another call; preserve same-range events for the deliberate restart.
+        let drainID = calendarFeedDrainID ?? UUID()
+        calendarFeedDrainID = drainID
+        calendarFeedOwner = nil
+        calendarFeedGeneration = UUID()
+        calendarFeedRefreshRequested = true
+        if calendarProjectionInFlight == 0 { calendarNeedsRead = true }
+        read.cancel()
+        await read.value
+        guard calendarFeedDrainID == drainID else { return }
+        calendarFeedTask = nil
+        calendarFeedDrainID = nil
+    }
+
+    private func calendarFeedPublished(_ feed: CoreObject, generation: UUID, host observed: CoreHost, session: UUID) {
+        let status = feed.text("status")
+        guard ["ready", "error"].contains(status), generation == calendarFeedGeneration,
+              calendarFeedLoggedGeneration != generation else { return }
+        let outcome = status == "error" ? "error" : feed.text("warning").isEmpty ? "ready" : "partial"
+        calendarFeedLoggedGeneration = generation
+        Task { [weak self] in
+            guard let self, self.host === observed, self.calendarViewHost === observed,
+                  self.calendarPageSession == session, self.calendarViewFeedGeneration == generation,
+                  self.calendarFeedGeneration == generation, self.selectedSurface == .calendar,
+                  self.calendarCurrent, !self.appLock.concealed, self.calendarFeedApplicationActive,
+                  !Task.isCancelled else { return }
+            _ = try? await observed.call("logLine", argumentsJSON: self.json([
+                "Native iOS calendar feed view published", try self.json([
+                    "releaseCheck": "v1.3.5/ios-calendar-feed", "outcome": outcome,
+                ]),
+            ]))
+        }
+    }
+
     private func readCalendar() async {
+        guard calendarEventOpenPresentation == nil else { calendarNeedsRead = true; return }
+        calendarProjectionInFlight += 1
+        defer { calendarProjectionInFlight -= 1 }
         calendarReadTask?.cancel()
         calendarNeedsRead = false
         calendarCurrent = false
         calendarError = nil
-        let text = calendarQuery
+        guard let currentHost = host else { return }
+        calendarReadGeneration += 1
+        let generation = calendarReadGeneration, session = calendarPageSession, text = calendarQuery
+        func current() -> Bool { calendarReadCurrent(currentHost, session: session, generation: generation, query: text) }
         for attempt in 0..<2 {
             do {
+                guard current() else { return }
                 let preferences = try await query("menuRead", ["calendarPreferences", "{}"])
+                guard current() else { return }
                 let values = preferences.object("values")
                 guard preferences.number("version") == 1, values["viewMode"] is String,
                       values["showCompleted"] is Bool, values["weekVisibleDays"] is NSNumber else {
@@ -12916,17 +16401,48 @@ final class CoreModel: ObservableObject {
                 var state = calendarState
                 if let target = calendarPreferenceTarget, !calendarPreferencePending {
                     state = target
-                    // Preserve the core navigation target, but honor the acknowledged stored mode
-                    // if replay finished persistence after a newer same-field preference arrived.
+                    // Honor the acknowledged stored mode if replay followed newer same-field intent.
                     state["viewMode"] = values["viewMode"]
                 }
                 var input: CoreObject = ["scheduleQuery": text, "offset": 0, "limit": pageSize]
                 if !state.isEmpty { input["state"] = state }
-                var next = try await query("menuRead", ["calendar", try json(input)])
-                guard !next.text("revision").isEmpty, !next.object("state").isEmpty,
-                      next.number("total") >= 0, next.objects("items").count == min(pageSize, next.number("total")) else {
-                    throw CocoaError(.coderReadCorrupt)
+                // Only core computes/normalizes the range; this task-only projection is never published.
+                let baseline = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                guard current() else { return }
+                let range = try CalendarFeedRange(baseline.object("range"))
+                if calendarFeedRange != range {
+                    calendarFeedTask?.cancel()
+                    calendarFeedTask = nil
+                    calendarFeedOwner = nil
+                    calendarFeedRange = range
+                    calendarFeed = ["status": "loading"]
+                    calendarFeedRefreshRequested = true
+                } else if calendarFeedRefreshRequested && calendarFeedTask == nil {
+                    var loading: CoreObject = ["status": "loading"]
+                    if calendarFeed["calendars"] != nil { loading["calendars"] = calendarFeed["calendars"] }
+                    if calendarFeed["events"] != nil { loading["events"] = calendarFeed["events"] }
+                    calendarFeed = loading
                 }
+                var frozenFeed = calendarFeed
+                let frozenFeedGeneration = calendarFeedGeneration
+                input["state"] = baseline.object("state")
+                input["calendar"] = frozenFeed
+                var next: CoreObject
+                do {
+                    next = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                } catch {
+                    guard current() else { return }
+                    // A rejected feed must remain visible as failure; keep core-rendered tasks and block planning.
+                    calendarError = error.localizedDescription
+                    frozenFeed = ["status": "error", "message": label("settings.calendarMobile.failedToLoadEvents")]
+                    calendarFeed = frozenFeed
+                    input["calendar"] = frozenFeed
+                    next = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                }
+                guard current() else { return }
+                guard !next.text("revision").isEmpty, !next.object("state").isEmpty,
+                      next.number("total") >= 0, next.objects("items").count == min(pageSize, next.number("total")),
+                      next.object("feedState")["status"] is String else { throw CocoaError(.coderReadCorrupt) }
                 var entries = next.objects("items")
                 input["state"] = next.object("state")
                 input["revision"] = next.text("revision")
@@ -12935,38 +16451,404 @@ final class CoreModel: ObservableObject {
                     let limit = min(pageSize, target - entries.count)
                     input["offset"] = entries.count
                     input["limit"] = limit
-                    let page = try await query("menuRead", ["calendar", try json(input)])
+                    let page = try await query("menuRead", ["calendar", try calendarInputJSON(input)])
+                    guard current() else { return }
                     guard page.text("revision") == next.text("revision"), page.number("total") == next.number("total"),
                           page.objects("items").count == limit,
                           try json(page.object("state")) == json(next.object("state")) else { throw CocoaError(.coderReadCorrupt) }
                     entries += page.objects("items")
                 }
-                guard selectedSurface == .calendar, text == calendarQuery else { calendarNeedsRead = true; return }
+                guard current() else { return }
                 next["items"] = entries
                 calendarState = next.object("state")
                 calendarPreferenceValues = values
                 calendarPreferenceTarget = nil
+                calendarViewFeed = frozenFeed
+                calendarViewFeedGeneration = frozenFeedGeneration
+                calendarViewHost = currentHost
                 if calendarView.isEmpty { NSLog("Native iOS Calendar view loaded releaseCheck=v1.3.3/native-ios-calendar-read") }
                 calendarView = next
+                if let intent = calendarEventIntent, !calendarEventIntentCurrent(intent) {
+                    retireCalendarEventIntent()
+                }
                 calendarCurrent = true
+                calendarFeedPublished(frozenFeed, generation: frozenFeedGeneration, host: currentHost, session: session)
+                beginCalendarFeedRead(range)
                 return
             } catch {
-                guard selectedSurface == .calendar, text == calendarQuery else { calendarNeedsRead = true; return }
+                guard current() else { return }
                 if attempt == 1 { calendarError = error.localizedDescription }
             }
         }
     }
 
     func completeCalendarItem(_ item: CoreObject) async {
-        guard calendarActionsEnabled, calendarItems.contains(where: { $0.text("id") == item.text("id")
-            && $0.text("taskId") == item.text("taskId") && $0.flag("showDone") }),
+        guard calendarActionsEnabled, calendarItems.contains(where: { $0.text("id").utf8.elementsEqual(item.text("id").utf8)
+            && $0.text("taskId").utf8.elementsEqual(item.text("taskId").utf8) && $0.flag("showDone") }),
               calendarEditableTask(item.text("taskId")) else { return }
         await complete(item.text("taskId"), taskRevision: item.object("row").text("taskRevision"))
     }
 
+    private func calendarEventSame(_ left: CoreObject, _ right: CoreObject) -> Bool {
+        guard let lhs = try? json(left), let rhs = try? json(right) else { return false }
+        return lhs.utf8.elementsEqual(rhs.utf8)
+    }
+
+    private func calendarEventDayValid(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        guard bytes.count == 10, bytes[4] == 45, bytes[7] == 45,
+              bytes.enumerated().allSatisfy({ [4, 7].contains($0.offset) || (48...57).contains($0.element) }),
+              let year = Int(value.prefix(4)), year > 0,
+              let month = Int(value.dropFirst(5).prefix(2)), let day = Int(value.suffix(2)) else { return false }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let components = DateComponents(year: year, month: month, day: day)
+        guard let date = calendar.date(from: components) else { return false }
+        let resolved = calendar.dateComponents([.year, .month, .day], from: date)
+        return resolved.year == year && resolved.month == month && resolved.day == day
+    }
+
+    private func calendarEventStateValid(_ state: CoreObject) -> Bool {
+        Set(state.keys) == Set(["viewMode", "selectedDate", "visibleMonth"])
+            && ["month", "week", "day", "schedule"].contains(state.text("viewMode"))
+            && calendarEventDayValid(state.text("visibleMonth"))
+            && ((state["selectedDate"] is NSNull && state.text("viewMode") == "month")
+                || (state["selectedDate"] as? String).map(calendarEventDayValid) == true)
+    }
+
+    private func captureCalendarEventOpenRequest(_ event: CoreObject, sourceID: String, allDay: Bool) -> NativeCalendarEventOpenRequest? {
+        let prefix = "system:"
+        guard sourceID.utf8.starts(with: prefix.utf8), let itemID = event["nativeEventId"] as? String else { return nil }
+        // Only remove the shared system-source prefix; never parse the display event ID.
+        let calendarID = String(decoding: sourceID.utf8.dropFirst(prefix.utf8.count), as: UTF8.self)
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let start = parser.date(from: event.text("start")), let end = parser.date(from: event.text("end")) else { return nil }
+        return try? NativeCalendarEventOpenRequest(calendarID: calendarID, calendarItemIdentifier: itemID,
+            start: start, end: end, allDay: allDay)
+    }
+
+    private func captureCalendarEvent(_ item: CoreObject) throws -> CalendarEventIntent {
+        guard let currentHost = host, calendarViewHost === currentHost,
+              item.text("kind") == "event", item["taskId"] is NSNull,
+              !calendarView.text("revision").isEmpty, calendarViewFeed.text("status") == "ready" else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let reference = item.object("eventRef")
+        guard Set(reference.keys) == Set(["sourceId", "id", "start", "end"]),
+              reference.values.allSatisfy({ ($0 as? String)?.isEmpty == false }) else { throw CocoaError(.coderReadCorrupt) }
+        func matches(_ event: CoreObject) -> Bool {
+            ["sourceId", "id", "start", "end"].allSatisfy {
+                guard let left = event[$0] as? String, let right = reference[$0] as? String else { return false }
+                return left.utf8.elementsEqual(right.utf8)
+            }
+        }
+        let rows = calendarItems.filter {
+            $0.text("kind") == "event" && $0.flag("pressable")
+                && $0.text("id").utf8.elementsEqual(item.text("id").utf8) && matches($0.object("eventRef"))
+        }
+        let events = calendarViewFeed.objects("events").filter(matches)
+        let sources = calendarViewFeed.objects("calendars").filter {
+            $0.text("id").utf8.elementsEqual(reference.text("sourceId").utf8)
+        }
+        // A multiday event can render in several Week columns; its feed tuple is still unique.
+        guard !rows.isEmpty, events.count == 1, sources.count == 1,
+              let calendarName = sources[0]["name"] as? String,
+              let allDay = events[0]["allDay"] as? NSNumber, CFGetTypeID(allDay) == CFBooleanGetTypeID(),
+              ["id", "sourceId", "title", "start", "end"].allSatisfy({ events[0][$0] is String }) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        var event: CoreObject = ["allDay": allDay]
+        for field in ["id", "sourceId", "title", "start", "end", "description", "location"] {
+            if let value = events[0][field] {
+                guard value is String else { throw CocoaError(.coderReadCorrupt) }
+                event[field] = value
+            }
+        }
+        let state = calendarView.object("state")
+        guard calendarEventStateValid(state) else { throw CocoaError(.coderReadCorrupt) }
+        // Serialize the narrow snapshot so no mutable nested provider collection escapes.
+        let captured = try decode(json(["reference": reference, "event": event, "state": state]))
+        return CalendarEventIntent(id: UUID(), host: currentHost, pageSession: calendarPageSession,
+            feedGeneration: calendarViewFeedGeneration, revision: calendarView.text("revision"),
+            state: captured.object("state"), reference: captured.object("reference"), event: captured.object("event"),
+            calendarName: calendarName,
+            openRequest: captureCalendarEventOpenRequest(events[0], sourceID: reference.text("sourceId"), allDay: allDay.boolValue),
+            successTitle: label("calendar.eventTaskCreatedTitle"),
+            successMessage: label("calendar.eventTaskCreated"))
+    }
+
+    private func calendarEventIntentCurrent(_ intent: CalendarEventIntent) -> Bool {
+        host === intent.host && calendarViewHost === intent.host && calendarEventIntent?.id == intent.id
+            && calendarPageSession == intent.pageSession && calendarViewFeedGeneration == intent.feedGeneration
+            && calendarView.text("revision").utf8.elementsEqual(intent.revision.utf8)
+            && calendarEventSame(calendarView.object("state"), intent.state)
+            && ready && selectedSurface == .calendar && calendarItemPresented && calendarViewFeed.text("status") == "ready"
+            && calendarFeedApplicationActive && !appLock.concealed && !Task.isCancelled
+    }
+
+    private func calendarEventOpenSessionCurrent(_ session: CalendarEventOpenSession) -> Bool {
+        let intent = session.intent
+        return !session.retired && host === intent.host && calendarViewHost === intent.host
+            && calendarPageSession == intent.pageSession && calendarViewFeedGeneration == intent.feedGeneration
+            && calendarView.text("revision").utf8.elementsEqual(intent.revision.utf8)
+            && calendarEventSame(calendarView.object("state"), intent.state)
+            && ready && calendarCurrent && selectedSurface == .calendar && calendarViewFeed.text("status") == "ready"
+            && !retryNeeded && !taskPresented && !capturePresented && !morePresented && !areaPickerPresented
+            && !calendarItemPresented && !calendarComposerPresented
+            && calendarFeedApplicationActive && UIApplication.shared.applicationState == .active
+            && !appLock.concealed && !Task.isCancelled
+    }
+
+    func calendarEventOpenCanPresent(_ id: UUID) -> Bool {
+        guard calendarEventOpenPresented, calendarEventOpenPresentation?.id == id,
+              let session = calendarEventOpenSession, session.id == id else { return false }
+        return calendarEventOpenSessionCurrent(session)
+    }
+
+    func requestCalendarEventOpenDismissal(_ id: UUID, outcome: NativeCalendarEventEditorOutcome) {
+        guard let presentation = calendarEventOpenPresentation, presentation.id == id,
+              presentation.outcome == outcome else { return }
+        presentation.concealAndCancel()
+        calendarEventOpenPresented = false
+        if !presentation.hasStarted { calendarEventOpenDidDismiss(id) }
+    }
+
+    func calendarEventOpenDidDismiss(_ id: UUID) {
+        guard let presentation = calendarEventOpenPresentation, presentation.id == id,
+              let session = calendarEventOpenSession, session.id == id else { return }
+        let wasPresented = presentation.wasPresented, outcome = presentation.outcome
+        let refreshCurrent = wasPresented && calendarEventOpenSessionCurrent(session)
+        presentation.finishDismissal()
+        calendarEventOpenPresented = false
+        calendarEventOpenPresentation = nil
+        calendarEventOpenSession = nil
+        if wasPresented, let outcome, host === session.intent.host {
+            let originalHost = session.intent.host
+            Task { [weak self] in
+                guard let self, self.host === originalHost else { return }
+                _ = try? await originalHost.call("logLine", argumentsJSON: self.json([
+                    "Native iOS calendar event dialog dismissed", try self.json([
+                        "releaseCheck": "v1.3.5/ios-calendar-event-open", "outcome": outcome.rawValue,
+                    ]),
+                ]))
+            }
+        }
+        if refreshCurrent {
+            // Shared state remains unchanged; only a passive current-page feed refresh is queued.
+            calendarFeedRefreshRequested = true
+            calendarNeedsRead = true
+        }
+        // A retired editor may have blocked a newer foreground/page request.
+        // Re-admit only the latest existing queue, without restoring its old state or host.
+        if calendarNeedsRead { scheduleCalendarRead() }
+    }
+
+    private func retireCalendarEventOpen() {
+        guard let presentation = calendarEventOpenPresentation else { return }
+        calendarEventOpenSession?.retired = true
+        presentation.concealAndCancel()
+        calendarEventOpenPresented = false
+        if !presentation.hasStarted { calendarEventOpenDidDismiss(presentation.id) }
+    }
+
+    private func openCalendarEventInEditor() async {
+        guard let intent = calendarEventIntent, calendarEventIntentCurrent(intent),
+              let request = intent.openRequest, calendarEventTaskPending == nil,
+              calendarEventOpenPresentation == nil, calendarEventTemplateJSON != nil else { return }
+        busy = true
+        calendarItemError = nil
+        defer { finishOperation() }
+        await drainCalendarFeedForCoreCall()
+        guard calendarEventIntentCurrent(intent), UIApplication.shared.applicationState == .active else { return }
+        do {
+            _ = try bindCalendarEventSheet(calendarItemSheet, to: intent)
+            let owner = try NativeCalendarEventOpenResolver().resolve(request)
+            guard calendarEventIntentCurrent(intent), UIApplication.shared.applicationState == .active else { return }
+            let id = UUID()
+            let presentation = NativeCalendarEventEditorPresentation(id: id, owner: owner)
+            calendarEventOpenSession = CalendarEventOpenSession(id: id, intent: intent)
+            calendarEventOpenPresentation = presentation
+            // The native dialog has a separate owner before its custom sheet is retired.
+            retireCalendarEventIntent()
+            calendarEventOpenPresented = true
+        } catch {
+            guard calendarEventIntentCurrent(intent) else { return }
+            let refused = (error as? NativeCalendarEventOpenError).map { $0 != .unavailable } == true
+            let message = label(refused ? "calendar.openUnsupported" : "calendar.openFromCalendarApp")
+            retireCalendarEventIntent()
+            calendarNotice = [label("calendar.cannotOpenEventTitle"), message].filter { !$0.isEmpty }.joined(separator: ": ")
+        }
+    }
+
+    private func retireCalendarEventIntent() {
+        calendarEventReadGeneration = UUID()
+        calendarEventTemplateJSON = nil
+        guard let intent = calendarEventIntent else { return }
+        calendarEventIntent = nil
+        calendarItemPresented = false
+        calendarItemSheet = [:]
+        calendarItemFeed = [:]
+        calendarItemTaskID = ""
+        calendarItemError = nil
+        #if DEBUG && targetEnvironment(simulator)
+        // Resume only after the real owner is retired, so the final dispatch fence must refuse.
+        releaseCalendarEventTaskDispatchTestHold(intent.id)
+        #endif
+        // An accepted command is owned by its host, independently of this retired sheet.
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private func releaseCalendarEventTaskDispatchTestHold(_ intentID: UUID) {
+        guard let waiter = calendarEventTaskDispatchTestWaiter, waiter.intentID == intentID else { return }
+        calendarEventTaskDispatchTestWaiter = nil
+        calendarEventTaskDispatchTestState = "released"
+        waiter.continuation.resume()
+    }
+    #endif
+
+    private func bindCalendarEventSheet(_ sheet: CoreObject, to intent: CalendarEventIntent) throws -> String {
+        let actions = intent.openRequest == nil ? ["createTask", "cancel"] : ["createTask", "openInCalendar", "cancel"]
+        guard Set(sheet.keys) == Set(["kind", "title", "buttons", "creationTemplate"]), sheet.text("kind") == "event",
+              let title = sheet["title"] as? String, title.utf16.count <= 2_000,
+              let buttons = sheet["buttons"] as? [CoreObject], buttons.count == actions.count,
+              buttons.enumerated().allSatisfy({ index, button in
+                  Set(button.keys) == Set(["id", "label", "style"])
+                      && button.text("id") == actions[index]
+                      && button.text("style") == (actions[index] == "cancel" ? "cancel" : "default")
+                      && (button["label"] as? String).map { !$0.isEmpty && $0.utf16.count <= 2_000 } == true
+              }) else { throw CocoaError(.coderReadCorrupt) }
+        let template = sheet.object("creationTemplate")
+        var event = intent.event
+        event.removeValue(forKey: "id")
+        event.removeValue(forKey: "sourceId")
+        guard Set(template.keys) == Set(["event", "calendarName", "fallbackTitle", "state"]),
+              calendarEventSame(template.object("event"), event), calendarEventSame(template.object("state"), intent.state),
+              let name = template["calendarName"] as? String, name.utf8.elementsEqual(intent.calendarName.utf8),
+              name.utf16.count <= 2_000,
+              let fallback = template["fallbackTitle"] as? String, fallback.utf16.count <= 2_000,
+              event.text("title").utf16.count <= 2_000, event.text("location").utf16.count <= 2_000,
+              event.text("description").utf16.count <= 20_000 else { throw CocoaError(.coderReadCorrupt) }
+        return try calendarInputJSON(template)
+    }
+
+    private func readCalendarEventSheet(_ intent: CalendarEventIntent) async {
+        guard calendarEventIntentCurrent(intent), calendarEventTaskPending == nil else { return }
+        let generation = UUID()
+        calendarEventReadGeneration = generation
+        func current() -> Bool { calendarEventReadGeneration == generation && calendarEventIntentCurrent(intent) }
+        busy = true
+        defer { finishOperation() }
+        calendarItemError = nil
+        calendarItemSheet = [:]
+        calendarEventTemplateJSON = nil
+        do {
+            var readerEvent = intent.event
+            if let openRequest = intent.openRequest { readerEvent["nativeEventId"] = openRequest.calendarItemIdentifier }
+            let input = try calendarInputJSON(["event": readerEvent, "canOpen": intent.openRequest != nil,
+                "state": intent.state, "calendarName": intent.calendarName])
+            let sheet = try await query("menuRead", ["calendarItem", input], beforeDispatch: current)
+            guard current() else { return }
+            let template = try bindCalendarEventSheet(sheet, to: intent)
+            calendarEventTemplateJSON = template
+            calendarItemSheet = sheet
+        } catch { if current() { calendarItemError = error.localizedDescription } }
+    }
+
+    private func createCalendarEventTask() async {
+        guard let intent = calendarEventIntent, calendarEventIntentCurrent(intent), calendarEventTaskPending == nil,
+              let templateJSON = calendarEventTemplateJSON else { return }
+        let pending: CalendarEventTaskPending
+        do {
+            var request = try decode(templateJSON)
+            // Rebind before constructing the only public event write; fallback text stays frozen.
+            _ = try bindCalendarEventSheet(calendarItemSheet, to: intent)
+            let requestId = UUID().uuidString.lowercased()
+            request["requestId"] = requestId
+            pending = CalendarEventTaskPending(host: intent.host, requestId: requestId,
+                requestJSON: try calendarInputJSON(request), viewMode: intent.state.text("viewMode"), intent: intent)
+        } catch { calendarItemError = error.localizedDescription; return }
+        calendarEventTaskPending = pending
+        busy = true
+        calendarItemError = nil
+        error = nil
+        defer { finishOperation() }
+        var dispatched = false
+        do {
+            let result = try await query("calendarEventTaskCreate", [pending.requestJSON], beforeDispatch: {
+                guard self.calendarEventIntentCurrent(intent),
+                      self.calendarEventTaskPending?.requestId == pending.requestId else { return false }
+                dispatched = true
+                return true
+            })
+            try await acknowledgeCalendarEventTask(result, pending: pending)
+        } catch {
+            guard host === pending.host, calendarEventTaskPending?.requestId == pending.requestId else { return }
+            if !dispatched || isDefiniteRejection(error) { calendarEventTaskPending = nil }
+            retryNeeded = calendarEventTaskPending != nil
+            if calendarEventIntentCurrent(intent) { calendarItemError = error.localizedDescription }
+            if retryNeeded { self.error = error.localizedDescription }
+        }
+    }
+
+    private func validateCalendarEventTaskResult(_ result: CoreObject, requestId: String? = nil, viewMode: String? = nil) throws -> CoreObject {
+        let next = result.object("next")
+        guard Set(result.keys) == Set(["changed", "toast", "composer", "next", "scrollToMinutes", "taskId"]),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(), changed.boolValue,
+              result["toast"] is NSNull, result["composer"] is NSNull, result["scrollToMinutes"] is NSNull,
+              let taskId = result["taskId"] as? String, UUID(uuidString: taskId)?.uuidString.lowercased() == taskId,
+              requestId.map({ taskId.utf8.elementsEqual($0.utf8) }) != false,
+              calendarEventStateValid(next), let day = next["selectedDate"] as? String,
+              day.utf8.elementsEqual(next.text("visibleMonth").utf8),
+              viewMode.map({ next.text("viewMode").utf8.elementsEqual($0.utf8) }) != false else { throw CocoaError(.coderReadCorrupt) }
+        return next
+    }
+
+    private func acknowledgeCalendarEventTask(_ result: CoreObject, pending: CalendarEventTaskPending) async throws {
+        guard host === pending.host, calendarEventTaskPending?.requestId == pending.requestId,
+              calendarEventTaskPending?.requestJSON.utf8.elementsEqual(pending.requestJSON.utf8) == true else {
+            throw CancellationError()
+        }
+        let next = try validateCalendarEventTaskResult(result, requestId: pending.requestId, viewMode: pending.viewMode)
+        let present = calendarEventIntentCurrent(pending.intent)
+        calendarEventTaskPending = nil
+        retryNeeded = false
+        error = nil
+        guard present else { return }
+        retireCalendarEventIntent()
+        await installCalendarEventTaskResult(next, title: pending.intent.successTitle, message: pending.intent.successMessage)
+    }
+
+    private func acknowledgeRecoveredCalendarEventTask(_ result: CoreObject, from currentHost: CoreHost) async throws {
+        guard host === currentHost else { throw CancellationError() }
+        let next = try validateCalendarEventTaskResult(result)
+        calendarEventTaskPending = nil
+        retryNeeded = false
+        error = nil
+        retireCalendarEventIntent()
+        await installCalendarEventTaskResult(next, title: label("calendar.eventTaskCreatedTitle"), message: label("calendar.eventTaskCreated"))
+    }
+
+    private func installCalendarEventTaskResult(_ next: CoreObject, title: String, message: String) async {
+        calendarComposerNavigation = nil
+        calendarQuery = ""
+        calendarState = next
+        calendarLoadedDepth = pageSize
+        calendarScrollAnchor = ""
+        calendarViewportAnchors.removeAll()
+        calendarViewportGeneration += 1
+        calendarNotice = title + ": " + message
+        selectedSurface = .calendar
+        await readCalendar()
+    }
+
     func openCalendarItem(_ item: CoreObject) async {
-        guard calendarActionsEnabled, item.flag("pressable"), !item.text("taskId").isEmpty,
-              calendarItems.contains(where: { $0.text("id") == item.text("id") && $0.text("taskId") == item.text("taskId") && $0.flag("pressable") }) else { return }
+        guard calendarItemOpeningEnabled(item) else { return }
+        calendarEventReadGeneration = UUID()
+        calendarEventTemplateJSON = nil
+        calendarEventIntent = item.text("kind") == "event" ? try? captureCalendarEvent(item) : nil
+        if item.text("kind") == "event", calendarEventIntent == nil { return }
+        calendarItemFeed = calendarViewFeed
         calendarItemTaskID = item.text("taskId")
         calendarItemSheet = [:]
         calendarItemError = nil
@@ -12975,32 +16857,55 @@ final class CoreModel: ObservableObject {
     }
 
     func retryCalendarItem() async {
-        guard calendarItemPresented, !busy, !retryNeeded, !taskPresented else { return }
+        guard calendarItemPresented, !busy, !retryNeeded, !taskPresented, !appLock.concealed,
+              calendarEventOpenPresentation == nil,
+              calendarFeedApplicationActive, let currentHost = host, calendarViewHost === currentHost else { return }
+        if let intent = calendarEventIntent {
+            await readCalendarEventSheet(intent)
+            return
+        }
+        let session = calendarPageSession, taskID = calendarItemTaskID
+        func current() -> Bool {
+            host === currentHost && calendarPageSession == session && calendarItemPresented
+                && calendarItemTaskID.utf8.elementsEqual(taskID.utf8) && !appLock.concealed
+                && calendarFeedApplicationActive && !Task.isCancelled
+        }
         busy = true
         defer { finishOperation() }
         calendarItemError = nil
         calendarItemSheet = [:]
         do {
-            let sheet = try await query("menuRead", ["calendarItem", try json(["taskId": calendarItemTaskID, "state": calendarState])])
-            guard sheet.text("kind") == "projected" || (sheet.text("kind") == "task" && sheet.text("taskId") == calendarItemTaskID) else {
+            let sheet = try await query("menuRead", ["calendarItem", try calendarInputJSON(["taskId": calendarItemTaskID, "state": calendarState, "calendar": calendarItemFeed])])
+            guard current() else { return }
+            guard sheet.text("kind") == "projected" || (sheet.text("kind") == "task" && sheet.text("taskId").utf8.elementsEqual(calendarItemTaskID.utf8)) else {
                 throw CocoaError(.coderReadCorrupt)
             }
             calendarItemSheet = sheet
-        } catch { calendarItemError = error.localizedDescription }
+        } catch { if current() { calendarItemError = error.localizedDescription } }
     }
 
     func closeCalendarItem() {
         guard !busy, !retryNeeded else { return }
+        retireCalendarEventIntent()
         calendarItemPresented = false
         calendarItemSheet = [:]
+        calendarItemFeed = [:]
         calendarItemTaskID = ""
         calendarItemError = nil
+        if calendarNeedsRead { scheduleCalendarRead() }
     }
 
     func performCalendarItemAction(_ action: String) async {
-        guard calendarItemPresented, !busy, !retryNeeded, !taskPresented,
-              calendarItemSheet.objects("buttons").contains(where: { $0.text("id") == action }) else { return }
+        guard calendarItemActionEnabled(action) else { return }
         if action == "cancel" || action == "ok" { closeCalendarItem(); return }
+        if action == "createTask", calendarItemSheet.text("kind") == "event" {
+            await createCalendarEventTask()
+            return
+        }
+        if action == "openInCalendar", calendarItemSheet.text("kind") == "event" {
+            await openCalendarEventInEditor()
+            return
+        }
         guard calendarItemSheet.text("kind") == "task", calendarEditableTask(calendarItemTaskID) else { return }
         let id = calendarItemTaskID
         if action == "edit" { closeCalendarItem(); await openTask(id) }
@@ -17863,7 +21768,8 @@ final class CoreModel: ObservableObject {
         await presentProject(row, caller: selectedSurface)
     }
 
-    private func presentProject(_ row: CoreObject, caller: Surface) async {
+    private func presentProject(_ row: CoreObject, caller: Surface, ownedGuard: (() -> Bool)? = nil) async {
+        guard ownedGuard?() != false else { return }
         projectTaskOrderPresented = false
         projectTaskOrderView = [:]
         projectTaskOrderError = nil
@@ -18008,7 +21914,7 @@ final class CoreModel: ObservableObject {
         selectedSurface = .project
         busy = true
         defer { finishOperation() }
-        await readProjectDetail()
+        await readProjectDetail(ownedGuard: ownedGuard)
     }
 
     func closeProject() async {
@@ -18564,8 +22470,8 @@ final class CoreModel: ObservableObject {
                 guard ownedGuard?() != false else { return false }
                 // Reference labels may be aliases; resolve the destination header through core.
                 if projectHeader["title"] == nil {
-                    guard ownedGuard == nil else { return false }
-                    try await readProjectRenameOptions()
+                    try await readProjectRenameOptions(ownedGuard: ownedGuard)
+                    guard ownedGuard?() != false else { return false }
                 }
                 var next = try await projectDetailWindow(projectID: id, offset: 0, limit: pageSize,
                     showCompleted: showCompleted, collapsed: collapsed, filters: filters,
@@ -19082,7 +22988,7 @@ final class CoreModel: ObservableObject {
             && projectDuplicateRequest == nil && projectLifecycleRequest == nil
             && projectDeleteRequest == nil && projectDeleteUndoRequest == nil
             && !savedSearchWritePresented && !settingsSyncPresented && !settingsSyncChecking
-            && !settingsManagePresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
+            && !settingsManagePresented && !settingsAboutPresented && !settingsCalendarPresented && !settingsNotificationsPresented && !settingsGeneralPresented && !settingsDataPresented && !settingsGtdPresented
     }
 
     func downloadProjectAttachment(_ attachmentID: String) {
@@ -19607,6 +23513,17 @@ final class CoreModel: ObservableObject {
     private func readProjectFileAddInventory(_ currentHost: CoreHost) async throws {
         let raw = try await currentHost.projectFileAddSummary()
         guard host === currentHost else { throw CancellationError() }
+        #if DEBUG && targetEnvironment(simulator)
+        if startupInventoryReadTestFailureOnce {
+            startupInventoryReadTestFailureOnce = false
+            _ = try? await currentHost.call("logLine", argumentsJSON: json([
+                "Native iOS isolated startup inventory read failed",
+                #"{"outcome":"injected"}"#,
+            ]))
+            guard host === currentHost else { throw CancellationError() }
+            throw CocoaError(.fileReadUnknown)
+        }
+        #endif
         let summary = try parseProjectFileAddSummary(raw)
         if let operation = projectFileAddOperation {
             guard operation.host === currentHost,
@@ -21080,6 +24997,8 @@ final class CoreModel: ObservableObject {
         // that reset into a new checkpoint or replace a Keep-for-later draft.
         taskRecoveryHydrating = true
         taskPresented = false
+        taskEditor = [:]
+        taskOpeningIntent = nil
         resetTaskDestination()
         resetTaskTokens()
         resetTaskSchedule()
@@ -22962,18 +26881,19 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func refreshTaskDestination() async throws {
+    private func refreshTaskDestination(ownedGuard: (() -> Bool)? = nil) async throws {
         invalidateTaskDestinationRead()
         taskDestinationError = nil
-        try await readTaskDestination(generation: taskDestinationGeneration)
+        try await readTaskDestination(generation: taskDestinationGeneration, ownedGuard: ownedGuard)
     }
 
-    private func readTaskDestination(generation: Int) async throws {
+    private func readTaskDestination(generation: Int, ownedGuard: (() -> Bool)? = nil) async throws {
         let id = viewedTaskID
         let queryText = taskDestinationQuery
         let draft = taskDraft
         let identity = try json(draft)
         let next = try await query("destinationPicker", [try json(["id": id, "draft": draft, "query": queryText])])
+        guard ownedGuard?() != false else { throw CancellationError() }
         guard taskPresented, viewedTaskID == id, generation == taskDestinationGeneration else { return }
         guard queryText == taskDestinationQuery, identity == (try json(taskDraft)) else {
             requestTaskDestinationRead(delay: 0)
@@ -23017,8 +26937,8 @@ final class CoreModel: ObservableObject {
         strings.merge(translated) { _, new in new }
     }
 
-    func readTaskView(more: Bool = false) async {
-        guard ready, taskPresented, !busy, !retryNeeded, taskChecklistWriteKind == nil,
+    func readTaskView(more: Bool = false, ownedGuard: (() -> Bool)? = nil) async {
+        guard ownedGuard?() != false, ready, taskPresented, !busy, !retryNeeded, taskChecklistWriteKind == nil,
               !taskChecklistReadPending else { return }
         let id = viewedTaskID
         let session = taskChecklistSession
@@ -23030,14 +26950,16 @@ final class CoreModel: ObservableObject {
         var attempt = 0
         while attempt < 2 {
             do {
+                guard ownedGuard?() != false else { return }
                 if taskEditor.isEmpty {
                     let editor = try await query("editorModel", [id])
+                    guard ownedGuard?() != false else { return }
                     try await readTaskEditorLabels(editor)
-                    guard taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
+                    guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
                     if var intent = taskOpeningIntent {
                         intent["readOnly"] = editor.flag("readOnly")
                         let opening = try await query("taskOpenTab", [try json(intent)])
-                        guard taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
+                        guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
                         // Resolve before publishing the editor. A manual/recovered tab is already user intent.
                         if taskOpeningIntent != nil {
                             taskInitialTab = opening.text("tab")
@@ -23061,9 +26983,17 @@ final class CoreModel: ObservableObject {
                 let readOnly = taskEditor.flag("readOnly")
                 if !readOnly {
                     try await resolveTaskEditorInputs()
-                    try await refreshTaskDestination()
-                    if taskSchedulePending { try await resolveTaskEditorInputs() }
-                    if taskChecklistLoaded { try await flushTaskChecklistInputs(id: id, session: session) }
+                    guard ownedGuard?() != false else { return }
+                    try await refreshTaskDestination(ownedGuard: ownedGuard)
+                    guard ownedGuard?() != false else { return }
+                    if taskSchedulePending {
+                        try await resolveTaskEditorInputs()
+                        guard ownedGuard?() != false else { return }
+                    }
+                    if taskChecklistLoaded {
+                        try await flushTaskChecklistInputs(id: id, session: session)
+                        guard ownedGuard?() != false else { return }
+                    }
                 }
                 var draft = taskDraft
                 // Archived-project previews use the saved core projection. Do
@@ -23075,13 +27005,14 @@ final class CoreModel: ObservableObject {
                     if taskChecklistLoaded { firstInput["attachments"] = taskAttachments }
                 }
                 var next = try await query("taskView", [try json(firstInput)])
+                guard ownedGuard?() != false else { return }
                 // Reactivation requires a fresh opening; this retained session
                 // must not acquire editable rows through its saved-view read.
                 guard !readOnly || (next.text("id") == id && next["readOnly"] as? Bool == true) else {
                     throw CocoaError(.coderReadCorrupt)
                 }
                 if !taskChecklistLoaded || readOnly {
-                    guard taskPresented, viewedTaskID == id, taskChecklistSession == session,
+                    guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session,
                           next["checklistBase"] is [CoreObject],
                           let openingAttachments = next["attachmentsBase"] as? [CoreObject] else {
                         throw CocoaError(.coderReadCorrupt)
@@ -23090,14 +27021,19 @@ final class CoreModel: ObservableObject {
                     taskChecklist = taskOriginalChecklist
                     taskOriginalAttachments = openingAttachments
                     taskAttachments = openingAttachments
-                    try await refreshTaskAttachmentRows()
-                    if !readOnly { _ = try await applyTaskChecklistEdit(nil, id: id, session: session) }
+                    try await refreshTaskAttachmentRows(ownedGuard: ownedGuard)
+                    guard ownedGuard?() != false else { return }
+                    if !readOnly {
+                        _ = try await applyTaskChecklistEdit(nil, id: id, session: session)
+                        guard ownedGuard?() != false else { return }
+                    }
                     taskChecklistLoaded = true
                     if !readOnly {
                         draft = taskDraft
                         next = try await query("taskView", [try json([
                             "id": id, "draft": draft, "checklist": taskChecklist,
                             "attachments": taskAttachments, "offset": 0, "limit": pageSize])])
+                        guard ownedGuard?() != false else { return }
                     }
                 }
                 let checklist = taskChecklist
@@ -23117,6 +27053,7 @@ final class CoreModel: ObservableObject {
                             input["attachments"] = attachments
                         }
                         let window = try await query("taskView", [try json(input)])
+                        guard ownedGuard?() != false else { return }
                         let checklist = window.objects("rows").first { $0.text("type") == "checklist" } ?? [:]
                         let page = checklist.objects("items")
                         guard window.text("revision") == revision, window.text("id") == id,
@@ -23129,7 +27066,7 @@ final class CoreModel: ObservableObject {
                     rows[index]["items"] = entries
                     next["rows"] = rows
                 }
-                guard taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
+                guard ownedGuard?() != false, taskPresented, viewedTaskID == id, taskChecklistSession == session else { return }
                 let draftChanged = (try json(draft)) != (try json(taskDraft))
                 if !readOnly && (taskSchedulePending || draftChanged || !taskDraftValuesEqual(checklist, taskChecklist)
                     || !taskChecklistInputs.isEmpty || !taskChecklistAppendInput.isEmpty
@@ -23137,15 +27074,23 @@ final class CoreModel: ObservableObject {
                     // A final native input callback may arrive during the view
                     // or checklist reads. Regenerate before publishing Preview.
                     try await resolveTaskEditorInputs()
+                    guard ownedGuard?() != false else { return }
                     try await flushTaskChecklistInputs(id: id, session: session)
+                    guard ownedGuard?() != false else { return }
                     continue
                 }
                 taskView = next
+                #if DEBUG && targetEnvironment(simulator)
+                if ownedGuard != nil, entityLinkTestHeldOnce {
+                    entityLinkTestReadState += id == "task454-a" ? ";published-first" : ";published-second"
+                }
+                #endif
                 if readOnly {
                     NSLog("Native iOS read-only task preview loaded releaseCheck=v1.3.4/ios-readonly-task-preview outcome=loaded checklistCount=\(taskChecklist.count) attachmentCount=\(taskAttachments.count)")
                 }
                 return
             } catch {
+                guard ownedGuard?() != false else { return }
                 attempt += 1
                 if attempt == 2, taskPresented, viewedTaskID == id, taskChecklistSession == session {
                     taskError = error.localizedDescription
@@ -23953,6 +27898,9 @@ final class CoreModel: ObservableObject {
     }
 
     func retry() async {
+        if notificationResponseRetry != nil { await retryNotificationResponses(); return }
+        if notificationSettingRequest != nil { retryNotificationSettings(); return }
+        if calendarSettingRequest != nil { retryCalendarSettings(); return }
         if projectFileAvailabilityPending {
             await retryProjectFileAvailability()
             return
@@ -23967,6 +27915,9 @@ final class CoreModel: ObservableObject {
         }
         guard !busy, !projectRenameEditing || projectRenameRequest != nil else { return }
         guard ready else { await start(); return }
+        guard let retryHost = host else { return }
+        let eventRetry = calendarEventTaskPending
+        guard eventRetry == nil || eventRetry?.host === retryHost else { return }
         let attachmentRetryRequest = projectAttachmentWriteRequest
         let attachmentRetryMethod = projectAttachmentWriteMethod
         let attachmentRetryHost = projectAttachmentWriteHost
@@ -23991,8 +27942,14 @@ final class CoreModel: ObservableObject {
             if boardTaskOpened { Task { await readTaskView() } }
         }
         do {
-            let acknowledgment = try await host!.retryPending()
+            let acknowledgment = try await retryHost.retryPending()
+            guard host === retryHost else { throw CancellationError() }
             guard attachmentRetryCurrent() else { throw CancellationError() }
+            if let pending = eventRetry {
+                guard let acknowledgment else { throw CocoaError(.coderValueNotFound) }
+                try await acknowledgeCalendarEventTask(try decode(acknowledgment), pending: pending)
+                return
+            }
             if backupDocumentPending, let currentHost = host, backupDocumentHost === currentHost {
                 guard let acknowledgment else { throw CocoaError(.coderReadCorrupt) }
                 if !appLock.concealed {
@@ -25104,6 +29061,15 @@ final class CoreModel: ObservableObject {
             }
             if !calendarPreferencePending { calendarComposerNavigation = nil }
         } catch {
+            guard host === retryHost else { return }
+            if let pending = eventRetry {
+                guard calendarEventTaskPending?.requestId == pending.requestId else { return }
+                if isDefiniteRejection(error) { calendarEventTaskPending = nil }
+                retryNeeded = calendarEventTaskPending != nil
+                if calendarEventIntentCurrent(pending.intent) { calendarItemError = error.localizedDescription }
+                self.error = retryNeeded ? error.localizedDescription : nil
+                return
+            }
             if backupDocumentPending, let currentHost = host, backupDocumentHost === currentHost {
                 handleBackupDocumentFailure(error, from: currentHost)
                 return
@@ -26119,6 +30085,11 @@ final class CoreModel: ObservableObject {
 
     private func readSelectedSurface() async throws {
         guard !settingsSyncRestartRequired else { return }
+        if selectedSurface == .settings && settingsAboutPresented { return }
+        if selectedSurface == .settings && settingsCalendarPresented {
+            await refreshCalendarSettings()
+            return
+        }
         if selectedSurface == .settings && settingsSyncPresented {
             if !settingsSyncNeedsReload && !settingsSyncChecking { await readSettingsSyncModel() }
             return
@@ -26180,6 +30151,10 @@ final class CoreModel: ObservableObject {
                 do { try await readDataSettings() }
                 catch { diagnosticsReadError = error.localizedDescription; throw error }
             }
+            if settingsNotificationsPresented {
+                do { try await readNotificationSettings() }
+                catch { notificationSettingReadError = error.localizedDescription; throw error }
+            }
             if settingsGeneralPresented {
                 do { try await readGeneralSettings() }
                 catch { generalPreferenceReadError = error.localizedDescription; throw error }
@@ -26198,12 +30173,17 @@ final class CoreModel: ObservableObject {
         }
     }
 
-    private func query(_ method: String, _ args: [Any] = []) async throws -> CoreObject {
+    private func query(_ method: String, _ args: [Any] = [], beforeDispatch: (@MainActor () -> Bool)? = nil) async throws -> CoreObject {
         guard !settingsSyncRestartRequired else { throw CocoaError(.userCancelled) }
         guard !projectFileAvailabilityPending || method == "appLockOptions" else { throw CocoaError(.userCancelled) }
         guard let host else { throw CocoaError(.coderInvalidValue) }
         #if DEBUG && targetEnvironment(simulator)
         var removeTestRead: (query: String, request: String, session: String, generation: Int)?
+        if method == "menuRead", args.first as? String == "contexts",
+           contextsIntents.contains(where: { $0.text("kind") == "focus" }), notificationContextTestReadFailures > 0 {
+            notificationContextTestReadFailures -= 1
+            throw CocoaError(.fileReadUnknown)
+        }
         if referenceBulkRemoveTestReadEnabled, method == "menuRead", args.first as? String == "bulk",
            let encoded = args.dropFirst().first as? String, let request = try? decode(encoded),
            request.text("list") == "reference", request.object("picker").text("kind") == "removeTag" {
@@ -26477,8 +30457,60 @@ final class CoreModel: ObservableObject {
             }
         }
         #endif
+        calendarCoreCallsInFlight += 1
+        defer {
+            calendarCoreCallsInFlight -= 1
+            if calendarCoreCallsInFlight == 0, calendarProjectionInFlight == 0, calendarNeedsRead, !busy {
+                scheduleCalendarRead()
+            }
+        }
+        await drainCalendarFeedForCoreCall()
+        #if DEBUG && targetEnvironment(simulator)
+        if method == "calendarEventTaskCreate", calendarEventTaskPredispatchTestHoldOnce,
+           let pending = calendarEventTaskPending, pending.host === host,
+           let intent = calendarEventIntent, intent.id == pending.intent.id, calendarEventIntentCurrent(intent),
+           let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection {
+            calendarEventTaskPredispatchTestHoldOnce = false
+            let heldIntentID = intent.id
+            await withTaskCancellationHandler(operation: {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    guard !Task.isCancelled, let currentIntent = calendarEventIntent,
+                          currentIntent.id == heldIntentID, calendarEventIntentCurrent(currentIntent) else {
+                        continuation.resume()
+                        return
+                    }
+                    calendarEventTaskDispatchTestWaiter = (heldIntentID, continuation)
+                    calendarEventTaskDispatchTestState = "held"
+                }
+            }, onCancel: {
+                Task { @MainActor [weak self] in
+                    self?.releaseCalendarEventTaskDispatchTestHold(heldIntentID)
+                }
+            })
+        }
+        #endif
+        guard self.host === host else { throw CancellationError() }
+        guard beforeDispatch?() != false else { throw CancellationError() }
         let result = try await host.call(method, argumentsJSON: json(args))
         #if DEBUG && targetEnvironment(simulator)
+        if method == "taskView", entityLinkPreview != nil, !entityLinkTestHeldOnce,
+           let encoded = args.first as? String, try decode(encoded).text("id") == "task454-a",
+           let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection {
+            let mode = ProcessInfo.processInfo.environment["MINDWTR_ENTITY_TEST_DELIVERY"] ?? ""
+            if ["read-latest", "read-background"].contains(mode) {
+                entityLinkTestHeldOnce = true
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    entityLinkTestReadState = "held"
+                    if mode == "read-latest" {
+                        receiveEntityLink(URL(string: "mindwtr-native-dev://open?task=task454-b")!)
+                        entityLinkTestReadState = "held;replaced"
+                        continuation.resume()
+                    } else {
+                        entityLinkTestReadWaiter = continuation
+                    }
+                }
+            }
+        }
         if let read = removeTestRead {
             let captured = try decode(result)
             guard captured.text("list") == "reference", captured.object("picker").text("kind") == "removeTag",
@@ -26541,6 +30573,10 @@ final class CoreModel: ObservableObject {
         return error is CoreHostRejection
     }
     private func finishOperation() {
+        defer {
+            admitReminderLifecycle(); admitCalendarPushLifecycle(); admitSearchLifecycle(); admitNotificationResponses()
+            if entityLinkTask == nil { requestEntityLinks() }
+        }
         busy = false
         if projectFileAvailabilityPending {
             retryNeeded = true
@@ -26548,6 +30584,7 @@ final class CoreModel: ObservableObject {
             return
         }
         if settingsSyncRestartRequired { refreshRequested = false; return }
+        if resumeFeedbackConfigurationIfNeeded() { return }
         admitForegroundSync()
         if foregroundSyncOwner != nil { return }
         presentQueuedReferenceProjectNextAction()

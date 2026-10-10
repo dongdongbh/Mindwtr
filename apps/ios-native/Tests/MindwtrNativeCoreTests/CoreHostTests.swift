@@ -9108,10 +9108,15 @@ final class CoreHostTests: XCTestCase {
         let state: [String: Any] = ["viewMode": "day", "selectedDate": "2026-11-01", "visibleMonth": "2026-11-01"]
         for (name, valid) in [("calendar", ["state": state, "offset": 0, "limit": 50] as [String: Any]), ("calendarItem", ["state": state, "taskId": "calendar-timed"] as [String: Any])] {
             try await read(name, valid)
-            for field in ["calendar", "events", "feed", "event", "canOpen", "action", "requestId", "unknown"] {
+            for field in ["events", "feed", "event", "canOpen", "action", "requestId", "unknown"] {
                 var input = valid; input[field] = NSNull()
-                await expectFailure("Unsupported native Calendar browsing input") { try await read(name, input) }
+                // An event member selects the closed event grammar for calendarItem.
+                await expectFailure("Unsupported native Calendar") { try await read(name, input) }
             }
+            // The optional, explicitly supplied feed is admitted by the native
+            // grammar, then rejected as malformed by the shared reader.
+            var nullCalendar = valid; nullCalendar["calendar"] = NSNull()
+            await expectFailure("INVALID_INPUT") { try await read(name, nullCalendar) }
             for malformedState in [NSNull(), [], ["viewMode": "unknown"], ["viewMode": "day", "selectedDate": "2026-02-30", "visibleMonth": "2026-11-01"], ["viewMode": "day", "selectedDate": "2026-11-01", "visibleMonth": "2026-11-01T00:00:00Z"]] as [Any] {
                 var input = valid; input["state"] = malformedState
                 await expectFailure("INVALID_INPUT") { try await read(name, input) }
@@ -27833,10 +27838,12 @@ final class CoreHostTests: XCTestCase {
     }
 
     func testDoneTask176ForgedDeleteAndUndoJournalsRefuseBeforeSQLite() async throws {
+        // Keep the seeded completion inside Done’s relative date window.
+        let frozen = try dateBundle(at: "2026-10-02T13:00:00.000Z")
         for undo in [false, true] {
             let id = try await seedDoneTask176()
             let method = undo ? "taskDeleteUndo" : "taskDelete"
-            let faults = HostIOFaults(), writer = host(faults)
+            let faults = HostIOFaults(), writer = host(faults, bundleURL: frozen)
             _ = try await writer.start()
             let request = try await doneTask176Request(writer, id: id, undo: undo)
             faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected Done Task176 COMMIT failure") } }
@@ -27870,7 +27877,7 @@ final class CoreHostTests: XCTestCase {
                 let replayFaults = HostIOFaults()
                 var statements = 0
                 replayFaults.beforeSQL = { _ in statements += 1 }
-                let cold = host(replayFaults)
+                let cold = host(replayFaults, bundleURL: frozen)
                 await expectFailure { _ = try await cold.start() }
                 XCTAssertEqual(statements, 0, "\(method), \(part)")
                 XCTAssertEqual(try Data(contentsOf: journal), bytes)
@@ -36377,8 +36384,11 @@ extension CoreHostTests {
         let otherRoot = directory.appendingPathComponent("isolated-second-library")
         let other = CoreHost(databaseURL: otherRoot.appendingPathComponent("mindwtr.sqlite"), bundleURL: bundle)
         _ = try await other.start()
+        let otherLog = otherRoot.appendingPathComponent("logs/mindwtr.log")
+        let otherBefore = try Data(contentsOf: otherLog)
+        XCTAssertTrue(String(decoding: otherBefore, as: UTF8.self).contains("v1.3.5/ios-reminder-receipt-retention"))
         await expectFailure { _ = try await other.validatedDiagnosticsShareURL(path) }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: otherRoot.appendingPathComponent("logs/mindwtr.log").path))
+        XCTAssertEqual(try Data(contentsOf: otherLog), otherBefore, "Refused sharing cannot append another library's log")
         await other.close()
         let cleared = try object(await core.diagnosticsFileAction("logClearChecked"))
         XCTAssertEqual(cleared["outcome"] as? String, "cleared")

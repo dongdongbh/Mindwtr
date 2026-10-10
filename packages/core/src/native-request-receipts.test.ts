@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NativeHostResult } from './native-host-contract';
-import { createNativeRequestReceipts, loadNativeRequestReceipts, pruneNativeRequestReceipts, resetNativeRequestReceipts,
+import { createNativeRequestReceipts, isNativeRequestReceiptDurable, loadNativeRequestReceipts, pruneNativeRequestReceipts, resetNativeRequestReceipts,
     runStoreWrite, settleWrite } from './native-request-receipts';
 import type { SqliteClient } from './sqlite-adapter';
 import { resetForTests, useTaskStore } from './store';
 import { deterministicHash128, generateUUID } from './uuid';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openScratchSqlite } from './screen-parity.replay';
 
 const ok = <T,>(value: T): NativeHostResult<T> => ({ ok: true, value });
 const saveFailed: NativeHostResult<never> = { ok: false, error: { code: 'SAVE_FAILED', message: 'disk unavailable' } };
@@ -22,6 +26,78 @@ function createSave() {
 }
 
 describe('native request receipts', () => {
+    it('reports loaded exact-command durable readiness without granting unjournaled commands', async () => {
+        const client: SqliteClient = { run: async () => undefined, all: async () => [], get: async () => undefined };
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(false);
+        await loadNativeRequestReceipts(client, { durableCommands: ['notificationSetting'] });
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(false);
+        await loadNativeRequestReceipts(client, { durableCommands: ['deviceCalendarSetting', 'calendarFeedAdd'] });
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(true);
+        expect(isNativeRequestReceiptDurable('calendarFeedAdd')).toBe(false);
+        await loadNativeRequestReceipts(client);
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(true);
+        expect(isNativeRequestReceiptDurable('calendarFeedAdd')).toBe(false);
+        resetNativeRequestReceipts();
+        expect(isNativeRequestReceiptDurable('deviceCalendarSetting')).toBe(false);
+    });
+
+    it.each([false, true])('retains unfinished reminder IDs or commands in SQLite and replay memory (scoped=%s)', async (scoped) => {
+        const directory = mkdtempSync(join(tmpdir(), 'mindwtr-retention-'));
+        const sqlite = openScratchSqlite(join(directory, 'receipts.sqlite'));
+        const commands = ['reminderComplete', 'reminderSnooze', 'notificationSetting'];
+        const receiptCommands = [...commands, 'unknown', 'reminderComplete'];
+        const payloads = receiptCommands.map((command) => JSON.stringify([command, 'opaque']));
+        const ids = payloads.map(() => generateUUID());
+        const fingerprint = (payload: string, command: string) => `${command}:${deterministicHash128(payload).map((part) => part.toString(16).padStart(8, '0')).join('')}`;
+        try {
+            const options = scoped ? { durableCommands: commands } : undefined;
+            await loadNativeRequestReceipts(sqlite.client, options);
+            for (const [index, payload] of payloads.entries()) await sqlite.client.run(
+                'INSERT INTO native_request_receipts VALUES (?, ?, ?, ?)',
+                [ids[index], fingerprint(payload, receiptCommands[index]), '{"original":true}',
+                    index === 4 ? '2026-09-09T00:00:00.000Z' : '2020-01-01T00:00:00.000Z'],
+            );
+            await loadNativeRequestReceipts(sqlite.client, options);
+            const receipts = createNativeRequestReceipts({ save: async () => ok(null) });
+            expect(await pruneNativeRequestReceipts(sqlite.client, new Date('2026-10-09T00:00:00.000Z'), {
+                retainedRequestIds: [ids[0]], retainedCommands: ['reminderSnooze'],
+            })).toBe(scoped ? 1 : 2);
+            expect(await sqlite.client.all('SELECT request_id FROM native_request_receipts ORDER BY request_id'))
+                .toEqual([ids[0], ids[1], ids[4], ...(scoped ? [ids[3]] : [])].sort().map((request_id) => ({ request_id })));
+            expect(receipts.saved(ids[0], payloads[0])).toEqual(ok({ original: true }));
+            expect(receipts.saved(ids[1], payloads[1])).toEqual(ok({ original: true }));
+            expect(receipts.saved(ids[2], payloads[2])).toBeNull();
+            // An explicit empty snapshot restores normal expiry; unknown scoped rows stay reserved.
+            expect(await pruneNativeRequestReceipts(sqlite.client, new Date('2026-10-09T00:00:00.000Z'), {
+                retainedRequestIds: [], retainedCommands: [],
+            })).toBe(2);
+            expect(receipts.saved(ids[0], payloads[0])).toBeNull();
+            expect(receipts.saved(ids[1], payloads[1])).toBeNull();
+            expect(receipts.saved(ids[4], payloads[4])).toEqual(ok({ original: true }));
+            expect(await sqlite.client.all('SELECT request_id FROM native_request_receipts ORDER BY request_id'))
+                .toEqual([ids[4], ...(scoped ? [ids[3]] : [])].sort().map((request_id) => ({ request_id })));
+        } finally { sqlite.close(); rmSync(directory, { recursive: true, force: true }); }
+    });
+
+    it('retains both reminder command families while default pruning still expires them', async () => {
+        const payloads = ['reminderComplete', 'reminderSnooze', 'notificationSetting'].map((command) => JSON.stringify([command]));
+        const rows = payloads.map((payload, index) => ({ request_id: generateUUID(),
+            method: `${JSON.parse(payload)[0]}:${deterministicHash128(payload).map((part) => part.toString(16).padStart(8, '0')).join('')}`,
+            reply: JSON.stringify(index), saved_at: '2020-01-01T00:00:00.000Z' }));
+        const deletes: unknown[][] = [];
+        const client: SqliteClient = { run: async (sql, params) => { if (sql.startsWith('DELETE')) deletes.push(params ?? []); },
+            all: async <T,>() => rows as T[], get: async () => undefined };
+        await loadNativeRequestReceipts(client, { durableCommands: ['reminderComplete', 'reminderSnooze', 'notificationSetting'] });
+        expect(await pruneNativeRequestReceipts(client, new Date(), { retainedCommands: ['reminderComplete', 'reminderSnooze'] })).toBe(1);
+        expect(deletes).toHaveLength(1); expect(deletes[0][0]).toBe(rows[2].request_id);
+        const receipts = createNativeRequestReceipts({ save: async () => ok(null) });
+        expect(receipts.saved(rows[0].request_id, payloads[0])).toEqual(ok(0));
+        expect(receipts.saved(rows[1].request_id, payloads[1])).toEqual(ok(1));
+        expect(await pruneNativeRequestReceipts(client)).toBe(2);
+        expect(receipts.saved(rows[0].request_id, payloads[0])).toBeNull();
+        expect(receipts.saved(rows[1].request_id, payloads[1])).toBeNull();
+    });
+
     it('scopes iOS disk replies to App lock, keeps other IDs reserved and preserves unknown rows', async () => {
         const appId = generateUUID();
         const otherId = generateUUID();

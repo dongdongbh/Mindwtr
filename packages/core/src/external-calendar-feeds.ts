@@ -65,6 +65,8 @@ export type ExternalCalendarFetchOptions = {
     timeoutMs?: number;
     /** Called for each enabled subscription that could not be read or parsed (it drops out of the result). */
     onFeedError?: (calendarId: string) => void;
+    /** A native read's admitted sources; omission retains RN's device getters. */
+    sources?: { subscriptions: ExternalCalendarSubscription[]; systemSettings: SystemCalendarSettings };
 };
 
 /** A device calendar as expo-calendar describes it (Android: a CalendarContract.Calendars row). */
@@ -116,7 +118,7 @@ export type ExternalCalendarFeedsHost = {
     storage: { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<void> };
     fetch: typeof fetch;
     /** Reads a local feed: a `file://` or a `content://` URL. */
-    readLocalFile(url: string): Promise<string>;
+    readLocalFile(url: string, signal?: AbortSignal): Promise<string>;
     calendars: DeviceCalendarReader;
     /** This device's pushed-event map (the calendar_sync table) for `platform`. */
     getAllCalendarSyncEntries(platform: string): Promise<Array<{ calendarId?: unknown; calendarEventId?: unknown }>>;
@@ -188,9 +190,8 @@ export function normalizeSystemCalendarSettings(raw: Partial<SystemCalendarSetti
         ? Array.from(
             new Set(
                 raw.selectedCalendarIds
-                    .filter((id): id is string => typeof id === 'string')
-                    .map((id) => id.trim())
-                    .filter((id) => id.length > 0)
+                    // Provider identifiers are opaque; trim only to reject blank entries.
+                    .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
             )
         )
         : [];
@@ -203,6 +204,11 @@ export function normalizeSystemCalendarSettings(raw: Partial<SystemCalendarSetti
             .filter((entry): entry is [string, string[]] => Array.isArray(entry[1]))
             .map(([id, ids]) => [id, [...new Set(ids.filter((areaId) => typeof areaId === 'string' && areaId.length > 0))]])),
     };
+}
+
+/** Decode the device-local cell with the same legacy defaults as the RN binding. */
+export function decodeSystemCalendarSettings(raw: string | null): SystemCalendarSettings {
+    return normalizeSystemCalendarSettings(safeJsonParse<Partial<SystemCalendarSettings> | null>(raw, null));
 }
 
 function normalizePermissionStatus(status: unknown): SystemCalendarPermissionStatus {
@@ -253,6 +259,25 @@ function toDateSafe(value: unknown): Date | null {
     const date = value instanceof Date ? value : new Date(String(value));
     if (!Number.isFinite(date.getTime())) return null;
     return date;
+}
+
+export function normalizeExternalCalendarSubscriptions(calendars: readonly ExternalCalendarSubscription[]): ExternalCalendarSubscription[] {
+    return calendars
+        .filter((c) => c && typeof c.url === 'string')
+        .map((c) => ({
+            id: c.id || generateUUID(),
+            name: (c.name || 'Calendar').trim() || 'Calendar',
+            url: c.url.trim(),
+            enabled: c.enabled !== false,
+            color: normalizeExternalCalendarColor(c.color),
+            ...(Array.isArray(c.areaIds) ? { areaIds: c.areaIds } : {}),
+        }))
+        .filter((c) => c.url.length > 0);
+}
+
+/** Decode a legacy device copy with the same defaults as the RN reader. */
+export function decodeExternalCalendarSubscriptions(raw: string | null): ExternalCalendarSubscription[] {
+    return normalizeExternalCalendarSubscriptions(safeJsonParse<ExternalCalendarSubscription[]>(raw, []));
 }
 
 function sanitizeExternalCalendars(calendars: ExternalCalendarSubscription[]): ExternalCalendarSubscription[] {
@@ -344,18 +369,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
     const getExternalCalendars = async (): Promise<ExternalCalendarSubscription[]> => {
         if (isSandboxMode()) return [];
         const raw = await host.storage.getItem(EXTERNAL_CALENDARS_KEY);
-        const parsed = safeJsonParse<ExternalCalendarSubscription[]>(raw, []);
-        return parsed
-            .filter((c) => c && typeof c.url === 'string')
-            .map((c) => ({
-                id: c.id || generateUUID(),
-                name: (c.name || 'Calendar').trim() || 'Calendar',
-                url: c.url.trim(),
-                enabled: c.enabled !== false,
-                color: normalizeExternalCalendarColor(c.color),
-                ...(Array.isArray(c.areaIds) ? { areaIds: c.areaIds } : {}),
-            }))
-            .filter((c) => c.url.length > 0);
+        return decodeExternalCalendarSubscriptions(raw);
     };
 
     const saveExternalCalendars = async (calendars: ExternalCalendarSubscription[]): Promise<void> => {
@@ -366,8 +380,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
     const getSystemCalendarSettings = async (): Promise<SystemCalendarSettings> => {
         if (isSandboxMode()) return normalizeSystemCalendarSettings(null);
         const raw = await host.storage.getItem(SYSTEM_CALENDAR_SETTINGS_KEY);
-        const parsed = safeJsonParse<Partial<SystemCalendarSettings> | null>(raw, null);
-        return normalizeSystemCalendarSettings(parsed);
+        return decodeSystemCalendarSettings(raw);
     };
 
     const saveSystemCalendarSettings = async (settings: SystemCalendarSettings): Promise<void> => {
@@ -402,7 +415,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         if (isSandboxMode()) return [];
         if (host.platform() === 'web') return [];
         const permission = await getSystemCalendarPermissionStatus();
-        if (permission !== 'granted') return [];
+        if (permission !== 'granted') throw new Error('Calendar provider unavailable');
 
         try {
             const calendars = await host.calendars.getCalendars();
@@ -416,14 +429,14 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
                 }))
                 .sort((a, b) => a.name.localeCompare(b.name));
         } catch {
-            return [];
+            throw new Error('Calendar provider unavailable');
         }
     };
 
     const fetchTextWithTimeout = async (url: string, timeoutMs: number, signal?: AbortSignal): Promise<string> => {
         if (isLocalCalendarSourceUrl(url)) {
             throwIfAborted(signal);
-            const text = await host.readLocalFile(url);
+            const text = await host.readLocalFile(url, signal);
             throwIfAborted(signal);
             return text;
         }
@@ -460,9 +473,10 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         rangeEnd: Date,
         signal?: AbortSignal,
         onFeedError?: (calendarId: string) => void,
+        sources?: ExternalCalendarFetchOptions['sources'],
     ): Promise<ExternalCalendarSourceResult> => {
         throwIfAborted(signal);
-        const calendars = await getExternalCalendars();
+        const calendars = sources ? sources.subscriptions : await getExternalCalendars();
         const enabled = calendars.filter((c) => c.enabled);
 
         const results = await Promise.allSettled(
@@ -509,24 +523,27 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         return merged;
     };
 
-    const fetchSystemCalendarEvents = async (rangeStart: Date, rangeEnd: Date, signal?: AbortSignal): Promise<ExternalCalendarSourceResult> => {
+    const fetchSystemCalendarEvents = async (rangeStart: Date, rangeEnd: Date, signal?: AbortSignal, sources?: ExternalCalendarFetchOptions['sources']): Promise<ExternalCalendarSourceResult> => {
         throwIfAborted(signal);
         const platform = host.platform();
         if (platform === 'web') {
             return { calendars: [], events: [] };
         }
 
-        const settings = await getSystemCalendarSettings();
+        const settings = sources ? sources.systemSettings : await getSystemCalendarSettings();
+        throwIfAborted(signal);
         if (!settings.enabled) {
             return { calendars: [], events: [] };
         }
 
         const permission = await getSystemCalendarPermissionStatus();
+        throwIfAborted(signal);
         if (permission !== 'granted') {
             return { calendars: [], events: [] };
         }
 
         const rawCalendars = await withAbortSignal(host.calendars.getCalendars(), signal);
+        throwIfAborted(signal);
         const availableCalendars = rawCalendars
             .filter((calendar) => typeof calendar.id === 'string' && calendar.id.trim().length > 0)
             .filter((calendar) => !isMindwtrNamedCalendar(calendar));
@@ -567,6 +584,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
             ),
             signal,
         );
+        throwIfAborted(signal);
 
         // Older exports did not carry a notes marker. Match only this device's
         // persisted (calendar, native event) pair; a same-title event is unrelated.
@@ -713,8 +731,8 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
 
         try {
             const [icsData, systemData] = await Promise.all([
-                fetchIcsCalendarEvents(rangeStart, rangeEnd, signal, options.onFeedError),
-                fetchSystemCalendarEvents(rangeStart, rangeEnd, signal),
+                fetchIcsCalendarEvents(rangeStart, rangeEnd, signal, options.onFeedError, options.sources),
+                fetchSystemCalendarEvents(rangeStart, rangeEnd, signal, options.sources),
             ]);
 
             return mergeExternalCalendarSources([icsData, systemData]);

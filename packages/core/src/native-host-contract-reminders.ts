@@ -79,7 +79,10 @@ import {
 import type { NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
+import { exact, record } from './native-host-contract-project-shared';
+import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { useTaskStore } from './store';
+import { getDigestSchedule } from './schedule-utils';
 
 export type NativeReminderAlarm = {
     key: string;
@@ -88,6 +91,8 @@ export type NativeReminderAlarm = {
     fireAtMs: number;
     /** `daily` and `weekly` alarms fire again at the same local time. */
     repeat: 'once' | 'daily' | 'weekly';
+    /** iOS recurring local wall-clock slot; Sunday is 0, independent of the first fire date's DST adjustment. */
+    calendar?: { hour: number; minute: number; weekday?: number };
     /** What the notification shows and carries (React Native's alarm details: title, message, channel, buttons, data). */
     details: Record<string, unknown>;
     /** The held alarm this one replaces goes for this reason; null when none is held. */
@@ -118,6 +123,7 @@ type ReminderDeps = {
     save: () => Promise<NativeHostResult<null>>;
     language: () => Language;
     requestIdPattern: RegExp;
+    reminderPlatform: 'android' | 'ios';
 };
 
 // Reminder alarms take ids in [1, 2^30), snoozed alarms in [2^30, 2^31 - 1), so the two never meet.
@@ -125,6 +131,57 @@ const ID_SPAN = 2 ** 30 - 1;
 const REMINDER_ID_BASE = 1;
 const SNOOZE_ID_BASE = 2 ** 30;
 const TASK_ID_LIMIT = 500;
+type ReminderCompletionRequest = { requestId: string; taskId: string };
+const COMPLETION_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const completionRequest = (input: unknown): ReminderCompletionRequest | null => {
+    if (!isNativeJsonWithinBytes(input, 4096) || !record(input) || !exact(input, ['requestId', 'taskId'])
+        || typeof input.requestId !== 'string' || !COMPLETION_UUID.test(input.requestId)
+        || !isText(input.taskId, TASK_ID_LIMIT) || !input.taskId) return null;
+    return { requestId: input.requestId, taskId: input.taskId };
+};
+const completionPayload = (request: ReminderCompletionRequest) => JSON.stringify(['reminderComplete', request.taskId]);
+const completionResult = (result: NativeHostResult<unknown>): NativeHostResult<ReminderCompletion> => {
+    if (!result.ok) return result;
+    const value = result.value;
+    if (!record(value) || !exact(value, ['changed', 'outcome'])
+        || !(value.changed === true && value.outcome === 'completed'
+            || value.changed === false && (value.outcome === 'task-not-found'
+                || value.outcome === 'task-deleted' || value.outcome === 'not-actionable'))) {
+        return fail('INVALID_INPUT', 'Saved reminder completion receipt is malformed');
+    }
+    return { ok: true, value: value as ReminderCompletion };
+};
+const unknownCompletion = () => fail('STALE_REVISION', 'Reminder completion is unconfirmed; no changes were replayed');
+type ReminderSnoozeRequest = { requestId: string; requestedAt: number; details: Record<string, unknown> };
+const snoozeInstant = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value)
+    && Math.abs(value) <= 8_640_000_000_000_000;
+const snoozeOwner = (value: unknown): value is string => typeof value === 'string'
+    && (/^(task|project):.+$/.test(value) || ['digest:morning', 'digest:evening', 'digest:weekly-review'].includes(value));
+const snoozeJson = (input: unknown): boolean => {
+    const pending = [input], seen = new Set<object>();
+    while (pending.length) {
+        const value = pending.pop();
+        if (value === null || typeof value === 'string' || typeof value === 'boolean'
+            || typeof value === 'number' && Number.isFinite(value)) continue;
+        if (typeof value !== 'object' || seen.has(value) || !Array.isArray(value)
+            && Object.prototype.toString.call(value) !== '[object Object]') return false;
+        seen.add(value); pending.push(...Object.values(value));
+    }
+    return true;
+};
+const snoozeRequest = (input: unknown): ReminderSnoozeRequest | null => {
+    if (!isNativeJsonWithinBytes(input, 65_536) || !record(input) || !exact(input, ['requestId', 'requestedAt', 'details'])
+        || typeof input.requestId !== 'string' || !COMPLETION_UUID.test(input.requestId) || !snoozeInstant(input.requestedAt)
+        || !record(input.details) || !snoozeJson(input.details) || !isText(input.details.title, 10_000)
+        || typeof input.details.message !== 'string' || typeof input.details.tag !== 'string'
+        || typeof input.details.play_sound !== 'boolean' || !record(input.details.data)
+        || !Object.values(input.details.data).every((value) => typeof value === 'string')
+        || !snoozeOwner(input.details.data.alarmKey) || typeof input.details.snooze_interval !== 'number'
+        || !Number.isFinite(input.details.snooze_interval) || input.details.snooze_interval <= 0) return null;
+    return { requestId: input.requestId, requestedAt: input.requestedAt, details: input.details };
+};
+const snoozePayload = (request: ReminderSnoozeRequest) => JSON.stringify(['reminderSnooze', request.requestedAt, request.details]);
+const unknownSnooze = () => fail('STALE_REVISION', 'Reminder Snooze is unconfirmed; no changes were replayed');
 
 /**
  * Marks each signature in the stored map as the native host's. React Native's planner keeps a
@@ -168,8 +225,8 @@ const readNativeReminderState = (raw: string | null | undefined): NativeReminder
                 state.set(key, { kind: 'snooze', id, fireAtMs: entry.fireAtMs as number, details: entry.details, armed: entry.armed === true });
             }
         }
-    } catch (error) {
-        void logWarn('Stored native reminder state unreadable; starting from none', { scope: 'notifications', error });
+    } catch {
+        void logWarn('Stored native reminder state unreadable; starting from none', { scope: 'notifications' });
     }
     return state;
 };
@@ -207,6 +264,29 @@ const allocateAlarmId = (key: string, taken: Set<number>, base: number): number 
     return id;
 };
 
+/** The original shared Snooze derivation, also used by the pure strict preview. */
+const buildNativeReminderSnooze = (input: ReminderSnoozeRequest): NativeReminderAlarm | null => {
+    const key = `snooze:${input.requestId.toLowerCase()}`;
+    const snooze = buildReminderSnooze(input.details, input.requestedAt, key);
+    return snooze ? { ...snooze, id: allocateAlarmId(key, new Set(), SNOOZE_ID_BASE), repeat: 'once', replacing: null } : null;
+};
+const previewSnooze = (input: unknown): NativeHostResult<NativeReminderAlarm> => {
+    const request = snoozeRequest(input), alarm = request && buildNativeReminderSnooze(request);
+    return alarm && snoozeInstant(alarm.fireAtMs) ? { ok: true, value: alarm }
+        : fail('INVALID_INPUT', 'A bounded reminder Snooze request is required');
+};
+const snoozeResult = (result: NativeHostResult<unknown>, expected: NativeReminderAlarm): NativeHostResult<NativeReminderAlarm> => {
+    if (!result.ok) return result;
+    const value = result.value;
+    if (!record(value) || !exact(value, ['key', 'id', 'fireAtMs', 'repeat', 'details', 'replacing'])
+        || value.key !== expected.key || value.id !== expected.id || value.fireAtMs !== expected.fireAtMs
+        || value.repeat !== 'once' || value.replacing !== null || !snoozeJson(value.details) || !isNativeJsonWithinBytes(value.details, 65_536)
+        || JSON.stringify(value.details) !== JSON.stringify(expected.details)) {
+        return fail('INVALID_INPUT', 'Saved reminder Snooze receipt is malformed');
+    }
+    return { ok: true, value: expected };
+};
+
 export function createReminderMethods(deps: ReminderDeps) {
     const receipts = createNativeRequestReceipts({
         save: async () => {
@@ -222,7 +302,7 @@ export function createReminderMethods(deps: ReminderDeps) {
     });
     let taskOpenSequence = 0;
 
-    return {
+    const methods = {
         /** The alarms to cancel and make now, from the stored alarm map (see the file comment for the order). */
         async planReminderAlarms(input: {
             storedAlarms: string | null;
@@ -244,9 +324,9 @@ export function createReminderMethods(deps: ReminderDeps) {
             let held: Map<string, ReminderAlarmEntry>;
             try {
                 held = readNativeAlarmMap(input.storedAlarms);
-            } catch (error) {
+            } catch {
                 // As on React Native: an unreadable map is replaced, since nothing in it can be cancelled.
-                void logWarn('Stored reminder alarm map unreadable; starting from none', { scope: 'notifications', error });
+                void logWarn('Stored reminder alarm map unreadable; starting from none', { scope: 'notifications' });
                 held = new Map();
             }
             const remakeAll = input.remake === 'all';
@@ -258,13 +338,14 @@ export function createReminderMethods(deps: ReminderDeps) {
             // The texts first: the store and the clock are read after the last await, so a change meanwhile is judged too.
             const translations = await loadTranslations(deps.language());
             const state = useTaskStore.getState();
+            const digest = deps.reminderPlatform === 'ios' ? getDigestSchedule(state.settings) : null;
             const plan = planReminderAlarms({
                 settings: state.settings,
                 tasks: state.tasks,
                 projects: state.projects,
                 now: new Date(),
                 translations,
-                maxOneShotReminders: MAX_PENDING_ONE_SHOT_REMINDER_ALARMS.android,
+                maxOneShotReminders: MAX_PENDING_ONE_SHOT_REMINDER_ALARMS[deps.reminderPlatform],
                 alarms: held,
                 permissionGranted: input.permissionGranted,
             });
@@ -298,7 +379,8 @@ export function createReminderMethods(deps: ReminderDeps) {
                         // Made now: one never made; at a process start, one ahead (a reboot dropped it) or one the phone missed while
                         // off (made but not shown; it shows once, now). Only a host with a ledger knows one was not shown.
                         const missed = Boolean(input.fired) && entry.fireAtMs <= nowMs;
-                        if (!entry.armed || (remakeAll && (entry.fireAtMs > nowMs || missed))) snoozes.push(snoozeAlarm(key, entry));
+                        if (!entry.armed || (remakeAll && (entry.fireAtMs > nowMs || missed))
+                            || (remake.has(key) && entry.fireAtMs > nowMs)) snoozes.push(snoozeAlarm(key, entry));
                         remembered.set(key, { ...entry, armed: true });
                     }
                     continue;
@@ -319,11 +401,16 @@ export function createReminderMethods(deps: ReminderDeps) {
                 taken.add(id);
                 const fireAt = new Date(request.config.fireAt);
                 fireAt.setMilliseconds(0);
+                const slot = digest && (key === 'digest:morning' ? digest.morning
+                    : key === 'digest:evening' ? digest.evening : key === 'digest:weekly-review' ? digest.weekly : null);
+                const calendar = digest && slot ? { hour: slot.hour, minute: slot.minute,
+                    ...(key === 'digest:weekly-review' ? { weekday: digest.weekly.day } : {}) } : null;
                 schedule.push({
                     key,
                     id,
                     fireAtMs: fireAt.getTime(),
                     repeat: request.config.repeatInterval ?? 'once',
+                    ...(calendar ? { calendar } : {}),
                     details: buildReminderAlarmDetails(key, request.config),
                     replacing: heldEntry ? getReminderAlarmCancelReason(plan, key) : null,
                 });
@@ -379,10 +466,8 @@ export function createReminderMethods(deps: ReminderDeps) {
                 || typeof input.requestedAt !== 'number' || !isObjectRecord(input.details) || !isText(input.details.title, 10_000)) {
                 return fail('INVALID_INPUT', 'A request UUID, the tap time and the fired alarm\'s details are required');
             }
-            const key = `snooze:${input.requestId.toLowerCase()}`;
-            const snooze = buildReminderSnooze(input.details, input.requestedAt, key);
-            if (!snooze) return fail('INVALID_INPUT', 'This reminder has no Snooze');
-            const alarm: NativeReminderAlarm = { ...snooze, id: allocateAlarmId(key, new Set(), SNOOZE_ID_BASE), repeat: 'once', replacing: null };
+            const alarm = buildNativeReminderSnooze(input);
+            if (!alarm) return fail('INVALID_INPUT', 'This reminder has no Snooze');
             return receipts.run<NativeReminderAlarm>(input.requestId, JSON.stringify(['reminderSnooze', input.requestedAt, input.details]), async () => (
                 { ok: true, value: alarm }
             ));
@@ -434,6 +519,59 @@ export function createReminderMethods(deps: ReminderDeps) {
                     },
                 }),
             };
+        },
+    };
+    const savedCompletion = (request: ReminderCompletionRequest): NativeHostResult<ReminderCompletion> | null => {
+        const saved = receipts.saved<unknown>(request.requestId, completionPayload(request));
+        return saved ? completionResult(saved) : null;
+    };
+    const savedSnooze = (request: ReminderSnoozeRequest, expected: NativeReminderAlarm): NativeHostResult<NativeReminderAlarm> | null => {
+        const saved = receipts.saved<unknown>(request.requestId, snoozePayload(request));
+        return saved ? snoozeResult(saved, expected) : null;
+    };
+    return {
+        ...methods,
+        /** Pure derivation: frozen journal validation must not consult changed eligibility or readiness. */
+        previewReminderSnooze: previewSnooze,
+        async commitReminderSnooze(input: unknown): Promise<NativeHostResult<NativeReminderAlarm>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const expected = previewSnooze(input); if (!expected.ok) return expected;
+            const request = snoozeRequest(input)!;
+            return savedSnooze(request, expected.value) ?? snoozeResult(await methods.snoozeReminder(request), expected.value);
+        },
+        probeReminderSnoozeOutcome(input: unknown): NativeHostResult<NativeReminderAlarm> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const expected = previewSnooze(input); if (!expected.ok) return expected;
+            return savedSnooze(snoozeRequest(input)!, expected.value) ?? unknownSnooze();
+        },
+        async retryReminderSnooze(input: unknown): Promise<NativeHostResult<NativeReminderAlarm>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const expected = previewSnooze(input); if (!expected.ok) return expected;
+            const request = snoozeRequest(input)!;
+            return savedSnooze(request, expected.value) ?? snoozeResult(await receipts.run<NativeReminderAlarm>(
+                request.requestId, snoozePayload(request), async () => unknownSnooze()), expected.value);
+        },
+        /** A newly admitted typed action; the legacy method remains the single task writer. */
+        async commitReminderCompletion(input: unknown): Promise<NativeHostResult<ReminderCompletion>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const request = completionRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
+            return savedCompletion(request) ?? completionResult(await methods.completeReminderTask(request));
+        },
+        /** Cold recovery only reads the exact original receipt, never the current task state. */
+        probeReminderCompletionOutcome(input: unknown): NativeHostResult<ReminderCompletion> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const request = completionRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
+            return savedCompletion(request) ?? unknownCompletion();
+        },
+        /** Warm recovery joins an existing run or finishes its owed save; an unknown request cannot write. */
+        async retryReminderCompletion(input: unknown): Promise<NativeHostResult<ReminderCompletion>> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            const request = completionRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded reminder completion request is required');
+            return savedCompletion(request) ?? completionResult(await receipts.run<ReminderCompletion>(
+                request.requestId, completionPayload(request), async () => unknownCompletion()));
         },
     };
 }

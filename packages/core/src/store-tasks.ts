@@ -1391,7 +1391,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, flushPe
         return result;
     },
 
-    commitPreparedCalendarCreate: async ({ task, project, intent, creation, deviceIdBefore, deviceIdToInitialize }: PreparedCalendarCreate) => {
+    commitPreparedCalendarCreate: async ({ task, project, intent, creation, deviceIdBefore, deviceIdToInitialize, defaultAreaWitness }: PreparedCalendarCreate) => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: 'Prepared Calendar creation conflicts with current data' };
         const sameTask = (left: Task, right: Task) => JSON.stringify(taskToSqliteRow(left)) === JSON.stringify(taskToSqliteRow(right));
         set((state) => {
@@ -1401,6 +1401,11 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, flushPe
             if (existingTask) {
                 if (sameTask(existingTask, task)) result = { success: true, id: task.id, outcome: 'replayed' };
                 return state;
+            }
+            if (defaultAreaWitness) {
+                const current = state._allAreas.find((area) => area.id === defaultAreaWitness.id);
+                if (defaultAreaWitness.before === null ? Boolean(current)
+                    : !current || (current.deletedAt ?? null) !== defaultAreaWitness.before.deletedAt) return state;
             }
             // This command publishes task and optional project together. An
             // occupied generated project ID with no task is a conflict, never

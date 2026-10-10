@@ -104,7 +104,7 @@ function main() {
 
     if (opts.detach) {
         const unit = opts.unit ?? `device-batch-${basename(opts.log)}`.replace(/[^\w.-]/g, '-');
-        const env = ['PATH', 'JAVA_HOME', 'HOME'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`);
+        const env = ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`);
         // KillMode=process: the unit's end must not take down an adb server or Gradle daemon other sessions now use.
         const run = spawnSync('systemd-run', ['--user', `--unit=${unit}`, '--collect', '--property=KillMode=process', `--working-directory=${opts.tree}`, ...env,
             `--property=StandardOutput=append:${opts.log}/runner.out`, `--property=StandardError=append:${opts.log}/runner.out`,
@@ -115,7 +115,7 @@ function main() {
 
     // One batch on the phone at a time: run again under the lock. -o keeps the lock out of the adb server this batch may start.
     if (!process.env.S23_LOCKED) {
-        const run = spawnSync('flock', ['-o', '-E', String(LOCK_TIMED_OUT), '-w', '14400', LOCK, process.execPath, ...self],
+        const run = spawnSync('flock', ['-o', '-E', String(LOCK_TIMED_OUT), '-w', '43200', LOCK, process.execPath, ...self],
             { stdio: 'inherit', env: { ...process.env, S23_LOCKED: '1' } });
         if (run.status === LOCK_TIMED_OUT) console.error(`STOP: ${LOCK} stayed busy for 4 hours`);
         process.exit(run.status ?? 1);

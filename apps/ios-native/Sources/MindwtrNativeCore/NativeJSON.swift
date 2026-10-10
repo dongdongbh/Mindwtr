@@ -17,6 +17,35 @@ public enum NativeJSON {
         return try restoreStrings(parsed, mutableContainers: options.contains(.mutableContainers))
     }
 
+    /// Checks member uniqueness after ordinary JSON validation, preserving decoded key bytes.
+    static func hasUniqueObjectKeys(_ text: String) throws -> Bool {
+        let bytes = Array(text.utf8)
+        var index = 0, objects: [Set<Data>] = []
+        while index < bytes.count {
+            if bytes[index] == 0x7b { objects.append([]); index += 1; continue }
+            if bytes[index] == 0x7d {
+                guard !objects.isEmpty else { return false }
+                objects.removeLast(); index += 1; continue
+            }
+            guard bytes[index] == 0x22 else { index += 1; continue }
+            let start = index; index += 1
+            while index < bytes.count {
+                if bytes[index] == 0x5c { index += 2; continue }
+                if bytes[index] == 0x22 { index += 1; break }
+                index += 1
+            }
+            let end = index
+            var next = end
+            while next < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[next]) { next += 1 }
+            if next < bytes.count, bytes[next] == 0x3a {
+                guard !objects.isEmpty,
+                      let key = try NativeJSON.jsonObject(with: Data(bytes[start..<end]), options: [.fragmentsAllowed]) as? String,
+                      objects[objects.count - 1].insert(Data(key.utf8)).inserted else { return false }
+            }
+        }
+        return objects.isEmpty
+    }
+
     private static func containsBOM(_ data: Data) -> Bool {
         let bytes = data
         for index in bytes.indices {

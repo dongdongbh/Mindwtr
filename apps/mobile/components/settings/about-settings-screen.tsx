@@ -5,7 +5,7 @@ import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { submitFeedbackSubmission } from '@mindwtr/core';
+import { fetchAppStoreInfo, shouldCheckForAppUpdate, submitFeedbackSubmission } from '@mindwtr/core';
 import { useToast } from '@/contexts/toast-context';
 import { getDeviceLocale, resolveMobileAnalyticsVersion } from '@/lib/analytics-heartbeat';
 import { collectFeedbackDiagnostics } from '@/lib/app-log';
@@ -16,7 +16,6 @@ import { compareVersions, logSettingsError, logSettingsWarn } from '@/lib/settin
 import {
     MobileExtraConfig,
     UPDATE_BADGE_AVAILABLE_KEY,
-    UPDATE_BADGE_INTERVAL_MS,
     UPDATE_BADGE_LAST_CHECK_KEY,
     UPDATE_BADGE_LATEST_KEY,
 } from './settings.constants';
@@ -87,8 +86,6 @@ export function AboutSettingsScreen({
     const PLAY_STORE_URL = `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE_NAME}`;
     const PLAY_STORE_MARKET_URL = `market://details?id=${ANDROID_PACKAGE_NAME}`;
     const APP_STORE_BUNDLE_ID = Constants.expoConfig?.ios?.bundleIdentifier || Application.applicationId || 'tech.dongdongbh.mindwtr';
-    const APP_STORE_LOOKUP_URL = `https://itunes.apple.com/lookup?bundleId=${encodeURIComponent(APP_STORE_BUNDLE_ID)}&country=US`;
-    const APP_STORE_LOOKUP_FALLBACK_URL = `https://itunes.apple.com/lookup?bundleId=${encodeURIComponent(APP_STORE_BUNDLE_ID)}`;
     const canRateInStore = !isFossBuild && (Platform.OS === 'android' || Platform.OS === 'ios');
 
     type AndroidComparableVersionResult =
@@ -122,44 +119,7 @@ export function AboutSettingsScreen({
         return response.json();
     }, []);
 
-    const fetchLatestAppStoreInfo = useCallback(async (): Promise<{ version: string; trackViewUrl: string | null }> => {
-        const lookupUrls = [APP_STORE_LOOKUP_FALLBACK_URL, APP_STORE_LOOKUP_URL];
-        let lastError: Error | null = null;
-        let bestMatch: { version: string; trackViewUrl: string | null } | null = null;
-
-        for (const baseUrl of lookupUrls) {
-            const separator = baseUrl.includes('?') ? '&' : '?';
-            const url = `${baseUrl}${separator}_=${Date.now()}`;
-            const response = await fetch(url, {
-                headers: {
-                    Accept: 'application/json',
-                    'User-Agent': 'Mindwtr-App',
-                },
-                cache: 'no-store',
-            });
-            if (!response.ok) {
-                lastError = new Error(`App Store lookup failed (${url}): ${response.status}`);
-                continue;
-            }
-            const payload = await response.json() as { results?: { version?: unknown; trackViewUrl?: unknown }[] };
-            const candidate = Array.isArray(payload.results) ? payload.results[0] : null;
-            const version = typeof candidate?.version === 'string' ? candidate.version.trim() : '';
-            if (!version) {
-                lastError = new Error(`Unable to parse App Store version from ${url}`);
-                continue;
-            }
-            const trackViewUrl = typeof candidate?.trackViewUrl === 'string' && candidate.trackViewUrl.trim()
-                ? candidate.trackViewUrl.trim()
-                : null;
-            if (!bestMatch || compareVersions(version, bestMatch.version) > 0) {
-                bestMatch = { version, trackViewUrl };
-            }
-        }
-
-        if (bestMatch) return bestMatch;
-        if (lastError) throw lastError;
-        throw new Error('Unable to fetch App Store version');
-    }, [APP_STORE_LOOKUP_FALLBACK_URL, APP_STORE_LOOKUP_URL]);
+    const fetchLatestAppStoreInfo = useCallback(() => fetchAppStoreInfo(APP_STORE_BUNDLE_ID), [APP_STORE_BUNDLE_ID]);
 
     const fetchAndroidComparableVersion = useCallback(async (): Promise<AndroidComparableVersionResult> => {
         if (androidInstallerSource === 'sideload') {
@@ -196,8 +156,7 @@ export function AboutSettingsScreen({
             if (isExpoGo || isFossBuild) return;
             try {
                 const lastCheckedRaw = await AsyncStorage.getItem(UPDATE_BADGE_LAST_CHECK_KEY);
-                const lastChecked = Number.parseInt(lastCheckedRaw || '0', 10);
-                if (Date.now() - lastChecked < UPDATE_BADGE_INTERVAL_MS) {
+                if (!shouldCheckForAppUpdate(lastCheckedRaw)) {
                     const storedBadge = await AsyncStorage.getItem(UPDATE_BADGE_AVAILABLE_KEY);
                     if (!cancelled) onUpdateBadgeChange(storedBadge === 'true');
                     return;

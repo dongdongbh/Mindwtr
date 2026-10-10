@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import type { Area, Project, Task } from '@mindwtr/core';
-import { hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
+import { configureDateFormatting, getDateFormattingConfig, getTaskAgeLabel, hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../contexts/language-context';
 import { TaskItemDisplay } from './TaskItemDisplay';
@@ -49,6 +49,96 @@ describe('TaskItemDisplay', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
         vi.useRealTimers();
+    });
+
+    const clockRow = (task: Task, showTaskAge = false) => <LanguageProvider><TaskItemDisplay
+        task={task} language="en" selectionMode={false} isViewOpen={showTaskAge}
+        actions={{ onToggleView: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn(),
+            onDuplicate: vi.fn(), onStatusChange: vi.fn(), openAttachment: vi.fn() }}
+        visibleAttachments={[]} recurrenceRule="" recurrenceStrategy="strict"
+        prioritiesEnabled={false} timeEstimatesEnabled={false} isStagnant={false}
+        showQuickDone={false} readOnly={false} showTaskAge={showTaskAge} t={(key) => key}
+    /></LanguageProvider>;
+
+    it.each([
+        { recurrence: undefined, timeFormat: '12h' as const },
+        { recurrence: undefined, timeFormat: '24h' as const },
+        { recurrence: 'daily' as const, timeFormat: '12h' as const },
+        { recurrence: 'daily' as const, timeFormat: '24h' as const },
+    ])('refreshes a memoized due row without prop changes ($timeFormat, $recurrence)', ({ recurrence, timeFormat }) => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 9, 9, 12, 59, 30));
+        const formatting = getDateFormattingConfig();
+        configureDateFormatting({ ...formatting, timeFormat });
+        const dueDate = new Date(2026, 9, 9, 13, 0, 0).toISOString();
+        const view = render(clockRow({ ...baseTask, status: 'next', recurrence, dueDate }));
+        try {
+            const label = safeFormatDate(dueDate, 'Pp');
+            expect(view.getByText(label).closest('.metadata-badge')).toHaveClass('text-warning');
+            act(() => { vi.advanceTimersByTime(30_001); });
+            expect(view.getByText(label).closest('.metadata-badge')).toHaveClass('text-destructive');
+        } finally {
+            view.unmount();
+            configureDateFormatting(formatting);
+        }
+    });
+
+    it('refreshes the memoized row on same-minute visibility resume', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 9, 9, 13, 0, 10));
+        let hidden = false;
+        const hiddenSpy = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+        const dueDate = new Date(2026, 9, 9, 13, 0, 20).toISOString();
+        const view = render(clockRow({ ...baseTask, status: 'next', dueDate }));
+        try {
+            const label = safeFormatDate(dueDate, 'Pp');
+            act(() => { hidden = true; document.dispatchEvent(new Event('visibilitychange')); vi.advanceTimersByTime(20_000); });
+            expect(view.getByText(label).closest('.metadata-badge')).toHaveClass('text-warning');
+            act(() => { hidden = false; document.dispatchEvent(new Event('visibilitychange')); });
+            expect(view.getByText(label).closest('.metadata-badge')).toHaveClass('text-destructive');
+        } finally {
+            view.unmount();
+            hiddenSpy.mockRestore();
+        }
+    });
+
+    it('preserves date-only deadlines and finished/reference status while the display clock ticks', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 9, 9, 12, 59, 30));
+        const dateOnly = render(clockRow({ ...baseTask, status: 'next', dueDate: '2026-10-09' }));
+        const done = render(clockRow({ ...baseTask, status: 'done', dueDate: '2026-10-08', completedAt: '2026-10-09T10:00:00.000Z' }));
+        const reference = render(clockRow({ ...baseTask, status: 'reference', dueDate: '2026-10-08' }));
+        try {
+            act(() => { vi.advanceTimersByTime(30_001); });
+            expect(dateOnly.getByText(safeFormatDate('2026-10-09', 'P')).closest('.metadata-badge')).toHaveClass('text-warning');
+            expect(done.container.querySelector('.text-destructive')).toBeNull();
+            expect(reference.container.querySelector('.text-destructive')).toBeNull();
+            vi.setSystemTime(new Date(2026, 9, 10, 0, 0, 0, 1));
+            act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+            expect(dateOnly.getByText(safeFormatDate('2026-10-09', 'P')).closest('.metadata-badge')).toHaveClass('text-destructive');
+        } finally {
+            dateOnly.unmount();
+            done.unmount();
+            reference.unmount();
+        }
+    });
+
+    it('refreshes enabled task age without a due date or prop change', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 9, 9, 12, 59, 30));
+        const createdAt = new Date(2026, 9, 7, 13, 0, 0).toISOString();
+        const before = getTaskAgeLabel(createdAt)!;
+        const view = render(clockRow({ ...baseTask, createdAt }, true));
+        try {
+            expect(view.getByText(before)).toBeInTheDocument();
+            act(() => { vi.advanceTimersByTime(30_001); });
+            const after = getTaskAgeLabel(createdAt)!;
+            expect(after).not.toBe(before);
+            expect(view.getByText(after)).toBeInTheDocument();
+            expect(view.queryByText(before)).not.toBeInTheDocument();
+        } finally {
+            view.unmount();
+        }
     });
 
     it('renders task age in Chinese when language is zh', () => {

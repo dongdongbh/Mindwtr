@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { en } from '../../../../../../packages/core/src/i18n/locales/en';
 import type { McpServerStatus } from '../../../lib/mcp-server';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), copy: vi.fn(), available: true }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), copy: vi.fn(), write: vi.fn(), log: vi.fn(), available: true }));
 vi.mock('../../../contexts/language-context', () => ({ useLanguage: () => ({ t: (key: string) => en[key] ?? key }) }));
 vi.mock('../../../lib/mcp-server', async (importOriginal) => ({
     ...await importOriginal<typeof import('../../../lib/mcp-server')>(),
@@ -11,6 +11,7 @@ vi.mock('../../../lib/mcp-server', async (importOriginal) => ({
     setMcpServerConfig: mocks.set,
     isMcpServerAvailable: () => mocks.available,
 }));
+vi.mock('../../../lib/app-log', () => ({ logInfo: mocks.log, logWarn: mocks.log }));
 import { SettingsMcpSection } from './SettingsMcpSection';
 
 const off: McpServerStatus = {
@@ -32,6 +33,9 @@ describe('SettingsMcpSection', () => {
         mocks.get.mockReset().mockResolvedValue(off);
         mocks.set.mockReset().mockResolvedValue(running);
         mocks.copy.mockReset().mockResolvedValue(undefined);
+        mocks.write.mockReset();
+        mocks.log.mockReset().mockResolvedValue(null);
+        vi.stubGlobal('ClipboardItem', undefined);
         vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: mocks.copy } });
     });
     afterEach(() => {
@@ -90,6 +94,159 @@ describe('SettingsMcpSection', () => {
         expect(view.container).not.toHaveTextContent('fresh-token');
     });
 
+    it('starts the clipboard write during the click and supplies fresh native details later', async () => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeEnabled());
+        let resolve!: (status: McpServerStatus) => void;
+        mocks.get.mockImplementationOnce(() => new Promise<McpServerStatus>((done) => { resolve = done; }));
+        let data!: Promise<Blob>;
+        vi.stubGlobal('ClipboardItem', class {
+            constructor(items: Record<string, Promise<Blob>>) { data = items['text/plain']; }
+        });
+        mocks.write.mockImplementation(() => data.then(() => undefined));
+        vi.stubGlobal('navigator', { clipboard: { write: mocks.write, writeText: mocks.copy } });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        expect(mocks.write).toHaveBeenCalledTimes(1);
+        expect(view.queryByText(en['settings.mcpCopied'])).not.toBeInTheDocument();
+        await act(async () => resolve({ ...running, token: 'fresh-deferred-token' }));
+        const blob = await data;
+        expect(blob.type).toBe('text/plain');
+        const text = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.readAsText(blob);
+        });
+        expect(JSON.parse(text).mcpServers.mindwtr.headers.Authorization).toBe('Bearer fresh-deferred-token');
+        expect(mocks.copy).not.toHaveBeenCalled();
+        expect(view.getByText(en['settings.mcpCopied'])).toBeInTheDocument();
+        expect(view.container).not.toHaveTextContent('fresh-deferred-token');
+    });
+
+    it.each(['constructor-throw', 'write-throw', 'write-reject'])('observes %s before a late native failure and retains the action lock', async (failure) => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeEnabled());
+        let reject!: (error: Error) => void;
+        mocks.get.mockImplementationOnce(() => new Promise<McpServerStatus>((_done, fail) => { reject = fail; }));
+        vi.stubGlobal('ClipboardItem', class {
+            constructor() { if (failure === 'constructor-throw') throw new Error('private constructor failure'); }
+        });
+        mocks.write.mockImplementation(() => {
+            if (failure === 'write-throw') throw new Error('private clipboard failure');
+            return Promise.reject(new Error('private clipboard failure'));
+        });
+        vi.stubGlobal('navigator', { clipboard: { write: mocks.write, writeText: mocks.copy } });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        await act(async () => { await Promise.resolve(); });
+        expect(view.getByRole('button', { name: en['settings.mcpRotate'] })).toBeDisabled();
+        expect(mocks.log).not.toHaveBeenCalled();
+        await act(async () => reject(new Error('private native failure')));
+        expect(view.getByRole('alert')).toHaveTextContent(en['settings.mcpError.config_failed']);
+        expect(view.queryByText(en['settings.mcpCopied'])).not.toBeInTheDocument();
+        expect(mocks.copy).not.toHaveBeenCalled();
+        expect(mocks.log).toHaveBeenCalledExactlyOnceWith('MCP connection action completed', {
+            scope: 'mcp', extra: {
+                releaseCheck: 'v1.3.5/mcp-connection-actions', operation: 'copy', outcome: 'native-failed', backend: 'clipboard-item',
+            },
+        });
+        expect(JSON.stringify(mocks.log.mock.calls)).not.toContain('private');
+    });
+
+    it('reports an early clipboard rejection only after the fresh native request settles', async () => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeEnabled());
+        let resolve!: (status: McpServerStatus) => void;
+        mocks.get.mockImplementationOnce(() => new Promise<McpServerStatus>((done) => { resolve = done; }));
+        vi.stubGlobal('ClipboardItem', class {});
+        mocks.write.mockRejectedValue(new Error('private clipboard failure'));
+        vi.stubGlobal('navigator', { clipboard: { write: mocks.write, writeText: mocks.copy } });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        await act(async () => { await Promise.resolve(); });
+        expect(view.getByRole('button', { name: en['settings.mcpRotate'] })).toBeDisabled();
+        await act(async () => resolve(running));
+        expect(view.getByText(en['settings.mcpCopyFailed'])).toBeInTheDocument();
+        expect(view.queryByText(en['settings.mcpCopied'])).not.toBeInTheDocument();
+        expect(mocks.copy).not.toHaveBeenCalled();
+        expect(mocks.log.mock.calls[0][1].extra.outcome).toBe('clipboard-failed');
+    });
+
+    it('waits for clipboard completion before success and unlocking other actions', async () => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeEnabled());
+        let finish!: () => void;
+        vi.stubGlobal('ClipboardItem', class {});
+        mocks.write.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+        vi.stubGlobal('navigator', { clipboard: { write: mocks.write, writeText: mocks.copy } });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        await act(async () => { await Promise.resolve(); });
+        expect(view.getByRole('button', { name: en['settings.mcpRotate'] })).toBeDisabled();
+        expect(view.queryByText(en['settings.mcpCopied'])).not.toBeInTheDocument();
+        expect(mocks.log).not.toHaveBeenCalled();
+        await act(async () => finish());
+        expect(view.getByText(en['settings.mcpCopied'])).toBeInTheDocument();
+        expect(view.getByRole('button', { name: en['settings.mcpRotate'] })).toBeEnabled();
+        expect(mocks.log.mock.calls[0][1].extra.outcome).toBe('copied');
+    });
+
+    it('rejects deferred clipboard data after unmount without publishing credentials or success', async () => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeEnabled());
+        let resolve!: (status: McpServerStatus) => void;
+        mocks.get.mockImplementationOnce(() => new Promise<McpServerStatus>((done) => { resolve = done; }));
+        let data!: Promise<Blob>;
+        vi.stubGlobal('ClipboardItem', class {
+            constructor(items: Record<string, Promise<Blob>>) { data = items['text/plain']; }
+        });
+        const publish = vi.fn();
+        mocks.write.mockImplementation(() => data.then(publish));
+        vi.stubGlobal('navigator', { clipboard: { write: mocks.write, writeText: mocks.copy } });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        view.unmount();
+        await act(async () => resolve({ ...running, token: 'late-private-token' }));
+        expect(publish).not.toHaveBeenCalled();
+        expect(mocks.copy).not.toHaveBeenCalled();
+        expect(mocks.log).not.toHaveBeenCalled();
+    });
+
+    it.each([{ running: false, token: null }, { error: 'exited' as const }])('rejects unusable native details on the modern clipboard path: %s', async (patch) => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeEnabled());
+        let data!: Promise<Blob>;
+        vi.stubGlobal('ClipboardItem', class {
+            constructor(items: Record<string, Promise<Blob>>) { data = items['text/plain']; }
+        });
+        const publish = vi.fn();
+        mocks.write.mockImplementation(() => data.then(publish));
+        vi.stubGlobal('navigator', { clipboard: { write: mocks.write, writeText: mocks.copy } });
+        mocks.get.mockResolvedValue({ ...running, ...patch });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        await waitFor(() => expect(view.getByText(en['settings.mcpCopyFailed'])).toBeInTheDocument());
+        expect(publish).not.toHaveBeenCalled();
+        expect(mocks.copy).not.toHaveBeenCalled();
+        expect(view.queryByText(en['settings.mcpCopied'])).not.toBeInTheDocument();
+        expect(mocks.log.mock.calls[0][1].extra.outcome).toBe('invalid-status');
+    });
+
+    it.each([
+        { running: false, url: null },
+        { token: null },
+        { error: 'start_failed' as const },
+    ])('does not acknowledge an invalid rotation: %s', async (patch) => {
+        mocks.get.mockResolvedValue(running);
+        mocks.set.mockResolvedValue({ ...running, ...patch });
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpRotate'] })).toBeEnabled());
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpRotate'] }));
+        await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent(en[`settings.mcpError.${patch.error ?? 'config_failed'}`]));
+        expect(view.queryByText(en['settings.mcpTokenRotated'])).not.toBeInTheDocument();
+        expect(mocks.copy).not.toHaveBeenCalled();
+    });
+
     it('does not copy stale details after the helper stops', async () => {
         mocks.get.mockResolvedValue(running);
         const view = openSection();
@@ -115,6 +272,11 @@ describe('SettingsMcpSection', () => {
         expect(view.getByText(en['settings.mcpTokenRotated'])).toBeInTheDocument();
         expect(mocks.copy).not.toHaveBeenCalled();
         expect(view.container).not.toHaveTextContent('rotated-token');
+        mocks.get.mockResolvedValue({ ...running, token: 'rotated-token' });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        await waitFor(() => expect(mocks.copy).toHaveBeenCalledTimes(1));
+        expect(JSON.parse(mocks.copy.mock.calls[0][0]).mcpServers.mindwtr.headers.Authorization).toBe('Bearer rotated-token');
+        expect(JSON.stringify(mocks.log.mock.calls)).not.toContain('rotated-token');
     });
 
     it('safely handles command and clipboard failures', async () => {

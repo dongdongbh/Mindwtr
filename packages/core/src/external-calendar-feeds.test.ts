@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hasCalendarPushTaskMarker } from './calendar-scheduling';
 import {
     createExternalCalendarFeeds,
+    normalizeSystemCalendarSettings,
     EXTERNAL_CALENDARS_KEY,
     SYSTEM_CALENDAR_SETTINGS_KEY,
     type DeviceCalendar,
@@ -156,6 +157,56 @@ describe('external calendar feeds behind the host ports', () => {
         await outcome;
     });
 
+    it('Task471 does not start enumeration when held passive permission returns after cancellation', async () => {
+        const handset = device({ calendars: [{ id: 'work', title: 'Work' }] });
+        let enter!: () => void;
+        const entered = new Promise<void>((resolve) => { enter = resolve; });
+        let release!: (permission: { status: string }) => void;
+        handset.host.calendars.getPermissions = () => {
+            enter();
+            return new Promise((resolve) => { release = resolve; });
+        };
+        const controller = new AbortController();
+        const pending = handset.feeds.fetchExternalCalendarEvents(...SEPT, { signal: controller.signal, sources: {
+            subscriptions: [], systemSettings: normalizeSystemCalendarSettings({ enabled: true }),
+        } });
+        const outcome = expect(pending).rejects.toThrow('Screen closed');
+        await entered;
+        controller.abort(new Error('Screen closed'));
+        release({ status: 'granted' });
+        await outcome;
+        expect(handset.calls).toEqual([]);
+        expect(handset.logs).toEqual([]);
+    });
+
+    it('Task471 observes a late permission rejection after cancellation without enumeration, mapping reads or logs', async () => {
+        const handset = device({ calendars: [{ id: 'work', title: 'Work' }] });
+        let enter!: () => void;
+        const entered = new Promise<void>((resolve) => { enter = resolve; });
+        let rejectPermission!: (error: Error) => void;
+        handset.host.calendars.getPermissions = () => { enter(); return new Promise((_resolve, reject) => { rejectPermission = reject; }); };
+        const mapping = vi.spyOn(handset.host, 'getAllCalendarSyncEntries'), controller = new AbortController();
+        const pending = handset.feeds.fetchExternalCalendarEvents(...SEPT, { signal: controller.signal, sources: {
+            subscriptions: [], systemSettings: normalizeSystemCalendarSettings({ enabled: true }),
+        } });
+        const outcome = expect(pending).rejects.toThrow('Screen closed');
+        await entered; controller.abort(new Error('Screen closed'));
+        rejectPermission(new Error('PRIVATE provider rejected after cancellation'));
+        await outcome;
+        expect(handset.calls).toEqual([]); expect(mapping).not.toHaveBeenCalled(); expect(handset.logs).toEqual([]);
+    });
+
+    it('Task471 checks cancellation after saved settings before starting passive permission', async () => {
+        const handset = device(), controller = new AbortController();
+        const permission = vi.spyOn(handset.host.calendars, 'getPermissions');
+        handset.host.storage.getItem = async (name) => {
+            if (name === SYSTEM_CALENDAR_SETTINGS_KEY) { controller.abort(new Error('Retired settings read')); return JSON.stringify({ enabled: true }); }
+            return null;
+        };
+        await expect(handset.feeds.fetchExternalCalendarEvents(...SEPT, { signal: controller.signal })).rejects.toThrow('Retired settings read');
+        expect(permission).not.toHaveBeenCalled(); expect(handset.calls).toEqual([]); expect(handset.logs).toEqual([]);
+    });
+
     it('keeps one copy of an event a feed lists twice', async () => {
         const text = ics([['dup', '20260910T090000Z', 'Twice'], ['dup', '20260910T090000Z', 'Twice']]);
         const { feeds } = device({
@@ -211,8 +262,27 @@ describe('external calendar feeds behind the host ports', () => {
             calendars: [{ id: 'b', title: 'Personal' }, { id: 'a', title: '' , name: 'Account' }, { id: 'm', title: 'Mindwtr' }, { id: ' ', title: 'Blank' }],
         });
         expect(await feeds.getSystemCalendars()).toEqual([{ id: 'a', name: 'Account', color: undefined }, { id: 'b', name: 'Personal', color: undefined }]);
-        await feeds.saveSystemCalendarSettings({ enabled: true, selectAll: false, selectedCalendarIds: [' a ', 'a', 'b'], areaIdsByCalendar: { a: ['x', 'x', ''] } });
-        expect(JSON.parse(storage.get(SYSTEM_CALENDAR_SETTINGS_KEY)!)).toEqual({ enabled: true, selectAll: false, selectedCalendarIds: ['a', 'b'], areaIdsByCalendar: { a: ['x'] } });
+        await feeds.saveSystemCalendarSettings({ enabled: true, selectAll: false, selectedCalendarIds: [' a ', 'a', 'b', 'é', 'e\u0301', ' a ', '', '  '], areaIdsByCalendar: { a: ['x', 'x', ''] } });
+        expect(JSON.parse(storage.get(SYSTEM_CALENDAR_SETTINGS_KEY)!)).toEqual({ enabled: true, selectAll: false, selectedCalendarIds: [' a ', 'a', 'b', 'é', 'e\u0301'], areaIdsByCalendar: { a: ['x'] } });
+    });
+
+    it('rejects unavailable enumeration with a fixed safe error and never requests permission', async () => {
+        const { feeds, host, calls } = device();
+        host.calendars.getCalendars = async () => { throw new Error('PRIVATE PROVIDER https://private.example/calendar'); };
+        await expect(feeds.getSystemCalendars()).rejects.toThrow(/^Calendar provider unavailable$/);
+        expect(calls).not.toContainEqual(['requestPermissions']);
+    });
+
+    it.each(['denied', 'undetermined'])('rejects enumeration when passive permission is %s without requesting it', async (permission) => {
+        const { feeds, calls } = device({ permission, calendars: [{ id: 'saved', title: 'Saved' }] });
+        await expect(feeds.getSystemCalendars()).rejects.toThrow(/^Calendar provider unavailable$/);
+        expect(calls).toEqual([]);
+    });
+
+    it('returns an empty enumeration only after a successful provider read', async () => {
+        const { feeds, calls } = device();
+        expect(await feeds.getSystemCalendars()).toEqual([]);
+        expect(calls).toEqual([['getCalendars']]);
     });
 
     it('touches no port in the sandbox', async () => {
@@ -223,10 +293,35 @@ describe('external calendar feeds behind the host ports', () => {
         const { host, calls, storage } = device({ storage: { [EXTERNAL_CALENDARS_KEY]: JSON.stringify([feed('team', 'https://example.com/team.ics')]) } });
         const feeds = module.createExternalCalendarFeeds(host);
         expect(await feeds.fetchExternalCalendarEvents(...SEPT)).toEqual({ calendars: [], events: [] });
+        expect(await feeds.fetchExternalCalendarEvents(...SEPT, { sources: {
+            subscriptions: [feed('captured', 'https://example.com/captured.ics')], systemSettings: normalizeSystemCalendarSettings({ enabled: true }),
+        } })).toEqual({ calendars: [], events: [] });
         await feeds.saveExternalCalendars([feed('new', 'https://example.com/new.ics')]);
         expect(await feeds.getSystemCalendars()).toEqual([]);
         expect(calls).toEqual([]);
         expect(JSON.parse(storage.get(EXTERNAL_CALENDARS_KEY)!)).toHaveLength(1);
         vi.resetModules();
+    });
+
+    it('uses captured subscription and device choices without rereading stale device cells; omitted sources retain RN behavior', async () => {
+        const canonicalUrl = 'https://example.com/canonical.ics', legacyUrl = 'https://example.com/legacy.ics';
+        const handset = device({
+            storage: { [EXTERNAL_CALENDARS_KEY]: JSON.stringify([feed('legacy', legacyUrl)]),
+                [SYSTEM_CALENDAR_SETTINGS_KEY]: JSON.stringify({ enabled: true }) },
+            feeds: { [canonicalUrl]: ics([['canonical', '20260910T090000Z', 'Canonical']]), [legacyUrl]: ics([['legacy', '20260910T090000Z', 'Legacy']]) },
+            calendars: [{ id: 'device', title: 'Device' }], events: [{ id: 'event', calendarId: 'device', title: 'Device',
+                startDate: '2026-09-10T11:00:00.000Z', endDate: '2026-09-10T12:00:00.000Z' }],
+        });
+        const reads = vi.spyOn(handset.host.storage, 'getItem');
+        const captured = await handset.feeds.fetchExternalCalendarEvents(...SEPT, { sources: {
+            subscriptions: [feed('canonical', canonicalUrl, { areaIds: ['é', 'e\u0301'] })],
+            systemSettings: normalizeSystemCalendarSettings({ enabled: false }),
+        } });
+        expect(captured.events.map((event) => event.title)).toEqual(['Canonical']);
+        expect(captured.calendars[0].areaIds).toEqual(['é', 'e\u0301']);
+        expect(reads).not.toHaveBeenCalled(); expect(handset.calls).toEqual([['fetch', canonicalUrl]]);
+        handset.calls.length = 0;
+        expect((await handset.feeds.fetchExternalCalendarEvents(...SEPT)).events.map((event) => event.title)).toEqual(['Legacy', 'Device']);
+        expect(reads.mock.calls.map(([name]) => name).sort()).toEqual([EXTERNAL_CALENDARS_KEY, SYSTEM_CALENDAR_SETTINGS_KEY].sort());
     });
 });

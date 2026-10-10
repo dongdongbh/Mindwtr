@@ -21,7 +21,8 @@ final class NativeDeviceKV {
         "@mindwtr_cloud_allow_insecure_http", "@mindwtr_sync_encryption_state_v1",
         "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1",
         "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
-        "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars",
+        "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars", "mindwtr-system-calendar-settings",
+        "mindwtr-update-available", "mindwtr-update-last-check", "mindwtr-update-latest",
     ].map { Data($0.utf8) })
     private static let removableSecrets: Set<Data> = Set([
         "@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1",
@@ -172,13 +173,133 @@ final class NativeDeviceKV {
         try mutate(changes)
     }
 
-    private func mutate(_ changes: [Change]) throws {
+    func recordAboutUpdateCheck(timestamp: String) throws {
+        try Self.validateAboutTimestamp(timestamp)
+        let changes = [Change(key: "mindwtr-update-last-check", bytes: Data("mindwtr-update-last-check".utf8), value: timestamp)]
+        try Self.validateChanges(changes)
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String? = nil) throws {
+        guard latestVersion.utf16.count <= 200, !latestVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !latestVersion.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw Self.invalid }
+        if let checkedAt { try Self.validateAboutTimestamp(checkedAt) }
+        var changes = [
+            Change(key: "mindwtr-update-available", bytes: Data("mindwtr-update-available".utf8), value: available ? "true" : "false"),
+            Change(key: "mindwtr-update-latest", bytes: Data("mindwtr-update-latest".utf8), value: available ? latestVersion : nil),
+        ]
+        if let checkedAt {
+            changes.append(Change(key: "mindwtr-update-last-check", bytes: Data("mindwtr-update-last-check".utf8), value: checkedAt))
+        }
+        try Self.validateChanges(changes)
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    private static let searchConsentName = "mindwtr:iosSearchIndexingEnabled"
+    func readSearchConsent() throws -> Bool {
+        switch try get(Self.searchConsentName) {
+        case nil, "false": return false
+        case "true": return true
+        default: throw Self.failure
+        }
+    }
+    // Private typed authority; the cell stays outside the generic JS writable allowlist.
+    func setSearchConsent(_ enabled: Bool) throws {
+        try mutate([Change(key: Self.searchConsentName, bytes: Data(Self.searchConsentName.utf8),
+                           value: enabled ? "true" : "false")], skipUnchanged: true)
+    }
+
+    private static let reminderNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
+    var hasPendingReminderMutation: Bool {
+        pending.map { $0.changes.map(\.key) == Self.reminderNames } ?? false
+    }
+    /// Fixed private two-cell CAS; reminder keys remain absent from the generic writable allowlist.
+    func compareAndSetReminderMaps(expected: [String?], next: [String?], confirmUnchanged: Bool = false) throws {
+        guard expected.count == 2, next.count == 2,
+              (expected + next).allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.invalid }
+        try requireUsable()
+        let changes = zip(Self.reminderNames, next).map { Change(key: $0.0, bytes: Data($0.0.utf8), value: $0.1) }
+        let before: Snapshot
+        if let pending {
+            guard pending.changes == changes else { throw Self.failure }
+            before = pending.before
+        } else { before = try checkedRead() }
+        guard zip(Self.reminderNames, expected).allSatisfy({ name, value in
+            before.values[Data(name.utf8)].map { Data($0.utf8) } == value.map { Data($0.utf8) }
+        }) else { throw Self.failure }
+        try mutate(changes, skipUnchanged: !confirmUnchanged)
+    }
+
+    private static let calendarSettingNames = ["mindwtr-system-calendar-settings", "mindwtr:native:calendar-setting:v1"]
+    func readCalendarSettingState() throws -> [String?] {
+        try multiGet(Self.calendarSettingNames).map(\.1)
+    }
+    var hasPendingCalendarSettingMutation: Bool {
+        pending.map { $0.changes.map(\.key) == Self.calendarSettingNames } ?? false
+    }
+    /// Only the prepared calendar owner may atomically publish its private mutation proof.
+    func compareAndSetCalendarSetting(expected: [String?], next: [String]) throws {
+        guard expected.count == 2, next.count == 2,
+              expected.allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }),
+              next.allSatisfy({ $0.utf8.count <= Self.valueLimit }) else { throw Self.invalid }
+        try requireUsable()
+        let changes = zip(Self.calendarSettingNames, next).map { Change(key: $0.0, bytes: Data($0.0.utf8), value: $0.1) }
+        let before: Snapshot
+        if let pending {
+            guard pending.changes == changes else { throw Self.failure }
+            before = pending.before
+        } else { before = try checkedRead() }
+        guard zip(Self.calendarSettingNames, expected).allSatisfy({ name, value in
+            before.values[Data(name.utf8)].map { Data($0.utf8) } == value.map { Data($0.utf8) }
+        }) else { throw Self.failure }
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    private static let calendarPushNames = [
+        "mindwtr:calendar-push-sync:enabled", "mindwtr:calendar-push-sync:calendar-id",
+        "mindwtr:calendar-push-sync:target-calendar-id", "mindwtr:calendar-push-sync:color",
+        "mindwtr:calendar-push-sync:creation-intent", "mindwtr:native:calendar-push-effect:v1",
+    ]
+    func readCalendarPushState() throws -> [String?] {
+        let values = try multiGet(Self.calendarPushNames).map(\.1)
+        guard values.allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.failure }
+        return values
+    }
+    var hasPendingCalendarPushMutation: Bool {
+        pending.map { $0.changes.map(\.key) == Self.calendarPushNames } ?? false
+    }
+    /// Private raw six-cell authority; the effect owner validates transitions before using it.
+    func compareAndSetCalendarPushState(expected: [String?], next: [String?]) throws {
+        guard expected.count == 6, next.count == 6,
+              (expected + next).allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.invalid }
+        try requireUsable()
+        let changes = zip(Self.calendarPushNames, next).map { Change(key: $0.0, bytes: Data($0.0.utf8), value: $0.1) }
+        let before: Snapshot
+        if let pending {
+            guard pending.changes == changes else { throw Self.failure }
+            before = pending.before
+        } else { before = try checkedRead() }
+        guard zip(Self.calendarPushNames, expected).allSatisfy({ name, value in
+            before.values[Data(name.utf8)].map { Data($0.utf8) } == value.map { Data($0.utf8) }
+        }) else { throw Self.failure }
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    private static func validateAboutTimestamp(_ timestamp: String) throws {
+        guard !timestamp.isEmpty, timestamp.utf8.count <= 16, let value = UInt64(timestamp),
+              value <= 9_007_199_254_740_991, String(value) == timestamp else { throw invalid }
+    }
+
+    private func mutate(_ changes: [Change], skipUnchanged: Bool = false) throws {
         try requireUsable()
         if let pending {
             guard pending.changes == changes else { throw Self.failure }
         } else {
             var before = try checkedRead()
             if changes.isEmpty { return }
+            if skipUnchanged && changes.allSatisfy({ change in
+                before.values[change.bytes].map { Data($0.utf8) } == change.value.map { Data($0.utf8) }
+            }) { return }
             let object: NSMutableDictionary
             if let bytes = before.manifest?.bytes {
                 guard let parsed = try NativeJSON.jsonObject(with: bytes, options: [.mutableContainers]) as? NSMutableDictionary else {

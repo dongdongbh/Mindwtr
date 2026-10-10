@@ -32,7 +32,7 @@ import type { CalendarSyncEntry } from './sqlite-adapter';
 import type { useTaskStore } from './store';
 import { nameNotifyListener } from './store-notify-profiler';
 import type { Task } from './types';
-import { generateUUID } from './uuid';
+import { deterministicHash128Hex, generateUUID } from './uuid';
 
 export const CALENDAR_PUSH_ENABLED_KEY = 'mindwtr:calendar-push-sync:enabled';
 export const CALENDAR_PUSH_CALENDAR_ID_KEY = 'mindwtr:calendar-push-sync:calendar-id';
@@ -45,10 +45,34 @@ export const CALENDAR_PUSH_COLOR_KEY = 'mindwtr:calendar-push-sync:color';
  */
 export const CALENDAR_PUSH_PENDING_KEY = 'mindwtr:calendar-push-sync:pending-calendar';
 export const CALENDAR_PUSH_CREATION_INTENT_KEY = 'mindwtr:calendar-push-sync:creation-intent';
+export type CalendarPushDeleteExpectation = { calendarId: string | null; creationIntentRevision?: string | null };
+export class CalendarPushOwnershipChangedError extends Error {}
 const MANAGED_CALENDAR_TITLE = 'Mindwtr';
 const MANAGED_CALENDAR_NAME = 'mindwtr';
 const CREATION_TITLE_PATTERN = /^Mindwtr \([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\)$/;
-type CalendarCreationIntent = { title: string; calendarId?: string };
+type CalendarCreationIntent = { title: string; calendarId?: string; deletionRevision?: string };
+
+function parseCalendarCreationIntent(raw: string): CalendarCreationIntent {
+    let intent: CalendarCreationIntent;
+    try { intent = JSON.parse(raw) as CalendarCreationIntent; }
+    catch { throw new Error('Invalid Mindwtr calendar creation intent'); }
+    if (!intent || typeof intent.title !== 'string' || !CREATION_TITLE_PATTERN.test(intent.title)
+        || (intent.calendarId !== undefined && (typeof intent.calendarId !== 'string' || !intent.calendarId.trim()))
+        || (intent.deletionRevision !== undefined && (!intent.calendarId || typeof intent.deletionRevision !== 'string'
+            || !/^[0-9a-f]{32}$/.test(intent.deletionRevision)))) {
+        throw new Error('Invalid Mindwtr calendar creation intent');
+    }
+    return intent;
+}
+
+/** Deletion binding retains the original confirmation revision across provider/local cleanup cuts. */
+export function matchesCalendarPushCreationIntentRevision(raw: string | null, expected: string | null | undefined): boolean {
+    if (raw === null || deterministicHash128Hex(raw) === expected) return true;
+    try {
+        const revision = parseCalendarCreationIntent(raw).deletionRevision;
+        return revision !== undefined && revision === expected;
+    } catch { return false; }
+}
 export const DEFAULT_CALENDAR_PUSH_COLOR = '#3B82F6';
 const PROJECTED_RECURRENCE_EVENT_DATE_FORMAT = 'PP';
 // expo-calendar's values (Android's CalendarContract access levels as text; iOS reports none).
@@ -112,6 +136,9 @@ export type CalendarPushEventDetails = {
     endTimeZone?: string;
 };
 
+/** Exact task/calendar identity for hosts that fence pushed-event writes. */
+export type CalendarPushEventIdentity = { taskId: string; calendarId: string };
+
 /** The device calendar writes the push needs, besides the reads (expo-calendar on React Native). */
 export type DeviceCalendarWriter = DeviceCalendarReader & {
     /** The calendar accounts (iOS: where a new calendar goes). */
@@ -120,9 +147,9 @@ export type DeviceCalendarWriter = DeviceCalendarReader & {
     /** Absent where the platform cannot recolor a calendar. */
     updateCalendar?: (calendarId: string, details: { color: string; title?: string }) => Promise<unknown>;
     deleteCalendar(calendarId: string): Promise<unknown>;
-    createEvent(calendarId: string, details: CalendarPushEventDetails & { calendarId: string }): Promise<string>;
-    updateEvent(eventId: string, details: CalendarPushEventDetails): Promise<unknown>;
-    deleteEvent(eventId: string): Promise<unknown>;
+    createEvent(calendarId: string, details: CalendarPushEventDetails & { calendarId: string }, context?: CalendarPushEventIdentity): Promise<string>;
+    updateEvent(eventId: string, details: CalendarPushEventDetails, context?: CalendarPushEventIdentity): Promise<unknown>;
+    deleteEvent(eventId: string, context?: CalendarPushEventIdentity): Promise<unknown>;
 };
 
 export type CalendarPushServiceHost = {
@@ -152,6 +179,8 @@ export type CalendarPushServiceHost = {
     };
     /** The task store the push reads and watches (React Native passes its own import, so its tests can replace it). */
     store: Pick<typeof useTaskStore, 'getState' | 'subscribe'>;
+    /** Synchronous, nonthrowing admission notification; the owner later calls runPartialCalendarSync. */
+    requestPartialSync?: (taskIds: string[]) => void;
 };
 
 export function normalizeCalendarPushColor(value: string | null | undefined): string {
@@ -423,15 +452,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
 
     const getCreationIntent = async (): Promise<CalendarCreationIntent | null> => {
         const raw = await storage.getItem(CALENDAR_PUSH_CREATION_INTENT_KEY);
-        if (raw === null) return null;
-        let intent: CalendarCreationIntent;
-        try { intent = JSON.parse(raw) as CalendarCreationIntent; }
-        catch { throw new Error('Invalid Mindwtr calendar creation intent'); }
-        if (!intent || typeof intent.title !== 'string' || !CREATION_TITLE_PATTERN.test(intent.title)
-            || (intent.calendarId !== undefined && (typeof intent.calendarId !== 'string' || !intent.calendarId.trim()))) {
-            throw new Error('Invalid Mindwtr calendar creation intent');
-        }
-        return intent;
+        return raw === null ? null : parseCalendarCreationIntent(raw);
     };
 
     const setCreationIntent = (intent: CalendarCreationIntent): Promise<void> =>
@@ -455,6 +476,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
 
     let pendingEnsure: Promise<string | null> | null = null;
     let pendingDelete: Promise<void> | null = null;
+    let pendingDeleteExpectation: string | null = null;
     let pendingColor: Promise<boolean> | null = null;
 
     /**
@@ -529,6 +551,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         try {
             const storedId = await getStoredCalendarId();
             const intent = host.os() === 'ios' ? await getCreationIntent() : null;
+            if (intent?.deletionRevision) return null;
             const allCalendars = await device.getCalendars();
             if (intent) {
                 const recovered = findIntentCalendar(allCalendars, intent, storedId);
@@ -689,19 +712,29 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
      * delete keeps them all and rejects (retry later), and a run cut short at any
      * step finishes when it runs again.
      */
-    const deleteMindwtrCalendarUnsafe = async (): Promise<void> => {
+    const deleteMindwtrCalendarUnsafe = async (expected?: CalendarPushDeleteExpectation): Promise<void> => {
         if (isSandboxMode()) return;
         const savedId = await getStoredCalendarId();
-        const intent = host.os() === 'ios' ? await getCreationIntent() : null;
+        const rawIntent = host.os() === 'ios' ? await storage.getItem(CALENDAR_PUSH_CREATION_INTENT_KEY) : null;
+        if (expected) {
+            if ((savedId !== null && savedId !== expected.calendarId)
+                || !matchesCalendarPushCreationIntentRevision(rawIntent, expected.creationIntentRevision)) {
+                throw new CalendarPushOwnershipChangedError('The Mindwtr calendar changed before deletion');
+            }
+        }
+        const intent = rawIntent === null ? null : parseCalendarCreationIntent(rawIntent);
         const selectedTargetId = await getCalendarPushTargetCalendarId();
         // A list the device could not give is an error, never an empty list: nothing is cleared.
         const calendars = await device.getCalendars();
         const ownedId = intent
             ? findIntentCalendar(calendars, intent, savedId)?.id ?? null
             : await resolveOwnedCalendar(calendars, savedId);
-        if (intent && !ownedId) throw new Error('Cannot identify pending Mindwtr calendar');
+        if (intent && !ownedId && !intent.deletionRevision) throw new Error('Cannot identify pending Mindwtr calendar');
 
         if (ownedId) {
+            if (intent && !intent.deletionRevision) {
+                await setCreationIntent({ ...intent, calendarId: ownedId, deletionRevision: deterministicHash128Hex(rawIntent!) });
+            }
             try {
                 await device.deleteCalendar(ownedId);
             } catch (error) {
@@ -720,7 +753,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         }
 
         // Gone now (a list proved it): the deleted calendar, and a stale saved one.
-        const goneIds = new Set([ownedId, savedId].filter((id): id is string => Boolean(id)));
+        const goneIds = new Set([ownedId, savedId, intent?.calendarId].filter((id): id is string => Boolean(id)));
         try {
             const syncedEntries = await syncEntries.getAll(PLATFORM);
             for (const entry of syncedEntries.filter((item) => goneIds.has(item.calendarId))) {
@@ -734,13 +767,18 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             });
         }
 
-        if (selectedTargetId && (goneIds.has(selectedTargetId)
-            || !calendars.some((calendar) => calendar.id === selectedTargetId && isWritableCalendar(calendar)))) {
+        if (selectedTargetId && goneIds.has(selectedTargetId)) {
             await setCalendarPushTargetCalendarId(null);
         }
         await storage.removeItem(CALENDAR_PUSH_PENDING_KEY);
         await storage.removeItem(CALENDAR_PUSH_CALENDAR_ID_KEY);
         if (intent) await storage.removeItem(CALENDAR_PUSH_CREATION_INTENT_KEY);
+
+        if (selectedTargetId && !goneIds.has(selectedTargetId)) {
+            void log.info('Calendar deletion kept the selected target', {
+                scope: 'calendar-push', extra: { releaseCheck: 'v1.3.5/calendar-delete-target', outcome: 'preserved' },
+            });
+        }
 
         void log.info('Deleted Mindwtr calendar', {
             scope: 'calendar-push',
@@ -748,14 +786,19 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         });
     };
 
-    const deleteMindwtrCalendar = (): Promise<void> => {
-        if (pendingDelete) return pendingDelete;
+    /** A confirmed native Delete rechecks its identity after any creation or recoloring finishes. */
+    const deleteMindwtrCalendar = (expected?: CalendarPushDeleteExpectation): Promise<void> => {
+        const expectation = JSON.stringify(expected ?? null);
+        if (pendingDelete) return expectation === pendingDeleteExpectation
+            ? pendingDelete
+            : pendingDelete.catch(() => undefined).then(() => deleteMindwtrCalendar(expected));
         const run = (async () => {
             if (pendingEnsure) await pendingEnsure;
             if (pendingColor) await pendingColor.catch(() => undefined);
-            await deleteMindwtrCalendarUnsafe();
+            await deleteMindwtrCalendarUnsafe(expected);
         })();
         pendingDelete = run;
+        pendingDeleteExpectation = expectation;
         void run.then(() => { pendingDelete = null; }, () => { pendingDelete = null; });
         return run;
     };
@@ -829,11 +872,11 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         nowIso: () => new Date().toISOString(),
         createEvent: async (task) => {
             const details = buildEventDetails(task);
-            return device.createEvent(target.id, { ...details, calendarId: target.id });
+            return device.createEvent(target.id, { ...details, calendarId: target.id }, { taskId: task.id, calendarId: target.id });
         },
         updateEvent: async (entry, task) => {
             try {
-                await device.updateEvent(entry.calendarEventId, buildEventDetails(task));
+                await device.updateEvent(entry.calendarEventId, buildEventDetails(task), { taskId: entry.taskId, calendarId: entry.calendarId });
                 return { status: 'updated', eventId: entry.calendarEventId };
             } catch (error) {
                 if (isCalendarEventMissingError(error)) {
@@ -852,7 +895,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         },
         deleteEvent: async (entry) => {
             try {
-                await device.deleteEvent(entry.calendarEventId);
+                await device.deleteEvent(entry.calendarEventId, { taskId: entry.taskId, calendarId: entry.calendarId });
             } catch (error) {
                 if (isCalendarEventMissingError(error)) {
                     return;
@@ -945,12 +988,17 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
     const calendarPushScheduler = createCalendarPushScheduler({
         runFull: () => runFullCalendarSyncUnsafe(),
         runPartial: (taskIds) => runPartialCalendarSyncUnsafe(taskIds),
+        onPartialDue: host.requestPartialSync,
     });
 
     const enqueueCalendarSync = calendarPushScheduler.enqueue;
 
     const runFullCalendarSync = (): Promise<void> => (
         isSandboxMode() ? Promise.resolve() : calendarPushScheduler.runFull()
+    );
+
+    const runPartialCalendarSync = (taskIds: readonly string[]): Promise<void> => (
+        isSandboxMode() ? Promise.resolve() : calendarPushScheduler.runPartial(taskIds)
     );
 
     const scheduleSyncDebounced = (taskIds: string[]): void => {
@@ -1051,7 +1099,6 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
     let unsubscribeStore: (() => void) | null = null;
 
     const stopCalendarPushSync = (): void => {
-        if (isSandboxMode()) return;
         unsubscribeStore?.();
         unsubscribeStore = null;
         calendarPushScheduler.cancelPending();
@@ -1127,6 +1174,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
         updateMindwtrCalendarColor,
         deleteMindwtrCalendar,
         runFullCalendarSync,
+        runPartialCalendarSync,
         scheduleSyncDebounced,
         startCalendarPushSync,
         stopCalendarPushSync,

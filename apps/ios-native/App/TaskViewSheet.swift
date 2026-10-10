@@ -89,6 +89,13 @@ struct TaskViewSheet: View {
                     close: { backdatedCompletion = nil })
             }
             if model.taskLinkSheetActive { taskLinkDialog }
+            #if DEBUG && targetEnvironment(simulator)
+            if model.entityLinkTestReadEnabled {
+                Text("Entity link read test state").font(.system(size: 1)).frame(width: 1, height: 1)
+                    .accessibilityIdentifier("entity-link-test-read-state")
+                    .accessibilityValue(model.entityLinkTestReadState).allowsHitTesting(false)
+            }
+            #endif
         }
         .sheet(item: Binding(get: { model.taskSharePayload }, set: { if $0 == nil { model.dismissTaskShare() } })) { payload in
             TaskActivitySheet(payload: payload)
@@ -1516,12 +1523,19 @@ struct NativeDocumentPickerClaim: Identifiable {
 
 struct NativeDocumentPicker: UIViewControllerRepresentable {
     let pickerID: UUID
+    let asCopy: Bool
     let completion: (Result<[URL], Error>, UUID) -> Void
+
+    init(pickerID: UUID, asCopy: Bool = false, completion: @escaping (Result<[URL], Error>, UUID) -> Void) {
+        self.pickerID = pickerID
+        self.asCopy = asCopy
+        self.completion = completion
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(pickerID: pickerID, completion: completion) }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: asCopy)
         picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
         return picker

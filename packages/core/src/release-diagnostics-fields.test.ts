@@ -13,10 +13,16 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // task-copy-diagnostics reuses releaseCheck and outcome below; source is the menu/shortcut category.
+    'source', 'documentFocused', 'activationSupported', 'activationActive', 'clipboardAvailable', 'errorKind',
+    // ios-search-publication reuses releaseCheck, operation, outcome, enabled, and count below.
+    // ios-search-snapshot reuses releaseCheck and count below.
+    // ios-entity-link reuses releaseCheck, kind, and outcome below.
     // obsidian-inline-tag reuses releaseCheck and count below.
     // webdav-host-upload-limit and webdav-host-download-limit reuse releaseCheck, operation, and outcome below.
     // ios-local-attachment-host, ios-attachment-draft-owned, ios-http-transport, ios-secure-storage, ios-sync-crypto, ios-device-storage and ios-legacy-secret-retirement reuse releaseCheck, operation, and outcome below.
     // automation concurrent-write replay; capture routing reuses outcome below.
+    'enabled',
     'retryCount',
     // deferred-attachment-pass: which pass owes the deferred pre-sync phase's work.
     'owed',
@@ -96,6 +102,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'requestedShortcut', 'appliedShortcut',
     // cleanup-batch-fresh-first: batch size and how many targets still had work (with total below).
     'limit', 'fresh',
+    // ios-reminder-apply: confirmed native effect counts.
+    'scheduled', 'cancelled',
     // PR1348 native reminder replacement fields.
     'tagged', 'replaced', 'taggedRemoved',
     'releaseCheck', 'backend', 'statusPublished', 'lastSyncAt', 'lastSyncStatus',

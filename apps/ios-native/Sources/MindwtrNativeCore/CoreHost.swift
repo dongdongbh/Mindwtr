@@ -59,17 +59,52 @@ public struct NativeBackupImportPreview: Sendable {
     public let json: String
 }
 
+public enum NativeReminderWake: Sendable {
+    case sourceChanged(revision: UInt64)
+    case admissionReady(revision: UInt64)
+}
+public struct NativeReminderObserverRegistration: Sendable {
+    public let id: UUID
+    public let revision: UInt64
+    public let rescheduleDelayMs: UInt64
+}
+
+public struct NativeCalendarFileAddResult: Sendable {
+    public let requestJSON: String
+    public let resultJSON: String
+}
+public enum NativeCalendarPushOperation: String, Sendable { case start, stop, run, setting }
+public struct NativeCalendarFileAddFailure: LocalizedError, Sendable {
+    /// Private accepted input for typed App recovery only; never log it.
+    public let requestJSON: String?
+    private let freshRuntimeRequired: Bool
+    init(requestJSON: String?, freshRuntimeRequired: Bool = false) {
+        self.requestJSON = requestJSON; self.freshRuntimeRequired = freshRuntimeRequired
+    }
+    public var errorDescription: String? {
+        freshRuntimeRequired ? "SAVE_FAILED: Calendar subscription save requires fresh runtime recovery"
+            : "Local calendar subscription could not be added"
+    }
+}
+private struct NativeCalendarFileCaptureAdmission: Sendable {
+    let id: UUID
+    let jobs: NativeAttachmentFileJobs
+}
+
 /// One off-main owner for the core runtime, database and pending command journal.
 /// Every result is the JSON-encoded core value, with host/core failures thrown.
 public final class CoreHost: @unchecked Sendable {
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.native-core", qos: .userInitiated)
     private let engine: Engine
     private let localAttachmentRequests = NativeAttachmentLocalRequests()
+    private let reminderEffects = NativeReminderEffects()
+    private let notificationAuthorization = NativeNotificationAuthorization()
+    private let calendarAuthorization = NativeCalendarAuthorization()
 
     public init(databaseURL: URL, bundleURL: URL,
                 deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL,
-                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests)
+                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
     }
 
     #if DEBUG
@@ -90,12 +125,26 @@ public final class CoreHost: @unchecked Sendable {
     init(databaseURL: URL, bundleURL: URL, faults: HostIOFaults, legacyStorage: LegacyRNStorage? = nil,
          deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL, legacyStorage: legacyStorage,
-                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests)
+                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
         engine.faults = faults
     }
     #endif
 
-    public func start() async throws -> String { try await perform { try $0.start() } }
+    public func start(retainingReminderResponseIDs: [String]? = nil) async throws -> String {
+        try await perform { try $0.start(retainingReminderResponseIDs: retainingReminderResponseIDs) }
+    }
+
+    public func searchSnapshot() async throws -> NativeSearchSnapshot {
+        try NativeSearchSnapshot(json: await call("iosSearchSnapshot"))
+    }
+
+    public func searchObservation() async throws -> NativeSearchObservation {
+        try await perform { try $0.searchObservation() }
+    }
+
+    public func setSearchObservationHandler(_ handler: (@Sendable (NativeSearchObservation) -> Void)?) async throws {
+        try await perform { try $0.setSearchObservationHandler(handler) }
+    }
 
     /// One physical cleanup decision; grants no attachment metadata authority.
     public func retireAttachmentCleanup(_ requestJSON: String) async throws -> String {
@@ -119,8 +168,234 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    public func aboutAppStoreInfo(bundleIdentifier: String, currentVersion: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.aboutAppStoreInfo(bundleIdentifier: bundleIdentifier, currentVersion: currentVersion, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    /// One cancellable, unjournaled read through the shared calendar contract.
+    public func calendarRead(requestJSON: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.calendarRead(requestJSON: requestJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    public func calendarPush(_ operation: NativeCalendarPushOperation, argumentsJSON: String = "{}") async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.calendarPush(operation, argumentsJSON: argumentsJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    public func observeCalendarPush(_ callback: @escaping @Sendable ([String]?) -> Void) async throws -> UUID {
+        try await perform { try $0.observeCalendarPush(callback) }
+    }
+
+    public func removeCalendarPushObserver(_ id: UUID) async throws {
+        try await perform { $0.removeCalendarPushObserver(id) }
+    }
+
+    public func getCalendarSubscriptionOptions() async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.getCalendarSubscriptionOptions(cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+    public func setCalendarSubscriptionSetting(requestJSON: String) async throws -> String {
+        try await perform { try $0.setCalendarSubscriptionSetting(requestJSON: requestJSON) }
+    }
+    public func probeCalendarSubscriptionSettingOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeCalendarSubscriptionSettingOutcome(requestJSON: requestJSON) }
+    }
+    public func addCalendarSubscription(requestJSON: String) async throws -> String {
+        try await perform { try $0.addCalendarSubscription(requestJSON: requestJSON) }
+    }
+    public func probeCalendarSubscriptionAddOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeCalendarSubscriptionAddOutcome(requestJSON: requestJSON) }
+    }
+    public func addLocalCalendarSubscription(selectedURL: URL, requestJSON: String) async throws -> NativeCalendarFileAddResult {
+        let id = UUID(), cancellation = NativeAttachmentCancellation()
+        localAttachmentRequests.register(cancellation, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            var capture: NativeCalendarFileCaptureAdmission?
+            do {
+                let admitted = try await perform { try $0.beginCalendarFileCapture(requestJSON: requestJSON, cancellation: cancellation) }
+                capture = admitted
+                let selection = try await admitted.jobs.copyCalendarProviderSource(selectedURL, cancellation: cancellation)
+                return try await perform { try $0.finishCalendarFileCapture(admitted.id, selection: selection, cancellation: cancellation) }
+            } catch {
+                // Exact capture retirement must drain and release its owner even after Task cancellation.
+                if let capture { _ = try? await perform(reminderOwned: true) { $0.abortCalendarFileCapture(capture.id) } }
+                if let failure = error as? NativeCalendarFileAddFailure { throw failure }
+                throw NativeCalendarFileAddFailure(requestJSON: nil)
+            }
+        }, onCancel: { cancellation.cancel() })
+    }
+
+    public func setDeviceCalendarSetting(requestJSON: String) async throws -> String {
+        try await perform { try $0.setDeviceCalendarSetting(requestJSON: requestJSON) }
+    }
+
+    public func probeDeviceCalendarSettingOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeDeviceCalendarSettingOutcome(requestJSON: requestJSON) }
+    }
+
+    public func grantDeviceCalendarAccess(readmission: @escaping @Sendable () async -> Bool) async throws {
+        let owner: UUID
+        do { owner = try calendarAuthorization.begin() }
+        catch { throw CoreHostRejection(message: "NOT_READY: Calendar access is unavailable") }
+        let cancellation = NativeAttachmentCancellation()
+        localAttachmentRequests.register(cancellation, id: owner)
+        defer { localAttachmentRequests.remove(owner); calendarAuthorization.finish(owner) }
+        if Task.isCancelled { cancellation.cancel() }
+        try await withTaskCancellationHandler {
+            let result: Result<Void, Error>
+            do {
+                let request = try await perform { try $0.beginCalendarAccess(owner, cancellation: cancellation) }
+                guard !cancellation.isCancelled,
+                      await calendarAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                    throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current")
+                }
+                try await perform { try $0.validateCalendarAccess(owner) }
+                do { try await request() }
+                catch {
+                    if cancellation.isCancelled { throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current") }
+                    throw CoreHostRejection(message: "ACTION_FAILED: Calendar authorization is unavailable")
+                }
+                guard !cancellation.isCancelled,
+                      await calendarAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                    throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current")
+                }
+                try await perform { try $0.acknowledgeCalendarAccess(owner) }
+                result = .success(())
+            } catch is CancellationError {
+                result = .failure(CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current"))
+            } catch {
+                result = .failure(cancellation.isCancelled
+                    ? CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current") : error)
+            }
+            // Accepted OS callbacks drain before this cancellation-independent owner retirement.
+            _ = try? await perform(reminderOwned: true) { $0.retireCalendarAccess(owner) }
+            try result.get()
+        } onCancel: { cancellation.cancel(); self.calendarAuthorization.cancelReadmission(owner) }
+    }
+
+    /// Passive permission observation followed by a fresh, read-only shared plan.
+    public func readReminderPlan() async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            do {
+                let admission = try await perform { try $0.admitReminderPlanRead(cancellation: token) }
+                let permission = try await admission.read()
+                try token.check()
+                let result = try await perform {
+                    try $0.readReminderPlan(permission: permission, generation: admission.generation, cancellation: token)
+                }
+                try token.check()
+                return result
+            } catch {
+                if token.isCancelled || Task.isCancelled { throw CancellationError() }
+                throw HostFailure("NOT_READY: Reminder plan is unavailable")
+            }
+        }, onCancel: { token.cancel() })
+    }
+
+    public func feedbackConfiguration(endpointURL: String) async throws -> String {
+        try await perform { try $0.feedbackConfiguration(endpointURL: endpointURL) }
+    }
+
+    /// One explicit, unjournaled submission. Cancellation cannot unsend a POST.
+    public func submitFeedback(requestJSON: String, endpointURL: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.submitFeedback(requestJSON: requestJSON, endpointURL: endpointURL, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    public func readAboutUpdateState() async throws -> String {
+        try await perform { try $0.readAboutUpdateState() }
+    }
+
+    public func recordAboutUpdateCheck(timestamp: String) async throws {
+        try await perform { try $0.recordAboutUpdateCheck(timestamp: timestamp) }
+    }
+
+    public func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String? = nil) async throws {
+        try await perform { try $0.storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt) }
+    }
+
+    public func readSearchConsent() async throws -> Bool {
+        try await perform { try $0.readSearchConsent() }
+    }
+
+    public func setSearchConsent(_ enabled: Bool) async throws {
+        try await perform { try $0.setSearchConsent(enabled) }
+    }
+
+    public func snoozeReminder(requestJSON: String) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            if let replay = try await perform({ try $0.reminderSnoozeReplay(requestJSON: requestJSON) }) { return replay }
+            let admission = try await perform { try $0.admitReminderPlanRead(cancellation: token) }
+            let permission = try await admission.read()
+            try token.check()
+            return try await perform {
+                try $0.snoozeReminder(requestJSON: requestJSON, permission: permission,
+                    generation: admission.generation, cancellation: token)
+            }
+        }, onCancel: { token.cancel() })
+    }
+
+    public func completeReminderTask(requestJSON: String) async throws -> String {
+        try await perform { try $0.completeReminderTask(requestJSON: requestJSON) }
+    }
+
+    public func probeReminderCompletionOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeReminderCompletionOutcome(requestJSON: requestJSON) }
+    }
+
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
-        try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
+        guard method != "iosPruneReceipts" else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
+        }
+        guard !Engine.reminderSnoozeMethods.contains(method) else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
+        }
+        guard !Engine.reminderCompletionMethods.contains(method) else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
+        }
+        guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard !Engine.notificationSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade") }
+        guard !Engine.deviceCalendarSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Device Calendar Settings require their explicit facade") }
+        guard !Engine.calendarSubscriptionSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Calendar subscription settings require their explicit facade") }
+        guard !Engine.calendarAccessMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Calendar access requires its explicit facade") }
+        return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
     /// Task-local byte operations only; no project/store command or picker UI.
@@ -215,6 +490,14 @@ public final class CoreHost: @unchecked Sendable {
     /// Existing DEBUG isolated-library fixture only, one known durable boundary.
     public func configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: Bool = false) async throws {
         try await perform { try $0.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnly) }
+    }
+    #endif
+    #if DEBUG && os(iOS) && targetEnvironment(simulator)
+    public func configureIsolatedCalendarEventTaskTerminalFailureOnce() async throws {
+        try await perform { try $0.configureIsolatedCalendarEventTaskTerminalFailureOnce() }
+    }
+    public func configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() async throws {
+        try await perform { try $0.configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() }
     }
     #endif
 
@@ -527,10 +810,208 @@ public final class CoreHost: @unchecked Sendable {
 
     public func cancelAppLockRecovery() async throws { try await perform { try $0.cancelAppLockRecovery() } }
 
+    public func readNotificationSettingsOptions() async throws -> String {
+        try await perform { try $0.readNotificationSettingsOptions() }
+    }
+
+    public func probeNotificationSettingOutcome(requestJSON: String) async throws -> String {
+        try await perform { try $0.probeNotificationSettingOutcome(requestJSON: requestJSON) }
+    }
+
+    /// The trusted App closure waits for the same active page/host intent and observes cancellation.
+    /// A temporary permission-sheet inactivity is not cancellation; real background/navigation is.
+    public func setNotificationSetting(requestJSON: String,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> String {
+        let owner = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation()
+        localAttachmentRequests.register(cancellation, id: owner)
+        defer { localAttachmentRequests.remove(owner); notificationAuthorization.finish(owner) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler {
+            let result: Result<String, Error>
+            var retryPending = false
+            do {
+                let admission = try await perform { try $0.beginNotificationSetting(owner, requestJSON: requestJSON, cancellation: cancellation) }
+                retryPending = admission.retryPending
+                if let replay = admission.replay { result = .success(replay) }
+                else {
+                    do {
+                        guard !cancellation.isCancelled,
+                              await notificationAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+                        }
+                        if admission.requiresAuthorization {
+                            do {
+                                try await admission.request(); try cancellation.check()
+                            } catch {
+                                if cancellation.isCancelled { throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current") }
+                                throw CoreHostRejection(message: "ACTION_FAILED: Notification authorization is unavailable")
+                            }
+                        }
+                        if admission.requiresAuthorization {
+                            let permission: NativeNotificationPermission
+                            do { permission = try await admission.read(); try cancellation.check() }
+                            catch {
+                                if cancellation.isCancelled { throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current") }
+                                throw CoreHostRejection(message: "ACTION_FAILED: Notification authorization is unavailable")
+                            }
+                            guard permission.granted else { throw CoreHostRejection(message: "ACTION_FAILED: Notification permission was not granted") }
+                        }
+                        guard await notificationAuthorization.readmit(owner, check: readmission), !cancellation.isCancelled else {
+                            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+                        }
+                    } catch {
+                        if admission.retryPending { throw HostFailure("Notification save still requires exact retry") }
+                        throw error
+                    }
+                    result = .success(try await perform { try $0.commitNotificationSetting(owner) })
+                }
+            } catch is CancellationError {
+                if retryPending { result = .failure(HostFailure("Notification save still requires exact retry")) }
+                else { result = .failure(CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")) }
+            } catch { result = .failure(error) }
+            // Exact owner retirement must run even after caller cancellation; no mutation is admitted here.
+            _ = try? await perform(reminderOwned: true) { $0.finishNotificationSetting(owner) }
+            return try result.get()
+        } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(owner) }
+    }
+
+    public func observeReminders(_ callback: @escaping @Sendable (NativeReminderWake) -> Void) async throws -> NativeReminderObserverRegistration {
+        try await perform(reminderOwned: true) { try $0.observeReminders(callback) }
+    }
+
+    public func removeReminderObserver(_ id: UUID) async {
+        _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(id) }
+    }
+
+    public func reconcileReminders() async throws -> String {
+        let token = NativeAttachmentCancellation(), request = UUID()
+        localAttachmentRequests.register(token, id: request)
+        defer { localAttachmentRequests.remove(request) }
+        if Task.isCancelled { token.cancel() }
+        let owner: UUID
+        do { try token.check(); owner = try reminderEffects.begin(cancellation: token) }
+        catch { if token.isCancelled { throw CancellationError() }; throw NativeReminderEffects.unavailable }
+        defer { reminderEffects.finish(owner) }
+        return try await withTaskCancellationHandler {
+            do {
+                let result = try await runReminderReconciliation(owner: owner, cancellation: token)
+                _ = try await perform(reminderOwned: true) { $0.finishReminderReconciliation(owner) }
+                return result
+            } catch {
+                _ = try? await perform(reminderOwned: true) { $0.finishReminderReconciliation(owner) }
+                if token.isCancelled || Task.isCancelled { throw CancellationError() }
+                throw NativeReminderEffects.unavailable
+            }
+        } onCancel: { token.cancel() }
+    }
+
+    private func runReminderReconciliation(owner: UUID, cancellation: NativeAttachmentCancellation) async throws -> String {
+        let admission = try await perform(reminderOwned: true) { try $0.beginReminderReconciliation(owner, cancellation: cancellation) }
+        let port = admission.port, namespace = admission.namespace
+        func current() async throws {
+            try cancellation.check()
+            _ = try await perform(reminderOwned: true) { try $0.checkReminderReconciliation(owner) }
+        }
+        try await current()
+        let permission = try await port.permission(); try await current()
+        let pending = try await port.pending(namespace: namespace); try await current()
+        let delivered = try await port.delivered(namespace: namespace); try await current()
+        let plan = try await perform(reminderOwned: true) {
+            try $0.prepareReminderReconciliation(owner, permission: permission, pending: pending, delivered: delivered)
+        }
+        func beforeEffect() async throws {
+            try await current()
+            let observed = try await port.permission(); try await current()
+            guard observed.granted == permission.granted else { throw NativeReminderEffects.unavailable }
+        }
+        let cancelled = Dictionary(plan.cancel.map { ($0.identifier, $0.id) }, uniquingKeysWith: { first, _ in first })
+        var withdrawn = Dictionary(plan.cancel.filter(\.withdrawn).map { ($0.identifier, $0.id) }
+            + plan.schedule.filter(\.withdrawn).map { ($0.identifier, $0.id) }, uniquingKeysWith: { first, _ in first })
+        if plan.clearDelivered {
+            for item in delivered { if let id = item.ownedID, withdrawn[item.identifier] == nil { withdrawn[item.identifier] = id } }
+        }
+        func currentTargets(_ observed: [NativeReminderObservation], expected: [String: Int]) throws -> [String] {
+            try NativeReminderEffects.checkInventory(observed)
+            var targets: [String] = []
+            for item in observed {
+                if let id = expected[item.identifier] {
+                    guard item.ownedID == id else { throw NativeReminderEffects.unavailable }
+                    targets.append(item.identifier)
+                }
+            }
+            return targets
+        }
+        // Withdrawal removes the tray entry first; expiry deliberately preserves it.
+        if plan.clearDelivered || !withdrawn.isEmpty {
+            try await beforeEffect()
+            let observed = try await port.delivered(namespace: namespace); try await current()
+            if plan.clearDelivered {
+                for item in observed { if let id = item.ownedID, withdrawn[item.identifier] == nil { withdrawn[item.identifier] = id } }
+            }
+            let targets = try currentTargets(observed, expected: withdrawn)
+            if !targets.isEmpty { try await port.removeDelivered(targets); try await current() }
+        }
+        if !cancelled.isEmpty {
+            try await beforeEffect()
+            let observed = try await port.pending(namespace: namespace); try await current()
+            let targets = try currentTargets(observed, expected: cancelled)
+            if !targets.isEmpty { try await port.removePending(targets); try await current() }
+        }
+        if plan.clearDelivered || !withdrawn.isEmpty || !cancelled.isEmpty {
+            let afterPending = try await port.pending(namespace: namespace); try await current()
+            let afterDelivered = try await port.delivered(namespace: namespace); try await current()
+            try NativeReminderEffects.checkInventory(afterPending); try NativeReminderEffects.checkInventory(afterDelivered)
+            guard !afterPending.contains(where: { cancelled[$0.identifier] != nil }),
+                  !afterDelivered.contains(where: { withdrawn[$0.identifier] != nil || plan.clearDelivered && $0.ownedID != nil }) else {
+                throw NativeReminderEffects.unavailable
+            }
+        }
+        for alarm in plan.schedule {
+            try await beforeEffect()
+            let actual = try await port.pending(namespace: namespace); try await current()
+            try NativeReminderEffects.checkInventory(actual)
+            guard !actual.contains(where: { $0.identifier == alarm.identifier && $0.ownedID != alarm.id }),
+                  Set(actual.map(\.identifier)).union([alarm.identifier]).count <= 64 else { throw NativeReminderEffects.unavailable }
+            if let deadline = alarm.armedSnoozeDeadline {
+                let tray = try await port.delivered(namespace: namespace); try await current()
+                try NativeReminderEffects.checkInventory(tray)
+                guard !actual.contains(where: { $0.identifier == alarm.identifier || $0.ownedID == alarm.id }),
+                      !tray.contains(where: { $0.identifier == alarm.identifier || $0.ownedID == alarm.id }),
+                      deadline > Date().timeIntervalSince1970 * 1000 else { throw NativeReminderEffects.unavailable }
+            }
+            if let expiry = alarm.unarmedSnoozeExpiry {
+                guard Date().timeIntervalSince1970 * 1000 <= expiry else { throw NativeReminderEffects.unavailable }
+            }
+            // No await separates the final deadline check from accepting the OS add callback.
+            try await port.add(alarm, namespace: namespace); try await current()
+        }
+        // Pending requests stay distinct. Collapse only actual, freshly observed delivered owners.
+        try await beforeEffect()
+        let observed = try await port.delivered(namespace: namespace); try await current()
+        let superseded = try NativeReminderEffects.supersededDelivered(observed)
+        var collapsed = 0
+        if !superseded.isEmpty {
+            let expected = Dictionary(uniqueKeysWithValues: superseded.compactMap { item in item.ownedID.map { (item.identifier, $0) } })
+            let targets = try currentTargets(observed, expected: expected)
+            try await port.removeDelivered(targets); try await current()
+            let after = try await port.delivered(namespace: namespace); try await current()
+            try NativeReminderEffects.checkInventory(after)
+            guard !after.contains(where: { expected[$0.identifier] != nil }) else { throw NativeReminderEffects.unavailable }
+            collapsed = targets.count
+        }
+        try await beforeEffect()
+        let confirmedCollapsed = collapsed
+        return try await perform(reminderOwned: true) { try $0.commitReminderReconciliation(owner, collapsed: confirmedCollapsed) }
+    }
+
     public func close() async {
         // This primitive flag reaches a running local invoke immediately; an
         // ordinary durable command remains governed by its existing journal.
         localAttachmentRequests.close()
+        _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(nil) }
+        await reminderEffects.closeAndDrain()
+        await notificationAuthorization.closeAndDrain()
+        await calendarAuthorization.closeAndDrain()
         await withCheckedContinuation { continuation in
             queue.async { [engine] in
                 engine.shutdown()
@@ -539,13 +1020,29 @@ public final class CoreHost: @unchecked Sendable {
         }
     }
 
-    private func perform<T: Sendable>(_ work: @escaping @Sendable (Engine) throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async { [engine] in
-                do { continuation.resume(returning: try work(engine)) }
-                catch { continuation.resume(throwing: error) }
+    private func perform<T: Sendable>(reminderOwned: Bool = false,
+        _ work: @escaping @Sendable (Engine) throws -> T) async throws -> T {
+        let cancellation = reminderOwned ? nil : NativeAttachmentCancellation(), request = UUID()
+        if let cancellation { localAttachmentRequests.register(cancellation, id: request) }
+        defer { if cancellation != nil { localAttachmentRequests.remove(request) } }
+        if Task.isCancelled { cancellation?.cancel() }
+        return try await withTaskCancellationHandler {
+            if let cancellation, !(await reminderEffects.reserveOrdinary(cancellation: cancellation)) { throw CancellationError() }
+            return try await withCheckedThrowingContinuation { continuation in
+                queue.async { [engine, reminderEffects] in
+                    // Once Engine work starts, its existing durable/cancellation contract owns the outcome.
+                    let result: Result<T, Error>
+                    do {
+                        if cancellation?.isCancelled == true { throw CancellationError() }
+                        result = .success(try work(engine))
+                    } catch { result = .failure(error) }
+                    if cancellation != nil { reminderEffects.finishOrdinary() }
+                    engine.reminderPostOperation()
+                    engine.searchPostOperation()
+                    continuation.resume(with: result)
+                }
             }
-        }
+        } onCancel: { cancellation?.cancel() }
     }
 
     deinit {
@@ -950,6 +1447,8 @@ private final class Engine: @unchecked Sendable {
     private let backupImportFile: NativeBackupImportFile
     private let backupOperationFiles: NativeBackupOperationFiles
     private var backupSelections: [UUID: (selection: NativeBackupImportSelection, action: NativeBackupImportAction)] = [:]
+    private var backupReplayReadOnly = false
+    private var calendarPushDatabaseBinding: OwnedDiscardIdentity?
     private let journalURL: URL
     private let editorDrafts: EditorDraftStore
     private let legacyStorage: LegacyRNStorage?
@@ -959,13 +1458,211 @@ private final class Engine: @unchecked Sendable {
     private var database: SQLiteBridge?
     private var attachmentJobs: NativeAttachmentFileJobs?
     private let localRequests: NativeAttachmentLocalRequests
+    private let reminderAdmissions: NativeReminderEffects
     private var httpJobs: NativeHTTPJobs?
     private var secretJobs: NativeSecretJobs?
+    private var calendarJobs: NativeCalendarJobs?
     private var cryptoJobs: NativeCryptoJobs?
-    private enum IOBodySource { case file, http, crypto }
+    private enum IOBodySource { case file, http, crypto, calendar }
     private var ioBodySource: IOBodySource?
     private var preferredIO = 1
     private var attachmentGeneration: UInt64 = 0
+    private final class ReminderEffectsTurn {
+        var id: UUID
+        let generation: UInt64
+        let runtime: JSContext
+        let storage: NativeDeviceKV
+        let dataVersion: Int64
+        let namespace: String
+        let port: any NativeReminderPort
+        let session: String
+        var cancellation: NativeAttachmentCancellation
+        var expected: [String?] = []
+        var mutation: (before: [String?], after: [String?])?
+        var final: [String?] = []
+        var plan: NativeReminderEffects.Plan?
+        var topUpAtMs: Double?
+        init(id: UUID, generation: UInt64, runtime: JSContext, storage: NativeDeviceKV, dataVersion: Int64,
+             namespace: String, port: any NativeReminderPort, cancellation: NativeAttachmentCancellation) {
+            self.id = id; self.generation = generation; self.runtime = runtime; self.storage = storage
+            self.dataVersion = dataVersion; self.namespace = namespace; self.port = port
+            self.cancellation = cancellation; session = id.uuidString.lowercased()
+        }
+    }
+    private var reminderEffectsTurn: ReminderEffectsTurn?
+    private final class NotificationSettingTurn {
+        let id: UUID
+        let runtime: JSContext
+        let generation: UInt64
+        let requestJSON: String
+        let cancellation: NativeAttachmentCancellation
+        let retryPending: Bool
+        init(id: UUID, runtime: JSContext, generation: UInt64, requestJSON: String,
+             cancellation: NativeAttachmentCancellation, retryPending: Bool) {
+            self.id = id; self.runtime = runtime; self.generation = generation; self.requestJSON = requestJSON
+            self.cancellation = cancellation; self.retryPending = retryPending
+        }
+    }
+    private var notificationSettingTurn: NotificationSettingTurn?
+    private var notificationSettingOwnerAccess = false
+    private final class DeviceCalendarSettingTurn {
+        let runtime: JSContext
+        let storage: NativeDeviceKV
+        let generation: UInt64
+        var envelopeJSON: String?
+        var preparing = false
+        var committing = false
+        init(runtime: JSContext, storage: NativeDeviceKV, generation: UInt64) {
+            self.runtime = runtime; self.storage = storage; self.generation = generation
+        }
+    }
+    private var deviceCalendarSettingTurn: DeviceCalendarSettingTurn?
+    private enum CalendarSubscriptionOperation: String {
+        case metadata = "calendarSubscriptionSetting", add = "calendarSubscriptionAdd"
+        var commitMethod: String { rawValue + "Commit" }
+        init?(commitMethod: String) {
+            switch commitMethod {
+            case "calendarSubscriptionSettingCommit": self = .metadata
+            case "calendarSubscriptionAddCommit": self = .add
+            default: return nil
+            }
+        }
+    }
+    private final class CalendarSubscriptionSettingTurn {
+        let operation: CalendarSubscriptionOperation
+        let runtime: JSContext
+        let storage: NativeDeviceKV?
+        let generation: UInt64
+        var envelopeJSON: String?
+        var journal: Data?
+        var legacyObserved = false
+        var legacyRaw: String?
+        var committing = false
+        var freshRuntimeRequired = false
+        init(operation: CalendarSubscriptionOperation, runtime: JSContext, storage: NativeDeviceKV?, generation: UInt64, journal: Data?) {
+            self.operation = operation; self.runtime = runtime; self.storage = storage; self.generation = generation; self.journal = journal
+        }
+    }
+    private var calendarSubscriptionSettingTurn: CalendarSubscriptionSettingTurn?
+    private final class CalendarPushTurn {
+        let parent: CalendarSubscriptionSettingTurn
+        let storage: NativeDeviceKV
+        let database: SQLiteBridge
+        let libraryID: String
+        let effects: NativeCalendarPushEffects
+        let cancellation: NativeAttachmentCancellation
+        let operation: NativeCalendarPushOperation
+        let edit: [String: Any]?
+        var writes: NativeCalendarPushWrites?
+        var calendarReads: Set<String> = []
+        var writeRequests: [String: NativeCalendarWriteRequest] = [:]
+        var calendars: [[String: Any]]?
+        var deletedIDs: Set<Data> = []
+        var statePublication: (before: [String?], next: [String?])?
+        var diagnostics: [(operation: String, outcome: String)] = []
+        init(parent: CalendarSubscriptionSettingTurn, storage: NativeDeviceKV, database: SQLiteBridge,
+             libraryID: String, effects: NativeCalendarPushEffects, cancellation: NativeAttachmentCancellation,
+             operation: NativeCalendarPushOperation, edit: [String: Any]?) {
+            self.parent = parent; self.storage = storage; self.database = database; self.libraryID = libraryID
+            self.effects = effects; self.cancellation = cancellation; self.operation = operation; self.edit = edit
+        }
+    }
+    private var calendarPushTurn: CalendarPushTurn?
+    private var retainedCalendarPushTurn: CalendarPushTurn?
+    private var calendarPushReady: [String] = []
+    private let calendarPushReplyGeneration = UUID().uuidString.lowercased()
+    private var calendarPushReplySequence: UInt64 = 0
+    private static let calendarPushMethods: Set<String> = ["iosCalendarPushStart", "iosCalendarPushStop",
+        "iosCalendarPushRun", "iosCalendarPushSetting", "iosCalendarPushDiagnostic"]
+    private static let calendarPushStateNames = ["enabled", "calendar-id", "target-calendar-id", "color", "creation-intent"]
+        .map { "mindwtr:calendar-push-sync:" + $0 }
+    private var calendarPushObserver: (id: UUID, generation: UInt64, callback: @Sendable ([String]?) -> Void)?
+    private struct CalendarFileCaptureTurn {
+        let id: UUID
+        let owner: CalendarSubscriptionSettingTurn
+        let jobs: NativeAttachmentFileJobs
+        let requestJSON: String
+        let cancellation: NativeAttachmentCancellation
+    }
+    private var calendarFileCaptureTurn: CalendarFileCaptureTurn?
+    fileprivate static let calendarSubscriptionSettingMethods: Set<String> = ["calendarSubscriptionSetting",
+        "calendarSubscriptionSettingOptions", "calendarSubscriptionSettingPrepare", "calendarSubscriptionSettingValidate",
+        "calendarSubscriptionSettingCommit", "calendarSubscriptionSettingRetryOutcome", "calendarSubscriptionSettingAcknowledged",
+        "calendarSubscriptionAdd", "calendarSubscriptionAddPrepare", "calendarSubscriptionAddValidate",
+        "calendarSubscriptionAddCommit", "calendarSubscriptionAddRetryOutcome", "calendarSubscriptionAddAcknowledged",
+        "calendarSubscriptionFileAddRequest"]
+    private static let calendarSubscriptionSettingRequestLimit = 1_048_576
+    private static let calendarSubscriptionSettingEnvelopeLimit = 4_194_304
+    private static let calendarSubscriptionSettingOptionsLimit = 2_000_000
+    private static let calendarSubscriptionSettingArgumentsLimit = 12_000_000
+    private static let calendarSubscriptionSettingJournalLimit = 24_000_000
+    private static var calendarSubscriptionFreshRuntime: HostFailure {
+        HostFailure("SAVE_FAILED: Calendar subscription save requires fresh runtime recovery")
+    }
+    private final class CalendarAccessTurn {
+        let id: UUID
+        let runtime: JSContext
+        let storage: NativeDeviceKV
+        let generation: UInt64
+        let expected: [String?]
+        let cancellation: NativeAttachmentCancellation
+        init(id: UUID, runtime: JSContext, storage: NativeDeviceKV, generation: UInt64,
+             expected: [String?], cancellation: NativeAttachmentCancellation) {
+            self.id = id; self.runtime = runtime; self.storage = storage; self.generation = generation
+            self.expected = expected; self.cancellation = cancellation
+        }
+    }
+    private var calendarAccessTurn: CalendarAccessTurn?
+    fileprivate static let calendarAccessMethods: Set<String> = ["grantDeviceCalendarAccess", "deviceCalendarAccessAcknowledged"]
+    fileprivate static let deviceCalendarSettingMethods: Set<String> = ["deviceCalendarSetting", "deviceCalendarSettingPrepare",
+        "deviceCalendarSettingValidate", "deviceCalendarSettingCommit", "deviceCalendarSettingRetryOutcome", "deviceCalendarSettingAcknowledged"]
+    private static let deviceCalendarSettingCellLimit = 1024 * 1024
+    private static let deviceCalendarSettingEnvelopeLimit = 4 * 1024 * 1024
+    private static let deviceCalendarSettingArgumentsLimit = 12_000_000
+    private static let deviceCalendarSettingJournalLimit = 24_000_000
+    fileprivate static let notificationSettingMethods: Set<String> = ["notificationSetting", "notificationSettingOptions",
+        "notificationSettingPrepare", "notificationSettingValidate", "notificationSettingCommit", "notificationSettingRetryOutcome",
+        "notificationSettingAcknowledged"]
+    fileprivate static let reminderCompletionMethods: Set<String> = ["reminderCompletionCommit", "reminderCompletionProbe",
+        "reminderCompletionRetry", "reminderCompletionAcknowledged"]
+    fileprivate static let reminderSnoozeMethods: Set<String> = ["reminderSnoozePrepare", "reminderSnoozeValidate",
+        "reminderSnoozeCommit", "reminderSnoozeProbe", "reminderSnoozeRetry", "reminderSnoozeAcknowledged"]
+    private var reminderSnoozeMutation: (arguments: String, storage: NativeDeviceKV, runtime: JSContext,
+        generation: UInt64, before: [String?], after: [String?], confirm: Bool)?
+    private var reminderOwnerAccess = false
+    private var reminderSourceStale = false
+    private final class ReminderObserver {
+        let id = UUID()
+        let runtime: JSContext
+        let generation: UInt64
+        let callback: @Sendable (NativeReminderWake) -> Void
+        var revision: UInt64
+        var ready: Bool
+        var pending: NativeReminderWake?
+        var deliveryScheduled = false
+        init(runtime: JSContext, generation: UInt64, callback: @escaping @Sendable (NativeReminderWake) -> Void,
+             revision: UInt64, ready: Bool) {
+            self.runtime = runtime; self.generation = generation; self.callback = callback
+            self.revision = revision; self.ready = ready
+        }
+    }
+    private var reminderObserver: ReminderObserver?
+    private final class SearchObserver {
+        let runtime: JSContext
+        let generation: UInt64
+        let callback: @Sendable (NativeSearchObservation) -> Void
+        var observation: NativeSearchObservation
+        var pending: NativeSearchObservation?
+        var deliveryScheduled = false
+        init(runtime: JSContext, generation: UInt64, callback: @escaping @Sendable (NativeSearchObservation) -> Void,
+             observation: NativeSearchObservation) {
+            self.runtime = runtime; self.generation = generation; self.callback = callback; self.observation = observation
+        }
+    }
+    private var searchObserver: SearchObserver?
+    private static let reminderMapNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
+    fileprivate static let reminderMethods = Set(["iosReminderBegin", "iosReminderCurrent", "iosReminderPrepare", "iosReminderAcknowledged", "iosReminderEnd",
+        "iosReminderObserve", "iosReminderObservation", "iosReminderDisposeObservation"])
     private struct ProviderCopyTurn {
         var receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt?
         var photoCaptureID: UUID? = nil
@@ -1139,6 +1836,12 @@ private final class Engine: @unchecked Sendable {
     private var startupBackupDocumentResult: String?
     private var startupDataSettingResult: String?
     private var startupGeneralPreferenceResult: String?
+    private var startupNotificationSettingResult: String?
+    private var startupDeviceCalendarSettingResult: String?
+    private var startupCalendarSubscriptionSettingResult: String?
+    private var startupCalendarSubscriptionAddResult: String?
+    private var startupReminderCompletionResult: String?
+    private var startupReminderSnoozeResult: String?
     private var startupTaxonomyResult: String?
     private var startupPersonEditResult: String?
     private var startupPersonDeleteResult: String?
@@ -1183,6 +1886,7 @@ private final class Engine: @unchecked Sendable {
     #endif
 
     private static let methods: [String: Int] = [
+        "logLine": 2,
         "dataSetting": 1,
         "window": 3, "inboxView": 1, "focus": 1, "focusWindow": 4, "theme": 1, "areaFilter": 0, "setAreaFilter": 1,
         "captureOpen": 0, "captureView": 1, "captureEdit": 1, "captureSubmit": 1,
@@ -1194,7 +1898,8 @@ private final class Engine: @unchecked Sendable {
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
         "gtdWorkflowOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1,
+        "iosEntityOpen": 1, "iosSearchSnapshot": 0, "iosSearchObservation": 0, "iosSearchOpen": 1, "iosNotificationOpen": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
+        "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1, "deviceCalendarSetting": 1, "calendarSubscriptionSetting": 1, "calendarSubscriptionAdd": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
         "managePersonDeleteOptions": 1, "managePersonDelete": 1, "managePersonDeleteRetryOutcome": 1,
@@ -1254,13 +1959,13 @@ private final class Engine: @unchecked Sendable {
         "projectDateOptions": 1, "projectDateWrite": 1, "projectDateRetryOutcome": 1,
         "projectAreaOptions": 1, "projectAreaWrite": 1, "projectAreaRetryOutcome": 1,
         "menuRead": 2, "archiveTaskSelection": 1, "doneBulkTagInput": 2, "destinationPicker": 1, "editorSuggestions": 4, "calendarPreference": 1, "calendarUnschedule": 1, "calendarDelete": 1, "boardAction": 1,
-        "calendarComposerOpen": 1, "calendarComposerEdit": 1, "calendarComposerSave": 1,
+        "calendarComposerOpen": 1, "calendarComposerEdit": 1, "calendarComposerSave": 1, "calendarEventTaskCreate": 1,
         "mindSweepGuide": 1, "mindSweepAdd": 1,
         "inboxStart": 1, "inboxStep": 1, "inboxEnd": 1,
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["calendarSubscriptionAdd", "calendarSubscriptionSetting", "deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "referenceTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "calendarEventTaskCreate", "mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -1293,9 +1998,11 @@ private final class Engine: @unchecked Sendable {
     }
 
     init(queue: DispatchQueue, databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage? = nil,
-         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil, localRequests: NativeAttachmentLocalRequests) {
+         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil, localRequests: NativeAttachmentLocalRequests,
+         reminderAdmissions: NativeReminderEffects) {
         self.queue = queue
         self.localRequests = localRequests
+        self.reminderAdmissions = reminderAdmissions
         self.databaseURL = databaseURL
         self.bundleURL = bundleURL
         diagnosticsFile = NativeDiagnosticsLogFile(libraryRoot: databaseURL.deletingLastPathComponent())
@@ -1323,6 +2030,41 @@ private final class Engine: @unchecked Sendable {
             throw HostFailure("Invalid pending command journal")
         }
         guard saved.version == 2 else { throw HostFailure("Unsupported pending command journal; raw captures cannot be safely replanned") }
+        if saved.method == "calendarEventTaskCommit" || raw["method"] as? String == "calendarEventTaskCommit" {
+            guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared Calendar event task journal")
+            }
+        }
+        if CalendarSubscriptionOperation(commitMethod: saved.method) != nil
+            || String(decoding: journalData, as: UTF8.self).contains("calendarSubscriptionSettingCommit")
+            || String(decoding: journalData, as: UTF8.self).contains("calendarSubscriptionAddCommit") {
+            guard journalData.count <= Self.calendarSubscriptionSettingJournalLimit,
+                  try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared calendar subscription journal")
+            }
+        }
+        if let operation = CalendarSubscriptionOperation(commitMethod: saved.method) {
+            guard Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
+                || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription journal has unknown members")
+            }
+            if let terminal = raw["terminal"] {
+                guard let encoded = terminal as? [String: Any], encoded.count == 1,
+                      let name = encoded.keys.first, ["success", "rejected"].contains(name),
+                      let payload = encoded[name] as? [String: Any], Set(payload.keys) == Set(["_0"]),
+                      let value = payload["_0"] as? String, value.utf8.count <= 1024 else {
+                    throw HostFailure("INVALID_INPUT: Calendar subscription terminal is malformed")
+                }
+                if name == "success" { _ = try Self.calendarSubscriptionResult(value, operation: operation) }
+                else { guard isDefiniteRejection(value, method: saved.method) else { throw Self.deviceStorageInvalid } }
+            }
+        }
+        if saved.method == "deviceCalendarSettingCommit" {
+            guard journalData.count <= Self.deviceCalendarSettingJournalLimit,
+                  try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)) else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared Device Calendar setting journal")
+            }
+        }
         if saved.method == Self.ownedDiscardMethod {
             _ = try decodeOwnedDiscardJournal(journalData, checkingNative: true)
         } else if saved.method == Self.cleanupMethod {
@@ -1348,6 +2090,12 @@ private final class Engine: @unchecked Sendable {
         case .success(let value):
             _ = try NativeJSON.jsonObject(with: Data(value.utf8), options: [.fragmentsAllowed])
             if saved.method == "dataSetting" { try validateDataSettingAcknowledgment(value) }
+            if saved.method == "reminderCompletionCommit" { try validateReminderCompletionResult(value) }
+            if saved.method == "reminderSnoozeCommit" {
+                let args = try reminderSnoozeJournalArguments(saved)
+                guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+                try validateReminderSnoozeAlarm(value, request: raw)
+            }
         case .rejected(let message):
             guard isDefiniteRejection(message, method: saved.method) else { throw HostFailure("Invalid terminal command journal") }
         case nil: break
@@ -1358,13 +2106,22 @@ private final class Engine: @unchecked Sendable {
         return saved
     }
 
-    func start() throws -> String {
+    func start(retainingReminderResponseIDs: [String]?) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        let retentionJSON: String
+        if let ids = retainingReminderResponseIDs {
+            guard ids.count <= 128, Set(ids).count == ids.count,
+                  ids.allSatisfy({ UUID(uuidString: $0)?.uuidString.lowercased() == $0 }) else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Invalid reminder receipt retention")
+            }
+            retentionJSON = String(decoding: try JSONSerialization.data(withJSONObject: ids), as: UTF8.self)
+        } else { retentionJSON = "null" }
         guard !closed else { throw HostFailure("Core host is closed") }
+        guard reminderEffectsTurn == nil else { throw NativeReminderEffects.unavailable }
         do {
             if started {
                 try denyCleanupOwner()
-                return try startupWindow()
+                return try startupWindow(retentionJSON: retentionJSON)
             }
             let source = try String(contentsOf: bundleURL, encoding: .utf8)
             guard !source.isEmpty else { throw HostFailure("Core bundle is empty") }
@@ -1384,17 +2141,27 @@ private final class Engine: @unchecked Sendable {
             // Optional platform capability: failure leaves attachments unbound,
             // never prevents database recovery or leaks the exclusive lock.
             attachmentJobs = try? NativeAttachmentFileJobs(libraryRoot: databaseURL.deletingLastPathComponent())
+            let calendarFiles = try? NativeAttachmentFiles(libraryRoot: databaseURL.deletingLastPathComponent())
+            let readCalendarFile: (String, NativeAttachmentCancellation) throws -> Data = { uri, cancellation in
+                guard let calendarFiles else { throw NativeCalendarReadError.unavailable }
+                return try calendarFiles.readCalendarFile(uri, checkCancellation: cancellation.check)
+            }
             attachmentGeneration &+= 1
             #if DEBUG
             httpJobs = NativeHTTPJobs(registry: localRequests, faults: faults)
             if let httpJobs { faults?.configureHTTPJobs?(httpJobs) }
             secretJobs = try NativeSecretJobs(registry: localRequests, faults: faults)
             if let secretJobs { faults?.configureSecretJobs?(secretJobs) }
+            calendarJobs = NativeCalendarJobs(registry: localRequests,
+                readFile: readCalendarFile,
+                readerFactory: faults?.calendarReaderFactory ?? { NativeCalendarReader() })
+            if let calendarJobs { faults?.configureCalendarJobs?(calendarJobs) }
             cryptoJobs = NativeCryptoJobs(registry: localRequests, faults: faults)
             if let cryptoJobs { faults?.configureCryptoJobs?(cryptoJobs) }
             #else
             httpJobs = NativeHTTPJobs(registry: localRequests)
             secretJobs = NativeSecretJobs(registry: localRequests)
+            calendarJobs = NativeCalendarJobs(registry: localRequests, readFile: readCalendarFile)
             cryptoJobs = NativeCryptoJobs(registry: localRequests)
             #endif
             let httpGeneration = attachmentGeneration
@@ -1416,6 +2183,13 @@ private final class Engine: @unchecked Sendable {
                 guard let self else { return }
                 self.queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == httpGeneration else { return }
+                    self.scheduleAttachmentIdle(immediate: true)
+                }
+            }
+            calendarJobs?.setWake { [weak self] in
+                guard let self else { return }
+                self.queue.async { [weak self] in
+                    guard let self, self.attachmentGeneration == httpGeneration, !self.localRequests.isClosing else { return }
                     self.scheduleAttachmentIdle(immediate: true)
                 }
             }
@@ -1558,6 +2332,10 @@ private final class Engine: @unchecked Sendable {
                 _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
             }
+            if let command = pending, command.method == "calendarEventTaskCommit" {
+                _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
+            }
             if let command = pending, ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
                 _ = try invoke(command.method == "calendarComposerCommit" ? "calendarComposerValidate" : "calendarComposerCreateValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
@@ -1605,6 +2383,18 @@ private final class Engine: @unchecked Sendable {
             if let command = pending, command.method == "gtdWorkflowCommit" {
                 _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
                 if case .success(let value) = command.terminal { try validateGtdWorkflowAcknowledgment(command, value: value) }
+            }
+            if let command = pending, command.method == "notificationSettingCommit" {
+                _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateNotificationSettingAcknowledgment(command, value: value) }
+            }
+            if let command = pending, let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
+                _ = try invoke(operation.rawValue + "Validate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateCalendarSubscriptionSettingAcknowledgment(command, value: value) }
+            }
+            if let command = pending, command.method == "deviceCalendarSettingCommit" {
+                _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
+                if case .success(let value) = command.terminal { try validateDeviceCalendarSettingAcknowledgment(command, value: value) }
             }
             if let command = pending, command.method == "generalPreferenceCommit" {
                 _ = try invoke("generalPreferenceValidate", arguments: journalArguments(command))
@@ -1758,14 +2548,17 @@ private final class Engine: @unchecked Sendable {
             }
             let sqlite = try SQLiteBridge(url: databaseURL)
             database = sqlite
+            calendarPushDatabaseBinding = try? Self.bindingIdentity(databaseURL)
             #if DEBUG
             let guardedFaults = HostIOFaults()
             guardedFaults.beforeSQL = { [unowned self] sql in
+                try self.requireCalendarSubscriptionSettingTurn(publication: self.calendarSubscriptionSQLPublication(sql))
                 try self.requireCleanupTurn()
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
                 try self.requireProjectDownloadTurn()
                 try self.faults?.beforeSQL?(sql)
+                try self.requireCalendarSubscriptionSettingTurn(publication: self.calendarSubscriptionSQLPublication(sql))
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
                 try self.requireProjectDownloadTurn()
@@ -1777,6 +2570,7 @@ private final class Engine: @unchecked Sendable {
                     if sql == "ROLLBACK" { turn.transaction = false }
                 }
                 try self.faults?.afterSQL?(sql)
+                try self.requireCalendarSubscriptionSettingTurn(publication: self.calendarSubscriptionSQLPublication(sql))
                 try self.requireRetainedOrdinaryTurn(requirePreparation: true)
                 try self.requireProjectFileAddTurn()
                 try self.requireProjectDownloadTurn()
@@ -1812,7 +2606,7 @@ private final class Engine: @unchecked Sendable {
             projectDownloadTurn?.expectedStarted = true
             // A durable no-write rejection needs only cleanup, not another failed
             // startup. The interactive retry still returns its original error.
-            return try startupWindow()
+            return try startupWindow(retentionJSON: retentionJSON)
         } catch {
             if !(error is CoreHostAppLockRecovery) && !(error is CoreHostProjectFileAddRecovery) && !(error is CoreHostProjectFileAvailabilityRecovery) { releaseRuntime() }
             throw error
@@ -1829,7 +2623,7 @@ private final class Engine: @unchecked Sendable {
         NSLog("Native iOS App lock recovery cancelled releaseCheck=v1.3.4/ios-app-lock outcome=cancelled")
     }
 
-    private func startupWindow() throws -> String {
+    private func startupWindow(retentionJSON: String) throws -> String {
         if pending?.method == Self.projectDownloadMethod || projectDownloadTurn != nil { throw CoreHostProjectFileAvailabilityRecovery() }
         if pending?.method == Self.projectFileAddMethod || projectFileAddTurn != nil { throw CoreHostProjectFileAddRecovery() }
         let recoveringAttachmentSaveMethod: String? = pending.flatMap { command in
@@ -1880,8 +2674,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringTrashTaskRestore = pending?.method == "trashTaskRestoreCommit"
         let recoveringTrashProjectRestore = pending?.method == "trashProjectRestoreCommit"
         let recoveringTaskPromote = pending?.method == "taskPromoteCommit"
-        let recoveringCalendarMethod = pending?.method == "calendarComposerCreateCommit" ? "calendarComposerCreateCommit"
-            : pending?.method == "calendarComposerCommit" ? "calendarComposerCommit" : nil
+        let recoveringCalendarMethod = ["calendarComposerCreateCommit", "calendarComposerCommit", "calendarEventTaskCommit"].first { $0 == pending?.method }
         let recoveringMindSweep = pending?.method == "mindSweepCommit"
         let recoveringProjectCreate = pending?.method == "projectCreateCommit"
         let recoveringProjectSectionCreate = pending?.method == "projectSectionCreateCommit"
@@ -1892,6 +2685,12 @@ private final class Engine: @unchecked Sendable {
         let recoveringGtdWorkflow = pending?.method == "gtdWorkflowCommit"
         let recoveringDataSetting = pending?.method == "dataSetting"
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
+        let recoveringNotificationSetting = pending?.method == "notificationSettingCommit"
+        let recoveringDeviceCalendarSetting = pending?.method == "deviceCalendarSettingCommit"
+        let recoveringCalendarSubscriptionSetting = pending?.method == "calendarSubscriptionSettingCommit"
+        let recoveringCalendarSubscriptionAdd = pending?.method == "calendarSubscriptionAddCommit"
+        let recoveringReminderCompletion = pending?.method == "reminderCompletionCommit"
+        let recoveringReminderSnooze = pending?.method == "reminderSnoozeCommit"
         let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
         let recoveringPersonEdit = pending?.method == "managePersonEditCommit"
         let recoveringPersonDelete = pending?.method == "managePersonDeleteCommit"
@@ -1940,6 +2739,8 @@ private final class Engine: @unchecked Sendable {
                 actual?["cancellation"] is [String: Any] ? recoveringAttachmentCancelRequestId : nil)
         }
         if recoveringBackupDocument, let terminal, case .success(let value) = terminal { startupBackupDocumentResult = value }
+        if recoveringReminderCompletion, let terminal, case .success(let value) = terminal { startupReminderCompletionResult = value }
+        if recoveringReminderSnooze, let terminal, case .success(let value) = terminal { startupReminderSnoozeResult = value }
         if let recoveringTaskDeleteCommand, let terminal, case .success = terminal {
             rememberConfirmedTaskDelete(recoveringTaskDeleteCommand)
         }
@@ -1999,6 +2800,10 @@ private final class Engine: @unchecked Sendable {
         if recoveringGtdWorkflow, let terminal, case .success(let value) = terminal { startupGtdWorkflowResult = value }
         if recoveringDataSetting, let terminal, case .success(let value) = terminal { startupDataSettingResult = value }
         if recoveringGeneralPreference, let terminal, case .success(let value) = terminal { startupGeneralPreferenceResult = value }
+        if recoveringNotificationSetting, let terminal, case .success(let value) = terminal { startupNotificationSettingResult = value }
+        if recoveringDeviceCalendarSetting, let terminal, case .success(let value) = terminal { startupDeviceCalendarSettingResult = value }
+        if recoveringCalendarSubscriptionSetting, let terminal, case .success(let value) = terminal { startupCalendarSubscriptionSettingResult = value }
+        if recoveringCalendarSubscriptionAdd, let terminal, case .success(let value) = terminal { startupCalendarSubscriptionAddResult = value }
         if recoveringTaxonomy, let terminal, case .success(let value) = terminal { startupTaxonomyResult = value }
         if recoveringPersonEdit, let terminal, case .success(let value) = terminal { startupPersonEditResult = value }
         if recoveringPersonDelete, let terminal, case .success(let value) = terminal { startupPersonDeleteResult = value }
@@ -2039,7 +2844,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringSomedaySectionMove, let terminal, case .success(let value) = terminal { startupSomedaySectionMoveResult = value }
         if recoveringSomedaySectionUndo, let terminal, case .success(let value) = terminal { startupSomedaySectionUndoResult = value }
         try resumeActivationIfNeeded()
-        _ = try invoke("pruneReceipts", arguments: [])
+        _ = try invoke("iosPruneReceipts", arguments: [retentionJSON])
         let value = try invoke("window", arguments: [0, 50, ""])
         let recoveredAreas = startupAreaCreateResult ?? startupAreaColorResult ?? startupAreaRenameResult
             ?? startupAreaOrderResult ?? startupAreaDeleteResult
@@ -2054,12 +2859,16 @@ private final class Engine: @unchecked Sendable {
         let recoveredSomedaySections = startupSomedaySectionCreateResult ?? startupSomedaySectionRenameResult
             ?? startupSomedaySectionDeleteResult ?? startupSomedaySectionOrderResult
             ?? startupSomedaySectionTaskResult
-        let recoveredManage = startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
+        let recoveredSettings = startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult
+            ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? startupNotificationSettingResult ?? startupDeviceCalendarSettingResult ?? startupCalendarSubscriptionSettingResult ?? startupCalendarSubscriptionAddResult
+        let recoveredManage = recoveredSettings ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
             ?? startupPersonDeleteResult ?? startupPersonEditResult ?? startupTaxonomyResult
         let recoveredDoneRows = startupDoneTaskCompletedAtResult ?? startupDoneTaskStatusResult
         let recoveredHistoryRows = startupArchiveTaskCompletedAtResult ?? recoveredDoneRows
         let recoveredReference = startupReferenceProjectNextActionResult ?? startupReferenceTaskDestinationResult ?? startupReferenceTaskBackdateResult ?? startupTaskCompletionResult ?? startupTaskCompletionUndoResult
-        let recoveredCompletion = recoveredHistoryRows ?? recoveredReference
+        let recoveredTaskCompletion = recoveredHistoryRows ?? recoveredReference
+        let recoveredReminderCommands = startupReminderCompletionResult ?? startupReminderSnoozeResult
+        let recoveredCompletion = recoveredTaskCompletion ?? recoveredReminderCommands
         let recoveredLists = recoveredCompletion
             ?? startupInboxResult ?? startupChecklistResult ?? startupTaskListSortResult
             ?? recoveredManage ?? recoveredSomedaySections
@@ -2107,7 +2916,9 @@ private final class Engine: @unchecked Sendable {
             : startupReferenceTaskDestinationResult != nil ? "referenceTaskDestinationCommit"
             : startupReferenceTaskBackdateResult != nil ? "referenceTaskBackdateCommit"
             : startupTaskCompletionResult != nil ? "taskCompletionCommit"
-            : startupTaskCompletionUndoResult != nil ? "taskCompletionUndoCommit" : nil
+            : startupTaskCompletionUndoResult != nil ? "taskCompletionUndoCommit"
+            : startupReminderCompletionResult != nil ? "reminderCompletionCommit"
+            : startupReminderSnoozeResult != nil ? "reminderSnoozeCommit" : nil
         let archiveMutationRecoveryMethod = startupArchivedTasksDeleteResult != nil ? "archivedTasksDeleteCommit"
             : startupArchivedTasksDeleteUndoResult != nil ? "archivedTasksDeleteUndoCommit" : nil
         let historyRecoveryMethod = startupReferenceTasksRemoveTagResult != nil ? "referenceTasksRemoveTagCommit" : startupReferenceTasksAddTagResult != nil ? "referenceTasksAddTagCommit" : startupReferenceTasksMoveResult != nil ? "referenceTasksMoveCommit" : archiveMutationRecoveryMethod ?? (startupArchivedTasksRestoreResult != nil ? "archivedTasksRestoreCommit" : completionRecoveryMethod)
@@ -2137,6 +2948,10 @@ private final class Engine: @unchecked Sendable {
                 : startupBackupDocumentResult != nil ? "backupDocumentCommit"
                 : startupDataSettingResult != nil ? "dataSetting"
                 : startupGeneralPreferenceResult != nil ? "generalPreferenceCommit"
+                : startupNotificationSettingResult != nil ? "notificationSettingCommit"
+                : startupDeviceCalendarSettingResult != nil ? "deviceCalendarSettingCommit"
+                : startupCalendarSubscriptionSettingResult != nil ? "calendarSubscriptionSettingCommit"
+                : startupCalendarSubscriptionAddResult != nil ? "calendarSubscriptionAddCommit"
                 : startupTaxonomyResult != nil ? "manageTaxonomyCommit"
                 : startupPersonEditResult != nil ? "managePersonEditCommit"
                 : startupPersonDeleteResult != nil ? "managePersonDeleteCommit"
@@ -2241,6 +3056,12 @@ private final class Engine: @unchecked Sendable {
         startupBackupDocumentResult = nil
         startupDataSettingResult = nil
         startupGeneralPreferenceResult = nil
+        startupNotificationSettingResult = nil
+        startupDeviceCalendarSettingResult = nil
+        startupCalendarSubscriptionSettingResult = nil
+        startupCalendarSubscriptionAddResult = nil
+        startupReminderCompletionResult = nil
+        startupReminderSnoozeResult = nil
         startupTaxonomyResult = nil
         startupPersonEditResult = nil
         startupPersonDeleteResult = nil
@@ -2282,6 +3103,1748 @@ private final class Engine: @unchecked Sendable {
         return encoded
     }
 
+    func aboutAppStoreInfo(bundleIdentifier: String, currentVersion: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try cancellation.check()
+        guard started, !closed, !recoveryActivationPending, pending == nil, lockFD >= 0,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil else {
+            throw HostFailure("App Store lookup is unavailable")
+        }
+        try requireNoAttachmentDraft()
+        return try invoke("iosAboutAppStoreInfo", arguments: [bundleIdentifier, currentVersion], localCancellation: cancellation)
+    }
+
+    func calendarRead(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        try requireCalendarAdmission()
+        guard requestJSON.utf8.count <= 8192,
+              let input = try? NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
+              (try? NativeJSON.hasUniqueObjectKeys(requestJSON)) == true else {
+            throw HostFailure("INVALID_INPUT: Calendar request is invalid")
+        }
+        return try invoke("iosCalendarRead", arguments: [requestJSON], localCancellation: cancellation,
+                          drainCalendarTest: Set(input.keys) == Set(["op"]) && input["op"] as? String == "testSettings")
+    }
+
+    private func calendarPushLibraryID() throws -> String {
+        guard let binding = calendarPushDatabaseBinding, let namespace = deviceStorageLocation?.bundleIdentifier,
+              try Self.bindingIdentity(databaseURL) == binding else { throw NativeCalendarWriteError.unavailable }
+        return try Self.ownedJSON([namespace, Self.mixedSaveCanonicalPath(databaseURL.absoluteString, directory: false),
+                                  String(binding.device), String(binding.inode)])
+    }
+
+    func observeCalendarPush(_ callback: @escaping @Sendable ([String]?) -> Void) throws -> UUID {
+        try requireCalendarAdmission()
+        guard calendarPushObserver == nil else { throw NativeCalendarWriteError.unavailable }
+        let id = UUID()
+        calendarPushObserver = (id, attachmentGeneration, callback)
+        return id
+    }
+
+    func removeCalendarPushObserver(_ id: UUID) {
+        if calendarPushObserver?.id == id { calendarPushObserver = nil }
+    }
+
+    private func requireCalendarPushSettlement(_ turn: CalendarPushTurn) throws {
+        guard context === turn.parent.runtime, deviceStorage === turn.storage, database === turn.database,
+              attachmentGeneration == turn.parent.generation, lockFD >= 0,
+              Self.ownedEqual(try calendarPushLibraryID(), turn.libraryID) else {
+            throw NativeCalendarWriteError.unavailable
+        }
+    }
+
+    @discardableResult private func requireCalendarPushTurn() throws -> CalendarPushTurn {
+        guard let turn = calendarPushTurn, calendarSubscriptionSettingTurn === turn.parent, pending == nil else {
+            throw NativeCalendarWriteError.unavailable
+        }
+        try turn.cancellation.check()
+        try requireCalendarSubscriptionSettingTurn()
+        try requireCalendarPushSettlement(turn)
+        return turn
+    }
+
+    private static func calendarPushIDs(_ value: Any?) throws -> [String] {
+        guard let ids = value as? [String], ids.count <= 10_000,
+              Set(ids.map { Data($0.utf8) }).count == ids.count,
+              ids.allSatisfy({ NativeCalendarWriteValidation.id($0) && $0.utf16.count <= 500
+                  && !$0.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{feff}"))).isEmpty }) else {
+            throw NativeCalendarWriteError.invalid
+        }
+        return ids
+    }
+
+    func calendarPush(_ operation: NativeCalendarPushOperation, argumentsJSON: String,
+                      cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try cancellation.check()
+        let input = try Self.deviceCalendarSettingObject(argumentsJSON, maximum: NativeCalendarJobs.maximumRequestBytes)
+        var edit: [String: Any]?
+        switch operation {
+        case .start, .stop:
+            guard input.isEmpty else { throw NativeCalendarWriteError.invalid }
+        case .run:
+            guard Set(input.keys) == ["ids"] else { throw NativeCalendarWriteError.invalid }
+            if !(input["ids"] is NSNull) { _ = try Self.calendarPushIDs(input["ids"]) }
+        case .setting:
+            guard Set(input.keys) == ["requestId", "edit"], let value = input["edit"] as? [String: Any],
+                  let type = value["type"] as? String,
+                  ["push", "pushTarget", "pushColor", "deleteMindwtrCalendar"].contains(type) else {
+                throw NativeCalendarWriteError.invalid
+            }
+            edit = value
+        }
+        if operation == .stop {
+            guard started, !closed, context != nil else { throw NativeCalendarWriteError.unavailable }
+            return try invoke("iosCalendarPushStop", arguments: [], localCancellation: cancellation)
+        }
+        try requireCalendarAdmission()
+        if let retained = retainedCalendarPushTurn {
+            try requireCalendarPushSettlement(retained)
+            try retryCalendarPushState(retained)
+            try retained.effects.retryPublication()
+            try retained.writes?.cancelAndDrain()
+            retainedCalendarPushTurn = nil
+        }
+        return try withCalendarSubscriptionSettingOwner {
+            guard pending == nil, let parent = calendarSubscriptionSettingTurn, let storage = parent.storage,
+                  let database, let jobs = calendarJobs, jobs.writeAdmissionAvailable else {
+                throw NativeCalendarWriteError.unavailable
+            }
+            let libraryID = try calendarPushLibraryID()
+            let effects = try NativeCalendarPushEffects(storage: storage, database: database, libraryID: libraryID)
+            let turn = CalendarPushTurn(parent: parent, storage: storage, database: database, libraryID: libraryID,
+                effects: effects, cancellation: cancellation, operation: operation, edit: edit)
+            calendarPushTurn = turn
+            defer { calendarPushTurn = nil }
+            do {
+                try recoverCalendarPush(turn)
+                turn.writes = NativeCalendarPushWrites(jobs: jobs, effects: effects,
+                    authorize: { [weak self, weak turn] request in
+                        guard let self, let turn, try self.requireCalendarPushTurn() === turn else {
+                            throw NativeCalendarWriteError.unavailable
+                        }
+                        if case .createCalendar? = request {
+                            let state = try turn.storage.readCalendarPushState()
+                            let calendars = try self.readCalendarPushCalendars(turn)
+                            if let saved = state[1], calendars.contains(where: { ($0["id"] as? String).map {
+                                NativeCalendarWriteValidation.equalID($0, saved)
+                            } ?? false }) { throw NativeCalendarWriteError.unavailable }
+                        }
+                    }, settleAuthority: { [weak self, weak turn] in
+                        guard let self, let turn else { throw NativeCalendarWriteError.unavailable }
+                        try self.requireCalendarPushSettlement(turn)
+                    })
+                let method: String
+                switch operation {
+                case .start: method = "iosCalendarPushStart"
+                case .run: method = "iosCalendarPushRun"
+                case .setting: method = "iosCalendarPushSetting"
+                case .stop: throw NativeCalendarWriteError.invalid
+                }
+                let result = try invoke(method, arguments: operation == .start ? [] : [argumentsJSON],
+                    localCancellation: cancellation, drainCalendarTest: true)
+                try turn.writes?.cancelAndDrain()
+                guard try effects.current() == nil else { throw NativeCalendarWriteError.unavailable }
+                calendarPushDiagnostics(turn)
+                return result
+            } catch {
+                retainedCalendarPushTurn = turn
+                do { try turn.writes?.cancelAndDrain() }
+                catch { retainedCalendarPushTurn = turn }
+                if let effect = try? effects.current() {
+                    turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "blocked"))
+                }
+                calendarPushDiagnostics(turn)
+                throw error
+            }
+        }
+    }
+
+    private func calendarPushReply(_ value: Any) throws -> String {
+        guard calendarPushReady.count < 32, calendarPushReplySequence < UInt64.max else {
+            throw NativeCalendarWriteError.unavailable
+        }
+        calendarPushReplySequence += 1
+        let id = "calendar-push-\(calendarPushReplyGeneration)-\(calendarPushReplySequence)"
+        let raw = try Self.ownedJSON(["id": id, "value": value])
+        guard raw.utf8.count <= NativeCalendarJobs.maximumReplyBytes else { throw NativeCalendarWriteError.invalid }
+        calendarPushReady.append(raw)
+        return id
+    }
+
+    private func calendarPushCall(_ raw: String) throws -> String {
+        let request = try NativeCalendarPushRequest(json: raw)
+        if calendarPushTurn != nil { _ = try requireCalendarPushTurn() }
+        else { try requireCalendarAdmission() }
+        switch request {
+        case .read(let read, let json):
+            guard let jobs = calendarJobs else { throw NativeCalendarWriteError.unavailable }
+            let id = try jobs.submit(json)
+            if case .calendars = read { calendarPushTurn?.calendarReads.insert(id) }
+            return id
+        case .readState:
+            guard let storage = deviceStorage else { throw NativeCalendarWriteError.unavailable }
+            return try calendarPushReply(try storage.readCalendarPushState().prefix(5).map { $0 as Any? ?? NSNull() })
+        case .mapping(let taskID):
+            return try calendarPushReply(try requireDatabase().readCalendarPushMapping(taskID: taskID)?.json as Any? ?? NSNull())
+        case .mappings:
+            let raw = try requireDatabase().execute("SELECT task_id AS taskId, calendar_event_id AS calendarEventId, calendar_id AS calendarId, platform, last_synced_at AS lastSyncedAt FROM calendar_sync WHERE platform = 'ios'")
+            guard let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]] else {
+                throw NativeCalendarWriteError.invalid
+            }
+            return try calendarPushReply(try rows.map { try NativeCalendarPushRequest.mapping($0).json })
+        case .sources:
+            guard let writes = try requireCalendarPushTurn().writes else { throw NativeCalendarWriteError.unavailable }
+            return try writes.submitSources()
+        case .write(let request, let json, let taskID):
+            let turn = try requireCalendarPushTurn()
+            guard let writes = turn.writes else { throw NativeCalendarWriteError.unavailable }
+            let id = try writes.submit(requestJSON: json, taskID: taskID)
+            turn.writeRequests[id] = request
+            return id
+        case .ackMapping(let id, let entry):
+            let turn = try requireCalendarPushTurn()
+            guard let writes = turn.writes else { throw NativeCalendarWriteError.unavailable }
+            let effect = try turn.effects.current()
+            try writes.acknowledge(operationID: id, entry: entry)
+            if let effect { turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "saved")) }
+            return try calendarPushReply(NSNull())
+        case .deleteMapping(let expected):
+            let turn = try requireCalendarPushTurn()
+            try calendarPushConfirmDeleted(turn)
+            guard turn.deletedIDs.contains(Data(expected.calendarId.utf8)), try turn.effects.current() == nil else {
+                throw NativeCalendarWriteError.unavailable
+            }
+            try turn.database.compareAndSetCalendarPushMapping(taskID: expected.taskId, expected: expected, next: nil)
+            return try calendarPushReply(NSNull())
+        case .setState(let name, let value):
+            try calendarPushSetState(name: name, value: value)
+            return try calendarPushReply(NSNull())
+        }
+    }
+
+    private func readCalendarPushValue(_ turn: CalendarPushTurn, request: String? = nil,
+                                       event: (String, String)? = nil) throws -> Any {
+        try requireCalendarPushTurn()
+        guard let jobs = calendarJobs, jobs.writeAdmissionAvailable else { throw NativeCalendarWriteError.unavailable }
+        let id: String
+        if let event { id = try jobs.submitRecoveryEvent(eventID: event.0, calendarID: event.1) }
+        else if let request { id = try jobs.submit(request) }
+        else { throw NativeCalendarWriteError.invalid }
+        jobs.drain()
+        guard let answer = try jobs.next(),
+              let object = try NativeJSON.jsonObject(with: Data(answer.json.utf8)) as? [String: Any],
+              object["id"] as? String == id, object["error"] == nil, let value = object["value"] else {
+            throw NativeCalendarWriteError.unavailable
+        }
+        try requireCalendarPushTurn()
+        return value
+    }
+
+    private func readCalendarPushCalendars(_ turn: CalendarPushTurn) throws -> [[String: Any]] {
+        guard let calendars = try readCalendarPushValue(turn, request: "{\"op\":\"calendars\"}") as? [[String: Any]],
+              calendars.count <= 10_000 else { throw NativeCalendarWriteError.invalid }
+        turn.calendars = calendars
+        return calendars
+    }
+
+    private func recoverCalendarPush(_ turn: CalendarPushTurn) throws {
+        try turn.effects.retryPublication()
+        // Each iteration advances one durable phase; no recovery path issues a provider mutation.
+        for _ in 0..<4 {
+            try requireCalendarPushTurn()
+            guard let effect = try turn.effects.current() else { return }
+            switch effect.phase {
+            case .prepared:
+                try turn.effects.discardPrepared(id: effect.id)
+            case .acknowledging:
+                try turn.effects.acknowledgeMapping(id: effect.id, mapping: effect.afterMapping)
+                turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "recovered"))
+            case .saved:
+                if let taskID = effect.taskID {
+                    let mapping: NativeCalendarPushMapping?
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    switch (effect.request, effect.result) {
+                    case (.createEvent(let calendar, _), .identifier(let event)?),
+                         (.updateEvent(let event, let calendar, _), .completed?):
+                        mapping = try NativeCalendarPushMapping(taskId: taskID, calendarEventId: event,
+                            calendarId: calendar, platform: "ios", lastSyncedAt: formatter.string(from: Date()))
+                    default: mapping = nil
+                    }
+                    try turn.effects.acknowledgeMapping(id: effect.id, mapping: mapping)
+                } else {
+                    if case .deleteCalendar(let id) = effect.request {
+                        guard try !readCalendarPushCalendars(turn).contains(where: {
+                            ($0["id"] as? String).map { NativeCalendarWriteValidation.equalID($0, id) } ?? false
+                        }) else { throw NativeCalendarWriteError.unavailable }
+                        turn.deletedIDs.insert(Data(id.utf8))
+                    }
+                    try turn.effects.acknowledgeCalendar(id: effect.id)
+                }
+                turn.diagnostics.append((Self.calendarPushOperationName(effect.request), "recovered"))
+            case .started:
+                let outcome: NativeCalendarWriteOutcome
+                switch effect.request {
+                case .createCalendar:
+                    outcome = .succeeded(.identifier(try NativeCalendarPushWitness.createdCalendar(effect: effect,
+                        calendars: readCalendarPushCalendars(turn))))
+                case .updateCalendar:
+                    try NativeCalendarPushWitness.updatedCalendar(effect: effect, calendars: readCalendarPushCalendars(turn))
+                    outcome = .succeeded(.completed)
+                case .deleteCalendar(let id):
+                    guard try !readCalendarPushCalendars(turn).contains(where: {
+                        ($0["id"] as? String).map { NativeCalendarWriteValidation.equalID($0, id) } ?? false
+                    }) else { throw NativeCalendarWriteError.unavailable }
+                    outcome = .succeeded(.completed)
+                case .createEvent(let calendar, let details):
+                    let instant = (details.start.timeIntervalSince1970 * 1000).rounded()
+                    let start = max(NativeCalendarEventOpenRequest.minimumSeconds * 1000, instant - 1000)
+                    let end = min((NativeCalendarEventOpenRequest.maximumSeconds * 1000).rounded(), instant + 1000)
+                    let request = try Self.ownedJSON(["op": "events", "calendarIds": [calendar], "startMs": start, "endMs": end])
+                    guard let events = try readCalendarPushValue(turn, request: request) as? [[String: Any]] else {
+                        throw NativeCalendarWriteError.invalid
+                    }
+                    outcome = .succeeded(.identifier(try NativeCalendarPushWitness.createdEvent(effect: effect, events: events)))
+                case .updateEvent(let event, let calendar, _), .deleteEvent(let event, let calendar):
+                    let value = try readCalendarPushValue(turn, event: (event, calendar))
+                    if value is NSNull { outcome = .confirmedMissingEvent }
+                    else if case .updateEvent = effect.request, let row = value as? [String: Any] {
+                        try NativeCalendarPushWitness.updatedEvent(effect: effect, event: row)
+                        outcome = .succeeded(.completed)
+                    } else { throw NativeCalendarWriteError.unavailable }
+                case .sources: throw NativeCalendarWriteError.invalid
+                }
+                try turn.effects.acceptCompletion(id: effect.id, outcome: outcome)
+            }
+        }
+        guard try turn.effects.current() == nil else { throw NativeCalendarWriteError.unavailable }
+    }
+
+    private func calendarPushConfirmDeleted(_ turn: CalendarPushTurn) throws {
+        guard turn.edit?["type"] as? String == "deleteMindwtrCalendar", let calendars = turn.calendars else { return }
+        let state = try turn.storage.readCalendarPushState()
+        let intent = try NativeCalendarPushEffects.calendarIntent(state[4])
+        for id in [state[1], intent?.deletionRevision == nil ? nil : intent?.calendarID].compactMap({ $0 }) {
+            if !calendars.contains(where: { ($0["id"] as? String).map {
+                NativeCalendarWriteValidation.equalID($0, id)
+            } ?? false }) { turn.deletedIDs.insert(Data(id.utf8)) }
+        }
+    }
+
+    private func calendarPushSetState(name: String, value: String?) throws {
+        let turn = try requireCalendarPushTurn()
+        guard let index = Self.calendarPushStateNames.firstIndex(of: name) else { throw NativeCalendarWriteError.invalid }
+        let before = try turn.storage.readCalendarPushState()
+        if before[index].map({ Data($0.utf8) }) == value.map({ Data($0.utf8) }) { return }
+        guard try turn.effects.current() == nil else { throw NativeCalendarWriteError.unavailable }
+        let edit = turn.edit, type = edit?["type"] as? String
+        var allowed = false
+        switch index {
+        case 0:
+            allowed = type == "push" && Self.isBoolean(edit?["enabled"])
+                && value == ((edit?["enabled"] as? Bool == true) ? "1" : "0")
+                || type == "deleteMindwtrCalendar" && value == "0"
+        case 2:
+            if type == "pushTarget" {
+                let target = (edit?["calendarId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                allowed = value == (target?.isEmpty == true ? nil : target)
+            } else if type == "deleteMindwtrCalendar", value == nil, let prior = before[2] {
+                try calendarPushConfirmDeleted(turn)
+                allowed = turn.deletedIDs.contains(Data(prior.utf8))
+            }
+        case 3:
+            allowed = type == "pushColor" && value?.uppercased() == (edit?["color"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                && value.map(NativeCalendarWriteValidation.color) == true
+        case 1, 4:
+            let prior = try NativeCalendarPushEffects.calendarIntent(before[4])
+            let next = index == 4 ? try NativeCalendarPushEffects.calendarIntent(value) : nil
+            let calendars = turn.calendars ?? []
+            func bound(_ id: String, title: String) -> Bool {
+                let matches = calendars.filter { ($0["id"] as? String).map {
+                    NativeCalendarWriteValidation.equalID($0, id)
+                } ?? false }
+                return matches.count == 1 && (matches[0]["title"] as? String).map {
+                    NativeCalendarWriteValidation.equalID($0, title)
+                } == true && matches[0]["allowsModifications"] as? Bool == true
+            }
+            if index == 1, let value, let prior, let id = prior.calendarID,
+               NativeCalendarWriteValidation.equalID(value, id) {
+                allowed = bound(id, title: prior.title) || bound(id, title: "Mindwtr")
+            } else if index == 4, let next {
+                if let prior {
+                    let sameTitle = NativeCalendarWriteValidation.equalID(prior.title, next.title)
+                    if let id = next.calendarID, prior.calendarID == nil, next.deletionRevision == nil {
+                        allowed = sameTitle && bound(id, title: prior.title)
+                            && calendars.filter { ($0["title"] as? String).map {
+                                NativeCalendarWriteValidation.equalID($0, prior.title)
+                            } ?? false }.count == 1
+                    } else if type == "deleteMindwtrCalendar", let id = next.calendarID, next.deletionRevision != nil {
+                        allowed = sameTitle && prior.deletionRevision == nil
+                            && (prior.calendarID == nil || prior.calendarID.map { NativeCalendarWriteValidation.equalID($0, id) } == true)
+                            && (bound(id, title: prior.title) || prior.calendarID != nil && bound(id, title: "Mindwtr"))
+                    }
+                } else {
+                    allowed = next.calendarID == nil && next.deletionRevision == nil && type != "deleteMindwtrCalendar"
+                }
+            } else if value == nil {
+                if type == "deleteMindwtrCalendar" {
+                    try calendarPushConfirmDeleted(turn)
+                    let id = index == 1 ? before[1] : prior?.calendarID
+                    allowed = id.map { turn.deletedIDs.contains(Data($0.utf8)) } ?? false
+                } else if index == 4, let prior, let id = prior.calendarID {
+                    allowed = before[1].map { NativeCalendarWriteValidation.equalID($0, id) } == true
+                        && prior.deletionRevision == nil && bound(id, title: "Mindwtr")
+                }
+            }
+        default: break
+        }
+        guard allowed else { throw NativeCalendarWriteError.unavailable }
+        var next = before; next[index] = value
+        turn.statePublication = (before, next)
+        try retryCalendarPushState(turn)
+    }
+
+    private func retryCalendarPushState(_ turn: CalendarPushTurn) throws {
+        guard let publication = turn.statePublication else { return }
+        try requireCalendarPushSettlement(turn)
+        try turn.storage.compareAndSetCalendarPushState(expected: publication.before, next: publication.next)
+        turn.statePublication = nil
+    }
+
+    private static func calendarPushOperationName(_ request: NativeCalendarWriteRequest) -> String {
+        switch request {
+        case .createCalendar: return "createCalendar"
+        case .updateCalendar: return "updateCalendar"
+        case .deleteCalendar: return "deleteCalendar"
+        case .createEvent: return "createEvent"
+        case .updateEvent: return "updateEvent"
+        case .deleteEvent: return "deleteEvent"
+        case .sources: return "restore"
+        }
+    }
+
+    private func calendarPushDiagnostics(_ turn: CalendarPushTurn) {
+        for diagnostic in turn.diagnostics {
+            if let json = try? Self.ownedJSON(["operation": diagnostic.operation, "outcome": diagnostic.outcome]) {
+                _ = try? invoke("iosCalendarPushDiagnostic", arguments: [json])
+            }
+        }
+        turn.diagnostics.removeAll()
+    }
+
+    func admitReminderPlanRead(cancellation: NativeAttachmentCancellation) throws -> NativeReminderPlanReadAdmission {
+        try cancellation.check()
+        _ = try requireDeviceStorageAdmission()
+        var reader: NativeNotificationPermission.Reader = { await NativeNotificationPermission.read() }
+        #if DEBUG
+        if let injected = faults?.notificationPermissionRead { reader = injected }
+        #endif
+        return NativeReminderPlanReadAdmission(generation: attachmentGeneration, read: reader)
+    }
+
+    private func reminderDataVersion() throws -> Int64 {
+        let raw = try requireDatabase().execute("PRAGMA data_version")
+        guard let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], rows.count == 1,
+              let number = rows[0]["data_version"] as? NSNumber else { throw NativeReminderEffects.unavailable }
+        return number.int64Value
+    }
+    private func reminderObservation(_ method: String) throws -> (revision: UInt64, ready: Bool, delay: UInt64) {
+        guard started, !closed, !invoking, let context,
+              let raw = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod(method, withArguments: [])?.toString() else {
+            throw NativeReminderEffects.unavailable
+        }
+        if context.exception != nil { context.exception = nil; throw NativeReminderEffects.unavailable }
+        guard let value = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(value.keys) == Set(["revision", "ready", "rescheduleDelayMs"]),
+              let revision = value["revision"] as? NSNumber, CFGetTypeID(revision) != CFBooleanGetTypeID(),
+              revision.doubleValue.rounded() == revision.doubleValue, (1...9_007_199_254_740_991).contains(revision.doubleValue),
+              let ready = value["ready"] as? NSNumber, CFGetTypeID(ready) == CFBooleanGetTypeID(),
+              let delay = value["rescheduleDelayMs"] as? NSNumber, CFGetTypeID(delay) != CFBooleanGetTypeID(),
+              delay.doubleValue.rounded() == delay.doubleValue, (0...86_400_000).contains(delay.doubleValue) else {
+            throw NativeReminderEffects.unavailable
+        }
+        // This read-only snapshot shares the reminder owner's admission without granting effect access.
+        // Otherwise requireNoAttachmentDraft would manufacture an own-cycle blocked→ready retry.
+        let priorAccess = reminderOwnerAccess
+        reminderOwnerAccess = true
+        defer { reminderOwnerAccess = priorAccess }
+        let nativeReady = !reminderSourceStale && (try? requireDeviceStorageAdmission()) != nil
+        return (revision.uint64Value, ready.boolValue && nativeReady, delay.uint64Value)
+    }
+    func observeReminders(_ callback: @escaping @Sendable (NativeReminderWake) -> Void) throws -> NativeReminderObserverRegistration {
+        guard reminderObserver == nil, let runtime = context else { throw NativeReminderEffects.unavailable }
+        let snapshot = try reminderObservation("iosReminderObserve")
+        let observer = ReminderObserver(runtime: runtime, generation: attachmentGeneration, callback: callback,
+            revision: snapshot.revision, ready: snapshot.ready)
+        reminderAdmissions.clearOrdinaryReadyWake()
+        reminderObserver = observer
+        return .init(id: observer.id, revision: snapshot.revision, rescheduleDelayMs: snapshot.delay)
+    }
+    func removeReminderObserver(_ id: UUID?) {
+        guard let observer = reminderObserver, id == nil || observer.id == id else { return }
+        reminderObserver = nil
+        reminderAdmissions.clearOrdinaryReadyWake()
+        if context === observer.runtime {
+            _ = observer.runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("iosReminderDisposeObservation", withArguments: [])
+            if observer.runtime.exception != nil { observer.runtime.exception = nil }
+        }
+    }
+    func reminderPostOperation() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if let observer = reminderObserver, context === observer.runtime, attachmentGeneration == observer.generation,
+           let snapshot = try? reminderObservation("iosReminderObservation") {
+            // Consume the one-shot debt even when a source change already supplies this wake.
+            let ordinaryReady = reminderAdmissions.takeOrdinaryReadyWake(ready: snapshot.ready)
+            if snapshot.revision != observer.revision {
+                observer.pending = .sourceChanged(revision: snapshot.revision)
+            } else if ((!observer.ready && snapshot.ready) || ordinaryReady), observer.pending == nil {
+                observer.pending = .admissionReady(revision: snapshot.revision)
+            }
+            observer.revision = snapshot.revision; observer.ready = snapshot.ready
+            if observer.pending != nil && !observer.deliveryScheduled {
+                observer.deliveryScheduled = true
+                queue.async { [weak self, weak observer] in
+                    guard let self, let observer, self.reminderObserver === observer,
+                          self.context === observer.runtime, self.attachmentGeneration == observer.generation, !self.closed else { return }
+                    observer.deliveryScheduled = false
+                    if let event = observer.pending { observer.pending = nil; observer.callback(event) }
+                }
+            }
+        }
+        // Only real existing JS timers are re-armed; dirty reminders never create polling work.
+        scheduleAttachmentIdle()
+    }
+    private func reminderInvoke(_ method: String, _ arguments: [Any], cancellation: NativeAttachmentCancellation? = nil) throws -> String {
+        guard Self.reminderMethods.contains(method), !reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
+        reminderOwnerAccess = true; defer { reminderOwnerAccess = false }
+        return try invoke(method, arguments: arguments, localCancellation: cancellation)
+    }
+
+    func searchObservation() throws -> NativeSearchObservation {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !localRequests.isClosing, !invoking, let context,
+              let raw = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("iosSearchObservation", withArguments: [])?.toString() else {
+            throw HostFailure("NOT_READY: Native search observation is unavailable")
+        }
+        if context.exception != nil {
+            context.exception = nil
+            throw HostFailure("NOT_READY: Native search observation is unavailable")
+        }
+        let observation = try NativeSearchObservation(json: raw)
+        return .init(ready: observation.ready && (try? requireDeviceStorageAdmission()) != nil,
+                     revision: observation.revision, nextAt: observation.nextAt)
+    }
+    func setSearchObservationHandler(_ handler: (@Sendable (NativeSearchObservation) -> Void)?) throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        searchObserver = nil
+        guard let handler else { return }
+        let observation = try searchObservation()
+        guard let context else { throw HostFailure("NOT_READY: Native search observation is unavailable") }
+        searchObserver = SearchObserver(runtime: context, generation: attachmentGeneration, callback: handler,
+                                        observation: observation)
+    }
+    func searchPostOperation() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard let observer = searchObserver, context === observer.runtime, attachmentGeneration == observer.generation,
+              !closed, !localRequests.isClosing else { return }
+        let observation = (try? searchObservation()) ?? .init(ready: false, revision: observer.observation.revision, nextAt: nil)
+        if observation != observer.observation {
+            observer.observation = observation; observer.pending = observation
+        }
+        guard observer.pending != nil, !observer.deliveryScheduled else { return }
+        observer.deliveryScheduled = true
+        queue.async { [weak self, weak observer] in
+            guard let self, let observer, self.searchObserver === observer, self.context === observer.runtime,
+                  self.attachmentGeneration == observer.generation, !self.closed, !self.localRequests.isClosing else { return }
+            observer.deliveryScheduled = false
+            if let pending = observer.pending { observer.pending = nil; observer.callback(pending) }
+        }
+    }
+    func beginReminderReconciliation(_ id: UUID, cancellation: NativeAttachmentCancellation) throws -> NativeReminderEffects.Admission {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try cancellation.check()
+        if let retained = reminderEffectsTurn {
+            // Settle only the exact already accepted mutation. It never resumes the old effects plan.
+            guard let mutation = retained.mutation, retained.storage.hasPendingReminderMutation,
+                  started, !closed, context === retained.runtime, deviceStorage === retained.storage,
+                  attachmentGeneration == retained.generation, lockFD >= 0 else { throw NativeReminderEffects.unavailable }
+            retained.id = id; retained.cancellation = cancellation
+            try retained.storage.compareAndSetReminderMaps(expected: mutation.before, next: mutation.after)
+            retained.expected = mutation.after; retained.mutation = nil
+            if try reminderDataVersion() != retained.dataVersion { reminderSourceStale = true }
+            throw NativeReminderEffects.unavailable
+        }
+        let storage = try requireDeviceStorageAdmission()
+        guard !reminderSourceStale, let runtime = context, let namespace = deviceStorageLocation?.bundleIdentifier,
+              NativeReminderRequest.validNamespace(namespace) else {
+            throw NativeReminderEffects.unavailable
+        }
+        let port: any NativeReminderPort
+        #if DEBUG
+        port = faults?.reminderPort ?? NativeSystemReminderPort()
+        #else
+        port = NativeSystemReminderPort()
+        #endif
+        let turn = ReminderEffectsTurn(id: id, generation: attachmentGeneration, runtime: runtime, storage: storage,
+            dataVersion: try reminderDataVersion(), namespace: namespace, port: port, cancellation: cancellation)
+        reminderEffectsTurn = turn
+        _ = try reminderInvoke("iosReminderBegin", [turn.session], cancellation: cancellation)
+        try checkReminderReconciliation(id)
+        return .init(namespace: namespace, port: port)
+    }
+    func checkReminderReconciliation(_ id: UUID) throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard let turn = reminderEffectsTurn, turn.id == id, started, !closed, !recoveryActivationPending,
+              context === turn.runtime, deviceStorage === turn.storage, attachmentGeneration == turn.generation,
+              pending == nil, retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
+              lockFD >= 0, !attachmentDraftEvidence else { throw NativeReminderEffects.unavailable }
+        try turn.cancellation.check()
+        guard try reminderDataVersion() == turn.dataVersion else {
+            reminderSourceStale = true; throw NativeReminderEffects.unavailable
+        }
+        _ = try reminderInvoke("iosReminderCurrent", [turn.session], cancellation: turn.cancellation)
+        if !turn.expected.isEmpty {
+            let values = try turn.storage.multiGet(Self.reminderMapNames).map(\.1)
+            guard zip(values, turn.expected).allSatisfy({ Self.taskDownloadOptionalEqual($0.0, $0.1) }) else {
+                throw NativeReminderEffects.unavailable
+            }
+        }
+    }
+    func prepareReminderReconciliation(_ id: UUID, permission: NativeNotificationPermission,
+        pending inventory: [NativeReminderObservation], delivered: [NativeReminderObservation]) throws -> NativeReminderEffects.Plan {
+        try checkReminderReconciliation(id)
+        try NativeReminderEffects.checkInventory(inventory); try NativeReminderEffects.checkInventory(delivered)
+        guard let turn = reminderEffectsTurn else { throw NativeReminderEffects.unavailable }
+        let planningStartedAtMs = floor(Date().timeIntervalSince1970 * 1000)
+        let raw = try reminderInvoke("iosReminderPrepare", [turn.session, permission.granted,
+            Self.ownedJSON(Array(Set(inventory.compactMap(\.ownedID))).sorted()), Self.ownedJSON(Array(Set(delivered.compactMap(\.ownedID))).sorted())], cancellation: turn.cancellation)
+        try checkReminderReconciliation(id)
+        guard let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(envelope.keys) == Set(["storedAlarms", "storedState", "plan"]),
+              let value = envelope["plan"] as? [String: Any],
+              Set(value.keys) == Set(["mode", "cancel", "schedule", "writeAhead", "alarms", "state", "topUpDelayMs", "clearDelivered"]),
+              let mode = value["mode"] as? String, ["active", "inactive", "revoked"].contains(mode),
+              let scheduled = value["schedule"] as? [[String: Any]], scheduled.count <= 64,
+              let cancelled = value["cancel"] as? [[String: Any]], cancelled.count <= 4096,
+              let alarms = value["alarms"] as? String, let state = value["state"] as? String,
+              let clear = value["clearDelivered"] as? Bool else { throw NativeReminderEffects.unavailable }
+        func optional(_ value: Any?) throws -> String? {
+            if value is NSNull { return nil }
+            guard let text = value as? String else { throw NativeReminderEffects.unavailable }; return text
+        }
+        let before = try [optional(envelope["storedAlarms"]), optional(envelope["storedState"])]
+        let originalState: [String: Any]
+        if let raw = before[1] {
+            guard let parsed = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+                throw NativeReminderEffects.unavailable
+            }
+            originalState = parsed
+        } else { originalState = [:] }
+        let schedule = try scheduled.map { alarm -> NativeReminderEffects.Alarm in
+            let request = try NativeReminderRequest.make(alarm: alarm, namespace: turn.namespace)
+            guard let id = NativeReminderRequest.ownedID(identifier: request.identifier,
+                metadata: request.content.userInfo["mindwtrNativeReminder"], namespace: turn.namespace) else { throw NativeReminderEffects.unavailable }
+            var armedSnoozeDeadline: Double?
+            var unarmedSnoozeExpiry: Double?
+            if let key = alarm["key"] as? String, key.hasPrefix("snooze:") {
+                guard let entry = originalState[key] as? [String: Any], entry["kind"] as? String == "snooze",
+                      let armed = entry["armed"] as? NSNumber, CFGetTypeID(armed) == CFBooleanGetTypeID() else {
+                    throw NativeReminderEffects.unavailable
+                }
+                if armed.boolValue {
+                    guard let storedID = entry["id"] as? NSNumber, CFGetTypeID(storedID) != CFBooleanGetTypeID(),
+                          storedID.doubleValue == Double(id),
+                          let deadline = entry["fireAtMs"] as? NSNumber, CFGetTypeID(deadline) != CFBooleanGetTypeID(),
+                          deadline.doubleValue.isFinite, deadline.doubleValue.rounded() == deadline.doubleValue,
+                          abs(deadline.doubleValue) <= 8_640_000_000_000_000,
+                          let fireAt = alarm["fireAtMs"] as? NSNumber, CFGetTypeID(fireAt) != CFBooleanGetTypeID(),
+                          fireAt.doubleValue == deadline.doubleValue else { throw NativeReminderEffects.unavailable }
+                    armedSnoozeDeadline = deadline.doubleValue
+                } else {
+                    guard let storedID = entry["id"] as? NSNumber, !Self.isBoolean(storedID), storedID.doubleValue == Double(id),
+                          let fireAt = entry["fireAtMs"] as? NSNumber, !Self.isBoolean(fireAt),
+                          fireAt.doubleValue.isFinite, fireAt.doubleValue.rounded() == fireAt.doubleValue,
+                          abs(fireAt.doubleValue) <= 8_640_000_000_000_000,
+                          let planned = alarm["fireAtMs"] as? NSNumber, !Self.isBoolean(planned),
+                          planned.doubleValue == fireAt.doubleValue else { throw NativeReminderEffects.unavailable }
+                    unarmedSnoozeExpiry = fireAt.doubleValue + 86_400_000
+                }
+            }
+            return .init(id: id, identifier: request.identifier, json: try Self.ownedJSON(alarm),
+                withdrawn: alarm["replacing"] as? String == "withdrawn", armedSnoozeDeadline: armedSnoozeDeadline,
+                unarmedSnoozeExpiry: unarmedSnoozeExpiry)
+        }
+        let cancel = try cancelled.map { item -> NativeReminderEffects.Cancellation in
+            guard Set(item.keys) == Set(["key", "id", "reason"]), let number = item["id"] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.rounded() == number.doubleValue,
+                  (1...2_147_483_647).contains(number.intValue), let reason = item["reason"] as? String,
+                  ["withdrawn", "expired"].contains(reason) else { throw NativeReminderEffects.unavailable }
+            return .init(id: number.intValue, identifier: "mindwtr-native:\(turn.namespace):\(number.intValue)", withdrawn: reason == "withdrawn")
+        }
+        let plan = NativeReminderEffects.Plan(mode: mode, schedule: schedule, cancel: cancel, clearDelivered: clear,
+            topUpDelayMs: value["topUpDelayMs"] as? Double)
+        if !(value["topUpDelayMs"] is NSNull) {
+            guard let delay = value["topUpDelayMs"] as? NSNumber, CFGetTypeID(delay) != CFBooleanGetTypeID(),
+                  delay.doubleValue.isFinite, delay.doubleValue >= 0, delay.doubleValue.rounded() == delay.doubleValue else {
+                throw NativeReminderEffects.unavailable
+            }
+            let deadline = planningStartedAtMs + delay.doubleValue
+            guard deadline.isFinite, deadline.rounded() == deadline, abs(deadline) <= 8_640_000_000_000_000 else {
+                throw NativeReminderEffects.unavailable
+            }
+            turn.topUpAtMs = deadline
+        }
+        try NativeReminderEffects.projectedCapacity(plan: plan, pending: inventory)
+        let affected = Set(schedule.map(\.identifier) + cancel.map(\.identifier))
+        guard !(inventory + delivered).contains(where: { affected.contains($0.identifier) && $0.ownedID == nil }) else {
+            throw NativeReminderEffects.unavailable
+        }
+        turn.expected = before; turn.final = [alarms, state]; turn.plan = plan
+        try checkReminderReconciliation(id)
+        // Unarmed Snooze state stays unarmed until final acknowledgment. Ordinary pending flags come from core.
+        let ahead = try optional(value["writeAhead"]) ?? before[0]
+        try writeReminderMaps(turn, next: [ahead, before[1]])
+        try checkReminderReconciliation(id)
+        return plan
+    }
+    private func writeReminderMaps(_ turn: ReminderEffectsTurn, next: [String?]) throws {
+        let before = turn.expected
+        turn.mutation = (before, next)
+        try turn.storage.compareAndSetReminderMaps(expected: before, next: next)
+        turn.expected = next; turn.mutation = nil
+    }
+    func commitReminderReconciliation(_ id: UUID, collapsed: Int) throws -> String {
+        try checkReminderReconciliation(id)
+        guard let turn = reminderEffectsTurn, let plan = turn.plan, turn.final.count == 2,
+              (0...4096).contains(collapsed) else { throw NativeReminderEffects.unavailable }
+        try writeReminderMaps(turn, next: turn.final)
+        try checkReminderReconciliation(id)
+        let rearmed = plan.schedule.filter { $0.armedSnoozeDeadline != nil }.count
+        _ = try? reminderInvoke("iosReminderAcknowledged", [turn.session, plan.mode, plan.schedule.count, plan.cancel.count, collapsed, rearmed], cancellation: turn.cancellation)
+        try checkReminderReconciliation(id)
+        return try Self.ownedJSON(["mode": plan.mode, "scheduled": plan.schedule.count, "cancelled": plan.cancel.count,
+            "topUpAtMs": turn.topUpAtMs.map { $0 as Any } ?? NSNull()])
+    }
+    func finishReminderReconciliation(_ id: UUID) {
+        guard let turn = reminderEffectsTurn, turn.id == id else { return }
+        if turn.storage.hasPendingReminderMutation { return }
+        reminderEffectsTurn = nil
+        _ = try? reminderInvoke("iosReminderEnd", [turn.session])
+        scheduleAttachmentIdle(immediate: true)
+    }
+
+    func readReminderPlan(permission: NativeNotificationPermission, generation: UInt64,
+                          cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        _ = try requireDeviceStorageAdmission()
+        guard generation == attachmentGeneration else { throw HostFailure("NOT_READY: Reminder plan is unavailable") }
+        let raw = try invoke("iosReadReminderPlan", arguments: [permission.granted], localCancellation: cancellation)
+        try cancellation.check()
+        _ = try requireDeviceStorageAdmission()
+        guard generation == attachmentGeneration,
+              let plan = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+            throw HostFailure("NOT_READY: Reminder plan is unavailable")
+        }
+        return String(decoding: try JSONSerialization.data(withJSONObject: ["permission": permission.json, "plan": plan]), as: UTF8.self)
+    }
+
+    private func requireFeedbackAdmission() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        do {
+            guard started, !closed, !recoveryActivationPending, pending == nil, lockFD >= 0,
+                  retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil else {
+                throw HostFailure("feedback_not_ready")
+            }
+            try requireNoAttachmentDraft()
+        } catch { throw HostFailure("feedback_not_ready") }
+    }
+
+    func feedbackConfiguration(endpointURL: String) throws -> String {
+        try requireFeedbackAdmission()
+        let endpoint = endpointURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try invoke("iosFeedbackConfiguration", arguments: [endpoint == "https://feedback.mindwtr.app" ? endpoint : ""])
+    }
+
+    func submitFeedback(requestJSON: String, endpointURL: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        try requireFeedbackAdmission()
+        let endpoint = endpointURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard endpoint == "https://feedback.mindwtr.app" else { throw HostFailure("feedback_not_configured") }
+        guard requestJSON.utf8.count <= 256_000 else { throw HostFailure("feedback_invalid_request") }
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        var metadata: [String: String] = ["platform": "ios", "installChannel": "app-store",
+            "os": "ios \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)", "locale": Locale.current.identifier]
+        if let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String { metadata["appVersion"] = value }
+        if let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String { metadata["build"] = value }
+        let encoded = String(decoding: try JSONSerialization.data(withJSONObject: metadata), as: UTF8.self)
+        return try invoke("iosSubmitFeedback", arguments: [requestJSON, encoded, endpoint], localCancellation: cancellation)
+    }
+
+    private static var reminderSnoozeInvalid: HostFailure { HostFailure("INVALID_INPUT: Reminder Snooze request or publication is malformed") }
+    private func reminderSnoozeRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 65_536,
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["requestId", "requestedAt", "details"]),
+              try Self.cleanupUniqueKeys(raw),
+              let id = request["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let instant = request["requestedAt"] as? NSNumber, Self.isInteger(instant),
+              abs(instant.doubleValue) <= 8_640_000_000_000_000,
+              let details = request["details"] as? [String: Any],
+              let title = details["title"] as? String, title.utf16.count <= 10_000,
+              details["message"] is String, details["tag"] is String, Self.isBoolean(details["play_sound"]),
+              let data = details["data"] as? [String: String], let owner = data["alarmKey"],
+              owner.range(of: #"\A(task|project):.+\z"#, options: .regularExpression) != nil
+                || ["digest:morning", "digest:evening", "digest:weekly-review"].contains(owner),
+              let interval = details["snooze_interval"] as? NSNumber, !Self.isBoolean(interval),
+              interval.doubleValue.isFinite, interval.doubleValue > 0 else { throw Self.reminderSnoozeInvalid }
+        let fireAt = floor((instant.doubleValue + interval.doubleValue * 60_000) / 1_000) * 1_000
+        guard fireAt.isFinite, abs(fireAt) <= 8_640_000_000_000_000 else { throw Self.reminderSnoozeInvalid }
+        return request
+    }
+    private func reminderSnoozeMap(_ raw: Any, required: Bool = false) throws -> String? {
+        if raw is NSNull, !required { return nil }
+        guard let value = raw as? String, value.utf8.count <= 1_048_576 else { throw Self.reminderSnoozeInvalid }
+        return value
+    }
+    private func reminderSnoozeState(_ raw: String?) throws -> [String: Any] {
+        guard let raw else { return [:] }
+        guard raw.utf8.count <= 1_048_576,
+              let state = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { throw Self.reminderSnoozeInvalid }
+        return state
+    }
+    private func validateReminderSnoozeAlarm(_ raw: String, request: String) throws {
+        let input = try reminderSnoozeRequest(request)
+        guard raw.utf8.count <= 1_048_576,
+              let alarm = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(alarm.keys) == Set(["key", "id", "fireAtMs", "repeat", "details", "replacing"]),
+              try Self.cleanupUniqueKeys(raw),
+              let requestID = input["requestId"] as? String, alarm["key"] as? String == "snooze:" + requestID,
+              let id = alarm["id"] as? NSNumber, Self.isInteger(id), (1_073_741_824...2_147_483_647).contains(id.intValue),
+              let at = alarm["fireAtMs"] as? NSNumber, Self.isInteger(at), abs(at.doubleValue) <= 8_640_000_000_000_000,
+              alarm["repeat"] as? String == "once", alarm["replacing"] is NSNull,
+              let actual = alarm["details"] as? [String: Any], var expected = input["details"] as? [String: Any],
+              let tap = input["requestedAt"] as? NSNumber, let interval = expected["snooze_interval"] as? NSNumber else {
+            throw Self.reminderSnoozeInvalid
+        }
+        expected["schedule_type"] = "once"
+        guard Self.equalJSON(actual, expected), at.doubleValue == floor((tap.doubleValue + interval.doubleValue * 60_000) / 1_000) * 1_000 else {
+            throw Self.reminderSnoozeInvalid
+        }
+    }
+    private func reminderSnoozeJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        guard command.version == 2, command.method == "reminderSnoozeCommit", command.editorDraft == nil,
+              command.argumentsJSON.utf8.count <= 20 * 1_024 * 1_024,
+              let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [Any], args.count == 4,
+              let raw = args[0] as? String else { throw Self.reminderSnoozeInvalid }
+        let request = try reminderSnoozeRequest(raw)
+        _ = try reminderSnoozeMap(args[1]); let beforeRaw = try reminderSnoozeMap(args[2])
+        guard let afterRaw = try reminderSnoozeMap(args[3], required: true), let id = request["requestId"] as? String else { throw Self.reminderSnoozeInvalid }
+        let before = try reminderSnoozeState(beforeRaw), after = try reminderSnoozeState(afterRaw)
+        let key = "snooze:" + id
+        guard before[key] == nil, Set(after.keys) == Set(before.keys).union([key]),
+              before.allSatisfy({ Self.equalJSON($0.value, after[$0.key]) }),
+              let entry = after[key] as? [String: Any], Set(entry.keys) == Set(["kind", "id", "fireAtMs", "details", "armed"]),
+              entry["kind"] as? String == "snooze", Self.isBoolean(entry["armed"]), entry["armed"] as? Bool == false else {
+            throw Self.reminderSnoozeInvalid
+        }
+        let alarm: [String: Any] = ["key": key, "id": entry["id"] ?? NSNull(), "fireAtMs": entry["fireAtMs"] ?? NSNull(),
+            "details": entry["details"] ?? NSNull(), "repeat": "once", "replacing": NSNull()]
+        try validateReminderSnoozeAlarm(Self.ownedJSON(alarm), request: raw)
+        return args
+    }
+    private func frozenReminderSnooze(_ command: PendingCommand) throws -> String {
+        let args = try reminderSnoozeJournalArguments(command)
+        let value = try invoke("reminderSnoozeValidate", arguments: args)
+        guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+        try validateReminderSnoozeAlarm(value, request: raw)
+        return value
+    }
+    private func savedReminderSnooze(_ raw: String) throws -> String {
+        let value = try invoke("reminderSnoozeProbe", arguments: [raw])
+        try validateReminderSnoozeAlarm(value, request: raw)
+        return value
+    }
+    private func reminderSnoozeStorage(_ command: PendingCommand) throws -> NativeDeviceKV {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try requireNoAttachmentDraft()
+        guard started, !closed, context != nil, lockFD >= 0, retainedOrdinaryTurn == nil,
+              projectFileAddTurn == nil, let current = pending, current.version == command.version,
+              Self.ownedEqual(current.method, command.method), Self.ownedEqual(current.argumentsJSON, command.argumentsJSON),
+              let storage = deviceStorage else { throw HostFailure("SAVE_FAILED: Reminder Snooze publication owner is unavailable") }
+        _ = try reminderSnoozeJournalArguments(command)
+        return storage
+    }
+    private func publishReminderSnooze(_ command: PendingCommand, value: String) throws {
+        let expected = try frozenReminderSnooze(command)
+        guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(expected.utf8)), try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+            throw HostFailure("SAVE_FAILED: Reminder Snooze alarm does not match its frozen publication")
+        }
+        let args = try reminderSnoozeJournalArguments(command)
+        let before = try [reminderSnoozeMap(args[1]), reminderSnoozeMap(args[2])]
+        let after = try [reminderSnoozeMap(args[1]), reminderSnoozeMap(args[3], required: true)]
+        let storage = try reminderSnoozeStorage(command)
+        if let mutation = reminderSnoozeMutation {
+            guard Self.ownedEqual(mutation.arguments, command.argumentsJSON), mutation.storage === storage,
+                  context === mutation.runtime, attachmentGeneration == mutation.generation else {
+                throw HostFailure("SAVE_FAILED: Reminder Snooze map mutation requires its exact owner")
+            }
+            try storage.compareAndSetReminderMaps(expected: mutation.before, next: mutation.after, confirmUnchanged: mutation.confirm)
+            reminderSnoozeMutation = nil
+            return
+        }
+        guard !storage.hasPendingReminderMutation else { throw HostFailure("SAVE_FAILED: Another reminder map mutation requires recovery") }
+        let current = try storage.multiGet(Self.reminderMapNames).map(\.1)
+        func matches(_ values: [String?]) -> Bool {
+            zip(current, values).allSatisfy { Self.taskDownloadOptionalEqual($0.0, $0.1) }
+        }
+        let selectedBefore: [String?], confirm: Bool
+        if matches(before) { selectedBefore = before; confirm = false }
+        else if matches(after) { selectedBefore = after; confirm = true }
+        else { throw HostFailure("SAVE_FAILED: Reminder Snooze maps changed; retain the exact publication") }
+        guard let runtime = context else { throw HostFailure("SAVE_FAILED: Reminder Snooze runtime is unavailable") }
+        reminderSnoozeMutation = (command.argumentsJSON, storage, runtime, attachmentGeneration, selectedBefore, after, confirm)
+        try storage.compareAndSetReminderMaps(expected: selectedBefore, next: after, confirmUnchanged: confirm)
+        reminderSnoozeMutation = nil
+    }
+    func reminderSnoozeReplay(requestJSON: String) throws -> String? {
+        guard started, !closed, !recoveryActivationPending, lockFD >= 0 else { throw HostFailure("NOT_READY: Reminder Snooze is unavailable") }
+        try requireNoAttachmentDraft()
+        let request: [String: Any]
+        do { request = try reminderSnoozeRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let command = pending {
+            let args = try reminderSnoozeJournalArguments(command)
+            guard let raw = args.first as? String, Self.ownedEqual(raw, requestJSON) else {
+                throw HostFailure("SAVE_FAILED: Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw HostFailure("SAVE_FAILED: Reminder Snooze still requires exact retry") }
+            return try terminal.value()
+        }
+        let storage = try requireDeviceStorageAdmission()
+        let saved: String?
+        do { saved = try savedReminderSnooze(requestJSON) }
+        catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") { saved = nil }
+        catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: failure.message) }
+        let values = try storage.multiGet(Self.reminderMapNames).map(\.1)
+        guard let id = request["requestId"] as? String else { throw Self.reminderSnoozeInvalid }
+        let state: [String: Any]
+        do {
+            _ = try reminderSnoozeMap(values[0].map { $0 as Any } ?? NSNull())
+            state = try reminderSnoozeState(values[1])
+        } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        if let saved {
+            guard state["snooze:" + id] != nil else { throw CoreHostRejection(message: "STALE_REVISION: Reminder Snooze was already consumed or withdrawn") }
+            do {
+                let expected = try invoke("reminderSnoozeValidate", arguments: [requestJSON, values[0].map { $0 as Any } ?? NSNull(),
+                    values[1].map { $0 as Any } ?? NSNull(), values[1].map { $0 as Any } ?? NSNull()])
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(saved.utf8)), try NativeJSON.jsonObject(with: Data(expected.utf8))) else { throw Self.reminderSnoozeInvalid }
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+            return saved
+        }
+        guard state["snooze:" + id] == nil else { throw CoreHostRejection(message: "STALE_REVISION: Reminder Snooze already has native ownership") }
+        return nil
+    }
+    func snoozeReminder(requestJSON: String, permission: NativeNotificationPermission, generation: UInt64,
+        cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        guard generation == attachmentGeneration else { throw HostFailure("NOT_READY: Reminder Snooze is unavailable") }
+        if let replay = try reminderSnoozeReplay(requestJSON: requestJSON) { return replay }
+        let storage = try requireDeviceStorageAdmission(), values = try storage.multiGet(Self.reminderMapNames).map(\.1)
+        let command: PendingCommand
+        do {
+            let prepared = try invoke("reminderSnoozePrepare", arguments: [requestJSON, values[0].map { $0 as Any } ?? NSNull(),
+                values[1].map { $0 as Any } ?? NSNull(), permission.granted])
+            guard prepared.utf8.count <= 6 * 1_048_576 + 64,
+                  let plan = try NativeJSON.jsonObject(with: Data(prepared.utf8)) as? [String: Any],
+                  Set(plan.keys) == Set(["stateAhead"]), let after = plan["stateAhead"] as? String else { throw Self.reminderSnoozeInvalid }
+            let args: [Any] = [requestJSON, values[0].map { $0 as Any } ?? NSNull(), values[1].map { $0 as Any } ?? NSNull(), after]
+            command = PendingCommand(version: 2, method: "reminderSnoozeCommit", argumentsJSON: try Self.ownedJSON(args))
+            _ = try frozenReminderSnooze(command)
+            try cancellation.check()
+            guard deviceStorage === storage, generation == attachmentGeneration else { throw Self.reminderSnoozeInvalid }
+        } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        ordinaryMutationDepth += 1; defer { ordinaryMutationDepth -= 1 }
+        pending = command
+        try persist(command)
+        let value = try invoke("reminderSnoozeCommit", arguments: [requestJSON])
+        try publishReminderSnooze(command, value: value)
+        return try finish(command, with: .success(value)).value()
+    }
+
+    private func reminderCompletionRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 4_096,
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["requestId", "taskId"]),
+              let id = request["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let task = request["taskId"] as? String, !task.isEmpty, task.utf16.count <= 500,
+              try dataSettingHasExactKeyTokens(raw, expected: ["requestId", "taskId"]) else {
+            throw HostFailure("INVALID_INPUT: Reminder completion needs an exact lowercase UUID and bounded task ID")
+        }
+        return request
+    }
+    private func validateReminderCompletionResult(_ raw: String) throws {
+        guard raw.utf8.count <= 1_024,
+              let result = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(result.keys) == Set(["changed", "outcome"]), Self.isBoolean(result["changed"]),
+              let changed = result["changed"] as? Bool, let outcome = result["outcome"] as? String,
+              changed ? outcome == "completed" : ["task-not-found", "task-deleted", "not-actionable"].contains(outcome),
+              try dataSettingHasExactKeyTokens(raw, expected: ["changed", "outcome"]) else {
+            throw HostFailure("INVALID_INPUT: Saved reminder completion result is malformed")
+        }
+    }
+    private func reminderCompletionJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        guard command.version == 2, command.method == "reminderCompletionCommit", command.editorDraft == nil,
+              command.argumentsJSON.utf8.count <= 24_586,
+              let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else {
+            throw HostFailure("INVALID_INPUT: Reminder completion journal is malformed")
+        }
+        _ = try reminderCompletionRequest(args[0])
+        return args
+    }
+    private func savedReminderCompletion(_ raw: String) throws -> String {
+        let value = try invoke("reminderCompletionProbe", arguments: [raw])
+        try validateReminderCompletionResult(value)
+        return value
+    }
+    func probeReminderCompletionOutcome(requestJSON: String) throws -> String {
+        guard started, !closed, !recoveryActivationPending, pending == nil, lockFD >= 0 else {
+            throw HostFailure("NOT_READY: Reminder completion probe is unavailable")
+        }
+        try requireNoAttachmentDraft()
+        do {
+            _ = try reminderCompletionRequest(requestJSON)
+            return try savedReminderCompletion(requestJSON)
+        } catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") || failure.message.hasPrefix("STALE_REVISION:") {
+            throw CoreHostRejection(message: failure.message)
+        }
+    }
+    func completeReminderTask(requestJSON: String) throws -> String {
+        guard started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+            throw HostFailure("NOT_READY: Reminder completion is unavailable")
+        }
+        try requireNoAttachmentDraft()
+        let request: [String: Any]
+        do { request = try reminderCompletionRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let command = pending {
+            guard command.method == "reminderCompletionCommit" else { throw HostFailure("SAVE_FAILED: Previous changes require their exact retry") }
+            let args = try reminderCompletionJournalArguments(command)
+            guard let raw = args.first as? String, Self.equalJSON(try reminderCompletionRequest(raw), request) else {
+                throw HostFailure("SAVE_FAILED: Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw HostFailure("SAVE_FAILED: Reminder completion still requires exact retry") }
+            return try terminal.value()
+        }
+        do { return try savedReminderCompletion(requestJSON) }
+        catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") { }
+        catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: failure.message) }
+        let args = String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self)
+        return try call("reminderCompletionCommit", argumentsJSON: args, editorAttempt: nil, reminderCompletionOwned: true)
+    }
+
+    func beginCalendarAccess(_ id: UUID, cancellation: NativeAttachmentCancellation) throws -> NativeCalendarAuthorization.Requester {
+        do {
+            try requireCalendarAdmission()
+            let storage = try requireDeviceStorageAdmission(), expected = try storage.readCalendarSettingState()
+            guard !cancellation.isCancelled, let runtime = context else { throw Self.deviceStorageUnavailable }
+            calendarAccessTurn = .init(id: id, runtime: runtime, storage: storage, generation: attachmentGeneration,
+                expected: expected, cancellation: cancellation)
+            var request: NativeCalendarAuthorization.Requester = { try await NativeCalendarAuthorization.request() }
+            #if DEBUG
+            if let injected = faults?.calendarAuthorizationRequest { request = injected }
+            #endif
+            return request
+        } catch { throw CoreHostRejection(message: "NOT_READY: Calendar access is unavailable") }
+    }
+    func validateCalendarAccess(_ id: UUID) throws {
+        do {
+            guard let turn = calendarAccessTurn, turn.id == id, context === turn.runtime, deviceStorage === turn.storage,
+                  attachmentGeneration == turn.generation, started, !closed, !localRequests.isClosing,
+                  !turn.cancellation.isCancelled, !recoveryActivationPending, pending == nil, lockFD >= 0,
+                  deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
+                  retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+                  taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
+                  providerCopy == nil, !cleanupOwed, !foregroundCleanupActive, !attachmentDraftEvidence else {
+                throw Self.deviceStorageUnavailable
+            }
+            let current = try turn.storage.readCalendarSettingState()
+            guard current.map({ $0.map { Data($0.utf8) } }) == turn.expected.map({ $0.map { Data($0.utf8) } }),
+                  !turn.cancellation.isCancelled else { throw Self.deviceStorageUnavailable }
+        } catch { throw CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current") }
+    }
+    func acknowledgeCalendarAccess(_ id: UUID) throws {
+        try validateCalendarAccess(id)
+        _ = try? invoke("deviceCalendarAccessAcknowledged", arguments: [])
+    }
+    func retireCalendarAccess(_ id: UUID) {
+        if calendarAccessTurn?.id == id { calendarAccessTurn = nil }
+    }
+
+    private static func deviceCalendarSettingObject(_ raw: String, maximum: Int) throws -> [String: Any] {
+        guard raw.utf8.count <= maximum,
+              let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              try NativeJSON.hasUniqueObjectKeys(raw) else {
+            throw HostFailure("INVALID_INPUT: Device Calendar setting requires a bounded object with unique members")
+        }
+        return object
+    }
+    private static func deviceCalendarSettingsShape(_ value: Any?) -> Bool {
+        guard let settings = value as? [String: Any],
+              Set(settings.keys) == Set(["enabled", "selectAll", "selectedCalendarIds"])
+                || Set(settings.keys) == Set(["enabled", "selectAll", "selectedCalendarIds", "areaIdsByCalendar"]),
+              isBoolean(settings["enabled"]), isBoolean(settings["selectAll"]),
+              let ids = settings["selectedCalendarIds"] as? [String], ids.allSatisfy({ $0.utf16.count <= 500 }) else { return false }
+        if let raw = settings["areaIdsByCalendar"] {
+            guard let areas = raw as? NSDictionary, areas.allValues.allSatisfy({
+                ($0 as? [String]).map { $0.allSatisfy { $0.utf16.count <= 200 } } == true
+            }) else { return false }
+        }
+        return true
+    }
+    private static func deviceCalendarSettingRequest(_ raw: String) throws -> [String: Any] {
+        let input = try deviceCalendarSettingObject(raw, maximum: deviceCalendarSettingCellLimit)
+        guard Set(input.keys) == Set(["requestId", "edit"]),
+              let id = input["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let edit = input["edit"] as? [String: Any], Set(edit.keys) == Set(["type", "before", "value"]),
+              edit["type"] as? String == "deviceCalendars",
+              deviceCalendarSettingsShape(edit["before"]), deviceCalendarSettingsShape(edit["value"]) else {
+            throw HostFailure("INVALID_INPUT: Device Calendar setting needs an exact device edit and lowercase UUID")
+        }
+        return input
+    }
+    private static func deviceCalendarSettingResult(_ result: [String: Any], changed: Bool? = nil) throws {
+        guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
+              isBoolean(result["changed"]), changed == nil || result["changed"] as? Bool == changed,
+              let toasts = result["toasts"] as? [Any], toasts.isEmpty,
+              result["open"] is NSNull || result["open"] as? String == "device",
+              isBoolean(result["clearDraft"]), result["clearDraft"] as? Bool == false else {
+            throw HostFailure("Malformed Device Calendar setting result")
+        }
+    }
+    private static func deviceCalendarSettingEnvelope(_ raw: String) throws -> [String: Any] {
+        let envelope = try deviceCalendarSettingObject(raw, maximum: deviceCalendarSettingEnvelopeLimit)
+        guard Set(envelope.keys) == Set(["request", "prepared"]),
+              let request = envelope["request"] as? [String: Any], let prepared = envelope["prepared"] as? [String: Any],
+              Set(prepared.keys) == Set(["version", "request", "storedBefore", "markerBefore", "storedAfter", "markerAfter", "result"]),
+              isInteger(prepared["version"], equalTo: 1), equalJSON(request, prepared["request"]),
+              ["storedBefore", "markerBefore"].allSatisfy({ field in
+                  prepared[field] is NSNull || (prepared[field] as? String).map { $0.utf8.count <= deviceCalendarSettingCellLimit } == true
+              }),
+              ["storedAfter", "markerAfter"].allSatisfy({ field in
+                  (prepared[field] as? String).map { $0.utf8.count <= deviceCalendarSettingCellLimit } == true
+              }), let result = prepared["result"] as? [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Malformed prepared Device Calendar setting")
+        }
+        _ = try deviceCalendarSettingRequest(String(decoding:
+            JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self))
+        try deviceCalendarSettingResult(result, changed: true)
+        return envelope
+    }
+    private func withDeviceCalendarSettingOwner<T>(_ work: () throws -> T) throws -> T {
+        guard deviceCalendarSettingTurn == nil, started, !closed, !localRequests.isClosing, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == "deviceCalendarSettingCommit",
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0,
+              let runtime = context, let storage = deviceStorage else { throw Self.deviceStorageUnavailable }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        deviceCalendarSettingTurn = .init(runtime: runtime, storage: storage, generation: attachmentGeneration)
+        defer { deviceCalendarSettingTurn = nil }
+        return try work()
+    }
+    private func requireDeviceCalendarSettingTurn() throws -> DeviceCalendarSettingTurn {
+        guard let turn = deviceCalendarSettingTurn, context === turn.runtime, deviceStorage === turn.storage,
+              attachmentGeneration == turn.generation, started, !closed, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == "deviceCalendarSettingCommit",
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              taskDownloadTurn == nil, projectAvailabilityTurn == nil, encryptionUnlockTurn == nil,
+              providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              !cleanupOwed, !foregroundCleanupActive, !attachmentDraftEvidence else { throw Self.deviceStorageUnavailable }
+        if let pending {
+            guard pending.method == "deviceCalendarSettingCommit", let raw = try journalArguments(pending).first as? String,
+                  let frozen = turn.envelopeJSON, Self.ownedEqual(raw, frozen) else { throw Self.deviceStorageUnavailable }
+        } else { guard turn.envelopeJSON == nil else { throw Self.deviceStorageUnavailable } }
+        return turn
+    }
+    func setDeviceCalendarSetting(requestJSON: String) throws -> String {
+        let request: [String: Any]
+        do { request = try Self.deviceCalendarSettingRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let pending {
+            guard pending.method == "deviceCalendarSettingCommit", let raw = try journalArguments(pending).first as? String,
+                  Self.equalJSON(try Self.deviceCalendarSettingEnvelope(raw)["request"], request) else {
+                throw HostFailure("Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw HostFailure("Device Calendar save still requires exact retry") }
+            try resumeActivationIfNeeded()
+            return try publicValue(terminal, method: pending.method)
+        }
+        return try withDeviceCalendarSettingOwner {
+            deviceCalendarSettingTurn?.preparing = true
+            return try call("deviceCalendarSetting", argumentsJSON: Self.ownedJSON([requestJSON]))
+        }
+    }
+    func probeDeviceCalendarSettingOutcome(requestJSON: String) throws -> String {
+        try requireCalendarAdmission()
+        do {
+            _ = try Self.deviceCalendarSettingRequest(requestJSON)
+            let value = try invoke("deviceCalendarSettingRetryOutcome", arguments: [requestJSON])
+            try Self.deviceCalendarSettingResult(Self.deviceCalendarSettingObject(value, maximum: 1024), changed: true)
+            return value
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+            throw CoreHostRejection(message: error.message)
+        }
+    }
+    private func deviceCalendarSettingJournalRequest(_ command: PendingCommand) throws -> String {
+        guard let raw = try journalArguments(command).first as? String,
+              let request = try Self.deviceCalendarSettingEnvelope(raw)["request"] else {
+            throw HostFailure("Malformed Device Calendar setting journal")
+        }
+        return try Self.ownedJSON(request)
+    }
+    private func validateDeviceCalendarSettingAcknowledgment(_ command: PendingCommand, value: String) throws {
+        guard let raw = try journalArguments(command).first as? String,
+              let prepared = try Self.deviceCalendarSettingEnvelope(raw)["prepared"] as? [String: Any] else {
+            throw HostFailure("Malformed Device Calendar setting acknowledgment")
+        }
+        let result = try Self.deviceCalendarSettingObject(value, maximum: 1024)
+        try Self.deviceCalendarSettingResult(result, changed: true)
+        guard Self.equalJSON(result, prepared["result"]) else { throw HostFailure("Malformed Device Calendar setting acknowledgment") }
+    }
+    private func invokeDeviceCalendarSettingCommit(_ command: PendingCommand) throws -> String {
+        let args = try journalArguments(command)
+        guard let raw = args.first as? String, let turn = deviceCalendarSettingTurn else { throw Self.deviceStorageUnavailable }
+        turn.envelopeJSON = raw
+        _ = try invoke("deviceCalendarSettingValidate", arguments: args)
+        do {
+            let replay = try invoke("deviceCalendarSettingRetryOutcome", arguments: [deviceCalendarSettingJournalRequest(command)])
+            try validateDeviceCalendarSettingAcknowledgment(command, value: replay)
+            return replay
+        } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") { }
+        let owned = try requireDeviceCalendarSettingTurn()
+        owned.committing = true
+        defer { owned.committing = false }
+        if owned.storage.hasPendingCalendarSettingMutation {
+            let envelope = try Self.deviceCalendarSettingEnvelope(raw)
+            guard let prepared = envelope["prepared"] as? [String: Any],
+                  let after = prepared["storedAfter"] as? String, let marker = prepared["markerAfter"] as? String else {
+                throw Self.deviceStorageInvalid
+            }
+            // Pure validation above must precede settling an ambiguously acknowledged native mutation.
+            try owned.storage.compareAndSetCalendarSetting(expected: [prepared["storedBefore"] as? String, prepared["markerBefore"] as? String],
+                next: [after, marker])
+        }
+        return try invoke("deviceCalendarSettingCommit", arguments: args)
+    }
+
+    private static func calendarSubscriptionSettingRequest(_ raw: String) throws -> [String: Any] {
+        let value = try deviceCalendarSettingObject(raw, maximum: calendarSubscriptionSettingRequestLimit)
+        guard Set(value.keys) == Set(["requestId", "edit", "expected"]),
+              let id = value["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let edit = value["edit"] as? [String: Any], let expected = value["expected"] as? [String: Any],
+              Set(expected.keys) == Set(["source", "revision", "fingerprint", "stampPresent", "stamp"]),
+              let source = expected["source"] as? String, ["canonical", "legacy"].contains(source),
+              let revision = expected["revision"] as? String, revision.utf16.count <= 200,
+              let fingerprint = expected["fingerprint"] as? String,
+              fingerprint.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil,
+              isBoolean(expected["stampPresent"]),
+              (expected["stampPresent"] as? Bool == true
+                ? (expected["stamp"] as? String).map(isCanonicalReviewInstant) == true : expected["stamp"] is NSNull),
+              let feedId = edit["feedId"] as? String, feedId.utf16.count <= 200,
+              !feedId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let editedRevision = edit["revision"] as? String, ownedEqual(editedRevision, revision) else {
+            throw HostFailure("INVALID_INPUT: Calendar subscription request is malformed")
+        }
+        if source == "canonical" {
+            guard ownedEqual(revision, "synced:" + (expected["stamp"] as? String ?? "")) else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription witness is malformed")
+            }
+        } else {
+            guard revision.range(of: #"^device:[0-9a-f]{32}$"#, options: .regularExpression) != nil else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription witness is malformed")
+            }
+        }
+        if edit["type"] as? String == "removeFeed" {
+            guard Set(edit.keys) == Set(["type", "feedId", "revision"]) else { throw Self.deviceStorageInvalid }
+        } else {
+            guard edit["type"] as? String == "feed", Set(edit.keys) == Set(["type", "feedId", "field", "value", "revision"]),
+                  let field = edit["field"] as? String,
+                  field == "enabled" && isBoolean(edit["value"])
+                    || field == "color" && (edit["value"] is NSNull || (edit["value"] as? String).map { $0.utf16.count <= 20 } == true)
+                    || field == "areaIds" && (edit["value"] as? [String]).map { $0.count <= 500 && $0.allSatisfy { $0.utf16.count <= 200 } } == true else {
+                throw HostFailure("INVALID_INPUT: Calendar subscription edit is malformed")
+            }
+        }
+        return value
+    }
+    private static func calendarSubscriptionSettingResult(_ raw: String, changed: Bool? = nil) throws -> [String: Any] {
+        let result = try deviceCalendarSettingObject(raw, maximum: 1024)
+        try deviceCalendarSettingResult(result, changed: changed)
+        guard result["open"] is NSNull else { throw HostFailure("INVALID_INPUT: Calendar subscription result is malformed") }
+        return result
+    }
+    private static func calendarSubscriptionAddRequest(_ raw: String) throws -> [String: Any] {
+        let value = try deviceCalendarSettingObject(raw, maximum: calendarSubscriptionSettingRequestLimit)
+        let whitespace = CharacterSet(charactersIn: "\u{9}\u{a}\u{b}\u{c}\u{d} \u{a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}")
+        guard Set(value.keys) == Set(["requestId", "name", "url", "defaultName", "expected"]),
+              let id = value["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let name = value["name"] as? String, name.utf16.count <= 500,
+              let url = value["url"] as? String, url.utf16.count <= 4000, !url.trimmingCharacters(in: whitespace).isEmpty,
+              let defaultName = value["defaultName"] as? String, defaultName.utf16.count <= 500,
+              !defaultName.trimmingCharacters(in: whitespace).isEmpty,
+              let expected = value["expected"] as? [String: Any],
+              Set(expected.keys) == Set(["source", "revision", "fingerprint", "stampPresent", "stamp"]),
+              let source = expected["source"] as? String, ["canonical", "legacy"].contains(source),
+              let revision = expected["revision"] as? String, revision.utf16.count <= 200,
+              let fingerprint = expected["fingerprint"] as? String,
+              fingerprint.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil,
+              isBoolean(expected["stampPresent"]),
+              (expected["stampPresent"] as? Bool == true
+                ? (expected["stamp"] as? String).map(isCanonicalReviewInstant) == true : expected["stamp"] is NSNull),
+              source == "canonical" ? ownedEqual(revision, "synced:" + (expected["stamp"] as? String ?? ""))
+                : revision.range(of: #"^device:[0-9a-f]{32}$"#, options: .regularExpression) != nil else {
+            throw HostFailure("INVALID_INPUT: Calendar subscription Add request is malformed")
+        }
+        return value
+    }
+    private static func calendarSubscriptionAddResult(_ raw: String) throws -> [String: Any] {
+        let result = try deviceCalendarSettingObject(raw, maximum: 1024)
+        guard Set(result.keys) == Set(["changed", "toasts", "open", "clearDraft"]),
+              isBoolean(result["changed"]), result["changed"] as? Bool == true,
+              let toasts = result["toasts"] as? [Any], toasts.isEmpty, result["open"] is NSNull,
+              isBoolean(result["clearDraft"]), result["clearDraft"] as? Bool == true else {
+            throw HostFailure("INVALID_INPUT: Calendar subscription Add result is malformed")
+        }
+        return result
+    }
+    private static func calendarSubscriptionResult(_ raw: String, operation: CalendarSubscriptionOperation) throws -> [String: Any] {
+        try operation == .add ? calendarSubscriptionAddResult(raw) : calendarSubscriptionSettingResult(raw, changed: true)
+    }
+    private static func calendarSubscriptionSettingEnvelope(_ raw: String, operation: CalendarSubscriptionOperation = .metadata) throws -> [String: Any] {
+        let envelope = try deviceCalendarSettingObject(raw, maximum: calendarSubscriptionSettingEnvelopeLimit)
+        guard Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any],
+              Set(prepared.keys) == Set(["version", "request", "preparedAt", "deviceIdBefore", "deviceIdToInitialize", "stamp"]),
+              isInteger(prepared["version"], equalTo: 1), equalJSON(request, prepared["request"]),
+              (prepared["preparedAt"] as? String).map(isCanonicalReviewInstant) == true,
+              (prepared["stamp"] as? String).map(isCanonicalReviewInstant) == true,
+              (prepared["deviceIdBefore"] is NSNull
+                ? (prepared["deviceIdToInitialize"] as? String).map({ UUID(uuidString: $0)?.uuidString.lowercased() == $0 }) == true
+                : (prepared["deviceIdBefore"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 }) == true && prepared["deviceIdToInitialize"] is NSNull) else {
+            throw HostFailure("INVALID_INPUT: Prepared calendar subscription request is malformed")
+        }
+        if operation == .add { _ = try calendarSubscriptionAddRequest(ownedJSON(request)) }
+        else { _ = try calendarSubscriptionSettingRequest(ownedJSON(request)) }
+        return envelope
+    }
+    private func withCalendarSubscriptionSettingOwner<T>(operation: CalendarSubscriptionOperation = .metadata, _ work: () throws -> T) throws -> T {
+        guard calendarSubscriptionSettingTurn == nil, deviceCalendarSettingTurn == nil, calendarAccessTurn == nil,
+              started, !closed, !localRequests.isClosing, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == operation.commitMethod,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0, let runtime = context else {
+            throw HostFailure("NOT_READY: Calendar subscription settings require their current owner")
+        }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        let turn = CalendarSubscriptionSettingTurn(operation: operation, runtime: runtime, storage: deviceStorage, generation: attachmentGeneration,
+            journal: try readJournalBytes(maximumBytes: Self.calendarSubscriptionSettingJournalLimit,
+                failure: Self.deviceStorageUnavailable, singleLink: true))
+        calendarSubscriptionSettingTurn = turn
+        do {
+            let result = try work()
+            if turn.freshRuntimeRequired { throw Self.calendarSubscriptionFreshRuntime }
+            calendarSubscriptionSettingTurn = nil
+            return result
+        } catch {
+            calendarSubscriptionSettingTurn = nil
+            if turn.freshRuntimeRequired || (error as? HostFailure)?.message == Self.calendarSubscriptionFreshRuntime.message {
+                // The failed queued snapshot must never re-enter ordinary work. App owns full lifecycle re-admission.
+                releaseRuntime()
+                throw Self.calendarSubscriptionFreshRuntime
+            }
+            throw error
+        }
+    }
+    @discardableResult private func requireCalendarSubscriptionSettingTurn(publication: Bool = false) throws -> CalendarSubscriptionSettingTurn? {
+        guard let turn = calendarSubscriptionSettingTurn else { return nil }
+        guard context === turn.runtime, deviceStorage === turn.storage, attachmentGeneration == turn.generation,
+              started, !closed, !localRequests.isClosing, lockFD >= 0,
+              !recoveryActivationPending || pending?.method == turn.operation.commitMethod,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil, notificationSettingTurn == nil,
+              deviceCalendarSettingTurn == nil, calendarAccessTurn == nil, !cleanupOwed, !foregroundCleanupActive,
+              !attachmentDraftEvidence,
+              try readJournalBytes(maximumBytes: Self.calendarSubscriptionSettingJournalLimit,
+                  failure: Self.deviceStorageUnavailable, singleLink: true) == turn.journal else { throw Self.deviceStorageUnavailable }
+        if let pending {
+            guard pending.method == turn.operation.commitMethod, let raw = try journalArguments(pending).first as? String,
+                  let frozen = turn.envelopeJSON, Self.ownedEqual(raw, frozen) else { throw Self.deviceStorageUnavailable }
+        }
+        if publication && turn.legacyObserved {
+            do {
+                guard let storage = turn.storage,
+                      (try storage.get("mindwtr-external-calendars")).map({ Data($0.utf8) }) == turn.legacyRaw.map({ Data($0.utf8) }) else {
+                    throw Self.deviceStorageUnavailable
+                }
+            } catch {
+                turn.freshRuntimeRequired = true
+                throw Self.calendarSubscriptionFreshRuntime
+            }
+        }
+        return turn
+    }
+    private func calendarSubscriptionSQLPublication(_ sql: String) -> Bool {
+        let statement = sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        // Receipt/source reads precede material guards; only this exact owner's rollback may settle a stale transaction.
+        return statement != "ROLLBACK" && !statement.hasPrefix("SELECT") && !statement.hasPrefix("PRAGMA")
+    }
+    private func calendarSubscriptionRead() throws -> String {
+        guard let turn = try requireCalendarSubscriptionSettingTurn(), let storage = turn.storage else { throw Self.deviceStorageUnavailable }
+        let raw = try storage.get("mindwtr-external-calendars")
+        guard raw == nil || raw!.utf8.count <= Self.calendarSubscriptionSettingRequestLimit else { throw Self.deviceStorageInvalid }
+        if turn.legacyObserved && turn.legacyRaw.map({ Data($0.utf8) }) != raw.map({ Data($0.utf8) }) {
+            if turn.committing { turn.freshRuntimeRequired = true; throw Self.calendarSubscriptionFreshRuntime }
+            throw HostFailure("STALE_REVISION: Calendar subscription source changed")
+        }
+        turn.legacyObserved = true; turn.legacyRaw = raw
+        return try Self.deviceStorageJSON([raw.map { $0 as Any } ?? NSNull()], strings: raw.map { [$0] } ?? [])
+    }
+    func getCalendarSubscriptionOptions(cancellation: NativeAttachmentCancellation) throws -> String {
+        try cancellation.check()
+        do {
+            return try withCalendarSubscriptionSettingOwner {
+                guard pending == nil else { throw Self.deviceStorageUnavailable }
+                let value = try invoke("calendarSubscriptionSettingOptions", arguments: ["{}"], localCancellation: cancellation)
+                try cancellation.check()
+                let options = try Self.deviceCalendarSettingObject(value, maximum: Self.calendarSubscriptionSettingOptionsLimit)
+                guard Set(options.keys) == Set(["model", "expected"]), options["model"] is [String: Any] else { throw Self.deviceStorageInvalid }
+                return value
+            }
+        } catch { try cancellation.check(); throw error }
+    }
+    func setCalendarSubscriptionSetting(requestJSON: String) throws -> String {
+        let request: [String: Any]
+        do { request = try Self.calendarSubscriptionSettingRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let command = pending {
+            guard command.method == "calendarSubscriptionSettingCommit", let raw = try journalArguments(command).first as? String,
+                  Self.equalJSON(try Self.calendarSubscriptionSettingEnvelope(raw)["request"], request) else {
+                throw HostFailure("Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw Self.deviceStorageUnavailable }
+            try resumeActivationIfNeeded()
+            return try publicValue(terminal, method: command.method)
+        }
+        return try withCalendarSubscriptionSettingOwner {
+            return try call("calendarSubscriptionSetting", argumentsJSON: Self.ownedJSON([requestJSON]))
+        }
+    }
+    func probeCalendarSubscriptionSettingOutcome(requestJSON: String) throws -> String {
+        do {
+            _ = try Self.calendarSubscriptionSettingRequest(requestJSON)
+            return try withCalendarSubscriptionSettingOwner {
+                if let pending {
+                    guard pending.method == "calendarSubscriptionSettingCommit", let raw = try journalArguments(pending).first as? String,
+                          Self.equalJSON(try Self.calendarSubscriptionSettingEnvelope(raw)["request"], try Self.calendarSubscriptionSettingRequest(requestJSON)) else { throw Self.deviceStorageUnavailable }
+                    calendarSubscriptionSettingTurn?.envelopeJSON = raw
+                }
+                let value = try invoke("calendarSubscriptionSettingRetryOutcome", arguments: [requestJSON])
+                _ = try Self.calendarSubscriptionSettingResult(value, changed: true)
+                return value
+            }
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+            throw CoreHostRejection(message: error.message)
+        }
+    }
+    func addCalendarSubscription(requestJSON: String) throws -> String {
+        let request: [String: Any]
+        do { request = try Self.calendarSubscriptionAddRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        if let command = pending {
+            guard command.method == "calendarSubscriptionAddCommit", let raw = try journalArguments(command).first as? String,
+                  Self.equalJSON(try Self.calendarSubscriptionSettingEnvelope(raw, operation: .add)["request"], request) else {
+                throw HostFailure("Previous changes require their exact retry")
+            }
+            guard let terminal = try resolvePending() else { throw Self.deviceStorageUnavailable }
+            try resumeActivationIfNeeded()
+            return try publicValue(terminal, method: command.method)
+        }
+        return try withCalendarSubscriptionSettingOwner(operation: .add) {
+            try call("calendarSubscriptionAdd", argumentsJSON: Self.ownedJSON([requestJSON]))
+        }
+    }
+    func probeCalendarSubscriptionAddOutcome(requestJSON: String) throws -> String {
+        do {
+            let request = try Self.calendarSubscriptionAddRequest(requestJSON)
+            return try withCalendarSubscriptionSettingOwner(operation: .add) {
+                if let pending {
+                    guard pending.method == "calendarSubscriptionAddCommit", let raw = try journalArguments(pending).first as? String,
+                          Self.equalJSON(try Self.calendarSubscriptionSettingEnvelope(raw, operation: .add)["request"], request) else { throw Self.deviceStorageUnavailable }
+                    calendarSubscriptionSettingTurn?.envelopeJSON = raw
+                }
+                let value = try invoke("calendarSubscriptionAddRetryOutcome", arguments: [requestJSON])
+                _ = try Self.calendarSubscriptionAddResult(value)
+                return value
+            }
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+            throw CoreHostRejection(message: error.message)
+        }
+    }
+    private static func calendarFileAddRequest(_ raw: String) throws -> [String: Any] {
+        var request = try deviceCalendarSettingObject(raw, maximum: calendarSubscriptionSettingRequestLimit)
+        guard Set(request.keys) == Set(["requestId", "name", "defaultName", "expected"]) else { throw deviceStorageInvalid }
+        request["url"] = "native-owned-local-calendar"
+        _ = try calendarSubscriptionAddRequest(ownedJSON(request))
+        request.removeValue(forKey: "url")
+        return request
+    }
+    func beginCalendarFileCapture(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> NativeCalendarFileCaptureAdmission {
+        try cancellation.check()
+        _ = try Self.calendarFileAddRequest(requestJSON)
+        var captured: CalendarSubscriptionSettingTurn?
+        let jobs = try withCalendarSubscriptionSettingOwner(operation: .add) {
+            guard pending == nil, calendarFileCaptureTurn == nil, let jobs = attachmentJobs else { throw Self.deviceStorageUnavailable }
+            captured = calendarSubscriptionSettingTurn
+            return jobs
+        }
+        guard let captured else { throw Self.deviceStorageUnavailable }
+        // The synchronous owner helper has completed; restore only this exact
+        // admission before yielding Engine to the off-queue provider copy.
+        calendarSubscriptionSettingTurn = captured
+        let id = UUID()
+        calendarFileCaptureTurn = .init(id: id, owner: captured, jobs: jobs, requestJSON: requestJSON, cancellation: cancellation)
+        return .init(id: id, jobs: jobs)
+    }
+    func abortCalendarFileCapture(_ id: UUID) {
+        guard let capture = calendarFileCaptureTurn, capture.id == id else { return }
+        capture.cancellation.cancel(); capture.jobs.drain()
+        if calendarSubscriptionSettingTurn === capture.owner { calendarSubscriptionSettingTurn = nil }
+        calendarFileCaptureTurn = nil
+    }
+    func finishCalendarFileCapture(_ id: UUID, selection: NativeAttachmentFiles.CalendarFileSelection,
+                                   cancellation: NativeAttachmentCancellation) throws -> NativeCalendarFileAddResult {
+        var frozen: String?
+        do {
+            guard let capture = calendarFileCaptureTurn, capture.id == id,
+                  capture.cancellation === cancellation, calendarSubscriptionSettingTurn === capture.owner,
+                  attachmentJobs === capture.jobs else { throw Self.deviceStorageUnavailable }
+            try requireCalendarSubscriptionSettingTurn(); try cancellation.check()
+            let request = try Self.calendarFileAddRequest(capture.requestJSON)
+            let derived = try invoke("calendarSubscriptionFileAddRequest", arguments: [Self.ownedJSON([
+                "request": request, "uri": selection.uri, "fileName": selection.fileName])])
+            let complete = try Self.calendarSubscriptionAddRequest(derived)
+            guard Self.equalJSON(complete["requestId"], request["requestId"]),
+                  Self.equalJSON(complete["defaultName"], request["defaultName"]), Self.equalJSON(complete["expected"], request["expected"]),
+                  Self.ownedEqual(complete["url"] as? String ?? "", selection.uri) else { throw Self.deviceStorageInvalid }
+            frozen = derived
+            try requireCalendarSubscriptionSettingTurn(); try cancellation.check()
+            // No queue yield between releasing capture authority and admitting
+            // the unchanged durable Add under its normal selected owner.
+            calendarFileCaptureTurn = nil; calendarSubscriptionSettingTurn = nil
+            let value = try addCalendarSubscription(requestJSON: derived)
+            return .init(requestJSON: derived, resultJSON: value)
+        } catch {
+            throw NativeCalendarFileAddFailure(requestJSON: frozen,
+                freshRuntimeRequired: (error as? HostFailure)?.message == Self.calendarSubscriptionFreshRuntime.message)
+        }
+    }
+    private func calendarSubscriptionSettingJournalRequest(_ command: PendingCommand) throws -> String {
+        guard let operation = CalendarSubscriptionOperation(commitMethod: command.method),
+              let raw = try journalArguments(command).first as? String,
+              let request = try Self.calendarSubscriptionSettingEnvelope(raw, operation: operation)["request"] else { throw Self.deviceStorageInvalid }
+        return try Self.ownedJSON(request)
+    }
+    private func validateCalendarSubscriptionSettingAcknowledgment(_ command: PendingCommand, value: String) throws {
+        _ = try journalArguments(command)
+        guard let operation = CalendarSubscriptionOperation(commitMethod: command.method) else { throw Self.deviceStorageInvalid }
+        _ = try Self.calendarSubscriptionResult(value, operation: operation)
+    }
+    private func invokeCalendarSubscriptionSettingCommit(_ command: PendingCommand) throws -> String {
+        let args = try journalArguments(command)
+        guard let raw = args.first as? String, let turn = calendarSubscriptionSettingTurn,
+              command.method == turn.operation.commitMethod else { throw Self.deviceStorageUnavailable }
+        turn.envelopeJSON = raw
+        _ = try invoke(turn.operation.rawValue + "Validate", arguments: args)
+        do {
+            let saved = try invoke(turn.operation.rawValue + "RetryOutcome", arguments: [calendarSubscriptionSettingJournalRequest(command)])
+            try validateCalendarSubscriptionSettingAcknowledgment(command, value: saved)
+            return saved
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
+        turn.committing = true
+        defer { turn.committing = false }
+        return try invoke(turn.operation.commitMethod, arguments: args)
+    }
+
+    private static let notificationSettingFields = Set(["notificationsEnabled", "startDateNotificationsEnabled",
+        "dueDateNotificationsEnabled", "weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled",
+        "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "weeklyReviewDay"])
+    private static func notificationSettingRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 8_192,
+              let input = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(input.keys) == Set(["requestId", "edit", "expected"]),
+              let id = input["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let edit = input["edit"] as? [String: Any], Set(edit.keys) == Set(["type", "value"]),
+              let type = edit["type"] as? String, notificationSettingFields.contains(type),
+              let expected = input["expected"] as? [String: Any], Set(expected.keys) == Set(["present", "value"]),
+              isBoolean(expected["present"]), expected["value"] != nil,
+              expected["present"] as? Bool == true || expected["value"] is NSNull else {
+            throw HostFailure("INVALID_INPUT: Notification setting needs a bounded typed edit, witness and lowercase UUID")
+        }
+        let valid: Bool
+        if type == "weeklyReviewDay" {
+            valid = isInteger(edit["value"]) && (edit["value"] as? NSNumber).map { (0...6).contains($0.doubleValue) } == true
+        } else if ["weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime"].contains(type) {
+            valid = (edit["value"] as? String).map { $0.range(of: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", options: .regularExpression) != nil } == true
+        } else { valid = isBoolean(edit["value"]) }
+        guard valid else { throw HostFailure("INVALID_INPUT: Notification setting value is malformed") }
+        return input
+    }
+    private func validateNotificationSettingRequest(_ raw: String) throws -> [String: Any] {
+        let request = try Self.notificationSettingRequest(raw)
+        let envelope = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["request": request, "prepared": ["version": 1, "request": request]], options: [.sortedKeys]), as: UTF8.self)
+        _ = try invoke("notificationSettingValidate", arguments: [envelope])
+        return request
+    }
+    func readNotificationSettingsOptions() throws -> String {
+        _ = try requireDeviceStorageAdmission()
+        let value = try invoke("notificationSettingOptions", arguments: ["{}"])
+        guard value.utf8.count <= 65_536, let object = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(object.keys) == Set(["model", "expected"]), object["model"] is [String: Any],
+              let expected = object["expected"] as? [String: Any], Set(expected.keys) == Self.notificationSettingFields else {
+            throw HostFailure("Malformed Notification Settings options")
+        }
+        return value
+    }
+    func probeNotificationSettingOutcome(requestJSON: String) throws -> String {
+        _ = try requireDeviceStorageAdmission()
+        do {
+            let request = try validateNotificationSettingRequest(requestJSON)
+            let value = try invoke("notificationSettingRetryOutcome", arguments: [requestJSON])
+            try validateNotificationSettingResult(try Self.projectObject(value, maximum: 1024), request: request, changed: true)
+            return value
+        } catch let error as HostFailure {
+            if error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+                throw CoreHostRejection(message: error.message)
+            }
+            throw error
+        }
+    }
+    func beginNotificationSetting(_ id: UUID, requestJSON: String,
+        cancellation: NativeAttachmentCancellation) throws -> NativeNotificationSettingAdmission {
+        guard notificationSettingTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+              let context else { throw CoreHostRejection(message: "NOT_READY: Notification edit is unavailable") }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        let request: [String: Any]
+        do { request = try validateNotificationSettingRequest(requestJSON) }
+        catch { if pending != nil { throw error }; throw CoreHostRejection(message: error.localizedDescription) }
+        let retry = pending != nil
+        if let pending {
+            guard pending.method == "notificationSettingCommit", let raw = try journalArguments(pending).first as? String,
+                  let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                  Self.equalJSON(envelope["request"], request) else { throw HostFailure("Previous changes require their exact retry") }
+        } else {
+            do {
+                let replay = try invoke("notificationSettingRetryOutcome", arguments: [requestJSON])
+                try validateNotificationSettingResult(try Self.projectObject(replay, maximum: 1024), request: request, changed: true)
+                return .init(replay: replay, requiresAuthorization: false, retryPending: false,
+                    request: { }, read: { await NativeNotificationPermission.read() })
+            } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
+            catch let error as HostFailure where error.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: error.message) }
+            let raw = try readNotificationSettingsOptions()
+            guard let options = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                  let expected = options["expected"] as? [String: Any], let edit = request["edit"] as? [String: Any],
+                  let type = edit["type"] as? String, Self.equalJSON(expected[type], request["expected"]) else {
+                throw CoreHostRejection(message: "STALE_REVISION: Notification setting changed; refresh Notifications")
+            }
+        }
+        if cancellation.isCancelled {
+            if retry { throw HostFailure("Notification save still requires exact retry") }
+            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+        }
+        notificationSettingTurn = .init(id: id, runtime: context, generation: attachmentGeneration,
+            requestJSON: requestJSON, cancellation: cancellation, retryPending: retry)
+        var requester: NativeNotificationAuthorization.Requester = { try await NativeNotificationAuthorization.request() }
+        var reader: NativeNotificationPermission.Reader = { await NativeNotificationPermission.read() }
+        #if DEBUG
+        if let injected = faults?.notificationAuthorizationRequest { requester = injected }
+        if let injected = faults?.notificationPermissionRead { reader = injected }
+        #endif
+        return .init(replay: nil, requiresAuthorization: !retry && Self.isBoolean((request["edit"] as? [String: Any])?["value"])
+            && (request["edit"] as? [String: Any])?["value"] as? Bool == true,
+            retryPending: retry, request: requester, read: reader)
+    }
+    func commitNotificationSetting(_ id: UUID) throws -> String {
+        guard let turn = notificationSettingTurn, turn.id == id, context === turn.runtime,
+              attachmentGeneration == turn.generation, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+        }
+        if turn.cancellation.isCancelled {
+            if turn.retryPending { throw HostFailure("Notification save still requires exact retry") }
+            throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+        }
+        notificationSettingOwnerAccess = true; defer { notificationSettingOwnerAccess = false }
+        if turn.retryPending {
+            guard let terminal = try resolvePending() else { throw HostFailure("Notification save still requires exact retry") }
+            return try terminal.value()
+        }
+        return try call("notificationSetting", argumentsJSON: String(decoding:
+            JSONSerialization.data(withJSONObject: [turn.requestJSON]), as: UTF8.self))
+    }
+    func finishNotificationSetting(_ id: UUID) {
+        if notificationSettingTurn?.id == id { notificationSettingTurn = nil }
+    }
+    private func validateNotificationSettingResult(_ result: [String: Any], request: [String: Any], changed: Bool? = nil) throws {
+        guard Set(result.keys) == Set(["type", "value", "changed"]), let edit = request["edit"] as? [String: Any],
+              let expected = request["expected"] as? [String: Any], Self.equalJSON(result["type"], edit["type"]),
+              Self.equalJSON(result["value"], edit["value"]), Self.isBoolean(result["changed"]),
+              result["changed"] as? Bool == (changed ?? !(expected["present"] as? Bool == true && Self.equalJSON(expected["value"], edit["value"]))) else {
+            throw HostFailure("Malformed Notification setting result")
+        }
+    }
+    private func validateNotificationSettingAcknowledgment(_ command: PendingCommand, value: String) throws {
+        guard let raw = try journalArguments(command).first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed Notification setting acknowledgment") }
+        try validateNotificationSettingResult(try Self.projectObject(value, maximum: 1024), request: request, changed: true)
+    }
+    private func notificationSettingJournalRequest(_ command: PendingCommand) throws -> String {
+        guard let raw = try journalArguments(command).first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed Notification setting journal") }
+        return String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+    }
+
+    func readAboutUpdateState() throws -> String {
+        _ = try requireDeviceStorageAdmission()
+        return try invoke("iosAboutUpdateState", arguments: [])
+    }
+
+    func recordAboutUpdateCheck(timestamp: String) throws {
+        try requireDeviceStorageAdmission().recordAboutUpdateCheck(timestamp: timestamp)
+        _ = try? invoke("iosAboutUpdateStateAcknowledged", arguments: ["check-saved"])
+    }
+
+    func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String?) throws {
+        try requireDeviceStorageAdmission().storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt)
+        _ = try? invoke("iosAboutUpdateStateAcknowledged", arguments: ["badge-saved"])
+    }
+
+    func readSearchConsent() throws -> Bool { try requireDeviceStorageAdmission().readSearchConsent() }
+
+    func setSearchConsent(_ enabled: Bool) throws {
+        try requireDeviceStorageAdmission().setSearchConsent(enabled)
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.5/ios-search-publication", "enabled": enabled, "outcome": "consent-saved"]) {
+            _ = try? invoke("logLine", arguments: ["Native iOS search consent saved", context])
+        }
+    }
+
     func call(_ method: String, argumentsJSON: String) throws -> String {
         try call(method, argumentsJSON: argumentsJSON, editorAttempt: nil)
     }
@@ -2290,6 +4853,9 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
+        guard notificationSettingTurn == nil || notificationSettingOwnerAccess else { throw HostFailure("Notification edit is still awaiting its owner") }
+        guard reminderEffectsTurn == nil || reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil else { throw Self.taskDownloadFailure }
         try denyCleanupOwner()
@@ -2983,7 +5549,7 @@ private final class Engine: @unchecked Sendable {
                 return result
             } catch {
                 turn.preparing = false
-                jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); cryptoJobs?.drain()
+                jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); calendarJobs?.drain(); cryptoJobs?.drain()
                 try? finishTaskDownloadSource(turn, completed: false)
                 throw error
             }
@@ -6113,6 +8679,11 @@ private final class Engine: @unchecked Sendable {
             try? backupOperationFiles.discard(reference, provenRejected: true)
             throw CoreHostRejection(message: "INVALID_INPUT: Backup operation is unavailable")
         }
+        do { try requireBackupDocumentMutationAllowed(command, arguments: arguments) }
+        catch {
+            try? backupOperationFiles.discard(reference, provenRejected: true)
+            throw CoreHostRejection(message: "NOT_READY: Finish pending Calendar effects before restoring or replacing data")
+        }
         pending = command
         try persist(command)
         // Document reload intentionally suppresses maintenance until this exact
@@ -6153,8 +8724,81 @@ private final class Engine: @unchecked Sendable {
         return [try backupEncoded(reference), operation.planJSON, operation.snapshot.name]
     }
 
-    private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?) throws -> String {
+    private func calendarPushEffectConstrainsBackup() -> Bool {
+        // Hosts without this capability cannot own a Calendar effect. A configured
+        // namespace that cannot prove absence must retain the same safety fence.
+        guard deviceStorageLocation != nil else { return false }
+        guard let deviceStorage, let cells = try? deviceStorage.readCalendarPushState(), cells.count == 6 else { return true }
+        return cells[5] != nil
+    }
+
+    private func backupDocumentPlanMode(_ command: PendingCommand, arguments: [Any]) throws -> String {
+        let reference = try backupOperationReference(command)
+        guard arguments.count == 3, let planJSON = arguments[1] as? String,
+              let plan = try NativeJSON.jsonObject(with: Data(planJSON.utf8)) as? [String: Any],
+              Set(plan.keys) == Set(["version", "requestId", "mode", "preparedAt", "expectedCurrent", "data", "reply"]),
+              Self.isInteger(plan["version"], equalTo: 1), plan["requestId"] as? String == reference.id,
+              let mode = plan["mode"] as? String,
+              ["merge", "restore", "replace", "csv", "todoist", "ticktick", "dgt", "omnifocus"].contains(mode) else {
+            throw HostFailure("Invalid owned backup document plan")
+        }
+        return mode
+    }
+
+    private func requireBackupDocumentMutationAllowed(_ command: PendingCommand, arguments: [Any]) throws {
+        let mode = try backupDocumentPlanMode(command, arguments: arguments)
+        guard !["restore", "replace"].contains(mode) || !calendarPushEffectConstrainsBackup() else {
+            _ = try? invoke("iosCalendarPushDiagnostic", arguments: ["{\"operation\":\"restore\",\"outcome\":\"blocked\"}"])
+            throw HostFailure("NOT_READY: Finish pending Calendar effects before restoring or replacing data")
+        }
+    }
+
+    private func invokeBackupDocumentReplay(_ command: PendingCommand, arguments: [Any]) throws -> String {
+        _ = try backupDocumentPlanMode(command, arguments: arguments)
+        let previous = backupReplayReadOnly
+        defer { backupReplayReadOnly = previous }
+        if calendarPushEffectConstrainsBackup() {
+            backupReplayReadOnly = true
+            // Keep the existing exact receipt proof and normal reload/finish path.
+            // A vanished receipt cannot fall through to document writes afterward.
+            guard try invoke("backupDocumentOutcome", arguments: arguments) != "null" else {
+                throw HostFailure("SAVE_FAILED: Pending Calendar effects require an exact saved backup receipt")
+            }
+        }
+        return try invoke(command.method, arguments: arguments)
+    }
+
+    private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
+        reminderCompletionOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard calendarPushTurn == nil, !Self.calendarPushMethods.contains(method) else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar push requires its current explicit owner")
+        }
+        guard calendarAccessTurn == nil, !Self.calendarAccessMethods.contains(method) else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar access requires its current explicit owner")
+        }
+        guard method != "iosPruneReceipts" else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
+        }
+        guard !Self.reminderSnoozeMethods.contains(method) else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
+        }
+        guard !Self.reminderCompletionMethods.contains(method) || method == "reminderCompletionCommit" && reminderCompletionOwned else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
+        }
+        guard reminderEffectsTurn == nil, !Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard (calendarSubscriptionSettingTurn == nil || method == calendarSubscriptionSettingTurn?.operation.rawValue),
+              !Self.calendarSubscriptionSettingMethods.contains(method) || method == calendarSubscriptionSettingTurn?.operation.rawValue else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar subscription settings require their current explicit owner")
+        }
+        guard (deviceCalendarSettingTurn == nil || method == "deviceCalendarSetting"),
+              !Self.deviceCalendarSettingMethods.contains(method) || (method == "deviceCalendarSetting" && deviceCalendarSettingTurn != nil) else {
+            throw CoreHostRejection(message: "NOT_READY: Device Calendar Settings require their current explicit owner")
+        }
+        guard (notificationSettingTurn == nil || notificationSettingOwnerAccess),
+              !Self.notificationSettingMethods.contains(method) || (method == "notificationSetting" && notificationSettingOwnerAccess) else {
+            throw CoreHostRejection(message: "NOT_READY: Notification Settings require their current explicit owner")
+        }
         try denyCleanupOwner()
         guard !["projectFileAvailabilityPreflight", "projectFileAvailabilityEncryptionAdmission", "projectFileAvailabilityWritePrepare", "projectFileAvailabilityWriteValidate", "projectFileAvailabilityWriteCommit", "iosProjectFilePrepareAvailability", "projectAttachmentCachedAvailabilityPreflight", "projectAttachmentCachedAvailability"].contains(method) else { throw Self.projectDownloadFailure }
         if started, !closed, pending?.method == Self.projectDownloadMethod || projectDownloadTurn != nil {
@@ -6272,11 +8916,16 @@ private final class Engine: @unchecked Sendable {
             // Mind Sweep has no journal or write before argument validation.
             // Its UI may release an oversized draft only on a definite refusal.
             // With an older command still owed, keep every error uncertain.
-            if ["mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            if ["mindSweepAdd", "inboxCommit", "inboxSkip", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
             throw error
         }
         guard pending == nil else { throw HostFailure("SAVE_FAILED: A pending command requires exact retry") }
         guard Self.mutations.contains(method) else {
+            if method == "iosSearchObservation" {
+                let observation = try searchObservation()
+                return try Self.ownedJSON(["ready": observation.ready, "revision": observation.revision,
+                                          "nextAt": observation.nextAt.map { $0 as Any } ?? NSNull()])
+            }
             if method == "referenceProjectNextActionOptions" {
                 do {
                     guard let text = args.first as? String,
@@ -7572,6 +10221,82 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "gtdWorkflowCommit", argumentsJSON: encoded)
                 _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "notificationSetting" {
+            do {
+                let value = try invoke("notificationSettingPrepare", arguments: args)
+                guard notificationSettingTurn?.cancellation.isCancelled == false else {
+                    throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+                }
+                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      let kind = response["kind"] as? String,
+                      let original = args.first as? String,
+                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
+                    throw HostFailure("Malformed Notification setting write preparation")
+                }
+                if kind == "noop" {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
+                        throw HostFailure("Malformed no-write Notification setting result")
+                    }
+                    try validateNotificationSettingResult(result, request: submitted)
+                    return String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self)
+                }
+                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any],
+                      let request = prepared["request"] as? [String: Any], Self.equalJSON(request, submitted) else {
+                    throw HostFailure("Malformed prepared Notification setting write")
+                }
+                let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                guard commit.utf8.count <= 8_192 else { throw HostFailure("INVALID_INPUT: Prepared Notification setting write is too large") }
+                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
+                guard encoded.utf8.count <= 18_192 else { throw HostFailure("INVALID_INPUT: Prepared Notification setting write journal is too large") }
+                command = PendingCommand(version: 2, method: "notificationSettingCommit", argumentsJSON: encoded)
+                _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if let operation = CalendarSubscriptionOperation(rawValue: method) {
+            do {
+                let raw = try invoke(operation.rawValue + "Prepare", arguments: args)
+                let response = try Self.deviceCalendarSettingObject(raw, maximum: Self.calendarSubscriptionSettingEnvelopeLimit)
+                guard let original = args.first as? String else { throw Self.deviceStorageInvalid }
+                if response["kind"] as? String == "noop" {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] else { throw Self.deviceStorageInvalid }
+                    let value = try Self.ownedJSON(result)
+                    if operation == .add { _ = try Self.calendarSubscriptionAddResult(value) }
+                    else { _ = try Self.calendarSubscriptionSettingResult(value) }
+                    return value
+                }
+                guard response["kind"] as? String == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any], let request = prepared["request"],
+                      Self.equalJSON(request, try operation == .add ? Self.calendarSubscriptionAddRequest(original)
+                        : Self.calendarSubscriptionSettingRequest(original)) else { throw Self.deviceStorageInvalid }
+                let envelope = try Self.ownedJSON(["request": request, "prepared": prepared])
+                command = PendingCommand(version: 2, method: operation.commitMethod, argumentsJSON: try Self.ownedJSON([envelope]))
+                calendarSubscriptionSettingTurn?.envelopeJSON = envelope
+                _ = try invoke(operation.rawValue + "Validate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "deviceCalendarSetting" {
+            do {
+                let value = try invoke("deviceCalendarSettingPrepare", arguments: args)
+                deviceCalendarSettingTurn?.preparing = false
+                let response = try Self.deviceCalendarSettingObject(value, maximum: Self.deviceCalendarSettingEnvelopeLimit)
+                guard let kind = response["kind"] as? String, let original = args.first as? String else {
+                    throw HostFailure("Malformed Device Calendar setting preparation")
+                }
+                if kind == "noop" {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
+                        throw HostFailure("Malformed no-write Device Calendar setting result")
+                    }
+                    try Self.deviceCalendarSettingResult(result)
+                    return try Self.ownedJSON(result)
+                }
+                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any],
+                      let request = prepared["request"], Self.equalJSON(request, try Self.deviceCalendarSettingRequest(original)) else {
+                    throw HostFailure("Malformed prepared Device Calendar setting write")
+                }
+                let commit = try Self.ownedJSON(["request": request, "prepared": prepared])
+                command = PendingCommand(version: 2, method: "deviceCalendarSettingCommit", argumentsJSON: try Self.ownedJSON([commit]))
+                _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "generalPreference" {
             do {
                 let value = try invoke("generalPreferencePrepare", arguments: args)
@@ -8416,6 +11141,26 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "calendarUnscheduleCommit", argumentsJSON: encoded)
                 _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "calendarEventTaskCreate" {
+            try allowRetainedOrdinaryPreparation()
+            do {
+                guard let original = args.first as? String,
+                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
+                    throw HostFailure("Malformed Calendar event task request")
+                }
+                let value = try invoke("calendarEventTaskPrepare", arguments: args)
+                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
+                      let prepared = response["prepared"] as? [String: Any], let request = prepared["request"] as? [String: Any],
+                      try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                        == JSONSerialization.data(withJSONObject: submitted, options: [.sortedKeys]) else {
+                    throw HostFailure("Malformed prepared Calendar event task")
+                }
+                let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
+                command = PendingCommand(version: 2, method: "calendarEventTaskCommit", argumentsJSON: encoded)
+                _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "calendarComposerSave" {
             try allowRetainedOrdinaryPreparation()
             do {
@@ -8530,6 +11275,15 @@ private final class Engine: @unchecked Sendable {
             _ = try ordinaryJournalArguments(command)
             turn.command = command
         }
+        if method == "notificationSetting" {
+            guard let turn = notificationSettingTurn, notificationSettingOwnerAccess, context === turn.runtime,
+                  attachmentGeneration == turn.generation, !turn.cancellation.isCancelled else {
+                throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
+            }
+        }
+        if command.method == "backupDocumentCommit" {
+            try requireBackupDocumentMutationAllowed(command, arguments: backupDocumentArguments(command))
+        }
         pending = command
         try persist(command)
         let terminal: TerminalResult
@@ -8538,7 +11292,9 @@ private final class Engine: @unchecked Sendable {
             if command.method == "backupDocumentCommit" { replay = try backupDocumentArguments(command) }
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
-            terminal = .success(try invoke(command.method, arguments: replay))
+            if CalendarSubscriptionOperation(commitMethod: command.method) != nil { terminal = .success(try invokeCalendarSubscriptionSettingCommit(command)) }
+            else { terminal = .success(try command.method == "deviceCalendarSettingCommit"
+                ? invokeDeviceCalendarSettingCommit(command) : invoke(command.method, arguments: replay)) }
         } catch {
             // These codes prove the first attempt stopped before its write. A
             // replay rejection cannot prove an earlier uncertain attempt did not.
@@ -8559,6 +11315,8 @@ private final class Engine: @unchecked Sendable {
 
     func retryPending() throws -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
+        guard notificationSettingTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Settings edit is still awaiting its owner") }
         let command = pending
         let method = command?.method
         let terminal = try resolvePending()
@@ -8651,6 +11409,31 @@ private final class Engine: @unchecked Sendable {
             #endif
             return try finishOwnedSave(command, with: .success(value))
         }
+        if let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
+            return try withCalendarSubscriptionSettingOwner(operation: operation) {
+                guard let raw = try journalArguments(command).first as? String else { throw Self.deviceStorageInvalid }
+                calendarSubscriptionSettingTurn?.envelopeJSON = raw
+                _ = try invoke(operation.rawValue + "Validate", arguments: [raw])
+                if let terminal = command.terminal { return try finish(command, with: terminal) }
+                try persist(command)
+                let terminal: TerminalResult
+                do { terminal = .success(try invokeCalendarSubscriptionSettingCommit(command)) }
+                catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") && recoveryActivationPending {
+                    terminal = .rejected(error.message)
+                }
+                return try finish(command, with: terminal)
+            }
+        }
+        if command.method == "deviceCalendarSettingCommit" {
+            return try withDeviceCalendarSettingOwner {
+                guard let raw = try journalArguments(command).first as? String else { throw Self.deviceStorageInvalid }
+                deviceCalendarSettingTurn?.envelopeJSON = raw
+                _ = try invoke("deviceCalendarSettingValidate", arguments: [raw])
+                if let terminal = command.terminal { return try finish(command, with: terminal) }
+                try persist(command)
+                return try finish(command, with: .success(invokeDeviceCalendarSettingCommit(command)))
+            }
+        }
         _ = try beginRetainedOrdinaryTurn(command: command)
         ordinaryMutationDepth += 1
         defer {
@@ -8662,6 +11445,62 @@ private final class Engine: @unchecked Sendable {
                    recoveryActivationPending { /* Activation still owns this turn. */ }
                 else { retainedOrdinaryTurn = nil }
             }
+        }
+        if command.method == "reminderSnoozeCommit" {
+            let args = try reminderSnoozeJournalArguments(command)
+            guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+            _ = try frozenReminderSnooze(command)
+            if let terminal = command.terminal { return try finish(command, with: terminal) }
+            let value: String
+            if recoveryActivationPending {
+                do { value = try savedReminderSnooze(raw) }
+                catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                    return try finish(command, with: .rejected(failure.message))
+                }
+            } else {
+                try persist(command)
+                do { value = try invoke("reminderSnoozeRetry", arguments: [raw]) }
+                catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                    return try finish(command, with: .rejected(failure.message))
+                }
+            }
+            try publishReminderSnooze(command, value: value)
+            return try finish(command, with: .success(value))
+        }
+        if command.method == "reminderCompletionCommit" {
+            let args = try reminderCompletionJournalArguments(command)
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Reminder completion journal is malformed") }
+            if recoveryActivationPending {
+                let terminal: TerminalResult
+                do { terminal = .success(try savedReminderCompletion(raw)) }
+                catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                    terminal = .rejected(failure.message)
+                }
+                return try finish(command, with: terminal)
+            }
+            if let terminal = command.terminal { return try finish(command, with: terminal) }
+            try persist(command)
+            // Unknown warm work must refuse: only the original running/owed/saved receipt may advance.
+            let value: String
+            do { value = try invoke("reminderCompletionRetry", arguments: args) }
+            catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                // Retire definite no-write refusal only after its terminal journal and clear succeed.
+                return try finish(command, with: .rejected(failure.message))
+            }
+            try validateReminderCompletionResult(value)
+            return try finish(command, with: .success(value))
+        }
+        if command.method == "notificationSettingCommit", recoveryActivationPending {
+            let terminal: TerminalResult
+            do {
+                let value = try invoke("notificationSettingRetryOutcome", arguments: [notificationSettingJournalRequest(command)])
+                try validateNotificationSettingAcknowledgment(command, value: value)
+                terminal = .success(value)
+            } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                // A cold intent without a receipt has no surviving permission or write authority.
+                terminal = .rejected(failure.message)
+            }
+            return try finish(command, with: terminal)
         }
         if let terminal = command.terminal {
             if command.method == "referenceTasksMoveCommit", case .success(let value) = terminal {
@@ -8750,7 +11589,8 @@ private final class Engine: @unchecked Sendable {
             if command.method == "backupDocumentCommit" { replay = try backupDocumentArguments(command) }
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
-            value = try invoke(command.method, arguments: replay)
+            value = try command.method == "backupDocumentCommit"
+                ? invokeBackupDocumentReplay(command, arguments: replay) : invoke(command.method, arguments: replay)
         }
         catch let failure as HostFailure {
             if command.method == "appLockCommit", recoveryActivationPending, failure.message.hasPrefix("STALE_REVISION:") {
@@ -8776,6 +11616,31 @@ private final class Engine: @unchecked Sendable {
         }
         if command.method == "dataSetting", case .success(let value) = terminal {
             try validateDataSettingAcknowledgment(value)
+        }
+        if command.method == "reminderSnoozeCommit" {
+            let expected = try frozenReminderSnooze(command)
+            if case .success(let value) = terminal {
+                let args = try reminderSnoozeJournalArguments(command)
+                guard let raw = args.first as? String else { throw Self.reminderSnoozeInvalid }
+                try validateReminderSnoozeAlarm(value, request: raw)
+                let proven = try savedReminderSnooze(raw)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(value.utf8)), try NativeJSON.jsonObject(with: Data(expected.utf8))),
+                      Self.equalJSON(try NativeJSON.jsonObject(with: Data(value.utf8)), try NativeJSON.jsonObject(with: Data(proven.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Reminder Snooze receipt does not match its frozen publication")
+                }
+            }
+        }
+        if command.method == "reminderCompletionCommit" {
+            let args = try reminderCompletionJournalArguments(command)
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Reminder completion journal is malformed") }
+            if case .success(let value) = terminal {
+                try validateReminderCompletionResult(value)
+                let proven = try savedReminderCompletion(raw)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
+                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Reminder completion outcome cannot be verified")
+                }
+            }
         }
         if command.method == "referenceTasksMoveCommit" {
             _ = try invoke("referenceTasksMoveValidate", arguments: referenceTasksMoveJournalArguments(command))
@@ -8870,6 +11735,10 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateCalendarAcknowledgment(command, value: value) }
         }
+        if command.method == "calendarEventTaskCommit" {
+            _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal { try validateCalendarAcknowledgment(command, value: value) }
+        }
         if ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
             _ = try invoke(command.method == "calendarComposerCommit" ? "calendarComposerValidate" : "calendarComposerCreateValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateCalendarAcknowledgment(command, value: value) }
@@ -8917,6 +11786,40 @@ private final class Engine: @unchecked Sendable {
         if command.method == "gtdWorkflowCommit" {
             _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateGtdWorkflowAcknowledgment(command, value: value) }
+        }
+        if command.method == "notificationSettingCommit" {
+            _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal {
+                let proven = try invoke("notificationSettingRetryOutcome", arguments: [notificationSettingJournalRequest(command)])
+                try validateNotificationSettingAcknowledgment(command, value: proven)
+                try validateNotificationSettingAcknowledgment(command, value: value)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
+                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Notification setting outcome cannot be verified")
+                }
+            }
+        }
+        if let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
+            _ = try invoke(operation.rawValue + "Validate", arguments: journalArguments(command))
+            if case .success(let value) = terminal {
+                let proven = try invoke(operation.rawValue + "RetryOutcome", arguments: [calendarSubscriptionSettingJournalRequest(command)])
+                try validateCalendarSubscriptionSettingAcknowledgment(command, value: proven)
+                try validateCalendarSubscriptionSettingAcknowledgment(command, value: value)
+                guard Self.equalJSON(try Self.calendarSubscriptionResult(proven, operation: operation),
+                                     try Self.calendarSubscriptionResult(value, operation: operation)) else { throw Self.deviceStorageUnavailable }
+            }
+        }
+        if command.method == "deviceCalendarSettingCommit" {
+            _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal {
+                let proven = try invoke("deviceCalendarSettingRetryOutcome", arguments: [deviceCalendarSettingJournalRequest(command)])
+                try validateDeviceCalendarSettingAcknowledgment(command, value: proven)
+                try validateDeviceCalendarSettingAcknowledgment(command, value: value)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
+                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: Device Calendar setting outcome cannot be verified")
+                }
+            }
         }
         if command.method == "generalPreferenceCommit" {
             _ = try invoke("generalPreferenceValidate", arguments: journalArguments(command))
@@ -9473,6 +12376,27 @@ private final class Engine: @unchecked Sendable {
             else if reviewing { NSLog("Native iOS GTD Review saved releaseCheck=v1.3.4/ios-gtd-review outcome=confirmed") }
             else { NSLog("Native iOS GTD workflow saved releaseCheck=v1.3.4/ios-gtd-workflow outcome=confirmed") }
         }
+        if command.method == "notificationSettingCommit", case .success = terminal {
+            _ = try? invoke("notificationSettingAcknowledged", arguments: [])
+        }
+        if let operation = CalendarSubscriptionOperation(commitMethod: command.method), case .success = terminal {
+            _ = try? invoke(operation.rawValue + "Acknowledged", arguments: [])
+        }
+        if command.method == "deviceCalendarSettingCommit", case .success = terminal {
+            _ = try? invoke("deviceCalendarSettingAcknowledged", arguments: [])
+        }
+        if command.method == "reminderSnoozeCommit", case .success = terminal {
+            _ = try? invoke("reminderSnoozeAcknowledged", arguments: [])
+        }
+        if command.method == "reminderCompletionCommit", case .success = terminal {
+            _ = try? invoke("reminderCompletionAcknowledged", arguments: [])
+        }
+        if command.method == "calendarEventTaskCommit", case .success = terminal {
+#if DEBUG
+            faults?.commandDiagnostic?("calendarEventTaskCreate")
+#endif
+            _ = try? invoke("calendarEventTaskAcknowledged", arguments: [])
+        }
         if command.method == "generalPreferenceCommit", case .success(let value) = terminal {
 #if DEBUG
             faults?.commandDiagnostic?("generalPreferenceApplied")
@@ -9741,9 +12665,11 @@ private final class Engine: @unchecked Sendable {
                 && ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:", "STALE_REVISION:"].contains(where: { message.hasPrefix($0) })
         }
         return ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:"].contains(where: { message.hasPrefix($0) })
+            || (method == "calendarSubscriptionAddCommit" && message.hasPrefix("STALE_REVISION:"))
+            || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "referenceTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "inboxPreparedCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -9781,6 +12707,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateCalendarAcknowledgment(_ command: PendingCommand, value: String) throws {
+        if command.method == "calendarEventTaskCommit" {
+            guard try NativeJSON.hasUniqueObjectKeys(value) else { throw HostFailure("Malformed Calendar event task acknowledgment") }
+        }
         let args = try journalArguments(command)
         guard let encoded = args.first as? String,
               let envelope = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
@@ -12637,6 +15566,14 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func journalArguments(_ command: PendingCommand, checkingEditorSnapshot: Bool = true, retainedOrdinary: Bool = false) throws -> [Any] {
+        if command.method == "reminderSnoozeCommit" {
+            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
+            return try reminderSnoozeJournalArguments(command)
+        }
+        if command.method == "reminderCompletionCommit" {
+            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
+            return try reminderCompletionJournalArguments(command)
+        }
         if command.method == Self.mixedSaveMethod { guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }; return [try mixedSaveJournal(command).envelopeJSON] }
         if command.method == Self.ownedSaveMethod { guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }; return [try ownedSaveJournal(command).envelopeJSON] }
         if command.method == "backupDocumentCommit" {
@@ -12834,6 +15771,46 @@ private final class Engine: @unchecked Sendable {
             }
             let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
             _ = try arguments("gtdWorkflow", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
+            return args
+        }
+        if let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
+            guard !retainedOrdinary, command.editorDraft == nil,
+                  command.argumentsJSON.utf8.count <= Self.calendarSubscriptionSettingArgumentsLimit,
+                  try JSONEncoder().encode(command).count <= Self.calendarSubscriptionSettingJournalLimit,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else { throw Self.deviceStorageInvalid }
+            _ = try Self.calendarSubscriptionSettingEnvelope(args[0], operation: operation)
+            if case .success(let value) = command.terminal { _ = try Self.calendarSubscriptionResult(value, operation: operation) }
+            return args
+        }
+        if command.method == "deviceCalendarSettingCommit" {
+            guard !retainedOrdinary, command.editorDraft == nil,
+                  command.argumentsJSON.utf8.count <= Self.deviceCalendarSettingArgumentsLimit,
+                  try JSONEncoder().encode(command).count <= Self.deviceCalendarSettingJournalLimit,
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else {
+                throw HostFailure("INVALID_INPUT: Malformed prepared Device Calendar setting journal")
+            }
+            _ = try Self.deviceCalendarSettingEnvelope(args[0])
+            if case .success(let value) = command.terminal {
+                try Self.deviceCalendarSettingResult(Self.deviceCalendarSettingObject(value, maximum: 1024), changed: true)
+            }
+            return args
+        }
+        if command.method == "notificationSettingCommit" {
+            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
+            guard command.argumentsJSON.utf8.count <= 49_152,
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 8_192,
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["request", "prepared"]),
+                  let request = input["request"] as? [String: Any],
+                  let prepared = input["prepared"] as? [String: Any],
+                  Self.isInteger(prepared["version"], equalTo: 1),
+                  let original = prepared["request"] as? [String: Any], Self.equalJSON(request, original) else {
+                throw HostFailure("Malformed prepared Notification setting journal")
+            }
+            let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+            _ = try arguments("notificationSetting", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
         if command.method == "generalPreferenceCommit" {
@@ -13689,6 +16666,21 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("calendarUnschedule", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
+        if command.method == "calendarEventTaskCommit" {
+            guard let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 2_000_000,
+                  (try? NativeJSON.hasUniqueObjectKeys(args[0])) == true,
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["request", "prepared"]), let request = input["request"] as? [String: Any],
+                  let prepared = input["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
+                  prepared["kind"] as? String == "event", let original = prepared["request"] as? [String: Any],
+                  try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                    == JSONSerialization.data(withJSONObject: original, options: [.sortedKeys]) else {
+                throw HostFailure("Malformed prepared Calendar event task journal")
+            }
+            try validateCalendarEventTaskRequest(request)
+            return args
+        }
         if ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
             guard let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
                   args[0].utf8.count <= 2_000_000,
@@ -13823,6 +16815,20 @@ private final class Engine: @unchecked Sendable {
 
     private func arguments(_ method: String, _ json: String, allowPreparedDates: Bool = true) throws -> [Any] {
         try validateArgumentTransportSize(method, json)
+        if method == "iosEntityOpen" {
+            guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
+                  args.count == 1, args[0].utf16.count <= 16_000 else {
+                throw HostFailure("INVALID_INPUT: Entity open requires one bounded URL string")
+            }
+            return args
+        }
+        if method == "iosSearchOpen" {
+            guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
+                  args.count == 1, !args[0].isEmpty, args[0].utf16.count <= 500 else {
+                throw HostFailure("INVALID_INPUT: Search open requires one bounded task ID string")
+            }
+            return args
+        }
         guard let count = Self.methods[method],
               let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [Any], args.count == count else {
             throw HostFailure("Invalid or unavailable core method arguments")
@@ -13841,7 +16847,9 @@ private final class Engine: @unchecked Sendable {
                 }
             } else if !(argument is String) { throw HostFailure("Core arguments must be strings") }
         }
+        if method == "logLine" { try validateClientDiagnosticArguments(args) }
         if method == "dataSetting" { try validateDataSettingArguments(args, json) }
+        if method == "reminderCompletionCommit", let raw = args.first as? String { _ = try reminderCompletionRequest(raw) }
         try validateTaskReadArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateListAndInboxArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateProjectCollectionArguments(method, args, json, allowPreparedDates: allowPreparedDates)
@@ -13850,6 +16858,67 @@ private final class Engine: @unchecked Sendable {
         try validatePreparedTaskArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateMenuAndDraftArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         return args
+    }
+
+    private func validateClientDiagnosticArguments(_ args: [Any]) throws {
+        let invalid = HostFailure("INVALID_INPUT: Invalid client diagnostic")
+        guard let message = args[0] as? String, message.utf8.count <= 256,
+              let raw = args[1] as? String, raw.utf8.count <= 1_024,
+              let context = try? NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              (try? NativeJSON.hasUniqueObjectKeys(raw)) == true else { throw invalid }
+        // Client diagnostics carry only audited marker enums and aggregate counts.
+        let valid: Bool
+        switch message {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+        case "Native iOS isolated startup inventory read failed":
+            let directory = databaseURL.deletingLastPathComponent()
+            let identifier = directory.lastPathComponent
+            valid = databaseURL.lastPathComponent == "mindwtr.sqlite"
+                && directory.deletingLastPathComponent().lastPathComponent == "NativeUITests"
+                && UUID(uuidString: identifier)?.uuidString.lowercased() == identifier
+                && faults?.secretService == "mindwtr.native-keychain.fixture." + identifier
+                && Self.equalJSON(context, ["outcome": "injected"])
+        #endif
+        case "Native iOS launch selection admitted":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"])
+        case "Native iOS reminder lifecycle reconciled":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"])
+        case "Native iOS foreground activation refreshed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"])
+        case "Native iOS calendar event dialog dismissed":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-event-open"
+                && ["cancelled", "saved", "deleted"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS calendar push lifecycle completed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-calendar-push-lifecycle", "outcome": "confirmed"])
+        case "Native iOS calendar feed view published":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-feed"
+                && ["ready", "partial", "error"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS system search":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome", "count"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-search-publication"
+                && ["publicationQueued", "removalQueued", "failed"].contains(context["outcome"] as? String ?? "")
+                && Self.isInteger(context["count"])
+                && (context["count"] as? NSNumber).map { (0.0...2_750.0).contains($0.doubleValue) } == true
+        case "Native iOS system search route", "Native iOS entity link":
+            let search = message == "Native iOS system search route"
+            valid = Set(context.keys) == Set(["releaseCheck", "kind", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/" + (search ? "ios-search-publication" : "ios-entity-link")
+                && (search ? ["none", "inbox", "task"] : ["none", "inbox", "task", "project"]).contains(context["kind"] as? String ?? "")
+                && ["opened", "refused"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS reminder response":
+            valid = Set(context.keys) == Set(["releaseCheck", "action", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-reminder-response"
+                && ["open", "complete", "snooze", "dismiss", "unknown"].contains(context["action"] as? String ?? "")
+                && ["captured", "retired", "capture-refused", "admitting", "confirmed", "refused", "uncertain"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS foreground reminder presentation requested":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.5/ios-reminder-present"
+                && ["sound", "silent"].contains(context["outcome"] as? String ?? "")
+        default: valid = false
+        }
+        guard valid else { throw invalid }
     }
 
     private func validateDataSettingArguments(_ args: [Any], _ transport: String) throws {
@@ -13904,6 +16973,21 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateArgumentTransportSize(_ method: String, _ json: String) throws {
+        if method == "logLine", json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Client diagnostic request is too large")
+        }
+        if ["iosSearchSnapshot", "iosSearchObservation"].contains(method), json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Search snapshot request is too large")
+        }
+        if method == "iosSearchOpen", json.utf8.count > 8_192 {
+            throw HostFailure("INVALID_INPUT: Search open request is too large")
+        }
+        if method == "iosEntityOpen", json.utf8.count > 128_000 {
+            throw HostFailure("INVALID_INPUT: Entity open request is too large")
+        }
+        if method == "iosNotificationOpen", json.utf8.count > 400_000 {
+            throw HostFailure("INVALID_INPUT: Notification open request is too large")
+        }
         if method == "dataSetting", json.utf8.count > 2_048 { throw HostFailure("INVALID_INPUT: Data setting request is too large") }
         if Self.historyTaskWritePrefix(method) == "referenceProjectNextAction", json.utf8.count > 12_610_000 {
             throw HostFailure("INVALID_INPUT: Next action request is too large")
@@ -14396,9 +17480,18 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Process Inbox needs a bounded step object")
             }
         }
+        if method == "iosNotificationOpen" {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 65_536,
+                  (try? NativeJSON.hasUniqueObjectKeys(encoded)) == true,
+                  let input = (try? NativeJSON.jsonObject(with: Data(encoded.utf8))) as? [String: String],
+                  Set(input.keys).isSubset(of: Set(["notificationId", "actionIdentifier", "taskId", "projectId", "context", "kind"])),
+                  input["actionIdentifier"] == "open" else {
+                throw HostFailure("INVALID_INPUT: Notification open requires a bounded route payload")
+            }
+        }
         if ["inboxView", "captureView", "captureEdit", "captureSubmit", "setAreaFilter", "taskView", "taskOpenTab", "taskViewReferenceTarget", "editDraft", "destinationPicker", "search", "mindSweepGuide", "mindSweepAdd",
-            "calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome",
-            "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
+            "calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave", "calendarEventTaskCreate", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome",
+            "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
             guard let json = args.first as? String,
                   (try NativeJSON.jsonObject(with: Data(json.utf8))) is [String: Any] else {
                 throw HostFailure("Core input must be a JSON object")
@@ -14973,6 +18066,24 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateSettingsAndAreaArguments(_ method: String, _ args: [Any], _ json: String, allowPreparedDates: Bool) throws {
+        if method == "calendarSubscriptionSetting" {
+            guard json.utf8.count <= Self.calendarSubscriptionSettingArgumentsLimit, args.count == 1, let raw = args.first as? String else { throw Self.deviceStorageInvalid }
+            _ = try Self.calendarSubscriptionSettingRequest(raw)
+        }
+        if method == "calendarSubscriptionAdd" {
+            guard json.utf8.count <= Self.calendarSubscriptionSettingArgumentsLimit, args.count == 1, let raw = args.first as? String else { throw Self.deviceStorageInvalid }
+            _ = try Self.calendarSubscriptionAddRequest(raw)
+        }
+        if method == "deviceCalendarSetting" {
+            guard json.utf8.count <= Self.deviceCalendarSettingArgumentsLimit, let raw = args.first as? String else {
+                throw HostFailure("INVALID_INPUT: Device Calendar setting requires one bounded request")
+            }
+            _ = try Self.deviceCalendarSettingRequest(raw)
+        }
+        if method == "notificationSetting" {
+            guard let encoded = args.first as? String else { throw HostFailure("INVALID_INPUT: Notification setting requires one request") }
+            _ = try Self.notificationSettingRequest(encoded)
+        }
         if ["appLockOptions", "appLock", "appLockRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 8_192,
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else {
@@ -15618,8 +18729,17 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Calendar action needs a task and revision")
             }
         }
+        if method == "calendarEventTaskCreate" {
+            guard let json = args.first as? String, json.utf8.count <= 2_000_000,
+                  (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
+                  let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
+                throw HostFailure("INVALID_INPUT: Unsupported native Calendar event task input")
+            }
+            try validateCalendarEventTaskRequest(input)
+        }
         if ["calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave"].contains(method) {
             guard let json = args.first as? String, json.utf8.count <= 2_000_000,
+                  (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
                   let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
                 throw HostFailure("INVALID_INPUT: Native Calendar composer requires a bounded JSON object")
             }
@@ -15648,6 +18768,41 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
+    private func validateCalendarEventTaskRequest(_ input: [String: Any]) throws {
+        guard Set(input.keys) == Set(["requestId", "event", "calendarName", "fallbackTitle", "state"]),
+              let id = input["requestId"] as? String, UUID(uuidString: id) != nil, id == id.lowercased(),
+              let fallback = input["fallbackTitle"] as? String, fallback.utf16.count <= 2_000 else {
+            throw HostFailure("INVALID_INPUT: Unsupported native Calendar event task request")
+        }
+        try validateCalendarEventProjection(input, includesIdentity: false)
+    }
+
+    private func validateCalendarEventProjection(_ input: [String: Any], includesIdentity: Bool) throws {
+        let fields: Set<String> = ["title", "start", "end", "allDay", "description", "location"]
+        let identity: Set<String> = includesIdentity ? ["id", "sourceId"] : []
+        let nativeOpen = includesIdentity && input["canOpen"] as? Bool == true
+        let openIdentity: Set<String> = nativeOpen ? ["nativeEventId"] : []
+        guard let event = input["event"] as? [String: Any], Set(event.keys).isSubset(of: fields.union(identity).union(openIdentity)),
+              !nativeOpen || ((event["sourceId"] as? String)?.hasPrefix("system:") == true
+                && (event["nativeEventId"] as? String).map {
+                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.utf8.count <= 1_024
+                } == true),
+              ["title", "start", "end"].allSatisfy({ (event[$0] as? String).map { $0.utf16.count <= 2_000 } == true }),
+              Self.isBoolean(event["allDay"]),
+              ["description", "location"].allSatisfy({ field in
+                  event[field] == nil || (event[field] as? String).map { $0.utf16.count <= (field == "description" ? 20_000 : 2_000) } == true
+              }),
+              identity.allSatisfy({ (event[$0] as? String).map { !$0.isEmpty && $0.utf16.count <= 500 } == true }),
+              input["calendarName"] is NSNull || (input["calendarName"] as? String).map({ $0.utf16.count <= 2_000 }) == true,
+              let state = input["state"] as? [String: Any], Set(state.keys) == Set(["viewMode", "selectedDate", "visibleMonth"]),
+              ["month", "week", "day", "schedule"].contains(state["viewMode"] as? String ?? ""),
+              (state["visibleMonth"] as? String).map({ $0.utf16.count <= 64 }) == true,
+              (state["selectedDate"] is NSNull ? state["viewMode"] as? String == "month"
+                : (state["selectedDate"] as? String).map({ $0.utf16.count <= 64 }) == true) else {
+            throw HostFailure("INVALID_INPUT: Unsupported native Calendar event projection")
+        }
+    }
+
     private func validateMenuAndDraftArguments(_ method: String, _ args: [Any], _ json: String, allowPreparedDates: Bool) throws {
         if ["doneBulkTagInput", "referenceBulkTagInput"].contains(method) {
             guard let tag = args.first as? String, tag.utf16.count <= 2_000 else {
@@ -15656,8 +18811,16 @@ private final class Engine: @unchecked Sendable {
         }
         if method == "menuRead" {
             guard let name = args[0] as? String, ["more", "savedSearch", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
-                  let json = args[1] as? String,
-                  let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
+                  let json = args[1] as? String else {
+                throw HostFailure("Unsupported native menu read or JSON object input")
+            }
+            if ["calendar", "calendarItem"].contains(name) {
+                guard json.utf8.count <= 2_000_000,
+                      (try? NativeJSON.hasUniqueObjectKeys(json)) == true else {
+                    throw HostFailure("INVALID_INPUT: Native Calendar browsing requires a bounded JSON object")
+                }
+            }
+            guard let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
                 throw HostFailure("Unsupported native menu read or JSON object input")
             }
             if ["dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport"].contains(name), !input.isEmpty { throw HostFailure("INVALID_INPUT: Unsupported Data settings read") }
@@ -15860,11 +19023,18 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("Unsupported native Review browsing input")
             }
             let calendarFields: [String: Set<String>] = [
-                "calendar": ["state", "scheduleQuery", "offset", "limit", "revision"],
-                "calendarItem": ["taskId", "state"],
+                "calendar": ["state", "scheduleQuery", "offset", "limit", "revision", "calendar"],
+                "calendarItem": ["taskId", "state", "calendar"],
                 "calendarPreferences": [],
             ]
-            if let fields = calendarFields[name], !Set(input.keys).isSubset(of: fields) {
+            if name == "calendarItem", input["event"] != nil {
+                guard json.utf8.count <= 2_000_000, (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
+                      Set(input.keys) == Set(["event", "canOpen", "state", "calendarName"]),
+                      Self.isBoolean(input["canOpen"]) else {
+                    throw HostFailure("Unsupported native Calendar event browsing input")
+                }
+                try validateCalendarEventProjection(input, includesIdentity: true)
+            } else if let fields = calendarFields[name], !Set(input.keys).isSubset(of: fields) {
                 throw HostFailure("Unsupported native Calendar browsing input")
             }
             if name == "board" || name == "boardList" {
@@ -16023,31 +19193,7 @@ private final class Engine: @unchecked Sendable {
     /// collapses duplicate members, so cleanup authority checks every object
     /// separately using the existing fixed-schema key-token reader pattern.
     private static func cleanupUniqueKeys(_ text: String) throws -> Bool {
-        let bytes = Array(text.utf8)
-        var index = 0, objects: [Set<Data>] = []
-        while index < bytes.count {
-            if bytes[index] == 0x7b { objects.append([]); index += 1; continue }
-            if bytes[index] == 0x7d {
-                guard !objects.isEmpty else { return false }
-                objects.removeLast(); index += 1; continue
-            }
-            guard bytes[index] == 0x22 else { index += 1; continue }
-            let start = index; index += 1
-            while index < bytes.count {
-                if bytes[index] == 0x5c { index += 2; continue }
-                if bytes[index] == 0x22 { index += 1; break }
-                index += 1
-            }
-            let end = index
-            var next = end
-            while next < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[next]) { next += 1 }
-            if next < bytes.count, bytes[next] == 0x3a {
-                guard !objects.isEmpty,
-                      let key = try NativeJSON.jsonObject(with: Data(bytes[start..<end]), options: [.fragmentsAllowed]) as? String,
-                      objects[objects.count - 1].insert(Data(key.utf8)).inserted else { return false }
-            }
-        }
-        return objects.isEmpty
+        try NativeJSON.hasUniqueObjectKeys(text)
     }
     private static func cleanupRequest(_ text: String) throws -> CleanupRequest {
         let raw = try cleanupObject(text, maximum: 128 * 1024)
@@ -16739,6 +19885,55 @@ private final class Engine: @unchecked Sendable {
     }
     #endif
 
+    #if DEBUG && os(iOS) && targetEnvironment(simulator)
+    func configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() throws {
+        let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
+        guard !started, !closed, !invoking, pending == nil, let faults, faults.afterSQL == nil, faults.beforeSQL == nil,
+              databaseURL.lastPathComponent == "mindwtr.sqlite", directory.deletingLastPathComponent().lastPathComponent == "NativeUITests",
+              Self.ownedDiscardUUID(identifier) == identifier,
+              faults.secretService == "mindwtr.native-keychain.fixture." + identifier,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.calendarSubscriptionSettingJournalLimit) == nil else {
+            throw HostFailure("Isolated Calendar subscription fixture is unavailable")
+        }
+        var fired = false
+        weak var interruptedRuntime: JSContext?
+        var interruptedOperation: CalendarSubscriptionOperation?
+        faults.beforeSQL = { [unowned self] sql in
+            guard fired, let interruptedRuntime, let interruptedOperation,
+                  self.context === interruptedRuntime, sql.hasPrefix("BEGIN"),
+                  self.pending?.method == interruptedOperation.commitMethod,
+                  self.calendarSubscriptionSettingTurn?.operation == interruptedOperation else { return }
+            throw HostFailure("Isolated Calendar subscription retry interrupted")
+        }
+        faults.afterSQL = { [unowned self] sql in
+            guard !fired, sql == "COMMIT", let turn = self.calendarSubscriptionSettingTurn,
+                  self.pending?.method == turn.operation.commitMethod, turn.committing else { return }
+            fired = true
+            interruptedRuntime = self.context
+            interruptedOperation = turn.operation
+            throw HostFailure("Isolated Calendar subscription COMMIT reply interrupted")
+        }
+    }
+
+    func configureIsolatedCalendarEventTaskTerminalFailureOnce() throws {
+        let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
+        guard !started, !closed, !invoking, pending == nil, let faults, faults.journalRemove == nil,
+              databaseURL.lastPathComponent == "mindwtr.sqlite", directory.deletingLastPathComponent().lastPathComponent == "NativeUITests",
+              Self.ownedDiscardUUID(identifier) == identifier,
+              faults.secretService == "mindwtr.native-keychain.fixture." + identifier,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil else {
+            throw HostFailure("Isolated Calendar event task fixture is unavailable")
+        }
+        var fired = false
+        faults.journalRemove = { [unowned self] in
+            guard !fired, let command = self.pending, command.method == "calendarEventTaskCommit",
+                  let terminal = command.terminal, case .success = terminal else { return }
+            fired = true
+            throw HostFailure("Isolated Calendar event task terminal cleanup interrupted")
+        }
+    }
+    #endif
+
     private func projectDownloadJournal(_ command: PendingCommand) throws -> ProjectDownloadState {
         guard command.version == 2, command.method == Self.projectDownloadMethod, command.editorDraft == nil,
               command.argumentsJSON.utf8.count <= Self.ownedSaveMaximumBytes,
@@ -17162,7 +20357,7 @@ private final class Engine: @unchecked Sendable {
             return try executeProjectDownload(&state, turn: turn, cancellation: cancellation)
         } catch {
             turn.preparing = false; turn.strict = false
-            turn.jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); cryptoJobs?.drain()
+            turn.jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); calendarJobs?.drain(); cryptoJobs?.drain()
             if turn.command == nil {
                 if let receipt = turn.receipt {
                     do { try turn.jobs.retireProviderSource(receipt, requireOwner: { try self.requireProjectDownloadTurn(strict: false) }); turn.receipt = nil }
@@ -18000,6 +21195,24 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func persist(_ command: PendingCommand, mixedGuard: (() throws -> Void)? = nil) throws {
+        if let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
+            _ = try journalArguments(command)
+            guard let turn = try requireCalendarSubscriptionSettingTurn(), turn.operation == operation else { throw Self.deviceStorageUnavailable }
+            #if DEBUG
+            try faults?.journalWrite?()
+            #endif
+            try requireCalendarSubscriptionSettingTurn()
+            let bytes = try JSONEncoder().encode(command)
+            do { try DurableFile.write(bytes, to: journalURL, privateDraft: operation == .add) }
+            catch {
+                if (try? readJournalBytes(maximumBytes: Self.calendarSubscriptionSettingJournalLimit, failure: Self.deviceStorageUnavailable, singleLink: true)) == bytes { turn.journal = bytes }
+                throw error
+            }
+            turn.journal = bytes
+            try requireCalendarSubscriptionSettingTurn()
+            return
+        }
+        if command.method == "deviceCalendarSettingCommit" { _ = try journalArguments(command) }
         if command.method == "taskCancellationUndoCommit", try cancellationUndoIsComplete(command) {
             // The same selected reader reserves future terminal capacity and
             // bounds an actual terminal before generic persistence can write it.
@@ -18084,11 +21297,13 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func clearPending() throws {
+        try requireCalendarSubscriptionSettingTurn()
         try requireRetainedOrdinaryTurn()
         #if DEBUG
         try faults?.journalRemove?()
         #endif
         if pending?.editorDraft != nil { try requireOrdinaryEditorMutation() }
+        try requireCalendarSubscriptionSettingTurn()
         try requireRetainedOrdinaryTurn()
         do { try DurableFile.remove(journalURL) }
         catch {
@@ -18100,6 +21315,7 @@ private final class Engine: @unchecked Sendable {
         }
         retainedOrdinaryTurn?.journal = nil
         retainedOrdinaryTurn?.command = nil
+        calendarSubscriptionSettingTurn?.journal = nil
         pending = nil
         try requireRetainedOrdinaryTurn()
     }
@@ -18452,6 +21668,7 @@ private final class Engine: @unchecked Sendable {
         attachmentJobs?.cancelAndDrain()
         httpJobs?.cancelAndDrain()
         secretJobs?.drain()
+        calendarJobs?.drain()
         cryptoJobs?.drain()
         if !terminalConsumed {
             while true {
@@ -18472,7 +21689,12 @@ private final class Engine: @unchecked Sendable {
         runtime.exception = nil
     }
 
-    private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil) throws -> String {
+    private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil,
+                        drainCalendarTest: Bool = false) throws -> String {
+        guard calendarAccessTurn == nil || method == "deviceCalendarAccessAcknowledged" else {
+            throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner")
+        }
+        guard reminderEffectsTurn == nil || reminderOwnerAccess && Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
         try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
@@ -18489,7 +21711,9 @@ private final class Engine: @unchecked Sendable {
         let selectedEncryption = encryptionUnlockTurn
         var selectedTicket: String?, selectedSucceeded = false, terminalConsumed = false
         defer {
-            if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil {
+            if drainCalendarTest, let selectedTicket {
+                settleSelectedTicket(selectedTicket, terminalConsumed: terminalConsumed, turn: nil, runtime: context, host: host)
+            } else if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil {
                 selectedDownload?.preparing = false
                 selectedProject?.live = false
                 selectedEncryption?.live = false
@@ -18510,7 +21734,7 @@ private final class Engine: @unchecked Sendable {
         }
         // Capture a trusted submitted ticket before observing a synchronous
         // exception so an accepted selected call is still cancelled and polled.
-        if selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
+        if drainCalendarTest || selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
             selectedTicket = id
         }
         try checkException()
@@ -18521,10 +21745,11 @@ private final class Engine: @unchecked Sendable {
         // Promise jobs drain whenever JSC returns from a call; timers share this queue.
         var cancelled = false
         defer {
-            if cancelled && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil {
+            if cancelled && !drainCalendarTest && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil {
                 attachmentJobs?.cancelAndDrain()
                 httpJobs?.cancelAndDrain()
                 secretJobs?.drain()
+                calendarJobs?.drain()
                 _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
                 _ = context.objectForKeyedSubscript("__resumeHostCalls")?.call(withArguments: [])
                 context.exception = nil
@@ -18543,10 +21768,13 @@ private final class Engine: @unchecked Sendable {
                     try checkException()
                     // Completes uninterruptible RN installer work before allowing
                     // another operation or library owner to observe the namespace.
-                    attachmentJobs?.cancelAndDrain()
-                    httpJobs?.cancelAndDrain()
-                    secretJobs?.drain()
-                    if selectedTurn != nil || selectedEncryption != nil || selectedDownload != nil { cryptoJobs?.drain() }
+                    if !drainCalendarTest {
+                        attachmentJobs?.cancelAndDrain()
+                        httpJobs?.cancelAndDrain()
+                        secretJobs?.drain()
+                        calendarJobs?.drain()
+                        if selectedTurn != nil || selectedEncryption != nil || selectedDownload != nil { cryptoJobs?.drain() }
+                    }
                 }
             }
             if reply == nil || reply!.isNull || reply!.isUndefined {
@@ -18593,9 +21821,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func scheduleAttachmentIdle(immediate: Bool = false) {
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil,
-              !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil,
-              attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil, let context else { return }
+        guard started, !closed, !localRequests.isClosing, !invoking, !recoveryActivationPending, pending == nil,
+              !cleanupOwed, reminderEffectsTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil,
+              attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil || calendarJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
         // One scheduled idle turn per generation; completions can move a timer
@@ -18612,11 +21840,12 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard generation == attachmentGeneration else { return }
         attachmentIdlePump = nil
-        guard started, !closed, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil, let context else { return }
+        guard started, !closed, !localRequests.isClosing, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, reminderEffectsTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil, let context else { return }
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         // No arbitrary JS exception content enters diagnostics.
         if context.exception != nil { context.exception = nil }
-        scheduleAttachmentIdle()
+        reminderPostOperation()
+        searchPostOperation()
     }
 
     private func checkException() throws {
@@ -18628,6 +21857,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
+        guard calendarPushTurn == nil else { throw NativeCalendarWriteError.unavailable }
+        try requireCalendarSubscriptionSettingTurn(publication: calendarSubscriptionSQLPublication(sql))
+        guard reminderEffectsTurn == nil else { throw NativeReminderEffects.unavailable }
         try requireEncryptionUnlockTurn()
         try denyCleanupOwner()
         guard taskDownloadTurn == nil else { throw Self.taskDownloadFailure }
@@ -18636,13 +21868,14 @@ private final class Engine: @unchecked Sendable {
         try requireProjectDownloadTurn()
         try requireProjectAvailabilityTurn()
         let result: String
-        if let parameters { result = try requireDatabase().execute(sql, parametersJSON: parameters) }
-        else { result = try requireDatabase().execute(sql) }
+        if let parameters { result = try requireDatabase().execute(sql, parametersJSON: parameters, readOnly: backupReplayReadOnly) }
+        else { result = try requireDatabase().execute(sql, readOnly: backupReplayReadOnly) }
         try requireEncryptionUnlockTurn()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
         try requireProjectDownloadTurn()
         try requireProjectAvailabilityTurn()
+        try requireCalendarSubscriptionSettingTurn(publication: calendarSubscriptionSQLPublication(sql))
         return result
     }
 
@@ -18651,6 +21884,7 @@ private final class Engine: @unchecked Sendable {
     private static let deviceStorageFrameLimit = 12 * 1024 * 1024
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil else { throw Self.deviceStorageUnavailable }
@@ -18732,13 +21966,13 @@ private final class Engine: @unchecked Sendable {
         do {
             let result = try work()
             try requireEncryptionUnlockTurn()
-            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil { return result }
+            if taskDownloadTurn != nil || projectAvailabilityTurn != nil || projectDownloadTurn != nil || encryptionUnlockTurn != nil || reminderEffectsTurn != nil || deviceCalendarSettingTurn != nil || calendarSubscriptionSettingTurn != nil { return result }
             let retiredSecret = legacySecretRemoval()
             guard let runtime = context else { throw Self.deviceStorageUnavailable }
             let generation = attachmentGeneration
             queue.async { [weak self, weak runtime] in
                 guard let self, let runtime, self.attachmentGeneration == generation,
-                      self.context === runtime, self.started, !self.closed, !self.invoking else { return }
+                      self.context === runtime, self.started, !self.closed, !self.localRequests.isClosing, !self.invoking else { return }
                 _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeDeviceStorageDelivered", withArguments: [])
                 runtime.exception = nil
                 if retiredSecret {
@@ -18761,6 +21995,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireHTTPAdmission(_ input: String) throws {
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -18789,6 +22024,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireSecretAdmission(_ input: String) throws {
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -18820,7 +22056,20 @@ private final class Engine: @unchecked Sendable {
         try requireNoAttachmentDraft()
     }
 
+    private func requireCalendarAdmission() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard started, !closed, !localRequests.isClosing, !recoveryActivationPending, pending == nil, lockFD >= 0,
+              retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              encryptionUnlockTurn == nil, providerCopy == nil, reminderEffectsTurn == nil,
+              notificationSettingTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil, !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
+            throw HostFailure("Calendar bridge is unavailable")
+        }
+        try requireNoAttachmentDraft()
+    }
+
     private func requireCryptoAdmission(_ input: String) throws {
+        guard deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -18877,7 +22126,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
+                          !self.localRequests.isClosing, !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeSecretDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -18891,14 +22140,54 @@ private final class Engine: @unchecked Sendable {
         func crypto() throws -> String? {
             guard let answer = try cryptoJobs?.next() else { return nil }
             if answer.body { ioBodySource = .crypto }
+            preferredIO = 4
+            return answer.json
+        }
+        func calendar() throws -> String? {
+            if let turn = calendarPushTurn, let reply = turn.writes?.next() {
+                if let object = try? NativeJSON.jsonObject(with: Data(reply.utf8)) as? [String: Any],
+                   let id = object["id"] as? String, let request = turn.writeRequests.removeValue(forKey: id) {
+                    if object["error"] == nil {
+                        switch request {
+                        case .deleteCalendar(let calendarID):
+                            turn.deletedIDs.insert(Data(calendarID.utf8))
+                            turn.diagnostics.append(("deleteCalendar", "saved"))
+                        case .createCalendar, .updateCalendar:
+                            turn.diagnostics.append((Self.calendarPushOperationName(request), "saved"))
+                        default: break
+                        }
+                    } else {
+                        do {
+                            if try turn.effects.current() == nil {
+                                turn.diagnostics.append((Self.calendarPushOperationName(request), "rejected"))
+                            }
+                        } catch { }
+                    }
+                }
+                preferredIO = 0
+                return reply
+            }
+            if !calendarPushReady.isEmpty {
+                preferredIO = 0
+                return calendarPushReady.removeFirst()
+            }
+            guard let answer = try calendarJobs?.next() else { return nil }
+            if let header = try? NativeJSON.jsonObject(with: Data(answer.json.utf8)) as? [String: Any] {
+                if header["body"] as? Bool == true { ioBodySource = .calendar }
+                if let turn = calendarPushTurn, let id = header["id"] as? String,
+                   turn.calendarReads.remove(id) != nil {
+                    turn.calendars = header["error"] == nil ? header["value"] as? [[String: Any]] : nil
+                }
+            }
             preferredIO = 0
             return answer.json
         }
         switch preferredIO {
-        case 1: return try http() ?? secret() ?? crypto() ?? file() ?? ""
-        case 2: return try secret() ?? crypto() ?? file() ?? http() ?? ""
-        case 3: return try crypto() ?? file() ?? http() ?? secret() ?? ""
-        default: return try file() ?? http() ?? secret() ?? crypto() ?? ""
+        case 1: return try http() ?? secret() ?? crypto() ?? calendar() ?? file() ?? ""
+        case 2: return try secret() ?? crypto() ?? calendar() ?? file() ?? http() ?? ""
+        case 3: return try crypto() ?? calendar() ?? file() ?? http() ?? secret() ?? ""
+        case 4: return try calendar() ?? file() ?? http() ?? secret() ?? crypto() ?? ""
+        default: return try file() ?? http() ?? secret() ?? crypto() ?? calendar() ?? ""
         }
     }
 
@@ -18907,6 +22196,9 @@ private final class Engine: @unchecked Sendable {
         guard let source = ioBodySource else { throw HostFailure("I/O response body is unavailable") }
         ioBodySource = nil
         switch source {
+        case .calendar:
+            guard let jobs = calendarJobs else { throw HostFailure("I/O response body is unavailable") }
+            return try jobs.body()
         case .file:
             guard let jobs = attachmentJobs else { throw HostFailure("I/O response body is unavailable") }
             return jobs.body()
@@ -18919,7 +22211,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
+                          !self.localRequests.isClosing, !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeHTTPDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -18936,7 +22228,7 @@ private final class Engine: @unchecked Sendable {
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
-                          !self.invoking, !self.cleanupOwed, let context = self.context else { return }
+                          !self.localRequests.isClosing, !self.invoking, !self.cleanupOwed, let context = self.context else { return }
                     _ = context.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("nativeCryptoDelivered", withArguments: [])
                     context.exception = nil
                     self.scheduleAttachmentIdle(immediate: true)
@@ -19099,6 +22391,42 @@ private final class Engine: @unchecked Sendable {
                 return id
             } ?? "!MindwtrNativeError:Crypto bridge is unavailable"
         }
+        let calendarCall: @convention(block) (JSValue) -> String = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
+            return self.guarded {
+                try self.requireCalendarAdmission()
+                guard let jobs = self.calendarJobs else { throw HostFailure("Calendar bridge is unavailable") }
+                return try jobs.submit(json)
+            } ?? "!MindwtrNativeError:Calendar bridge is unavailable"
+        }
+        let calendarAbort: @convention(block) (JSValue) -> Void = { [weak self] request in
+            guard request.isString, let id = request.toString() else { return }
+            self?.calendarJobs?.abort(id)
+        }
+        let calendarPushCall: @convention(block) (JSValue) -> String = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
+            return self.guarded { try self.calendarPushCall(json) } ?? "!MindwtrNativeError:Calendar push is unavailable"
+        }
+        let calendarPushAbort: @convention(block) (JSValue) -> Void = { [weak self] request in
+            guard let self, request.isString, let id = request.toString() else { return }
+            self.calendarPushTurn?.writes?.cancel(id)
+            self.calendarJobs?.abort(id)
+        }
+        let calendarPushDue: @convention(block) (JSValue) -> String? = { [weak self] request in
+            guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
+            return self.guarded {
+                guard self.started, !self.closed, !self.localRequests.isClosing,
+                      let observer = self.calendarPushObserver, observer.generation == self.attachmentGeneration else {
+                    throw NativeCalendarWriteError.unavailable
+                }
+                // A large dirty batch invalidates the full projection; dropping it would strand saved changes.
+                if json.utf8.count > NativeCalendarJobs.maximumRequestBytes { observer.callback(nil); return nil }
+                let value = try NativeJSON.jsonObject(with: Data(json.utf8))
+                if let ids = value as? [Any], ids.count > 10_000 { observer.callback(nil); return nil }
+                observer.callback(try Self.calendarPushIDs(value))
+                return nil
+            }
+        }
         let next: @convention(block) () -> String = { [weak self] in
             self?.guarded { try self?.nextIO() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
@@ -19106,16 +22434,62 @@ private final class Engine: @unchecked Sendable {
             self?.guarded { try self?.ioBody() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
         for (name, block) in ["netFetch": netFetch as Any, "netAbort": netAbort as Any, "secretCall": secretCall as Any,
-                              "cryptoCall": cryptoCall as Any, "ioNext": next as Any, "ioBody": body as Any] {
+                              "cryptoCall": cryptoCall as Any, "calendarCall": calendarCall as Any,
+                              "calendarAbort": calendarAbort as Any, "ioNext": next as Any, "ioBody": body as Any] {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
         }
         if deviceStorageLocation != nil {
+            bridge.setObject(calendarPushCall, forKeyedSubscript: "calendarPushCall" as NSString)
+            bridge.setObject(calendarPushAbort, forKeyedSubscript: "calendarPushAbort" as NSString)
+            bridge.setObject(calendarPushDue, forKeyedSubscript: "calendarPushDue" as NSString)
+        }
+        if deviceStorageLocation != nil {
+            let calendarSubscriptionRead: @convention(block) () -> String = { [weak self] in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.guarded { try self.calendarSubscriptionRead() } ?? "!MindwtrNativeError:Device settings storage is unavailable"
+            }
+            bridge.setObject(calendarSubscriptionRead, forKeyedSubscript: "calendarSubscriptionRead" as NSString)
+            let calendarSettingRead: @convention(block) () -> String = { [weak self] in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let turn = try self.requireDeviceCalendarSettingTurn()
+                    guard turn.preparing || turn.committing else { throw Self.deviceStorageUnavailable }
+                    let values = try turn.storage.readCalendarSettingState()
+                    return try Self.deviceStorageJSON(values.map { $0.map { $0 as Any } ?? NSNull() }, strings: values.compactMap { $0 })
+                } ?? "!MindwtrNativeError:Device settings storage is unavailable"
+            }
+            let calendarSettingCAS: @convention(block) (JSValue, JSValue) -> String? = { [weak self] expected, next in
+                guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
+                return self.deviceStorageResult {
+                    let turn = try self.requireDeviceCalendarSettingTurn()
+                    guard turn.committing, let frozen = turn.envelopeJSON,
+                          let prepared = try Self.deviceCalendarSettingEnvelope(frozen)["prepared"] as? [String: Any],
+                          expected.isString, next.isString, let expectedJSON = expected.toString(), let nextJSON = next.toString(),
+                          expectedJSON.utf8.count <= Self.deviceStorageFrameLimit, nextJSON.utf8.count <= Self.deviceStorageFrameLimit,
+                          let before = try NativeJSON.jsonObject(with: Data(expectedJSON.utf8)) as? [Any], before.count == 2,
+                          before.allSatisfy({ $0 is String || $0 is NSNull }),
+                          let after = try NativeJSON.jsonObject(with: Data(nextJSON.utf8)) as? [String], after.count == 2,
+                          Self.equalJSON(before, [prepared["storedBefore"]!, prepared["markerBefore"]!]),
+                          Self.equalJSON(after, [prepared["storedAfter"]!, prepared["markerAfter"]!]) else { throw Self.deviceStorageInvalid }
+                    try turn.storage.compareAndSetCalendarSetting(expected: before.map { $0 as? String }, next: after)
+                    return nil
+                }
+            }
+            bridge.setObject(calendarSettingRead, forKeyedSubscript: "calendarSettingRead" as NSString)
+            bridge.setObject(calendarSettingCAS, forKeyedSubscript: "calendarSettingCAS" as NSString)
             let get: @convention(block) (JSValue) -> String = { [weak self] key in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key)
                     let value: String?
-                    if self.projectDownloadTurn != nil {
+                    if self.calendarPushTurn != nil {
+                        let turn = try self.requireCalendarPushTurn()
+                        guard ["mindwtr-system-calendar-settings", "mindwtr-external-calendars"].contains(key) else {
+                            throw Self.deviceStorageUnavailable
+                        }
+                        value = try turn.storage.get(key)
+                    } else if self.projectDownloadTurn != nil {
                         value = try self.projectDownloadLegacyRead([key])[0].1
                     } else if let turn = self.projectAvailabilityTurn {
                         try self.requireProjectAvailabilityTurn(); value = try turn.readStorage([key])[0].1
@@ -19129,6 +22503,7 @@ private final class Engine: @unchecked Sendable {
             let set: @convention(block) (JSValue, JSValue) -> String? = { [weak self] key, value in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key), value = try Self.deviceStorageText(value)
                     try self.requireDeviceStorageAdmission().set(key, value); return nil
                 }
@@ -19137,6 +22512,7 @@ private final class Engine: @unchecked Sendable {
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 var retiredSecret = false
                 return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key)
                     try self.requireDeviceStorageAdmission().remove(key)
                     retiredSecret = NativeDeviceKV.isLegacySecretRemoval([key]); return nil
@@ -19147,7 +22523,16 @@ private final class Engine: @unchecked Sendable {
                 return self.deviceStorageResult {
                     let keys = try Self.deviceStorageKeys(keys)
                     let pairs: [(String, String?)]
-                    if self.projectDownloadTurn != nil {
+                    if self.calendarPushTurn != nil {
+                        let turn = try self.requireCalendarPushTurn()
+                        guard keys.allSatisfy({ ["mindwtr-system-calendar-settings", "mindwtr-external-calendars"].contains($0) }) else {
+                            throw Self.deviceStorageUnavailable
+                        }
+                        pairs = try turn.storage.multiGet(keys)
+                    } else if let turn = self.reminderEffectsTurn {
+                        guard self.reminderOwnerAccess, keys == Self.reminderMapNames else { throw Self.deviceStorageUnavailable }
+                        pairs = try turn.storage.multiGet(keys)
+                    } else if self.projectDownloadTurn != nil {
                         pairs = try self.projectDownloadLegacyRead(keys)
                     } else if let turn = self.projectAvailabilityTurn {
                         try self.requireProjectAvailabilityTurn(); pairs = try turn.readStorage(keys)
@@ -19162,6 +22547,7 @@ private final class Engine: @unchecked Sendable {
             let multiSet: @convention(block) (JSValue) -> String? = { [weak self] pairs in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.deviceStorageResult {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let pairs = try Self.deviceStoragePairs(pairs)
                     try self.requireDeviceStorageAdmission().multiSet(pairs); return nil
                 }
@@ -19170,6 +22556,7 @@ private final class Engine: @unchecked Sendable {
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 var retiredSecret = false
                 return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
+                    guard self.reminderEffectsTurn == nil else { throw Self.deviceStorageUnavailable }
                     let keys = try Self.deviceStorageKeys(keys)
                     try self.requireDeviceStorageAdmission().multiRemove(keys)
                     retiredSecret = NativeDeviceKV.isLegacySecretRemoval(keys); return nil
@@ -19225,6 +22612,29 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        // Drain accepted writes while their original storage, database and file lease still exist.
+        if let turn = calendarPushTurn ?? retainedCalendarPushTurn {
+            try? retryCalendarPushState(turn)
+            try? turn.effects.retryPublication()
+            try? turn.writes?.cancelAndDrain()
+        }
+        calendarPushTurn = nil; retainedCalendarPushTurn = nil
+        calendarPushReady.removeAll(); calendarPushObserver = nil
+        calendarPushDatabaseBinding = nil
+        if let capture = calendarFileCaptureTurn { abortCalendarFileCapture(capture.id) }
+        removeReminderObserver(nil)
+        searchObserver = nil
+        reminderAdmissions.clearOrdinaryReadyWake()
+        reminderEffectsTurn = nil
+        notificationSettingTurn = nil; notificationSettingOwnerAccess = false
+        deviceCalendarSettingTurn = nil
+        calendarSubscriptionSettingTurn = nil
+        calendarAccessTurn = nil
+        startupDeviceCalendarSettingResult = nil
+        startupCalendarSubscriptionSettingResult = nil
+        startupCalendarSubscriptionAddResult = nil
+        reminderOwnerAccess = false
+        reminderSourceStale = false
         foregroundCleanupCancellation = nil
         foregroundCleanupActive = false
         cleanupTurn = nil
@@ -19237,7 +22647,9 @@ private final class Engine: @unchecked Sendable {
         // No file/installer worker survives release of the library lock.
         httpJobs?.shutdown(); httpJobs = nil
         secretJobs?.shutdown(); secretJobs = nil
+        calendarJobs?.shutdown(); calendarJobs = nil
         cryptoJobs?.shutdown(); cryptoJobs = nil
+        reminderSnoozeMutation = nil
         deviceStorage?.close(); deviceStorage = nil
         ioBodySource = nil
         attachmentJobs?.shutdown(); attachmentJobs = nil

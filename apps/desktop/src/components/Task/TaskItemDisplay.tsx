@@ -15,6 +15,7 @@ import { isImageAttachment } from './task-item-attachment-utils';
 import { AttachmentImage } from './AttachmentImage';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { ToolbarSelect } from '../views/list/ToolbarSelect';
+import { useTaskDisplayClock } from '../../hooks/useTaskDisplayClock';
 
 interface TaskItemDisplayActions {
     onToggleSelect?: (options?: RangeSelectionOptions) => void;
@@ -136,6 +137,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     theme,
     t,
 }: TaskItemDisplayProps) {
+    useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge));
     const {
         onToggleSelect,
         onToggleView,

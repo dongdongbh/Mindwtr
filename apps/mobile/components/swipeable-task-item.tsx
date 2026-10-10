@@ -5,6 +5,7 @@ import {
     formatI18nTemplate,
     getProjectNextActionPromptData,
     isTaskFinished,
+    isTaskActionable,
     normalizeFocusTaskLimit,
     buildQuickAddParseOptions,
     buildTaskMovePatch,
@@ -27,6 +28,7 @@ import { ArrowRight, Check, RotateCcw, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { ThemeColors } from '../hooks/use-theme-colors';
 import { useStatusColors } from '../hooks/use-status-colors';
+import { useTaskDisplayClock } from '../hooks/use-task-display-clock';
 import { useToast } from '../contexts/toast-context';
 import { AppPressable } from './app-pressable';
 import { logNextActionSavedForEditing, presentProjectNextActionPrompt, ProjectNextActionEditor } from './project-next-action-prompt';
@@ -300,12 +302,11 @@ function SwipeableTaskItemInner({
         areas,
         sectionById,
     ), [areas, projects, sectionById, task.areaId, task.projectId, task.sectionId]);
-    // Urgency and age read the clock: a render in a new minute recomputes them.
-    const minuteKey = Math.floor(Date.now() / 60_000);
+    const displayRevision = useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge));
     // The configuration the root layout applied, so labels match the rest of the app.
     const dateFormatting = getDateFormattingConfig();
     const meta = useMemo(() => {
-        void minuteKey;
+        void displayRevision;
         return buildTaskRowMeta({
             task: { ...task, checklist: localChecklist },
             lookup,
@@ -333,7 +334,7 @@ function SwipeableTaskItemInner({
         language,
         localChecklist,
         lookup,
-        minuteKey,
+        displayRevision,
         prioritiesEnabled,
         projectDeadlineLabel,
         sequenceCue,

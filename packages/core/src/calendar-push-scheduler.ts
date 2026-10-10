@@ -14,6 +14,8 @@ export type CalendarPushSchedulerOptions = {
     debounceMs?: number;
     runFull: () => Promise<void>;
     runPartial: (taskIds: string[]) => Promise<void>;
+    /** Synchronous, nonthrowing admission notification; the owner later calls runPartial. */
+    onPartialDue?: (taskIds: string[]) => void;
 };
 
 export type CalendarPushScheduler = {
@@ -24,6 +26,7 @@ export type CalendarPushScheduler = {
     /** Clears the queue and any pending work; for tests. */
     reset: () => void;
     runFull: () => Promise<void>;
+    runPartial: (taskIds: readonly string[]) => Promise<void>;
     scheduleDebounced: (taskIds: string[]) => void;
 };
 
@@ -55,6 +58,10 @@ export function createCalendarPushScheduler(options: CalendarPushSchedulerOption
             queue = Promise.resolve();
         },
         runFull: () => enqueue(options.runFull),
+        runPartial: (taskIds: readonly string[]) => {
+            const idsToSync = [...taskIds];
+            return enqueue(() => options.runPartial(idsToSync));
+        },
         scheduleDebounced: (taskIds: string[]) => {
             taskIds.forEach((id) => pendingTaskIds.add(id));
             if (debounceTimer) clearTimeout(debounceTimer);
@@ -62,7 +69,8 @@ export function createCalendarPushScheduler(options: CalendarPushSchedulerOption
                 debounceTimer = null;
                 const idsToSync = Array.from(pendingTaskIds);
                 pendingTaskIds.clear();
-                void enqueue(() => options.runPartial(idsToSync));
+                if (options.onPartialDue) options.onPartialDue(idsToSync);
+                else void enqueue(() => options.runPartial(idsToSync));
             }, debounceMs);
         },
     };

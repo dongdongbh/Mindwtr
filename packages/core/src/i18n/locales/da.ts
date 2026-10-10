@@ -2635,6 +2635,10 @@ export const daOverrides: Record<string, string> = {
     'settings.appSearchLabel': 'Vis i systemsøgning',
     'settings.appSearchDesc':
         'Lad Android systemsøgning finde dine aktive opgaver, projekter og områder efter titel. Intet forlader denne enhed.',
+    'settings.iosSearchLabel': 'Vis opgaver i systemsøgning',
+    'settings.iosSearchDesc': 'Vis opgavetitler og projektnavne i iOS-systemsøgning.',
+    'settings.iosSearchPaused': 'Sat på pause, mens applås er aktiveret.',
+    'settings.iosSearchFailed': 'Systemsøgningen kunne ikke opdateres. Prøv igen.',
     'captureNotification.title': 'Hurtig registrering',
     'captureNotification.text': 'Tryk for at registrere i din indbakke',
     'captureNotification.channelName': 'Hurtig registrering',

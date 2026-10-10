@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { build } from 'esbuild';
+import ts from 'typescript';
 
 const app = resolve(import.meta.dirname, '..');
 const consoleState = {
@@ -146,6 +147,15 @@ assert.equal(String(new consoleState.URL('https://host/dav/?dir=a+b')), 'https:/
 // A context automation link names a context with a space as "+" (core's parseContextAutomationUrl reads the query).
 assert.equal(new consoleState.URL('mindwtr://contexts?token=home+office&contextAction=activate').searchParams.get('token'), 'home office');
 assert.equal(new consoleState.URL('mindwtr://activate-context?name=%40home+office%2Bgym').searchParams.get('name'), '@home office+gym');
+// Query decoding is forgiving like the platform URL parser; response-body decoding stays fatal by default.
+for (const init of ['?task=%', '?task=%A', '?task=%GG', '?task=%E0%A4%A', '?task=%E0%A4', '?task=%80',
+    '?task=%C0%AF', '?task=%ED%A0%80', '?task=%F4%90%80%80', '?task=%F0%9F%98%80',
+    '?task=home+office%2Bgym', '?task=漢😀', '?task=%EF%BB%BFtask', '?task=\uD800',
+    '?task=%E0%A4%A&task=valid&project=p', '?ta%73k=first&task=second']) {
+    const expected = JSON.stringify([...new URLSearchParams(init)]);
+    assert.equal(JSON.stringify([...new consoleState.URLSearchParams(init)]), expected, `query decode ${JSON.stringify(init)}`);
+    assert.equal(JSON.stringify([...new consoleState.URL('mindwtr://open' + init).searchParams]), expected, `URL query decode ${JSON.stringify(init)}`);
+}
 // URLSearchParams.toString() has no "?", as WHATWG writes it: core posts it as a form body (dropbox-auth-tokens.ts) and puts
 // its own "?" before it (sync-helpers.ts); String(url) still writes the "?" before a query.
 for (const init of ['?a=1&b=x+y', 'a=1', '', { grant_type: 'refresh_token', refresh_token: 'r t+s' }, { a: 'x y', b: '1+1' }]) {
@@ -640,7 +650,7 @@ assert.match(hostEntry, /createNativeSync\(nativeSyncBindings\)/);
 {
     assert.match(hostEntry, /class ValidatedSqliteAdapter extends NativeReceiptSqliteAdapter \{/);
     const bootBody = hostEntry.slice(hostEntry.indexOf('const boot = '), hostEntry.indexOf('globalThis.MindwtrHost ='));
-    const bootOrder = ['setStorageAdapter(adapter)', 'if (journaled) await loadNativeRequestReceipts(sqlite)', "else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] })", 'await adapter.getData()', 'await activateAndVerify(adapter'].map((text) => bootBody.indexOf(text));
+    const bootOrder = ['setStorageAdapter(adapter)', 'if (journaled) await loadNativeRequestReceipts(sqlite)', "else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] })", 'await adapter.getData()', 'await activateAndVerify(adapter'].map((text) => bootBody.indexOf(text));
     assert(bootOrder.every((index, i) => index > (i ? bootOrder[i - 1] : -1)), `receipts boot order ${bootOrder}`);
     assert.match(hostEntry, /pruneReceipts\(\): string \{\s*return submit\(async \(\) => \(\{ pruned: await pruneNativeRequestReceipts\(sqlite\) \}\)\);/);
     const coreAdapter = readFileSync(resolve(app, '../../packages/core/src/sqlite-adapter.ts'), 'utf8');
@@ -1183,15 +1193,18 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     const iosPreparedCommits = ['captureCommit', 'draftCommit'];
     // The iOS host's task attachment link/remove methods (taskAttachmentLinks, taskAttachmentRemove) are its own; Kotlin sends
     // the same core writes through MENU_COMMANDS and the journal (pass A2).
-    const iosOnlyWrites = ['setCalendarPreference', 'setFocusGroupChecked', 'commitPreparedSomedaySectionTask', 'submitAttachmentLinks', 'removeAttachment'];
-    // Core writes no host method calls yet (Settings › Calendar's edits):
+    const iosOnlyWrites = ['commitPreparedNotificationSetting', 'commitReminderCompletion', 'retryReminderCompletion', 'commitReminderSnooze', 'retryReminderSnooze', 'setCalendarPreference', 'setFocusGroupChecked', 'commitPreparedSomedaySectionTask', 'submitAttachmentLinks', 'removeAttachment', 'setCalendarSetting'];
+    // Core writes no host method calls yet (generic Calendar subscription Add):
     // wiring one into host-entry fails the write-list checks above until the journal takes it.
-    const unwiredWrites = ['setCalendarSetting', 'addCalendarFeed'];
+    const unwiredWrites = ['addCalendarFeed'];
     assert.equal(coreHost.match(new RegExp(`"(${iosPreparedCommits.join('|')})"`, 'g')), null, 'Kotlin never calls the iOS prepared commits');
     assert.deepEqual(methods.filter((m) => m.body.includes('taskResult(') && !iosPreparedCommits.includes(m.name)).map((m) => m.name).sort(), writes, 'the journal\'s write list is host-entry\'s task commands');
     const table = (name) => hostEntry.slice(hostEntry.indexOf(`const ${name}`), hostEntry.indexOf('\n};', hostEntry.indexOf(`const ${name}`)));
     const called = (text) => [...text.matchAll(/contract\.(\w+)\(/g)].map((m) => m[1]);
     assert.deepEqual(called(hostEntry).filter((name) => unwiredWrites.includes(name)), [], 'no host method calls an unwired core write');
+    const pushSetting = methods.find((method) => method.name === 'iosCalendarPushSetting');
+    assert(pushSetting && pushSetting.body.includes('iosCalendarPushOwned('), 'Calendar push settings require the private iOS owner');
+    assert.deepEqual(called(pushSetting.body), ['setCalendarSetting'], 'the private push facade delegates only its shared setting');
     const iosOnlyMethods = methods.filter((m) => called(m.body).some((name) => iosOnlyWrites.includes(name))).map((m) => m.name);
     {
         assert.equal(iosOnlyMethods.length, iosOnlyWrites.length, 'each iOS-only write has its host method');
@@ -1273,7 +1286,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
-    assert.match(hostEntry, /createNativeHostContract\(\{ get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
+    assert.match(hostEntry, /createNativeHostContract\(\{ reminderPlatform: globalThis\.__mindwtrHostPlatform === 'ios' \? 'ios' : 'android', get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, \.\.\.\(nativeAI \? \{ ai: nativeAI \} : \{\}\),\s*calendar: iosCalendar,\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
     assert.match(hostEntry, /const result = await \(iosSelfHostedProjectAttachments \?\? iosManualSync\)\?\.prepareAttachmentAvailableDetailed\?\.\(attachment\);/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
     // An entry replays only while it fits its write as host-entry takes it (WriteJournal.SHAPES): a JSON object for `json`, a
@@ -1318,6 +1331,30 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
                 if (site[1] === 'appLock' && file.includes('const payload = (request: AppLockRequest)')) {
                     assert.match(file, /const payload = \(request: AppLockRequest\): string => JSON\.stringify\(\['appLock', request\.value,/);
                     assert.match(file, /receipts\.run<AppLockResult>\(request\.requestId, key,/);
+                    continue;
+                }
+                if (site[1] === 'notificationSetting' && file.includes('const payload = (request: NotificationSettingRequest)')) {
+                    assert.match(file, /const payload = \(request: NotificationSettingRequest\) => JSON\.stringify\(\['notificationSetting', request\.edit\.type,/);
+                    assert.match(file, /receipts\.run<NotificationSettingResult>\(request\.requestId, key,/);
+                    assert.match(file, /async commitPreparedNotificationSetting\(input:/);
+                    continue;
+                }
+                const completionHelper = 'const completionPayload = (request: ReminderCompletionRequest) => ';
+                if (site[1] === 'reminderComplete' && file.includes(completionHelper)
+                    && site.index === file.indexOf(completionHelper) + completionHelper.length) {
+                    assert.match(file, /const completionPayload = \(request: ReminderCompletionRequest\) => JSON\.stringify\(\['reminderComplete', request\.taskId\]\);/);
+                    assert.match(file, /methods\.completeReminderTask\(request\)/);
+                    assert.match(file, /receipts\.saved<unknown>\(request\.requestId, completionPayload\(request\)\)/);
+                    // The original writer's literal remains attributed below; this helper only probes or retries it.
+                    continue;
+                }
+                const snoozeHelper = 'const snoozePayload = (request: ReminderSnoozeRequest) => ';
+                if (site[1] === 'reminderSnooze' && file.includes(snoozeHelper)
+                    && site.index === file.indexOf(snoozeHelper) + snoozeHelper.length) {
+                    assert.match(file, /const snoozePayload = \(request: ReminderSnoozeRequest\) => JSON\.stringify\(\['reminderSnooze', request\.requestedAt, request\.details\]\);/);
+                    assert.match(file, /methods\.snoozeReminder\(request\)/);
+                    assert.match(file, /receipts\.saved<unknown>\(request\.requestId, snoozePayload\(request\)\)/);
+                    // The legacy writer still owns its original payload; this helper only probes or retries it.
                     continue;
                 }
                 const owner = defs.filter((def) => def.index < site.index).at(-1);
@@ -3138,8 +3175,21 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(clearBody, /logInfo\(|logWarn\(|diagnosticsLog\.append\(/, 'Clear cannot append a line that recreates its target');
     assert.match(clearBody, /logClearChecked\(\): string \{\s+return submit\(\(\) => diagnosticsLog\.clearChecked\(\)\);/);
     assert.match(hostEntry, /logClear\(\): string \{\s+return submit\(async \(\) => \{\s+await diagnosticsLog\.clear\(\);/);
-    // The host's diagnostic lines put their fields in the payload's context, the part the log file keeps.
-    assert.doesNotMatch(hostEntry, /\bextra: \{|, extra \}/);
+    // Direct log payloads require context; the shared entry builder accepts extra and sanitizes it into context.
+    const checkDiagnosticFields = (source) => {
+        const visit = (node) => {
+            if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && node.name.getText() === 'extra') {
+                const object = node.parent, call = object.parent;
+                assert(ts.isCallExpression(call) && call.expression.getText() === 'buildDiagnosticsLogEntry'
+                    && call.arguments[2] === object, 'Direct diagnostic payloads must use context');
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(ts.createSourceFile('host-entry.ts', source, ts.ScriptTarget.Latest, true));
+    };
+    assert.throws(() => checkDiagnosticFields('diagnosticsLog.append({ extra: { outcome: "lost" } });'));
+    assert.throws(() => checkDiagnosticFields('diagnosticsLog.append({ message, extra });'));
+    checkDiagnosticFields(hostEntry);
     assert.match(hostEntry, /^\s+dataSettings: \(\) => contract\.getDataSettings\(\),$/m);
     assert.match(hostEntry, /^\s+dataSetting: \(input\) => contract\.setDataSetting\(input\),$/m);
     // Share log: only the logs folder is shareable, through a private FileProvider and the system share sheet; nothing is sent by the app.
@@ -3615,6 +3665,16 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 }
 
 const fakeCore = `
+export { createDeviceCalendarSettingsMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-device-calendar-settings.ts'))};
+export { createCalendarSubscriptionSettingsMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-calendar-subscription-settings.ts'))};
+export { createCalendarSubscriptionAddMethods } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-calendar-subscription-add.ts'))};
+export { buildCalendarSubscriptionSettingsModel } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-host-contract-settings-calendar.ts'))};
+export { REMINDER_STORE_RESCHEDULE_DELAY_MS, shouldRescheduleReminderAlarms } from ${JSON.stringify(resolve(app, '../../packages/core/src/mobile-reminder-alarms.ts'))};
+export { nameNotifyListener } from ${JSON.stringify(resolve(app, '../../packages/core/src/store-notify-profiler.ts'))};
+export { buildShortcutsSnapshot } from ${JSON.stringify(resolve(app, '../../packages/core/src/widget-payload.ts'))};
+export { getNextFutureStartRevealAt } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-utils.ts'))};
+export { resolveEntityOpenTarget } from ${JSON.stringify(resolve(app, '../../packages/core/src/entry-points.ts'))};
+export { compareAppVersions, fetchAppStoreInfo, UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY, shouldCheckForAppUpdate } from ${JSON.stringify(resolve(app, '../../packages/core/src/app-store-update.ts'))};
 export { SYNC_BACKEND_KEY, CLOUD_PROVIDER_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
 export { getBaseSyncUrl } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-paths.ts'))};
 import { NativeAttachmentCleanupUnconfirmedError as RealCleanupError } from ${JSON.stringify(resolve(app, '../../packages/core/src/native-attachment-cleanup.ts'))};
@@ -3623,7 +3683,11 @@ import { mapSqliteTaskRow as hydrateTask285 } from ${JSON.stringify(resolve(app,
 globalThis.hydrateTaskAttachments285 = (attachments) => hydrateTask285({ id: 'task285', attachments: JSON.stringify(attachments) }).attachments;
 export { planAttachmentOpen, getAttachmentResolutionMessage } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-editor-model.ts'))};
 import { logInfo as realLogInfo, setLogger as setRealLogger } from ${JSON.stringify(resolve(app, '../../packages/core/src/logger.ts'))};
-export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
+export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled, buildDiagnosticsLogEntry } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
+export { createFeedbackDiagnosticsBuffer, buildFeedbackDiagnostics, FEEDBACK_DIAGNOSTICS_SOURCE_CHARS } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback-diagnostics.ts'))};
+export { buildFeedbackSubmissionPayload, submitFeedbackSubmission, FEEDBACK_CATEGORIES } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback.ts'))};
+export { sanitizeForLog, sanitizeLogContext } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-sanitize.ts'))};
+export { getBreadcrumbs } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-breadcrumbs.ts'))};
 export { validateNativeAttachmentDraftBeginV3, validateNativeAttachmentDraftLineageV3,
     validateNativeAttachmentDraftBeginV4, validateNativeAttachmentDraftLineageV4,
     validateNativeAttachmentDraftBeginV5, validateNativeAttachmentDraftLineageV5,
@@ -3758,6 +3822,8 @@ export const NATIVE_REMINDER_STATE_STORAGE_KEY = 'mindwtr:native:reminders:v1';
 export const NATIVE_HOST_CONTRACT_VERSION = 1;
 export function buildImmediateNotificationDetails(title, message, data) { return { title, message, channel: 'mindwtr_reminders_v2', data: { kind: 'pomodoro', ...data } }; }
 export function isSandboxMode() { return globalThis.sandbox === true; }
+export const isEntityOpenUrl = () => false;
+export const parseEntityOpenUrl = () => null;
 export function isWorkspaceTransitionActive() { return globalThis.workspaceTransition === true; }
 // The debug net check's WebDAV calls: bundled, never run here.
 export const [cloudHeadJson, webdavDeleteFile, webdavGetFile, webdavGetJson, webdavGetSyncDocument, webdavHeadFile, webdavMakeDirectory, webdavPutFile, webdavPutJson] = Array(9).fill(async () => null);
@@ -4166,6 +4232,7 @@ const makeState = (taskCount, fakeDataSequence = [], hostPlatform = undefined, c
     };
     configure(state);
     vm.runInNewContext(source, state);
+    assert.equal(state.contractBindings.reminderPlatform, hostPlatform === 'ios' ? 'ios' : 'android');
     return state;
 };
 const poll = async (state, id) => {
@@ -4240,7 +4307,7 @@ const poll = async (state, id) => {
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configureHTTP);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), []);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform']);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost.nativeHTTPDelivered();
     assert.equal(local.logText, null, 'No preboot transport receipt');
@@ -4282,7 +4349,7 @@ for (const [bridge, receipt, operation] of [
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configurePort);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), []);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform']);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost[receipt]();
     assert.equal(local.logText, null, 'No preboot native primitive receipt');
@@ -4326,7 +4393,7 @@ for (const [bridge, receipt, operation] of [
         };
     };
     const local = makeState(0, [], 'ios', configureKV);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), [], 'KV does not enable iOS Sync or AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform'], 'KV does not enable iOS Sync or AI');
     for (const name of names) assert.equal(typeof local.__mindwtrNative[name], 'function');
     for (const [method] of receipts) local.MindwtrHost[method]();
     assert.equal(local.logText, null, 'No preboot device storage receipt');
@@ -4768,7 +4835,7 @@ export function createNativeSync() {
     assert.ok(hostEntry.includes("name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }"));
     assert.match(hostEntry, /context: \{ releaseCheck: diagnostic\.releaseCheck, operation: name, outcome:/);
     const local = makeState(0, [], 'ios', configureLocal);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments'], 'local capability enables neither Sync nor AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform', 'attachments'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');
     assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
     const owner = { kind: 'task', taskId: 'task215', attachments: [] };
@@ -4814,7 +4881,7 @@ export function createNativeSync() {
             if (variant === 'partial') delete state.__mindwtrNative.ioBody;
             if (variant === 'refused') state.__mindwtrNative.fileDirectories = () => '!MindwtrNativeError:fixed unavailable';
         });
-        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined), [], `${variant} capability offers no local fallback`);
+        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined), ['reminderPlatform'], `${variant} capability offers no local fallback`);
         assert.equal(unavailable.localShaInstallCount, 0, 'failed optional discovery leaves SHA binding unchanged');
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true, 'optional local failure does not fail boot');
     }
@@ -6172,7 +6239,7 @@ export function createNativeSync() {
                 state.__mindwtrNative[name] = () => { calls++; throw new Error('Unexpected device service activation'); };
             }
         });
-        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['attachments']);
+        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['reminderPlatform', 'attachments']);
         assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
         assert.equal(local.localShaInstallCount, 1);
         assert.equal(call(local), '{"outcome":"removed"}', 'existing synchronous local Discard remains admitted');
@@ -6847,7 +6914,7 @@ assert.deepEqual(ready.events, ['schema', 'activate', 'load', 'flush', 'baseline
 // journaled boot requires tokens and loads all receipts before the validated load, activation, and replay.
 assert.equal(ready.replayTokens, 'optional');
 assert.equal(ready.receiptsLoadedAt, 0);
-assert.deepEqual([...ready.receiptScope], ['appLock', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'], 'the VM array, compared in this realm');
+assert.deepEqual([...ready.receiptScope], ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'], 'the VM array, compared in this realm');
 {
     const journaled = makeState(0);
     assert.equal((await poll(journaled, journaled.MindwtrHost.boot('', '', 'journaled'))).ok, true);
@@ -7734,6 +7801,60 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const refused = await vm.runInContext("__mindwtrFileCall({ op: 'getInfo', uri: 'file:///x' })", files).then(() => 'resolved', (error) => error.name);
     assert.equal(refused, 'AbortError', 'no new file call starts while the operation drains');
     files.__resumeHostCalls();
+}
+// Passive calendar reads share the value pump, but cancellation targets only the calendar provider.
+{
+    const polyfills = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
+    const answers = [], aborted = [], submitted = [];
+    let sequence = 0, failure = null;
+    const bridge = {
+        log() { throw new Error('Calendar transport must not log provider exceptions'); }, nowMs: () => 0,
+        calendarCall(text) {
+            if (failure === 'throw') throw new Error('Calendar read unavailable');
+            if (failure === 'native') return '!MindwtrNativeError:Calendar read unavailable';
+            submitted.push(JSON.parse(text)); return `cal:1:${++sequence}`;
+        },
+        calendarAbort(id) { aborted.push(['calendar', id]); throw new Error('Calendar abort unavailable'); },
+        fileCall: () => 'file:1:1', installerCall: () => 'installer:1:1',
+        fileAbort(id) { aborted.push(['file', id]); },
+        ioNext: () => answers.shift() ?? '',
+        ioBody() { throw new Error('Calendar replies are bodyless'); },
+    };
+    const state = vm.createContext({ __mindwtrNative: bridge });
+    vm.runInContext(polyfills, state);
+    assert.deepEqual(submitted, [], 'installing the calendar capability never reads or prompts');
+    const held = state.__mindwtrCalendarCall({ op: 'events', calendarIds: ['é'], startMs: 0, endMs: 1 });
+    const outcome = held.then(() => 'resolved', (error) => `${error.name}: ${error.message}`);
+    const file = assert.rejects(state.__mindwtrFileCall({ op: 'getInfo' }), { name: 'AbortError' });
+    const installer = assert.rejects(state.__mindwtrInstallerCall({ op: 'install' }), { name: 'AbortError' });
+    state.__cancelHostCalls('Calendar operation cancelled');
+    assert.equal(await outcome, 'AbortError: Calendar operation cancelled', 'cancellation rejects without waiting for native completion');
+    await Promise.all([file, installer]);
+    assert.deepEqual(aborted, [['calendar', 'cal:1:1'], ['file', 'file:1:1'], ['file', 'installer:1:1']],
+        'calendar uses calendarAbort; existing file and installer keep fileAbort');
+    await assert.rejects(state.__mindwtrCalendarCall({ op: 'permissions' }), { name: 'AbortError' });
+    assert.equal(submitted.length, 1, 'cancelled operation cannot start another calendar read');
+    answers.push(...['cal:1:1', 'file:1:1', 'installer:1:1'].map((id) => JSON.stringify({ id, value: [] })));
+    assert.equal(state.__pumpTimers(), 0, 'cancelled late answers are drained without settling promises');
+    state.__resumeHostCalls();
+    const retry = state.__mindwtrCalendarCall({ op: 'permissions' });
+    answers.push(JSON.stringify({ id: 'cal:1:2', value: { status: 'granted' } }));
+    assert.equal(state.__pumpTimers(), 1, 'late cancellation leaves the next read live');
+    assert.equal((await retry).status, 'granted');
+    assert.deepEqual(submitted, [{ op: 'events', calendarIds: ['é'], startMs: 0, endMs: 1 }, { op: 'permissions' }]);
+    const refused = assert.rejects(state.__mindwtrCalendarCall({ op: 'calendars' }), /^Error: Calendar read unavailable$/);
+    answers.push(JSON.stringify({ id: 'cal:1:3', error: 'Calendar read unavailable' }));
+    assert.equal(state.__pumpTimers(), 1); await refused;
+    for (const mode of ['throw', 'native']) {
+        failure = mode;
+        await assert.rejects(state.__mindwtrCalendarCall({ op: 'permissions' }), /^\w*Error: Calendar read unavailable$/);
+        assert.equal(state.__pumpTimers(), 0, 'submission exception does not leave an open pump slot');
+    }
+    for (const native of [undefined, { log() {} }, { log() {}, fileCall() {} }]) {
+        const absent = vm.createContext({ __mindwtrNative: native });
+        vm.runInContext(polyfills, absent);
+        assert.equal(absent.__mindwtrCalendarCall, undefined, 'calendar capability absent stays unavailable');
+    }
 }
 // Review finding 1 (A2): a managed attachment's delete asks core's keep() in the same engine turn as the delete itself, after every
 // file call queued before it. Here a delete waits behind a held file call while the attachment is restored: the bytes stay.

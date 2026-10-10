@@ -481,6 +481,8 @@ export type PreparedCalendarCreate = {
     project: Project | null;
     deviceIdBefore: string | null;
     deviceIdToInitialize: string | null;
+    /** Event copy only: a fixed default Area's presence/deletion, including absence. */
+    defaultAreaWitness?: { id: string; before: { deletedAt: string | null } | null } | null;
     intent: { props: Partial<Task>; projectToCreate: { name: string; color: string; areaId: string | null } | null };
     creation: {
         selectedProject: Project | null;
@@ -783,6 +785,16 @@ export interface TaskStore {
     commitPreparedAppLock: (request: import('./native-host-contract-app-lock').AppLockRequest,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     retryPreparedAppLockSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** One device-local notification scalar, without a synced preference stamp. */
+    commitPreparedNotificationSetting: (request: import('./native-host-contract-notification-settings').NotificationSettingRequest,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    retryPreparedNotificationSettingSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Existing subscription metadata, saved only in canonical synced SQL settings. */
+    commitPreparedCalendarSubscriptionSetting: (prepared: import('./native-host-contract-calendar-subscription-settings').PreparedCalendarSubscriptionSetting,
+        authority: PreparedAreaAuthority, legacyRaw: string | null) => Promise<PreparedTaskEditResult>;
+    commitPreparedCalendarSubscriptionAdd: (prepared: import('./native-host-contract-calendar-subscription-add').PreparedCalendarSubscriptionAdd,
+        authority: PreparedAreaAuthority, legacyRaw: string | null) => Promise<PreparedTaskEditResult>;
+    retryPreparedCalendarSubscriptionSettingSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     /** Update a project */
     updateProject: (id: string, updates: Partial<Project>) => Promise<StoreActionResult>;
     /** Archive a project as cancelled and cancel its unfinished child tasks */

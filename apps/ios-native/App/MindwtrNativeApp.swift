@@ -1,10 +1,203 @@
 import SwiftUI
+import CoreSpotlight
 import LocalAuthentication
 import UIKit
+import MindwtrNativeCore
+import UserNotifications
+
+/// One immutable process snapshot, shared by startup and future early native response capture.
+enum NativeAppLaunch {
+    static let arguments = ProcessInfo.processInfo.arguments
+    static let selection: Result<NativeLaunchSelection, Error> = {
+        #if targetEnvironment(simulator) || (DEBUG && NATIVE_DEVICE_TEST)
+        let identifier = Bundle.main.bundleIdentifier
+        #if !targetEnvironment(simulator)
+        guard identifier == "tech.dongdongbh.mindwtr.native.dev" else {
+            return .failure(LaunchFailure.developmentBundleRequired)
+        }
+        let mode = NativeLaunchSelection.BuildMode.deviceTest
+        #elseif DEBUG
+        let mode = NativeLaunchSelection.BuildMode.simulatorDebug
+        #else
+        let mode = NativeLaunchSelection.BuildMode.simulatorRelease
+        #endif
+        return Result {
+            let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: false)
+            return try NativeLaunchSelection.resolve(arguments: arguments, bundleIdentifier: identifier,
+                supportURL: support, homeURL: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), mode: mode)
+        }
+        #else
+        return .failure(LaunchFailure.unavailable)
+        #endif
+    }()
+
+    private enum LaunchFailure: LocalizedError {
+        case developmentBundleRequired
+        case unavailable
+        var errorDescription: String? {
+            switch self {
+            case .developmentBundleRequired: return "Physical testing requires the isolated native development app."
+            case .unavailable: return "This build is not enabled for physical-device testing."
+            }
+        }
+    }
+}
+
+/// One pre-host owner; a failed open is retried only by a later explicit capture or startup.
+actor NativeNotificationResponses {
+    struct Diagnostic: Sendable {
+        let action: String
+        let outcome: String
+    }
+    static let shared = NativeNotificationResponses()
+    static let changed = Notification.Name("MindwtrNativeNotificationResponsesChanged")
+    private var storage: NativeReminderInbox?
+    private var diagnostics: [Diagnostic] = []
+
+    #if DEBUG && targetEnvironment(simulator)
+    private var moreTestCaptured = false
+    func captureMoreTestResponse() async throws {
+        let mode = ProcessInfo.processInfo.environment["MINDWTR_RESPONSE_TEST_MORE"] ?? ""
+        guard !moreTestCaptured, ["1", "context"].contains(mode),
+              case let .isolated(_, _, namespace, _) = try NativeAppLaunch.selection.get() else { return }
+        moreTestCaptured = true
+        let content = UNMutableNotificationContent()
+        let data = mode == "context"
+            ? ["alarmKey": "task:task452-preview", "kind": "context-automation", "context": " @office "]
+            : ["alarmKey": "task:task452-preview", "taskId": "task452-preview"]
+        content.userInfo = ["mindwtrNativeReminder": ["version": 1, "namespace": namespace, "id": 452], "data": data]
+        let request = UNNotificationRequest(identifier: "mindwtr-native:\(namespace):452", content: content, trigger: nil)
+        let now = Date()
+        guard let response = NativeReminderResponse.capture(request, deliveredAt: now, receivedAt: now,
+            actionIdentifier: UNNotificationDefaultActionIdentifier, namespace: namespace),
+              try await capture(response) != nil else { throw CocoaError(.coderInvalidValue) }
+        record(.open, outcome: "captured")
+        await MainActor.run {
+            // The fixture must capture while More is open, rather than win a close/capture race.
+            precondition(NativeAppModel.shared.morePresented)
+            NativeAppModel.shared.requestNotificationResponses()
+        }
+    }
+    #endif
+
+    func record(_ action: NativeReminderResponse.Action, outcome: String) {
+        if diagnostics.count == 128 { diagnostics.removeFirst() }
+        diagnostics.append(.init(action: action.rawValue, outcome: outcome))
+    }
+
+    func takeDiagnostics() -> [Diagnostic] {
+        defer { diagnostics.removeAll() }
+        return diagnostics
+    }
+
+    private func inbox() throws -> NativeReminderInbox {
+        if let storage { return storage }
+        let opened = try NativeReminderInbox(selection: NativeAppLaunch.selection.get())
+        storage = opened
+        return opened
+    }
+
+    func capture(_ response: NativeReminderResponse) async throws -> NativeReminderInbox.Item? {
+        let current = try inbox()
+        do { return try await current.capture(response) }
+        catch {
+            try await current.retry()
+            return try await current.capture(response)
+        }
+    }
+
+    func pending() async throws -> [NativeReminderInbox.Item] {
+        let current = try inbox()
+        try await current.retry()
+        return try await current.pending()
+    }
+
+    func markAdmitting(_ id: String) async throws -> NativeReminderInbox.Item {
+        let current = try inbox()
+        do { return try await current.markAdmitting(id) }
+        catch {
+            try await current.retry()
+            return try await current.markAdmitting(id)
+        }
+    }
+
+    func finish(_ item: NativeReminderInbox.Item) async throws {
+        let current = try inbox()
+        do { try await current.finish(item) }
+        catch {
+            try await current.retry()
+            try await current.finish(item)
+        }
+    }
+}
+
+final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let options = NativeReminderResponse.foregroundPresentation(notification.request,
+            selection: try? NativeAppLaunch.selection.get())
+        completionHandler(options)
+        guard !options.isEmpty else { return }
+        Task { @MainActor in
+            await NativeAppModel.shared.recordForegroundReminderPresentation(sound: options.contains(.sound))
+        }
+    }
+
+    func application(_ application: UIApplication,
+                     willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return true }
+        switch selection {
+        case .standard, .isolated:
+            let center = UNUserNotificationCenter.current()
+            center.delegate = self
+            center.setNotificationCategories(NativeReminderResponse.categories())
+        case .rehearsal: break
+        }
+        return true
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let namespace: String
+        guard let selection = try? NativeAppLaunch.selection.get() else { completionHandler(); return }
+        switch selection {
+        case let .standard(_, _, name), let .isolated(_, _, name, _): namespace = name
+        case .rehearsal: completionHandler(); return
+        }
+        guard let captured = NativeReminderResponse.capture(response.notification.request,
+            deliveredAt: response.notification.date, receivedAt: Date(),
+            actionIdentifier: response.actionIdentifier, namespace: namespace) else { completionHandler(); return }
+        Task {
+            defer { completionHandler() }
+            do {
+                if try await NativeNotificationResponses.shared.capture(captured) != nil {
+                    await NativeNotificationResponses.shared.record(captured.action, outcome: "captured")
+                    await MainActor.run {
+                        NativeAppModel.shared.requestNotificationResponses()
+                        NotificationCenter.default.post(name: NativeNotificationResponses.changed, object: nil)
+                    }
+                } else {
+                    await NativeNotificationResponses.shared.record(captured.action, outcome: "retired")
+                    await MainActor.run { NativeAppModel.shared.requestNotificationResponses() }
+                }
+            } catch {
+                await NativeNotificationResponses.shared.record(captured.action, outcome: "capture-refused")
+                await MainActor.run { NativeAppModel.shared.requestNotificationResponses() }
+            }
+        }
+    }
+}
+
+@MainActor
+enum NativeAppModel {
+    static let shared = CoreModel()
+}
 
 @main
 struct MindwtrNativeApp: App {
-    @StateObject private var model = CoreModel()
+    @UIApplicationDelegateAdaptor(NativeNotificationDelegate.self) private var notificationDelegate
+    @StateObject private var model = NativeAppModel.shared
 
     var body: some Scene {
         WindowGroup {
@@ -13,6 +206,11 @@ struct MindwtrNativeApp: App {
                 .environment(\.nativeExternalLinkDiagnostic, { outcome, surface in
                     Task { await model.recordUpNoteHandoff(outcome, surface: surface) }
                 })
+                .onOpenURL { model.receiveEntityLink($0) }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
+                    model.receiveSearchIdentifier(identifier)
+                }
                 .task { await model.start() }
         }
     }
@@ -157,22 +355,33 @@ final class AppLockController: ObservableObject {
 }
 
 private struct AppLockRoot: View {
+    private struct ForegroundState: Equatable {
+        let token: UUID?
+        let active: Bool
+        let concealed: Bool
+    }
     @ObservedObject var model: CoreModel
     @ObservedObject var lock: AppLockController
     @State private var confirmingCorruptDraftDiscard = false
+    @State private var observedApplicationActive: Bool?
     @Environment(\.scenePhase) private var phase
     @Environment(\.colorScheme) private var scheme
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
+    // Match RN AppState: refresh the initial snapshot until a lifecycle event supersedes it.
+    private var applicationActive: Bool {
+        observedApplicationActive ?? (UIApplication.shared.applicationState == .active)
+    }
 
     var body: some View {
         let startupToken = model.completedStartupToken
+        let foreground = ForegroundState(token: startupToken, active: applicationActive, concealed: lock.concealed)
         Group {
             if model.ready && !lock.concealed {
                 if model.settingsSyncRestartRequired {
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
                             .font(.system(size: 32)).accessibilityHidden(true)
-                        Text("Sync could not be confirmed. Close and reopen Mindwtr before trying again.")
+                        Text("The operation could not be confirmed. Close and reopen Mindwtr before trying again.")
                             .rnFont(17, .semibold).multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -272,10 +481,50 @@ private struct AppLockRoot: View {
                 .accessibilityIdentifier("app-lock-gate")
             }
         }
+        .background {
+            NativeCalendarEventEditor(presentation: model.calendarEventOpenPresentation,
+                isPresented: model.calendarEventOpenPresented,
+                canPresent: { model.calendarEventOpenCanPresent($0) },
+                requestDismiss: { model.requestCalendarEventOpenDismissal($0, outcome: $1) },
+                didDismiss: { model.calendarEventOpenDidDismiss($0) })
+        }
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
-        .onAppear { lock.sceneChanged(phase) }
+        .onAppear {
+            lock.sceneChanged(phase)
+            if applicationActive { model.notificationSettingsDidBecomeActive(); model.calendarSettingsDidBecomeActive(); model.calendarFeedDidBecomeActive() }
+            model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
+            model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestNotificationResponses()
+            model.requestEntityLinks()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NativeNotificationResponses.changed)) { _ in
+            model.requestNotificationResponses()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            observedApplicationActive = true
+            model.notificationSettingsDidBecomeActive()
+            model.calendarSettingsDidBecomeActive()
+            model.calendarFeedDidBecomeActive()
+            model.requestNotificationResponses()
+            model.requestEntityLinks()
+            model.requestSearchLifecycle(token: model.completedStartupToken, active: true, force: true)
+            guard !lock.concealed else { return }
+            model.requestForegroundSync(token: model.completedStartupToken, active: true)
+            model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
+            model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: true)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            observedApplicationActive = false
+            model.suspendEntityLinks()
+            model.notificationSettingsWillResignActive()
+            model.calendarSettingsWillResignActive()
+            model.calendarFeedWillResignActive()
             model.cancelForegroundSync()
+            model.cancelReminderLifecycle()
+            model.cancelCalendarPushLifecycle()
+            model.cancelSearchLifecycle()
             model.cancelProjectAttachmentDownload()
             model.clearSettingsSyncForPrivacy()
             model.stopTaskAudioForBackground()
@@ -285,10 +534,20 @@ private struct AppLockRoot: View {
             if model.appLockActive && !lock.authenticating { lock.readFailed() }
             lock.concealSnapshot()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            model.cancelNotificationSettingsIntent()
+            model.cancelCalendarSettingsIntent()
+            model.retireCalendarFeed()
+        }
         .onChange(of: phase) { next in
+            if next == .background { model.cancelNotificationSettingsIntent(); model.cancelCalendarSettingsIntent(); model.retireCalendarFeed() }
             model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
+                model.suspendEntityLinks()
                 model.cancelForegroundSync()
+                model.cancelReminderLifecycle()
+                model.cancelCalendarPushLifecycle()
+                model.cancelSearchLifecycle()
                 model.cancelProjectAttachmentDownload()
                 model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
@@ -300,10 +559,20 @@ private struct AppLockRoot: View {
             if next != .active && model.appLockActive && !lock.authenticating { lock.readFailed() }
             lock.sceneChanged(next)
             if next == .active && !lock.concealed { Task { await model.refresh() } }
+            model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
+            model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: applicationActive)
+            model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
+                model.suspendEntityLinks()
+                model.cancelNotificationSettingsIntent()
+                model.cancelCalendarSettingsIntent()
+                model.retireCalendarFeed()
                 model.cancelForegroundSync()
+                model.cancelReminderLifecycle()
+                model.cancelCalendarPushLifecycle()
                 model.cancelProjectAttachmentDownload()
                 model.cancelProjectFileAvailabilityRecovery()
                 model.clearSettingsSyncForPrivacy()
@@ -313,9 +582,42 @@ private struct AppLockRoot: View {
             }
             if !concealed && phase == .active { Task { await model.refresh() } }
         }
-        .task(id: "\(startupToken?.uuidString ?? "")-\(phase == .active)-\(lock.concealed)") {
-            guard !Task.isCancelled else { return }
-            model.requestForegroundSync(token: startupToken, active: phase == .active)
+        .onChange(of: lock.enabled) { _ in model.searchPolicyChanged() }
+        .onChange(of: lock.authenticating) { _ in model.searchPolicyChanged() }
+        .onChange(of: model.appLockActive) { _ in model.searchPolicyChanged() }
+        .onChange(of: foreground) { next in
+            model.requestForegroundSync(token: next.token, active: next.active)
+            model.requestReminderLifecycle(token: next.token, active: next.active)
+            model.requestCalendarPushLifecycle(token: next.token, active: next.active)
+            model.requestSearchLifecycle(token: next.token, active: next.active)
+            if next.active && !next.concealed { model.requestNotificationResponses() }
+            if next.active && !next.concealed { model.requestEntityLinks() }
+        }
+        .onChange(of: model.notificationResponseContextClean) { clean in
+            if clean { model.externalContextBecameClean() }
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        .onChange(of: model.morePresented) { presented in
+            if presented {
+                model.deliverEntityLinkTestInput("more")
+                Task { try? await NativeNotificationResponses.shared.captureMoreTestResponse() }
+            }
+        }
+        .onChange(of: model.taskTitleDraft) { _ in model.deliverEntityLinkTestInput("dirty") }
+        .onChange(of: model.morePresented) { presented in
+            if presented { model.deliverSearchTestInput("more") }
+        }
+        .onChange(of: model.taskTitleDraft) { _ in model.deliverSearchTestInput("dirty") }
+        #endif
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            model.reminderClockChanged()
+            model.searchClockChanged()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            model.reminderClockChanged(); model.searchClockChanged()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            model.reminderClockChanged(); model.searchClockChanged()
         }
         .task(id: "\(model.ready)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard model.ready, phase == .active else { return }

@@ -38,8 +38,10 @@ import { buildGeneralSettingsUpdate } from './general-settings-model';
 import { buildGtdSettingsUpdate, GTD_DEFAULT_AREA_ACTIVE_OPTION, isGtdSettingStored } from './gtd-settings-model';
 import { DEFAULT_TASK_EDITOR_ORDER, TASK_EDITOR_SECTION_ORDER } from './task-editor-layout';
 import { generalPreferenceWitness } from './general-preference-witness';
+import { notificationSettingWitness } from './notification-settings-model';
 import { taskEditValuesEqual } from './json-value-equality';
 import { backfillArchiveClocks, getArchiveRetentionPreview, isArchiveRetentionDays } from './archive-retention';
+import { calendarSubscriptionModules } from './store-calendar-subscription-modules';
 
 const STORAGE_TIMEOUT_MS = 15_000;
 // Runtime diagnostic threshold: loads slower than this get a phase-breakdown log line.
@@ -390,7 +392,7 @@ type SettingsActionContext = {
     getStorage: () => StorageAdapter;
 };
 
-type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'commitPreparedGeneralPreference' | 'commitPreparedGtdWorkflow' | 'commitPreparedAppLock' | 'retryPreparedAppLockSnapshot' | 'commitPreparedFocusSavedFilter' | 'commitPreparedSavedSearchWrite' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
+type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'commitPreparedGeneralPreference' | 'commitPreparedGtdWorkflow' | 'commitPreparedAppLock' | 'retryPreparedAppLockSnapshot' | 'commitPreparedNotificationSetting' | 'retryPreparedNotificationSettingSnapshot' | 'commitPreparedCalendarSubscriptionSetting' | 'commitPreparedCalendarSubscriptionAdd' | 'retryPreparedCalendarSubscriptionSettingSnapshot' | 'commitPreparedFocusSavedFilter' | 'commitPreparedSavedSearchWrite' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
 
 export const createSettingsActions = ({
     set,
@@ -1157,6 +1159,163 @@ export const createSettingsActions = ({
                 _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
             authority.saveBoundary = { ...boundary, generation: getSaveGeneration(),
                 failure: memory.persistenceFailure };
+            result = { success: true, outcome: 'applied' };
+            return { ...memory };
+        });
+        return result;
+    },
+
+    commitPreparedNotificationSetting: async (request, authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'Notification setting changed; refresh Notifications' };
+        set((memory) => {
+            const before = authority.state;
+            if (memory.persistenceFailure || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const current = notificationSettingWitness(durable.settings, request.edit.type);
+            if (!current || !taskEditValuesEqual(current, request.expected)
+                || current.present && current.value === request.edit.value) return memory;
+            const settings = { ...durable.settings, [request.edit.type]: request.edit.value };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    retryPreparedNotificationSettingSnapshot: async (authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'Notification save ownership changed' };
+        set((memory) => {
+            const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
+            if (!boundary || !raw || memory._allTasks !== boundary.taskReference
+                || memory.lastDataChangeAt !== boundary.lastDataChangeAt
+                || memory.settings !== raw.settings || memory.persistenceFailure === null
+                || memory.persistenceFailure !== boundary.failure
+                || boundary.generation !== getSaveGeneration()) return memory;
+            persist(set, debouncedSave, { ...memory, _allTasks: raw.tasks,
+                _allProjects: raw.projects, _allSections: raw.sections ?? [],
+                _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
+            authority.saveBoundary = { ...boundary, generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            result = { success: true, outcome: 'applied' };
+            return { ...memory };
+        });
+        return result;
+    },
+
+    commitPreparedCalendarSubscriptionSetting: async (prepared, authority, legacyRaw) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'Calendar subscriptions changed; refresh Settings' };
+        const modules = calendarSubscriptionModules.setting;
+        if (!modules) return result;
+        const { source: calendarSubscriptionSettingSource, plan: planCalendarSubscriptionSetting } = modules;
+        set((memory) => {
+            const before = authority.state;
+            if (memory.persistenceFailure || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const source = calendarSubscriptionSettingSource(durable.settings, legacyRaw);
+            if (!source || !taskEditValuesEqual(source.witness, prepared.request.expected)
+                || (durable.settings.deviceId ?? null) !== prepared.deviceIdBefore
+                || prepared.stamp !== timestampAtLeastAfter(prepared.preparedAt, source.witness.stamp ?? undefined)) return memory;
+            const planned = planCalendarSubscriptionSetting(source.feeds, prepared.request.edit);
+            if (!planned?.changed) return memory;
+            const settings = { ...durable.settings, externalCalendars: planned.feeds,
+                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}), externalCalendars: prepared.stamp },
+                ...(prepared.deviceIdToInitialize === null ? {} : { deviceId: prepared.deviceIdToInitialize }) };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    commitPreparedCalendarSubscriptionAdd: async (prepared, authority, legacyRaw) => {
+        const admittedGeneration = getSaveGeneration();
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'Calendar subscriptions changed; refresh Settings' };
+        const setting = calendarSubscriptionModules.setting, planCalendarSubscriptionAdd = calendarSubscriptionModules.add;
+        if (!setting || !planCalendarSubscriptionAdd) return result;
+        const { source: calendarSubscriptionSettingSource } = setting;
+        set((memory) => {
+            const before = authority.state;
+            if (admittedGeneration !== getSaveGeneration() || memory.persistenceFailure
+                || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const source = calendarSubscriptionSettingSource(durable.settings, legacyRaw);
+            if (!source || prepared.version !== 1 || !taskEditValuesEqual(source.witness, prepared.request.expected)
+                || (durable.settings.deviceId ?? null) !== prepared.deviceIdBefore
+                || prepared.stamp !== timestampAtLeastAfter(prepared.preparedAt, source.witness.stamp ?? undefined)) return memory;
+            const feeds = planCalendarSubscriptionAdd(source.feeds, prepared.request);
+            if (!feeds || !calendarSubscriptionSettingSource({ ...durable.settings, externalCalendars: feeds }, null)) return memory;
+            const settings = { ...durable.settings, externalCalendars: feeds,
+                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}), externalCalendars: prepared.stamp },
+                ...(prepared.deviceIdToInitialize === null ? {} : { deviceId: prepared.deviceIdToInitialize }) };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    retryPreparedCalendarSubscriptionSettingSnapshot: async (authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'Calendar subscription save ownership changed' };
+        set((memory) => {
+            const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
+            if (!boundary || !raw || memory._allTasks !== boundary.taskReference
+                || memory.lastDataChangeAt !== boundary.lastDataChangeAt
+                || memory.settings !== raw.settings || memory.persistenceFailure === null
+                || memory.persistenceFailure !== boundary.failure
+                || boundary.generation !== getSaveGeneration()) return memory;
+            persist(set, debouncedSave, { ...memory, _allTasks: raw.tasks,
+                _allProjects: raw.projects, _allSections: raw.sections ?? [],
+                _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
+            authority.saveBoundary = { ...boundary, generation: getSaveGeneration(), failure: memory.persistenceFailure };
             result = { success: true, outcome: 'applied' };
             return { ...memory };
         });

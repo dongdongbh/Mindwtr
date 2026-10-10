@@ -6,13 +6,16 @@ import {
     CALENDAR_PUSH_PENDING_KEY,
     CALENDAR_PUSH_ENABLED_KEY,
     CALENDAR_PUSH_TARGET_ID_KEY,
+    CalendarPushOwnershipChangedError,
     createCalendarPushService,
     type CalendarPushServiceHost,
 } from './calendar-push-service';
 import { planCalendarPushColor } from './calendar-settings-model';
+import * as sandbox from './sandbox';
 import type { DeviceCalendar } from './external-calendar-feeds';
 import type { CalendarSyncEntry } from './sqlite-adapter';
 import type { Task } from './types';
+import { deterministicHash128Hex } from './uuid';
 
 /**
  * The push's device side as a native host binds it. React Native's own suite
@@ -43,14 +46,15 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
     const calendars = [...(options.calendars ?? [PRIMARY])];
     const entries = new Map((options.entries ?? []).map((entry) => [entry.taskId, entry]));
     const writes: unknown[][] = [];
+    const eventContexts: [string, string, { taskId: string; calendarId: string } | undefined][] = [];
     let nextId = 0;
     let tasks = options.tasks ?? [];
-    const listeners: ((tasks: Task[]) => void)[] = [];
+    const listeners = new Set<(tasks: Task[]) => void>();
     const store = {
         getState: () => ({ _allTasks: tasks, _tasksById: new Map(tasks.map((entry) => [entry.id, entry])), projects: [], sections: [], settings: {} }),
         subscribe: (_selector: unknown, listener: (tasks: Task[]) => void) => {
-            listeners.push(listener);
-            return () => undefined;
+            listeners.add(listener);
+            return () => { listeners.delete(listener); };
         },
     };
     const host: CalendarPushServiceHost = {
@@ -96,13 +100,18 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
                 const index = calendars.findIndex((calendar) => calendar.id === id);
                 if (index >= 0) calendars.splice(index, 1);
             },
-            createEvent: async (calendarId, details) => {
+            createEvent: async (calendarId, details, context?: { taskId: string; calendarId: string }) => {
                 tick();
                 writes.push(['createEvent', calendarId, details]);
+                eventContexts.push(['createEvent', calendarId, context]);
                 return `event-${writes.length}`;
             },
-            updateEvent: async (id, details) => { tick(); writes.push(['updateEvent', id, details.title]); },
-            deleteEvent: async (id) => { tick(); writes.push(['deleteEvent', id]); },
+            updateEvent: async (id, details, context?: { taskId: string; calendarId: string }) => {
+                tick(); writes.push(['updateEvent', id, details.title]); eventContexts.push(['updateEvent', id, context]);
+            },
+            deleteEvent: async (id, context?: { taskId: string; calendarId: string }) => {
+                tick(); writes.push(['deleteEvent', id]); eventContexts.push(['deleteEvent', id, context]);
+            },
         },
         syncEntries: {
             ensureReady: async () => undefined,
@@ -115,7 +124,7 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
         store: store as unknown as CalendarPushServiceHost['store'],
     };
     return {
-        host, storage, calendars, entries, writes, life,
+        host, storage, calendars, entries, writes, eventContexts, life,
         setTasks: (next: Task[]) => {
             tasks = next;
             listeners.forEach((listener) => listener(next));
@@ -153,7 +162,7 @@ async function everyDeath(
 }
 
 describe('calendar push behind the host ports', () => {
-    afterEach(() => { vi.useRealTimers(); });
+    afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
     it('reuses the saved Mindwtr calendar across a restart and makes a new one only when it is gone', async () => {
         const phone = device();
@@ -191,6 +200,34 @@ describe('calendar push behind the host ports', () => {
         // The chosen calendar was not the one deleted: it stays chosen.
         expect(phone.storage.get(CALENDAR_PUSH_TARGET_ID_KEY)).toBe('app-made');
         expect([...phone.entries.keys()]).toEqual(['t2']);
+    });
+
+    it.each([
+        { os: 'android', availability: 'absent' }, { os: 'android', availability: 'read-only' },
+        { os: 'ios', availability: 'absent' }, { os: 'ios', availability: 'read-only' },
+    ])('keeps an unrelated selected target during owned-calendar deletion: $os/$availability', async ({ os, availability }) => {
+        const phone = device({
+            os,
+            calendars: [PRIMARY, { ...PRIMARY, id: 'saved', title: 'Mindwtr' },
+                ...(availability === 'read-only' ? [{ id: 'selected', title: 'Personal', allowsModifications: false }] : [])],
+            storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'selected' },
+            entries: [
+                { taskId: 'owned-task', calendarEventId: 'owned-event', calendarId: 'saved', platform: 'android', lastSyncedAt: '' },
+                { taskId: 'selected-task', calendarEventId: 'selected-event', calendarId: 'selected', platform: 'android', lastSyncedAt: '' },
+            ],
+        });
+        const proof: unknown[] = [];
+        phone.host.log.info = (message, context) => {
+            if (context.extra?.releaseCheck === 'v1.3.5/calendar-delete-target') proof.push([message, context.extra]);
+        };
+        await createCalendarPushService(phone.host).deleteMindwtrCalendar();
+        expect(phone.writes).toEqual([['deleteCalendar', 'saved'], ['deleteSyncEntry', 'owned-task']]);
+        expect(phone.storage.get(CALENDAR_PUSH_TARGET_ID_KEY)).toBe('selected');
+        expect(phone.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
+        expect([...phone.entries.keys()]).toEqual(['selected-task']);
+        expect(proof).toEqual([['Calendar deletion kept the selected target', {
+            releaseCheck: 'v1.3.5/calendar-delete-target', outcome: 'preserved',
+        }]]);
     });
 
     it('makes exactly one Mindwtr calendar however its creation is cut short', async () => {
@@ -240,6 +277,10 @@ describe('calendar push behind the host ports', () => {
             { intent: JSON.stringify({ title }), calendars: [PRIMARY, { id: 'a', title }, { id: 'b', title }] },
             { intent: JSON.stringify({ title, calendarId: 'a' }), calendars: [PRIMARY, { id: 'a', title }, { id: 'b', title }] },
             { intent: JSON.stringify({ title, calendarId: 'a' }), calendars: [PRIMARY, { id: 'a', title }, { id: 'saved', title: 'Mindwtr' }], stored: 'saved' },
+            { intent: JSON.stringify({ title, deletionRevision: 'a'.repeat(32) }), calendars: [PRIMARY] },
+            { intent: JSON.stringify({ title, calendarId: '', deletionRevision: 'a'.repeat(32) }), calendars: [PRIMARY] },
+            { intent: JSON.stringify({ title, calendarId: 'a', deletionRevision: 'A'.repeat(32) }), calendars: [PRIMARY, { id: 'a', title }] },
+            { intent: JSON.stringify({ title, calendarId: 'a', deletionRevision: 42 }), calendars: [PRIMARY, { id: 'a', title }] },
         ];
         for (const item of cases) {
             const phone = device({ os: 'ios', calendars: item.calendars, storage: {
@@ -291,6 +332,114 @@ describe('calendar push behind the host ports', () => {
         expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
         expect(phone.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
         expect(phone.writes.filter((write) => write[0] === 'createCalendar')).toHaveLength(1);
+    });
+
+    it('checks expected ownership after an in-flight iOS creation finishes', async () => {
+        const phone = device({ os: 'ios' });
+        const create = phone.host.calendars.createCalendar;
+        let finishCreate: (() => void) | undefined;
+        phone.host.calendars.createCalendar = async (details) => {
+            await new Promise<void>((resolve) => { finishCreate = resolve; });
+            return create(details);
+        };
+        const service = createCalendarPushService(phone.host);
+        const ensuring = service.ensureMindwtrCalendar();
+        await vi.waitFor(() => expect(finishCreate).toBeTypeOf('function'));
+        const deleting = service.deleteMindwtrCalendar({
+            calendarId: null,
+            creationIntentRevision: deterministicHash128Hex(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)!),
+        });
+        const refused = expect(deleting).rejects.toThrow('changed before deletion');
+        finishCreate!();
+        expect(await ensuring).toBe('created-1');
+        await refused;
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'created-1']);
+        expect(phone.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('created-1');
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([]);
+    });
+
+    it('queues a different Delete expectation after a stale request instead of sharing its result', async () => {
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'saved', title: 'Mindwtr' }], storage: {
+            [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved',
+        } });
+        const service = createCalendarPushService(phone.host);
+        const stale = service.deleteMindwtrCalendar({ calendarId: 'old', creationIntentRevision: null });
+        const current = service.deleteMindwtrCalendar({ calendarId: 'saved', creationIntentRevision: null });
+        await expect(stale).rejects.toThrow('changed before deletion');
+        await current;
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary']);
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'saved']]);
+    });
+
+    it('guards the raw iOS intent revision and permits completion once that intent is gone', async () => {
+        const title = 'Mindwtr (12345678-1234-4234-8234-123456789abc)';
+        const intent = JSON.stringify({ title }, null, 2);
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'personal', title: 'Mindwtr' }, { id: 'pending', title }], storage: {
+            [CALENDAR_PUSH_CREATION_INTENT_KEY]: intent,
+        } });
+        const service = createCalendarPushService(phone.host);
+        await expect(service.deleteMindwtrCalendar({ calendarId: null, creationIntentRevision: deterministicHash128Hex('older intent') }))
+            .rejects.toBeInstanceOf(CalendarPushOwnershipChangedError);
+        expect(phone.writes).toEqual([]);
+        expect(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(intent);
+        const expected = { calendarId: null, creationIntentRevision: deterministicHash128Hex(intent) };
+        await service.deleteMindwtrCalendar(expected);
+        await service.deleteMindwtrCalendar(expected);
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'personal']);
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'pending']]);
+        expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+    });
+
+    it('saves durable iOS deletion progress before provider removal and keeps the original expectation retryable', async () => {
+        const title = 'Mindwtr (12345678-1234-4234-8234-123456789abc)';
+        const intent = JSON.stringify({ title });
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'pending', title }], storage: {
+            [CALENDAR_PUSH_CREATION_INTENT_KEY]: intent,
+        } });
+        const expected = { calendarId: null, creationIntentRevision: deterministicHash128Hex(intent) };
+        const deleting = vi.spyOn(phone.host.calendars, 'deleteCalendar');
+        phone.life.dieAt = 1;
+        await expect(createCalendarPushService(phone.host).deleteMindwtrCalendar(expected)).rejects.toThrow();
+        expect(phone.writes).toEqual([]);
+        expect(deleting).not.toHaveBeenCalled();
+        expect(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(intent);
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'pending']);
+        phone.life.dieAt = Infinity;
+        phone.life.died = false;
+        const remove = phone.host.calendars.deleteCalendar;
+        phone.host.calendars.deleteCalendar = async (id) => {
+            expect(JSON.parse(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)!)).toEqual({
+                title, calendarId: 'pending', deletionRevision: expected.creationIntentRevision,
+            });
+            await remove(id);
+            phone.life.failList = true;
+            throw new Error('Native delete response lost');
+        };
+        await expect(createCalendarPushService(phone.host).deleteMindwtrCalendar(expected)).rejects.toThrow('response lost');
+        phone.life.failList = false;
+        await createCalendarPushService(phone.host).deleteMindwtrCalendar(expected);
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary']);
+        expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
+        expect(phone.writes.filter(([name]) => name === 'deleteCalendar')).toEqual([['deleteCalendar', 'pending']]);
+    });
+
+    it.each([false, true])('iOS ensure preserves deletion-phase ownership and cleanup clears its mapping (visible: %s)', async (visible) => {
+        const title = 'Mindwtr (12345678-1234-4234-8234-123456789abc)';
+        const revision = deterministicHash128Hex(JSON.stringify({ title }));
+        const intent = JSON.stringify({ title, calendarId: 'pending', deletionRevision: revision });
+        const phone = device({ os: 'ios', calendars: [PRIMARY, { id: 'personal', title: 'Mindwtr' }, ...(visible ? [{ id: 'pending', title }] : [])], storage: {
+            [CALENDAR_PUSH_CREATION_INTENT_KEY]: intent,
+        }, entries: [
+            { taskId: 'owned', calendarId: 'pending', calendarEventId: 'event', platform: 'android', lastSyncedAt: '' },
+            { taskId: 'other', calendarId: 'primary', calendarEventId: 'other-event', platform: 'android', lastSyncedAt: '' },
+        ] });
+        expect(await createCalendarPushService(phone.host).ensureMindwtrCalendar()).toBeNull();
+        expect(phone.writes).toEqual([]);
+        expect(phone.storage.get(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(intent);
+        await createCalendarPushService(phone.host).deleteMindwtrCalendar({ calendarId: null, creationIntentRevision: revision });
+        expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'personal']);
+        expect([...phone.entries.keys()]).toEqual(['other']);
+        expect(phone.storage.has(CALENDAR_PUSH_CREATION_INTENT_KEY)).toBe(false);
     });
 
     it('does not create a second iOS calendar while recolor is recovering an unfinished creation', async () => {
@@ -588,6 +737,228 @@ describe('calendar push behind the host ports', () => {
         await vi.advanceTimersByTimeAsync(1);
         expect(phone.writes.map(([name, id, title]) => [name, id, title])).toEqual([['updateEvent', phone.entries.get('t1')!.calendarEventId, 'Renamed']]);
         service.stopCalendarPushSync();
+    });
+
+    it('hands coalesced store changes to admission and writes only when the owner explicitly runs the partial sync', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const first = task('t1', { dueDate: '2026-09-10' });
+        const second = task('t2', { dueDate: '2026-09-11' });
+        const phone = device({ storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1' }, tasks: [first, second] });
+        const requestPartialSync = vi.fn();
+        phone.host.requestPartialSync = requestPartialSync;
+        const subscribe = vi.spyOn(phone.host.store, 'subscribe');
+        const service = createCalendarPushService(phone.host);
+        await service.runFullCalendarSync();
+        service.startCalendarPushSync();
+        service.startCalendarPushSync();
+        expect(subscribe).toHaveBeenCalledTimes(1);
+        phone.writes.length = 0;
+
+        const renamedFirst = { ...first, title: 'Changed first' };
+        const renamedSecond = { ...second, title: 'Changed second' };
+        phone.setTasks([renamedFirst, second]);
+        await vi.advanceTimersByTimeAsync(2000);
+        phone.setTasks([renamedFirst, renamedSecond]);
+        await vi.advanceTimersByTimeAsync(2499);
+        expect(requestPartialSync).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(requestPartialSync.mock.calls).toEqual([[['t1', 't2']]]);
+        expect(phone.writes).toEqual([]);
+
+        await service.runPartialCalendarSync(requestPartialSync.mock.calls[0]![0]);
+        expect(phone.writes).toEqual([
+            ['updateEvent', phone.entries.get('t1')!.calendarEventId, 'Changed first'],
+            ['updateEvent', phone.entries.get('t2')!.calendarEventId, 'Changed second'],
+        ]);
+        service.stopCalendarPushSync();
+    });
+
+    it('serializes native-owned partial and full provider writes and snapshots caller IDs', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const dated = task('t1', { dueDate: '2026-09-10' });
+        const phone = device({
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_TARGET_ID_KEY]: PRIMARY.id },
+            tasks: [dated],
+        });
+        phone.host.requestPartialSync = vi.fn();
+        const order: string[] = [];
+        let releaseFull: (() => void) | undefined;
+        let releasePartial: (() => void) | undefined;
+        const createEvent = phone.host.calendars.createEvent;
+        const updateEvent = phone.host.calendars.updateEvent;
+        phone.host.calendars.createEvent = async (...args) => {
+            order.push('create:start');
+            await new Promise<void>((resolve) => { releaseFull = resolve; });
+            const id = await createEvent(...args);
+            order.push('create:end');
+            return id;
+        };
+        let updateCount = 0;
+        phone.host.calendars.updateEvent = async (...args) => {
+            const count = ++updateCount;
+            order.push(`update:${count}:start`);
+            if (count === 1) await new Promise<void>((resolve) => { releasePartial = resolve; });
+            await updateEvent(...args);
+            order.push(`update:${count}:end`);
+        };
+        phone.host.log.info = (message) => { if (message === 'Full calendar sync complete') order.push('full:complete'); };
+        const service = createCalendarPushService(phone.host);
+
+        const firstFull = service.runFullCalendarSync();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(order).toEqual(['create:start']);
+        phone.setTasks([{ ...dated, title: 'Changed' }]);
+        const taskIds = ['t1'];
+        const partial = service.runPartialCalendarSync(taskIds);
+        taskIds.splice(0, taskIds.length, 'mutated');
+        const secondFull = service.runFullCalendarSync();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(order).toEqual(['create:start']);
+
+        releaseFull?.();
+        await firstFull;
+        await vi.advanceTimersByTimeAsync(0);
+        expect(order).toEqual(['create:start', 'create:end', 'full:complete', 'update:1:start']);
+
+        releasePartial?.();
+        await Promise.all([partial, secondFull]);
+        expect(order).toEqual([
+            'create:start', 'create:end', 'full:complete', 'update:1:start', 'update:1:end',
+            'update:2:start', 'update:2:end', 'full:complete',
+        ]);
+        expect(phone.writes.map(([method]) => method)).toEqual(['createEvent', 'updateEvent', 'updateEvent']);
+        expect(phone.host.requestPartialSync).not.toHaveBeenCalled();
+    });
+
+    it('cancels the pending handoff and watcher on stop, then starts a fresh watcher', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const phone = device({ tasks: [task('t1'), task('t2')] });
+        const requestPartialSync = vi.fn();
+        phone.host.requestPartialSync = requestPartialSync;
+        const service = createCalendarPushService(phone.host);
+        service.startCalendarPushSync();
+        phone.setTasks([task('t1', { title: 'Pending change' }), task('t2')]);
+        await vi.advanceTimersByTimeAsync(2499);
+        service.stopCalendarPushSync();
+        phone.setTasks([task('t1', { title: 'While stopped' }), task('t2')]);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(requestPartialSync).not.toHaveBeenCalled();
+        expect(phone.writes).toEqual([]);
+
+        service.startCalendarPushSync();
+        phone.setTasks([task('t1', { title: 'While stopped' }), task('t2', { title: 'Fresh change' })]);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(requestPartialSync.mock.calls).toEqual([[['t2']]]);
+        expect(phone.writes).toEqual([]);
+        service.stopCalendarPushSync();
+    });
+
+    it('retires an existing watcher and pending handoff while sandbox is active', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const sandboxMode = vi.spyOn(sandbox, 'isSandboxMode').mockReturnValue(false);
+        const phone = device({ tasks: [task('t1')] });
+        const requestPartialSync = vi.fn(); phone.host.requestPartialSync = requestPartialSync;
+        const unsubscribe = vi.fn();
+        const subscribe = phone.host.store.subscribe;
+        vi.spyOn(phone.host.store, 'subscribe').mockImplementation((...args) => {
+            const stop = subscribe(...args);
+            return () => { unsubscribe(); stop(); };
+        });
+        const service = createCalendarPushService(phone.host);
+        service.startCalendarPushSync();
+        phone.setTasks([task('t1', { title: 'Pending change' })]);
+        sandboxMode.mockReturnValue(true);
+        service.stopCalendarPushSync();
+        expect(unsubscribe).toHaveBeenCalledOnce();
+        sandboxMode.mockReturnValue(false);
+        phone.setTasks([task('t1', { title: 'While stopped' })]);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(requestPartialSync).not.toHaveBeenCalled(); expect(phone.writes).toEqual([]);
+    });
+
+    it('neither requests admission nor runs full or partial calendar work in sandbox', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        vi.spyOn(sandbox, 'isSandboxMode').mockReturnValue(true);
+        const phone = device({ storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1' }, tasks: [task('t1', { dueDate: '2026-09-10' })] });
+        const requestPartialSync = vi.fn();
+        phone.host.requestPartialSync = requestPartialSync;
+        const getItem = vi.spyOn(phone.host.storage, 'getItem');
+        const subscribe = vi.spyOn(phone.host.store, 'subscribe');
+        const service = createCalendarPushService(phone.host);
+
+        service.startCalendarPushSync();
+        service.scheduleSyncDebounced(['t1']);
+        await service.runFullCalendarSync();
+        await service.runPartialCalendarSync(['t1']);
+        phone.setTasks([task('t1', { dueDate: '2026-09-11' })]);
+        await vi.advanceTimersByTimeAsync(2500);
+        service.stopCalendarPushSync();
+        expect(requestPartialSync).not.toHaveBeenCalled();
+        expect(getItem).not.toHaveBeenCalled();
+        expect(subscribe).not.toHaveBeenCalled();
+        expect(phone.writes).toEqual([]);
+    });
+
+    it('supplies exact task and calendar context to create, update, and stale-task delete callbacks', async () => {
+        const taskId = 'task-é';
+        const calendarId = 'calendar-e\u0301';
+        const dated = task(taskId, { dueDate: '2026-09-10' });
+        const phone = device({
+            calendars: [{ ...PRIMARY, id: calendarId }],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_TARGET_ID_KEY]: calendarId },
+            tasks: [dated],
+        });
+        const service = createCalendarPushService(phone.host);
+        await service.runFullCalendarSync();
+        const eventId = phone.entries.get(taskId)!.calendarEventId;
+        phone.setTasks([{ ...dated, title: 'Changed fields', updatedAt: '2026-09-02T00:00:00.000Z' }]);
+        await service.runFullCalendarSync();
+        phone.setTasks([]);
+        await service.runFullCalendarSync();
+        expect(phone.eventContexts).toEqual([
+            ['createEvent', calendarId, { taskId, calendarId }],
+            ['updateEvent', eventId, { taskId, calendarId }],
+            ['deleteEvent', eventId, { taskId, calendarId }],
+        ]);
+        expect(phone.writes.map(([method]) => method)).toEqual(['createEvent', 'updateEvent', 'deleteEvent', 'deleteSyncEntry']);
+        expect(phone.entries.size).toBe(0);
+    });
+
+    it('keeps migration deletion bound to the old mapping and creation bound to the new target', async () => {
+        const taskId = 'task-unchanged';
+        const oldCalendarId = 'calendar-é';
+        const newCalendarId = 'calendar-e\u0301';
+        const oldEntry = { taskId, calendarEventId: 'old-event', calendarId: oldCalendarId, platform: 'android', lastSyncedAt: '' };
+        const phone = device({
+            calendars: [{ ...PRIMARY, id: oldCalendarId }, { ...PRIMARY, id: newCalendarId }],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_TARGET_ID_KEY]: newCalendarId },
+            entries: [oldEntry], tasks: [task(taskId, { dueDate: '2026-09-10' })],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.eventContexts).toEqual([
+            ['deleteEvent', 'old-event', { taskId: oldEntry.taskId, calendarId: oldCalendarId }],
+            ['createEvent', newCalendarId, { taskId, calendarId: newCalendarId }],
+        ]);
+        expect(phone.writes.map(([method]) => method)).toEqual(['deleteEvent', 'deleteSyncEntry', 'createEvent']);
+        expect(phone.entries.get(taskId)).toMatchObject({ taskId, calendarId: newCalendarId });
+        expect(oldEntry).toEqual({ taskId, calendarEventId: 'old-event', calendarId: oldCalendarId, platform: 'android', lastSyncedAt: '' });
+    });
+
+    it('supplies the projected occurrence task identity without rewriting its source task', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-09-09T12:00:00.000Z'));
+        const source = task('recurring-task', {
+            dueDate: '2026-09-10', recurrence: { rule: 'monthly', strategy: 'strict' }, showFutureRecurrence: true,
+        });
+        const original = structuredClone(source);
+        const phone = device({ storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_TARGET_ID_KEY]: PRIMARY.id }, tasks: [source] });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.eventContexts).toEqual([
+            ['createEvent', PRIMARY.id, { taskId: source.id, calendarId: PRIMARY.id }],
+            ['createEvent', PRIMARY.id, { taskId: source.id + ':projected-recurrence', calendarId: PRIMARY.id }],
+        ]);
+        expect([...phone.entries.keys()]).toEqual([source.id, source.id + ':projected-recurrence']);
+        expect(source).toEqual(original);
     });
 
     it('logs one v1.3.4/calendar-push-owned-only line per proving point, with no titles', async () => {

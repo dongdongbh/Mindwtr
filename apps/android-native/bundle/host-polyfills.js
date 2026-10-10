@@ -458,8 +458,23 @@
     }
 
     if (typeof global.URLSearchParams !== 'function') {
-        // A query name or value as WHATWG's form-urlencoded parser reads it (and RN's URL shim): "+" is a space.
-        var decodeQuery = function (text) { return decodeURIComponent(text.replace(/\+/g, ' ')); };
+        // WHATWG form decoding keeps malformed percent literals and replaces malformed UTF-8.
+        var decodeQuery = function (text) {
+            var bytes = new global.TextEncoder().encode(text.replace(/\+/g, ' '));
+            var decoded = [];
+            for (var i = 0; i < bytes.length; i += 1) {
+                if (bytes[i] === 0x25 && i + 2 < bytes.length) {
+                    var hex = String.fromCharCode(bytes[i + 1], bytes[i + 2]);
+                    if (/^[0-9a-f]{2}$/i.test(hex)) {
+                        decoded.push(parseInt(hex, 16));
+                        i += 2;
+                        continue;
+                    }
+                }
+                decoded.push(bytes[i]);
+            }
+            return new global.TextDecoder('utf-8', { fatal: false, ignoreBOM: true }).decode(new Uint8Array(decoded));
+        };
         global.URLSearchParams = function URLSearchParams(init) {
             var pairs = [];
             if (typeof init === 'string') {
@@ -808,7 +823,8 @@
     // with the host's text (a missing file names ENOENT). Refused once the host's deadline passed, as a fetch is, and an open
     // call then rejects at once and the host aborts it (HostIo.fileAbort: a copy stalled on a document provider), so a
     // timed-out operation drains and the host never stops; its late answer settles nothing.
-    var fileChannel = function (method) {
+    var fileChannel = function (method, abortMethod) {
+        abortMethod = abortMethod || 'fileAbort';
         return function (request, bytes) {
             return new Promise(function (resolve, reject) {
                 refuseIfCancelled();
@@ -817,7 +833,7 @@
                 if (bytes !== undefined) payload.base64 = toBase64(bytesOf(bytes));
                 var cancel = function (reason) {
                     ioPending.delete(id);
-                    try { native().fileAbort(id); } catch (_error) { /* its late answer is dropped either way */ }
+                    try { native()[abortMethod](id); } catch (_error) { /* its late answer is dropped either way */ }
                     reject(reason);
                 };
                 var id = startIo(hostCall(native()[method](JSON.stringify(payload))), function (answer) {
@@ -830,6 +846,12 @@
     if (global.__mindwtrNative && typeof global.__mindwtrNative.fileCall === 'function') {
         global.__mindwtrFileCall = fileChannel('fileCall');
         global.__mindwtrInstallerCall = fileChannel('installerCall');
+    }
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarCall === 'function') {
+        global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');
+    }
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarPushCall === 'function') {
+        global.__mindwtrCalendarPushCall = fileChannel('calendarPushCall', 'calendarPushAbort');
     }
 
     // --- sync crypto --------------------------------------------------------

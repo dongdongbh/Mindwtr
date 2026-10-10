@@ -317,6 +317,10 @@ type PendingReceipt = { fingerprint: string; reply: unknown; generation: number 
 let durableReceipts: Map<string, StoredReceipt> | null = null;
 /** null selects Android's existing all-command mode; a set scopes iOS durable replies and writes. */
 let durableCommands: Set<string> | null = null;
+/** Whether boot loaded durable receipt ownership for this exact command. */
+export const isNativeRequestReceiptDurable = (command: string): boolean => durableReceipts !== null
+    && (durableCommands === null || durableCommands.has(command))
+    && !NATIVE_UNJOURNALED_COMMANDS.has(command);
 /** Every request ID a receipts instance holds, and its payload: one ID belongs to one action across the contract's modules. */
 const requestPayloads = new Map<string, string>();
 /** Landed, not committed yet; `generation` is the store's when it landed (every change it made is saved at or before it). */
@@ -364,18 +368,25 @@ export async function loadNativeRequestReceipts(client: SqliteClient,
 }
 
 /** After the journal's boot replay: drops receipts older than 30 days. */
-export async function pruneNativeRequestReceipts(client: SqliteClient, now = new Date()): Promise<number> {
-    // ponytail: a fixed 30-day window; a journal entry older than that replays without its receipt (the write rules above still hold).
+export async function pruneNativeRequestReceipts(client: SqliteClient, now = new Date(), retention?: {
+    readonly retainedRequestIds?: readonly string[];
+    readonly retainedCommands?: readonly string[];
+}): Promise<number> {
+    // shortcut: default 30-day expiry, pass explicit retention when unfinished work outlives it.
     const cutoff = new Date(now.getTime() - RECEIPT_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    if (durableCommands === null) await client.run('DELETE FROM native_request_receipts WHERE saved_at < ?', [cutoff]);
+    const retainedIds = new Set(retention?.retainedRequestIds);
+    const retainedCommands = new Set(retention?.retainedCommands);
+    const expires = (id: string, receipt: StoredReceipt): boolean => receipt.savedAt < cutoff
+        && (durableCommands === null || durableCommands.has(fingerprintCommand(receipt.fingerprint)))
+        && !retainedIds.has(id) && !retainedCommands.has(fingerprintCommand(receipt.fingerprint));
+    if (durableCommands === null && retention === undefined) await client.run('DELETE FROM native_request_receipts WHERE saved_at < ?', [cutoff]);
     else for (const [id, receipt] of durableReceipts ?? []) {
-        if (receipt.savedAt < cutoff && durableCommands.has(fingerprintCommand(receipt.fingerprint)))
+        if (expires(id, receipt))
             await client.run('DELETE FROM native_request_receipts WHERE request_id = ? AND saved_at < ?', [id, cutoff]);
     }
     let pruned = 0;
     for (const [id, receipt] of durableReceipts ?? []) {
-        if (receipt.savedAt >= cutoff || durableCommands !== null
-            && !durableCommands.has(fingerprintCommand(receipt.fingerprint))) continue;
+        if (!expires(id, receipt)) continue;
         durableReceipts!.delete(id);
         pruned += 1;
     }
@@ -674,9 +685,7 @@ export function createNativeRequestReceipts(options: {
 }): NativeRequestReceipts {
     const limit = options.limit ?? 50;
     const receipts = new Map<string, Receipt>();
-    const durableFor = (payload: string) => durableReceipts !== null
-        && (durableCommands === null || durableCommands.has(commandOf(payload)))
-        && !NATIVE_UNJOURNALED_COMMANDS.has(commandOf(payload));
+    const durableFor = (payload: string) => isNativeRequestReceiptDurable(commandOf(payload));
 
     const checkIdentity = (requestId: unknown, payload: string): NativeHostResult<null> => {
         if (typeof requestId !== 'string' || !REQUEST_ID_PATTERN.test(requestId)) {

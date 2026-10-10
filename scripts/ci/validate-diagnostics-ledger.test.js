@@ -66,11 +66,29 @@ function collectCodeSlugs({ file, source }) {
       }
     }
   }
-  // Native Swift diagnostics use NSLog; unused string constants do not count.
+  // Native Swift diagnostics use NSLog or forward a literal JSON context to
+  // the shared Diagnostics logLine bridge; unused string constants do not count.
   if (file.endsWith(".swift")) {
     for (const message of source.matchAll(/\bNSLog\(\s*"((?:\\[\s\S]|[^"\\])*)"/g)) {
       for (const match of message[1].matchAll(/\breleaseCheck=([\w./-]+)/g)) {
         sites.push({ file, slug: match[1] });
+      }
+    }
+    for (const call of source.matchAll(
+      /\bcall\(\s*"logLine"\s*,\s*argumentsJSON:\s*(?:self\.)?json\(\s*\[\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*(#+)"([\s\S]*?)"\1\s*,?\s*\]\s*\)\s*\)/g,
+    )) {
+      try {
+        const context = JSON.parse(call[2]);
+        if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
+      } catch { /* Invalid JSON cannot supply a Diagnostics context. */ }
+    }
+    // Dynamic scalar fields use a flat Swift dictionary encoded at the call site.
+    for (const call of source.matchAll(
+      /\bcall\(\s*"logLine"\s*,\s*argumentsJSON:\s*(?:self\.)?json\(\s*\[\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*try\s+(?:self\.)?json\(\s*\[((?:"(?:\\[\s\S]|[^"\\])*"|[^"[\]])*)\]\s*\)\s*,?\s*\]\s*\)\s*\)/g,
+    )) {
+      for (const field of call[1].matchAll(/"releaseCheck"\s*:\s*("(?:\\[\s\S]|[^"\\])*")/g)) {
+        try { sites.push({ file, slug: JSON.parse(field[1]) }); }
+        catch { /* Interpolated or unsupported Swift strings are not resolved literals. */ }
       }
     }
   }
@@ -185,6 +203,58 @@ describe("release diagnostics ledger", () => {
     ` })).toEqual([
       { file, slug: "v1.3.3/native-swift-save" },
       { file, slug: "v1.3.3/native-swift-retry" },
+    ]);
+  });
+
+  it("resolves Swift raw JSON immediately forwarded through the Diagnostics logLine bridge", () => {
+    const file = "apps/ios-native/App/CoreModel.swift";
+    expect(collectCodeSlugs({ file, source: `
+      _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+        "Native iOS foreground activation refreshed",
+        #"{"releaseCheck":"v1.3.5/ios-foreground-activation","outcome":"refreshed"}"#,
+      ]))
+    ` })).toEqual([{ file, slug: "v1.3.5/ios-foreground-activation" }]);
+  });
+
+  it("rejects unused Swift JSON, other bridge calls and invalid logLine contexts", () => {
+    const file = "apps/ios-native/App/Example.swift";
+    expect(collectCodeSlugs({ file, source: `
+      let unused = #"{"releaseCheck":"v1.3.5/unused-swift-json"}"#
+      currentHost.call("other", argumentsJSON: self.json([
+        "Not a diagnostic", #"{"releaseCheck":"v1.3.5/other-swift-call"}"#,
+      ]))
+      currentHost.call("logLine", argumentsJSON: self.json(["Dynamic context", unused]))
+      currentHost.call("logLine", argumentsJSON: self.json([
+        "Malformed context", #"{"releaseCheck":"v1.3.5/malformed-swift-json",}"#,
+      ]))
+      currentHost.call("logLine", argumentsJSON: self.json([
+        "Wrong field type", #"{"releaseCheck":123}"#,
+      ]))
+    ` })).toEqual([]);
+  });
+
+  it("resolves Swift dictionary contexts only when immediately encoded into logLine", () => {
+    const file = "apps/ios-native/App/CoreModel.swift";
+    expect(collectCodeSlugs({ file, source: `
+      let unused = ["releaseCheck": "v1.3.5/unused-dictionary"]
+      currentHost.call("other", argumentsJSON: json([
+        "Not a diagnostic", try json(["releaseCheck": "v1.3.5/other-dictionary"]),
+      ]))
+      currentHost.call("logLine", argumentsJSON: json([
+        "Dynamic context", try json(unused),
+      ]))
+      currentHost.call("logLine", argumentsJSON: json([
+        "Wrong field type", try json(["releaseCheck": 123]),
+      ]))
+      owner.host.call("logLine", argumentsJSON: json([
+        "Native response", try json(["releaseCheck": "v1.3.5/native-response", "action": action, "outcome": outcome]),
+      ]))
+      currentHost.call("logLine", argumentsJSON: self.json([
+        "Native presentation", try self.json(["releaseCheck": "v1.3.5/native-presentation", "outcome": sound ? "sound" : "silent"]),
+      ]))
+    ` })).toEqual([
+      { file, slug: "v1.3.5/native-response" },
+      { file, slug: "v1.3.5/native-presentation" },
     ]);
   });
 

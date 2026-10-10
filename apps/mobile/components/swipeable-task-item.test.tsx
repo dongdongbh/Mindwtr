@@ -1,9 +1,10 @@
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import renderer from 'react-test-renderer';
-import { AccessibilityInfo, Alert, Text } from 'react-native';
+import { AccessibilityInfo, Alert, AppState, Text } from 'react-native';
+import type { AppStateStatus } from 'react-native';
 
-import { getTaskAgeLabel, safeFormatDate } from '@mindwtr/core';
+import { configureDateFormatting, getDateFormattingConfig, getTaskAgeLabel, safeFormatDate } from '@mindwtr/core';
 import { SwipeableTaskItem, readTaskRowRenderCount, type TaskRowActions } from './swipeable-task-item';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
 import { TaskEditModal } from './task-edit-modal';
@@ -258,6 +259,103 @@ describe('SwipeableTaskItem', () => {
     restoreTask.mockResolvedValue({ success: true });
     undoTaskCompletion.mockResolvedValue(undefined);
     getTaskStaleness.mockReturnValue('stale');
+  });
+
+  it.each([
+    { recurrence: undefined, timeFormat: '12h' as const },
+    { recurrence: undefined, timeFormat: '24h' as const },
+    { recurrence: 'daily' as const, timeFormat: '12h' as const },
+    { recurrence: 'daily' as const, timeFormat: '24h' as const },
+  ])('refreshes a memoized due row without prop changes ($timeFormat, $recurrence)', ({ recurrence, timeFormat }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 9, 12, 59, 30));
+    const formatting = getDateFormattingConfig();
+    configureDateFormatting({ ...formatting, timeFormat });
+    const dueDate = new Date(2026, 9, 9, 13, 0, 0).toISOString();
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<SwipeableTaskItem
+        task={{ id: 'clock', title: 'Clock', status: 'next', recurrence, dueDate,
+          tags: [], contexts: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }}
+        isDark={false}
+        tc={{ taskItemBg: '#111111', border: '#222222', text: '#ffffff', secondaryText: '#999999',
+          tint: '#3b82f6', warning: '#f59e0b', danger: '#b91c1c' } as any}
+      />);
+    });
+    try {
+      const label = safeFormatDate(dueDate, 'Pp');
+      expect(getTextColor(tree, label)).toBe('#f59e0b');
+      renderer.act(() => { vi.advanceTimersByTime(30_001); });
+      expect(getTextColor(tree, label)).toBe('#b91c1c');
+    } finally {
+      renderer.act(() => { tree.unmount(); });
+      configureDateFormatting(formatting);
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes the memoized row on same-minute resume and preserves date-only/status semantics', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 9, 13, 0, 10));
+    let onState!: (state: AppStateStatus) => void;
+    const stateSpy = vi.spyOn(AppState, 'addEventListener').mockImplementation((_, listener) => {
+      onState = listener;
+      return { remove: vi.fn() };
+    });
+    const timedDue = new Date(2026, 9, 9, 13, 0, 20).toISOString();
+    const colors = { taskItemBg: '#111111', border: '#222222', text: '#ffffff', secondaryText: '#999999',
+      tint: '#3b82f6', warning: '#f59e0b', danger: '#b91c1c' } as any;
+    const task = { id: 'clock', title: 'Clock', status: 'next' as const, tags: [], contexts: [],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => { tree = renderer.create(<>
+      <SwipeableTaskItem task={{ ...task, dueDate: timedDue }} isDark={false} tc={colors} />
+      <SwipeableTaskItem task={{ ...task, id: 'date', dueDate: '2026-10-09' }} isDark={false} tc={colors} />
+      <SwipeableTaskItem task={{ ...task, id: 'done', status: 'done', dueDate: '2026-10-08' }} isDark={false} tc={colors} />
+      <SwipeableTaskItem task={{ ...task, id: 'reference', status: 'reference', dueDate: timedDue }} isDark={false} tc={colors} />
+    </>); });
+    try {
+      const timedLabel = safeFormatDate(timedDue, 'Pp');
+      renderer.act(() => { onState('background'); vi.advanceTimersByTime(20_000); });
+      expect(getTextColor(tree, timedLabel)).toBe('#f59e0b');
+      renderer.act(() => { onState('active'); });
+      expect(getTextColor(tree, timedLabel)).toBe('#b91c1c');
+      expect(getTextColor(tree, safeFormatDate('2026-10-09', 'P'))).toBe('#f59e0b');
+      expect(getTextColor(tree, safeFormatDate('2026-10-08', 'P'))).toBe('#999999');
+      expect(vi.getTimerCount()).toBe(1);
+      vi.setSystemTime(new Date(2026, 9, 10, 0, 0, 0, 1));
+      renderer.act(() => { onState('active'); });
+      expect(getTextColor(tree, safeFormatDate('2026-10-09', 'P'))).toBe('#b91c1c');
+    } finally {
+      renderer.act(() => { tree.unmount(); });
+      stateSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes enabled task age without a due date or prop change', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 9, 12, 59, 30));
+    storeState.settings.appearance = { showTaskAge: true };
+    const createdAt = new Date(2026, 9, 7, 13, 0, 0).toISOString();
+    const before = getTaskAgeLabel(createdAt)!;
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => { tree = renderer.create(<SwipeableTaskItem
+      task={{ id: 'age', title: 'Age', status: 'next', tags: [], contexts: [], createdAt, updatedAt: createdAt }}
+      isDark={false} tc={{ taskItemBg: '#111111', border: '#222222', text: '#ffffff', secondaryText: '#999999' } as any}
+    />); });
+    try {
+      expect(hasText(tree, before)).toBe(true);
+      renderer.act(() => { vi.advanceTimersByTime(30_001); });
+      const after = getTaskAgeLabel(createdAt)!;
+      expect(after).not.toBe(before);
+      expect(hasText(tree, after)).toBe(true);
+      expect(hasText(tree, before)).toBe(false);
+    } finally {
+      renderer.act(() => { tree.unmount(); });
+      storeState.settings.appearance = {};
+      vi.useRealTimers();
+    }
   });
 
   it('keeps inbox row titles width-constrained without the focus toggle', () => {

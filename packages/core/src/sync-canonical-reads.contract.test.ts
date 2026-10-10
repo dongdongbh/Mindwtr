@@ -42,6 +42,9 @@ import { createNextRecurringTask } from './recurrence';
 import { toStableSyncJson } from './sync-helpers';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { createNativeHostContract } from './native-host-contract';
+import { createCalendarSubscriptionSettingsMethods } from './native-host-contract-calendar-subscription-settings';
+import { createCalendarSubscriptionAddMethods } from './native-host-contract-calendar-subscription-add';
+import { buildCalendarSubscriptionSettingsModel } from './native-host-contract-settings-calendar';
 import { prepareChecklistProjectConversion } from './checklist-project-conversion';
 import { readAreaDurableData } from './native-host-contract-area-durable';
 import { projectAvailabilityWritePlan, projectFileAvailabilityWritePlan } from './store-projects/project-actions';
@@ -820,6 +823,12 @@ describe('canonical local reads contract', () => {
         // Requeues the raw saved snapshot owned by commitPreparedAppLock after
         // a failed save; the SQLite recovery test checks its exact contents.
         'retryPreparedAppLockSnapshot',
+        // Exact raw snapshot retry of the notification write covered below;
+        // actual failed-save and foreign-failure ownership are checked in SQLite tests.
+        'retryPreparedNotificationSettingSnapshot',
+        // Exact raw snapshot retry of the calendar subscription write covered below;
+        // failed-save and foreign-failure ownership are checked in real SQLite tests.
+        'retryPreparedCalendarSubscriptionSettingSnapshot',
     ]);
 
     it('leaves a canonical document after every store write action', async () => {
@@ -1191,6 +1200,94 @@ describe('canonical local reads contract', () => {
                 });
                 expect(nativeValue(await host.commitPreparedAppLock({ request, prepared: planned.prepared })))
                     .toEqual({ changed: true, value: request.value });
+            },
+            commitPreparedCalendarSubscriptionAdd: async (control) => {
+                await useTaskStore.getState().updateSettings({ externalCalendars: [] });
+                const host = await nativeHost(control);
+                const deps = {
+                    readiness: () => {
+                        const ready = host.getDataSettings();
+                        return ready.ok ? { ok: true as const, value: null } : ready;
+                    },
+                    save: async () => { await flushPendingSave(); return { ok: true as const, value: null }; },
+                    storage: () => null,
+                };
+                const metadata = createCalendarSubscriptionSettingsMethods({ ...deps,
+                    model: ({ settings, areas, feeds, revision }) => buildCalendarSubscriptionSettingsModel(feeds, revision,
+                        { areas, theme: settings.theme, t: (key) => key }) });
+                const methods = createCalendarSubscriptionAddMethods(deps);
+                const expected = nativeValue(await metadata.getCalendarSubscriptionOptions({})).expected;
+                const request = { requestId: '5136a7dc-a2ed-4b3a-a3cf-bd0dbd841472',
+                    name: '  ', url: ' https://calendar.example.invalid/new.ics ', defaultName: 'Calendar', expected };
+                const planned = nativeValue(await methods.prepareCalendarSubscriptionAdd(request));
+                expect(planned.kind).toBe('prepared');
+                if (planned.kind !== 'prepared') return;
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                control.expectPersisted((written) => {
+                    expect(written).toEqual({ ...before, settings: { ...before.settings,
+                        externalCalendars: [{ id: request.requestId, name: 'Calendar',
+                            url: request.url.trim(), enabled: true }],
+                        syncPreferencesUpdatedAt: { ...before.settings.syncPreferencesUpdatedAt,
+                            externalCalendars: planned.prepared.stamp } } });
+                });
+                expect(nativeValue(await methods.commitPreparedCalendarSubscriptionAdd({ request, prepared: planned.prepared })))
+                    .toEqual({ changed: true, toasts: [], open: null, clearDraft: true });
+            },
+            commitPreparedCalendarSubscriptionSetting: async (control) => {
+                const feed = { id: 'contract-calendar', name: 'Contract calendar',
+                    url: 'https://calendar.example.invalid/calendar.ics', enabled: true,
+                    color: '#2563EB', areaIds: [areaId] };
+                await useTaskStore.getState().updateSettings({ externalCalendars: [feed] });
+                const host = await nativeHost(control);
+                const methods = createCalendarSubscriptionSettingsMethods({
+                    readiness: () => {
+                        const ready = host.getDataSettings();
+                        return ready.ok ? { ok: true, value: null } : ready;
+                    },
+                    save: async () => {
+                        await flushPendingSave();
+                        return { ok: true, value: null };
+                    },
+                    storage: () => null,
+                    model: ({ settings, areas, feeds, revision }) => buildCalendarSubscriptionSettingsModel(feeds, revision,
+                        { areas, theme: settings.theme, t: (key) => key }),
+                });
+                const options = nativeValue(await methods.getCalendarSubscriptionOptions({}));
+                expect(options.expected.source).toBe('canonical');
+                const request = { requestId: '5136a7dc-a2ed-4b3a-a3cf-bd0dbd841470',
+                    edit: { type: 'feed' as const, feedId: feed.id, field: 'enabled' as const,
+                        value: false, revision: options.expected.revision }, expected: options.expected };
+                expect(options.model.items[0].toggle).toEqual(request.edit);
+                const planned = nativeValue(await methods.prepareCalendarSubscriptionSetting(request));
+                expect(planned.kind).toBe('prepared');
+                if (planned.kind !== 'prepared') return;
+                const before = nativeValue(await readAreaDurableData(false, true)).authority.snapshot;
+                control.expectPersisted((written) => {
+                    expect(written).toEqual({ ...before, settings: { ...before.settings,
+                        externalCalendars: [{ ...feed, enabled: false }],
+                        syncPreferencesUpdatedAt: { ...before.settings.syncPreferencesUpdatedAt,
+                            externalCalendars: planned.prepared.stamp } } });
+                });
+                expect(nativeValue(await methods.commitPreparedCalendarSubscriptionSetting({ request, prepared: planned.prepared })))
+                    .toEqual({ changed: true, toasts: [], open: null, clearDraft: false });
+            },
+            commitPreparedNotificationSetting: async (control) => {
+                const host = await nativeHost(control);
+                const options = nativeValue(await host.getNotificationSettingsOptions({}));
+                const request = { requestId: '0f5deea3-9ef2-4386-bf43-27a176f98442',
+                    edit: { type: 'notificationsEnabled' as const, value: !options.model.task.master.value },
+                    expected: options.expected.notificationsEnabled };
+                const planned = nativeValue(await host.prepareNotificationSetting(request));
+                expect(planned.kind).toBe('prepared');
+                if (planned.kind !== 'prepared') return;
+                const before = useTaskStore.getState().settings;
+                control.expectPersisted((written) => {
+                    expect(written.settings).toEqual({ ...before, notificationsEnabled: request.edit.value });
+                    expect(written.tasks).toHaveLength(settled.tasks.length);
+                    expect(written.projects).toHaveLength(settled.projects.length);
+                });
+                expect(nativeValue(await host.commitPreparedNotificationSetting({ request, prepared: planned.prepared })))
+                    .toEqual({ type: request.edit.type, value: request.edit.value, changed: true });
             },
             commitPreparedArchivedTaskRestore: async (control) => {
                 const host = await nativeHost(control);
@@ -2347,7 +2444,9 @@ describe('canonical local reads contract', () => {
         const notCanonical: Array<{ action: string; storeFields: string[]; readFields: string[] }> = [];
         for (const action of Object.keys(WRITE_ACTIONS).sort()) {
             const outcome = await runMutation(action, WRITE_ACTIONS[action], settled,
-                action === 'commitPreparedReferenceTasksMove' || action === 'commitPreparedReferenceTasksAddTag' || action === 'commitPreparedReferenceTasksRemoveTag');
+                action === 'commitPreparedCalendarSubscriptionSetting' || action === 'commitPreparedCalendarSubscriptionAdd'
+                    || action === 'commitPreparedReferenceTasksMove'
+                    || action === 'commitPreparedReferenceTasksAddTag' || action === 'commitPreparedReferenceTasksRemoveTag');
             if (outcome.storeFields.length > 0 || outcome.readFields.length > 0) {
                 notCanonical.push({ action, ...outcome });
             }

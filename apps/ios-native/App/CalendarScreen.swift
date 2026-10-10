@@ -5,6 +5,7 @@ struct CalendarScreen: View {
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var weekOffset: CGFloat = 0
+    @State private var measuredWeekdays = CalendarWeekdayMeasurements()
     @FocusState private var queryFocused: Bool
     @ScaledMetric(relativeTo: .body) private var monthCellHeight: CGFloat = 86
     @ScaledMetric(relativeTo: .body) private var weekHeaderHeight: CGFloat = 56
@@ -58,6 +59,7 @@ struct CalendarScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                     .accessibilityIdentifier("calendar-notice")
             }
+            feedStatus
             if let error = model.calendarError {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(error).rnFont(14).foregroundStyle(palette.danger).accessibilityIdentifier("calendar-error")
@@ -74,6 +76,29 @@ struct CalendarScreen: View {
             }.frame(height: contentHeight)
             if content.text("mode") == "week" { weekDensity }
             if model.busy { ProgressView().padding(6).accessibilityLabel(model.label("common.loading")) }
+        }
+    }
+
+    @ViewBuilder
+    private var feedStatus: some View {
+        let state = view.object("feedState")
+        let message = state.text("message")
+        if !message.isEmpty && model.calendarError == nil {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    if state.text("status") == "loading" {
+                        ProgressView().accessibilityIdentifier("calendar-feed-loading")
+                    }
+                    Text(message).rnFont(14)
+                        .foregroundStyle(state.text("status") == "error" ? palette.danger : palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("calendar-feed-message")
+                }
+                if state.text("status") != "loading" {
+                    CalendarAction(title: model.label("common.retry"), enabled: model.calendarFeedRetryEnabled,
+                        palette: palette, id: "calendar-feed-retry") { Task { await model.retryCalendar() } }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
         }
     }
 
@@ -135,57 +160,103 @@ struct CalendarScreen: View {
     private var month: some View {
         GeometryReader { geometry in
             let details = content.object("details")
+            let names = content["dayNames"] as? [String] ?? []
+            let count = max(1, names.count)
+            let measurementIdentity = names.map { Data($0.utf8).base64EncodedString() }.joined(separator: ":") + ":" + String(describing: dynamicTypeSize)
+            let intrinsicWidth = measuredWeekdays.identity == measurementIdentity ? measuredWeekdays.maximumWidth : 0
+            let columnWidth = max(geometry.size.width / CGFloat(count), max(intrinsicWidth + 8, 44))
+            let canvasWidth = columnWidth * CGFloat(count)
             let panelHeight = min(geometry.size.height, max(176, geometry.size.height * (dynamicTypeSize.isAccessibilitySize ? 0.75 : 0.58)))
             ZStack(alignment: .bottom) {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        let names = content["dayNames"] as? [String] ?? []
-                        HStack(spacing: 0) {
-                            ForEach(names.indices, id: \.self) { index in
-                                Text(names[index]).rnFont(11, .semibold).foregroundStyle(palette.secondary)
-                                    .frame(maxWidth: .infinity, minHeight: 30)
-                            }
-                        }.background(palette.card)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: max(1, names.count)), spacing: 0) {
-                            ForEach((0..<max(0, content.number("leadingBlanks"))).map { "blank-" + String($0) }, id: \.self) { _ in
-                                Color.clear.frame(height: details.isEmpty ? monthCellHeight : 48).accessibilityHidden(true)
-                            }
-                            ForEach(days.map { $0.text("key") }, id: \.self) { key in
-                                if let cell = days.first(where: { $0.text("key") == key }) {
-                                    monthCell(cell, compact: !details.isEmpty)
-                                }
-                            }
-                        }
-                        .id(details.isEmpty)
+                if canvasWidth > geometry.size.width + 0.5 {
+                    CalendarAnchoredScroll(axis: .horizontal, anchor: viewportAnchor("horizontal"),
+                        pointsPerUnit: columnWidth,
+                        initialOffset: monthColumnOffset(columnWidth: columnWidth, viewportWidth: geometry.size.width, count: count),
+                        identifier: "calendar-month-columns", revealColumn: monthSelectedColumn(count: count)) {
+                        monthGrid(names: names, columnWidth: columnWidth, canvasWidth: canvasWidth,
+                            height: geometry.size.height, panelHeight: details.isEmpty ? 0 : panelHeight,
+                            measurementIdentity: measurementIdentity)
                     }
-                    .padding(.bottom, details.isEmpty ? 0 : panelHeight)
+                    .id(viewportKey)
+                } else {
+                    monthGrid(names: names, columnWidth: columnWidth, canvasWidth: canvasWidth,
+                        height: geometry.size.height, panelHeight: details.isEmpty ? 0 : panelHeight,
+                        measurementIdentity: measurementIdentity)
                 }
-                .accessibilityIdentifier("calendar-month-grid")
-                .refreshable { await model.refresh() }
                 if !details.isEmpty {
-                    VStack(spacing: 0) {
-                        HStack(alignment: .center) {
-                            Text(details.text("title")).rnFont(16, .semibold).fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
-                                .accessibilityIdentifier("calendar-selected-date")
-                            CalendarAction(title: text.text("addTask"), enabled: model.calendarActionsEnabled,
-                                palette: palette, id: "calendar-add-selected-day") {
-                                Task { await model.openNewCalendarComposer(day: view.object("state").text("selectedDate")) }
+                    CalendarEntryList(model: model, palette: palette, entries: entries.filter { $0.text("type") != "day" },
+                        empty: details.text("empty"), prefix: "calendar-details") {
+                        VStack(spacing: 6) {
+                            HStack(alignment: .center) {
+                                Text(details.text("title")).rnFont(16, .semibold).fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                                    .accessibilityIdentifier("calendar-selected-date")
+                                CalendarAction(title: text.text("addTask"), enabled: model.calendarComposerOpeningEnabled,
+                                    palette: palette, id: "calendar-add-selected-day") {
+                                    Task { await model.openNewCalendarComposer(day: view.object("state").text("selectedDate")) }
+                                }
+                                Button { navigate(details.object("close")) } label: {
+                                    AppIcon(name: "x", size: 20).frame(width: 44, height: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).disabled(!model.calendarActionsEnabled)
+                                .accessibilityLabel(model.label("common.close")).accessibilityIdentifier("calendar-details-close")
                             }
-                            Button { navigate(details.object("close")) } label: {
-                                AppIcon(name: "x", size: 20).frame(width: 44, height: 44).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain).disabled(!model.calendarActionsEnabled)
-                            .accessibilityLabel(model.label("common.close")).accessibilityIdentifier("calendar-details-close")
-                        }.padding(.horizontal, 14).padding(.top, 6)
-                        queryInput.padding(.horizontal, 14)
-                        entryList(entries.filter { $0.text("type") != "day" }, empty: details.text("empty"), prefix: "calendar-details")
+                            queryInput
+                        }
                     }
                     .frame(height: panelHeight).background(palette.card, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1))
+                    .accessibilityAction(.escape) { navigate(details.object("close")) }
                 }
             }
+            .onPreferenceChange(CalendarWeekdayWidths.self) { value in
+                if value.identity == measurementIdentity { measuredWeekdays = value }
+            }
         }
+    }
+
+    private func monthColumnOffset(columnWidth: CGFloat, viewportWidth: CGFloat, count: Int) -> CGFloat {
+        let index = days.firstIndex { $0.flag("selected") } ?? days.firstIndex { $0.flag("isToday") } ?? 0
+        let column = (max(0, content.number("leadingBlanks")) + index) % count
+        return max(0, CGFloat(column) * columnWidth - max(0, viewportWidth - columnWidth) / 2)
+    }
+
+    private func monthSelectedColumn(count: Int) -> Int? {
+        guard let index = days.firstIndex(where: { $0.flag("selected") }) else { return nil }
+        return (max(0, content.number("leadingBlanks")) + index) % count
+    }
+
+    private func monthGrid(names: [String], columnWidth: CGFloat, canvasWidth: CGFloat, height: CGFloat,
+                           panelHeight: CGFloat, measurementIdentity: String) -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    ForEach(names.indices, id: \.self) { index in
+                        Text(names[index]).rnFont(11, .semibold).foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: true, vertical: true)
+                            .background(GeometryReader { geometry in
+                                Color.clear.preference(key: CalendarWeekdayWidths.self,
+                                    value: CalendarWeekdayMeasurements(identity: measurementIdentity, widths: [index: geometry.size.width]))
+                            })
+                            .frame(width: columnWidth).frame(minHeight: 30)
+                            .accessibilityIdentifier("calendar-weekday-" + String(index))
+                    }
+                }.background(palette.card)
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(columnWidth), spacing: 0), count: max(1, names.count)), spacing: 0) {
+                    ForEach((0..<max(0, content.number("leadingBlanks"))).map { "blank-" + String($0) }, id: \.self) { _ in
+                        Color.clear.frame(height: panelHeight == 0 ? monthCellHeight : 48).accessibilityHidden(true)
+                    }
+                    ForEach(days.map { $0.text("key") }, id: \.self) { key in
+                        if let cell = days.first(where: { $0.text("key") == key }) {
+                            monthCell(cell, compact: panelHeight > 0)
+                        }
+                    }
+                }.id(panelHeight > 0)
+            }.padding(.bottom, panelHeight)
+        }
+        .frame(width: canvasWidth, height: height)
+        .accessibilityIdentifier("calendar-month-grid")
+        .refreshable { await model.refresh() }
     }
 
     private func monthCell(_ cell: CoreObject, compact: Bool) -> some View {
@@ -391,7 +462,7 @@ struct CalendarScreen: View {
                 (today ? palette.tint.opacity(0.04) : palette.card)
                     .contentShape(Rectangle())
                     .gesture(SpatialTapGesture().onEnded { tap in
-                        guard model.calendarActionsEnabled else { return }
+                        guard model.calendarComposerOpeningEnabled else { return }
                         let raw = mode == "day" ? Double(min(1440, max(0, tap.location.y / pixelsPerMinute))) : nil
                         Task { await model.openNewCalendarComposer(day: dayKey, rawMinutes: raw) }
                     })
@@ -479,6 +550,7 @@ private struct CalendarAnchoredScroll<Content: View>: View {
     let pointsPerUnit: CGFloat
     let initialOffset: CGFloat
     let identifier: String
+    var revealColumn: Int? = nil
     var onOffset: (CGFloat) -> Void = { _ in }
     @ViewBuilder var content: () -> Content
     @State private var restoredGeometry: CalendarViewportPosition?
@@ -513,7 +585,18 @@ private struct CalendarAnchoredScroll<Content: View>: View {
                     if geometryChanged {
                         restoredGeometry = position
                         lastOffset = offset
-                        let target = min(maximum, max(0, CGFloat(anchor ?? 0) * position.pointsPerUnit))
+                        var target = min(maximum, max(0, CGFloat(anchor ?? 0) * position.pointsPerUnit))
+                        if let column = revealColumn {
+                            let start = CGFloat(column) * position.pointsPerUnit
+                            let end = start + position.pointsPerUnit
+                            let restored = target
+                            if start < target { target = start }
+                            else if end > target + position.viewportLength { target = end - position.viewportLength }
+                            target = min(maximum, max(0, target))
+                            // Preserve the manual logical offset unless the new geometry would
+                            // hide the current selection. A necessary reveal becomes its new anchor.
+                            if target != restored { anchor = Double(target / position.pointsPerUnit) }
+                        }
                         onOffset(target)
                         pendingOffset = abs(offset - target) > 1 ? target : nil
                         if pendingOffset != nil {
@@ -563,16 +646,35 @@ private struct CalendarEntryOffsets: PreferenceKey {
 }
 
 private func calendarEntryID(_ entry: CoreObject) -> String {
-    entry.text("type") + ":" + entry.text("dayKey") + ":" + entry.text("lane") + ":" +
-        (entry.text("type") == "day" ? entry.text("key") : entry.text("type") == "task" ? entry.text("taskId") : entry.object("item").text("id"))
+    let opaqueID = entry.text("type") == "day" ? entry.text("key")
+        : entry.text("type") == "task" ? entry.text("taskId") : entry.object("item").text("id")
+    return entry.text("type") + ":" + entry.text("dayKey") + ":" + entry.text("lane") + ":" +
+        Data(opaqueID.utf8).base64EncodedString()
 }
 
-private struct CalendarEntryList: View {
+private struct CalendarWeekdayMeasurements: Equatable {
+    var identity = ""
+    var widths: [Int: CGFloat] = [:]
+    var maximumWidth: CGFloat { widths.values.max() ?? 0 }
+}
+
+private struct CalendarWeekdayWidths: PreferenceKey {
+    static var defaultValue = CalendarWeekdayMeasurements()
+    static func reduce(value: inout CalendarWeekdayMeasurements, nextValue: () -> CalendarWeekdayMeasurements) {
+        let next = nextValue()
+        guard !next.identity.isEmpty else { return }
+        if value.identity != next.identity { value = next }
+        else { value.widths.merge(next.widths, uniquingKeysWith: { _, width in width }) }
+    }
+}
+
+private struct CalendarEntryList<LeadingContent: View>: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
     let entries: [CoreObject]
     let empty: String
     let prefix: String
+    @ViewBuilder var leadingContent: () -> LeadingContent
     @State private var restored = false
     @State private var queryReset: String?
     var body: some View {
@@ -580,6 +682,7 @@ private struct CalendarEntryList: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     Color.clear.frame(height: 0).id("calendar-list-top").accessibilityHidden(true)
+                    leadingContent()
                     if !empty.isEmpty { Text(empty).rnFont(14).foregroundStyle(palette.secondary).padding(.vertical, 20) }
                     ForEach(entries.indices, id: \.self) { index in
                         let entry = entries[index]
@@ -645,6 +748,13 @@ private struct CalendarEntryList: View {
     }
 }
 
+private extension CalendarEntryList where LeadingContent == EmptyView {
+    init(model: CoreModel, palette: AppPalette, entries: [CoreObject], empty: String, prefix: String) {
+        self.init(model: model, palette: palette, entries: entries, empty: empty, prefix: prefix,
+            leadingContent: { EmptyView() })
+    }
+}
+
 private struct CalendarCandidate: View {
     let entry: CoreObject
     @ObservedObject var model: CoreModel
@@ -659,7 +769,7 @@ private struct CalendarCandidate: View {
             .padding(12).background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).disabled(!model.calendarActionsEnabled)
+        .buttonStyle(.plain).disabled(!model.calendarComposerOpeningEnabled)
         .accessibilityIdentifier("calendar-candidate-" + entry.text("taskId"))
     }
 }
@@ -677,7 +787,7 @@ private struct CalendarItemButton: View {
                     .frame(maxWidth: .infinity, maxHeight: timed ? .infinity : nil, alignment: .topLeading)
                     .frame(minHeight: timed ? 0 : 44).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(!model.calendarActionsEnabled || !item.flag("pressable") || item.text("taskId").isEmpty)
+            .buttonStyle(.plain).disabled(!model.calendarItemOpeningEnabled(item))
             .accessibilityLabel(item.text("accessibilityLabel").isEmpty ? [item.text("title"), item.text("detail")].filter { !$0.isEmpty }.joined(separator: ", ") : item.text("accessibilityLabel"))
             .accessibilityIdentifier("calendar-item-" + item.text("id"))
             if item.flag("showDone") {
@@ -752,14 +862,22 @@ private struct CalendarAction: View {
 struct CalendarItemSheet: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
+    private var sheetTitle: some View {
+        let title = Text(model.calendarItemSheet.text("title")).rnFont(19, .bold).accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("calendar-item-title")
+        #if DEBUG && targetEnvironment(simulator)
+        return title.accessibilityValue(model.calendarEventTaskDispatchTestState)
+        #else
+        return title
+        #endif
+    }
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { model.closeCalendarItem() }.accessibilityHidden(true)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(model.calendarItemSheet.text("title")).rnFont(19, .bold).accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("calendar-item-title")
+                        sheetTitle
                         if !model.calendarItemSheet.text("message").isEmpty {
                             Text(model.calendarItemSheet.text("message")).rnFont(14).fixedSize(horizontal: false, vertical: true)
                         }
@@ -768,10 +886,12 @@ struct CalendarItemSheet: View {
                             CalendarAction(title: model.label("common.retry"), enabled: !model.busy && !model.retryNeeded,
                                 palette: palette, id: "calendar-item-retry") { Task { await model.retryCalendarItem() } }
                         }
-                        let actions = model.calendarItemSheet.objects("buttons").filter { ["edit", "unschedule", "done", "delete", "cancel", "ok"].contains($0.text("id")) }
+                        let allowedActions = model.calendarItemSheet.text("kind") == "event"
+                            ? ["createTask", "openInCalendar", "cancel"] : ["edit", "unschedule", "done", "delete", "cancel", "ok"]
+                        let actions = model.calendarItemSheet.objects("buttons").filter { allowedActions.contains($0.text("id")) }
                         ForEach(actions.indices, id: \.self) { index in
                             let action = actions[index]
-                            CalendarAction(title: action.text("label"), destructive: action.text("style") == "destructive", enabled: !model.busy && !model.retryNeeded,
+                            CalendarAction(title: action.text("label"), destructive: action.text("style") == "destructive", enabled: model.calendarItemActionEnabled(action.text("id")),
                                 palette: palette, id: "calendar-action-" + action.text("id")) {
                                 Task { await model.performCalendarItemAction(action.text("id")) }
                             }

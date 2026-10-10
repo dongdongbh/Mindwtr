@@ -522,32 +522,30 @@ describe('private cached Project availability durable authority', () => {
         } finally { await env.close(); }
     });
 
-    it('refuses foreign URI, no-op, invalid hash and deleted/ambiguous selection without proof or queued writes', async () => {
-        const selected = { ...file, uri: '' };
-        const variants: Project[] = [
-            project('target', { attachments: [file, sibling] }),
-            project('target', { attachments: [{ ...selected, uri: target + '-foreign' }, sibling] }),
-            project('target', { attachments: [{ ...selected, uri: target, localStatus: 'available' }, sibling] }),
-            project('target', { attachments: [{ ...selected, fileHash: undefined }, sibling] }),
-            project('target', { attachments: [{ ...selected, fileHash: 'invalid' }, sibling] }),
-            project('target', { attachments: [{ ...selected, deletedAt: at }, sibling] }),
-            project('target', { attachments: [selected, { ...selected }, sibling] }),
-            project('target', { attachments: [selected, sibling], deletedAt: at }),
-        ];
-        for (const fixture of variants) {
-            const { env, ensure, attachments } = await open(undefined, fixture);
-            try {
-                const before = await allRows(env), state = useTaskStore.getState(), { api, save } = cachedMethods(env, attachments);
-                const options = env.host.getProjectAttachmentEditOptions({ projectId: 'target' });
-                const input = { projectId: 'target', attachmentId: id, managedDirectoryURI: directory,
-                    revision: options.ok ? options.value.revision : 'unavailable-selection' };
-                expect(await api.getProjectAttachmentAvailabilityPreflight(input)).toMatchObject({ ok: false });
-                expect(await api.downloadRelocatedProjectAttachment(input, target)).toMatchObject({ ok: false });
-                expect(ensure).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
-                expect(useTaskStore.getState().lastDataChangeAt).toBe(state.lastDataChangeAt);
-                await flushPendingSave(); expect(await allRows(env)).toEqual(before);
-            } finally { await env.close(); }
-        }
+    const selected = { ...file, uri: '' };
+    // Each independent real SQLite boot keeps the default timeout and all no-effect checks.
+    it.each([
+        ['foreign URI', project('target', { attachments: [file, sibling] })],
+        ['foreign target URI', project('target', { attachments: [{ ...selected, uri: target + '-foreign' }, sibling] })],
+        ['already available selection', project('target', { attachments: [{ ...selected, uri: target, localStatus: 'available' }, sibling] })],
+        ['missing hash', project('target', { attachments: [{ ...selected, fileHash: undefined }, sibling] })],
+        ['invalid hash', project('target', { attachments: [{ ...selected, fileHash: 'invalid' }, sibling] })],
+        ['deleted attachment', project('target', { attachments: [{ ...selected, deletedAt: at }, sibling] })],
+        ['duplicate attachment ID', project('target', { attachments: [selected, { ...selected }, sibling] })],
+        ['deleted project', project('target', { attachments: [selected, sibling], deletedAt: at })],
+    ] as const)('refuses %s without proof or queued writes', async (_variant, fixture) => {
+        const { env, ensure, attachments } = await open(undefined, fixture);
+        try {
+            const before = await allRows(env), state = useTaskStore.getState(), { api, save } = cachedMethods(env, attachments);
+            const options = env.host.getProjectAttachmentEditOptions({ projectId: 'target' });
+            const input = { projectId: 'target', attachmentId: id, managedDirectoryURI: directory,
+                revision: options.ok ? options.value.revision : 'unavailable-selection' };
+            expect(await api.getProjectAttachmentAvailabilityPreflight(input)).toMatchObject({ ok: false });
+            expect(await api.downloadRelocatedProjectAttachment(input, target)).toMatchObject({ ok: false });
+            expect(ensure).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
+            expect(useTaskStore.getState().lastDataChangeAt).toBe(state.lastDataChangeAt);
+            await flushPendingSave(); expect(await allRows(env)).toEqual(before);
+        } finally { await env.close(); }
     });
 
     it('refuses a different canonical target before the verified-local callback', async () => {
