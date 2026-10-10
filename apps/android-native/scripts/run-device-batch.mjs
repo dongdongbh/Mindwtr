@@ -115,7 +115,7 @@ function main() {
 
     // One batch on the phone at a time: run again under the lock. -o keeps the lock out of the adb server this batch may start.
     if (!process.env.S23_LOCKED) {
-        const run = spawnSync('flock', ['-o', '-E', String(LOCK_TIMED_OUT), '-w', '14400', LOCK, process.execPath, ...self],
+        const run = spawnSync('flock', ['-o', '-E', String(LOCK_TIMED_OUT), '-w', '43200', LOCK, process.execPath, ...self],
             { stdio: 'inherit', env: { ...process.env, S23_LOCKED: '1' } });
         if (run.status === LOCK_TIMED_OUT) console.error(`STOP: ${LOCK} stayed busy for 4 hours`);
         process.exit(run.status ?? 1);
