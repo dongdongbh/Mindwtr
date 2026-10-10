@@ -8,6 +8,7 @@ import {
     type McpServerConfig,
     type McpServerStatus,
 } from '../../../lib/mcp-server';
+import { logInfo, logWarn } from '../../../lib/app-log';
 import { Switch } from '../../ui/Switch';
 import { SettingRow, SettingsDisclosureCard } from './SettingRow';
 
@@ -73,31 +74,74 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
         setBusy(true);
         setFailed(false);
         setFeedback(null);
+        let clipboardResult: Promise<boolean> | undefined;
+        const useClipboardItem = copy && typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard?.write === 'function';
+        const reportOutcome = (outcome: 'copied' | 'rotated' | 'invalid-status' | 'clipboard-failed' | 'native-failed') => {
+            if (!copy && !config?.regenerateToken) return;
+            void (outcome === 'copied' || outcome === 'rotated' ? logInfo : logWarn)('MCP connection action completed', {
+                scope: 'mcp', extra: {
+                    releaseCheck: 'v1.3.5/mcp-connection-actions', operation: copy ? 'copy' : 'rotate', outcome,
+                    backend: copy ? (useClipboardItem ? 'clipboard-item' : 'write-text') : 'native',
+                },
+            }).catch(() => {});
+        };
         try {
-            const next = config ? await setMcpServerConfig(config) : await getMcpServerStatus();
+            const request = config ? setMcpServerConfig(config) : getMcpServerStatus();
+            if (useClipboardItem) {
+                const data = request.then((next) => {
+                    const details = mounted.current && !next.error && getMcpConnectionDetails(next);
+                    if (!details) throw new Error('MCP connection details unavailable.');
+                    return new Blob([details], { type: 'text/plain' });
+                });
+                // Observe data even if construction/write throws or the clipboard rejects before native status arrives.
+                void data.catch(() => {});
+                try {
+                    // WebKit requires starting the write in the click gesture; native data resolves afterward.
+                    clipboardResult = navigator.clipboard.write([new ClipboardItem({ 'text/plain': data })]).then(() => true, () => false);
+                } catch {
+                    clipboardResult = Promise.resolve(false);
+                }
+            }
+            const next = await request;
             if (!mounted.current) return;
             setStatus(next);
             if (copy) {
-                const details = getMcpConnectionDetails(next);
+                const details = !next.error && getMcpConnectionDetails(next);
                 if (!details) {
                     setFeedback('settings.mcpCopyFailed');
+                    reportOutcome('invalid-status');
                     return;
                 }
-                try {
-                    await navigator.clipboard.writeText(details);
-                    if (mounted.current) setFeedback('settings.mcpCopied');
-                } catch {
-                    if (mounted.current) setFeedback('settings.mcpCopyFailed');
+                if (!clipboardResult) {
+                    try {
+                        clipboardResult = navigator.clipboard.writeText(details).then(() => true, () => false);
+                    } catch {
+                        clipboardResult = Promise.resolve(false);
+                    }
                 }
-            } else if (config?.regenerateToken && !next.error) {
-                setFeedback('settings.mcpTokenRotated');
+                const copied = await clipboardResult;
+                if (mounted.current) {
+                    setFeedback(copied ? 'settings.mcpCopied' : 'settings.mcpCopyFailed');
+                    reportOutcome(copied ? 'copied' : 'clipboard-failed');
+                }
+            } else if (config?.regenerateToken) {
+                if (!next.error && getMcpConnectionDetails(next)) {
+                    setFeedback('settings.mcpTokenRotated');
+                    reportOutcome('rotated');
+                } else {
+                    if (!next.error) setFailed(true);
+                    reportOutcome('invalid-status');
+                }
             }
         } catch {
             if (mounted.current) {
                 setFailed(true);
                 setStatus((current) => current ? { ...current, running: false, url: null, token: null } : null);
+                reportOutcome('native-failed');
             }
         } finally {
+            // A rejected native read must not release the action lock while its clipboard write is still settling.
+            if (clipboardResult) await clipboardResult;
             inFlight.current = false;
             if (mounted.current) setBusy(false);
         }
