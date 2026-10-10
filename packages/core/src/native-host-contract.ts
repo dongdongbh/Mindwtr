@@ -334,6 +334,8 @@ import {
 import { createSettingsMethods } from './native-host-contract-settings';
 import { createSyncSettingsMethods, type NativeSyncSettingsHost } from './native-host-contract-settings-sync';
 import { createAIMethods, type NativeAIHost } from './native-host-contract-ai';
+import { createAboutMethods, type NativeAboutHost } from './native-host-contract-about';
+export type { NativeAboutHost, NativeAboutNotice, NativeAboutSettings } from './native-host-contract-about';
 export { NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS, type NativeSyncSettingsHost } from './native-host-contract-settings-sync';
 import { createCalendarSettingsMethods, type NativeCalendarHost } from './native-host-contract-settings-calendar';
 export {
@@ -956,6 +958,8 @@ export function createNativeHostContract(options: {
     syncSettings?: NativeSyncSettingsHost;
     calendar?: NativeCalendarHost;
     ai?: NativeAIHost;
+    /** Settings › About, the heartbeat and the store review prompt (native-host-contract-about.ts). */
+    about?: NativeAboutHost;
     /** Core's mobile attachment modules on the host's file bridge (native-host-contract-attachments.ts). */
     attachments?: NativeAttachmentsHost;
     /** Trusted host platform selects core's existing reminder window; omitted hosts retain Android's cap. */
@@ -1761,9 +1765,12 @@ export function createNativeHostContract(options: {
         }),
         ...createSavedSearchWriteMethods({ readiness, save }),
         // Settings: the menu, General and Manage: native-host-contract-settings.ts.
+        // Settings › About, the heartbeat and the store review prompt: native-host-contract-about.ts.
+        ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
         ...createSettingsMethods({
             readiness,
             save,
+            about: () => options.about ?? null,
             t: () => translate,
             language: () => language,
             systemLocale: () => systemLocale,

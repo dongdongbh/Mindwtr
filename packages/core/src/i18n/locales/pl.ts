@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const plOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Przesuń daty zadania",
+    'timeline.moveProjectDates': "Przesuń daty projektu",
+    'timeline.resizeStart': "Zmień datę rozpoczęcia",
+    'timeline.resizeDue': "Zmień termin",
+    'timeline.datesUpdated': "Daty zaktualizowane",
+    'timeline.dateEditConflict': "Daty zmieniono w innym miejscu. Spróbuj ponownie.",
+    'timeline.dateEditFailed': "Nie udało się zaktualizować dat. Sprawdź zakres i spróbuj ponownie.",
+    'timeline.dateUndoConflict': "Daty zmieniły się po tej edycji. Cofnięcie pominięto.",
+    'timeline.dateUndoFailed': "Nie udało się cofnąć zmian dat. Spróbuj ponownie.",
     'task.doneTagOutcomeUnknown': "Nie udało się potwierdzić zmiany tagów. Uruchom ponownie Mindwtr, aby ponownie wczytać zapisane dane.",
     'task.doneCompletedAtOutcomeUnknown': "Nie udało się potwierdzić zmiany czasu ukończenia. Uruchom ponownie Mindwtr, aby wczytać zapisane dane.",
     'task.destinationOutcomeUnknown': "Nie udało się potwierdzić zmiany miejsca docelowego. Uruchom ponownie Mindwtr, aby wczytać zapisane dane.",

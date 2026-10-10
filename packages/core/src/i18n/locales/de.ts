@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const deOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Aufgabendaten verschieben",
+    'timeline.moveProjectDates': "Projektdaten verschieben",
+    'timeline.resizeStart': "Startdatum anpassen",
+    'timeline.resizeDue': "Fälligkeitsdatum anpassen",
+    'timeline.datesUpdated': "Daten aktualisiert",
+    'timeline.dateEditConflict': "Die Daten wurden andernorts geändert. Erneut versuchen.",
+    'timeline.dateEditFailed': "Daten konnten nicht aktualisiert werden. Zeitraum prüfen und erneut versuchen.",
+    'timeline.dateUndoConflict': "Die Daten wurden seit der Bearbeitung geändert. Rückgängig wurde übersprungen.",
+    'timeline.dateUndoFailed': "Datumsänderungen konnten nicht rückgängig gemacht werden. Erneut versuchen.",
     "settings.mcpTitle": "Lokaler MCP-Server (erweitert)",
     "settings.mcpDesc": "Verbinde einen KI-Client auf diesem Computer mit Mindwtr.",
     "settings.mcpUnavailable": "Nur in der Desktop-App außerhalb der Testumgebung verfügbar.",

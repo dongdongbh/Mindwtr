@@ -25,9 +25,10 @@ import java.io.File
  * that fails a check can also checkpoint the WAL into the file when it closes.
  * So the guard copies the bytes and queries the copy.
  *
- * [commitRnState] is the only write to RN state and the only open of the
- * original `RKStorage`. The host calls it after the import is saved and read
- * back, and it copies `RKStorage` byte for byte before it changes anything.
+ * Once the guard passes it copies `RKStorage` byte for byte, before anything
+ * opens it: any open, a read included, can checkpoint RN's WAL into the file
+ * and drop the sidecars when it closes. [commitRnState] makes RN's own startup
+ * change after the import is saved and read back.
  *
  * It assumes no concurrent writer. Replacing the package kills the RN process,
  * and this process owns exactly one host, so the files cannot change while the
@@ -93,6 +94,9 @@ internal object LegacyRnStoreGuard {
         // A fresh install, or a missing database with a JSON backup to migrate, gets here without
         // the file. SQLite creates the file, not its folder.
         database.parentFile!!.mkdirs()
+        // RN's own copy before the host opens RKStorage (RnKeyValue's first read, the About keys, the alarms): taken at a first
+        // write instead, it could miss the WAL an earlier read checkpointed away.
+        checkpointRnState(dataDir)
         val bootState = JSONObject()
             .put("jsonAhead", state.jsonAhead)
             .put("reconciled", state.reconciled)
@@ -172,9 +176,9 @@ internal object LegacyRnStoreGuard {
     }
 
     /**
-     * The same byte copy of `RKStorage` (once per install, the first copy kept), for a native write to RN's `RKStorage` other than
-     * [commitRnState]'s: the reminder alarms clear RN's alarm map and keep theirs under RN's key (Reminders.kt). Nothing when RN
-     * left no `RKStorage`. Engine thread, as every `RKStorage` opener.
+     * The byte copy of `RKStorage` (once per install, the first copy kept): [requireClear] takes it before anything opens
+     * `RKStorage`; a writer may call it again (the reminder alarms, Reminders.kt), which then only syncs. Nothing when RN left
+     * no `RKStorage`.
      */
     fun checkpointRnState(dataDir: File) {
         val asyncStorage = File(dataDir, ASYNC_STORAGE)

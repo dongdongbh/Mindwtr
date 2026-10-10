@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { TimelineView, resolveTimelineTrack, taskBarTint } from './TimelineView';
 import { LanguageProvider } from '../../contexts/language-context';
 import { DEFAULT_PROJECT_COLOR, configureDateFormatting, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
@@ -13,6 +13,8 @@ const iso = (offsetDays: number): string => {
 
 const makeTask = (overrides: Partial<Task> & { id: string; title: string }): Task => ({
     status: 'next',
+    tags: [],
+    contexts: [],
     createdAt: iso(-30),
     updatedAt: iso(-30),
     ...overrides,
@@ -199,6 +201,112 @@ describe('TimelineView (#1111)', () => {
         expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['dated']);
     });
 
+    it('keeps active statuses selected by default and persists a multi-status selection across zoom and remount', () => {
+        setStore({ tasks: [
+            ...(['inbox', 'next', 'waiting', 'someday', 'done', 'reference'] as const).map((status) =>
+                makeTask({ id: status, title: status, status, dueDate: iso(1) })),
+            makeTask({ id: 'archived', title: 'archived', status: 'archived', dueDate: iso(1) }),
+            makeTask({ id: 'cancelled', title: 'cancelled', status: 'archived', cancelledAt: iso(0), dueDate: iso(1) }),
+        ] });
+        const view = renderTimeline();
+        expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['inbox', 'next', 'waiting', 'someday']);
+        fireEvent.click(screen.getByRole('button', { name: 'Status' }));
+        const filter = screen.getByRole('dialog', { name: 'Status' });
+        for (const name of ['Inbox', 'Next', 'Someday']) {
+            fireEvent.click(within(filter).getByRole('checkbox', { name }));
+        }
+        fireEvent.click(within(filter).getByRole('checkbox', { name: 'Completed' }));
+        expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['waiting', 'done', 'archived']);
+        fireEvent.keyDown(filter, { key: 'Escape' });
+        expect(screen.getByRole('button', { name: 'Status' })).toHaveFocus();
+        fireEvent.click(screen.getByRole('button', { name: 'Day' }));
+        expect(JSON.parse(window.localStorage.getItem('mindwtr:view:timeline:v1') ?? '{}')).toEqual({
+            zoom: 'day', statuses: ['waiting', 'done'],
+        });
+        view.unmount();
+        renderTimeline();
+        expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['waiting', 'done', 'archived']);
+    });
+
+    it.each([
+        { saved: { statuses: ['done', 'reference', 'done', null, 1], zoom: 'invalid' }, expected: ['done'] },
+        { saved: { statuses: 'done' }, expected: ['next'] },
+        { saved: { statuses: ['invalid'] }, expected: ['next'] },
+        { saved: { statuses: [] }, expected: [] },
+    ])('sanitizes saved status selection $saved', ({ saved, expected }) => {
+        window.localStorage.setItem('mindwtr:view:timeline:v1', JSON.stringify(saved));
+        setStore({ tasks: [
+            makeTask({ id: 'next', title: 'Next', dueDate: iso(1) }),
+            makeTask({ id: 'done', title: 'Done', status: 'done', dueDate: iso(1) }),
+        ] });
+        renderTimeline();
+        expect(bars().map((bar) => bar.dataset.taskId)).toEqual(expected);
+        expect(screen.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('allows an empty selection and resets to the default statuses', () => {
+        setStore({ tasks: [makeTask({ id: 'next', title: 'Next', dueDate: iso(1) })] });
+        renderTimeline();
+        fireEvent.click(screen.getByRole('button', { name: 'Status' }));
+        const filter = screen.getByRole('dialog', { name: 'Status' });
+        for (const input of within(filter).getAllByRole('checkbox')) {
+            if ((input as HTMLInputElement).checked) fireEvent.click(input);
+        }
+        expect(bars()).toHaveLength(0);
+        expect(JSON.parse(window.localStorage.getItem('mindwtr:view:timeline:v1') ?? '{}').statuses).toEqual([]);
+        fireEvent.click(within(filter).getByRole('button', { name: 'Reset' }));
+        expect(barFor('next')).not.toBeNull();
+    });
+
+    it('retains archived project names, dates and area color for completed history while honoring the area filter', () => {
+        const projects: Project[] = [
+            { id: 'closed', title: 'Finished project', status: 'archived', areaId: 'work', startDate: iso(-3), dueDate: iso(2), createdAt: iso(-30), updatedAt: iso(0) } as Project,
+            { id: 'deleted', title: 'Deleted project', status: 'archived', deletedAt: iso(0), startDate: iso(-3), dueDate: iso(2), createdAt: iso(-30), updatedAt: iso(0) } as Project,
+        ];
+        setStore({ projects, areas: [{ id: 'work', name: 'Work', color: '#ff0000' } as Area], tasks: [
+            makeTask({ id: 'completed', title: 'Completed work', status: 'archived', projectId: 'closed', startTime: iso(-1), dueDate: iso(1) }),
+            makeTask({ id: 'other', title: 'Other area', status: 'done', dueDate: iso(1) }),
+            makeTask({ id: 'deleted-task', title: 'Deleted task', status: 'done', deletedAt: iso(0), dueDate: iso(1) }),
+        ] });
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, filters: { areaIds: ['work'] } } }));
+        renderTimeline();
+        expect(rowLabels()).not.toContain('Finished project');
+        fireEvent.click(screen.getByRole('button', { name: 'Status' }));
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Completed' }));
+        expect(rowLabels()).toEqual(['Finished project', 'Completed work']);
+        expect(projectBarFor('closed')).not.toBeNull();
+        expect(projectBarFor('deleted')).toBeNull();
+        expect(barFor('completed')?.style.backgroundColor).toBe('rgba(255, 0, 0, 0.25)');
+        expect(projectBarFor('closed')?.style.backgroundColor).toBe('rgb(255, 0, 0)');
+        expect(useTaskStore.getState()._allProjects.find((project) => project.id === 'closed')?.status).toBe('archived');
+    });
+
+    it('opens archived completed tasks as read-only history', () => {
+        window.localStorage.setItem('mindwtr:view:timeline:v1', JSON.stringify({ statuses: ['done'] }));
+        setStore({ tasks: [makeTask({ id: 'archived', title: 'Completed work', status: 'archived', dueDate: iso(1) })] });
+        renderTimeline();
+        fireEvent.click(screen.getByTestId('timeline-row-label'));
+        const dialog = screen.getByRole('dialog');
+        expect(within(dialog).getByText('Completed work')).toBeInTheDocument();
+        expect(dialog.querySelector('[data-task-edit-trigger]')).toBeDisabled();
+        expect(within(dialog).queryByRole('button', { name: /Restore|Delete|Duplicate/i })).toBeNull();
+        fireEvent.keyDown(dialog, { key: 'e' });
+        expect(dialog.querySelector('input')).toBeNull();
+        expect(useTaskStore.getState()._allTasks[0].status).toBe('archived');
+    });
+
+    it('labels status icons and ignores invalid task dates without breaking valid bars', () => {
+        setStore({ tasks: [
+            makeTask({ id: 'waiting', title: 'Waiting task', status: 'waiting', dueDate: iso(1) }),
+            makeTask({ id: 'invalid', title: 'Invalid dates', startTime: 'invalid', dueDate: 'invalid' }),
+        ] });
+        renderTimeline();
+        const taskLabel = screen.getByTestId('timeline-row-label');
+        expect(taskLabel).toHaveAccessibleName(/Waiting task.*Waiting/);
+        expect(within(taskLabel).getByRole('img', { name: 'Waiting' })).toHaveAttribute('title', 'Waiting');
+        expect(bars().map((bar) => bar.dataset.taskId)).toEqual(['waiting']);
+    });
+
     it('tints a bar with the same accent the calendar gives that task', () => {
         setStore({
             tasks: [
@@ -336,7 +444,8 @@ describe('TimelineView (#1111)', () => {
             renderTimeline();
 
             expect(projectBarFor('p1')?.style.backgroundColor).toBe('rgb(0, 255, 0)');
-            const groupButton = screen.getByRole('button', { name: /Rebuild the deck.*Start date: .+Due date: .+/ });
+            const groupButton = screen.getByTestId('timeline-group');
+            expect(groupButton).toHaveAccessibleName(/Rebuild the deck.*Start date: .+Due date: .+/);
             expect(groupButton.dataset.projectId).toBe('p1');
 
             const navigations: string[] = [];
@@ -595,6 +704,6 @@ describe('TimelineView (#1111)', () => {
         const taskActions = screen.getAllByRole('button').filter((button) => button.dataset.taskId === 'accessible');
         expect(taskActions).toHaveLength(1);
         expect(taskActions[0]).toHaveAccessibleName(/Accessible task.*Start date: .+Due date: .+/);
-        expect(barFor('accessible')).toHaveAttribute('aria-hidden', 'true');
+        expect(barFor('accessible')?.querySelector('[data-testid="timeline-move-task"]')).toHaveAccessibleName(/Move task dates.*Accessible task.*Start date/);
     });
 });

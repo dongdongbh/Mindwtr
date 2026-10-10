@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.playstoreupdates
 
 import android.content.Context
+import android.os.Build
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.InstallStatus
@@ -16,6 +17,18 @@ class PlayStoreUpdatesModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("PlayStoreUpdates")
+
+    // The installing package: com.android.vending for every Google Play install, testing tracks included (their referrer is empty).
+    Function("getInstallerPackageName") {
+      runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          context.packageManager.getInstallSourceInfo(context.packageName).installingPackageName
+        } else {
+          @Suppress("DEPRECATION")
+          context.packageManager.getInstallerPackageName(context.packageName)
+        }
+      }.getOrNull()
+    }
 
     AsyncFunction("getUpdateInfoAsync") { promise: Promise ->
       val appUpdateManager = AppUpdateManagerFactory.create(context)

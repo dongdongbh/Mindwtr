@@ -50,6 +50,7 @@ describe('native host contract: Settings › Data', () => {
         expect(off.title).toBe(t('settings.data'));
         expect(off.diagnostics).toEqual({
             title: t('settings.diagnostics'),
+            analytics: null,
             debugLogging: { label: t('settings.debugLogging'), description: t('settings.debugLoggingDesc'), value: false, edit: { type: 'debugLogging', value: true } },
             shareLog: null,
             clearLog: null,

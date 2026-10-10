@@ -1,3 +1,6 @@
+import type { DiagnosticsLogEntry } from './diagnostics-log';
+import { sanitizeForLog, sanitizeLogContext } from './log-sanitize';
+
 /** Local, volatile diagnostics. Callers supply entries through their existing
  * sanitizers; this buffer never writes to disk or sends anything. */
 type DiagnosticEntry = {
@@ -96,4 +99,56 @@ export function buildFeedbackDiagnostics(
     }
     selected.sort((a, b) => Date.parse(a.entry.ts) - Date.parse(b.entry.ts));
     return [...selected.map((item) => item.line), snapshot].join('\n');
+}
+
+/**
+ * The snapshot line that ends the attached diagnostics: whether debug logging is on and the recent app flow (the breadcrumbs).
+ * Built in memory, so attaching never writes a log while logging is off. RN's collectFeedbackDiagnostics and the native host's.
+ */
+export function buildFeedbackDiagnosticsSnapshot(input: { debugLoggingEnabled: boolean; breadcrumbs: readonly string[]; now?: Date }): string {
+    const { breadcrumbs } = input;
+    return JSON.stringify({
+        ts: (input.now ?? new Date()).toISOString(),
+        level: 'info',
+        scope: 'feedback',
+        message: 'Feedback diagnostics snapshot',
+        context: sanitizeLogContext({
+            debugLoggingEnabled: input.debugLoggingEnabled,
+            releaseCheck: 'v1.3.0/feedback-diagnostics',
+            captureMode: 'recent-session-and-saved-log',
+            breadcrumbCount: breadcrumbs.length,
+            breadcrumbs: breadcrumbs.length > 0 ? breadcrumbs.join(';') : 'none',
+        }),
+    });
+}
+
+/** Only existing sanitized diagnostic fields can enter explicit feedback: a diagnostics line's fields, through the log sanitizer. */
+export function feedbackDiagnosticEntry(value: unknown): DiagnosticsLogEntry | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const entry = value as Record<string, unknown>;
+    if (typeof entry.ts !== 'string' || !Number.isFinite(Date.parse(entry.ts))
+        || !['info', 'warn', 'error'].includes(String(entry.level))
+        || typeof entry.scope !== 'string' || typeof entry.message !== 'string') return null;
+    return {
+        ts: entry.ts, level: entry.level as DiagnosticsLogEntry['level'],
+        scope: sanitizeForLog(entry.scope), message: sanitizeForLog(entry.message),
+        ...(typeof entry.stack === 'string' ? { stack: sanitizeForLog(entry.stack) } : {}),
+        ...(entry.context && typeof entry.context === 'object' && !Array.isArray(entry.context)
+            ? { context: sanitizeLogContext(entry.context as Record<string, unknown>) } : {}),
+    };
+}
+
+/**
+ * The saved log's recent part as feedback attaches it: each line through [feedbackDiagnosticEntry] again (a line saved before a
+ * sanitizer rule, or by another writer, may carry a title or a secret); a rotated fragment or a foreign line is dropped.
+ */
+export function sanitizeSavedFeedbackLog(saved: string | null | undefined): string {
+    const sanitized: string[] = [];
+    for (const line of (saved ?? '').slice(-FEEDBACK_DIAGNOSTICS_SOURCE_CHARS).split('\n')) {
+        try {
+            const entry = feedbackDiagnosticEntry(JSON.parse(line));
+            if (entry) sanitized.push(JSON.stringify(entry));
+        } catch { /* Never export a rotated fragment or an invalid diagnostic line. */ }
+    }
+    return sanitized.join('\n');
 }

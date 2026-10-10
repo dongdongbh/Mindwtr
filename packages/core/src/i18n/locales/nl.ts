@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const nlOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Taakdatums verplaatsen",
+    'timeline.moveProjectDates': "Projectdatums verplaatsen",
+    'timeline.resizeStart': "Startdatum aanpassen",
+    'timeline.resizeDue': "Deadline aanpassen",
+    'timeline.datesUpdated': "Datums bijgewerkt",
+    'timeline.dateEditConflict': "De datums zijn elders gewijzigd. Probeer opnieuw.",
+    'timeline.dateEditFailed': "De datums konden niet worden bijgewerkt. Controleer de periode en probeer opnieuw.",
+    'timeline.dateUndoConflict': "De datums zijn sinds deze wijziging veranderd. Ongedaan maken is overgeslagen.",
+    'timeline.dateUndoFailed': "De datumwijzigingen konden niet ongedaan worden gemaakt. Probeer opnieuw.",
     'task.doneTagOutcomeUnknown': "De tagwijziging kon niet worden bevestigd. Start Mindwtr opnieuw om de opgeslagen gegevens opnieuw te laden.",
     'task.doneCompletedAtOutcomeUnknown': "De wijziging van het voltooiingstijdstip kon niet worden bevestigd. Start Mindwtr opnieuw om opgeslagen gegevens opnieuw te laden.",
     'task.destinationOutcomeUnknown': "De wijziging van de bestemming kon niet worden bevestigd. Start Mindwtr opnieuw om opgeslagen gegevens opnieuw te laden.",

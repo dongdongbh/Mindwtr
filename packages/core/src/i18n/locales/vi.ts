@@ -1,4 +1,13 @@
 export const viOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Di chuyển ngày của công việc",
+    'timeline.moveProjectDates': "Di chuyển ngày của dự án",
+    'timeline.resizeStart': "Điều chỉnh ngày bắt đầu",
+    'timeline.resizeDue': "Điều chỉnh hạn chót",
+    'timeline.datesUpdated': "Đã cập nhật ngày",
+    'timeline.dateEditConflict': "Ngày đã được thay đổi ở nơi khác. Hãy thử lại.",
+    'timeline.dateEditFailed': "Không thể cập nhật ngày. Kiểm tra khoảng ngày và thử lại.",
+    'timeline.dateUndoConflict': "Ngày đã thay đổi sau khi chỉnh sửa. Đã bỏ qua hoàn tác.",
+    'timeline.dateUndoFailed': "Không thể hoàn tác thay đổi ngày. Hãy thử lại.",
     'task.doneTagOutcomeUnknown': "Không thể xác nhận thay đổi thẻ. Hãy khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
     'task.doneCompletedAtOutcomeUnknown': "Không thể xác nhận thay đổi thời gian hoàn thành. Hãy khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
     'task.destinationOutcomeUnknown': "Không thể xác nhận thay đổi đích đến. Khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",

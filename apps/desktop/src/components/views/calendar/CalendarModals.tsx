@@ -47,6 +47,7 @@ type CalendarTaskComposerModalController = Pick<
 
 type CalendarOpenTaskModalProps = {
     controller: CalendarOpenTaskModalController;
+    readOnly?: boolean;
 };
 
 type CalendarTaskComposerModalProps = {
@@ -68,7 +69,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
     return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
 }
 
-export function CalendarOpenTaskModal({ controller }: CalendarOpenTaskModalProps) {
+export function CalendarOpenTaskModal({ controller, readOnly = false }: CalendarOpenTaskModalProps) {
     const {
         closeOpenTask,
         openProject,
@@ -77,13 +78,13 @@ export function CalendarOpenTaskModal({ controller }: CalendarOpenTaskModalProps
     } = controller;
 
     const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
-        if (!isEditShortcut(event) || isTypingTarget(event.target)) return;
+        if (readOnly || !isEditShortcut(event) || isTypingTarget(event.target)) return;
         const trigger = event.currentTarget.querySelector<HTMLElement>('[data-task-edit-trigger]');
         if (!trigger) return;
         event.preventDefault();
         event.stopPropagation();
         trigger.click();
-    }, []);
+    }, [readOnly]);
 
     if (!openTask) return null;
 
@@ -114,7 +115,8 @@ export function CalendarOpenTaskModal({ controller }: CalendarOpenTaskModalProps
                 task={openTask}
                 project={openProject}
                 showQuickDone={false}
-                readOnly={false}
+                readOnly={readOnly}
+                interactionDisabled={readOnly}
                 compactMetaEnabled={true}
                 editorPresentation="inline"
             />

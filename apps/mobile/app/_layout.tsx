@@ -43,6 +43,7 @@ import {
   useStartupPromptQueue,
   useTaskStore,
   isSandboxMode,
+  resolveAndroidInstallerSource,
   type AppAnnouncement,
   type AppAnnouncementAction,
   type StartupPromptDescriptor,
@@ -65,6 +66,7 @@ import { useRootLayoutNotificationOpenHandler } from '@/hooks/root-layout/use-ro
 import { useRootLayoutStartup } from '@/hooks/root-layout/use-root-layout-startup';
 import { useRootLayoutArchiveRetention } from '@/hooks/root-layout/use-root-layout-archive-retention';
 import { resolveMobileAnalyticsVersion } from '@/lib/analytics-heartbeat';
+import { getInstallerPackageName } from '@/lib/play-store-updates';
 import { useRootLayoutSyncEffects } from '@/hooks/root-layout/use-root-layout-sync-effects';
 import { ProjectNextActionPromptProvider } from '@/components/project-next-action-prompt';
 import { ThemedAlertProvider } from '@/components/themed-alert';
@@ -664,7 +666,7 @@ function RootLayoutContentInner() {
     Application.getInstallReferrerAsync()
       .then((referrer) => {
         if (cancelled) return;
-        setAndroidInstallerSource(String(referrer || '').trim() ? 'play-store' : 'sideload');
+        setAndroidInstallerSource(resolveAndroidInstallerSource(referrer, getInstallerPackageName()));
       })
       .catch((error) => {
         if (!cancelled) setAndroidInstallerSource('unknown');

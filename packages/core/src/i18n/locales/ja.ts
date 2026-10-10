@@ -10,6 +10,15 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "タスクの日付を移動",
+    'timeline.moveProjectDates': "プロジェクトの日付を移動",
+    'timeline.resizeStart': "開始日を調整",
+    'timeline.resizeDue': "期限を調整",
+    'timeline.datesUpdated': "日付を更新しました",
+    'timeline.dateEditConflict': "日付が別の場所で変更されました。もう一度お試しください。",
+    'timeline.dateEditFailed': "日付を更新できませんでした。期間を確認して再試行してください。",
+    'timeline.dateUndoConflict': "編集後に日付が変更されたため、元に戻しませんでした。",
+    'timeline.dateUndoFailed': "日付の変更を元に戻せませんでした。再試行してください。",
     "task.expandChecklist": "チェックリストの項目をプロジェクトのタスクにする",
     "task.keepChecklistDescription": "元のタスクとチェックリストをプロジェクト内に残します。",
     "task.expandChecklistDescription": "順序とチェック状態を保ち、項目ごとにタスクを作成します。メモ、添付、日付はプロジェクトに、タグとコンテキストは新しいタスクに引き継ぎます。元のタスクはゴミ箱に移動し、フォーカスは引き継ぎません。変換は取り消せます。",

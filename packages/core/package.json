@@ -42,6 +42,7 @@
     "./whisper-models": "./src/whisper-models.ts",
     "./ai-config": "./src/ai-config.ts",
     "./ai-settings-model": "./src/ai-settings-model.ts",
+    "./about-settings-model": "./src/about-settings-model.ts",
     "./ai-task-actions": "./src/ai-task-actions.ts",
     "./sync-secret-storage": "./src/sync-secret-storage.ts",
     "./dropbox-auth-tokens": "./src/dropbox-auth-tokens.ts",

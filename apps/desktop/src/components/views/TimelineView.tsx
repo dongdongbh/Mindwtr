@@ -1,13 +1,20 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronDown } from 'lucide-react';
 import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     compareProjectsByOrder,
+    canEditTimelineTaskDates,
+    canEditTimelineProjectDates,
     getCalendarDayOfMonth,
     getCalendarMonthIndex,
     getWeekStartsOnIndex,
     hasTimeComponent,
     isTaskVisibleInArea,
+    isTaskCompleted,
+    isTaskFinished,
+    taskMatchesAreaFilterSelection,
     projectMatchesAreaFilterSelection,
     safeFormatDate,
     safeParseDate,
@@ -18,6 +25,10 @@ import {
 } from '@mindwtr/core';
 
 import { ErrorBoundary } from '../ErrorBoundary';
+import type { TimelineDateEditTarget } from '../../lib/timeline-date-edit';
+import { useTimelineDateEditing } from './timeline/useTimelineDateEditing';
+import { TASK_STATUS_ICONS } from '../../lib/task-status-icons';
+import { useDropdownPosition } from '../ui/use-dropdown-position';
 import { cn } from '../../lib/utils';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { useUiStore } from '../../store/ui-store';
@@ -62,11 +73,16 @@ const MAX_SPAN_DAYS = 400;
 /** Below this, rendering every row outright is cheaper than measuring them. */
 const VIRTUALIZE_ABOVE_ROWS = 100;
 
+const TIMELINE_STATUSES = ['inbox', 'next', 'waiting', 'someday', 'done'] as const;
+type TimelineStatus = (typeof TIMELINE_STATUSES)[number];
 type TimelinePersistedViewState = {
     zoom: TimelineZoom;
+    statuses: TimelineStatus[];
 };
 
-const DEFAULT_TIMELINE_VIEW_STATE: TimelinePersistedViewState = { zoom: 'week' };
+const DEFAULT_TIMELINE_VIEW_STATE: TimelinePersistedViewState = {
+    zoom: 'week', statuses: ['inbox', 'next', 'waiting', 'someday'],
+};
 
 function sanitizeTimelineViewState(
     value: unknown,
@@ -75,7 +91,12 @@ function sanitizeTimelineViewState(
     const parsed = value && typeof value === 'object' && !Array.isArray(value)
         ? value as Partial<TimelinePersistedViewState>
         : {};
+    const statuses = Array.isArray(parsed.statuses)
+        ? TIMELINE_STATUSES.filter((status) => parsed.statuses?.includes(status))
+        : fallback.statuses;
     return {
+        statuses: statuses.length > 0 || (Array.isArray(parsed.statuses) && parsed.statuses.length === 0)
+            ? statuses : fallback.statuses,
         zoom: ZOOM_LEVELS.includes(parsed.zoom as TimelineZoom) ? parsed.zoom as TimelineZoom : fallback.zoom,
     };
 }
@@ -194,7 +215,8 @@ type TimelineRow =
 
 export function TimelineView() {
     const perf = usePerformanceMonitor('TimelineView');
-    const tasks = useTaskStore((state) => state.tasks);
+    const activeTasks = useTaskStore((state) => state.tasks);
+    const allTasks = useTaskStore((state) => state._allTasks);
     const weekStart = useTaskStore((state) => state.settings?.weekStart);
     const calendarSystem = useTaskStore((state) => state.settings?.calendarSystem);
     const dateFormat = useTaskStore((state) => state.settings?.dateFormat);
@@ -208,6 +230,42 @@ export function TimelineView() {
         sanitizeTimelineViewState,
     );
     const zoom = persistedViewState.zoom;
+    const statuses = persistedViewState.statuses;
+    const tasks = statuses.includes('done') ? allTasks : activeTasks;
+    const statusLabel = (status: TimelineStatus) => t(status === 'done' ? 'list.done' : `status.${status}`);
+    const statusFilterLabel = t('taskEdit.statusLabel');
+    const [statusFilterOpen, setStatusFilterOpen] = React.useState(false);
+    const statusFilterRef = React.useRef<HTMLDivElement>(null);
+    const statusTriggerRef = React.useRef<HTMLButtonElement>(null);
+    const statusPanelRef = React.useRef<HTMLDivElement>(null);
+    const statusPanelId = React.useId();
+    const { fixedDropdownStyle, listMaxHeight } = useDropdownPosition({
+        open: statusFilterOpen, containerRef: statusFilterRef, dropdownRef: statusPanelRef,
+    });
+    React.useEffect(() => {
+        if (!statusFilterOpen) return;
+        statusPanelRef.current?.querySelector<HTMLInputElement>('input')?.focus();
+        const onPointer = (event: MouseEvent) => {
+            const target = event.target as Node;
+            if (!statusFilterRef.current?.contains(target) && !statusPanelRef.current?.contains(target)) {
+                setStatusFilterOpen(false);
+            }
+        };
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            setStatusFilterOpen(false);
+            statusTriggerRef.current?.focus();
+        };
+        document.addEventListener('mousedown', onPointer);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onPointer);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [statusFilterOpen]);
+    const hasStatusFilter = statuses.length !== DEFAULT_TIMELINE_VIEW_STATE.statuses.length
+        || DEFAULT_TIMELINE_VIEW_STATE.statuses.some((status) => !statuses.includes(status));
     const weekStartsOn = getWeekStartsOnIndex(weekStart);
     const calendarLocale = React.useMemo(() => resolveCalendarLocale({
         language,
@@ -246,27 +304,27 @@ export function TimelineView() {
 
     const today = React.useMemo(() => startOfDay(new Date()), [localDayKey]);
 
-    // Same scope as the board: no deleted tasks, no tasks parked out of the
-    // active area filter. Finished and filed work has no place on a plan, so
-    // done/archived/reference drop out too.
     const datedTasks = React.useMemo(() => {
         perf.trackUseMemo();
         return tasks.filter((task) => {
-            if (task.deletedAt) return false;
-            if (task.status === 'done' || task.status === 'archived' || task.status === 'reference') return false;
-            if (!task.startTime && !task.dueDate) return false;
-            return isTaskVisibleInArea(task, visibility);
+            if (task.deletedAt || task.purgedAt) return false;
+            const completed = isTaskCompleted(task);
+            if (!statuses.includes(completed ? 'done' : task.status as TimelineStatus)) return false;
+            if (!safeParseDate(task.startTime) && !safeParseDate(task.dueDate)) return false;
+            // History keeps parked-project context without reactivating its work.
+            return completed
+                ? taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById)
+                : isTaskVisibleInArea(task, visibility);
         });
-    }, [tasks, visibility]);
+    }, [tasks, statuses, visibility, resolvedAreaFilter, projectById, areaById]);
 
-    // A dated project is plan-worthy on its own: a project whose steps have no
-    // dates yet still gets its span drawn. Same scope as the task filter —
-    // nothing deleted, nothing archived, nothing outside the area filter.
     const projectSpans = React.useMemo(() => {
         perf.trackUseMemo();
+        const historicalProjectIds = new Set(datedTasks.filter(isTaskCompleted).map((task) => task.projectId));
         const spans = new Map<string, { start: Date | null; due: Date | null }>();
         for (const project of projectById.values()) {
-            if (project.deletedAt || project.status === 'archived') continue;
+            if (project.deletedAt || project.purgedAt) continue;
+            if (project.status === 'archived' && !historicalProjectIds.has(project.id)) continue;
             const start = safeParseDate(project.startDate);
             const due = safeParseDate(project.dueDate);
             if (!start && !due) continue;
@@ -277,7 +335,7 @@ export function TimelineView() {
             });
         }
         return spans;
-    }, [areaById, projectById, resolvedAreaFilter]);
+    }, [areaById, datedTasks, projectById, resolvedAreaFilter]);
 
     const range = React.useMemo(() => {
         perf.trackUseMemo();
@@ -358,7 +416,7 @@ export function TimelineView() {
                 continue;
             }
             const color = getTaskAccentColor(task, projectById, areaById);
-            const key = task.projectId ?? '';
+            const key = task.projectId && projectById.has(task.projectId) ? task.projectId : '';
             const list = byProject.get(key);
             const row: TimelineRow = { kind: 'task', key: task.id, task, color, lo, hi, single };
             if (list) list.push(row);
@@ -446,7 +504,7 @@ export function TimelineView() {
 
     const { rows, earlierOmitted, laterOmitted } = timelineRows;
     const omittedCount = earlierOmitted + laterOmitted;
-    const taskRowCount = rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0);
+    const taskRowCount = React.useMemo(() => rows.reduce((count, row) => (row.kind === 'task' ? count + 1 : count), 0), [rows]);
     const hasDatedWork = datedTasks.length > 0 || projectSpans.size > 0;
     const hasRows = Boolean(range) && rows.length > 0;
     const { dayWidth, trackWidth, fitted } = resolveTimelineTrack(
@@ -454,6 +512,12 @@ export function TimelineView() {
         DAY_WIDTH[zoom],
         Math.max(0, viewportWidth - GUTTER_WIDTH),
     );
+    const dateEditing = useTimelineDateEditing({
+        dayWidth,
+        geometryKey: `${zoom}:${range?.from.getTime()}:${range?.days}:${statuses.join(',')}`,
+        scrollRef,
+        t,
+    });
     const contentWidth = GUTTER_WIDTH + trackWidth + (fitted ? 0 : TRACK_TAIL);
     const todayIndex = range ? differenceInCalendarDays(today, range.from) : -1;
     const todayVisible = range ? todayIndex >= 0 && todayIndex < range.days : false;
@@ -557,8 +621,8 @@ export function TimelineView() {
     }, [laterOmitted, range]);
 
     const openTask = React.useMemo(
-        () => (openTaskId ? tasks.find((task) => task.id === openTaskId) ?? null : null),
-        [openTaskId, tasks],
+        () => (openTaskId ? allTasks.find((task) => task.id === openTaskId) ?? null : null),
+        [openTaskId, allTasks],
     );
     const openProject = openTask?.projectId ? projectById.get(openTask.projectId) : undefined;
 
@@ -568,9 +632,73 @@ export function TimelineView() {
         dispatchNavigateEvent('projects');
     }, [setProjectView]);
 
+    const previewSpan = (target: TimelineDateEditTarget) => {
+        const preview = dateEditing.preview;
+        if (!range || !preview?.dates || preview.target.kind !== target.kind) return null;
+        const id = target.kind === 'task' ? target.task.id : target.project.id;
+        const previewId = preview.target.kind === 'task' ? preview.target.task.id : preview.target.project.id;
+        if (id !== previewId) return null;
+        const start = safeParseDate(preview.dates.start);
+        const due = safeParseDate(preview.dates.due);
+        const a = differenceInCalendarDays(start ?? due!, range.from);
+        const b = differenceInCalendarDays(due ?? start!, range.from);
+        return { lo: Math.min(a, b), hi: Math.max(a, b) };
+    };
+    const renderDateControls = (
+        target: TimelineDateEditTarget,
+        dates: { start?: string; due?: string },
+        resizeStart: boolean,
+        resizeDue: boolean,
+        open: () => void,
+    ) => {
+        const editable = target.kind === 'task'
+            ? canEditTimelineTaskDates(target.task, target.project)
+            : canEditTimelineProjectDates(target.project);
+        if (!editable) return null;
+        const label = target.kind === 'task' ? target.task.title : target.project.title;
+        const spokenDates = describeDates(t, dates.start, dates.due);
+        const actionLabel = (key: string) => `${t(`timeline.${key}`)}: ${label}. ${spokenDates}`;
+        return (
+            <>
+                <button
+                    type="button"
+                    data-testid={`timeline-move-${target.kind}`}
+                    aria-label={actionLabel(target.kind === 'task' ? 'moveTaskDates' : 'moveProjectDates')}
+                    title={actionLabel(target.kind === 'task' ? 'moveTaskDates' : 'moveProjectDates')}
+                    disabled={dateEditing.pending}
+                    onPointerDown={(event) => dateEditing.onPointerDown(event, target, 'move')}
+                    onKeyDown={(event) => dateEditing.onKeyDown(event, target, 'move')}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        if (!dateEditing.consumeClick(target)) open();
+                    }}
+                    className="absolute inset-0 rounded-[inherit] cursor-grab touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-wait"
+                />
+                {(['start', 'due'] as const).map((edge) => (edge === 'start' ? resizeStart : resizeDue) && (
+                    <button
+                        key={edge}
+                        type="button"
+                        data-testid={`timeline-resize-${edge}`}
+                        aria-label={actionLabel(edge === 'start' ? 'resizeStart' : 'resizeDue')}
+                        title={actionLabel(edge === 'start' ? 'resizeStart' : 'resizeDue')}
+                        disabled={dateEditing.pending}
+                        onPointerDown={(event) => dateEditing.onPointerDown(event, target, edge)}
+                        onKeyDown={(event) => dateEditing.onKeyDown(event, target, edge)}
+                        onClick={(event) => { event.stopPropagation(); dateEditing.consumeClick(target); }}
+                        style={{ top: -8, [edge === 'start' ? 'left' : 'right']: 0, width: 10, height: 8 }}
+                        className="absolute z-20 cursor-ew-resize rounded-sm border border-border bg-background opacity-0 touch-none group-hover/timeline-row:opacity-100 group-hover/timeline-bar:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-wait"
+                    />
+                ))}
+            </>
+        );
+    };
+
     const renderRow = (row: TimelineRow, index: number) => {
         if (row.kind === 'group') {
             const project = row.project;
+            const target: TimelineDateEditTarget | null = project ? { kind: 'project', project } : null;
+            const displayedSpan = target ? previewSpan(target) ?? row.span : row.span;
+            const editable = project ? canEditTimelineProjectDates(project) : false;
             const groupDates = project ? describeDates(t, project.startDate, project.dueDate) : '';
             const groupActionLabel = groupDates ? `${row.label}. ${groupDates}` : row.label;
             const gutterClassName = 'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-muted pl-3 pr-2 text-left text-xs font-semibold text-foreground';
@@ -623,22 +751,27 @@ export function TimelineView() {
                         </div>
                     )}
                     <div className="relative min-w-0 flex-1 bg-muted/60">
-                        {row.span && project && (
+                        {displayedSpan && project && target && (
                             <div
                                 data-testid="timeline-project-bar"
                                 data-project-id={project.id}
                                 title={row.label}
-                                aria-hidden="true"
-                                onClick={() => goToProject(project.id)}
-                                className="absolute z-10 cursor-pointer rounded-[3px] shadow-sm transition-[filter] hover:brightness-110"
+                                aria-hidden={editable ? undefined : true}
+                                onClick={editable ? undefined : () => goToProject(project.id)}
+                                className="group/timeline-bar absolute z-10 cursor-pointer rounded-[3px] shadow-sm transition-[filter] hover:brightness-110"
                                 style={{
-                                    left: row.span.lo * dayWidth,
-                                    width: Math.max(MIN_BAR_WIDTH, (row.span.hi - row.span.lo + 1) * dayWidth),
+                                    left: Math.max(0, displayedSpan.lo) * dayWidth,
+                                    width: Math.max(MIN_BAR_WIDTH, (Math.min(range!.days - 1, displayedSpan.hi) - Math.max(0, displayedSpan.lo) + 1) * dayWidth),
                                     height: PROJECT_BAR_HEIGHT,
                                     top: (ROW_HEIGHT - PROJECT_BAR_HEIGHT) / 2,
                                     backgroundColor: row.color || 'hsl(var(--primary))',
                                 }}
-                            />
+                            >
+                                {renderDateControls(target, { start: project.startDate, due: project.dueDate },
+                                    Boolean(project.startDate && differenceInCalendarDays(safeParseDate(project.startDate)!, range!.from) >= 0),
+                                    Boolean(project.dueDate && differenceInCalendarDays(safeParseDate(project.dueDate)!, range!.from) < range!.days),
+                                    () => goToProject(project.id))}
+                            </div>
                         )}
                     </div>
                 </div>
@@ -646,8 +779,12 @@ export function TimelineView() {
         }
         // Keep each task's source dates intact for labels and ordering, but draw
         // only the part that intersects the bounded axis.
-        const drawingLo = Math.max(0, row.lo);
-        const drawingHi = Math.min(range!.days - 1, row.hi);
+        const project = row.task.projectId ? projectById.get(row.task.projectId) : undefined;
+        const target: TimelineDateEditTarget = { kind: 'task', task: row.task, project };
+        const displayedSpan = previewSpan(target) ?? row;
+        const editable = canEditTimelineTaskDates(row.task, project);
+        const drawingLo = Math.max(0, displayedSpan.lo);
+        const drawingHi = Math.min(range!.days - 1, displayedSpan.hi);
         const naturalWidth = row.single
             ? MARKER_WIDTH
             : Math.max(MIN_BAR_WIDTH, (drawingHi - drawingLo + 1) * dayWidth);
@@ -663,9 +800,12 @@ export function TimelineView() {
         // under it is drawn as a tint of the same one. Mini markers included.
         const tint = taskBarTint(row.color);
         const dateDescription = describeDates(t, row.task.startTime, row.task.dueDate);
+        const status = isTaskCompleted(row.task) ? 'done' : row.task.status as TimelineStatus;
+        const label = statusLabel(status);
+        const StatusIcon = TASK_STATUS_ICONS[status];
         const taskActionLabel = dateDescription
-            ? `${row.task.title}. ${dateDescription}`
-            : row.task.title;
+            ? `${row.task.title}. ${label}. ${dateDescription}`
+            : `${row.task.title}. ${label}`;
         return (
             <div className="group/timeline-row flex border-b border-border/40" style={{ height: ROW_HEIGHT }}>
                 {/* The name column is the row's primary click target; the bar is a
@@ -678,12 +818,15 @@ export function TimelineView() {
                     aria-label={taskActionLabel}
                     onClick={() => setOpenTaskId(row.task.id)}
                     className={cn(
-                        'sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card pl-6 pr-3 text-left',
+                        'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-card pl-6 pr-3 text-left',
                         'text-xs text-foreground transition-colors hover:bg-muted group-hover/timeline-row:bg-muted',
                         'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                     )}
                     style={{ width: GUTTER_WIDTH }}
                 >
+                    <span role="img" aria-label={label} title={label} className="shrink-0 text-muted-foreground">
+                        <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                    </span>
                     <span className="min-w-0 truncate">{row.task.title}</span>
                 </button>
                 <div className="relative min-w-0 flex-1 transition-colors group-hover/timeline-row:bg-muted/40">
@@ -692,11 +835,11 @@ export function TimelineView() {
                         data-task-id={row.task.id}
                         data-variant={row.single ? 'mini' : 'bar'}
                         title={row.task.title}
-                        aria-hidden="true"
-                        onClick={() => setOpenTaskId(row.task.id)}
+                        aria-hidden={editable ? undefined : true}
+                        onClick={editable ? undefined : () => setOpenTaskId(row.task.id)}
                         // No title on the bar: the sticky name column already
                         // carries it, and the tooltip repeats it on hover.
-                        className="absolute z-10 cursor-pointer rounded-full transition-[filter] hover:brightness-110"
+                        className="group/timeline-bar absolute z-10 cursor-pointer rounded-full transition-[filter] hover:brightness-110"
                         style={{
                             left,
                             width,
@@ -705,7 +848,11 @@ export function TimelineView() {
                             backgroundColor: tint.fill,
                             border: `1px solid ${tint.border}`,
                         }}
-                    />
+                    >
+                        {renderDateControls(target, { start: row.task.startTime, due: row.task.dueDate },
+                            !row.single && row.lo >= 0, !row.single && row.hi < range!.days,
+                            () => setOpenTaskId(row.task.id))}
+                    </div>
                 </div>
             </div>
         );
@@ -728,6 +875,65 @@ export function TimelineView() {
                         </span>
                     </div>
                     <div className="flex items-center gap-2">
+                        <div ref={statusFilterRef}>
+                            <button
+                                ref={statusTriggerRef}
+                                type="button"
+                                aria-haspopup="dialog"
+                                aria-expanded={statusFilterOpen}
+                                aria-controls={statusFilterOpen ? statusPanelId : undefined}
+                                aria-label={statusFilterLabel}
+                                onClick={() => setStatusFilterOpen((open) => !open)}
+                                className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                            >
+                                {statusFilterLabel}
+                                {hasStatusFilter && <span className="text-muted-foreground">{statuses.length}</span>}
+                                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                            {statusFilterOpen && createPortal(
+                                <div
+                                    ref={statusPanelRef}
+                                    id={statusPanelId}
+                                    role="dialog"
+                                    aria-label={statusFilterLabel}
+                                    style={{ ...fixedDropdownStyle, width: 180, maxHeight: listMaxHeight }}
+                                    className="z-50 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg"
+                                    onBlur={(event) => {
+                                        const target = event.relatedTarget as Node | null;
+                                        if (target && !event.currentTarget.contains(target) && !statusFilterRef.current?.contains(target)) {
+                                            setStatusFilterOpen(false);
+                                        }
+                                    }}
+                                >
+                                    {TIMELINE_STATUSES.map((status) => {
+                                        const Icon = TASK_STATUS_ICONS[status];
+                                        return (
+                                            <label key={status} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs text-foreground hover:bg-muted focus-within:bg-muted">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={statuses.includes(status)}
+                                                    onChange={() => setPersistedViewState((current) => ({
+                                                        ...current,
+                                                        statuses: TIMELINE_STATUSES.filter((value) => value === status
+                                                            ? !current.statuses.includes(value) : current.statuses.includes(value)),
+                                                    }))}
+                                                    className="accent-primary"
+                                                />
+                                                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                                                {statusLabel(status)}
+                                            </label>
+                                        );
+                                    })}
+                                    <button
+                                        type="button"
+                                        onClick={() => setPersistedViewState((current) => ({ ...current, statuses: DEFAULT_TIMELINE_VIEW_STATE.statuses }))}
+                                        className="mt-1 w-full rounded border-t border-border px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                    >
+                                        {t('common.reset')}
+                                    </button>
+                                </div>, document.body,
+                            )}
+                        </div>
                         {todayVisible && (
                             <button
                                 type="button"
@@ -747,7 +953,7 @@ export function TimelineView() {
                                     key={level}
                                     type="button"
                                     aria-pressed={zoom === level}
-                                    onClick={() => setPersistedViewState({ zoom: level })}
+                                    onClick={() => setPersistedViewState((current) => ({ ...current, zoom: level }))}
                                     className={cn(
                                         'rounded px-2.5 py-1 text-xs font-medium transition-colors',
                                         zoom === level
@@ -762,10 +968,17 @@ export function TimelineView() {
                     </div>
                 </div>
 
+                {dateEditing.preview && (
+                    <div role="status" className="mb-2 text-xs text-muted-foreground">
+                        {dateEditing.preview.dates
+                            ? describeDates(t, dateEditing.preview.dates.start, dateEditing.preview.dates.due)
+                            : t('timeline.dateEditFailed')}
+                    </div>
+                )}
                 {!hasDatedWork ? (
                     <div>
                         <ListEmptyState
-                            hasFilters={false}
+                            hasFilters={hasStatusFilter}
                             emptyState={{
                                 title: tFallback(t, 'timeline.empty', 'Nothing scheduled yet'),
                                 body: tFallback(t, 'timeline.emptyHint', 'Projects and tasks with a start or due date appear here as bars.'),
@@ -927,6 +1140,8 @@ export function TimelineView() {
                 )}
             </div>
             <CalendarOpenTaskModal
+                readOnly={Boolean(openTask && (isTaskFinished(openTask)
+                    || (openProject && openProject.status !== 'active')))}
                 controller={{
                     closeOpenTask: () => setOpenTaskId(null),
                     openProject,

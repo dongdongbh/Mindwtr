@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+    ANALYTICS_DISTINCT_ID_KEY,
     HEARTBEAT_LAST_SENT_DAY_KEY,
     HEARTBEAT_OPT_OUT_SENT_KEY,
+    isMobileAnalyticsHeartbeatConfigured,
     resetHeartbeatOptOutMarker,
+    resolveMobileAnalyticsVersion,
     sendDailyHeartbeat,
     sendHeartbeatOptOut,
+    sendMobileAnalyticsOptOut,
+    sendMobileDailyHeartbeat,
 } from './analytics-heartbeat';
 
 type MemoryStore = {
@@ -330,5 +335,78 @@ describe('sendDailyHeartbeat', () => {
         expect(skipped).toBe(false);
         expect(sent).toBe(true);
         expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('the mobile heartbeat (React Native and the native hosts)', () => {
+    const config = {
+        analyticsHeartbeatUrl: 'https://analytics.example.com/heartbeat',
+        appVersion: '0.9.4',
+        isExpoGo: false,
+        isFossBuild: false,
+    };
+    const device = () => {
+        const store = new Map<string, string>();
+        const reads: string[] = [];
+        const bodies: Record<string, string>[] = [];
+        return {
+            store, reads, bodies,
+            value: {
+                platform: 'android', platformVersion: 34, osRelease: '14', locale: 'en-US', isDev: false,
+                storage: {
+                    getItem: async (key: string) => { reads.push(key); return store.get(key) ?? null; },
+                    setItem: async (key: string, value: string) => { store.set(key, value); },
+                    removeItem: async (key: string) => { store.delete(key); },
+                },
+                fetcher: async (_url: string, init?: RequestInit) => {
+                    bodies.push(JSON.parse(String(init?.body)));
+                    return { ok: true } as Response;
+                },
+                generateId: () => 'generated-id',
+            },
+        };
+    };
+
+    it('does not read storage or send when the setting is off', async () => {
+        const d = device();
+        await expect(sendMobileDailyHeartbeat(config, { analytics: { heartbeatEnabled: false } }, d.value)).resolves.toBe(false);
+        expect(d.reads).toEqual([]);
+        expect(d.bodies).toEqual([]);
+    });
+
+    it('lets a configured FOSS build send on its baked channel', async () => {
+        const d = device();
+        const fossConfig = { ...config, analyticsHeartbeatChannel: 'fdroid', isFossBuild: true };
+        expect(isMobileAnalyticsHeartbeatConfigured(fossConfig)).toBe(true);
+        await expect(sendMobileDailyHeartbeat(fossConfig, {}, d.value)).resolves.toBe(true);
+        expect(d.bodies[0]).toMatchObject({ channel: 'fdroid', distinct_id: 'generated-id', os_major: 'android-14', device_class: 'phone' });
+        expect(d.bodies[0].profile_id).toBeUndefined();
+    });
+
+    it('sends the synced profile id and keeps the made distinct id', async () => {
+        const d = device();
+        await expect(sendMobileDailyHeartbeat(config, { analyticsProfileId: 'profile-1' }, d.value)).resolves.toBe(true);
+        expect(d.bodies[0]).toMatchObject({ distinct_id: 'generated-id', profile_id: 'profile-1' });
+        expect(d.store.get(ANALYTICS_DISTINCT_ID_KEY)).toBe('generated-id');
+    });
+
+    it('never sends from a development build', async () => {
+        const d = device();
+        await expect(sendMobileDailyHeartbeat(config, {}, { ...d.value, isDev: true })).resolves.toBe(false);
+        await expect(sendMobileAnalyticsOptOut(config, { ...d.value, isDev: true })).resolves.toBe(false);
+        expect(d.bodies).toEqual([]);
+    });
+
+    it('sends the opt-out once, from the explicit opt-out', async () => {
+        const d = device();
+        await expect(sendMobileAnalyticsOptOut(config, d.value)).resolves.toBe(true);
+        await expect(sendMobileAnalyticsOptOut(config, d.value)).resolves.toBe(false);
+        expect(d.bodies).toHaveLength(1);
+        expect(d.bodies[0]).toMatchObject({ event: 'opt_out', analytics_enabled: 'false' });
+    });
+
+    it('shows the RC tag only when it extends the app version', () => {
+        expect(resolveMobileAnalyticsVersion('1.0.5', 'v1.0.5-rc.1')).toBe('1.0.5-rc.1');
+        expect(resolveMobileAnalyticsVersion('1.0.5', 'v1.0.6-rc.1')).toBe('1.0.5');
     });
 });

@@ -41,6 +41,8 @@ const val LANGUAGE_KEY = "mindwtr-language"
 const val THEME_KEY = "@mindwtr_theme"
 const val MANAGE_SECTIONS_KEY = "mindwtr:settings:manage:openSections"
 const val TASK_OPEN_MODE_KEY = "mindwtr:view:taskOpenMode:v1"
+/** RN's update dot (core's UPDATE_BADGE_AVAILABLE_KEY), in RN's AsyncStorage. */
+const val UPDATE_AVAILABLE_KEY = "mindwtr-update-available"
 
 /** The preferences file that holds RN's device keys (InboxViewModel's `prefs`). */
 const val DEVICE_PREFS = "mindwtr-view-state"
@@ -95,6 +97,8 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     val sync = SyncSettingsModel(menu)
     /** Settings › AI's screen state and commands (AISettings.kt). */
     val ai = AISettingsModel(menu)
+    /** Settings › About's screen state and requests (AboutSettings.kt). */
+    val about = AboutSettingsModel(menu)
 
     /** RN's settings stack: "main", then "general", "manage", "data", "advanced", or a GTD screen ("gtd", "gtd-pomodoro", ...). */
     var stack by mutableStateOf(saved.get<String>("settingsStack")?.split(',') ?: listOf("main")); private set
@@ -120,7 +124,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
         return when (screen) {
             "main" -> view.getString("title")
             "advanced" -> view.getJSONObject("advanced").getString("title")
-            "general", "manage", "data", "sync", "ai" -> view.getString("title")
+            "general", "manage", "data", "sync", "ai", "about" -> view.getString("title")
             "gtd" -> view.getJSONObject("hub").getString("title")
             else -> gtdScreen(view)?.getString("title") ?: t("settings.title")
         }
@@ -130,6 +134,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     fun reset() {
         sync.leave()
         ai.leave()
+        about.leave()
         keepStack(listOf("main"))
         logToShare = null
         query = ""
@@ -153,6 +158,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
         if (stack.size < 2) return false
         if (screen == "sync") sync.leave()
         if (screen == "ai") ai.leave()
+        if (screen == "about") about.leave()
         keepStack(stack.dropLast(1))
         logToShare = null
         keepLocal(JSONObject())
@@ -190,7 +196,9 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     /** The open screen's core read and its input: the device values core's doc names (RN's keys), sent as stored. */
     private fun request(screen: String): Pair<String, JSONObject> = when {
         // The Sync row's badge as RN's useMobileSyncBadge resolves it (core's state from the JS host's sync events).
+        // The About row's update dot: RN's stored `mindwtr-update-available` (settings.tsx reads it on mount).
         screen == "main" || screen == "advanced" -> "settingsMenu" to JSONObject().put("query", query).put("syncBadge", shell.syncBadge.state)
+            .put("updateAvailable", runCatching { shell.coreHost()?.rnValue(UPDATE_AVAILABLE_KEY) == "true" }.getOrDefault(false))
         screen == "general" -> "generalSettings" to JSONObject().put("deviceTheme", prefs.getString(THEME_KEY, null) ?: JSONObject.NULL)
         screen == "manage" -> "manageSettings" to JSONObject().put("openSections", prefs.getString(MANAGE_SECTIONS_KEY, null) ?: JSONObject.NULL)
         screen == "data" -> "dataSettings" to JSONObject()
@@ -205,6 +213,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     private fun read(runtime: CoreHost, screen: String, depth: Map<String, Int>): SettingsPage {
         if (screen == "sync") return SettingsPage(screen, sync.read(runtime), emptyMap(), null)
         if (screen == "ai") return SettingsPage(screen, ai.read(runtime), emptyMap(), null)
+        if (screen == "about") return SettingsPage(screen, about.read(runtime), emptyMap(), null)
         val (name, input) = request(screen)
         // GTD › Capture's automation capture card: core gets whether the stored config is on (null: it cannot be read).
         val capture = if (name == "gtdSettings") runCatching { CaptureIntentConfigStore.read(shell.getApplication<Application>()) } else null
@@ -250,6 +259,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
         if (menu.list != "settings" || next.screen != screen) return
         if (screen == "sync") sync.follow(next.view)
         if (screen == "ai") ai.follow(next.view)
+        if (screen == "about") about.follow(next.view)
         page = next
         next.view.optJSONObject("openSectionsRestore")?.takeIf { prefs.getString(it.getString("key"), null) != it.getString("value") }?.let { store(JSONArray().put(it)) }
     }

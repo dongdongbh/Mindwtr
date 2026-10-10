@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const arOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "نقل تواريخ المهمة",
+    'timeline.moveProjectDates': "نقل تواريخ المشروع",
+    'timeline.resizeStart': "تعديل تاريخ البدء",
+    'timeline.resizeDue': "تعديل تاريخ الاستحقاق",
+    'timeline.datesUpdated': "تم تحديث التواريخ",
+    'timeline.dateEditConflict': "تغيرت التواريخ في مكان آخر. حاول مجددًا.",
+    'timeline.dateEditFailed': "تعذر تحديث التواريخ. تحقق من النطاق وحاول مجددًا.",
+    'timeline.dateUndoConflict': "تغيرت التواريخ بعد التعديل. لم يتم التراجع.",
+    'timeline.dateUndoFailed': "تعذر التراجع عن التواريخ. حاول مجددًا.",
     'task.doneTagOutcomeUnknown': "تعذّر تأكيد تغيير الوسوم. أعد تشغيل Mindwtr لإعادة تحميل البيانات المحفوظة.",
     'task.doneCompletedAtOutcomeUnknown': "تعذر تأكيد تغيير وقت الإكمال. أعد تشغيل Mindwtr لإعادة تحميل البيانات المحفوظة.",
     'task.destinationOutcomeUnknown': "تعذّر تأكيد تغيير الوجهة. أعد تشغيل Mindwtr لإعادة تحميل البيانات المحفوظة.",

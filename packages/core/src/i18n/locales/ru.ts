@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const ruOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Сдвинуть даты задачи",
+    'timeline.moveProjectDates': "Сдвинуть даты проекта",
+    'timeline.resizeStart': "Изменить дату начала",
+    'timeline.resizeDue': "Изменить срок",
+    'timeline.datesUpdated': "Даты обновлены",
+    'timeline.dateEditConflict': "Даты изменены в другом месте. Попробуйте снова.",
+    'timeline.dateEditFailed': "Не удалось обновить даты. Проверьте период и попробуйте снова.",
+    'timeline.dateUndoConflict': "Даты изменились после правки. Отмена пропущена.",
+    'timeline.dateUndoFailed': "Не удалось отменить изменение дат. Попробуйте снова.",
     'task.doneTagOutcomeUnknown': "Не удалось подтвердить изменение тегов. Перезапустите Mindwtr, чтобы повторно загрузить сохранённые данные.",
     'task.doneCompletedAtOutcomeUnknown': "Не удалось подтвердить изменение времени завершения. Перезапустите Mindwtr, чтобы заново загрузить сохранённые данные.",
     'task.destinationOutcomeUnknown': "Не удалось подтвердить изменение места назначения. Перезапустите Mindwtr, чтобы заново загрузить сохранённые данные.",

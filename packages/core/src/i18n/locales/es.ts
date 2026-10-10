@@ -2,6 +2,15 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Spanish.
 export const esOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Mover fechas de la tarea",
+    'timeline.moveProjectDates': "Mover fechas del proyecto",
+    'timeline.resizeStart': "Ajustar fecha de inicio",
+    'timeline.resizeDue': "Ajustar fecha de vencimiento",
+    'timeline.datesUpdated': "Fechas actualizadas",
+    'timeline.dateEditConflict': "Las fechas cambiaron en otro lugar. Inténtalo de nuevo.",
+    'timeline.dateEditFailed': "No se pudieron actualizar las fechas. Revisa el intervalo e inténtalo de nuevo.",
+    'timeline.dateUndoConflict': "Las fechas cambiaron desde esta edición. No se deshizo el cambio.",
+    'timeline.dateUndoFailed': "No se pudieron deshacer las fechas. Inténtalo de nuevo.",
     "task.expandChecklist": "Convertir los elementos de la lista en tareas del proyecto",
     "task.keepChecklistDescription": "Conservar la tarea original y su lista dentro del proyecto.",
     "task.expandChecklistDescription": "Crear una tarea por elemento, conservando el orden y las marcas. Las notas, adjuntos y fechas pasan al proyecto; las etiquetas y contextos, a las tareas. El original va a la papelera. No se copia el enfoque. Se puede deshacer.",

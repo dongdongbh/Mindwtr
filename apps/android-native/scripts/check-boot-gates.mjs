@@ -881,7 +881,19 @@ const kotlinFiles = [activity, model, owner, editorUi, focusUi, projectsUi, labe
 assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
 // The dev build keeps its own database. The upgradetest build gets the RN database and RN's state
 // only from the guard, before CoreHost exists: before any open of it, the checkpoint, and any core write.
-assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: ""\)/);
+assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\)\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: ""\)/);
+// Once the guard passes, it copies RN's RKStorage before it returns, so before RnKeyValue (or anything) opens it: an open can
+// checkpoint RN's WAL away when it closes.
+assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
+// About asks Google Play only through aboutPlayAnswer (AboutEndpointsTest), after core's preflight answered; a device check's stub
+// never reaches Play's referrer.
+{
+    const about = source('AboutSettings.kt');
+    assert.equal(about.match(/PlayServices\.updateInfo\(/g)?.length, 1);
+    assert.match(about, /val due = runtime\.aboutRequest\("isAboutUpdateCheckDue", [^\n]*\)\.getBoolean\("due"\)\n\s*val play = aboutPlayAnswer\(source, due, stubbed\) \{ PlayServices\.updateInfo\(app\) \}/);
+    assert.equal(about.match(/PlayServices\.installReferrer\(/g)?.length, 1);
+    assert.match(about, /if \(stubbed\) debugProperty\("about_referrer"\) else PlayServices\.installReferrer\(app\)/);
+}
 // RN's installer journal recovery runs at boot after the validated load and before the journal's replay, the first write that
 // can reach files/attachments (pass A2); it is RN's own Kotlin, compiled as it is.
 assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*(?:\/\/[^\n]*\n\s*)*recoverInstalls\(installer\)\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
@@ -1380,8 +1392,10 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // only an unjournaled write or a read, so no journaled write can skip the journal through it.
         assert.match(journalKt, /fun unjournaled\(method: String, args: List<Any\?>\): Boolean = method in WRITES && key\(method, args\) in UNJOURNALED/);
         assert.match(coreHost, /private fun callLong\(method: String, vararg args: Any\?, handle: LongCall = LongCall\(\)\): JSONObject \{\s+require\(method !in WriteJournal\.WRITES \|\| WriteJournal\.unjournaled\(method, args\.toList\(\)\)\)/);
-        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['backgroundSync', 'menuCommand', 'aiRequest', 'attachmentRequest'],
-            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s requests and the attachments\' downloads take the long path');
+        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest'],
+            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests and the attachments\' downloads take the long path');
+        // O1: About's requests (an update check, a feedback send, the heartbeat, the prompts) are reads of core: never journaled.
+        assert(!writes.includes('aboutRequest'), 'an About request is no journaled write');
         // S4a: CoreWork's background run (core's runner) is a read-and-sync like Sync now: no journaled write.
         assert.match(coreHost, /fun backgroundSync\(trigger: String, stored: Int\): JSONObject =\s+callLong\("backgroundSync", trigger, stored, debugFault\("bgsync_deadline_ms"\)\.toIntOrNull\(\) \?: 0\)/);
         assert(!writes.includes('backgroundSync'), 'a background sync run is no journaled write');
@@ -1738,7 +1752,7 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     const tested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-sync.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(tested.status, 0, `bundle/host-sync.test.ts: ${tested.stderr.slice(-1500)}`);
     // D8: the channel is the build's flavor, read by core as RN's isFossBuild; no host passes a fixed false any more.
-    assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /create\("play"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "false"\)\s+\}\s+create\("foss"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "true"\)/);
+    assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /create\("play"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "false"\)[^}]*\}\s+create\("foss"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "true"\)/);
     assert.match(coreHost, /engine\.globalObject\.setProperty\("__mindwtrFossBuild", BuildConfig\.FOSS\)/);
     assert.match(hostEntry, /const isFossBuild = globalThis\.__mindwtrFossBuild === true;/);
     const bundleHosts = ['host-sync.ts', 'host-ai.ts'].map((name) => readFileSync(resolve(app, 'bundle', name), 'utf8')).join('\n');
@@ -3684,7 +3698,7 @@ globalThis.hydrateTaskAttachments285 = (attachments) => hydrateTask285({ id: 'ta
 export { planAttachmentOpen, getAttachmentResolutionMessage } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-editor-model.ts'))};
 import { logInfo as realLogInfo, setLogger as setRealLogger } from ${JSON.stringify(resolve(app, '../../packages/core/src/logger.ts'))};
 export { createDiagnosticsLog, diagnosticsEntryFromLogPayload, isDiagnosticsLoggingEnabled, buildDiagnosticsLogEntry } from ${JSON.stringify(resolve(app, '../../packages/core/src/diagnostics-log.ts'))};
-export { createFeedbackDiagnosticsBuffer, buildFeedbackDiagnostics, FEEDBACK_DIAGNOSTICS_SOURCE_CHARS } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback-diagnostics.ts'))};
+export { createFeedbackDiagnosticsBuffer, buildFeedbackDiagnostics, buildFeedbackDiagnosticsSnapshot, FEEDBACK_DIAGNOSTICS_SOURCE_CHARS, feedbackDiagnosticEntry, sanitizeSavedFeedbackLog } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback-diagnostics.ts'))};
 export { buildFeedbackSubmissionPayload, submitFeedbackSubmission, FEEDBACK_CATEGORIES } from ${JSON.stringify(resolve(app, '../../packages/core/src/feedback.ts'))};
 export { sanitizeForLog, sanitizeLogContext } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-sanitize.ts'))};
 export { getBreadcrumbs } from ${JSON.stringify(resolve(app, '../../packages/core/src/log-breadcrumbs.ts'))};

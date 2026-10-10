@@ -169,6 +169,11 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // ios-share-capture (mobile incoming share host and capture form)
     'stage', 'type', 'providerReady', 'dataReady', 'disabled',
     'fileCount', 'candidateCount', 'attachedCount', 'skippedCount',
+    // native-about-update-check, native-about-feedback, native-analytics-heartbeat, native-analytics-opt-out and
+    // native-store-review (v1.3.5) reuse releaseCheck, mode and outcome above.
+    'source', 'play', 'badge', 'notice', 'diagnostics', 'channel', 'request', 'optedOut',
+    // android-installer-source (v1.3.5) reuses source above.
+    'installer',
 ];
 
 describe('release diagnostics field names', () => {

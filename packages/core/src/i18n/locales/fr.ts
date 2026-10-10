@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const frOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Déplacer les dates de la tâche",
+    'timeline.moveProjectDates': "Déplacer les dates du projet",
+    'timeline.resizeStart': "Ajuster la date de début",
+    'timeline.resizeDue': "Ajuster la date d’échéance",
+    'timeline.datesUpdated': "Dates mises à jour",
+    'timeline.dateEditConflict': "Les dates ont été modifiées ailleurs. Réessayez.",
+    'timeline.dateEditFailed': "Impossible de mettre à jour les dates. Vérifiez la période et réessayez.",
+    'timeline.dateUndoConflict': "Les dates ont changé depuis cette modification. Annulation ignorée.",
+    'timeline.dateUndoFailed': "Impossible d’annuler les changements de dates. Réessayez.",
     "settings.mcpTitle": "Serveur MCP local (avancé)",
     "settings.mcpDesc": "Connectez un client IA de cet ordinateur à Mindwtr.",
     "settings.mcpUnavailable": "Disponible uniquement dans l’application de bureau, hors de l’environnement de test.",

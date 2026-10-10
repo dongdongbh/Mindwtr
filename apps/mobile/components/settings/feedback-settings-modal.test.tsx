@@ -236,6 +236,49 @@ describe('FeedbackSettingsModal', () => {
     expect(text).not.toContain(tr('settings.feedbackPrivacy'));
   });
 
+  it('shortens the message field by the place that will lead it, so a full message still sends', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FeedbackSettingsModal visible isConfigured tr={tr} onClose={vi.fn()} onSubmit={vi.fn()} />);
+    });
+    const messageInput = () => tree.root.findAllByType(TextInput).find((node) => node.props.multiline)!;
+    expect(messageInput().props.maxLength).toBe(4000);
+    act(() => {
+      findTouchableByText(tree, 'Sync').props.onPress();
+    });
+    expect(messageInput().props.maxLength).toBe(4000 - 'Where: Sync\n\n'.length);
+  });
+
+  it('a send that ends after the modal closed and opened again leaves the new draft alone', async () => {
+    let finish!: () => void;
+    const onSubmit = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const render = (visible: boolean) => (
+      <FeedbackSettingsModal visible={visible} isConfigured tr={tr} onClose={vi.fn()} onSubmit={onSubmit} />
+    );
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(render(true));
+    });
+    act(() => {
+      tree.root.findAllByType(TextInput)[0].props.onChangeText('First report');
+    });
+    await act(async () => {
+      findTouchableByText(tree, 'Send feedback').props.onPress();
+      await Promise.resolve();
+    });
+    act(() => tree.update(render(false)));
+    act(() => tree.update(render(true)));
+    act(() => {
+      tree.root.findAllByType(TextInput)[0].props.onChangeText('Second report');
+    });
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+    });
+    expect(tree.root.findAllByType(TextInput)[0].props.value).toBe('Second report');
+    expect(tree.root.findAllByType(Text).map((node) => node.props.children)).not.toContain('Thanks for the feedback.');
+  });
+
   it('routes unconfigured builds to GitHub issues', () => {
     const onOpenGitHub = vi.fn();
     let tree!: ReturnType<typeof create>;

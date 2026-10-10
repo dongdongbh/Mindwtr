@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const csOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Posunout data úkolu",
+    'timeline.moveProjectDates': "Posunout data projektu",
+    'timeline.resizeStart': "Upravit datum začátku",
+    'timeline.resizeDue': "Upravit termín",
+    'timeline.datesUpdated': "Data aktualizována",
+    'timeline.dateEditConflict': "Data byla změněna jinde. Zkuste to znovu.",
+    'timeline.dateEditFailed': "Data nelze aktualizovat. Zkontrolujte rozsah a zkuste znovu.",
+    'timeline.dateUndoConflict': "Data se od úpravy změnila. Změna nebyla vrácena.",
+    'timeline.dateUndoFailed': "Změnu dat nelze vrátit. Zkuste to znovu.",
     'task.doneTagOutcomeUnknown': "Změnu štítků se nepodařilo potvrdit. Restartujte Mindwtr a znovu načtěte uložená data.",
     'task.doneCompletedAtOutcomeUnknown': "Změnu času dokončení se nepodařilo potvrdit. Restartujte Mindwtr a znovu načtěte uložená data.",
     'task.destinationOutcomeUnknown': "Změnu cíle se nepodařilo potvrdit. Restartujte Mindwtr a znovu načtěte uložená data.",

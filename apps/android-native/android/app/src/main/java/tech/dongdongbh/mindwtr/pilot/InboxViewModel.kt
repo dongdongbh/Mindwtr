@@ -352,6 +352,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     if (screen == Screen.Projects && lists.projects == null) refreshProjects()
                     // The boot's held sync start: now when the boot read was this screen's content (not the Inbox, whose first rows
                     // report it: contentShown); a fallback covers an Inbox read that never draws.
+                    // RN's first-paint prompt activity and the day's heartbeat (once per process).
+                    ProcessCoreHost.aboutStartup(runtime)
                     if (screen != Screen.Inbox) ProcessCoreHost.startDeferredSync()
                     main.postDelayed({ ProcessCoreHost.startDeferredSync("boot-timeout") }, SYNC_FALLBACK_MS)
                     restored?.let { resumeEditor(it, savedDraft.optJSONObject("pending")) }
@@ -941,10 +943,12 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     private var toastShown = 0
     /** RN's toast for 3.2 s, or 5.2 s with an action (RN's Undo), which runs [onAction] and dismisses it. */
-    internal fun showToast(title: String?, message: String, tone: String = "warning", action: String? = null, onAction: () -> Unit = {}) {
+    internal fun showToast(title: String?, message: String, tone: String = "warning", action: String? = null, durationMs: Long? = null,
+                           onAction: () -> Unit = {}) {
         toast = Toast(title, message, tone, action, onAction)
         val mine = ++toastShown
-        main.postDelayed({ if (mine == toastShown) toast = null }, if (action != null) 5_200 else 3_200)
+        // A toast RN shows longer (About's FOSS update notice, 4.8 s) names its own time.
+        main.postDelayed({ if (mine == toastShown) toast = null }, durationMs ?: if (action != null) 5_200 else 3_200)
     }
 
     fun dismissToast() { toast = null }

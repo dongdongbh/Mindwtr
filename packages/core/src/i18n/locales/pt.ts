@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const ptOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Mover datas da tarefa",
+    'timeline.moveProjectDates': "Mover datas do projeto",
+    'timeline.resizeStart': "Ajustar data de início",
+    'timeline.resizeDue': "Ajustar prazo",
+    'timeline.datesUpdated': "Datas atualizadas",
+    'timeline.dateEditConflict': "As datas foram alteradas em outro lugar. Tente novamente.",
+    'timeline.dateEditFailed': "Não foi possível atualizar as datas. Verifique o intervalo e tente novamente.",
+    'timeline.dateUndoConflict': "As datas mudaram desde esta edição. A alteração não foi desfeita.",
+    'timeline.dateUndoFailed': "Não foi possível desfazer as alterações de datas. Tente novamente.",
     'task.doneTagOutcomeUnknown': "Não foi possível confirmar a alteração das etiquetas. Reinicie o Mindwtr para recarregar os dados salvos.",
     'task.doneCompletedAtOutcomeUnknown': "Não foi possível confirmar a alteração da data de conclusão. Reinicie o Mindwtr para recarregar os dados salvos.",
     'task.destinationOutcomeUnknown': "Não foi possível confirmar a alteração do destino. Reinicie o Mindwtr para recarregar os dados salvos.",

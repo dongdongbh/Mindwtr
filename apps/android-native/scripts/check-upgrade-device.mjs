@@ -9,7 +9,9 @@
 //       left queued once at its first boot, captures once, keeps every
 //       pre-upgrade row and every other non-database file, and leaves a
 //       .prewrite checkpoint that holds the pre-upgrade rows. In RKStorage only
-//       RN's alarm map may change (the reminder alarms), after a byte checkpoint;
+//       RN's alarm map (the reminder alarms) and RN's prompt state may change, after the byte checkpoint the boot takes;
+//       RN's About, heartbeat and prompt keys carry over (pass O1): RN's update dot shows on the native
+//       Settings menu, the prompt state keeps RN's days and adds today, the anonymous id stays;
 //   4   recovery (continues 1): the RN 154 build opens the database and keeps
 //       the native edit and the native import. While the recovery source is v1.3.2 a failure is
 //       reported as BLOCKED (RN startup snapshot bug) and does not fail the run;
@@ -112,6 +114,11 @@ const MARKER = 'mindwtr-data:json-ahead-of-sqlite';
 const RECONCILED = 'mindwtr-data:sqlite-json-reconcile-v1';
 const JSON_BACKUP = 'mindwtr-data';
 const ASYNC_STORAGE = 'databases/RKStorage';
+// RN's About, heartbeat and prompt keys (core's UPDATE_BADGE_*, ANALYTICS_DISTINCT_ID_KEY, LOCAL_USER_PROMPT_STATE_KEY): pass O1.
+const UPDATE_AVAILABLE = 'mindwtr-update-available';
+const UPDATE_LAST_CHECK = 'mindwtr-update-last-check';
+const DISTINCT_ID = 'mindwtr-analytics-distinct-id';
+const PROMPT_STATE = 'mindwtr:local-user-prompts:v1';
 // The native app's byte copy of RKStorage, taken once before its first RKStorage write.
 const RN_CHECKPOINT = 'files/SQLite/RKStorage.prewrite';
 // RN's reminder alarm map (core's REMINDER_ALARM_MAP_STORAGE_KEY): the native app's reminder alarms clear RN's and keep theirs there.
@@ -351,10 +358,34 @@ const rewriteAsyncStorage = (name, statements) => {
     pushPrivate(copy, ASYNC_STORAGE);
     runAs(`rm -f ${ASYNC_STORAGE}-wal ${ASYNC_STORAGE}-shm ${ASYNC_STORAGE}-journal`);
 };
+// rewriteAsyncStorage, but the statements' rows stay in RKStorage-wal, as RN leaves its recent AsyncStorage writes: the native
+// boot must copy RN's -wal before anything opens RKStorage (an open can checkpoint the WAL away when it closes).
+const rewriteAsyncStorageInWal = (name, statements) => {
+    const copy = pullAsyncStorage(name);
+    sql(copy, 'PRAGMA wal_checkpoint(TRUNCATE);', false);
+    const staged = resolve(work, `${name}-staged`);
+    rmSync(staged, { recursive: true, force: true });
+    mkdirSync(staged, { recursive: true });
+    // Copied while the connection is open: closing it would checkpoint the frames into the file and delete the -wal.
+    execFileSync('bun', ['-e', `
+        import { Database } from 'bun:sqlite';
+        import { copyFileSync } from 'node:fs';
+        const db = new Database(process.env.COPY);
+        db.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;');
+        db.exec(process.env.STATEMENTS);
+        copyFileSync(process.env.COPY, process.env.STAGED + '/RKStorage');
+        copyFileSync(process.env.COPY + '-wal', process.env.STAGED + '/RKStorage-wal');
+        db.close();
+    `], { env: { ...process.env, COPY: copy, STATEMENTS: statements, STAGED: staged }, stdio: 'inherit' });
+    runAs(`rm -f ${ASYNC_STORAGE}-wal ${ASYNC_STORAGE}-shm ${ASYNC_STORAGE}-journal`);
+    pushPrivate(resolve(staged, 'RKStorage'), ASYNC_STORAGE);
+    pushPrivate(resolve(staged, 'RKStorage-wal'), `${ASYNC_STORAGE}-wal`);
+};
 // Names (never values) of the AsyncStorage rows that differ, other than the marker, a newly set reconcile flag, and RN's alarm map
 // (the reminder alarms clear RN's and keep theirs under RN's key: each scenario that allows it also checks RKStorage's checkpoint).
+// RN's prompt state changes at every native first paint (today counted, as RN's first paint does): pass O1.
 const asyncChanges = (before, after) => [...new Set([...before.keys(), ...after.keys()])].filter((name) => name !== MARKER && name !== ALARM_MAP
-    && before.get(name) !== after.get(name) && !(name === RECONCILED && !before.has(name) && after.get(name) === '1'));
+    && name !== PROMPT_STATE && before.get(name) !== after.get(name) && !(name === RECONCILED && !before.has(name) && after.get(name) === '1'));
 // The RKStorage checkpoint must hold exactly the pre-import RKStorage files, byte for byte.
 const checkpointMatches = (before, after) => ['', '-wal', '-journal', '-shm'].every((suffix) =>
     before.get(`${ASYNC_STORAGE}${suffix}`) === after.get(`${RN_CHECKPOINT}/RKStorage${suffix}`))
@@ -501,7 +532,15 @@ const scenarioUpgrade = async () => {
     const queued = { id: randomUUID(), title: t.queued, createdAt: new Date().toISOString(), source: 'android-quick-capture' };
     queue([queued]);
     const queuedPath = `files/pending-captures/${queued.id}.json`;
+    // Pass O1: RN's About, analytics and review state under RN's keys (INJECTED, as RN's About, heartbeat and first paint write
+    // them): an update RN found, the heartbeat's anonymous id, and the prompt state with RN's first-seen day and active days.
+    const phoneToday = sh('date +%Y-%m-%d');
+    const rnPrompts = { firstSeenAt: new Date(Date.now() - 40 * 86_400_000).toISOString(), firstSeenDayKey: '2026-01-02', activeDayKeys: ['2026-01-02', '2026-01-03'] };
+    const rnAbout = { [UPDATE_AVAILABLE]: 'true', [UPDATE_LAST_CHECK]: String(Date.now()), [DISTINCT_ID]: 'rn-upgrade-distinct-id', [PROMPT_STATE]: JSON.stringify(rnPrompts) };
+    rewriteAsyncStorageInWal('1-about', `INSERT OR REPLACE INTO catalystLocalStorage (key, value) VALUES ${Object.entries(rnAbout)
+        .map(([key, value]) => `('${key}', '${value.replace(/'/g, "''")}')`).join(', ')};`);
     const before = snapshot();
+    check(before.has(`${ASYNC_STORAGE}-wal`), '(1) RN\'s About rows are in RKStorage-wal before the upgrade');
     const widgetsBefore = widgetPrefsNow();
     const pre = readState(pullDatabase('1-pre'));
     const preAsync = asyncStorage('1-pre-rkstorage');
@@ -520,6 +559,14 @@ const scenarioUpgrade = async () => {
     await tap(button(await screen(), 'Save'));
     nodes = await waitFor('the native capture', (current) => header(current) === expected.length + 1 && draftText(current) === '');
     check(hasText(nodes, t.native), '(1) native capture is listed');
+    // RN's update dot carries over: the native Settings menu's About row has it.
+    await tap(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'));
+    nodes = await waitFor('the More sheet', (current) => Boolean(tagged(current, 'more-sheet')), 10_000);
+    await tap(withDescription(nodes, en['nav.settings']) ?? fail('no Settings tile'));
+    nodes = await waitFor('native Settings', (current) => Boolean(tagged(current, 'settings-main')), 20_000);
+    const aboutRow = (current) => current.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.about']}. `));
+    for (let step = 0; step < 6 && !aboutRow(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
+    check(aboutRow(nodes)?.['content-desc'].includes(en['settings.updateAvailable']), `(1) RN's update dot carries over to the native Settings menu: ${aboutRow(nodes)?.['content-desc']}`);
     const published = await widgetsPublished('1');
     await stopApp();
 
@@ -536,16 +583,22 @@ const scenarioUpgrade = async () => {
     check(checkpointChanges.length === 0, `(1) .prewrite holds every pre-upgrade row exactly${shortList(checkpointChanges)}`);
     const imported = rows(post, TASK_SQL).filter((task) => task.title === t.queued && !task.deletedAt);
     check(imported.length === 1 && imported[0].id === queued.id && !after.has(queuedPath), '(1) the native boot imported the capture RN left queued once, under its id, and removed its file');
-    // The one RKStorage write the native app makes here on purpose: the reminder alarms clear RN's alarm map and keep their own under
-    // RN's key, after the byte checkpoint of RKStorage. No other RKStorage row may change.
-    const rnStateWritten = [ASYNC_STORAGE, `${ASYNC_STORAGE}-wal`, `${ASYNC_STORAGE}-journal`].some((path) => before.get(path) !== after.get(path))
-        || [...after.keys()].some(isRnCheckpoint);
+    // The RKStorage writes the native app makes here on purpose: the reminder alarms clear RN's alarm map and keep their own under
+    // RN's key, and the first paint counts today in RN's prompt state, after the boot's byte copy of RKStorage. No other row may change.
     const asyncChanged = (() => {
         const postAsync = asyncStorage('1-post-rkstorage');
         return [...new Set([...preAsync.keys(), ...postAsync.keys()])].filter((name) => preAsync.get(name) !== postAsync.get(name));
     })();
-    check(asyncChanged.every((name) => name === ALARM_MAP), `(1) RKStorage: only RN's alarm map ${ALARM_MAP} changed${shortList(asyncChanged)}`);
-    check(!rnStateWritten || checkpointMatches(before, after), `(1) ${RN_CHECKPOINT} holds the pre-upgrade RKStorage files byte for byte, taken before that write`);
+    check(asyncChanged.every((name) => name === ALARM_MAP || name === PROMPT_STATE), `(1) RKStorage: only RN's alarm map ${ALARM_MAP} and RN's prompt state changed${shortList(asyncChanged)}`);
+    // Pass O1: the native first paint counted today as RN's does, on RN's state: RN's first-seen time and days kept, today added.
+    const postAbout = asyncStorage('1-post-about');
+    const prompts = JSON.parse(postAbout.get(PROMPT_STATE) ?? '{}');
+    check(prompts.firstSeenAt === rnPrompts.firstSeenAt && prompts.firstSeenDayKey === rnPrompts.firstSeenDayKey
+        && isDeepStrictEqual(prompts.activeDayKeys, [...rnPrompts.activeDayKeys, phoneToday]), `(1) RN's prompt state carries over with today added: ${JSON.stringify(prompts)}`);
+    check([UPDATE_AVAILABLE, UPDATE_LAST_CHECK, DISTINCT_ID].every((key) => postAbout.get(key) === rnAbout[key]),
+        '(1) RN\'s update dot, its last check and the heartbeat\'s anonymous id are kept as RN left them (a debug build sends no heartbeat)');
+    const rnFiles = ['', '-wal', '-journal', '-shm'].filter((suffix) => before.has(`${ASYNC_STORAGE}${suffix}`)).map((suffix) => `RKStorage${suffix}`);
+    check(checkpointMatches(before, after), `(1) ${RN_CHECKPOINT} holds the pre-upgrade RKStorage files byte for byte (${rnFiles.join(', ')}), taken at boot before anything opened RKStorage`);
     const changed = differences(before, after, {
         changedOk: (path) => isDatabase(path) || path === queuedPath || isAsyncStorage(path) || isWidgetPayload(path),
         newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path),
@@ -685,7 +738,9 @@ const scenarioJsonAhead = async () => {
     const storedAgain = rows(again, `SELECT rev, updatedAt FROM tasks WHERE id = '${extra.id}'`);
     check(storedAgain.length === 1 && storedAgain[0].rev === stored[0].rev && storedAgain[0].updatedAt === stored[0].updatedAt
         && counts(again).tasks === counts(postDb).tasks, `(2) relaunch imported nothing: the task keeps rev ${stored[0].rev}, ${counts(postDb).tasks} task rows`);
-    check(relaunch.get(ASYNC_STORAGE) === after.get(ASYNC_STORAGE), '(2) relaunch left RKStorage unchanged');
+    // Rows, not file bytes: every first paint rewrites RN's prompt state (the same day: the same value), as RN's first paint does.
+    const relaunchAsync = asyncStorage('2-relaunch-rkstorage');
+    check(isDeepStrictEqual(relaunchAsync, postAsync), `(2) relaunch left every RKStorage row unchanged${shortList(asyncChanges(postAsync, relaunchAsync))}`);
     return { t, id: extra.id, stored: stored[0], post: readState(again) };
 };
 
@@ -845,10 +900,8 @@ const scenarioMissingWithBackup = async () => {
     check(postAsync.get(RECONCILED) === '1', '(5b) the reconcile flag is set');
     const asyncChanged = asyncChanges(preAsync, postAsync);
     check(asyncChanged.length === 0, `(5b) no other AsyncStorage row changed, ${JSON_BACKUP} included${shortList(asyncChanged)}`);
-    // With the flag already set only the reminder alarms write RKStorage (RN's alarm map), and only after its checkpoint.
-    const alarmMapChanged = preAsync.get(ALARM_MAP) !== postAsync.get(ALARM_MAP);
-    check(flagWasSet && !alarmMapChanged ? after.get(ASYNC_STORAGE) === before.get(ASYNC_STORAGE) && ![...after.keys()].some(isRnCheckpoint) : checkpointMatches(before, after),
-        flagWasSet && !alarmMapChanged ? '(5b) RN had set the reconcile flag, so RKStorage is untouched and not checkpointed' : `(5b) ${RN_CHECKPOINT} holds the pre-upgrade RKStorage files`);
+    // The boot copies RKStorage once the guard passes, before anything opens it, whether or not RN had set the flag.
+    check(checkpointMatches(before, after), `(5b) ${RN_CHECKPOINT} holds the pre-upgrade RKStorage files`);
     const changed = differences(before, after, {
         changedOk: (path) => isAsyncStorage(path) || isWidgetPayload(path),
         newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path),

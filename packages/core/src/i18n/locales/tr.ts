@@ -1,5 +1,14 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const trOverrides: Record<string, string> = {
+    'timeline.moveTaskDates': "Görev tarihlerini taşı",
+    'timeline.moveProjectDates': "Proje tarihlerini taşı",
+    'timeline.resizeStart': "Başlangıç tarihini ayarla",
+    'timeline.resizeDue': "Son tarihi ayarla",
+    'timeline.datesUpdated': "Tarihler güncellendi",
+    'timeline.dateEditConflict': "Tarihler başka bir yerde değiştirildi. Tekrar deneyin.",
+    'timeline.dateEditFailed': "Tarihler güncellenemedi. Tarih aralığını kontrol edip tekrar deneyin.",
+    'timeline.dateUndoConflict': "Düzenlemeden sonra tarihler değişti. Geri alma atlandı.",
+    'timeline.dateUndoFailed': "Tarih değişiklikleri geri alınamadı. Tekrar deneyin.",
     'task.doneTagOutcomeUnknown': "Etiket değişikliği doğrulanamadı. Kaydedilen verileri yeniden yüklemek için Mindwtr uygulamasını yeniden başlatın.",
     'task.doneCompletedAtOutcomeUnknown': "Tamamlanma zamanı değişikliği doğrulanamadı. Kaydedilen verileri yeniden yüklemek için Mindwtr uygulamasını yeniden başlatın.",
     'task.destinationOutcomeUnknown': "Hedef değişikliği doğrulanamadı. Kaydedilen verileri yeniden yüklemek için Mindwtr uygulamasını yeniden başlatın.",

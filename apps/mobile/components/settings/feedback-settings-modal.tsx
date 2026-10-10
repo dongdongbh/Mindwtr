@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
@@ -15,7 +15,16 @@ import {
 } from 'react-native';
 import { Bug, Lightbulb, MessageSquare, X, type LucideIcon } from 'lucide-react-native';
 
-import { FEEDBACK_CATEGORIES, type FeedbackCategory } from '@mindwtr/core';
+import {
+    buildFeedbackModalText,
+    FEEDBACK_CATEGORIES,
+    FEEDBACK_LOCATIONS as feedbackLocations,
+    getFeedbackDraftState,
+    getFeedbackMessageMaxLength,
+    planFeedbackSubmit,
+    type FeedbackCategory,
+    type FeedbackLocation,
+} from '@mindwtr/core';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 import { styles } from './settings.styles';
@@ -42,20 +51,6 @@ const categoryIcons: Record<FeedbackCategory, LucideIcon> = {
     other: MessageSquare,
 };
 
-const feedbackLocations = [
-    'inbox',
-    'focus',
-    'projects',
-    'review',
-    'settings',
-    'sync',
-    'importExport',
-    'notifications',
-    'other',
-] as const;
-
-type FeedbackLocation = typeof feedbackLocations[number];
-
 export function FeedbackSettingsModal({
     isConfigured,
     onClose,
@@ -77,7 +72,10 @@ export function FeedbackSettingsModal({
         Platform.OS === 'android' ? { scrollsChildToFocus: false } : {}
     );
 
+    // Each opening is its own visit: a send from an earlier visit that ends later changes nothing here.
+    const visit = useRef(0);
     useEffect(() => {
+        visit.current += 1;
         if (!visible) return;
         setStatus('idle');
         setError(null);
@@ -89,62 +87,33 @@ export function FeedbackSettingsModal({
         setBugLocation('');
     }, [category]);
 
-    const categoryLabels = useMemo<Record<FeedbackCategory, string>>(() => ({
-        bug: tr('settings.feedbackCategoryBug'),
-        feature: tr('settings.feedbackCategoryFeature'),
-        other: tr('settings.feedbackCategoryOther'),
-    }), [tr]);
-    const messagePlaceholders = useMemo<Record<FeedbackCategory, string>>(() => ({
-        bug: tr('settings.feedbackMessagePlaceholderBug'),
-        feature: tr('settings.feedbackMessagePlaceholderFeature'),
-        other: tr('settings.feedbackMessagePlaceholderOther'),
-    }), [tr]);
-    const locationLabels = useMemo<Record<FeedbackLocation, string>>(() => ({
-        inbox: tr('settings.feedbackWhereInbox'),
-        focus: tr('settings.feedbackWhereFocus'),
-        projects: tr('settings.feedbackWhereProjects'),
-        review: tr('settings.feedbackWhereReview'),
-        settings: tr('settings.feedbackWhereSettings'),
-        sync: tr('settings.feedbackWhereSync'),
-        importExport: tr('settings.feedbackWhereImportExport'),
-        notifications: tr('settings.feedbackWhereNotifications'),
-        other: tr('settings.feedbackWhereOther'),
-    }), [tr]);
+    // Core's words and rules (about-settings-model.ts), shared with the native host.
+    const text = useMemo(() => buildFeedbackModalText(tr), [tr]);
+    const categoryLabels = text.categories;
+    const messagePlaceholders = text.messagePlaceholders;
+    const locationLabels = text.locations;
 
-    const trimmedMessage = message.trim();
-    const trimmedEmail = email.trim();
-    const emailValid = !trimmedEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
-    const canSubmit = isConfigured && trimmedMessage.length > 0 && emailValid && status !== 'sending';
-    const visibleError = error
-        ?? (trimmedEmail && !emailValid ? tr('settings.feedbackInvalidEmail') : null);
+    const { canSubmit, visibleError } = getFeedbackDraftState({ tr, isConfigured, message, email, status, error });
 
     const submit = async () => {
-        if (!trimmedMessage) {
-            setError(tr('settings.feedbackRequired'));
-            return;
-        }
-        if (!emailValid) {
-            setError(tr('settings.feedbackInvalidEmail'));
+        const plan = planFeedbackSubmit({ category, message, email, location: bugLocation, includeDiagnostics }, tr);
+        if ('error' in plan) {
+            setError(plan.error);
             return;
         }
         setStatus('sending');
         setError(null);
-        const submittedMessage = category === 'bug' && bugLocation
-            ? `${tr('settings.feedbackWhereMessagePrefix')}: ${locationLabels[bugLocation]}\n\n${trimmedMessage}`
-            : trimmedMessage;
+        const sentIn = visit.current;
         try {
-            await onSubmit({
-                category,
-                email: trimmedEmail || undefined,
-                includeDiagnostics: category === 'bug' && includeDiagnostics,
-                message: submittedMessage,
-            });
+            await onSubmit(plan.input);
+            if (visit.current !== sentIn) return;
             setStatus('sent');
             setMessage('');
             setEmail('');
             setBugLocation('');
             setIncludeDiagnostics(false);
         } catch {
+            if (visit.current !== sentIn) return;
             setStatus('error');
             setError(tr('settings.feedbackFailed'));
         }
@@ -164,24 +133,24 @@ export function FeedbackSettingsModal({
                         <View style={[styles.feedbackModalHeader, { borderBottomColor: tc.border }]}>
                             <View style={styles.feedbackModalTitleBlock}>
                                 <Text style={[styles.feedbackModalTitle, { color: tc.text }]}>
-                                    {tr('settings.feedback')}
+                                    {text.title}
                                 </Text>
                                 {onOpenGitHub && status !== 'sent' ? (
                                     <Text style={[styles.feedbackModalSubtitle, { color: tc.secondaryText }]}>
-                                        {tr('settings.feedbackGitHubDesc').split('{channel}')[0]}
+                                        {text.gitHub[category].before}
                                         <Text
                                             accessibilityRole="link"
                                             onPress={() => onOpenGitHub(category)}
                                             style={{ color: tc.tint, textDecorationLine: 'underline' }}
                                         >
-                                            {tr(category === 'other' ? 'settings.feedbackOpenGitHubDiscussion' : 'settings.feedbackOpenGitHubIssue')}
+                                            {text.gitHub[category].link}
                                         </Text>
-                                        {tr('settings.feedbackGitHubDesc').split('{channel}')[1]}
+                                        {text.gitHub[category].after}
                                     </Text>
                                 ) : null}
                             </View>
                             <TouchableOpacity
-                                accessibilityLabel={tr('common.close')}
+                                accessibilityLabel={text.close}
                                 onPress={onClose}
                                 style={styles.feedbackCloseButton}
                             >
@@ -193,7 +162,7 @@ export function FeedbackSettingsModal({
                             <View style={styles.feedbackSentBody}>
                                 <View style={[styles.feedbackNotice, { backgroundColor: `${tc.success}22`, borderColor: `${tc.success}55` }]}>
                                     <Text style={[styles.feedbackNoticeText, { color: tc.success }]}>
-                                        {tr('settings.feedbackSent')}
+                                        {text.sent}
                                     </Text>
                                 </View>
                                 <TouchableOpacity
@@ -201,7 +170,7 @@ export function FeedbackSettingsModal({
                                     onPress={onClose}
                                 >
                                     <Text style={[styles.feedbackPrimaryButtonText, { color: filledButton.textColor ?? tc.onTint }]}>
-                                        {tr('common.close')}
+                                        {text.close}
                                     </Text>
                                 </TouchableOpacity>
                             </View>
@@ -216,7 +185,7 @@ export function FeedbackSettingsModal({
                                 {...androidScrollViewFocusProps}
                             >
                                 <Text style={[styles.feedbackFieldLabel, { color: tc.secondaryText }]}>
-                                    {tr('settings.feedbackCategory')}
+                                    {text.category}
                                 </Text>
                                 <View style={styles.feedbackCategoryGrid}>
                                     {FEEDBACK_CATEGORIES.map((item) => {
@@ -251,7 +220,7 @@ export function FeedbackSettingsModal({
                                 {category === 'bug' ? (
                                     <>
                                         <Text style={[styles.feedbackFieldLabel, { color: tc.secondaryText }]}>
-                                            {tr('settings.feedbackWhere')}
+                                            {text.where}
                                         </Text>
                                         <View style={styles.feedbackLocationGrid}>
                                             {feedbackLocations.map((location) => {
@@ -289,7 +258,7 @@ export function FeedbackSettingsModal({
                                 ) : null}
 
                                 <Text style={[styles.feedbackFieldLabel, { color: tc.secondaryText }]}>
-                                    {tr('settings.feedbackMessage')}
+                                    {text.message}
                                 </Text>
                                 <TextInput
                                     value={message}
@@ -300,7 +269,7 @@ export function FeedbackSettingsModal({
                                     placeholder={messagePlaceholders[category]}
                                     placeholderTextColor={tc.secondaryText}
                                     multiline
-                                    maxLength={4000}
+                                    maxLength={getFeedbackMessageMaxLength({ category, location: bugLocation }, tr)}
                                     style={[
                                         styles.feedbackTextArea,
                                         {
@@ -313,7 +282,7 @@ export function FeedbackSettingsModal({
                                 />
 
                                 <Text style={[styles.feedbackFieldLabel, { color: tc.secondaryText }]}>
-                                    {tr('settings.feedbackEmail')}
+                                    {text.email}
                                 </Text>
                                 <TextInput
                                     value={email}
@@ -321,7 +290,7 @@ export function FeedbackSettingsModal({
                                         setEmail(next);
                                         setError(null);
                                     }}
-                                    placeholder={tr('settings.feedbackEmailPlaceholder')}
+                                    placeholder={text.emailPlaceholder}
                                     placeholderTextColor={tc.secondaryText}
                                     autoCapitalize="none"
                                     autoCorrect={false}
@@ -340,10 +309,10 @@ export function FeedbackSettingsModal({
                                     <View style={[styles.feedbackDiagnosticsRow, { backgroundColor: tc.bg, borderColor: tc.border }]}>
                                         <View style={styles.feedbackDiagnosticsCopy}>
                                             <Text style={[styles.feedbackDiagnosticsTitle, { color: tc.text }]}>
-                                                {tr('settings.feedbackIncludeDiagnostics')}
+                                                {text.includeDiagnostics}
                                             </Text>
                                             <Text style={[styles.feedbackDiagnosticsDescription, { color: tc.secondaryText }]}>
-                                                {tr('settings.feedbackIncludeDiagnosticsDesc')}
+                                                {text.includeDiagnosticsDescription}
                                             </Text>
                                         </View>
                                         <Switch
@@ -358,10 +327,10 @@ export function FeedbackSettingsModal({
                                 {!isConfigured ? (
                                     <View style={[styles.feedbackNotice, { backgroundColor: `${tc.danger}18`, borderColor: `${tc.danger}55` }]}>
                                         <Text style={[styles.feedbackNoticeText, { color: tc.danger }]}>
-                                            {tr('settings.feedbackUnavailable')}
+                                            {text.unavailable}
                                         </Text>
                                         <Text style={[styles.feedbackNoticeDescription, { color: tc.danger }]}>
-                                            {tr('settings.feedbackUnavailableDesc')}
+                                            {text.unavailableDescription}
                                         </Text>
                                     </View>
                                 ) : null}
@@ -382,7 +351,7 @@ export function FeedbackSettingsModal({
                                     onPress={onClose}
                                 >
                                     <Text style={[styles.feedbackSecondaryButtonText, { color: tc.secondaryText }]}>
-                                        {tr('common.cancel')}
+                                        {text.cancel}
                                     </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
@@ -399,8 +368,8 @@ export function FeedbackSettingsModal({
                                     ) : null}
                                     <Text style={[styles.feedbackPrimaryButtonText, { color: filledButton.textColor ?? tc.onTint }]}>
                                         {status === 'sending'
-                                            ? tr('settings.feedbackSending')
-                                            : tr('settings.feedbackSubmit')}
+                                            ? text.sending
+                                            : text.submit}
                                     </Text>
                                 </TouchableOpacity>
                             </View>

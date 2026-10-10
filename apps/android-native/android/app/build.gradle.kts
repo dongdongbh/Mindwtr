@@ -25,6 +25,26 @@ fun com.android.build.api.dsl.ApplicationBuildType.urlScheme() {
     manifestPlaceholders["urlScheme"] = scheme
 }
 
+// RN's build facts (apps/mobile/app.json and app.config.ts), so About, feedback and the heartbeat report what RN's same build
+// reports: the version and build number, the release tag (release-version.json, else ANALYTICS_RELEASE_VERSION), and the
+// endpoints from the same environment variables. The benchmarks never send a heartbeat (RN's benchmark variant has none).
+val rnAppJson = groovy.json.JsonSlurper().parse(rootProject.projectDir.resolve("../../mobile/app.json")) as Map<*, *>
+val rnExpo = rnAppJson["expo"] as Map<*, *>
+val rnVersion = rnExpo["version"] as String
+val rnVersionCode = ((rnExpo["android"] as Map<*, *>)["versionCode"] as Number).toString()
+val rnName = rnExpo["name"] as String
+val rnPackage = (rnExpo["android"] as Map<*, *>)["package"] as String
+val rnReleaseVersion = (System.getenv("ANALYTICS_RELEASE_VERSION") ?: "").trim().ifEmpty {
+    runCatching { ((groovy.json.JsonSlurper().parse(rootProject.projectDir.resolve("../../mobile/release-version.json")) as Map<*, *>)["releaseVersion"] as String).trim() }.getOrDefault("")
+}
+val rnFeedbackUrl = (System.getenv("FEEDBACK_ENDPOINT_URL") ?: "").trim()
+// RN's builds default to the live heartbeat endpoint; this app is not a production build yet (it ships under the dev package),
+// so its heartbeat is on only when ANALYTICS_HEARTBEAT_URL names one. The production identity pass (O3) restores RN's default.
+val rnHeartbeatUrl = if (System.getenv("ANALYTICS_HEARTBEAT_DISABLED") in setOf("1", "true")) "" else
+    (System.getenv("ANALYTICS_HEARTBEAT_URL") ?: "").trim()
+val rnHeartbeatChannel = System.getenv("ANALYTICS_HEARTBEAT_CHANNEL")
+fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "tech.dongdongbh.mindwtr.pilot"
     compileSdk = 36
@@ -39,6 +59,13 @@ android {
         buildConfigField("boolean", "RN_STORAGE", "false")
         // The QuickJS wrapper's version (the dependency below): a key of the bundle's bytecode cache (BytecodeCache.kt).
         buildConfigField("String", "QUICKJS_WRAPPER", "\"3.2.0\"")
+        buildConfigField("String", "RN_NAME", quoted(rnName))
+        buildConfigField("String", "RN_PACKAGE", quoted(rnPackage))
+        buildConfigField("String", "RN_VERSION", quoted(rnVersion))
+        buildConfigField("String", "RN_VERSION_CODE", quoted(rnVersionCode))
+        buildConfigField("String", "RN_RELEASE_VERSION", quoted(rnReleaseVersion))
+        buildConfigField("String", "FEEDBACK_ENDPOINT_URL", quoted(rnFeedbackUrl))
+        buildConfigField("String", "ANALYTICS_HEARTBEAT_URL", quoted(rnHeartbeatUrl))
     }
 
     buildTypes {
@@ -60,6 +87,7 @@ android {
             isMinifyEnabled = true
             isProfileable = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            buildConfigField("String", "ANALYTICS_HEARTBEAT_URL", "\"\"")
             urlScheme()
         }
         // The benchmark's debuggable twin (same id and key): installed first so run-as can seed a database, then the
@@ -85,10 +113,13 @@ android {
         create("play") {
             dimension = "channel"
             buildConfigField("boolean", "FOSS", "false")
+            buildConfigField("String", "ANALYTICS_HEARTBEAT_CHANNEL", quoted(rnHeartbeatChannel ?: ""))
         }
         create("foss") {
             dimension = "channel"
             buildConfigField("boolean", "FOSS", "true")
+            // RN's FOSS default: fdroid while the heartbeat is on.
+            buildConfigField("String", "ANALYTICS_HEARTBEAT_CHANNEL", quoted(rnHeartbeatChannel ?: if (rnHeartbeatUrl.isNotEmpty()) "fdroid" else ""))
         }
     }
 
@@ -140,6 +171,12 @@ dependencies {
     implementation("androidx.sqlite:sqlite-bundled:2.7.1")
     // RN's fetch runs on OkHttp; the host's fetch uses it too (HostIo.kt), so redirects, TLS and cleartext match RN's.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // RN's Play-only modules, in the Play channel alone (RN's FOSS build drops them, scripts/verify_foss_no_google_services.py):
+    // Google Play's in-app update answer (modules/play-store-updates), its review flow (expo-store-review) and the install
+    // referrer (expo-application), at RN's versions.
+    "playImplementation"("com.google.android.play:app-update:2.1.0")
+    "playImplementation"("com.google.android.play:review:2.0.1")
+    "playImplementation"("com.android.installreferrer:installreferrer:2.2")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2025.08.01"))
     implementation("androidx.compose.ui:ui")

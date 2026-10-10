@@ -1,0 +1,5815 @@
+{
+ "provenance": {
+  "head": "b1ee68b0452e651a98ef9df58e5e4068222b447c"
+ },
+ "now": "2026-10-07T10:00:00.000Z",
+ "scenarios": [
+  {
+   "name": "play: screen opens, silent check finds a Play update",
+   "referrer": {
+    "value": "utm_source=google-play&utm_medium=organic"
+   },
+   "play": [
+    {
+     "value": {
+      "availability": "available",
+      "availabilityCode": 2,
+      "installStatus": "unknown",
+      "installStatusCode": 0,
+      "updateAvailable": true,
+      "availableVersionCode": 160,
+      "clientVersionStalenessDays": null,
+      "updatePriority": 0,
+      "immediateUpdateAllowed": false,
+      "flexibleUpdateAllowed": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "play: silent check within a day reads the stored dot",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367140000",
+    "mindwtr-update-available": "true"
+   }
+  },
+  {
+   "name": "play: manual check, Play update, Open",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "play": [
+    {
+     "value": {
+      "availability": "not-available",
+      "availabilityCode": 1,
+      "installStatus": "unknown",
+      "installStatusCode": 0,
+      "updateAvailable": false,
+      "availableVersionCode": null,
+      "clientVersionStalenessDays": null,
+      "updatePriority": 0,
+      "immediateUpdateAllowed": false,
+      "flexibleUpdateAllowed": false
+     }
+    },
+    {
+     "value": {
+      "availability": "available",
+      "availabilityCode": 2,
+      "installStatus": "unknown",
+      "installStatusCode": 0,
+      "updateAvailable": true,
+      "availableVersionCode": 160,
+      "clientVersionStalenessDays": null,
+      "updatePriority": 0,
+      "immediateUpdateAllowed": false,
+      "flexibleUpdateAllowed": true
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    },
+    {
+     "pressAlert": "attachments.open"
+    }
+   ]
+  },
+  {
+   "name": "play: manual check, Play up to date",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "play": [
+    {
+     "value": {
+      "availability": "not-available",
+      "availabilityCode": 1,
+      "installStatus": "unknown",
+      "installStatusCode": 0,
+      "updateAvailable": false,
+      "availableVersionCode": null,
+      "clientVersionStalenessDays": null,
+      "updatePriority": 0,
+      "immediateUpdateAllowed": false,
+      "flexibleUpdateAllowed": false
+     }
+    },
+    {
+     "value": {
+      "availability": "not-available",
+      "availabilityCode": 1,
+      "installStatus": "unknown",
+      "installStatusCode": 0,
+      "updateAvailable": false,
+      "availableVersionCode": null,
+      "clientVersionStalenessDays": null,
+      "updatePriority": 0,
+      "immediateUpdateAllowed": false,
+      "flexibleUpdateAllowed": false
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "play: Play API fails, GitHub newer, Later",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "play": [
+    {
+     "error": "boom"
+    },
+    {
+     "error": "boom"
+    }
+   ],
+   "github": [
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.3.5",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.5"
+     }
+    },
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.3.5",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.5"
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    },
+    {
+     "pressAlert": "settings.later"
+    }
+   ]
+  },
+  {
+   "name": "play: Play API fails, GitHub same",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "play": [
+    {
+     "error": "boom"
+    },
+    {
+     "error": "boom"
+    }
+   ],
+   "github": [
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.3.4",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.4"
+     }
+    },
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.3.4",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.4"
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "play: Play API fails, GitHub fails",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "play": [
+    {
+     "error": "boom"
+    },
+    {
+     "error": "boom"
+    }
+   ],
+   "github": [
+    {
+     "status": 503
+    },
+    {
+     "status": 503
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "sideload: GitHub newer with changelog, Download",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "github": [
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.4.0",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.4.0",
+      "body": "- change 0\n- change 1\n- change 2\n- change 3\n- change 4\n- change 5\n- change 6\n- change 7\n- change 8\n- change 9\n- change 10\n- change 11\n- change 12\n- change 13\n- change 14\n- change 15\n- change 16\n- change 17\n- change 18\n- change 19\n- change 20\n- change 21\n- change 22\n- change 23\n- change 24\n- change 25\n- change 26\n- change 27\n- change 28\n- change 29\n- change 30\n- change 31\n- change 32\n- change 33\n- change 34\n- change 35\n- change 36\n- change 37\n- change 38\n- change 39\n- change 40\n- change 41\n- change 42\n- change 43\n- change 44\n- change 45\n- change 46\n- change 47\n- change 48\n- change 49\n- change 50\n- change 51\n- change 52\n- change 53\n- change 54\n- change 55\n- change 56\n- change 57\n- change 58\n- change 59"
+     }
+    },
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.4.0",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.4.0",
+      "body": "- change 0\n- change 1\n- change 2\n- change 3\n- change 4\n- change 5\n- change 6\n- change 7\n- change 8\n- change 9\n- change 10\n- change 11\n- change 12\n- change 13\n- change 14\n- change 15\n- change 16\n- change 17\n- change 18\n- change 19\n- change 20\n- change 21\n- change 22\n- change 23\n- change 24\n- change 25\n- change 26\n- change 27\n- change 28\n- change 29\n- change 30\n- change 31\n- change 32\n- change 33\n- change 34\n- change 35\n- change 36\n- change 37\n- change 38\n- change 39\n- change 40\n- change 41\n- change 42\n- change 43\n- change 44\n- change 45\n- change 46\n- change 47\n- change 48\n- change 49\n- change 50\n- change 51\n- change 52\n- change 53\n- change 54\n- change 55\n- change 56\n- change 57\n- change 58\n- change 59"
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    },
+    {
+     "pressAlert": "attachments.download"
+    }
+   ]
+  },
+  {
+   "name": "sideload: GitHub newer without changelog",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "releaseVersion": "1.3.4-rc.2",
+   "github": [
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "1.3.5",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/1.3.5"
+     }
+    },
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "1.3.5",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/1.3.5"
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "sideload: GitHub same version",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "github": [
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.3.4",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.4"
+     }
+    },
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.3.4",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.4"
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "sideload: GitHub fails",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000",
+    "mindwtr-update-available": "true",
+    "mindwtr-update-latest": "1.3.9"
+   },
+   "github": [
+    {
+     "status": 500
+    },
+    {
+     "status": 500
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "referrer fails: Play path",
+   "referrer": {
+    "error": "no referrer"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "play": [
+    {
+     "value": {
+      "availability": "not-available",
+      "availabilityCode": 1,
+      "installStatus": "unknown",
+      "installStatusCode": 0,
+      "updateAvailable": false,
+      "availableVersionCode": null,
+      "clientVersionStalenessDays": null,
+      "updatePriority": 0,
+      "immediateUpdateAllowed": false,
+      "flexibleUpdateAllowed": false
+     }
+    },
+    {
+     "value": {
+      "availability": "not-available",
+      "availabilityCode": 1,
+      "installStatus": "unknown",
+      "installStatusCode": 0,
+      "updateAvailable": false,
+      "availableVersionCode": null,
+      "clientVersionStalenessDays": null,
+      "updatePriority": 0,
+      "immediateUpdateAllowed": false,
+      "flexibleUpdateAllowed": false
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "foss build: no check row, rate row or silent check",
+   "foss": true,
+   "steps": []
+  },
+  {
+   "name": "zh: play screen",
+   "language": "zh",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   }
+  },
+  {
+   "name": "zh: sideload GitHub newer",
+   "language": "zh",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791277200000"
+   },
+   "github": [
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.4.0",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.4.0",
+      "body": "Notes"
+     }
+    },
+    {
+     "status": 200,
+     "body": {
+      "tag_name": "v1.4.0",
+      "html_url": "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.4.0",
+      "body": "Notes"
+     }
+    }
+   ],
+   "steps": [
+    {
+     "tap": "settings.checkForUpdates"
+    }
+   ]
+  },
+  {
+   "name": "links: rate, website, tutorials, privacy, terms, sponsor",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   },
+   "steps": [
+    {
+     "tap": "settings.aboutMobile.rateOurApp"
+    },
+    {
+     "tap": "settings.officialWebsite"
+    },
+    {
+     "tap": "settings.videoTutorials"
+    },
+    {
+     "tap": "settings.privacy"
+    },
+    {
+     "tap": "settings.terms"
+    },
+    {
+     "tap": "settings.sponsorProject"
+    }
+   ]
+  },
+  {
+   "name": "feedback: not configured",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   },
+   "steps": [
+    {
+     "tap": "settings.feedback"
+    },
+    {
+     "type": {
+      "field": "message",
+      "text": "Hello"
+     }
+    },
+    {
+     "tap": "settings.feedbackSubmit",
+     "last": true
+    }
+   ]
+  },
+  {
+   "name": "feedback: bug with location, email and diagnostics",
+   "feedbackEndpointUrl": "https://feedback.example.test/submit",
+   "referrer": {
+    "value": "utm_source=google-play"
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   },
+   "steps": [
+    {
+     "tap": "settings.feedback"
+    },
+    {
+     "tap": "settings.feedbackWhereSync"
+    },
+    {
+     "type": {
+      "field": "message",
+      "text": "  Sync stopped  "
+     }
+    },
+    {
+     "type": {
+      "field": "email",
+      "text": " me@example.com "
+     }
+    },
+    {
+     "diagnostics": true
+    },
+    {
+     "tap": "settings.feedbackSubmit",
+     "last": true
+    },
+    {
+     "tap": "common.close"
+    }
+   ]
+  },
+  {
+   "name": "feedback: location chip toggles off",
+   "feedbackEndpointUrl": "https://feedback.example.test/submit",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   },
+   "steps": [
+    {
+     "tap": "settings.feedback"
+    },
+    {
+     "tap": "settings.feedbackWhereInbox"
+    },
+    {
+     "tap": "settings.feedbackWhereInbox"
+    },
+    {
+     "type": {
+      "field": "message",
+      "text": "No place"
+     }
+    },
+    {
+     "tap": "settings.feedbackSubmit",
+     "last": true
+    }
+   ]
+  },
+  {
+   "name": "feedback: feature drops diagnostics, opens GitHub",
+   "feedbackEndpointUrl": "https://feedback.example.test/submit",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   },
+   "steps": [
+    {
+     "tap": "settings.feedback"
+    },
+    {
+     "diagnostics": true
+    },
+    {
+     "tap": "settings.feedbackCategoryFeature"
+    },
+    {
+     "tap": "settings.feedbackOpenGitHubIssue"
+    },
+    {
+     "type": {
+      "field": "message",
+      "text": "Add tags"
+     }
+    },
+    {
+     "tap": "settings.feedbackSubmit",
+     "last": true
+    }
+   ]
+  },
+  {
+   "name": "feedback: other opens discussions",
+   "feedbackEndpointUrl": "https://feedback.example.test/submit",
+   "foss": true,
+   "steps": [
+    {
+     "tap": "settings.feedback"
+    },
+    {
+     "tap": "settings.feedbackCategoryOther"
+    },
+    {
+     "tap": "settings.feedbackOpenGitHubDiscussion"
+    },
+    {
+     "type": {
+      "field": "message",
+      "text": "Thanks"
+     }
+    },
+    {
+     "tap": "settings.feedbackSubmit",
+     "last": true
+    }
+   ]
+  },
+  {
+   "name": "feedback: invalid email",
+   "feedbackEndpointUrl": "https://feedback.example.test/submit",
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   },
+   "steps": [
+    {
+     "tap": "settings.feedback"
+    },
+    {
+     "type": {
+      "field": "message",
+      "text": "Hi"
+     }
+    },
+    {
+     "type": {
+      "field": "email",
+      "text": "nope@"
+     }
+    },
+    {
+     "tap": "settings.feedbackSubmit",
+     "last": true
+    }
+   ]
+  },
+  {
+   "name": "feedback: endpoint refuses",
+   "feedbackEndpointUrl": "https://feedback.example.test/submit",
+   "feedbackStatus": 500,
+   "referrer": {
+    "value": ""
+   },
+   "storage": {
+    "mindwtr-update-last-check": "1791367200000"
+   },
+   "steps": [
+    {
+     "tap": "settings.feedback"
+    },
+    {
+     "type": {
+      "field": "message",
+      "text": "Broken"
+     }
+    },
+    {
+     "tap": "settings.feedbackSubmit",
+     "last": true
+    }
+   ]
+  }
+ ],
+ "observations": {
+  "locale": "en-US",
+  "about": [
+   {
+    "name": "play: screen opens, silent check finds a Play update",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ],
+     [
+      "badge",
+      true
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "play: silent check within a day reads the stored dot",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      true
+     ],
+     [
+      "badge",
+      true
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367140000"
+    }
+   },
+   {
+    "name": "play: manual check, Play update, Open",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "canOpenURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ],
+     [
+      "alert",
+      {
+       "title": "Update Available",
+       "message": "Update is available on Google Play. Open app listing now?",
+       "buttons": [
+        {
+         "text": "Later",
+         "style": "cancel"
+        },
+        {
+         "text": "Open"
+        }
+       ]
+      }
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ],
+     [
+      "openURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "play: manual check, Play up to date",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "canOpenURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ],
+     [
+      "toast",
+      {
+       "title": "Up to Date",
+       "message": "You are using the latest Google Play version!",
+       "tone": "success"
+      }
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "false",
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "play: Play API fails, GitHub newer, Later",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.3.5"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "canOpenURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "alert",
+      {
+       "title": "Update Available",
+       "message": "v1.3.4 → v1.3.5\n\nGoogle Play check was unavailable, but a newer GitHub release is available. Play rollout may lag. Open app listing now?",
+       "buttons": [
+        {
+         "text": "Later",
+         "style": "cancel"
+        },
+        {
+         "text": "Open"
+        }
+       ]
+      }
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.3.5"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367200000",
+     "mindwtr-update-latest": "1.3.5"
+    }
+   },
+   {
+    "name": "play: Play API fails, GitHub same",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "canOpenURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "toast",
+      {
+       "title": "Up to Date",
+       "message": "Google Play check was unavailable, but your version matches the latest GitHub release.",
+       "tone": "success"
+      }
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "false",
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "play: Play API fails, GitHub fails",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "canOpenURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "toast",
+      {
+       "title": "Error",
+       "message": "Failed to check for updates",
+       "tone": "warning"
+      }
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "sideload: GitHub newer with changelog, Download",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.4.0"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "alert",
+      {
+       "title": "Update Available",
+       "message": "v1.3.4 → v1.4.0\n\nChangelog:\n- change 0\n- change 1\n- change 2\n- change 3\n- change 4\n- change 5\n- change 6\n- change 7\n- change 8\n- change 9\n- change 10\n- change 11\n- change 12\n- change 13\n- change 14\n- change 15\n- change 16\n- change 17\n- change 18\n- change 19\n- change 20\n- change 21\n- change 22\n- change 23\n- change 24\n- change 25\n- change 26\n- change 27\n- change 28\n- change 29\n- change 30\n- change 31\n- change 32\n- change 33\n- change 34\n- change 35\n- change 36\n- change 37\n- change 38\n- change 39\n- change 40\n- change 41\n- chan...",
+       "buttons": [
+        {
+         "text": "Later",
+         "style": "cancel"
+        },
+        {
+         "text": "Download"
+        }
+       ]
+      }
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.4.0"
+     ],
+     [
+      "openURL",
+      "https://github.com/dongdongbh/Mindwtr/releases/tag/v1.4.0"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367200000",
+     "mindwtr-update-latest": "1.4.0"
+    }
+   },
+   {
+    "name": "sideload: GitHub newer without changelog",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4-rc.2",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4-rc.2",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.3.5"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "alert",
+      {
+       "title": "Update Available",
+       "message": "v1.3.4-rc.2 → v1.3.5\n\nChangelog:\nNo changelog available",
+       "buttons": [
+        {
+         "text": "Later",
+         "style": "cancel"
+        },
+        {
+         "text": "Download"
+        }
+       ]
+      }
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.3.5"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367200000",
+     "mindwtr-update-latest": "1.3.5"
+    }
+   },
+   {
+    "name": "sideload: GitHub same version",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "toast",
+      {
+       "title": "Up to Date",
+       "message": "You are using the latest version!",
+       "tone": "success"
+      }
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "false",
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "sideload: GitHub fails",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "toast",
+      {
+       "title": "Error",
+       "message": "Failed to check for updates",
+       "tone": "warning"
+      }
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367200000",
+     "mindwtr-update-latest": "1.3.9"
+    }
+   },
+   {
+    "name": "referrer fails: Play path",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "canOpenURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ],
+     [
+      "toast",
+      {
+       "title": "Up to Date",
+       "message": "You are using the latest Google Play version!",
+       "tone": "success"
+      }
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "false"
+     ],
+     [
+      "storage.remove",
+      "mindwtr-update-latest"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "false",
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "foss build: no check row, rate row or silent check",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [],
+    "storage": {}
+   },
+   {
+    "name": "zh: play screen",
+    "screens": [
+     [
+      "关于",
+      "Mindwtr",
+      "v1.3.4",
+      "检查更新",
+      "点击检查",
+      "给应用评分",
+      "Google Play",
+      "发送反馈",
+      "发送反馈",
+      "官方网站",
+      "Mindwtr",
+      "视频教程",
+      "YouTube",
+      "隐私",
+      "隐私",
+      "使用条款",
+      "使用条款",
+      "支持开发",
+      "捐赠",
+      "许可证",
+      "AGPL-3.0",
+      "发送反馈",
+      "如果你有 GitHub 账号，推荐通过 GitHub 问题反馈 反馈，方便跟进。",
+      "类别",
+      "错误报告",
+      "功能请求",
+      "其他",
+      "发生在哪里？",
+      "收集箱",
+      "专注",
+      "项目",
+      "回顾",
+      "设置",
+      "同步",
+      "导入或导出",
+      "通知",
+      "其他",
+      "内容",
+      "回复邮箱（可选，建议填写）",
+      "包含最近诊断信息",
+      "附加最近的操作与错误。请在此设备上重现问题后再发送。",
+      "此版本未配置反馈通道。",
+      "你仍可通过 GitHub issue 模板提交错误报告或功能请求。",
+      "取消",
+      "发送反馈"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "zh: sideload GitHub newer",
+    "screens": [
+     [
+      "关于",
+      "Mindwtr",
+      "v1.3.4",
+      "检查更新",
+      "点击检查",
+      "给应用评分",
+      "Google Play",
+      "发送反馈",
+      "发送反馈",
+      "官方网站",
+      "Mindwtr",
+      "视频教程",
+      "YouTube",
+      "隐私",
+      "隐私",
+      "使用条款",
+      "使用条款",
+      "支持开发",
+      "捐赠",
+      "许可证",
+      "AGPL-3.0",
+      "发送反馈",
+      "如果你有 GitHub 账号，推荐通过 GitHub 问题反馈 反馈，方便跟进。",
+      "类别",
+      "错误报告",
+      "功能请求",
+      "其他",
+      "发生在哪里？",
+      "收集箱",
+      "专注",
+      "项目",
+      "回顾",
+      "设置",
+      "同步",
+      "导入或导出",
+      "通知",
+      "其他",
+      "内容",
+      "回复邮箱（可选，建议填写）",
+      "包含最近诊断信息",
+      "附加最近的操作与错误。请在此设备上重现问题后再发送。",
+      "此版本未配置反馈通道。",
+      "你仍可通过 GitHub issue 模板提交错误报告或功能请求。",
+      "取消",
+      "发送反馈"
+     ],
+     [
+      "关于",
+      "Mindwtr",
+      "v1.3.4",
+      "检查更新",
+      "点击检查",
+      "给应用评分",
+      "Google Play",
+      "发送反馈",
+      "发送反馈",
+      "官方网站",
+      "Mindwtr",
+      "视频教程",
+      "YouTube",
+      "隐私",
+      "隐私",
+      "使用条款",
+      "使用条款",
+      "支持开发",
+      "捐赠",
+      "许可证",
+      "AGPL-3.0",
+      "发送反馈",
+      "如果你有 GitHub 账号，推荐通过 GitHub 问题反馈 反馈，方便跟进。",
+      "类别",
+      "错误报告",
+      "功能请求",
+      "其他",
+      "发生在哪里？",
+      "收集箱",
+      "专注",
+      "项目",
+      "回顾",
+      "设置",
+      "同步",
+      "导入或导出",
+      "通知",
+      "其他",
+      "内容",
+      "回复邮箱（可选，建议填写）",
+      "包含最近诊断信息",
+      "附加最近的操作与错误。请在此设备上重现问题后再发送。",
+      "此版本未配置反馈通道。",
+      "你仍可通过 GitHub issue 模板提交错误报告或功能请求。",
+      "取消",
+      "发送反馈"
+     ]
+    ],
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.4.0"
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "tap",
+      "settings.checkForUpdates",
+      "enabled"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-last-check",
+      "1791367200000"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest",
+       "method": "GET",
+       "headers": {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Mindwtr-App"
+       },
+       "body": null
+      }
+     ],
+     [
+      "alert",
+      {
+       "title": "有可用更新",
+       "message": "v1.3.4 → v1.4.0\n\n更新日志:\nNotes",
+       "buttons": [
+        {
+         "text": "稍后",
+         "style": "cancel"
+        },
+        {
+         "text": "下载"
+        }
+       ]
+      }
+     ],
+     [
+      "badge",
+      true
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-available",
+      "true"
+     ],
+     [
+      "storage.set",
+      "mindwtr-update-latest",
+      "1.4.0"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-available": "true",
+     "mindwtr-update-last-check": "1791367200000",
+     "mindwtr-update-latest": "1.4.0"
+    }
+   },
+   {
+    "name": "links: rate, website, tutorials, privacy, terms, sponsor",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.aboutMobile.rateOurApp",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "market://details?id=tech.dongdongbh.mindwtr"
+     ],
+     [
+      "tap",
+      "settings.officialWebsite",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "https://mindwtr.app"
+     ],
+     [
+      "tap",
+      "settings.videoTutorials",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "https://youtube.com/playlist?list=PLLwV6zeTfB_k"
+     ],
+     [
+      "tap",
+      "settings.privacy",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "https://mindwtr.app/privacy"
+     ],
+     [
+      "tap",
+      "settings.terms",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "https://mindwtr.app/terms"
+     ],
+     [
+      "tap",
+      "settings.sponsorProject",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "https://mindwtr.app/donate?src=app_about"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "feedback: not configured",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Feedback is not configured in this build.",
+      "You can still report bugs and feature requests with the GitHub issue templates.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.feedback",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackSubmit",
+      "disabled"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "feedback: bug with location, email and diagnostics",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "Feedback sent. Thank you.",
+      "Close"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "Feedback sent. Thank you.",
+      "Close"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.feedback",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackWhereSync",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackSubmit",
+      "enabled"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://feedback.example.test/submit",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "category": "bug",
+        "message": "Where: Sync\n\nSync stopped",
+        "email": "me@example.com",
+        "metadata": {
+         "appVersion": "1.3.4",
+         "platform": "android",
+         "os": "android 34",
+         "installChannel": "play-store",
+         "locale": "en-US",
+         "build": "154"
+        },
+        "diagnostics": {
+         "logs": "{\"ts\":\"2026-10-07T09:59:00.000Z\",\"level\":\"warn\",\"scope\":\"sync\",\"message\":\"x\"}"
+        },
+        "submittedAt": "<now>"
+       }
+      }
+     ],
+     [
+      "tap",
+      "common.close",
+      "enabled"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "feedback: location chip toggles off",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "Feedback sent. Thank you.",
+      "Close"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.feedback",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackWhereInbox",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackWhereInbox",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackSubmit",
+      "enabled"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://feedback.example.test/submit",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "category": "bug",
+        "message": "No place",
+        "metadata": {
+         "appVersion": "1.3.4",
+         "platform": "android",
+         "os": "android 34",
+         "installChannel": "sideload",
+         "locale": "en-US",
+         "build": "154"
+        },
+        "submittedAt": "<now>"
+       }
+      }
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "feedback: feature drops diagnostics, opens GitHub",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "Feedback sent. Thank you.",
+      "Close"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.feedback",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackCategoryFeature",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackOpenGitHubIssue",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "https://github.com/dongdongbh/Mindwtr/issues/new/choose"
+     ],
+     [
+      "tap",
+      "settings.feedbackSubmit",
+      "enabled"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://feedback.example.test/submit",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "category": "feature",
+        "message": "Add tags",
+        "metadata": {
+         "appVersion": "1.3.4",
+         "platform": "android",
+         "os": "android 34",
+         "installChannel": "sideload",
+         "locale": "en-US",
+         "build": "154"
+        },
+        "submittedAt": "<now>"
+       }
+      }
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "feedback: other opens discussions",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Discussions for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Discussions for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Discussions for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "Feedback sent. Thank you.",
+      "Close"
+     ]
+    ],
+    "events": [
+     [
+      "tap",
+      "settings.feedback",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackCategoryOther",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackOpenGitHubDiscussion",
+      "enabled"
+     ],
+     [
+      "openURL",
+      "https://github.com/dongdongbh/Mindwtr/discussions/new"
+     ],
+     [
+      "tap",
+      "settings.feedbackSubmit",
+      "enabled"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://feedback.example.test/submit",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "category": "other",
+        "message": "Thanks",
+        "metadata": {
+         "appVersion": "1.3.4",
+         "platform": "android",
+         "os": "android 34",
+         "installChannel": "fdroid",
+         "locale": "en-US",
+         "build": "154"
+        },
+        "submittedAt": "<now>"
+       }
+      }
+     ]
+    ],
+    "storage": {}
+   },
+   {
+    "name": "feedback: invalid email",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Enter a valid email or leave it blank.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Enter a valid email or leave it blank.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.feedback",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackSubmit",
+      "disabled"
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   },
+   {
+    "name": "feedback: endpoint refuses",
+    "screens": [
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Cancel",
+      "Send feedback"
+     ],
+     [
+      "About",
+      "Mindwtr",
+      "v1.3.4",
+      "Check for Updates",
+      "Tap to check",
+      "Rate our app",
+      "Google Play",
+      "Send feedback",
+      "Send feedback",
+      "Official website",
+      "Mindwtr",
+      "Video tutorials",
+      "YouTube",
+      "Privacy",
+      "Privacy",
+      "Terms of Use",
+      "Terms of Use",
+      "Support development",
+      "Donate",
+      "License",
+      "AGPL-3.0",
+      "Send feedback",
+      "If you have a GitHub account, we recommend GitHub Issues for easy follow-up.",
+      "Category",
+      "Bug report",
+      "Feature request",
+      "Other",
+      "Where did this happen?",
+      "Inbox",
+      "Focus",
+      "Projects",
+      "Review",
+      "Settings",
+      "Sync",
+      "Import or export",
+      "Notifications",
+      "Other",
+      "Message",
+      "Reply email (optional, recommended)",
+      "Include recent diagnostics",
+      "Recent activity and errors. Reproduce the issue on this device before sending.",
+      "Could not send feedback. Your message is still here; please try again.",
+      "Cancel",
+      "Send feedback"
+     ]
+    ],
+    "events": [
+     [
+      "badge",
+      false
+     ],
+     [
+      "badge",
+      false
+     ],
+     [
+      "tap",
+      "settings.feedback",
+      "enabled"
+     ],
+     [
+      "tap",
+      "settings.feedbackSubmit",
+      "enabled"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://feedback.example.test/submit",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "category": "bug",
+        "message": "Broken",
+        "metadata": {
+         "appVersion": "1.3.4",
+         "platform": "android",
+         "os": "android 34",
+         "installChannel": "sideload",
+         "locale": "en-US",
+         "build": "154"
+        },
+        "submittedAt": "<now>"
+       }
+      }
+     ]
+    ],
+    "storage": {
+     "mindwtr-update-last-check": "1791367200000"
+    }
+   }
+  ],
+  "heartbeats": [
+   {
+    "name": "first heartbeat makes the distinct id",
+    "sent": true,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "<uuid>",
+     "mindwtr-analytics-last-heartbeat-day": "2026-10-07"
+    },
+    "events": [
+     [
+      "storage.set",
+      "mindwtr-analytics-distinct-id",
+      "<uuid>"
+     ],
+     [
+      "fetch",
+      {
+       "url": "https://analytics.example.test/",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "distinct_id": "<uuid>",
+        "platform": "android",
+        "channel": "play-store",
+        "app_version": "1.3.4-rc.2",
+        "version": "1.3.4-rc.2",
+        "device_class": "phone",
+        "os_major": "android-14",
+        "locale": "en-US"
+       }
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-analytics-last-heartbeat-day",
+      "2026-10-07"
+     ]
+    ]
+   },
+   {
+    "name": "stored id and profile id",
+    "sent": true,
+    "storage": {
+     "mindwtr-analytics-distinct-id": " stored-id ",
+     "mindwtr-analytics-last-heartbeat-day": "2026-10-07"
+    },
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://analytics.example.test/",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "distinct_id": "stored-id",
+        "profile_id": "profile-1",
+        "platform": "android",
+        "channel": "play-store",
+        "app_version": "1.3.4-rc.2",
+        "version": "1.3.4-rc.2",
+        "device_class": "phone",
+        "os_major": "android-14",
+        "locale": "en-US"
+       }
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-analytics-last-heartbeat-day",
+      "2026-10-07"
+     ]
+    ]
+   },
+   {
+    "name": "already sent today",
+    "sent": false,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "<uuid>",
+     "mindwtr-analytics-last-heartbeat-day": "2026-10-07"
+    },
+    "events": [
+     [
+      "storage.set",
+      "mindwtr-analytics-distinct-id",
+      "<uuid>"
+     ]
+    ]
+   },
+   {
+    "name": "sent yesterday",
+    "sent": true,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "id-2",
+     "mindwtr-analytics-last-heartbeat-day": "2026-10-07"
+    },
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://analytics.example.test/",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "distinct_id": "id-2",
+        "platform": "android",
+        "channel": "play-store",
+        "app_version": "1.3.4-rc.2",
+        "version": "1.3.4-rc.2",
+        "device_class": "phone",
+        "os_major": "android-14",
+        "locale": "en-US"
+       }
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-analytics-last-heartbeat-day",
+      "2026-10-07"
+     ]
+    ]
+   },
+   {
+    "name": "heartbeat off",
+    "sent": false,
+    "storage": {},
+    "events": []
+   },
+   {
+    "name": "baked channel",
+    "sent": true,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "id-3",
+     "mindwtr-analytics-last-heartbeat-day": "2026-10-07"
+    },
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://analytics.example.test/",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "distinct_id": "id-3",
+        "platform": "android",
+        "channel": "android-direct",
+        "app_version": "1.3.4-rc.2",
+        "version": "1.3.4-rc.2",
+        "device_class": "phone",
+        "os_major": "android-14",
+        "locale": "en-US"
+       }
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-analytics-last-heartbeat-day",
+      "2026-10-07"
+     ]
+    ]
+   },
+   {
+    "name": "foss fallback channel",
+    "sent": true,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "id-4",
+     "mindwtr-analytics-last-heartbeat-day": "2026-10-07"
+    },
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://analytics.example.test/",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "distinct_id": "id-4",
+        "platform": "android",
+        "channel": "fdroid",
+        "app_version": "1.3.4-rc.2",
+        "version": "1.3.4-rc.2",
+        "device_class": "phone",
+        "os_major": "android-14",
+        "locale": "en-US"
+       }
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-analytics-last-heartbeat-day",
+      "2026-10-07"
+     ]
+    ]
+   },
+   {
+    "name": "no url",
+    "sent": false,
+    "storage": {},
+    "events": []
+   },
+   {
+    "name": "dev build",
+    "sent": false,
+    "storage": {},
+    "events": []
+   },
+   {
+    "name": "server refuses",
+    "sent": false,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "id-5"
+    },
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://analytics.example.test/",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "distinct_id": "id-5",
+        "platform": "android",
+        "channel": "play-store",
+        "app_version": "1.3.4-rc.2",
+        "version": "1.3.4-rc.2",
+        "device_class": "phone",
+        "os_major": "android-14",
+        "locale": "en-US"
+       }
+      }
+     ]
+    ]
+   },
+   {
+    "name": "opt-out",
+    "sent": true,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "id-6",
+     "mindwtr-analytics-opt-out-sent": "2026-10-07T10:00:00.000Z"
+    },
+    "events": [
+     [
+      "fetch",
+      {
+       "url": "https://analytics.example.test/",
+       "method": "POST",
+       "headers": {
+        "Content-Type": "application/json"
+       },
+       "body": {
+        "distinct_id": "id-6",
+        "platform": "android",
+        "channel": "play-store",
+        "app_version": "1.3.4-rc.2",
+        "version": "1.3.4-rc.2",
+        "event": "opt_out",
+        "analytics_enabled": "false",
+        "device_class": "phone",
+        "os_major": "android-14",
+        "locale": "en-US"
+       }
+      }
+     ],
+     [
+      "storage.set",
+      "mindwtr-analytics-opt-out-sent",
+      "2026-10-07T10:00:00.000Z"
+     ]
+    ]
+   },
+   {
+    "name": "opt-out already sent",
+    "sent": false,
+    "storage": {
+     "mindwtr-analytics-distinct-id": "<uuid>",
+     "mindwtr-analytics-opt-out-sent": "2026-10-01T00:00:00.000Z"
+    },
+    "events": [
+     [
+      "storage.set",
+      "mindwtr-analytics-distinct-id",
+      "<uuid>"
+     ]
+    ]
+   }
+  ],
+  "storeReviews": [
+   {
+    "name": "eligible",
+    "requested": true,
+    "reviewRequests": 1,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-09-17T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\",\"2026-10-04\",\"2026-10-03\",\"2026-10-02\",\"2026-10-01\",\"2026-09-30\"],\"lastInterruptivePromptAt\":\"2026-10-07T10:00:00.000Z\",\"storeReview\":{\"lastAttemptAt\":\"2026-10-07T10:00:00.000Z\"}}"
+    }
+   },
+   {
+    "name": "no state yet",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {}
+   },
+   {
+    "name": "unreadable state",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{"
+    }
+   },
+   {
+    "name": "too new",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-10-04T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\",\"2026-10-04\",\"2026-10-03\",\"2026-10-02\",\"2026-10-01\",\"2026-09-30\"]}"
+    }
+   },
+   {
+    "name": "too few active days",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-09-17T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\"]}"
+    }
+   },
+   {
+    "name": "recent attempt",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-09-17T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\",\"2026-10-04\",\"2026-10-03\",\"2026-10-02\",\"2026-10-01\",\"2026-09-30\"],\"storeReview\":{\"lastAttemptAt\":\"2026-09-07T10:00:00.000Z\",\"attemptCount\":1}}"
+    }
+   },
+   {
+    "name": "old attempt",
+    "requested": true,
+    "reviewRequests": 1,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-09-17T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\",\"2026-10-04\",\"2026-10-03\",\"2026-10-02\",\"2026-10-01\",\"2026-09-30\"],\"storeReview\":{\"lastAttemptAt\":\"2026-10-07T10:00:00.000Z\",\"attemptCount\":1},\"lastInterruptivePromptAt\":\"2026-10-07T10:00:00.000Z\"}"
+    }
+   },
+   {
+    "name": "recent other prompt",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-09-17T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\",\"2026-10-04\",\"2026-10-03\",\"2026-10-02\",\"2026-10-01\",\"2026-09-30\"],\"lastInterruptivePromptAt\":\"2026-10-05T10:00:00.000Z\"}"
+    }
+   },
+   {
+    "name": "no review action",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-09-17T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\",\"2026-10-04\",\"2026-10-03\",\"2026-10-02\",\"2026-10-01\",\"2026-09-30\"]}"
+    }
+   },
+   {
+    "name": "foss build",
+    "requested": false,
+    "reviewRequests": 0,
+    "storage": {
+     "mindwtr:local-user-prompts:v1": "{\"firstSeenAt\":\"2026-09-17T10:00:00.000Z\",\"activeDayKeys\":[\"2026-10-07\",\"2026-10-06\",\"2026-10-05\",\"2026-10-04\",\"2026-10-03\",\"2026-10-02\",\"2026-10-01\",\"2026-09-30\"]}"
+    }
+   }
+  ]
+ }
+}
