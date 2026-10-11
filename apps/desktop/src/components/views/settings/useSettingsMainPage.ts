@@ -20,10 +20,10 @@ import {
     setLaunchAtStartupEnabled as setSystemLaunchAtStartupEnabled,
 } from '../../../lib/launch-at-startup';
 import { reportError } from '../../../lib/report-error';
+import { applyDesktopTheme } from '../../../lib/omarchy-theme';
 import {
     THEME_STORAGE_KEY,
     applyNativeTheme,
-    applyThemeMode,
     resolveDesktopThemeMode,
     resolveNativeTheme,
     resolveSystemThemeCommandPreference,
@@ -110,13 +110,13 @@ export function useSettingsMainPage({
 
     useEffect(() => {
         let cancelled = false;
-        applyThemeMode(themeMode);
+        applyDesktopTheme(themeMode, undefined, (step, error) => reportError(`Failed to read the Omarchy theme (${step})`, error));
         if (isTauri && (themeMode === 'system' || themeMode === 'system-oled')) {
             void resolveSystemThemeCommandPreference(
                 (_step, error) => reportError('Failed to resolve system theme', error),
             ).then((theme) => {
                 if (!cancelled && theme) {
-                    applyThemeMode(themeMode, theme);
+                    applyDesktopTheme(themeMode, theme, (step, error) => reportError(`Failed to read the Omarchy theme (${step})`, error));
                     if (isLinux) void applyNativeTheme(
                         resolveNativeTheme(themeMode, theme),
                         () => import('@tauri-apps/api/app'),

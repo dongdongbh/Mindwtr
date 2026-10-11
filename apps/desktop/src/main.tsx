@@ -19,12 +19,12 @@ import { invokeNative, preloadNativeTransport } from './lib/tauri-invoke';
 import { reportError } from './lib/report-error';
 import { webStorage } from './lib/storage-adapter-web';
 import { isDiagnosticsEnabled, logError, logInfo, logWarn, setupGlobalErrorLogging } from './lib/app-log';
+import { applyDesktopTheme } from './lib/omarchy-theme';
 import {
     THEME_STORAGE_KEY,
     applyNativeTheme,
     applyStartupSystemThemeBeforeApp,
     applySystemThemeChange,
-    applyThemeMode,
     coerceDesktopThemeMode,
     resolveNativeTheme,
     resolveSystemThemeCommandPreference,
@@ -215,7 +215,9 @@ async function bootstrap() {
     const initialTheme = coerceDesktopThemeMode(
         sandboxMode ? sandboxSettings.theme : localStorage.getItem(THEME_STORAGE_KEY),
     );
-    applyThemeMode(initialTheme);
+    applyDesktopTheme(initialTheme, undefined, (step, error) => {
+        void logError(error, { scope: 'theme', step: `omarchy-${step}` });
+    });
     let appOwnsTheme = false;
     if (((initialTheme ?? 'system') === 'system' || initialTheme === 'system-oled') && isTauriRuntime()) {
         void applyStartupSystemThemeBeforeApp(

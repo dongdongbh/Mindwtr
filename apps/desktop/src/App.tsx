@@ -88,6 +88,7 @@ import {
 } from './lib/email-capture';
 import { canDesktopAutoSync } from './lib/desktop-auto-sync-eligibility';
 import { beginSettingsOpenTrace, markSettingsOpenTrace, wrapSettingsOpenImport } from './lib/settings-open-diagnostics';
+import { applyDesktopTheme, watchOmarchyTheme } from './lib/omarchy-theme';
 import {
     THEME_STORAGE_KEY,
     applyNativeTheme,
@@ -573,7 +574,9 @@ function App() {
         let cancelled = false;
         const normalizedTheme = getActiveThemeMode();
         if (!sandboxMode) localStorage.setItem(THEME_STORAGE_KEY, normalizedTheme);
-        applyThemeMode(normalizedTheme);
+        applyDesktopTheme(normalizedTheme, undefined, (step, error) => {
+            void logError(error, { scope: 'theme', step: `omarchy-${step}` });
+        });
         if ((normalizedTheme === 'system' || normalizedTheme === 'system-oled') && isTauriRuntime()) {
             void resolveSystemThemeCommandPreference(
                 (step, error) => void logError(error, { scope: 'theme', step: `initial-command:${step}` }),
@@ -588,6 +591,15 @@ function App() {
             cancelled = true;
         };
     }, [applyActiveNativeTheme, getActiveThemeMode, hasHydratedSettings, sandboxMode]);
+
+    useEffect(() => {
+        if (!hasHydratedSettings) return;
+        // Omarchy rewrites theme.name on every theme set; following it keeps the
+        // app in step with the desktop instead of only at launch.
+        return watchOmarchyTheme(getActiveThemeMode(), (step, error) => {
+            void logError(error, { scope: 'theme', step: `omarchy-${step}` });
+        });
+    }, [getActiveThemeMode, hasHydratedSettings]);
 
     useEffect(() => {
         // Hydrate the shared pomodoro store once tasks are loaded so task rows

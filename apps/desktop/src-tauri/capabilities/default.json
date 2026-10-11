@@ -67,6 +67,12 @@
         },
         {
           "path": "$RUNTIME/doc/**"
+        },
+        {
+          "path": "$HOME/.local/state/omarchy/**"
+        },
+        {
+          "path": "$HOME/.config/omarchy/**"
         }
       ]
     },

@@ -32,6 +32,9 @@ const SYSTEM_THEME_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 const SYSTEM_THEME_PORTAL_CHANGED_EVENT = 'system-theme-portal-changed';
 let cachedSystemThemePreference: SystemThemePreference = null;
 
+/** Set by the Omarchy palette layer; see `setSystemSchemeOverride`. */
+let systemSchemeOverride: SystemThemePreference = null;
+
 const isDesktopThemeMode = (value: string | null | undefined): value is DesktopThemeMode => (
     value === 'system' || themeDescriptor(value)?.desktop === true
 );
@@ -66,11 +69,26 @@ export const resolveDesktopThemeMode = (
 export const resolveSystemThemePreference = (override?: SystemThemePreference): SystemThemePreference => {
     if (override === 'light' || override === 'dark') {
         cachedSystemThemePreference = override;
-        return override;
     }
+    // The Omarchy palette outranks the platform signal while it is active, but
+    // the platform signal still refreshes the cache for the moment it stops
+    // being the source. Without the override, a portal or media event arriving
+    // after the palette applied would flip the dark class against colors that
+    // did not change.
+    if (systemSchemeOverride) return systemSchemeOverride;
+    if (override === 'light' || override === 'dark') return override;
     if (cachedSystemThemePreference) return cachedSystemThemePreference;
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return null;
     return window.matchMedia(SYSTEM_THEME_MEDIA_QUERY).matches ? 'dark' : 'light';
+};
+
+/**
+ * Hands the light/dark decision to a theme source that knows better than the
+ * platform, which today means the live Omarchy palette. `null` returns the
+ * decision to the platform.
+ */
+export const setSystemSchemeOverride = (scheme: SystemThemePreference): void => {
+    systemSchemeOverride = scheme;
 };
 
 export const coerceSystemThemePreference = (value: unknown): SystemThemePreference => {
@@ -249,7 +267,10 @@ export const resolveNativeTheme = (
     systemTheme = resolveSystemThemePreference(),
 ): 'light' | 'dark' | null => {
     if (!mode || mode === 'system' || mode === 'system-oled') {
-        return isLinuxRuntime() ? systemTheme : null;
+        // Resolved rather than passed through: the Omarchy palette has to reach
+        // the GTK titlebar too, and callers that already have the platform
+        // theme in hand would otherwise bypass the override.
+        return isLinuxRuntime() ? resolveSystemThemePreference(systemTheme) : null;
     }
     return resolveThemeColorScheme(mode, 'light');
 };
