@@ -69,8 +69,8 @@ describe('i18n-loader sync fallback', () => {
 
         expect(zhHant['settings.cloudBaseUrlHint']).toBe('填寫基礎地址，Mindwtr 會自動加上 /v1/data。');
         expect(zhHant['settings.webdavTestHint']).toBe('僅驗證地址與憑證，不執行資料同步');
-        expect(zhHant['settings.cloudTestHint']).toBe('僅驗證地址與令牌，不執行資料同步');
-        expect(zhHant['settings.dropboxTestHint']).toBe('驗證 Dropbox 令牌與帳號存取。');
+        expect(zhHant['settings.cloudTestHint']).toBe('僅驗證地址與權杖，不執行資料同步');
+        expect(zhHant['settings.dropboxTestHint']).toBe('驗證 Dropbox 權杖與帳號存取。');
     });
 
     it('loads mobile calendar and sync-off settings copy through i18n keys', async () => {
