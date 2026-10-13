@@ -1580,6 +1580,7 @@ export const TaskItem = memo(function TaskItem({
     }, [handleEditorCancel, isEditing, task.id]);
     const renderEditor = () => (
         <TaskItemEditor
+            isModalEditor={isModalEditor}
             t={t}
             draft={draft}
             setField={setField}
