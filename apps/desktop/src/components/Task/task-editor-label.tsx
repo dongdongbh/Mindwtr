@@ -21,7 +21,7 @@ export function TaskEditorFieldLabel({
     children: ReactNode;
 }) {
     return (
-        <label className={cn(taskEditorLabelClassName, 'inline-flex items-center gap-1.5', className)}>
+        <label className={cn(taskEditorLabelClassName, 'inline-flex items-center gap-1.5 group-data-[popup=true]/task-editor:text-sm group-data-[popup=true]/task-editor:font-medium', className)}>
             {Icon ? <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" /> : null}
             {children}
         </label>
@@ -64,7 +64,7 @@ export function QuickAddTokenBadge({
     return (
         <code
             title={quickAddTokenHint(t, token)}
-            className="inline-flex rounded border border-current/30 bg-background/20 px-1 py-0.5 font-mono text-[10px] font-normal leading-none text-current opacity-80"
+            className="group-data-[popup=true]/task-editor:sr-only inline-flex rounded border border-current/30 bg-background/20 px-1 py-0.5 font-mono text-[10px] font-normal leading-none text-current opacity-80"
         >
             {token}
         </code>

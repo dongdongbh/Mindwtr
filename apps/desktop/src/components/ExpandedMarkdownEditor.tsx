@@ -6,7 +6,7 @@ import { MarkdownFormatToolbar } from './MarkdownFormatToolbar';
 import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } from './MarkdownReferenceAutocomplete';
 import { RichMarkdown } from './RichMarkdown';
 import { Dialog, DialogHeader } from './ui/Dialog';
-import type { MarkdownSelection, MarkdownToolbarActionId, MarkdownToolbarResult } from '@mindwtr/core';
+import type { Attachment, MarkdownSelection, MarkdownToolbarActionId, MarkdownToolbarResult } from '@mindwtr/core';
 
 type ExpandedMarkdownEditorProps = {
     isOpen: boolean;
@@ -28,6 +28,7 @@ type ExpandedMarkdownEditorProps = {
     onEditorKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
     onEditorPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
     currentTaskId?: string;
+    attachments?: Attachment[];
 };
 
 export function ExpandedMarkdownEditor({
@@ -50,6 +51,7 @@ export function ExpandedMarkdownEditor({
     onEditorKeyDown,
     onEditorPaste,
     currentTaskId,
+    attachments,
 }: ExpandedMarkdownEditorProps) {
     const [mode, setMode] = useState<'edit' | 'preview'>(initialMode);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -194,7 +196,7 @@ export function ExpandedMarkdownEditor({
                             isRtl && 'text-right',
                         )}
                     >
-                        <RichMarkdown markdown={value} />
+                        <RichMarkdown markdown={value} attachments={attachments} />
                     </div>
                 )}
             </div>

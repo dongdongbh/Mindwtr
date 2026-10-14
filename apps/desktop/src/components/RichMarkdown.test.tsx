@@ -77,3 +77,22 @@ describe('RichMarkdown', () => {
         expect(screen.getByRole('link', { name: 'email' })).toHaveAttribute('title', 'mid:960830.1639@example.com');
     });
 });
+
+
+it('renders only task-owned image attachments and blocks remote, deleted and unrelated images', () => {
+    const attachment = { id: 'image-1', kind: 'file' as const, title: 'Screenshot', uri: '/managed/image.png', mimeType: 'image/png', createdAt: '2026-10-13', updatedAt: '2026-10-13' };
+    const { container, rerender } = render(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[attachment]} />);
+    expect(container.querySelector('img')).toHaveAttribute('src', '/managed/image.png');
+    rerender(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[{ ...attachment, deletedAt: '2026-10-13' }]} />);
+    expect(container.querySelector('img')).toBeNull();
+    rerender(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[]} />);
+    expect(container.querySelector('img')).toBeNull();
+    rerender(<RichMarkdown markdown="![Tracker](https://example.com/track.png)" attachments={[attachment]} />);
+    expect(container.querySelector('img')).toBeNull();
+    rerender(<RichMarkdown markdown="![Tracker](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri: 'https://example.com/track.png' }]} />);
+    expect(container.querySelector('img')).toBeNull();
+    for (const uri of ['/\t/example.com/track.png', '/\r/example.com/track.png', '/\n/example.com/track.png', '//example.com/track.png', ' //example.com/track.png', ' \\\\example.com\\track.png']) {
+        rerender(<RichMarkdown markdown="![Tracker](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri }]} />);
+        expect(container.querySelector('img')).toBeNull();
+    }
+});
