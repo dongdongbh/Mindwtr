@@ -10,6 +10,7 @@ import {
     resolveNativeTheme,
     resolveSystemThemeCommandPreference,
     resolveSystemThemePreference,
+    setSystemSchemeOverride,
     watchSystemThemePortalPreference,
     watchNativeSystemThemePreference,
     watchSystemThemePreference,
@@ -459,5 +460,36 @@ describe('watchNativeSystemThemePreference', () => {
 
         expect(onChange).toHaveBeenCalledWith('dark');
         expect(unlisten).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('setSystemSchemeOverride', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        setSystemSchemeOverride(null);
+        document.documentElement.className = '';
+    });
+
+    it('outranks a platform preference that arrives afterwards', () => {
+        setSystemSchemeOverride('light');
+        expect(resolveSystemThemePreference('dark')).toBe('light');
+    });
+
+    it('returns the decision to the platform once cleared', () => {
+        setSystemSchemeOverride('light');
+        setSystemSchemeOverride(null);
+        expect(resolveSystemThemePreference('dark')).toBe('dark');
+    });
+
+    it('keeps the dark class off when the palette is light and the platform says dark', () => {
+        setSystemSchemeOverride('light');
+        applyThemeMode('system', 'dark');
+        expect(document.documentElement.classList.contains('dark')).toBe(false);
+    });
+
+    it('reports the palette scheme to the native window', () => {
+        vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Linux');
+        setSystemSchemeOverride('light');
+        expect(resolveNativeTheme('system', 'dark')).toBe('light');
     });
 });
