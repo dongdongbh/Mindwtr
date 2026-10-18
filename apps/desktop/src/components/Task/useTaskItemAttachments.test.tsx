@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import type { Attachment, Task } from '@mindwtr/core';
 import { LanguageProvider } from '../../contexts/language-context';
 import { TaskAttachmentOverlays } from './TaskAttachmentOverlays';
@@ -813,7 +813,7 @@ it('discards an image import that finishes after cancelling the draft', async ()
     const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
     let importing!: Promise<Attachment[] | null>;
     await act(async () => { importing = result.current.addDroppedFileAttachments([new File(['png'], 'image.png', { type: 'image/png' })]); });
-    await waitFor(() => expect(finishWrite).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(finishWrite).toBeTypeOf('function'));
     expect(result.current.isImportingFiles).toBe(true);
     act(() => result.current.resetAttachmentState([]));
     let imported!: Attachment[] | null;
