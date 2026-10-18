@@ -1,15 +1,12 @@
 export function getClipboardImageFiles(data: DataTransfer | null): File[] {
     if (!data) return [];
-    const files: File[] = [];
+    // items and files describe the same clipboard; WebView may wrap each File separately.
+    const files = Array.from(data.files ?? []).filter((file) => file.type.toLowerCase().startsWith('image/'));
+    if (files.length > 0) return files;
     for (const item of Array.from(data.items ?? [])) {
         if (item.kind !== 'file' || !item.type.toLowerCase().startsWith('image/')) continue;
         const file = item.getAsFile();
         if (file) files.push(file);
-    }
-    for (const file of Array.from(data.files ?? [])) {
-        if (!file.type.toLowerCase().startsWith('image/')) continue;
-        if (files.includes(file)) continue;
-        files.push(file);
     }
     return files;
 }

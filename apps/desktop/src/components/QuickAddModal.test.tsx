@@ -98,7 +98,7 @@ const createImageClipboardData = (file: File) => ({
     items: [{
         kind: 'file',
         type: file.type,
-        getAsFile: () => file,
+        getAsFile: () => new File([file], file.name, { type: file.type }),
     }],
 });
 
