@@ -410,6 +410,8 @@ export const zhHans: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '购物清单？',
         'taskEdit.openChecklistMode': '打开清单模式',
         'taskEdit.addItem': '添加项目',
+        'taskEdit.resetChecklistOnRepeat': "为下次重复重置清单",
+        'taskEdit.resetChecklistOnRepeatHint': "关闭后，任务重复时会保留清单项目的勾选状态。",
         'taskEdit.resetChecklist': '重置清单',
         'task.convertToReference': '转换为参考资料',
         'task.convertToSection': '转换为分区',

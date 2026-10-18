@@ -22,11 +22,11 @@ import {
 const PINNED_RECURRENCE_FIELD_KEYS = [
   'rule', 'seriesId', 'strategy', 'byDay', 'byMonthDay', 'weekStart', 'count', 'until',
   'completedOccurrences', 'anchorDay', 'startAnchorDay', 'dueAnchorDay', 'reviewAnchorDay',
-  'rrule',
+  'rrule', 'preserveChecklistOnRepeat',
 ];
 
 describe('recurrence field-key consolidation (single shared list, two consumers)', () => {
-  test("mindwtr_add_task/mindwtr_update_task's recurrence object schema exposes exactly the shared 14-key set", () => {
+  test("mindwtr_add_task/mindwtr_update_task's recurrence object schema exposes exactly the shared recurrence field set", () => {
     expect([...TASK_RECURRENCE_INPUT_FIELD_KEYS].sort()).toEqual([...PINNED_RECURRENCE_FIELD_KEYS].sort());
   });
 

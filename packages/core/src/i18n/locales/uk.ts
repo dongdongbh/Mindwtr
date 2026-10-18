@@ -373,6 +373,8 @@ export const ukOverrides: Record<string, string> = {
     "taskEdit.shoppingListPrompt": "Список покупок?",
     "taskEdit.openChecklistMode": "Відкрийте режим контрольного списку",
     "taskEdit.addItem": "Додати товар",
+    "taskEdit.resetChecklistOnRepeat": "Скидати список під час наступного повторення",
+    "taskEdit.resetChecklistOnRepeatHint": "Вимкніть, щоб зберігати позначені пункти під час повторення завдання.",
     "taskEdit.resetChecklist": "Скинути контрольний список",
     "task.convertToReference": "Перетворити на посилання",
     "task.convertToSection": "Перетворити на розділ",

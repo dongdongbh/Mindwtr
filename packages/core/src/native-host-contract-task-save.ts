@@ -36,7 +36,7 @@ export type NativeTaskRecurrenceBase = {
 type SaveField = 'title' | 'description' | 'location' | 'assignedTo' | 'priority' | 'energyLevel' | 'timeEstimate' | 'contexts' | 'tags' | 'status'
     | 'focusedToday' | 'completedAt' | 'timeSpentMinutes'
     | 'projectId' | 'areaId' | 'sectionId' | 'startTime' | 'dueDate' | 'reviewAt' | 'relativeStartOffset'
-    | 'recurrence' | 'recurrenceStrategy' | 'recurrenceRRule' | 'showFutureRecurrence';
+    | 'recurrence' | 'preserveChecklistOnRepeat' | 'recurrenceStrategy' | 'recurrenceRRule' | 'showFutureRecurrence';
 type SaveFields = Partial<{ [K in SaveField]: Exclude<TaskDraft[K], undefined>
     | (K extends 'relativeStartOffset' | 'timeSpentMinutes' ? null : never) }>;
 export type NativeTaskDraftSaveRequest = {
@@ -78,10 +78,10 @@ export type NativeReviewTaskWriteInput = Extract<NativeReviewAction, { type: 'ma
 
 const FIELDS: readonly SaveField[] = ['title', 'description', 'location', 'assignedTo', 'priority', 'energyLevel', 'timeEstimate', 'contexts', 'tags', 'status', 'focusedToday', 'completedAt', 'timeSpentMinutes',
     'projectId', 'areaId', 'sectionId', 'startTime', 'dueDate', 'reviewAt', 'relativeStartOffset',
-    'recurrence', 'recurrenceStrategy', 'recurrenceRRule', 'showFutureRecurrence'];
-const STORED_FIELDS = FIELDS.filter((field) => field !== 'recurrenceStrategy' && field !== 'recurrenceRRule' && field !== 'focusedToday');
+    'recurrence', 'preserveChecklistOnRepeat', 'recurrenceStrategy', 'recurrenceRRule', 'showFutureRecurrence'];
+const STORED_FIELDS = FIELDS.filter((field) => field !== 'preserveChecklistOnRepeat' && field !== 'recurrenceStrategy' && field !== 'recurrenceRRule' && field !== 'focusedToday');
 export const SCHEDULE = ['startTime', 'dueDate', 'relativeStartOffset', 'reviewAt'] as const;
-export const RECURRENCE = ['recurrence', 'recurrenceStrategy', 'recurrenceRRule', 'showFutureRecurrence'] as const;
+export const RECURRENCE = ['recurrence', 'preserveChecklistOnRepeat', 'recurrenceStrategy', 'recurrenceRRule', 'showFutureRecurrence'] as const;
 export const ASSOCIATIONS = ['projectId', 'areaId', 'sectionId'] as const;
 export const LIFECYCLE = ['status', 'focusedToday', 'completedAt'] as const;
 const REFERENCE_FIELDS = new Set<SaveField>(['title', 'description', 'location', 'assignedTo', 'contexts', 'tags', 'energyLevel',
@@ -90,7 +90,7 @@ const referenceEditable = (request: NativeTaskDraftSaveRequest): boolean => Obje
     .every((field) => REFERENCE_FIELDS.has(field as SaveField)
         || (field === 'priority' || field === 'timeEstimate') && request.patch[field] === '');
 const recurrenceRuleEdited = (request: NativeTaskDraftSaveRequest): boolean =>
-    (['recurrence', 'recurrenceStrategy', 'recurrenceRRule'] as const)
+    (['recurrence', 'preserveChecklistOnRepeat', 'recurrenceStrategy', 'recurrenceRRule'] as const)
         .some((field) => own(request.patch, field) && !taskEditValuesEqual(request.patch[field], request.base[field]));
 const recurrenceFlagEdited = (request: NativeTaskDraftSaveRequest): boolean =>
     own(request.patch, 'showFutureRecurrence')
@@ -147,7 +147,8 @@ export const readNativeTaskDraftSaveRequest = (input: unknown, validateField: (f
         || !keys(value.base, fields) || fields.some((field) => !(FIELDS as readonly string[]).includes(field)
             || (!allowChecklist && ['status', 'focusedToday', 'completedAt'].includes(field))
             || (field === 'timeSpentMinutes' && !allowChecklist && !allowPlain))) return null;
-    if (editsRecurrence && (!RECURRENCE.every((field) => own(value.patch as object, field))
+    // Older saved drafts own the recurrence group without the newly added checklist flag.
+    if (editsRecurrence && (!RECURRENCE.every((field) => field === 'preserveChecklistOnRepeat' || own(value.patch as object, field))
         || !record(value.recurrenceBase) || !keys(value.recurrenceBase, ['recurrence', 'showFutureRecurrence'])
         || !(value.recurrenceBase.recurrence === null || typeof value.recurrenceBase.recurrence === 'string' || record(value.recurrenceBase.recurrence))
         || !(value.recurrenceBase.showFutureRecurrence === null || typeof value.recurrenceBase.showFutureRecurrence === 'boolean'))) return null;
@@ -533,7 +534,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             const scheduleEdited = SCHEDULE.some((field) => own(request.patch, field));
             const recurrenceEdited = RECURRENCE.some((field) => own(request.patch, field));
             const allowed = new Set<string>(Object.keys(request.patch).filter((field) =>
-                field !== 'recurrenceStrategy' && field !== 'recurrenceRRule'));
+                field !== 'preserveChecklistOnRepeat' && field !== 'recurrenceStrategy' && field !== 'recurrenceRRule'));
             if (moves) ['projectId', 'areaId', 'sectionId', 'order', 'orderNum'].forEach((field) => allowed.add(field));
             if (scheduleEdited || recurrenceEdited) {
                 ['startTime', 'relativeStartOffset', 'status', 'isFocusedToday', 'focusOrder', 'boardOrder'].forEach((field) => allowed.add(field));

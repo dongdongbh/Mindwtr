@@ -273,6 +273,8 @@ export const arOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'قائمة التسوق؟',
         'taskEdit.openChecklistMode': 'افتح وضع قائمة التحقق',
         'taskEdit.addItem': 'إضافة عنصر',
+        'taskEdit.resetChecklistOnRepeat': "إعادة تعيين قائمة التحقق للتكرار التالي",
+        'taskEdit.resetChecklistOnRepeatHint': "أوقف هذا الخيار للاحتفاظ بالعناصر المحددة عند تكرار المهمة.",
         'taskEdit.resetChecklist': 'إعادة تعيين قائمة التحقق',
         'task.convertToReference': 'تحويل إلى مرجع',
         'task.createProjectFromTask': 'إنشاء مشروع من المهمة',

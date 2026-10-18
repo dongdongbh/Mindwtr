@@ -45,6 +45,7 @@ const recurrenceObjectSchema = z.object({
   rule: recurrenceRuleSchema,
   seriesId: z.string().trim().min(1).max(MAX_TASK_TITLE_LENGTH).optional(),
   strategy: z.enum(['strict', 'fluid']).optional(),
+  preserveChecklistOnRepeat: z.boolean().optional(),
   byDay: z.array(recurrenceByDaySchema).optional(),
   byMonthDay: z.array(recurrenceMonthDaySchema).max(31).optional(),
   weekStart: z.enum(['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']).optional(),

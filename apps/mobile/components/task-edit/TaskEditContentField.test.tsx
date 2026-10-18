@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, Text, TextInput, View } from 'react-native';
+import { Platform, Switch, Text, TextInput, View } from 'react-native';
 import { act, create as createRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -262,6 +262,22 @@ const createChecklistState = (checklist = [{ id: 'check-1', title: 'Item 1', isC
 };
 
 describe('TaskEditContentField', () => {
+  it('edits the recurring checklist policy without changing current items', () => {
+    const setDraftField = vi.fn();
+    const checklist = [{ id: 'a', title: 'First', isCompleted: true }];
+    const props = { ...baseProps, fieldId: 'checklist' as const, checklist, setDraftField,
+      draft: { recurrence: 'weekly', preserveChecklistOnRepeat: false, status: 'next' }, task: { taskMode: 'task' } };
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TaskEditContentField {...props} />); });
+    const toggle = tree.root.findByType(Switch);
+    expect(toggle.props.value).toBe(true);
+    act(() => toggle.props.onValueChange(false));
+    expect(setDraftField).toHaveBeenCalledWith('preserveChecklistOnRepeat', true);
+    expect(checklist[0].isCompleted).toBe(true);
+    act(() => tree.update(<TaskEditContentField {...props} task={{ taskMode: 'list' } as any} />));
+    expect(tree.root.findAllByType(Switch)).toHaveLength(0);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     logInfoMock.mockReset();

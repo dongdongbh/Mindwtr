@@ -158,11 +158,19 @@ export function applyTaskUpdates(
         // Moving an already-completed task back from Archived is a lifecycle
         // correction, not another completion event. Preserve its completion
         // timestamp and do not create a duplicate recurring occurrence.
+        // Save-and-complete carries the checklist and its policy from this same edit.
+        const recurrenceSource = { ...oldTask, ...(hasOwnField(updates, 'checklist') ? { checklist: updates.checklist } : {}) };
+        if (recurrenceSource.recurrence && updates.recurrence && typeof updates.recurrence === 'object') {
+            recurrenceSource.recurrence = {
+                ...(typeof recurrenceSource.recurrence === 'string' ? { rule: recurrenceSource.recurrence } : recurrenceSource.recurrence),
+                preserveChecklistOnRepeat: updates.recurrence.preserveChecklistOnRepeat,
+            };
+        }
         nextRecurringTask = isReturningFromArchive
             ? null
             : recurrenceProjection === undefined
-                ? createNextRecurringTask(oldTask, completedAt, oldTask.status, createId ? { createId } : undefined)
-                : buildNextRecurringTask(oldTask, completedAt, oldTask.status, recurrenceProjection, createId);
+                ? createNextRecurringTask(recurrenceSource, completedAt, oldTask.status, createId ? { createId } : undefined)
+                : buildNextRecurringTask(recurrenceSource, completedAt, oldTask.status, recurrenceProjection, createId);
     } else if (statusChanged && incomingStatus === 'archived') {
         finalUpdates = {
             ...updatesToApply,

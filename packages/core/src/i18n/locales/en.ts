@@ -375,6 +375,8 @@ export const en: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Shopping list?',
         'taskEdit.openChecklistMode': 'Open Checklist Mode',
         'taskEdit.addItem': 'Add Item',
+        'taskEdit.resetChecklistOnRepeat': "Reset checklist for the next occurrence",
+        'taskEdit.resetChecklistOnRepeatHint': "Turn off to keep checked items checked when this task repeats.",
         'taskEdit.resetChecklist': 'Reset checklist',
         'task.convertToReference': 'Convert to Reference',
         'task.convertToSection': 'Convert to Section',

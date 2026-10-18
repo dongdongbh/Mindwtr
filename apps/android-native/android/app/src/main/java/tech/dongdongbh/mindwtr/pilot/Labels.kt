@@ -33,6 +33,7 @@ val LABEL_KEYS = listOf(
     "taskEdit.recurrenceLabel", "recurrence.none", "recurrence.daily", "recurrence.weekly", "recurrence.monthly", "recurrence.yearly",
     "recurrence.custom", "recurrence.monthlyOnDay", "recurrence.repeatEvery", "recurrence.dayUnit", "recurrence.afterCompletion",
     "recurrence.showFutureInCalendar", "recurrence.showFutureInCalendarHint",
+    "taskEdit.resetChecklistOnRepeat", "taskEdit.resetChecklistOnRepeatHint",
     "taskEdit.suppressMindwtrReminders", "taskEdit.suppressMindwtrRemindersHint",
     "taskEdit.startModeAbsolute", "taskEdit.startModeRelative", "taskEdit.relativeStartAmount", "taskEdit.relativeStartBeforeDue",
     "taskEdit.dateOnly", "taskEdit.timeSpentLabel", "recurrence.weekUnit", "recurrence.monthUnit", "recurrence.yearUnit",

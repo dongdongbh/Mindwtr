@@ -283,6 +283,8 @@ export const ruOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Список покупок?',
         'taskEdit.openChecklistMode': 'Открыть режим контрольного списка',
         'taskEdit.addItem': 'Добавить элемент',
+        'taskEdit.resetChecklistOnRepeat': "Сбрасывать список при следующем повторении",
+        'taskEdit.resetChecklistOnRepeatHint': "Отключите, чтобы сохранять отмеченные пункты при повторении задачи.",
         'taskEdit.resetChecklist': 'Сбросить контрольный список',
         'task.convertToReference': 'Преобразовать в ссылку',
         'task.createProjectFromTask': 'Создать проект из задачи',

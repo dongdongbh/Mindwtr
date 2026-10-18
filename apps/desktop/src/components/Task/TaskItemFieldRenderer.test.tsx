@@ -562,6 +562,23 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(getByText(label)).not.toHaveClass('font-medium');
     });
 
+    it('offers recurrence reset only for ordinary recurring checklists and edits only the preference', () => {
+        const setField = vi.fn();
+        const task: Task = { ...baseTask, recurrence: { rule: 'weekly' },
+            checklist: [{ id: 'a', title: 'First', isCompleted: true }] };
+        const props = createProps({ task, draft: { recurrence: 'weekly', preserveChecklistOnRepeat: false }, setField });
+        const view = render(<TaskItemFieldRenderer fieldId="checklist" {...props} />);
+        const toggle = view.getByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' });
+        expect(toggle).toBeChecked();
+        fireEvent.click(toggle);
+        expect(setField).toHaveBeenCalledWith('preserveChecklistOnRepeat', true);
+        expect(task.checklist![0].isCompleted).toBe(true);
+        view.rerender(<TaskItemFieldRenderer fieldId="checklist" {...props} task={{ ...task, taskMode: 'list' }} />);
+        expect(view.queryByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' })).toBeNull();
+        view.rerender(<TaskItemFieldRenderer fieldId="checklist" {...createProps({ task, draft: { recurrence: '' } })} />);
+        expect(view.queryByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' })).toBeNull();
+    });
+
     it('uses the effective draft status to edit a retained reference checklist as a plain list', () => {
         const task: Task = {
             ...baseTask,

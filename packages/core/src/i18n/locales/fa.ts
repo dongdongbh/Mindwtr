@@ -370,6 +370,8 @@ export const faOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'فهرست خرید؟',
         'taskEdit.openChecklistMode': 'باز کردن حالت چک‌لیست',
         'taskEdit.addItem': 'افزودن مورد',
+        'taskEdit.resetChecklistOnRepeat': "بازنشانی فهرست بررسی برای تکرار بعدی",
+        'taskEdit.resetChecklistOnRepeatHint': "خاموش کنید تا هنگام تکرار کار، موارد علامت‌خورده حفظ شوند.",
         'taskEdit.resetChecklist': 'بازنشانی چک‌لیست',
         'task.convertToReference': 'تبدیل به مرجع',
         'task.convertToSection': 'تبدیل به بخش',

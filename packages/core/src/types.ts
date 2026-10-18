@@ -36,6 +36,7 @@ export type SettingsSyncUpdatedAt = Partial<Record<SettingsSyncGroup | 'preferen
 export interface Recurrence {
     rule: RecurrenceRule;
     seriesId?: string; // Stable identity used to distinguish otherwise identical recurring series
+    preserveChecklistOnRepeat?: boolean; // Copy progress to the next ordinary task; list mode always resets.
     strategy?: RecurrenceStrategy; // Defaults to 'strict'
     byDay?: RecurrenceByDay[]; // Explicit weekdays for weekly/monthly recurrences
     byMonthDay?: number[]; // Explicit month days for monthly recurrences

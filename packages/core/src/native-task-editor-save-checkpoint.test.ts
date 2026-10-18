@@ -20,7 +20,7 @@ const validateField = (field: TaskDraftField, value: unknown): boolean => {
     if (['timeSpentMinutes', 'relativeStartOffset'].includes(field)) return value === undefined
         || field === 'timeSpentMinutes' && typeof value === 'number' && Number.isFinite(value) && value >= 0
         || field === 'relativeStartOffset' && typeof value === 'object' && value !== null;
-    if (field === 'showFutureRecurrence') return typeof value === 'boolean';
+    if ((field === 'showFutureRecurrence' || field === 'preserveChecklistOnRepeat')) return typeof value === 'boolean';
     return typeof value === 'string';
 };
 const draftFor = (task: Task) => createTaskDraft({ ...task, recurrence: normalizeRecurrenceForLoad(task.recurrence),

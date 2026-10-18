@@ -299,6 +299,8 @@ export const frOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Liste de courses ?',
         'taskEdit.openChecklistMode': 'Ouvrir le mode liste de contrôle',
         'taskEdit.addItem': 'Ajouter un élément',
+        'taskEdit.resetChecklistOnRepeat': "Réinitialiser la liste pour la prochaine occurrence",
+        'taskEdit.resetChecklistOnRepeatHint': "Désactivez pour conserver les éléments cochés lorsque la tâche se répète.",
         'taskEdit.resetChecklist': 'Réinitialiser la liste de contrôle',
         'task.convertToReference': 'Convertir en Référence',
         'task.createProjectFromTask': 'Créer un projet à partir de la tâche',

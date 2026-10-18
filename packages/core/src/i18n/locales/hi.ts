@@ -288,6 +288,8 @@ export const hiOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'खरीदारी की सूची?',
         'taskEdit.openChecklistMode': 'चेकलिस्ट मोड खोलें',
         'taskEdit.addItem': 'मद जोड़ें',
+        'taskEdit.resetChecklistOnRepeat': "अगली पुनरावृत्ति के लिए चेकलिस्ट रीसेट करें",
+        'taskEdit.resetChecklistOnRepeatHint': "इस कार्य के दोहराने पर चिह्नित आइटम वैसे ही रखने के लिए बंद करें।",
         'taskEdit.resetChecklist': 'चेकलिस्ट रीसेट करें',
         'task.convertToReference': 'संदर्भ में कनवर्ट करें',
         'task.createProjectFromTask': 'कार्य से प्रोजेक्ट बनाएं',

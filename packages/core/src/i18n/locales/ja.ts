@@ -390,6 +390,8 @@ export const jaOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '買い物リストにしますか？',
         'taskEdit.openChecklistMode': 'チェックリストモードで開く',
         'taskEdit.addItem': '項目を追加',
+        'taskEdit.resetChecklistOnRepeat': "次の繰り返しでチェックリストをリセット",
+        'taskEdit.resetChecklistOnRepeatHint': "オフにすると、タスクの繰り返し時にチェック済みの状態を引き継ぎます。",
         'taskEdit.resetChecklist': 'チェックリストをリセット',
         'task.convertToReference': '資料に変換',
         'task.convertToSection': 'セクションに変換',

@@ -398,6 +398,7 @@ export type NativeTaskEditorModel = TaskEditorModel & {
     readOnly: boolean;
     canCancel: boolean;
     canSkipOccurrence: boolean;
+    canPreserveChecklistOnRepeat: boolean;
     cancelLabel: string;
     /** createTaskDraft(task). Fields whose value is undefined are absent over JSON. */
     draft: TaskDraft;
@@ -769,6 +770,7 @@ const DRAFT_VALUE_CHECKS: Record<TaskDraftField, (value: unknown) => boolean> = 
     recurrenceStrategy: isOneOf(['strict', 'fluid']),
     recurrenceRRule: (value) => value === '' || (isString(value) && parseRRuleString(value).rule !== undefined),
     showFutureRecurrence: isBoolean,
+    preserveChecklistOnRepeat: isBoolean,
     timeEstimate: (value) => value === '' || TIME_ESTIMATE_OPTIONS.includes(value as TimeEstimate)
         || (isString(value) && isCustomTimeEstimate(value as TimeEstimate)),
     timeSpentMinutes: isUnsetOrMinutes,
@@ -842,9 +844,10 @@ const readTaskDraft = (value: unknown): TaskDraft | null => {
     if (!isObjectRecord(value) || Object.keys(value).some((field) => !DRAFT_FIELD_SET.has(field) && field !== 'dateInputBaseline')) return null;
     if (Object.prototype.hasOwnProperty.call(value, 'dateInputBaseline') && !isTaskDraftDateInputBaseline(value.dateInputBaseline)) return null;
     const draft = toDraftValues(value) as TaskDraft;
+    if (!Object.prototype.hasOwnProperty.call(value, 'preserveChecklistOnRepeat')) draft.preserveChecklistOnRepeat = false;
     if (!Object.prototype.hasOwnProperty.call(value, 'reminderPolicy')) draft.reminderPolicy = getTaskReminderPolicy(draft);
     return TASK_DRAFT_FIELD_KEYS.every((field) => (
-        (Object.prototype.hasOwnProperty.call(value, field) || UNSET_DRAFT_FIELDS.has(field) || field === 'reminderPolicy')
+        (Object.prototype.hasOwnProperty.call(value, field) || UNSET_DRAFT_FIELDS.has(field) || field === 'reminderPolicy' || field === 'preserveChecklistOnRepeat')
         // Stored history must round-trip without making Archived an editable status.
         && ((field === 'status' && draft.status === 'archived') || DRAFT_VALUE_CHECKS[field](draft[field]))
     )) ? draft : null;
@@ -1584,6 +1587,7 @@ export function createNativeHostContract(options: {
             taskRevision: taskRevisionOf(task),
             readOnly: isInArchivedProject(task),
             canCancel: canCancelNativeTask(task, state._allProjects, isInArchivedProject(task)),
+            canPreserveChecklistOnRepeat: task.taskMode !== 'list' && draft.status !== 'reference' && Boolean(draft.recurrence),
             canSkipOccurrence: canSkipNativeTaskOccurrence(task, state._allProjects, isInArchivedProject(task)),
             cancelLabel: task.recurrence
                 ? tFallback(translate, 'task.cancelRecurringSeries', 'Cancel recurring series')

@@ -847,6 +847,9 @@ describe('cloud server utils', () => {
         if (invalidOffset.ok) throw new Error('Expected invalid relativeStartOffset');
         expect(invalidOffset.error).toContain('relativeStartOffset');
 
+        expect(validateEntityProps('task', 'patch', { recurrence: { rule: 'weekly', preserveChecklistOnRepeat: true } }).ok).toBe(true);
+        expect(validateEntityProps('task', 'patch', { recurrence: { rule: 'weekly', preserveChecklistOnRepeat: false } }).ok).toBe(true);
+        expect(validateEntityProps('task', 'patch', { recurrence: { rule: 'weekly', preserveChecklistOnRepeat: 'true' } }).ok).toBe(false);
         const invalidRecurrence = validateEntityProps('task', 'patch', { recurrence: { rule: 'daily', arbitrary: true } });
         expect(invalidRecurrence.ok).toBe(false);
         if (invalidRecurrence.ok) throw new Error('Expected invalid recurrence');

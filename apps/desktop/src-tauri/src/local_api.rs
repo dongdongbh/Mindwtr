@@ -3435,7 +3435,15 @@ fn create_next_recurring_task_for_local_api(
             .cloned()
             .unwrap_or_else(|| Value::Array(Vec::new())),
     );
-    if let Some(checklist) = reset_checklist_value(task.get("checklist")) {
+    if let Some(checklist) = copy_recurring_checklist_value(
+        task.get("checklist"),
+        task.get("taskMode").and_then(Value::as_str) != Some("list")
+            && task
+                .get("recurrence")
+                .and_then(|r| r.get("preserveChecklistOnRepeat"))
+                .and_then(Value::as_bool)
+                == Some(true),
+    ) {
         next_task.insert("checklist".to_string(), checklist);
     }
     if let Some(attachments) = duplicate_attachment_value(task.get("attachments"), completed_at) {
@@ -3780,10 +3788,13 @@ fn copy_task_fields(source: &Map<String, Value>, target: &mut Map<String, Value>
     }
 }
 
-fn reset_checklist_value(value: Option<&Value>) -> Option<Value> {
+fn copy_recurring_checklist_value(value: Option<&Value>, preserve: bool) -> Option<Value> {
     let checklist = value?.as_array()?;
     if checklist.is_empty() {
         return None;
+    }
+    if preserve {
+        log::info!("Recurring checklist progress copied releaseCheck=v1.3.7/recurring-checklist-progress outcome=constructed");
     }
     Some(Value::Array(
         checklist
@@ -3791,7 +3802,9 @@ fn reset_checklist_value(value: Option<&Value>) -> Option<Value> {
             .filter_map(|item| {
                 let mut item = item.as_object()?.clone();
                 item.insert("id".to_string(), Value::String(generate_uuid_v4()));
-                item.insert("isCompleted".to_string(), Value::Bool(false));
+                if !preserve {
+                    item.insert("isCompleted".to_string(), Value::Bool(false));
+                }
                 Some(Value::Object(item))
             })
             .collect(),
@@ -4910,6 +4923,7 @@ fn valid_recurrence(value: &Value) -> bool {
         }),
         "weekStart" => value.as_str().is_some_and(valid_recurrence_weekday),
         "count" => value.as_i64().is_some_and(|count| count > 0),
+        "preserveChecklistOnRepeat" => value.is_boolean(),
         "completedOccurrences" => value.as_i64().is_some_and(|count| count >= 0),
         "anchorDay" | "startAnchorDay" | "dueAnchorDay" | "reviewAnchorDay" => {
             value.as_i64().is_some_and(|day| (1..=31).contains(&day))
@@ -8662,6 +8676,34 @@ mod tests {
             "2026-08-10T23:00:00Z"
         )
         .is_some());
+    }
+
+    #[test]
+    fn local_api_recurring_checklist_progress_is_independent_and_list_mode_resets() {
+        for mode in ["task", "list"] {
+            let task = json!({
+                "id": "routine", "title": "Routine", "status": "next", "taskMode": mode,
+                "dueDate": "2026-10-18", "recurrence": { "rule": "weekly", "preserveChecklistOnRepeat": true },
+                "checklist": [{ "id": "a", "title": "First", "isCompleted": true },
+                    { "id": "b", "title": "Second", "isCompleted": false }]
+            });
+            let next = create_next_recurring_task_for_local_api(
+                task.as_object().unwrap(),
+                "2026-10-18T12:00:00Z",
+                "next",
+            )
+            .unwrap();
+            assert_eq!(next["recurrence"]["preserveChecklistOnRepeat"], true);
+            assert_eq!(next["checklist"][0]["isCompleted"], mode == "task");
+            assert_eq!(next["checklist"][1]["isCompleted"], false);
+            assert_ne!(next["checklist"][0]["id"], "a");
+            let third =
+                create_next_recurring_task_for_local_api(&next, "2026-10-25T12:00:00Z", "next")
+                    .unwrap();
+            assert_eq!(third["checklist"][0]["isCompleted"], mode == "task");
+            assert_ne!(third["checklist"][0]["id"], next["checklist"][0]["id"]);
+            assert_eq!(task["checklist"][0]["isCompleted"], true);
+        }
     }
 
     #[test]

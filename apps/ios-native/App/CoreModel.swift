@@ -1729,7 +1729,7 @@ final class CoreModel: ObservableObject {
     private var taskRelativeInputCommitRequested = false
     private var taskRecurrenceInputOwned: Set<String> = []
     private var taskRecurrenceInputCommitRequested: Set<String> = []
-    private let taskRecurrenceFields = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
+    private let taskRecurrenceFields = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence", "preserveChecklistOnRepeat"]
     private let taskDateFields = ["startTime", "dueDate", "reviewAt"]
     private var taskEstimateResolvedInput = ""
     private var taskTimeSpentResolvedInput = ""
@@ -10074,6 +10074,7 @@ final class CoreModel: ObservableObject {
                     "taskEdit.assignedTo", "taskEdit.priorityLabel", "taskEdit.timeEstimateLabel", "taskEdit.timeSpentLabel",
                     "taskEdit.contextsLabel", "taskEdit.statusLabel", "taskEdit.reviewDateLabel",
                     "taskEdit.startModeRelative", "taskEdit.recurrenceLabel", "recurrence.showFutureInCalendar",
+                    "taskEdit.resetChecklistOnRepeat", "taskEdit.resetChecklistOnRepeatHint",
                     "task.completedAtPromptTitle", "task.editCompletedAt", "task.moveToProjectOrArea", "task.destination", "status.inbox", "status.next", "status.done", "status.reference",
                     "task.doneCompletedAtOutcomeUnknown", "task.doneStatusOutcomeUnknown", "task.doneTagOutcomeUnknown", "task.destinationOutcomeUnknown",
                     "task.completionOutcomeUnknown", "task.completionUndoOutcomeUnknown", "task.projectNextActionOutcomeUnknown",
@@ -26227,6 +26228,11 @@ final class CoreModel: ObservableObject {
             edit: ["type": "recurrence", "edit": edit], coalesces: false)
     }
 
+    func toggleTaskChecklistRecurrence() {
+        guard taskRecurrenceAvailable, !busy else { return }
+        enqueueTaskScheduleEdit("recurrence:checklist", edit: ["type": "fields", "patch": ["preserveChecklistOnRepeat": !taskDraft.flag("preserveChecklistOnRepeat")]], coalesces: false)
+    }
+
     func toggleTaskFutureRecurrence() {
         guard taskRecurrenceAvailable, !busy else { return }
         enqueueTaskScheduleEdit("recurrence:showFuture", edit: ["type": "toggleFutureRecurrence"], coalesces: false)
@@ -26926,6 +26932,7 @@ final class CoreModel: ObservableObject {
                     "recurrence.endsLabel", "recurrence.endsNever", "recurrence.endsOnDate", "recurrence.endsAfterCount",
                     "recurrence.occurrenceUnit", "recurrence.afterCompletion", "recurrence.showFutureInCalendar",
                     "recurrence.showFutureInCalendarHint", "recurrence.customTitle", "recurrence.onLabel",
+                    "taskEdit.resetChecklistOnRepeat", "taskEdit.resetChecklistOnRepeatHint",
                     "recurrence.lastDay", "recurrence.lastDayOfMonth", "recurrence.onDayOfMonth", "recurrence.onNthWeekday",
                     "recurrence.weekdayMonFri", "recurrence.ordinal.first", "recurrence.ordinal.second",
                     "recurrence.ordinal.third", "recurrence.ordinal.fourth", "recurrence.ordinal.last",

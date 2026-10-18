@@ -364,6 +364,11 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
                     contentAlignment = Alignment.Center) { Text(label, style = rnText(12, 700), color = c.tint) }
             }
         }
+        if (editor.view.canPreserveChecklistOnRepeat && field.menuObjects("items").isNotEmpty()) {
+            SwitchRow(t("taskEdit.resetChecklistOnRepeat"), t("taskEdit.resetChecklistOnRepeatHint"), !editor.flag("preserveChecklistOnRepeat"), !locked) {
+                editFields(mapOf("preserveChecklistOnRepeat" to !editor.flag("preserveChecklistOnRepeat")))
+            }
+        }
         val shape = RoundedCornerShape(10.dp)
         Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(8.dp)) {
             val items = field.menuObjects("items")

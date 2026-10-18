@@ -357,6 +357,8 @@ export const esOverrides: Record<string, string> = {
 'taskEdit.shoppingListPrompt': "¿Lista de la compra?",
 'taskEdit.openChecklistMode': "Abrir modo de lista de verificación",
 'taskEdit.addItem': "Añadir elemento",
+'taskEdit.resetChecklistOnRepeat': "Restablecer la lista para la próxima repetición",
+'taskEdit.resetChecklistOnRepeatHint': "Desactiva para conservar los elementos marcados cuando se repita la tarea.",
 'taskEdit.resetChecklist': "Restablecer la lista de verificación",
 'task.convertToReference': "Convertir en referencia",
 'task.convertToSection': "Convertir en sección",

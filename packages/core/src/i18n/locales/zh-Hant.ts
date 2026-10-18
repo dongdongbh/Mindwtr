@@ -410,6 +410,8 @@ export const zhHant: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '購物清單？',
         'taskEdit.openChecklistMode': '打開清單模式',
         'taskEdit.addItem': '添加項目',
+        'taskEdit.resetChecklistOnRepeat': "為下次重複重設清單",
+        'taskEdit.resetChecklistOnRepeatHint': "關閉後，任務重複時會保留清單項目的勾選狀態。",
         'taskEdit.resetChecklist': '重置清單',
         'task.convertToReference': '轉換爲參考資料',
         'task.convertToSection': '轉換為分區',

@@ -314,6 +314,7 @@ export function normalizeRecurrenceForLoad(value: unknown): Recurrence | undefin
     return {
         rule,
         ...(seriesId ? { seriesId } : {}),
+        ...(typeof recurrence.preserveChecklistOnRepeat === 'boolean' ? { preserveChecklistOnRepeat: recurrence.preserveChecklistOnRepeat } : {}),
         ...(strategy ? { strategy } : {}),
         ...(byDay ? { byDay } : {}),
         ...(byMonthDay ? { byMonthDay } : {}),
@@ -1089,12 +1090,12 @@ function rebuildScheduleFieldsFromAnchor(
     };
 }
 
-function resetChecklist(checklist: ChecklistItem[] | undefined, createId: () => string): ChecklistItem[] | undefined {
+function copyRecurringChecklist(checklist: ChecklistItem[] | undefined, createId: () => string, preserve: boolean): ChecklistItem[] | undefined {
     if (!checklist || checklist.length === 0) return undefined;
     return checklist.map((item) => ({
         ...item,
         id: createId(),
-        isCompleted: false,
+        isCompleted: preserve ? item.isCompleted : false,
     }));
 }
 
@@ -2205,6 +2206,14 @@ export function buildNextRecurringTask(
             deletedAt: undefined,
         }));
 
+    if (task.taskMode !== 'list' && recurrence?.preserveChecklistOnRepeat === true && task.checklist?.length) {
+        try {
+            logInfo('Recurring checklist progress copied', {
+                scope: 'recurrence', category: 'storage', force: true,
+                context: { releaseCheck: 'v1.3.7/recurring-checklist-progress', outcome: 'constructed' },
+            });
+        } catch { /* Diagnostics must not interrupt recurrence creation. */ }
+    }
     const nextCompletedOccurrences = completedOccurrences + 1;
     const seriesId = typeof task.recurrence === 'object' && typeof task.recurrence.seriesId === 'string'
         ? task.recurrence.seriesId.trim() || task.id
@@ -2253,7 +2262,7 @@ export function buildNextRecurringTask(
         repeatReminderMinutes: task.repeatReminderMinutes,
         tags: [...(task.tags || [])],
         contexts: [...(task.contexts || [])],
-        checklist: resetChecklist(task.checklist, createId),
+        checklist: copyRecurringChecklist(task.checklist, createId, task.taskMode !== 'list' && recurrence?.preserveChecklistOnRepeat === true),
         description: task.description,
         textDirection: task.textDirection,
         attachments: duplicatedAttachments.length > 0 ? duplicatedAttachments : undefined,

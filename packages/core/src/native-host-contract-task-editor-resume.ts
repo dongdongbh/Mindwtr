@@ -74,7 +74,7 @@ export function validateNativeTaskEditorOpeningFields(
 ): NativeHostResult<Omit<NativeTaskEditorResumeReady, 'kind' | 'freshAttachmentsBase'>> {
     const touched = Object.keys(input.touchedBase);
     if (task.id !== input.id || OWNED_GROUPS.some((group) => group.some((field) => touched.includes(field))
-            && !group.every((field) => touched.includes(field)))
+            && !group.every((field) => field === 'preserveChecklistOnRepeat' || touched.includes(field)))
         || own(input, 'scheduleBase') !== SCHEDULE.some((field) => touched.includes(field))
         || own(input, 'recurrenceBase') !== RECURRENCE.some((field) => touched.includes(field)))
         return fail('INVALID_INPUT', 'Incomplete editor recovery group');
@@ -147,7 +147,7 @@ export function createTaskEditorResumeMethods(deps: ResumeDependencies) {
 
             const touched = Object.keys(input.touchedBase);
             if (OWNED_GROUPS.some((group) => group.some((field) => touched.includes(field))
-                    && !group.every((field) => touched.includes(field)))
+                    && !group.every((field) => field === 'preserveChecklistOnRepeat' || touched.includes(field)))
                 || own(input, 'scheduleBase') !== SCHEDULE.some((field) => touched.includes(field))
                 || own(input, 'recurrenceBase') !== RECURRENCE.some((field) => touched.includes(field)))
                 return fail('INVALID_INPUT', 'Incomplete editor recovery group');

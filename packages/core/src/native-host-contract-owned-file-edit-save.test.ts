@@ -40,7 +40,7 @@ const seed = (extra: Partial<Task> = {}): AppData => ({ tasks: [task(extra), tas
 const validateField = (field: TaskDraftField, value: unknown): boolean => {
     if (field === 'timeSpentMinutes') return value === undefined || typeof value === 'number' && Number.isFinite(value) && value >= 0;
     if (field === 'relativeStartOffset') return value === undefined || typeof value === 'object' && value !== null;
-    if (field === 'showFutureRecurrence' || field === 'focusedToday') return typeof value === 'boolean';
+    if ((field === 'showFutureRecurrence' || field === 'preserveChecklistOnRepeat') || field === 'focusedToday') return typeof value === 'boolean';
     return typeof value === 'string';
 };
 const root = join(process.cwd(), '../../.orchestrator/tmp');

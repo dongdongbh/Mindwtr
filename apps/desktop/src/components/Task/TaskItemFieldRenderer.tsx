@@ -1229,13 +1229,25 @@ export function TaskItemFieldRenderer({
             );
         case 'checklist':
             return (
-                <ChecklistField
-                    t={t}
-                    taskId={taskId}
-                    checklist={task.checklist}
-                    plainList={editStatus === 'reference'}
-                    resetTaskChecklist={resetTaskChecklist}
-                />
+                <div className="flex flex-col gap-2">
+                    {editRecurrence && task.taskMode !== 'list' && editStatus !== 'reference' && Boolean(task.checklist?.length) && (
+                        <label className="flex flex-col gap-1 text-xs">
+                            <span className="flex items-center gap-2">
+                                <input type="checkbox" aria-label={t('taskEdit.resetChecklistOnRepeat')} checked={!draft.preserveChecklistOnRepeat}
+                                    onChange={(event) => setField('preserveChecklistOnRepeat', !event.target.checked)} />
+                                {t('taskEdit.resetChecklistOnRepeat')}
+                            </span>
+                            <span className="text-muted-foreground">{t('taskEdit.resetChecklistOnRepeatHint')}</span>
+                        </label>
+                    )}
+                    <ChecklistField
+                        t={t}
+                        taskId={taskId}
+                        checklist={task.checklist}
+                        plainList={editStatus === 'reference'}
+                        resetTaskChecklist={resetTaskChecklist}
+                    />
+                </div>
             );
         default:
             return null;

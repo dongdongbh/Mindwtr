@@ -56,6 +56,7 @@ export type TaskDraft = {
     recurrenceStrategy: RecurrenceStrategy;
     recurrenceRRule: string;
     showFutureRecurrence: boolean;
+    preserveChecklistOnRepeat: boolean;
     timeEstimate: TimeEstimate | '';
     timeSpentMinutes: number | undefined;
     priority: TaskPriority | '';
@@ -225,6 +226,7 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     recurrence: { fromTask: (task) => getTaskDraftRecurrenceRuleValue(task.recurrence) },
     recurrenceStrategy: { fromTask: (task) => getTaskDraftRecurrenceStrategyValue(task.recurrence) },
     recurrenceRRule: { fromTask: (task) => getTaskDraftRecurrenceRRuleValue(task.recurrence) },
+    preserveChecklistOnRepeat: { fromTask: (task) => typeof task.recurrence === 'object' && task.recurrence?.preserveChecklistOnRepeat === true },
     showFutureRecurrence: { fromTask: (task) => Boolean(task.showFutureRecurrence) },
     timeEstimate: { fromTask: (task) => task.timeEstimate || '' },
     timeSpentMinutes: {
@@ -341,7 +343,8 @@ export function taskDraftToUpdatePatch(
 
     const resolvedProjectId = draft.projectId || undefined;
     const recurrenceValue: Recurrence | undefined = draft.recurrence
-        ? { rule: draft.recurrence, strategy: draft.recurrenceStrategy }
+        ? { rule: draft.recurrence, strategy: draft.recurrenceStrategy,
+            ...(draft.preserveChecklistOnRepeat ? { preserveChecklistOnRepeat: true } : {}) }
         : undefined;
     const storedRecurrence = task.recurrence && typeof task.recurrence === 'object'
         ? task.recurrence

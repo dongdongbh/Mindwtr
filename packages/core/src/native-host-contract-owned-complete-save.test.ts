@@ -48,7 +48,7 @@ const seed = (extra: Partial<Task> = {}, settings: AppData['settings'] = { devic
 const validateField = (field: TaskDraftField, value: unknown): boolean => {
     if (field === 'timeSpentMinutes') return value === undefined || typeof value === 'number' && Number.isFinite(value) && value >= 0;
     if (field === 'relativeStartOffset') return value === undefined || normalizeRelativeStartOffset(value) !== undefined;
-    if (field === 'showFutureRecurrence' || field === 'focusedToday') return typeof value === 'boolean';
+    if ((field === 'showFutureRecurrence' || field === 'preserveChecklistOnRepeat') || field === 'focusedToday') return typeof value === 'boolean';
     return typeof value === 'string';
 };
 const root = join(process.cwd(), '../../.orchestrator/tmp'); mkdirSync(root, { recursive: true });
@@ -337,6 +337,20 @@ describe('internal complete owned editor Save', () => {
         } finally { process.env.TZ = oldZone; }
         expect(rows()).toEqual(saved); expect((await env.adapter.getData({ rawTasks: true })).tasks.filter((row) => row.id === child.id)).toHaveLength(1);
     });
+    it('saves carry-forward with the latest checklist and reloads its successor from SQLite', async () => {
+        env = await open(path, seed({ taskMode: 'task', recurrence: { rule: 'weekly' }, dueDate: '2026-10-05' }));
+        const envelope = await plan(await request({ edits: { preserveChecklistOnRepeat: true, status: 'done' },
+            checklist: [item('one', 'First', true), item('two', 'Second', false)] }));
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope));
+        const saved = (await env.adapter.getData({ rawTasks: true })).tasks;
+        const child = saved.find(row => row.id !== 'complete' && row.id !== 'other' && !row.deletedAt)!;
+        expect(child.recurrence).toMatchObject({ preserveChecklistOnRepeat: true });
+        expect(child.checklist?.map(entry => entry.isCompleted)).toEqual([true, false]);
+        expect(child.checklist?.map(entry => entry.id)).not.toContain('one');
+        env = await open(path);
+        expect((await env.adapter.getData({ rawTasks: true })).tasks.find(row => row.id === child.id)).toEqual(child);
+    });
+
     it('saves backdated completion/time spent and Focus with the actual checklist policy', async () => {
         const envelope = await plan(await request({ edits: { status: 'done', completedAt: '2026-10-04T08:30:00.000Z', timeSpentMinutes: 12.5 }, checklist: [item('one', 'First', true)] }));
         expect(after(envelope)).toMatchObject({ status: 'done', completedAt: '2026-10-04T08:30:00.000Z', timeSpentMinutes: 12.5 });

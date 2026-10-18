@@ -360,6 +360,8 @@ export const daOverrides: Record<string, string> = {
     'taskEdit.shoppingListPrompt': 'Indkøbsliste?',
     'taskEdit.openChecklistMode': 'Åbn Tjeklistetilstand',
     'taskEdit.addItem': 'Tilføj vare',
+    'taskEdit.resetChecklistOnRepeat': "Nulstil tjeklisten ved næste gentagelse",
+    'taskEdit.resetChecklistOnRepeatHint': "Slå fra for at beholde afkrydsede punkter, når opgaven gentages.",
     'taskEdit.resetChecklist': 'Nulstil tjekliste',
     'task.convertToReference': 'Konverter til reference',
     'task.convertToSection': 'Konverter til sektion',

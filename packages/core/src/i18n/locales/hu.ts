@@ -357,6 +357,8 @@ export const huOverrides: Record<string, string> = {
     'taskEdit.shoppingListPrompt': 'Bevásárlólista?',
     'taskEdit.openChecklistMode': 'Ellenőrzőlista mód megnyitása',
     'taskEdit.addItem': 'Elem hozzáadása',
+    'taskEdit.resetChecklistOnRepeat': "Ellenőrzőlista alaphelyzetbe állítása a következő ismétléskor",
+    'taskEdit.resetChecklistOnRepeatHint': "Kapcsolja ki a bejelölt elemek megtartásához a feladat ismétlésekor.",
     'taskEdit.resetChecklist': 'Ellenőrzőlista visszaállítása',
     'task.convertToReference': 'Átalakítás Referenciává',
     'task.convertToSection': 'Átalakítás szakasszá',

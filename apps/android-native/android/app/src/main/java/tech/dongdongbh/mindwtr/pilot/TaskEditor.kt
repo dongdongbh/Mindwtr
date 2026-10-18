@@ -111,6 +111,7 @@ class EditorModel(val source: String) {
     private val reply = root.getJSONObject("model").also { check(it.getInt("version") == 1) { "Unsupported core contract" } }
     val id: String = reply.getString("id")
     val readOnly = reply.getBoolean("readOnly")
+    val canPreserveChecklistOnRepeat = reply.optBoolean("canPreserveChecklistOnRepeat")
     val focusStar: JSONObject = reply.getJSONObject("focusStar")
     /** createTaskDraft(task), each field as JSON text. A field core left unset is absent here and reads as null. */
     val draft: Map<String, String> = reply.getJSONObject("draft").let { d -> d.keys().asSequence().associateWith { draftLiteral(d.get(it)) } }
@@ -1163,7 +1164,7 @@ private fun SmallButton(icon: ImageVector, description: String, enabled: Boolean
 
 /** RN's switch row (Skip reminders, Show future occurrences): the label, the hint, and the tint border when on. */
 @Composable
-private fun SwitchRow(label: String, hint: String, on: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+internal fun SwitchRow(label: String, hint: String, on: Boolean, enabled: Boolean, onToggle: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
     Column(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on) c.tint else c.border, shape)

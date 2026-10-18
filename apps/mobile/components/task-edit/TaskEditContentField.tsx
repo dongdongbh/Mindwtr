@@ -1,6 +1,7 @@
 import React from 'react';
 import {
     Text,
+    Switch,
     TextInput,
     TouchableOpacity,
     View,
@@ -670,6 +671,17 @@ export function TaskEditContentField({
                             </TouchableOpacity>
                         ) : null}
                     </View>
+                    {draft?.recurrence && task?.taskMode !== 'list' && !isReference && Boolean(checklist?.length) && (
+                        <View>
+                            <View style={styles.checklistHeader}>
+                                <Text style={[styles.label, { color: tc.text, flex: 1 }]}>{t('taskEdit.resetChecklistOnRepeat')}</Text>
+                                <Switch value={!draft.preserveChecklistOnRepeat}
+                                    accessibilityLabel={t('taskEdit.resetChecklistOnRepeat')}
+                                    onValueChange={(reset) => setDraftField('preserveChecklistOnRepeat', !reset)} />
+                            </View>
+                            <Text style={[styles.helperText, { color: tc.secondaryText }]}>{t('taskEdit.resetChecklistOnRepeatHint')}</Text>
+                        </View>
+                    )}
                     <View style={[styles.checklistContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                         {checklistOrderMode ? (
                             <View style={styles.checklistOrderPanel} testID="mobile-checklist-order-panel">

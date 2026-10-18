@@ -732,6 +732,13 @@ struct TaskViewSheet: View {
                     .accessibilityIdentifier("task-checklist-reorder")
                 }
             }
+            if model.taskEditor.flag("canPreserveChecklistOnRepeat"), !items.isEmpty {
+                Toggle(model.label("taskEdit.resetChecklistOnRepeat"), isOn: Binding(
+                    get: { !model.taskEditor.object("draft").flag("preserveChecklistOnRepeat") },
+                    set: { _ in endEditingBeforeAction(); model.toggleTaskChecklistRecurrence() }))
+                    .disabled(frozen)
+                Text(model.label("taskEdit.resetChecklistOnRepeatHint")).rnFont(12).foregroundStyle(palette.secondary)
+            }
             ForEach(items.indices, id: \.self) { offset in
                 let item = items[offset]
                 if checklistReordering {

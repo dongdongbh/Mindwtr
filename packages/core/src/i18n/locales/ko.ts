@@ -431,6 +431,8 @@ export const koOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '쇼핑 목록인가요?',
         'taskEdit.openChecklistMode': '체크리스트 모드 열기',
         'taskEdit.addItem': '항목 추가',
+        'taskEdit.resetChecklistOnRepeat': "다음 반복 시 체크리스트 초기화",
+        'taskEdit.resetChecklistOnRepeatHint': "끄면 작업이 반복될 때 체크한 항목의 상태가 유지됩니다.",
         'taskEdit.resetChecklist': '체크리스트 재설정',
         'task.convertToReference': '참조로 변환',
         'task.createProjectFromTask': '할 일에서 프로젝트 만들기',

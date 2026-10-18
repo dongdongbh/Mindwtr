@@ -365,6 +365,8 @@ export const svOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Inköpslista?',
         'taskEdit.openChecklistMode': 'Öppna checklistläge',
         'taskEdit.addItem': 'Lägg till post',
+        'taskEdit.resetChecklistOnRepeat': "Återställ checklistan vid nästa upprepning",
+        'taskEdit.resetChecklistOnRepeatHint': "Stäng av för att behålla markerade punkter när uppgiften upprepas.",
         'taskEdit.resetChecklist': 'Återställ checklista',
         'task.convertToReference': 'Gör om till referens',
         'task.convertToSection': 'Gör om till sektion',

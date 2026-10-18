@@ -62,7 +62,7 @@
         "startTime": "2026-07-15T09:00:00.000Z",
         "relativeStartOffset": { "amount": -1, "unit": "day" },
         "dueDate": "2026-07-16T09:00:00.000Z",
-        "recurrence": { "rule": "weekly", "strategy": "strict", "byDay": ["TH"], "rrule": "FREQ=WEEKLY;BYDAY=TH" },
+        "recurrence": { "rule": "weekly", "strategy": "strict", "preserveChecklistOnRepeat": true, "byDay": ["TH"], "rrule": "FREQ=WEEKLY;BYDAY=TH" },
         "showFutureRecurrence": true,
         "pushCount": 2,
         "tags": ["#schema"],
