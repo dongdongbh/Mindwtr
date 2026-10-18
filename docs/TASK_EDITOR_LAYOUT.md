@@ -6,6 +6,15 @@ Details moves as one configured section. Field visibility, ordering, grouping, d
 
 The title and persistent action row receive popup-specific spacing. The form owns scrolling so Save/Cancel remain accessible. Existing native controls, shortcuts, and file-drop routing are retained.
 
-Layout tests cover modal columns, inline order, and moving configured Details together. Native Windows manual acceptance confirmed narrow-window controls and save/reopen behavior in the combined downstream build. That is not proof for every native picker/drop boundary: short-window controls, pickers near scroll edges, unsaved-draft resizing and drops revealing configured Attachments require explicit native smoke coverage before upstream merge.
+Layout tests cover modal columns, inline order, and moving configured Details together.
+
+On 2026-10-18, the owner explicitly reported that all four requested native smoke cases passed in the main installed Windows application, built from downstream commit `cbbc3ac5b5c7f536502eee32fcc7904856ba4f07`:
+
+- Save and Cancel remain accessible in a short window.
+- Project and date pickers remain usable near scroll edges.
+- Resizing preserves an unsaved description draft.
+- Dropping a file reveals Attachments assigned to a different configured section.
+
+This is owner-reported manual acceptance of the combined layout-and-images build, not an automated native test or a separate native run of the layout-only PR head. Earlier manual acceptance also covered save/reopen behavior. Upstream review and CI remain separate merge requirements.
 
 Clipboard image import and inline Markdown image rendering are proposed separately. They are not part of this layout diff.
