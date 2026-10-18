@@ -534,6 +534,12 @@ export function TaskItemFieldRenderer({
                 const insertion = `${text}${text ? '\n\n' : ''}${imported.map((attachment) => `![Image](mindwtr://attachment/${attachment.id})`).join('\n\n')}`;
                 const selection = { start: start + insertion.length, end: start + insertion.length };
                 applyDescriptionValue(`${value.slice(0, start)}${insertion}${value.slice(end)}`, { baseSelection: { start, end }, nextSelection: selection });
+                if (imported.length > 0) {
+                    void logInfo('Description clipboard image references inserted', {
+                        scope: 'attachments', force: true,
+                        extra: { releaseCheck: 'v1.3.7/description-clipboard-images', count: imported.length },
+                    });
+                }
                 if (textarea.isConnected && document.activeElement === textarea) restoreDescriptionTextareaSelection(textarea, selection);
             }).catch((error) => setDescriptionAudioError(error instanceof Error ? error.message : t('attachments.fileNotReadable')));
             return;

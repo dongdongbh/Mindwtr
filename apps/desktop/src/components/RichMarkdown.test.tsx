@@ -79,6 +79,12 @@ describe('RichMarkdown', () => {
 });
 
 
+it.each(['\u0001//example.com/track.png', '\u001fhttps://example.com/track.png', 'file:///%01//example.com/track.png'])('blocks image paths with browser-stripped controls: %j', (uri) => {
+    const attachment = { id: 'image-1', kind: 'file' as const, title: 'Screenshot', uri, mimeType: 'image/png', createdAt: '2026-10-13', updatedAt: '2026-10-13' };
+    const { container } = render(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[attachment]} />);
+    expect(container.querySelector('img')).toBeNull();
+});
+
 it('renders only task-owned image attachments and blocks remote, deleted and unrelated images', () => {
     const attachment = { id: 'image-1', kind: 'file' as const, title: 'Screenshot', uri: '/managed/image.png', mimeType: 'image/png', createdAt: '2026-10-13', updatedAt: '2026-10-13' };
     const { container, rerender } = render(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[attachment]} />);

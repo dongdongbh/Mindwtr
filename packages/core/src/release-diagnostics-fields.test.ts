@@ -13,6 +13,7 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // description-clipboard-images reuses releaseCheck and count; no attachment contents or identifiers.
     // linux-task-link-launcher reuses releaseCheck and outcome below; no executable paths.
     // linux-quick-add-focus reuses backend and outcome below; no window or input content.
     // inactive-sync-credential: fixed service category only; no endpoint or secret.

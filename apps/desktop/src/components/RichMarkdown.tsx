@@ -136,10 +136,13 @@ export function RichMarkdown({ markdown, attachments }: { markdown: string; atta
                     const id = /^mindwtr:\/\/attachment\/([a-zA-Z0-9-]+)$/.exec(src || '')?.[1];
                     const attachment = id && attachments?.find((item) => item.id === id);
                     const uri = attachment ? resolveAttachmentOpenTarget(attachment.uri) : '';
+                    // Browsers strip leading controls before resolving URLs; reject them before classification.
+                    // eslint-disable-next-line no-control-regex
+                    const hasControlCharacters = /[\u0000-\u001f\u007f]/.test(`${attachment ? attachment.uri : ''}${uri}`);
                     // Only task-owned files render; remote image URLs stay blocked to avoid tracking.
                     if (!attachment || attachment.deletedAt || attachment.kind !== 'file'
                         || !isImageAttachment(attachment)
-                        || /[\t\r\n]/.test(uri)
+                        || hasControlCharacters
                         || /^file:\/\/[^/]/i.test(attachment.uri.trim())
                         || /^[/\\]{2}/.test(uri)
                         || (attachment.uri && !isLocalAttachmentPath(attachment.uri))) return <span>{alt}</span>;

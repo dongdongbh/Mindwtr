@@ -36,6 +36,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.7 (add before tagging, trim in the release after)
 
+- **`v1.3.7/description-clipboard-images`** — `apps/desktop/src/components/Task/TaskItemFieldRenderer.tsx`, after imported clipboard image references are inserted into the live description draft. Message: `Description clipboard image references inserted`; field `count` is the number of inserted image references. Paste an image into a task description and export Diagnostics; expect this receipt even with Debug logging off. It proves draft insertion only: separately confirm save/reopen, discard cleanup and attachment sync on another device. No task text, attachment identifiers, names, paths or image contents are logged. (#1402, #1403)
+
 - **`v1.3.7/linux-task-link-launcher`** — `apps/desktop/src-tauri/src/lib.rs`, after Linux task-link protocol registration and desktop Exec correction are checked. `Linux task link handler checked` carries fixed `outcome=registered|unavailable` and is written directly to the native diagnostics file before the optional log plugin starts. On NixOS, install Mindwtr in a path containing `%`, start it, then export Settings › Diagnostics; `registered` proves registration and correction succeeded with an executable `env` in PATH. Open a task link to confirm GIO delivery separately. The receipt does not prove that another application launched a link or that navigation completed. No executable paths, URLs, identifiers, task content or raw errors are logged. (#1377)
 
 ## v1.3.6 (add before tagging, trim in the release after)

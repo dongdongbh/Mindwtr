@@ -1972,6 +1972,7 @@ describe('TaskItemFieldRenderer quick-add token hints (#918)', () => {
 
 
 describe('description clipboard images', () => {
+    beforeEach(() => logMocks.logInfo.mockClear());
     it('keeps typing during import and undo restores the latest text', async () => {
         let complete!: (value: import('@mindwtr/core').Attachment[]) => void;
         const addDroppedFileAttachments = vi.fn(() => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { complete = resolve; }));
@@ -1986,6 +1987,10 @@ describe('description clipboard images', () => {
         textarea.setSelectionRange(0, 6);
         await act(async () => complete([{ id: 'image-1', kind: 'file', title: 'screenshot.png', uri: '/data/image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
         expect(textarea.value).toBe('Before typing![Image](mindwtr://attachment/image-1)');
+        expect(logMocks.logInfo).toHaveBeenCalledWith('Description clipboard image references inserted', {
+            scope: 'attachments', force: true,
+            extra: { releaseCheck: 'v1.3.7/description-clipboard-images', count: 1 },
+        });
         fireEvent.keyDown(textarea, { key: 'z', ctrlKey: true });
         expect(textarea.value).toBe('Before typing');
     });
@@ -1997,6 +2002,7 @@ describe('description clipboard images', () => {
         const image = new File(['image'], 'image.png', { type: 'image/png' });
         await act(async () => fireEvent.paste(textarea, { clipboardData: { items: [], files: [image], getData: () => '' } }));
         expect(textarea.value).toBe('Keep this');
+        expect(logMocks.logInfo).not.toHaveBeenCalled();
     });
 });
 
