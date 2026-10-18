@@ -48,7 +48,12 @@ const host = (stored: Record<string, string> = {}, refuseSchedule = false, getDa
             setSecret: async () => { calls.push('setSecret'); },
             deleteSecret: async () => { calls.push('deleteSecret'); },
         },
-        localData: () => ({ getData: getData ?? (async () => { throw new Error('no local data in this test'); }), saveData: async () => undefined }),
+        localData: () => ({
+            getData: getData ?? (async () => { throw new Error('no local data in this test'); }),
+            saveData: async () => undefined,
+            readTokenOf: () => undefined,
+            prepareSaveRows: function* () { /* no rows to prepare */ },
+        }),
         networkState: () => { calls.push('networkState'); return { isConnected: true, isInternetReachable: true }; },
         appendLog: async (entry) => { calls.push('appendLog'); lines.push(entry.message); entries.push(entry); return null; },
         translate: (key) => key,
@@ -1058,4 +1063,31 @@ describe('native background sync binding', () => {
         expect(lines).not.toContain('Sync follow-up scheduled');
         expect(sent).toHaveLength(1);
     }, 60_000);
+});
+
+// D9b change 5 (design §2, §6): only the Android host slices its sync cycles. iOS keeps unsliced cycles, its recovery save
+// and its in-gate publish; a sliced cycle there would also need the token ports, which the binding passes on both platforms.
+it.each(['android', 'ios'] as const)('binds sliceYield on %s only when the host is Android, with the token ports', async (platform) => {
+    if (platform === 'ios') iosFiles();
+    globals.__mindwtrHostPlatform = platform;
+    const create = core.createMobileSyncService;
+    let serviceHost: Parameters<typeof core.createMobileSyncService>[0] | undefined;
+    spyOn(core, 'createMobileSyncService').mockImplementation((options) => {
+        serviceHost = options;
+        return create(options);
+    });
+    host({}, false, undefined, async () => false);
+    expect(serviceHost).toBeDefined();
+    expect(typeof serviceHost!.sliceYield).toBe(platform === 'android' ? 'function' : 'undefined');
+    expect(typeof serviceHost!.localData.readTokenOf).toBe('function');
+    expect(typeof serviceHost!.localData.prepareSave).toBe('function');
+    if (platform === 'android') {
+        // A zero-delay timer: the slice gives the engine back and resumes in a later turn.
+        let resumed = false;
+        const slice = serviceHost!.sliceYield!().then(() => { resumed = true; });
+        await Promise.resolve();
+        expect(resumed).toBe(false);
+        await slice;
+        expect(resumed).toBe(true);
+    }
 });

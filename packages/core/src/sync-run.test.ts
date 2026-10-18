@@ -4903,6 +4903,31 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
         expect(after.settings.pendingRemoteWriteAt).toBeUndefined();
     });
 
+    it.each([
+        ['a cycle that commits', undefined, 'none'],
+        ['a cycle whose first save is refused', 1, 'stale-db'],
+    ])('logs one native-sync-slices line at the end of %s, with its requeue reason (D9b diagnostics)', async (_name, refuseAtSave, requeue) => {
+        const many = Array.from({ length: 200 }, (_, index) => createTask(`t-${index}`, `Task ${index}`));
+        const bundle = await adapterHarness({ sliced: true, refuseAtSave, local: createData(many), remote: createData([...many, createTask('t-remote', 'Remote task')]) });
+        let clock = 0;
+        const now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10));
+        try {
+            await bundle.run();
+        } finally {
+            now.mockRestore();
+        }
+        const lines = bundle.harness.infos.filter((line) => line.message === 'Sync cycle ran in slices');
+        expect(lines).toHaveLength(1);
+        expect(lines[0].extra).toMatchObject({ requeue, releaseCheck: 'v1.3.7/native-sync-slices' });
+        expect(Number(lines[0].extra?.slices)).toBeGreaterThan(0);
+        expect(Number(lines[0].extra?.longestSliceMs)).toBeGreaterThanOrEqual(10);
+        expect(lines[0].extra?.commitPublishMs).toMatch(requeue === 'none' ? /^\d+(,\d+)*$/ : /^-$/);
+
+        const unsliced = await adapterHarness({ sliced: false, remote: remoteWithNewTask() });
+        await unsliced.run();
+        expect(unsliced.harness.infos.some((line) => line.message === 'Sync cycle ran in slices')).toBe(false);
+    });
+
     it('an unsliced cycle passes no token, so the same foreign write refuses nothing', async () => {
         const bundle = await adapterHarness({ sliced: false, refuseAtSave: 1, remote: remoteWithNewTask() });
 

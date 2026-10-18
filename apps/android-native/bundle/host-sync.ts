@@ -62,6 +62,7 @@ import {
     shouldScheduleMobileBackgroundSync,
     useTaskStore,
     type AppData,
+    type SqliteAdapter,
     type AutoSyncController,
     type DiagnosticsLogEntry,
     type MobileBackgroundSyncTrigger,
@@ -87,8 +88,8 @@ export type NativeSyncBindings = {
     keyValue: HostKeyValue;
     /** host-polyfills.js's secret calls (SecretStore.kt, expo-secure-store's format). */
     secrets: { getSecret(key: string): Promise<string | null>; setSecret(key: string, value: string, accessibility?: SyncSecretAccessibility): Promise<void>; deleteSecret(key: string): Promise<void> };
-    /** The boot's validated SQLite adapter: the local snapshot a cycle reads and saves. */
-    localData: () => { getData(): Promise<AppData>; saveData(data: AppData): Promise<void> };
+    /** The boot's validated SQLite adapter: the local snapshot a cycle reads and saves, on its read tokens (D9b W3). */
+    localData: () => Pick<SqliteAdapter, 'getData' | 'saveData' | 'readTokenOf' | 'prepareSaveRows'>;
     /** The device's network state now (HostNetwork.kt), as expo-network reads it. */
     networkState: () => MobileSyncNetworkState;
     /** RN's diagnostics log line (app-log.ts appendLogLine): the file's path once written. */
@@ -273,7 +274,16 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 return { remove: () => { networkListeners.delete(listener); } };
             },
         },
-        localData: { getData: () => bindings.localData().getData(), saveData: (data) => bindings.localData().saveData(data) },
+        localData: {
+            getData: (options) => bindings.localData().getData(options),
+            saveData: (data, options) => bindings.localData().saveData(data, options),
+            readTokenOf: (data) => bindings.localData().readTokenOf(data),
+            prepareSave: (data) => bindings.localData().prepareSaveRows(data),
+        },
+        // D9b: an Android cycle gives the engine back between slices of its long passes (core cooperative.ts). A zero-delay
+        // timer fires in a later idle pump turn (CoreHost), so the screens' calls queued meanwhile run first. iOS keeps
+        // unsliced cycles (design §6).
+        ...(platform === 'android' ? { sliceYield: () => new Promise<void>((resolve) => { setTimeout(resolve, 0); }) } : {}),
         log: {
             info: (message, context) => logLine('info', message, context),
             warn: (message, context) => logLine('warn', message, context),

@@ -37,6 +37,7 @@ import { isLikelyOfflineSyncError, isRemoteSyncBackend, SYNC_FILE_NAME, SyncFile
 import { summarizeTaskLifecycleCounts } from './task-utils';
 import { decodeUriSafe } from './async-utils';
 import { flushPendingSave, lastStoreLoadWasRecovery, sameStoreData, storeDataOf, useTaskStore } from './store';
+import { getStoreListenerCount } from './store-notify-profiler';
 import { createSlicer, runSliced, type CooperativePass } from './cooperative';
 import { isSandboxMode, isWorkspaceTransitionActive } from './sandbox';
 import { performSyncCycle } from './sync';
@@ -455,7 +456,8 @@ export type MobileSyncServiceHost<Lease> = {
   allowQueuedFollowUp?: boolean;
   /**
    * D9b, native Android only: the notifier's slice port (sync-run-ports.ts). A host that binds it gets sliced cycles, with
-   * token-checked saves, write-free aborts and quiet-paced follow-ups. React Native binds none. No host binds it yet.
+   * token-checked saves, write-free aborts and quiet-paced follow-ups. Only the native Android host binds it
+   * (apps/android-native/bundle/host-sync.ts); React Native and iOS bind none.
    */
   sliceYield?(): Promise<void>;
   /** The device key-value store (React Native: AsyncStorage). */
@@ -1056,6 +1058,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             getInMemorySnapshot: () => core.getInMemoryAppDataSnapshot(),
             // A sliced cycle takes the lists in one turn and copies them in slices (cloneAppDataPass).
             captureInMemorySnapshot: () => captureInMemoryAppDataSnapshot(core.useTaskStore),
+            listenerCount: () => getStoreListenerCount(),
             flushPendingSave: () => core.flushPendingSave(),
             setUiError: (message) => core.useTaskStore.getState().setError(message),
             getSettings: () => core.useTaskStore.getState().settings,

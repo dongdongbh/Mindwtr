@@ -44,8 +44,10 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // mcp-codex-copy reuses releaseCheck, operation, outcome, backend below.
     // linux-task-link-launcher reuses releaseCheck and outcome below; no executable paths.
     // sync-write-gate reuses backend below; step is the sync step name; gateWaitMs lists each save's wait for the gate.
-    // Sliced cycles add commitPublishMs (each save's time in the gate) and storePublish (prepared or in-gate, per save).
-    'step', 'gateWaitMs', 'commitPublishMs', 'storePublish',
+    'step', 'gateWaitMs',
+    // native-sync-slices reuses backend and gateWaitMs: each save's time in the gate, its publish (prepared or in-gate),
+    // the slices that gave the engine back and the longest, the store's subscribers, and the requeue reason.
+    'commitPublishMs', 'storePublish', 'slices', 'longestSliceMs', 'storeListeners', 'requeue',
     // sync-status-published (v1.2.7 line): storeRefresh=dropped when a sliced cycle skipped its end-of-cycle load.
     'storeRefresh',
     // linux-quick-add-focus reuses backend and outcome below; no window or input content.
