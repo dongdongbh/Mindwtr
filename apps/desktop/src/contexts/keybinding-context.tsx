@@ -147,7 +147,7 @@ function moveSidebarFocus(target: EventTarget | null, direction: 'next' | 'prev'
     const origin = active ?? (target instanceof HTMLElement ? target : null);
     if (!origin) return false;
     const sidebar = origin.closest('[data-sidebar-nav]');
-    if (!sidebar) return false;
+    if (!sidebar || origin.closest('[data-project-navigation-root], [data-context-navigation-root]')) return false;
     const items = getSidebarFocusTargets(sidebar);
     if (items.length === 0) return false;
     const currentIndex = active ? items.findIndex((item) => item === active) : -1;

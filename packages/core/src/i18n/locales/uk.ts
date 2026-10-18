@@ -181,6 +181,7 @@ export const ukOverrides: Record<string, string> = {
     "nav.calendar": "Календар",
     "nav.review": "Огляд",
     "nav.agenda": "Фокус",
+    "nav.resizeSubmenu": "Змінити розмір навігації та підменю",
     "nav.settings": "Налаштування",
     "nav.done": "Готово",
     "nav.archived": "Архівовано",

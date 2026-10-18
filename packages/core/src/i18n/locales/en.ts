@@ -165,6 +165,7 @@ export const en: Record<string, string> = {
         'nav.calendar': 'Calendar',
         'nav.review': 'Review',
         'nav.agenda': 'Focus',
+        'nav.resizeSubmenu': 'Resize navigation and submenu',
         'nav.settings': 'Settings',
         'nav.done': 'Done',
         'nav.archived': 'Archived',

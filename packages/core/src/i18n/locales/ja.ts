@@ -180,6 +180,7 @@ export const jaOverrides: Record<string, string> = {
         'nav.calendar': 'カレンダー',
         'nav.review': 'レビュー',
         'nav.agenda': 'フォーカス',
+        'nav.resizeSubmenu': 'ナビゲーションとサブメニューの高さを変更',
         'nav.settings': '設定',
         'nav.done': '完了',
         'nav.archived': 'アーカイブ',

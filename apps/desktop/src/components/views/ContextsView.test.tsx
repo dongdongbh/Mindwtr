@@ -1,4 +1,5 @@
-import { act, fireEvent, render } from '@testing-library/react';
+import { ViewSidebarContext } from '../../contexts/view-sidebar-context';
+import { act, fireEvent, render, within } from '@testing-library/react';
 import type { Area, Project, Task } from '@mindwtr/core';
 import { safeFormatDate, useTaskStore } from '@mindwtr/core';
 import * as core from '@mindwtr/core';
@@ -39,6 +40,22 @@ const renderContextsView = () => render(
 );
 
 describe('ContextsView', () => {
+    it('moves the existing token submenu into the main sidebar without losing its selection', () => {
+        const slot = document.createElement('div');
+        document.body.append(slot);
+        const view = render(<ViewSidebarContext.Provider value={slot}><LanguageProvider><ContextsView /></LanguageProvider></ViewSidebarContext.Provider>);
+        expect(view.container.querySelector('[data-context-navigation-root]')).toBeNull();
+        expect(slot.querySelector('[data-context-navigation-root]')).not.toBeNull();
+        fireEvent.click(within(slot).getByRole('button', { name: '@Office (1)' }));
+        expect(within(slot).getByRole('button', { name: '@Office (1)' })).toHaveAttribute('aria-pressed', 'true');
+        view.rerender(<ViewSidebarContext.Provider value={null}><LanguageProvider><ContextsView /></LanguageProvider></ViewSidebarContext.Provider>);
+        expect(slot.children).toHaveLength(0);
+        expect(view.container.querySelector('[data-context-navigation-root]')).not.toBeNull();
+        expect(view.getByRole('button', { name: '@Office (1)' })).toHaveAttribute('aria-pressed', 'true');
+        view.unmount();
+        slot.remove();
+    });
+
     beforeEach(() => {
         vi.restoreAllMocks();
         clearUndoableAction();

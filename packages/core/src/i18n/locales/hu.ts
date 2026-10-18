@@ -165,6 +165,7 @@ export const huOverrides: Record<string, string> = {
     'nav.calendar': 'Naptár',
     'nav.review': 'Áttekintés',
     'nav.agenda': 'Fókusz',
+    'nav.resizeSubmenu': 'A navigáció és az almenü méretezése',
     'nav.settings': 'Beállítások',
     'nav.done': 'Kész',
     'nav.archived': 'Archiválva',

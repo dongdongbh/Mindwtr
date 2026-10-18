@@ -70,6 +70,7 @@ export function getVisibleProjectIds({
 }
 
 interface ProjectsSidebarProps {
+    embedded?: boolean;
     t: (key: string) => string;
     areaFilterLabel?: string;
     selectedTag: string;
@@ -156,6 +157,7 @@ export function ProjectsSidebar({
     draggingSection,
     collapseLabel,
     onToggleCollapsed,
+    embedded = false,
 }: ProjectsSidebarProps) {
     const focusedCount = focusedProjectCount;
     const [contextMenu, setContextMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
@@ -488,11 +490,11 @@ export function ProjectsSidebar({
         <div
             ref={projectNavigationRootRef}
             data-project-navigation-root
-            className="w-full h-full min-h-0 flex flex-col gap-4 border-r border-border pr-5 xl:pr-6"
+            className={cn("w-full min-h-0 flex flex-col gap-4", !embedded && "h-full border-r border-border pr-5 xl:pr-6")}
         >
             <div data-projects-sidebar-header className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                    <h2 className="text-xl font-bold tracking-tight">{t('projects.title')}</h2>
+                    <h2 className={embedded ? "text-xs font-semibold text-muted-foreground uppercase tracking-wide" : "text-xl font-bold tracking-tight"}>{t(embedded ? 'projects.activeSection' : 'projects.title')}</h2>
                     {areaFilterLabel && (
                         <span className="text-[10px] uppercase tracking-wide bg-muted/40 text-muted-foreground border border-border/60 rounded-full px-2 py-0.5 truncate max-w-[180px]">
                             {t('projects.areaLabel')}: {areaFilterLabel}
@@ -627,8 +629,8 @@ export function ProjectsSidebar({
                 </form>
             )}
 
-            <div className="space-y-3 overflow-y-auto flex-1">
-                {groupedActiveProjects.length > 0 && (
+            <div className={embedded ? "space-y-3" : "space-y-3 overflow-y-auto flex-1"}>
+                {!embedded && groupedActiveProjects.length > 0 && (
                     <div className="pt-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         {t('projects.activeSection')}
                     </div>

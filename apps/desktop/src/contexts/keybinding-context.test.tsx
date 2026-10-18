@@ -290,12 +290,15 @@ const ProjectAndTaskScopes = ({
         <div>
             <button type="button" data-sidebar-item data-view="projects">Projects</button>
             <div data-main-content tabIndex={-1}>Main content</div>
+            <nav data-sidebar-nav>
             <div data-project-navigation-root>
                 <div role="button" tabIndex={0} data-project-navigation-item data-project-id="project-1">
                     Project 1
                     <button type="button" data-project-selection-ignore="true">Drag</button>
                 </div>
             </div>
+            <button type="button" data-sidebar-section-toggle>More</button>
+            </nav>
             <div data-project-workspace tabIndex={-1}>
                 <div data-task-id="task-1">
                     <button type="button" data-task-view-toggle>Task 1</button>
@@ -470,6 +473,9 @@ describe('KeybindingProvider (vim)', () => {
     });
 
     it('triggers quick add with Ctrl+Alt+M', () => {
+        useTaskStore.setState((state) => ({
+            settings: { ...state.settings, globalQuickAddShortcut: GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT },
+        }));
         const quickAddListener = vi.fn();
         window.addEventListener('mindwtr:quick-add', quickAddListener);
 
@@ -1178,7 +1184,7 @@ describe('KeybindingProvider (vim)', () => {
         expect(document.activeElement).toBe(document.querySelector('[data-project-id="project-1"]'));
     });
 
-    it('routes arrows, j/k, gg, and G to a focused project list, then Right enters its task workspace', () => {
+    it('routes arrows, j/k, gg, and G to projects inside the shared sidebar, then Right enters its task workspace', () => {
         const projectSpies = createProjectScopeSpies();
         const taskSpies = createTaskActionSpies();
         render(

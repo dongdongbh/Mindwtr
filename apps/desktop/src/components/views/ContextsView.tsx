@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo, useCallback, useRef, type DragEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { ViewSidebarContext } from '../../contexts/view-sidebar-context';
+import { useState, useContext, useEffect, useMemo, useCallback, useRef, type DragEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     useTaskStore,
@@ -72,6 +74,7 @@ const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
 const CLEAR_SELECTION_OPTION = '__clear__';
 
 export function ContextsView() {
+    const sidebarSlot = useContext(ViewSidebarContext);
     const perf = usePerformanceMonitor('ContextsView');
     const { tasksById, projects, areas, settings, theme, undoNotificationsEnabled, updateSettings } = useTaskStore(
         (state) => ({
@@ -569,18 +572,14 @@ export function ContextsView() {
         );
     };
 
-    return (
-        <>
-            <div className="h-full px-4 pt-3">
-                <div className="mx-auto flex h-full w-full max-w-[84rem] min-w-0 gap-0 lg:gap-5 xl:gap-6 2xl:max-w-[88rem]">
-                    {/* Sidebar List of Contexts */}
-                    <div className="hidden min-w-[13.5rem] w-[clamp(13.5rem,16vw,15.5rem)] flex-shrink-0 flex-col gap-4 border-r border-border pr-5 lg:flex xl:pr-6">
+    const contextNavigation = (
+        <div data-context-navigation-root className={sidebarSlot ? "flex flex-col gap-3" : "hidden min-w-[13.5rem] w-[clamp(13.5rem,16vw,15.5rem)] flex-shrink-0 flex-col gap-4 border-r border-border pr-5 lg:flex xl:pr-6"}>
                         <div className="flex items-center justify-between">
-                            <h2 className="text-xl font-bold tracking-tight">{t('contexts.title')}</h2>
+                            <h2 className={sidebarSlot ? "text-xs font-semibold uppercase tracking-wide text-muted-foreground" : "text-xl font-bold tracking-tight"}>{t('contexts.title')}</h2>
                             <Filter className="w-5 h-5 text-muted-foreground" />
                         </div>
 
-                        <div className="space-y-1 overflow-y-auto flex-1">
+                        <div className={sidebarSlot ? "space-y-1" : "space-y-1 overflow-y-auto flex-1"}>
                             <button
                                 type="button"
                                 onClick={() => setSelectedContext(null)}
@@ -640,6 +639,13 @@ export function ContextsView() {
                             <div data-list-end className={LIST_END_GAP} aria-hidden="true" />
                         </div>
                     </div>
+    );
+
+    return (
+        <>
+            <div className={sidebarSlot ? "h-full px-5 pt-6 lg:px-8" : "h-full px-4 pt-3"}>
+                <div className="mx-auto flex h-full w-full max-w-[84rem] min-w-0 gap-0 lg:gap-5 xl:gap-6 2xl:max-w-[88rem]">
+                    {sidebarSlot ? createPortal(contextNavigation, sidebarSlot) : contextNavigation}
 
                     {/* Context Tasks */}
                     <div className="min-w-0 flex-1 flex flex-col h-full overflow-hidden">

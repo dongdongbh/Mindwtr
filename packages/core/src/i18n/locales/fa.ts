@@ -169,6 +169,7 @@ export const faOverrides: Record<string, string> = {
         'nav.calendar': 'تقویم',
         'nav.review': 'مرور',
         'nav.agenda': 'تمرکز',
+        'nav.resizeSubmenu': 'تغییر اندازهٔ پیمایش و زیرمنو',
         'nav.settings': 'تنظیمات',
         'nav.done': 'انجام‌شده',
         'nav.archived': 'بایگانی‌شده',

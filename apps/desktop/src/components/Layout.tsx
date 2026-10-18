@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { usePersistedViewState } from '../hooks/usePersistedViewState';
+import { ViewSidebarContext } from '../contexts/view-sidebar-context';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
     Calendar,
     GanttChartSquare,
@@ -40,6 +42,12 @@ import { SandboxBanner } from './sandbox/SandboxBanner';
 import { getWorkspaceCache } from '../lib/workspace-cache';
 import { TASK_STATUS_ICONS } from '../lib/task-status-icons';
 import { dismissCleartextSyncWarning, getCleartextSyncDestination, isCleartextSyncDismissed } from '../lib/cleartext-sync-warning';
+
+function clampSidebarNavigationHeight(value: unknown, fallback = 60): number {
+    return typeof value === 'number' && Number.isFinite(value)
+        ? Math.max(20, Math.min(80, Math.round(value)))
+        : fallback;
+}
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -142,6 +150,17 @@ export function Layout({
     ));
     const isCollapsed = userSidebarCollapsed || compactViewport;
     const calendarDragNavTimeoutRef = useRef<number | null>(null);
+    const sidebarSplitRef = useRef<HTMLDivElement | null>(null);
+    const [sidebarNavigationHeight, setSidebarNavigationHeight] = usePersistedViewState(
+        'mindwtr:sidebar-navigation-height:v1', 60, clampSidebarNavigationHeight,
+    );
+    const resizeSidebarFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+        const bounds = sidebarSplitRef.current?.getBoundingClientRect();
+        if (!bounds || bounds.height <= 0) return;
+        setSidebarNavigationHeight(clampSidebarNavigationHeight((event.clientY - bounds.top) / bounds.height * 100));
+    };
+    const [viewSidebarSlot, setViewSidebarSlot] = useState<HTMLDivElement | null>(null);
+    const hasViewSidebar = (contentView === 'projects' || contentView === 'contexts') && !isCollapsed;
     const isFocusMode = useUiStore((state) => state.isFocusMode);
     const hiddenSidebarViews = useUiStore((state) => state.hiddenSidebarViews);
     const showToast = useUiStore((state) => state.showToast);
@@ -784,6 +803,7 @@ export function Layout({
 
 
     return (
+        <ViewSidebarContext.Provider value={viewSidebarSlot}>
         <div className={cn(
             "flex h-screen overflow-hidden bg-background text-foreground",
             sandboxMode && "pt-10",
@@ -799,7 +819,7 @@ export function Layout({
             {!isFocusMode && (
                 <aside className={cn(
                     "border-r border-border bg-card flex flex-col",
-                    isCollapsed ? "w-16 p-2" : "w-64 px-3 pt-5 pb-3"
+                    isCollapsed ? "w-16 shrink-0 p-2" : "w-64 shrink-0 px-3 pt-5 pb-3"
                 )}>
                 <div className={cn(
                     "flex items-center gap-2 px-1.5 mb-6",
@@ -865,7 +885,9 @@ export function Layout({
                     )}
                 </button>
 
-                <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                <div ref={sidebarSplitRef} data-sidebar-split className={cn("flex-1 min-h-0", hasViewSidebar && "grid")}
+                    style={hasViewSidebar ? { gridTemplateRows: `minmax(0, ${sidebarNavigationHeight}fr) 12px minmax(0, ${100 - sidebarNavigationHeight}fr)` } : undefined}>
+                <div id="sidebar-navigation-panel" className={cn("min-h-0 overflow-y-auto pr-1", !hasViewSidebar && "h-full")}>
                     {savedSearches.length > 0 && (
                         <div className={cn("mb-2 space-y-1", isCollapsed && "mb-2")}>
                             {!isCollapsed && (
@@ -1002,6 +1024,38 @@ export function Layout({
                         })}
                     </nav>
                 </div>
+                    {hasViewSidebar && <>
+                        <div role="separator" tabIndex={0} aria-orientation="horizontal"
+                            aria-label={tFallback(t, 'nav.resizeSubmenu', 'Resize navigation and submenu')}
+                            aria-controls="sidebar-navigation-panel view-sidebar-panel"
+                            aria-valuemin={20} aria-valuemax={80} aria-valuenow={sidebarNavigationHeight}
+                            title={tFallback(t, 'nav.resizeSubmenu', 'Resize navigation and submenu')}
+                            className="group flex cursor-row-resize touch-none select-none items-center justify-center rounded outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                            onPointerDown={(event) => {
+                                if (event.button !== 0) return;
+                                event.preventDefault();
+                                event.currentTarget.setPointerCapture(event.pointerId);
+                                resizeSidebarFromPointer(event);
+                            }}
+                            onPointerMove={(event) => {
+                                if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeSidebarFromPointer(event);
+                            }}
+                            onPointerUp={(event) => {
+                                if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                            }}
+                            onDoubleClick={() => setSidebarNavigationHeight(60)}
+                            onKeyDown={(event) => {
+                                if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+                                event.preventDefault();
+                                setSidebarNavigationHeight((height) => clampSidebarNavigationHeight(
+                                    event.key === 'Home' ? 20 : event.key === 'End' ? 80 : height + (event.key === 'ArrowUp' ? -5 : 5),
+                                ));
+                            }}>
+                            <span aria-hidden="true" className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary/60" />
+                        </div>
+                        <div ref={setViewSidebarSlot} id="view-sidebar-panel" data-view-sidebar-slot className="min-h-0 overflow-y-auto pr-1 pt-2" />
+                    </>}
+                </div>
 
                 <div className="mt-auto border-t border-border/60 px-2 py-1.5" data-sidebar-footer>
                     <div className={cn("pb-1.5", isCollapsed && "flex justify-center")}>
@@ -1122,7 +1176,7 @@ export function Layout({
                     // is skipped entirely by every view that overflows it. Each
                     // view puts LIST_END_GAP on its own scrolled content instead
                     // (#977).
-                    "mx-auto h-full px-4 pt-4 lg:px-6 lg:pt-6 2xl:px-8 2xl:pt-8",
+                    (contentView === 'projects' || contentView === 'contexts') ? "mx-auto h-full" : "mx-auto h-full px-4 pt-4 lg:px-6 lg:pt-6 2xl:px-8 2xl:pt-8",
                     isFocusMode
                         ? "max-w-[800px]"
                         : isFullWidthView
@@ -1178,5 +1232,6 @@ export function Layout({
             </main>
             <ToastHost />
         </div>
+        </ViewSidebarContext.Provider>
     );
 }

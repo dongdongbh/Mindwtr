@@ -166,6 +166,7 @@ export const daOverrides: Record<string, string> = {
     'nav.calendar': 'Kalender',
     'nav.review': 'Gennemgang',
     'nav.agenda': 'Fokus',
+    'nav.resizeSubmenu': 'Tilpas størrelsen på navigation og undermenu',
     'nav.settings': 'Indstillinger',
     'nav.done': 'Færdig',
     'nav.archived': 'Arkiveret',
