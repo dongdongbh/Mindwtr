@@ -19,6 +19,8 @@ const provider = () => {
     const docs = new Map<string, { name: string; bytes: Uint8Array }>();
     const ops: string[] = [];
     let revoked = false;
+    /** The host's pick slot (PendingSyncFolderPick.kt): what Settings › Sync's picker left, taken once. */
+    let pick: Record<string, unknown> | null = null;
     const refuse = () => { if (revoked) throw new Error('SAF_DOCUMENTS_UNAVAILABLE: permission revoked'); };
     const row = (uri: string) => {
         const doc = docs.get(uri);
@@ -28,6 +30,11 @@ const provider = () => {
         const op = String(request.op);
         const uri = String(request.uri);
         ops.push(op);
+        if (op === 'takePick') {
+            const taken = pick;
+            pick = null;
+            return { value: taken, bytes: null };
+        }
         refuse();
         switch (op) {
             case 'listChildren':
@@ -69,7 +76,7 @@ const provider = () => {
         const doc = docs.get(childUri(name));
         return doc ? new TextDecoder().decode(doc.bytes) : null;
     };
-    return { call, docs, ops, put, text, revoke: () => { revoked = true; } };
+    return { call, docs, ops, put, text, revoke: () => { revoked = true; }, picked: (value: Record<string, unknown>) => { pick = value; } };
 };
 
 const lock = () => {
@@ -123,7 +130,14 @@ const host = (stored: Record<string, string>) => {
         isFossBuild: false,
     });
     const cycleLine = () => entries.filter((entry) => entry.message === 'Native Android File Sync cycle').map((entry) => entry.context);
-    return { sync, entries, saved, cycleLine };
+    const contract = async () => {
+        const opened = core.createNativeHostContract({ syncSettings: sync.settingsHost });
+        const activated = await opened.activate({ writeSafetyReady: true });
+        expect(activated).toMatchObject({ ok: true });
+        expect((await opened.openSyncSettings({})).ok).toBe(true);
+        return opened;
+    };
+    return { sync, entries, saved, cycleLine, kv, contract };
 };
 
 const install = () => {
@@ -137,7 +151,9 @@ const install = () => {
     return { folder, folderLock };
 };
 
-afterEach(() => {
+afterEach(async () => {
+    // A cycle's store save is still pending when a test ends: the next test's contract cannot load over it.
+    await core.flushPendingSave().catch(() => undefined);
     resetForTests();
     setLogger(null);
     for (const name of channelGlobals) {
@@ -148,6 +164,59 @@ afterEach(() => {
 });
 
 describe('native Android File Sync', () => {
+    // First: core's store keeps a cycle's merged rows across tests, and the contract's activation refuses a store holding rows
+    // its storage lacks (the merge test's peer row).
+    describe('Select folder (the pick slot)', () => {
+        const pick = async (contract: Awaited<ReturnType<ReturnType<typeof host>['contract']>>, requestId = core.generateUUID()) => {
+            const result = await contract.pickSyncFolder({ requestId });
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+
+        it('an empty slot is a cancel: nothing is stored and nothing syncs', async () => {
+            const { folder, folderLock } = install();
+            const { kv, contract } = host({ [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: ROOT });
+            const before = [...kv];
+            expect((await pick(await contract())).toasts).toEqual([]);
+            expect([...kv]).toEqual(before);
+            expect(folder.ops).toEqual(['takePick']);
+            expect(folderLock.calls).toEqual([]);
+        });
+
+        it('a picked folder is stored as the sync path and activates through its first sync; the slot is taken once', async () => {
+            const { folder } = install();
+            const { kv, contract, cycleLine } = host({ [SYNC_BACKEND_KEY]: 'file' });
+            folder.picked({ treeUri: TREE });
+            const opened = await contract();
+            const requestId = core.generateUUID();
+            const first = await pick(opened, requestId);
+            expect(first.toasts.filter((toast) => toast.tone === 'error')).toEqual([]);
+            // The folder's sync file by name, created only when the first cycle published it.
+            expect(kv.get(SYNC_PATH_KEY)).toBe(childUri('data.json'));
+            expect(kv.get(SYNC_BACKEND_KEY)).toBe('file');
+            expect(JSON.parse(folder.text('data.json')!).tasks.map((task: { title: string }) => task.title)).toEqual(['mine']);
+            expect(cycleLine().length).toBeGreaterThan(0);
+            expect(cycleLine().every((line) => line?.outcome === 'synced' && line.provider === AUTHORITY)).toBe(true);
+            // The probe left nothing behind, and a replayed request takes nothing twice.
+            expect([...folder.docs.values()].map((doc) => doc.name)).toEqual(['data.json']);
+            const takes = folder.ops.filter((op) => op === 'takePick').length;
+            expect(await pick(opened, requestId)).toEqual(first);
+            expect(folder.ops.filter((op) => op === 'takePick').length).toBe(takes);
+        });
+
+        it('a refused grant shows RN\'s failed-to-set-path toast and stores nothing', async () => {
+            const { folder } = install();
+            const { kv, contract, entries } = host({ [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: ROOT });
+            folder.picked({ grant: 'refused' });
+            const before = [...kv];
+            const result = await pick(await contract());
+            expect(result.toasts).toEqual([expect.objectContaining({ tone: 'error', title: 'Error', message: 'Failed to set sync path' })]);
+            expect([...kv]).toEqual(before);
+            expect(folder.ops).toEqual(['takePick']);
+            expect(entries.some((entry) => entry.context?.operation === 'import')).toBe(true);
+        });
+    });
+
     it('syncs a picked SAF folder under the folder lock and logs the synced cycle', async () => {
         const { folder, folderLock } = install();
         const { sync, cycleLine } = host({ [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: ROOT });

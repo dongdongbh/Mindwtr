@@ -88,4 +88,15 @@ class HostDocumentsTest {
         val folder = Folder()
         assertEquals(null, call(HostDocuments(folder, folder), "op" to "stat", "uri" to "content://p/tree/t/document/9").value)
     }
+
+    @Test
+    fun thePickedFolderIsTakenOnceAndNeedsNoUri() {
+        val folder = Folder()
+        val host = HostDocuments(folder, folder)
+        assertEquals(null, call(host, "op" to "takePick").value)
+        PendingSyncFolderPick.put(JSONObject().put("treeUri", "content://p/tree/t"))
+        PendingSyncFolderPick.put(JSONObject().put("treeUri", "content://p/tree/newer"))
+        assertEquals("content://p/tree/newer", (call(host, "op" to "takePick").value as JSONObject).getString("treeUri"))
+        assertEquals(null, call(host, "op" to "takePick").value)
+    }
 }

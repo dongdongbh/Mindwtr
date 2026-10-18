@@ -752,6 +752,23 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             delete: (key) => secureConfig.deleteSecureConfigValue(key),
         },
         performSync,
+        // File Sync's Select folder (S5): Kotlin's picker already ran and left the folder it granted in the host's pick slot
+        // (HostDocuments.kt PendingSyncFolderPick); taking it empties it, and an empty slot is a cancel. The folder step is RN's
+        // pickAndParseSyncFolder after expo's directory permission, with its error log.
+        ...(documentCall ? {
+            pickSyncFolder: async () => {
+                const pick = (await documentCall({ op: 'takePick' })).value as { treeUri?: string } | null;
+                if (!pick) return null;
+                try {
+                    if (!pick.treeUri) throw new Error('Android did not keep access to the selected folder');
+                    const picked = await fileSync.prepareSafSyncFolder(pick.treeUri);
+                    return picked.__fileUri ? { uri: picked.__fileUri } : null;
+                } catch (error) {
+                    void logError(error, { scope: 'sync', extra: { operation: 'import', message: 'Failed to import data from folder' } });
+                    throw error;
+                }
+            },
+        } : {}),
         ...(bindings.listRecoverySnapshots ? { listRecoverySnapshots: bindings.listRecoverySnapshots } : {}),
         clearSyncConfigCache: () => service.clearMobileSyncConfigCache(),
         reconcileBackgroundSync,

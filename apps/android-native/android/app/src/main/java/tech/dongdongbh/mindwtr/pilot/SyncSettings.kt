@@ -1,7 +1,13 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.provider.DocumentsContract
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,6 +72,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import tech.dongdongbh.mindwtr.pilot.core.PendingSyncFolderPick
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -138,13 +145,16 @@ class SyncSettingsModel(private val menu: MenuModel) {
     }
 
     /** One open per visit, after any close sent before it: a refresh and a reload can read at once. */
-    private fun open(runtime: CoreHost) = visits.submit {
+    private fun open(runtime: CoreHost) = visits.submit { openNow(runtime) }.get()
+
+    /** On the visits thread. */
+    private fun openNow(runtime: CoreHost) {
         if (!opened) {
             val reply = runtime.syncCommand("openSyncSettings", "{}")
             opened = true
             shell.ui { toasts("openSyncSettings", reply) }
         }
-    }.get()
+    }
 
     /** The form's typed URL and token (null: not edited), which core's checks follow. */
     private fun draft(): JSONObject = form?.let { typed ->
@@ -229,7 +239,22 @@ class SyncSettingsModel(private val menu: MenuModel) {
     /** The panel's Test connection (Dropbox sends no fields). */
     fun test() = run("testSyncConnection", formFields()?.let { (name, fields) -> JSONObject().put(name, fields) } ?: JSONObject())
 
-    fun pickFolder() = run("pickSyncFolder", JSONObject().put("requestId", uuid()))
+    /**
+     * The File panel's system folder picker answered (RN: expo's requestDirectoryPermissionsAsync). A cancel sends nothing. Else the
+     * folder's grant is kept with the flags the picker gave, as expo keeps it, and core's pickSyncFolder takes the folder from the
+     * host's slot (PendingSyncFolderPick) after this visit's open. A refused grant still runs it: core shows RN's failure toast.
+     */
+    fun folderPicked(context: Context, result: ActivityResult) {
+        val tree = result.data?.data?.takeIf { result.resultCode == Activity.RESULT_OK } ?: return
+        val flags = result.data!!.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val kept = runCatching { context.contentResolver.takePersistableUriPermission(tree, flags) }
+            .onFailure { Log.w(CoreHost.TAG, "Sync folder grant refused ${failureForLog(it)}") }.isSuccess
+        PendingSyncFolderPick.put(if (kept) JSONObject().put("treeUri", tree.toString()) else JSONObject().put("grant", "refused"))
+        val runtime = shell.coreHost() ?: return
+        // After a process death the picker answers into the recreated screen: the command waits for that visit's open.
+        visits.execute { openNow(runtime) }
+        run("pickSyncFolder", JSONObject().put("requestId", uuid()), after = visits)
+    }
 
     fun dropbox(connected: Boolean) = run(if (connected) "disconnectDropbox" else "connectDropbox", JSONObject().put("requestId", uuid()))
 
@@ -539,6 +564,17 @@ private fun FormPanel(model: InboxViewModel, view: JSONObject, panel: JSONObject
 @Composable
 private fun FilePanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObject) {
     val c = LocalTheme.current.colors
+    val context = LocalContext.current
+    // RN's expo picker: ACTION_OPEN_DOCUMENT_TREE with no start folder. Debug builds only (check-file-sync-device.mjs):
+    // `debug.mindwtr.native.sync_tree` opens it in the check's test folder.
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { sync.folderPicked(context, it) }
+    val pickFolder = {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        tech.dongdongbh.mindwtr.pilot.core.debugProperty("sync_tree").ifEmpty { null }
+            ?.let { intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, it.toUri()) }
+        runCatching { picker.launch(intent) }.onFailure { Log.w(CoreHost.TAG, "Sync folder picker unavailable ${failureForLog(it)}") }
+        Unit
+    }
     val help = panel.getJSONObject("help")
     HelpBox(help.getString("title"), listOf(help.getString("text"), help.getString("tip")))
     SectionTitle(panel.getString("title"), top = 16, color = c.text)
@@ -552,8 +588,8 @@ private fun FilePanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObje
             }
             Text(select.getString("label"), style = rnText(16, 400, 21), color = c.tint, textAlign = TextAlign.End,
                 modifier = Modifier.clearAndSetSemantics { contentDescription = select.getString("label"); role = Role.Button; testTag = "sync-select-folder"
-                    if (select.getBoolean("enabled")) onClick { sync.pickFolder(); true } else disabled() }
-                    .clickable(enabled = select.getBoolean("enabled")) { sync.pickFolder() })
+                    if (select.getBoolean("enabled")) onClick { pickFolder(); true } else disabled() }
+                    .clickable(enabled = select.getBoolean("enabled"), onClick = pickFolder))
         }
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
         Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) { LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = true) }

@@ -42,6 +42,8 @@ class HostDocuments internal constructor(
 
     fun call(json: String, bytes: ByteArray? = null): HostFiles.Reply {
         val request = JSONObject(json)
+        // The folder Settings › Sync's picker granted (core's pickSyncFolder takes it once; null: nothing picked).
+        if (request.getString("op") == "takePick") return HostFiles.Reply(PendingSyncFolderPick.take())
         val uri = request.getString("uri")
         return when (val op = request.getString("op")) {
             "listChildren" -> HostFiles.Reply(JSONArray(core.listChildren(uri).map { it.json() }))
@@ -63,6 +65,19 @@ class HostDocuments internal constructor(
             else -> throw IllegalArgumentException("Unsupported document call $op")
         }
     }
+}
+
+/**
+ * File Sync's picked folder between Settings › Sync's system picker and core's pickSyncFolder (design §6): one value, taken
+ * once by the bundle's host.pickSyncFolder ([HostDocuments.call]'s `takePick`). Memory only; a newer pick replaces an older one.
+ */
+object PendingSyncFolderPick {
+    private var pick: JSONObject? = null
+
+    /** `{ treeUri }` for a folder whose grant the app kept, `{ grant: "refused" }` when Android refused to persist it. */
+    @Synchronized fun put(value: JSONObject) { pick = value }
+
+    @Synchronized fun take(): JSONObject? = pick.also { pick = null }
 }
 
 private class AndroidDocumentOps(private val context: Context) : HostDocuments.DocumentOps {
