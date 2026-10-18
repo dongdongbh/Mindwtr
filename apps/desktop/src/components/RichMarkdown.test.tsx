@@ -91,8 +91,10 @@ it('renders only task-owned image attachments and blocks remote, deleted and unr
     expect(container.querySelector('img')).toBeNull();
     rerender(<RichMarkdown markdown="![Tracker](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri: 'https://example.com/track.png' }]} />);
     expect(container.querySelector('img')).toBeNull();
-    for (const uri of ['/\t/example.com/track.png', '/\r/example.com/track.png', '/\n/example.com/track.png', '//example.com/track.png', ' //example.com/track.png', ' \\\\example.com\\track.png']) {
+    for (const uri of ['/\t/example.com/track.png', '/\r/example.com/track.png', '/\n/example.com/track.png', '//example.com/track.png', ' //example.com/track.png', ' \\\\example.com\\track.png', 'file://example.com/track.png', 'file:////example.com/track.png', 'file:///%2Fexample.com/track.png', 'file:///%09/example.com/track.png']) {
         rerender(<RichMarkdown markdown="![Tracker](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri }]} />);
         expect(container.querySelector('img')).toBeNull();
     }
+    rerender(<RichMarkdown markdown="![Screenshot](mindwtr://attachment/image-1)" attachments={[{ ...attachment, uri: 'file:///C:/managed/image.png' }]} />);
+    expect(container.querySelector('img')).toHaveAttribute('src', 'file:///C:/managed/image.png');
 });
