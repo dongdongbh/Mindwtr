@@ -70,7 +70,14 @@ android {
         buildConfigField("String", "RN_RELEASE_VERSION", quoted(rnReleaseVersion))
         buildConfigField("String", "FEEDBACK_ENDPOINT_URL", quoted(rnFeedbackUrl))
         buildConfigField("String", "ANALYTICS_HEARTBEAT_URL", "\"\"")
+        // RN's File Sync lock JNI (apps/mobile/modules/sync-file-lock), with RN's C++ flags.
+        externalNativeBuild { cmake { cppFlags += "-std=c++17 -Wall -Wextra -Werror" } }
     }
+
+    // RN's File Sync lock C++ (stable_root_lock.cpp, file_compat_lock.cpp), built from RN's CMakeLists.txt as RN builds it
+    // (16 KB pages); SyncFileLockCore.kt loads it.
+    ndkVersion = "27.1.12297006"
+    externalNativeBuild { cmake { path = file("../../../mobile/modules/sync-file-lock/android/src/main/cpp/CMakeLists.txt") } }
 
     buildTypes {
         getByName("debug") { launcherIdentity() }
@@ -143,6 +150,9 @@ android {
         getByName("main").java.srcDir(layout.buildDirectory.dir("generated/rnInstaller/main/java"))
         getByName("main").java.srcDir(layout.buildDirectory.dir("generated/rnPersistentCapture"))
         getByName("test").java.srcDir(layout.buildDirectory.dir("generated/rnInstaller/test/java"))
+        // RN's File Sync folder calls, lock and transition rename (rnFileSync below), with their JVM tests.
+        getByName("main").java.srcDir(layout.buildDirectory.dir("generated/rnFileSync/main/java"))
+        getByName("test").java.srcDir(layout.buildDirectory.dir("generated/rnFileSync/test/java"))
         urlSchemes.keys.forEach { type ->
             val widgets = layout.buildDirectory.dir("generated/widgets/$type").get().asFile
             getByName(type).res.srcDir(widgets.resolve("res"))
@@ -315,6 +325,22 @@ val rnAttachmentInstaller by tasks.registering(Sync::class) {
     }
     into(layout.buildDirectory.dir("generated/rnInstaller"))
 }
+// RN's File Sync Kotlin (S5), byte for byte: the SAF folder calls (SafDocumentsCore, AndroidSafDocumentProvider) and the
+// transition rename from modules/sync-file-transition-cas, the folder lock (SyncFileLockCore) from modules/sync-file-lock, and
+// their JVM tests. Their Expo modules stay in RN.
+val rnFileSync by tasks.registering(Sync::class) {
+    val cas = "tech/dongdongbh/mindwtr/syncfiletransitioncas"
+    val lock = "tech/dongdongbh/mindwtr/syncfilelock"
+    from(rootProject.projectDir.resolve("../../mobile/modules/sync-file-transition-cas/android/src")) {
+        include(listOf("SafDocumentsCore", "AndroidSafDocumentProvider", "SyncFileTransitionCasCore").map { "main/java/$cas/$it.kt" })
+        include("test/java/$cas/SafDocumentsCoreTest.kt")
+    }
+    from(rootProject.projectDir.resolve("../../mobile/modules/sync-file-lock/android/src")) {
+        include("main/java/$lock/SyncFileLockCore.kt")
+        include("test/java/$lock/SyncFileLockModuleTest.kt")
+    }
+    into(layout.buildDirectory.dir("generated/rnFileSync"))
+}
 // RN's persistent capture notification (modules/notification-open-intents), byte for byte: its notifier and its dismiss receiver.
 val rnPersistentCapture by tasks.registering(Sync::class) {
     from(rootProject.projectDir.resolve("../../mobile/modules/notification-open-intents/android/src/main/java")) {
@@ -322,7 +348,7 @@ val rnPersistentCapture by tasks.registering(Sync::class) {
     }
     into(layout.buildDirectory.dir("generated/rnPersistentCapture"))
 }
-tasks.named("preBuild") { dependsOn(buildCoreBundle, buildShortcuts, buildWidgets, rnAttachmentInstaller, rnPersistentCapture) }
+tasks.named("preBuild") { dependsOn(buildCoreBundle, buildShortcuts, buildWidgets, rnAttachmentInstaller, rnPersistentCapture, rnFileSync) }
 tasks.matching { it.name.startsWith("pre") && it.name.endsWith("BenchmarkTraceBuild") }.configureEach { dependsOn(buildTracedCoreBundle) }
 // Both channels' JVM tests under the one name the gates and CI run (flavors leave no testDebugUnitTest), with the widget module's
 // RN tests (Robolectric) and every variant's identity check.

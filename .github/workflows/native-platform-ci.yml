@@ -271,7 +271,7 @@ jobs:
                 ;;
             esac
             case "$path" in
-              apps/android-native/*|packages/core/src/*|packages/core/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/android-native/*|apps/mobile/modules/sync-file-lock/*|apps/mobile/modules/sync-file-transition-cas/*|packages/core/src/*|packages/core/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 android_client=true
                 ;;
             esac
@@ -555,7 +555,7 @@ jobs:
 
       - name: Setup Android SDK
         env:
-          ANDROID_SDK_PACKAGES: "platform-tools platforms;android-36 build-tools;36.0.0"
+          ANDROID_SDK_PACKAGES: "platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.22.1"
         run: bash scripts/ci/setup-android-sdk.sh
 
       - name: Setup Bun
@@ -580,6 +580,22 @@ jobs:
       - name: Build Android Compose client
         working-directory: apps/android-native/android
         run: ./gradlew :app:assembleDebug :app:checkVariantIdentity --no-daemon
+
+      # RN's File Sync lock JNI, built into the native app from RN's C++ (pass S5): every ABI, its JNI entry points, 16 KB pages.
+      - name: Verify the native app's File Sync lock JNI
+        working-directory: apps/android-native/android
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/play/debug/app-play-debug.apk
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            unzip -p "$APK" "lib/$abi/libsync-file-lock.so" > "$RUNNER_TEMP/libsync-file-lock-$abi.so"
+            for symbol in tryLock unlock tryOfdLock unlockOfdLock; do
+              readelf --dyn-syms --wide "$RUNNER_TEMP/libsync-file-lock-$abi.so" \
+                | grep -F "Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_$symbol"
+            done
+          done
+          readelf -lW "$RUNNER_TEMP/libsync-file-lock-arm64-v8a.so" | awk '$1 == "LOAD" && $NF != "0x4000" { exit 1 }'
+          ./gradlew :app:testPlayDebugUnitTest --tests '*SafDocumentsCore*' --tests '*SyncFileLockModuleTest' --tests '*HostDocumentsTest' --tests '*HostSyncLockTest' --no-daemon
 
   ios-client:
     # shortcut: paused during native iOS migration; remove false && when migration is complete.

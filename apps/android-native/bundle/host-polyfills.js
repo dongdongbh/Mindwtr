@@ -823,7 +823,7 @@
     // with the host's text (a missing file names ENOENT). Refused once the host's deadline passed, as a fetch is, and an open
     // call then rejects at once and the host aborts it (HostIo.fileAbort: a copy stalled on a document provider), so a
     // timed-out operation drains and the host never stops; its late answer settles nothing.
-    var fileChannel = function (method, abortMethod) {
+    var fileChannel = function (method, abortMethod, withValue) {
         abortMethod = abortMethod || 'fileAbort';
         return function (request, bytes) {
             return new Promise(function (resolve, reject) {
@@ -838,6 +838,7 @@
                 };
                 var id = startIo(hostCall(native()[method](JSON.stringify(payload))), function (answer) {
                     if (answer.error !== undefined) reject(new Error(answer.error));
+                    else if (withValue) resolve({ value: answer.value, bytes: answer.body ? fromBase64(answer.base64) : null });
                     else resolve(answer.body ? fromBase64(answer.base64) : answer.value);
                 }, cancel);
             });
@@ -846,6 +847,14 @@
     if (global.__mindwtrNative && typeof global.__mindwtrNative.fileCall === 'function') {
         global.__mindwtrFileCall = fileChannel('fileCall');
         global.__mindwtrInstallerCall = fileChannel('installerCall');
+    }
+    // File Sync's SAF folder and folder lock (HostDocuments.kt, HostSyncLock.kt, pass S5), on the same files thread. A
+    // document read answers `{ value, bytes }` (its lengthVerified and its bytes), so its channel keeps both.
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.documentCall === 'function') {
+        global.__mindwtrDocumentCall = fileChannel('documentCall', 'fileAbort', true);
+    }
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.syncLockCall === 'function') {
+        global.__mindwtrSyncLockCall = fileChannel('syncLockCall');
     }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarCall === 'function') {
         global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');

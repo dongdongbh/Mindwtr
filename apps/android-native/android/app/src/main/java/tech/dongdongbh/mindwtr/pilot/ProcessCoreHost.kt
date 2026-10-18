@@ -13,6 +13,8 @@ import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import tech.dongdongbh.mindwtr.pilot.core.DiagnosticsLogFile
 import tech.dongdongbh.mindwtr.pilot.core.HostAppSearch
 import tech.dongdongbh.mindwtr.pilot.core.HostCalendars
+import tech.dongdongbh.mindwtr.pilot.core.HostDocuments
+import tech.dongdongbh.mindwtr.pilot.core.HostSyncLock
 import tech.dongdongbh.mindwtr.pilot.core.HostFiles
 import tech.dongdongbh.mindwtr.pilot.core.HostInstaller
 import tech.dongdongbh.mindwtr.pilot.core.HostIo
@@ -127,7 +129,7 @@ internal object ProcessCoreHost {
             HostWidgets(app) { appState },
             scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
             backups = BackupOperations(File(app.noBackupFilesDir, "backup-operations"), File(app.filesDir, "snapshots"), maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
-            calendars = HostCalendars(app),
+            calendars = HostCalendars(app), documents = HostDocuments(app), syncLock = HostSyncLock(app),
             appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)))
         try {
             runtime.start(coreBundle(app), legacy?.bootState ?: "", legacy?.backup ?: "", legacy?.preflight == true)
