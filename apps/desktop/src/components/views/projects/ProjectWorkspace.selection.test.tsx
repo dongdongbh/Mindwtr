@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,6 +65,7 @@ vi.mock('../../TokenPickerModal', () => ({
 
 vi.mock('./ProjectDetailsHeader', () => ({
     ProjectDetailsHeader: ({
+        primaryAction,
         detailsExpanded,
         editTitle,
         onCommitTitle,
@@ -72,6 +74,7 @@ vi.mock('./ProjectDetailsHeader', () => ({
         onToggleDetails,
         readOnly,
     }: {
+        primaryAction?: ReactNode;
         detailsExpanded: boolean;
         editTitle: string;
         onCommitTitle: () => void;
@@ -80,7 +83,8 @@ vi.mock('./ProjectDetailsHeader', () => ({
         onToggleDetails: () => void;
         readOnly?: boolean;
     }) => (
-        <div>
+        <header>
+            {primaryAction}
             <button type="button" onClick={onToggleDetails}>Details</button>
             <input
                 aria-label="Project title"
@@ -92,7 +96,7 @@ vi.mock('./ProjectDetailsHeader', () => ({
             />
             <button type="button" disabled={readOnly} onClick={onDelete}>Delete project</button>
             <span data-testid="details-expanded">{String(detailsExpanded)}</span>
-        </div>
+        </header>
     ),
 }));
 
@@ -952,20 +956,15 @@ describe('ProjectWorkspace Select mode', () => {
         expect(toolbar).toContainElement(selectButton);
     });
 
-    it('keeps the primary add-task action in the same task toolbar row as section controls', () => {
+    it('keeps one primary add-task action in the project header and search in the task toolbar', () => {
         const { container, getAllByRole } = renderWorkspace();
+        const addTasks = getAllByRole('button', { name: 'Add task' });
+        expect(addTasks).toHaveLength(1);
+        expect(container.querySelector('header')).toContainElement(addTasks[0]);
         const toolbar = container.querySelector('[data-project-task-toolbar]');
-        const toolbarRow = container.querySelector('[data-project-task-toolbar-row]');
-        const primaryControls = container.querySelector('[data-project-task-primary-controls]');
-        const secondaryControls = container.querySelector('[data-project-task-secondary-controls]');
-        const addTask = getAllByRole('button', { name: 'Add task' })[0];
-
-        expect(toolbar).toContainElement(addTask);
-        expect(toolbarRow).toHaveClass('flex-wrap');
-        expect(primaryControls).toContainElement(addTask);
-        expect(primaryControls).toHaveClass('shrink-0', 'whitespace-nowrap');
-        expect(addTask).toHaveClass('shrink-0', 'whitespace-nowrap');
-        expect(secondaryControls).toHaveClass('min-w-0', 'max-w-full', 'flex-wrap');
+        expect(toolbar).not.toContainElement(addTasks[0]);
+        expect(toolbar).toContainElement(container.querySelector('[data-project-search-row]'));
+        expect(container.querySelector('[data-project-task-secondary-controls]')).toHaveClass('min-w-0', 'max-w-full', 'flex-wrap');
     });
 
     it('keeps structural section creation in the task toolbar overflow', () => {

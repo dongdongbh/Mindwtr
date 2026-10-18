@@ -518,7 +518,9 @@ describe('TaskItemDisplay', () => {
             </LanguageProvider>
         );
 
-        fireEvent.click(getByRole('button', { name: buttonName }));
+        const quickAction = getByRole('button', { name: buttonName });
+        expect(quickAction.hasAttribute('data-task-complete')).toBe(expectedStatus === 'done');
+        fireEvent.click(quickAction);
         expect(onStatusChange).toHaveBeenCalledWith(expectedStatus);
         expect(queryByRole('button', { name: absentButton })).not.toBeInTheDocument();
         unmount();

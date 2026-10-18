@@ -780,6 +780,33 @@
     color: hsl(var(--destructive));
   }
 
+  .project-workspace [data-project-task-toolbar] { box-shadow: none; }
+  .project-workspace [data-view-filter-input] { min-height: 2.75rem; font-size: 0.875rem; }
+  .project-workspace--list .project-section-title { font-size: 1.125rem; }
+  .project-workspace .task-item-display__title { font-weight: 400; }
+  .project-workspace--list .task-item-display__title.text-base { font-size: 1.125rem; }
+  .project-workspace--list .task-item-display__description-preview { font-size: 0.875rem; }
+  .project-workspace--list [data-task-complete] {
+    width: 1.5rem;
+    height: 1.5rem;
+    margin: 0.25rem;
+    padding: 0.125rem;
+    border: 1.5px solid hsl(var(--muted-foreground));
+    border-radius: 50%;
+    color: hsl(var(--primary));
+  }
+  .project-workspace--list [data-task-complete] svg { opacity: 0; }
+  .project-workspace--list [data-task-complete]:is(:hover, :focus-visible) svg { opacity: 1; }
+
+  .project-progress {
+    appearance: none;
+    border: 0;
+    background: hsl(var(--muted));
+  }
+  .project-progress::-webkit-progress-bar { background: hsl(var(--muted)); }
+  .project-progress::-webkit-progress-value { background: hsl(var(--primary)); }
+  .project-progress::-moz-progress-bar { background: hsl(var(--primary)); }
+
   .project-details-header {
     container-type: inline-size;
   }
@@ -862,8 +889,8 @@
     }
 
     .project-details-header__titleInput {
-      font-size: 1.25rem;
-      line-height: 1.75rem;
+      font-size: 1.75rem;
+      line-height: 2.125rem;
     }
   }
 }

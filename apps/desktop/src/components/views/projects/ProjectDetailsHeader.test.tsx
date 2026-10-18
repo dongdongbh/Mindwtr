@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -52,6 +52,33 @@ function buildProject(overrides: Partial<Project> = {}): Project {
 const openMenu = () => fireEvent.click(screen.getByRole('button', { name: /^More options: / }));
 
 describe('ProjectDetailsHeader', () => {
+    it('grows a wrapped title when its available width changes and releases the observer', () => {
+        let resize: (() => void) | undefined;
+        const disconnect = vi.fn();
+        vi.stubGlobal('ResizeObserver', class {
+            constructor(callback: ResizeObserverCallback) { resize = () => callback([], {} as ResizeObserver); }
+            observe = vi.fn();
+            disconnect = disconnect;
+        });
+        try {
+            const view = render(<ProjectDetailsHeader
+                project={buildProject()} projectColor="#2563eb" isSequential={false}
+                editTitle="A long project title" onEditTitleChange={vi.fn()} onCommitTitle={vi.fn()} onResetTitle={vi.fn()}
+                detailsExpanded={false} onToggleDetails={vi.fn()} onDuplicate={vi.fn()}
+                onArchive={vi.fn()} onReactivate={vi.fn()} onDelete={vi.fn()} t={t}
+            />);
+            const title = screen.getByRole('textbox', { name: 'Project title' });
+            Object.defineProperty(title, 'clientWidth', { configurable: true, value: 200 });
+            Object.defineProperty(title, 'scrollHeight', { configurable: true, value: 96 });
+            act(() => resize?.());
+            expect(title).toHaveStyle({ height: '96px' });
+            view.unmount();
+            expect(disconnect).toHaveBeenCalledOnce();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('keeps conversion visible with a reason when blocked', () => {
         const onConvertToSection = vi.fn();
         render(<ProjectDetailsHeader
@@ -162,7 +189,9 @@ describe('ProjectDetailsHeader', () => {
         expect(screen.queryByText('Start Date: Mar 24')).not.toBeInTheDocument();
         expect(screen.queryByText('Review Date: Mar 30')).not.toBeInTheDocument();
         expect(screen.queryByText('#client')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('project-progress-bar')).not.toBeInTheDocument();
+        const progress = screen.getByRole('progressbar', { name: 'Done' });
+        expect(progress).toHaveAttribute('value', '2');
+        expect(progress).toHaveAttribute('max', '5');
 
         const details = screen.getByRole('button', { name: 'Details' });
         expect(details).toHaveAttribute('aria-expanded', 'false');
