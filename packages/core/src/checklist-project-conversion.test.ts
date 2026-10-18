@@ -84,6 +84,16 @@ describe('optional checklist project conversion', () => {
             .toEqual({ success: false, error: 'task.expandChecklistNameExists' });
         expect(useTaskStore.getState()._tasksById.get('source')?.deletedAt).toBeUndefined();
     });
+    it('resolves inherited reminders again before conversion, even with a stale legacy snapshot', () => {
+        const task: Task = { ...source(), dueDate: '2026-11-01T10:00:00Z', reminderPolicy: 'inherit', suppressMindwtrReminders: true };
+        expect(checklistProjectBlockReason(task, { taskReminderDefault: 'skip' })).toBeNull();
+        expect(checklistProjectBlockReason(task, { taskReminderDefault: 'send' })).toBe('task.expandChecklistSchedule');
+        useTaskStore.setState({ _allTasks: [task], settings: { taskReminderDefault: 'skip' } });
+        const command = prepare();
+        useTaskStore.setState({ settings: { taskReminderDefault: 'send' } });
+        expect(prepareChecklistProjectConversion(useTaskStore.getState(), command.source, 'Launch'))
+            .toEqual({ success: false, error: 'task.expandChecklistSchedule' });
+    });
     it('retains one conversion across a failed save and retry', async () => {
         const command = prepare(); failSave = true;
         const failed = await useTaskStore.getState().convertChecklistToProject(command);

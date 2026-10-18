@@ -1,5 +1,5 @@
-import { act, render, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Task, type TaskDraftSetter, useTaskStore } from '@mindwtr/core';
 
 import { useTaskItemAi } from './useTaskItemAi';
@@ -7,13 +7,15 @@ import { buildCopilotConfig } from '../../lib/ai-config';
 import { TaskItem } from '../TaskItem';
 import { LanguageProvider } from '../../contexts/language-context';
 import { useUiStore } from '../../store/ui-store';
+import { holdSyncSave } from '../../test/hold-sync-save';
 
 const predictMetadata = vi.hoisted(() => vi.fn());
+const breakDownTask = vi.hoisted(() => vi.fn());
 const logWarn = vi.hoisted(() => vi.fn());
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
-    return { ...actual, createAIProvider: () => ({ predictMetadata }) };
+    return { ...actual, createAIProvider: () => ({ predictMetadata, breakDownTask }) };
 });
 
 // Wraps the real hook (calls through) so TaskItem-level tests can assert on
@@ -345,6 +347,40 @@ describe('useTaskItemAi copilot parts', () => {
         await settleSuggestion();
 
         expect(predictMetadata).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('useTaskItemAi breakdown steps', () => {
+    const initialTaskState = useTaskStore.getState();
+    // The copilot tests above leave fake timers on.
+    beforeEach(() => { vi.useRealTimers(); });
+    afterEach(() => {
+        act(() => useTaskStore.setState(initialTaskState, true));
+    });
+
+    it('appends breakdown steps to the checklist a sync save published while the write waited', async () => {
+        const at = new Date().toISOString();
+        const base = {
+            id: 'task-1', title: 'Book the dentist', status: 'next', tags: [], contexts: [], rev: 1,
+            checklist: [{ id: 'c1', title: 'One', isCompleted: false }], createdAt: at, updatedAt: at,
+        } as Task;
+        act(() => useTaskStore.setState({ _allTasks: [base], tasks: [base] }));
+        predictMetadata.mockResolvedValue({});
+        breakDownTask.mockResolvedValue({ steps: ['Call'] });
+        const { result } = renderAi(vi.fn());
+        await act(() => result.current.handleAIBreakdown());
+        expect(result.current.aiBreakdownSteps).toEqual(['Call']);
+
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{
+            ...base,
+            rev: 3,
+            checklist: [...(base.checklist ?? []), { id: 'c2', title: 'Two', isCompleted: false }],
+        }] }));
+        act(() => result.current.addBreakdownStepsToChecklist());
+        await act(finish);
+
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get('task-1')?.checklist?.map((item) => item.title))
+            .toEqual(['One', 'Two', 'Call']));
     });
 });
 

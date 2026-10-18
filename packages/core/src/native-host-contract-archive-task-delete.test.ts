@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, onTestFinished } from 'vitest';
 import { openSqliteHost } from './screen-parity.replay';
 import { taskRevisionOf } from './native-request-receipts';
-import { flushPendingSave, resetForTests, useTaskStore } from './store';
+import { flushPendingSave, resetForTests, useTaskStore, setSaveRetrySleepForTests } from './store';
 import type { AppData, Project, Section, Task } from './types';
 
 const NOW = '2026-10-02T13:00:00.000Z';
@@ -183,6 +183,10 @@ describe('Archive Task Delete through the prepared Task Delete writer', () => {
     });
 
     it('cold-retries a failed SQLite COMMIT without a partial Task or receipt', async () => {
+        // The store's retry waits are recorded (vitest.setup.ts skips them in every test): the schedule stays 250, 500, 1000, 2000 ms.
+        const retryWaits: number[] = [];
+        setSaveRetrySleepForTests(async (ms) => { retryWaits.push(ms); });
+        onTestFinished(() => setSaveRetrySleepForTests(null));
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(NOW));
         const fault = { commits: 0 };
@@ -198,6 +202,7 @@ describe('Archive Task Delete through the prepared Task Delete writer', () => {
             fault.commits = 10;
             expect(await sqlite.host.commitPreparedTaskDelete({ request: original, prepared }))
                 .toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+            expect(retryWaits).toEqual([250, 500, 1000, 2000]);
             expect(await sqlite.sql('SELECT * FROM tasks ORDER BY id')).toEqual(before);
             expect(await sqlite.receiptIds()).toEqual(receiptIds);
             fault.commits = 0;

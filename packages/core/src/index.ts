@@ -14,6 +14,7 @@
 // toStableJson. This preserves the public name without duplicating its implementation.
 
 export * from './types';
+export * from './task-icon-badge';
 export { isSettingsSyncGroupEnabled } from './settings-options';
 export * from './async-utils';
 export * from './storage';
@@ -39,6 +40,8 @@ export * from './about-settings-model';
 export * from './sandbox';
 export * from './sandbox-data';
 export * from './store';
+export { runStoreCommand, runSyncStoreSave } from './store-write-gate';
+export * from './store-latest-updates';
 export * from './native-host-contract';
 export * from './native-host-contract-calendar';
 export * from './native-host-contract-saved-search-write';
@@ -290,6 +293,7 @@ export * from './capture-deeplink';
 export * from './dropbox-auth-callback';
 export * from './entry-points';
 export * from './capture-modal-model';
+export * from './share-capture-files';
 export * from './session-restore';
 export * from './whisper-models';
 export * from './import-apply';
@@ -387,3 +391,5 @@ export type { NativeAttachmentDraftDiscardInputV5, NativeAttachmentDraftDiscardC
 
 export { checklistProjectBlockReason, prepareChecklistProjectConversion } from './checklist-project-conversion';
 export type { ChecklistProjectConversion } from './checklist-project-conversion';
+
+export * from './task-reminder-policy';

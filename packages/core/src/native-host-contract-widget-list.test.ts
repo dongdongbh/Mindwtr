@@ -33,10 +33,22 @@ const ids = (rows: { id: string }[]) => rows.map((row) => row.id);
 afterEach(async () => {
     await flushPendingSave();
     resetForTests();
+    vi.useRealTimers();
     vi.restoreAllMocks();
 });
 
 describe('native host contract: widget list screen', () => {
+    it('opens the full Upcoming list through the header route and re-evaluates the local day', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 9, 17, 12));
+        const host = await open({ tasks: Array.from({ length: 90 }, (_, i) => task(`upcoming-${i}`, { startTime: '2026-10-18' })) });
+        const first = value(host.getWidgetListView({ id: 'upcoming', limit: 50 }));
+        const second = value(host.getWidgetListView({ id: 'upcoming', offset: 50, limit: 50, revision: first.revision }));
+        expect(first).toMatchObject({ found: true, title: 'Upcoming', total: 90, empty: null });
+        expect([...first.rows, ...second.rows]).toHaveLength(90);
+        vi.setSystemTime(new Date(2026, 9, 18, 0));
+        expect(value(host.getWidgetListView({ id: 'upcoming' }))).toMatchObject({ found: true, title: 'Upcoming', total: 0, rows: [] });
+    });
     it('keeps the full live list, windowed, and drops a completed task', async () => {
         const host = await open({ tasks: Array.from({ length: 90 }, (_, i) => task(`task-${String(i).padStart(2, '0')}`)) });
         const first = value(host.getWidgetListView({ id: 'next', offset: 0, limit: 50 }));
@@ -51,6 +63,14 @@ describe('native host contract: widget list screen', () => {
         expect(after.total).toBe(89);
         expect(ids(after.rows)).not.toContain('task-00');
         expect(host.getWidgetListView({ id: 'next', offset: 50, limit: 50, revision: first.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
+    it('opens direct context/tag routes with live shared matching and keeps removed selections empty', async () => {
+        const host = await open({ tasks: [task('desk', { contexts: ['@家/desk +?'], status: 'waiting' }), task('tag', { tags: ['#urgent'] })] });
+        expect(value(host.getWidgetListView({ id: 'context:@家/desk +?' }))).toMatchObject({ found: true, title: '@家/desk +?', total: 1 });
+        expect(ids(value(host.getWidgetListView({ id: 'tag:#urgent' })).rows)).toEqual(['tag']);
+        await useTaskStore.getState().updateTask('desk', { contexts: [] });
+        expect(value(host.getWidgetListView({ id: 'context:@家/desk +?' }))).toMatchObject({ found: true, title: '@家/desk +?', total: 0, rows: [] });
     });
 
     it('uses a saved filter by ID, follows its rename, and becomes empty when it is deleted', async () => {

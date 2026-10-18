@@ -29,6 +29,11 @@ const destination = { id: 'dest', title: 'Destination', status: 'active', color:
 const t = (key: string) => key === 'common.cancel' ? 'Cancel' : key;
 
 describe('ProjectToSectionDialog', () => {
+    it('explains the required destination flow for a sequential source', () => {
+        render(<ProjectToSectionDialog source={{ ...source, isSequential: true }} projects={[destination]} onCancel={vi.fn()} onSuccess={vi.fn()} t={t} />);
+        expect(screen.getByText(/Choose a destination set to Sequential → Within sections/)).toBeInTheDocument();
+    });
+
     it('cancels without a write and shows the count and chosen title at confirmation', () => {
         const onCancel = vi.fn();
         const { unmount } = render(<ProjectToSectionDialog source={source} projects={[source, destination]} onCancel={onCancel} onSuccess={vi.fn()} t={t} />);

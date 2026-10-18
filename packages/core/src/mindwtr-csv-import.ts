@@ -57,8 +57,10 @@ type MindwtrCsvWarningCounters = {
     sectionWithoutProject: number;
     unclosedQuotedFiles: number;
     unknownColumns: number;
+    unknownColumnLocations: string[];
     unknownStatuses: number;
     unparsedDates: number;
+    unparsedDateLocations: string[];
     unsupportedRecurrenceRules: number;
     unsupportedRecurrenceSamples: string[];
 };
@@ -154,8 +156,10 @@ const createWarningCounters = (): MindwtrCsvWarningCounters => ({
     sectionWithoutProject: 0,
     unclosedQuotedFiles: 0,
     unknownColumns: 0,
+    unknownColumnLocations: [],
     unknownStatuses: 0,
     unparsedDates: 0,
+    unparsedDateLocations: [],
     unsupportedRecurrenceRules: 0,
     unsupportedRecurrenceSamples: [],
 });
@@ -163,6 +167,7 @@ const createWarningCounters = (): MindwtrCsvWarningCounters => ({
 const buildWarnings = (counters: MindwtrCsvWarningCounters): string[] => {
     const warnings: string[] = [];
     appendWarning(warnings, counters.unknownColumns, '1 unknown column was ignored.', '{count} unknown columns were ignored.');
+    appendLocationDetails(warnings, counters.unknownColumns, counters.unknownColumnLocations);
     appendWarning(warnings, counters.unknownStatuses, '1 task status could not be mapped and was imported to Inbox.', '{count} task statuses could not be mapped and were imported to Inbox.');
     appendWarning(warnings, counters.sectionWithoutProject, '1 Section was ignored because its row had no Project.', '{count} Sections were ignored because their rows had no Project.');
     appendWarning(warnings, counters.unsupportedRecurrenceRules, '1 Recurrence rule could not be understood; that task was imported without recurrence.', '{count} Recurrence rules could not be understood; those tasks were imported without recurrence.');
@@ -170,6 +175,7 @@ const buildWarnings = (counters: MindwtrCsvWarningCounters): string[] => {
         warnings.push(`Unsupported Recurrence rules: ${counters.unsupportedRecurrenceSamples.join('; ')}.`);
     }
     appendWarning(warnings, counters.unparsedDates, '1 date value could not be parsed and was skipped.', '{count} date values could not be parsed and were skipped.');
+    appendLocationDetails(warnings, counters.unparsedDates, counters.unparsedDateLocations);
     appendWarning(warnings, counters.duplicateIds, '1 row had an ID that duplicated an earlier row in this import and was dropped.', '{count} rows had an ID that duplicated an earlier row in this import and were dropped.');
     appendWarning(warnings, counters.emptyTitleRows, '1 row with an empty title was skipped.', '{count} rows with empty titles were skipped.');
     appendWarning(warnings, counters.nonCsvEntries, '1 non-CSV file inside the ZIP was skipped.', '{count} non-CSV files inside the ZIP were skipped.');
@@ -192,10 +198,24 @@ const detectMindwtrCsvDelimiter = (text: string): string => {
     return detectDelimiter(text);
 };
 
-const countUnknownColumns = (headerRow: string[], counters: MindwtrCsvWarningCounters): void => {
-    headerRow.forEach((cell) => {
+const WARNING_LOCATION_LIMIT = 5;
+
+// Only numeric positions cross the warning/localization seam; never copy source contents.
+const appendLocationDetails = (warnings: string[], count: number, locations: string[]): void => {
+    if (locations.length > 0) {
+        warnings[warnings.length - 1] += ` [csv-locations=${locations.join(',')}; omitted=${count - locations.length}]`;
+    }
+};
+
+const countUnknownColumns = (headerRow: string[], counters: MindwtrCsvWarningCounters, source: MindwtrCsvRowSource): void => {
+    headerRow.forEach((cell, columnIndex) => {
         const normalized = normalizeHeaderCell(cell);
-        if (normalized && !KNOWN_COLUMNS.has(normalized)) counters.unknownColumns += 1;
+        if (normalized && !KNOWN_COLUMNS.has(normalized)) {
+            counters.unknownColumns += 1;
+            if (counters.unknownColumnLocations.length < WARNING_LOCATION_LIMIT) {
+                counters.unknownColumnLocations.push(`${source.csvEntryIndex ?? 0}:1:${columnIndex + 1}`);
+            }
+        }
     });
 };
 
@@ -395,19 +415,25 @@ const readCell = (row: string[], headerIndex: Map<string, number>, key: string):
     return /^null$/iu.test(value) ? '' : value;
 };
 
-const parseDateCell = (raw: string, counters: MindwtrCsvWarningCounters): string | undefined => {
+const recordUnparsedDate = (counters: MindwtrCsvWarningCounters, location: string): void => {
+    counters.unparsedDates += 1;
+    if (counters.unparsedDateLocations.length < WARNING_LOCATION_LIMIT) counters.unparsedDateLocations.push(location);
+};
+
+const parseDateCell = (raw: string, counters: MindwtrCsvWarningCounters, location: string): string | undefined => {
     const value = parseCsvDateValue(raw);
-    if (!value && raw.trim()) counters.unparsedDates += 1;
+    if (!value && raw.trim()) recordUnparsedDate(counters, location);
     return value;
 };
 
-const parseTimestampCell = (raw: string, counters: MindwtrCsvWarningCounters): string | undefined => {
+const parseTimestampCell = (raw: string, counters: MindwtrCsvWarningCounters, location: string): string | undefined => {
     const value = normalizeEntityTimestamp(raw);
-    if (!value && raw.trim()) counters.unparsedDates += 1;
+    if (!value && raw.trim()) recordUnparsedDate(counters, location);
     return value;
 };
 
 type MindwtrCsvRowSource = {
+    csvEntryIndex?: number;
     documentFingerprint: string;
     kind: 'standalone-file' | 'zip-entry';
     name: string;
@@ -456,7 +482,8 @@ const parseMindwtrCsvRows = (
     archiveBudget: ImportArchiveBudget,
 ): ParsedMindwtrCsvImportData => {
     const delimiter = detectMindwtrCsvDelimiter(csvText);
-    const { rows, hasUnclosedQuote } = parseCsvRows(sanitizeCsvText(csvText), delimiter, undefined, archiveBudget);
+    const recordNumbers: number[] = [];
+    const { rows, hasUnclosedQuote } = parseCsvRows(sanitizeCsvText(csvText), delimiter, undefined, archiveBudget, recordNumbers);
     if (hasUnclosedQuote) counters.unclosedQuotedFiles += 1;
     if (rows.length === 0) {
         return { areas: [], projects: [], sections: [], tasks: [], warnings: [] };
@@ -466,7 +493,7 @@ const parseMindwtrCsvRows = (
     if (!headerIndex.has('TITLE')) {
         throw new Error('Mindwtr CSV is missing the required column: Title');
     }
-    countUnknownColumns(rows[0] || [], counters);
+    countUnknownColumns(rows[0] || [], counters, source);
 
     const areasByKey = new Map<string, ParsedMindwtrCsvArea>();
     const projectsByKey = new Map<string, ParsedMindwtrCsvProject>();
@@ -525,8 +552,11 @@ const parseMindwtrCsvRows = (
             });
         }
 
-        const completedAt = parseTimestampCell(readCell(row, headerIndex, 'COMPLETED AT'), counters);
-        const cancelledAt = parseTimestampCell(readCell(row, headerIndex, 'CANCELLED AT'), counters);
+        const rowNumber = rowIndex + 1;
+        const recordNumber = recordNumbers[rowIndex] - recordNumbers[0] + 1;
+        const dateLocation = (column: string): string => `${source.csvEntryIndex ?? 0}:${recordNumber}:${(headerIndex.get(column) ?? 0) + 1}`;
+        const completedAt = parseTimestampCell(readCell(row, headerIndex, 'COMPLETED AT'), counters, dateLocation('COMPLETED AT'));
+        const cancelledAt = parseTimestampCell(readCell(row, headerIndex, 'CANCELLED AT'), counters, dateLocation('CANCELLED AT'));
         const status = resolveStatus(
             readCell(row, headerIndex, 'STATUS'),
             Boolean(projectSourceKey),
@@ -535,7 +565,6 @@ const parseMindwtrCsvRows = (
             counters,
         );
         const idColumn = readCell(row, headerIndex, 'ID').trim();
-        const rowNumber = rowIndex + 1;
         const sourceIdentityKind = idColumn ? 'explicit-id' : 'row-fallback';
         const sourceId = idColumn || `${source.kind === 'zip-entry' ? `${source.name}:` : ''}row-${rowNumber}`;
         const sourceKey = idColumn
@@ -555,9 +584,9 @@ const parseMindwtrCsvRows = (
             checklist: parseChecklist(readCell(row, headerIndex, 'CHECKLIST'), archiveBudget),
             completedAt,
             contexts: parseContexts(readCell(row, headerIndex, 'CONTEXTS')),
-            createdAt: parseTimestampCell(readCell(row, headerIndex, 'CREATED AT'), counters),
+            createdAt: parseTimestampCell(readCell(row, headerIndex, 'CREATED AT'), counters, dateLocation('CREATED AT')),
             description: readCell(row, headerIndex, 'DESCRIPTION').trim() || undefined,
-            dueDate: parseDateCell(readCell(row, headerIndex, 'DUE DATE'), counters),
+            dueDate: parseDateCell(readCell(row, headerIndex, 'DUE DATE'), counters, dateLocation('DUE DATE')),
             energyLevel: parseEnergy(readCell(row, headerIndex, 'ENERGY')),
             location: readCell(row, headerIndex, 'LOCATION').trim() || undefined,
             // Falls back to row index like TickTick's own ORDER column handling; ties after
@@ -566,7 +595,7 @@ const parseMindwtrCsvRows = (
             priority: parsePriority(readCell(row, headerIndex, 'PRIORITY')),
             projectSourceKey,
             recurrence: parseRecurrenceCell(readCell(row, headerIndex, 'RECURRENCE'), counters, rowNumber, source),
-            reviewAt: parseDateCell(readCell(row, headerIndex, 'REVIEW DATE'), counters),
+            reviewAt: parseDateCell(readCell(row, headerIndex, 'REVIEW DATE'), counters, dateLocation('REVIEW DATE')),
             sectionSourceKey,
             sourceId,
             sourceIdentityKind,
@@ -574,7 +603,7 @@ const parseMindwtrCsvRows = (
             ...(!idColumn ? {
                 compatibilitySourceKeys: [rowTaskSourceKeyFor(source.kind, source.name, rowNumber)],
             } : {}),
-            startTime: parseDateCell(readCell(row, headerIndex, 'START DATE'), counters),
+            startTime: parseDateCell(readCell(row, headerIndex, 'START DATE'), counters, dateLocation('START DATE')),
             status,
             tags: parseTags(readCell(row, headerIndex, 'TAGS')),
             title,
@@ -609,7 +638,8 @@ const mergeParsedData = (target: ParsedMindwtrCsvImportData, source: ParsedMindw
         sectionKeys.add(section.sourceKey);
         target.sections.push(section);
     });
-    target.tasks.push(...source.tasks);
+    // One push per task: QuickJS (native Android) refuses a call with more than 65535 arguments.
+    source.tasks.forEach((task) => target.tasks.push(task));
 };
 
 const dropDuplicateTasksAndUnusedContainers = (
@@ -700,6 +730,7 @@ export const parseMindwtrCsvImportSource = (input: MindwtrCsvFileInput): Mindwtr
                 : generateDeterministicUUID(source.entries.map(({ entryName, entryBytes }) => (
                     `${normalizeArchiveEntryIdentity(entryName)}:${fingerprintImportBytes(entryBytes)}`
                 )).sort().join('|'));
+            let csvEntryIndex = 0;
             source.entries.forEach(({ entryName, entryBytes }) => {
                 const lowerName = entryName.toLowerCase();
                 if (!entryName || entryName.endsWith('/')) return;
@@ -711,8 +742,10 @@ export const parseMindwtrCsvImportSource = (input: MindwtrCsvFileInput): Mindwtr
                     counters.nonCsvEntries += 1;
                     return;
                 }
+                csvEntryIndex += 1;
                 try {
                     parseOneCsv(decodeTextBytes(entryBytes), {
+                        csvEntryIndex,
                         documentFingerprint,
                         kind: 'zip-entry',
                         name: entryName,

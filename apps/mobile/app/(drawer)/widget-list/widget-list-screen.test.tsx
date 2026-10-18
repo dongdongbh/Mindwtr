@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppData, Task } from '@mindwtr/core';
 import WidgetListScreen from './[id]';
 
@@ -9,12 +9,18 @@ const state = vi.hoisted(() => ({
   canonical: {} as { _allTasks?: AppData['tasks']; _allProjects?: AppData['projects'] },
   id: 'next' as string | string[],
   source: undefined as string | undefined,
+  dayKey: '2026-10-17',
   logInfo: vi.fn(),
   updateTask: vi.fn(), deleteTask: vi.fn(), fetchData: vi.fn(),
 }));
 vi.mock('@mindwtr/core', async (original) => ({
   ...await original<typeof import('@mindwtr/core')>(),
-  useTaskStore: (selector: (store: unknown) => unknown) => selector({ ...state.data, ...state.canonical, updateTask: state.updateTask, deleteTask: state.deleteTask, fetchData: state.fetchData }),
+  useTaskStore: (selector: (store: unknown) => unknown, equality?: (a: unknown, b: unknown) => boolean) => {
+    const selected = selector({ ...state.data, ...state.canonical, updateTask: state.updateTask, deleteTask: state.deleteTask, fetchData: state.fetchData });
+    const previous = React.useRef(selected);
+    if (!equality?.(previous.current, selected)) previous.current = selected;
+    return previous.current;
+  },
 }));
 vi.mock('expo-router', () => ({
   router: { push: vi.fn() },
@@ -28,6 +34,7 @@ vi.mock('@/hooks/use-theme-colors', () => {
   const tc = { bg: '#fff', text: '#111', secondaryText: '#555' };
   return { useThemeColors: () => tc };
 });
+vi.mock('@/hooks/use-local-day-key', () => ({ useLocalDayKey: () => state.dayKey }));
 vi.mock('@/lib/task-meta-navigation', () => ({ openProjectScreen: vi.fn(), openContextsScreen: vi.fn() }));
 vi.mock('@/components/swipeable-task-item', () => ({ SwipeableTaskItem: (props: object) => React.createElement('TaskRow', props) }));
 vi.mock('@/components/task-edit-modal', () => ({ TaskEditModal: (props: object) => React.createElement('TaskModal', props) }));
@@ -45,7 +52,24 @@ describe('WidgetListScreen', () => {
     state.id = 'next';
     state.source = undefined;
     state.canonical = {};
+    state.dayKey = '2026-10-17';
     vi.clearAllMocks();
+  });
+  afterEach(() => vi.useRealTimers());
+  it('opens the full Upcoming list and refreshes its eligibility on the next local day', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 9, 17, 12));
+    state.id = 'upcoming';
+    state.data.tasks = Array.from({ length: 90 }, (_, i) => ({ ...task(`future-${i}`), startTime: '2026-10-18' }));
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<WidgetListScreen />); });
+    expect(tree.root.findByType('TaskRows' as never).props.data).toHaveLength(90);
+    expect(tree.root.findByType('StackScreen' as never).props.options.title).toBe('Upcoming');
+    vi.setSystemTime(new Date(2026, 9, 18, 0));
+    state.dayKey = '2026-10-18';
+    await act(async () => { tree.update(<WidgetListScreen />); });
+    expect(tree.root.findByType('TaskRows' as never).props.data).toEqual([]);
+    await act(async () => { tree.unmount(); });
   });
   it('keeps the full live list and refreshes after completion', async () => {
     state.data.tasks = Array.from({ length: 90 }, (_, i) => task(`task-${i}`));

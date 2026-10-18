@@ -31,6 +31,25 @@ class PendingCaptureWriterTest {
   }
 
   @Test
+  fun writesLiteralMultilineNoteWithoutParsingOrTruncatingIt() {
+    val note = "  @home #literal due:tomorrow\nSecond line\n" + "x".repeat(5000)
+    val written = PendingCaptureWriter.write(tempFilesDir(), "Title", Date(0), note)
+
+    assertEquals(note, JSONObject(written!!.readText()).getString("note"))
+  }
+
+  @Test
+  fun titleOnlyAndBlankNoteKeepTheLegacyQueueShape() {
+    val filesDir = tempFilesDir()
+    val titleOnly = PendingCaptureWriter.write(filesDir, "Title")!!
+    val blankNote = PendingCaptureWriter.write(filesDir, "Title", note = " \n ")!!
+
+    assertTrue(!JSONObject(titleOnly.readText()).has("note"))
+    assertTrue(!JSONObject(blankNote.readText()).has("note"))
+    assertNull(PendingCaptureWriter.write(filesDir, "  ", note = "A note needs a title"))
+  }
+
+  @Test
   fun writesACompletionItemInTheCompleteKindSchema() {
     val filesDir = tempFilesDir()
 

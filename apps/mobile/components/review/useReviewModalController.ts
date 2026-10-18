@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import {
     LAST_WEEKLY_REVIEW_STORAGE_KEY,
@@ -111,6 +112,17 @@ export function useReviewModalController({
     }, []);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [showEditModal, setShowEditModal] = useState(false);
+    const [closingForNavigation, setClosingForNavigation] = useState(false);
+    const modalVisible = visible && !closingForNavigation;
+    const pendingNavigationRef = useRef<{ after: 'editor' | 'review'; navigate: () => void } | null>(null);
+
+    useEffect(() => {
+        setClosingForNavigation(false);
+        pendingNavigationRef.current = null;
+        if (!visible) setShowEditModal(false);
+    }, [visible]);
+
+    useEffect(() => () => { pendingNavigationRef.current = null; }, []);
     const [expandedProject, setExpandedProject] = useState<string | null>(null);
     const [aiSuggestions, setAiSuggestions] = useState<TitledReviewSuggestion[]>([]);
     const [aiSelectedIds, setAiSelectedIds] = useState<Set<string>>(new Set());
@@ -167,18 +179,21 @@ export function useReviewModalController({
     }, [reviewSession, sessionHydrated, visible]);
 
     const handleClose = useCallback(() => {
+        pendingNavigationRef.current = null;
         setExpandedExternalDays(new Set());
         setExpandedContextGroups(new Set());
         onClose();
     }, [onClose]);
 
     const handleTaskPress = useCallback((task: Task) => {
+        pendingNavigationRef.current = null;
         setEditModalTab('view');
         setEditingTask(task);
         setShowEditModal(true);
     }, []);
 
     const closeEditModal = useCallback(() => {
+        pendingNavigationRef.current = null;
         setShowEditModal(false);
     }, []);
 
@@ -433,15 +448,39 @@ export function useReviewModalController({
         if (previousStepId) setCurrentStep(previousStepId);
     }, [previousStepId, setCurrentStep]);
 
-    const handleNavigateToProject = useCallback((projectId: string) => {
+    const navigateFromPreview = useCallback((navigate: () => void) => {
+        if (!visible) return;
+        // UIKit must dismiss the child sheet, then the review, before changing routes.
+        if (Platform.OS === 'ios') {
+            pendingNavigationRef.current ??= { after: 'editor', navigate };
+        } else {
+            onClose();
+            navigate();
+        }
+    }, [onClose, visible]);
+
+    const handleEditModalDismiss = useCallback(() => {
+        const pending = pendingNavigationRef.current;
+        if (!visible || showEditModal || pending?.after !== 'editor') return;
+        pending.after = 'review';
+        setClosingForNavigation(true);
+    }, [showEditModal, visible]);
+
+    const handleReviewDismiss = useCallback(() => {
+        const pending = pendingNavigationRef.current;
+        if (modalVisible || pending?.after !== 'review') return;
+        pendingNavigationRef.current = null;
         onClose();
-        openProjectScreen(projectId);
-    }, [onClose]);
+        pending.navigate();
+    }, [modalVisible, onClose]);
+
+    const handleNavigateToProject = useCallback((projectId: string) => {
+        navigateFromPreview(() => openProjectScreen(projectId));
+    }, [navigateFromPreview]);
 
     const handleNavigateToToken = useCallback((token: string) => {
-        onClose();
-        openContextsScreen(token);
-    }, [onClose]);
+        navigateFromPreview(() => openContextsScreen(token));
+    }, [navigateFromPreview]);
 
     const toggleExpandedProject = useCallback((projectId: string) => {
         setExpandedProject((prev) => (prev === projectId ? null : projectId));
@@ -472,9 +511,11 @@ export function useReviewModalController({
         externalCalendarReviewItems,
         handleClose,
         handleDelete,
+        handleEditModalDismiss,
         handleFinish,
         handleNavigateToProject,
         handleNavigateToToken,
+        handleReviewDismiss,
         handleSaveTask,
         handleStatusChange,
         handleTaskPress,
@@ -483,6 +524,7 @@ export function useReviewModalController({
         isActionableSuggestion: isActionableReviewSuggestion,
         isDark,
         labels,
+        modalVisible,
         nextStep,
         openProjectTaskPrompt,
         openReviewQuickAdd,

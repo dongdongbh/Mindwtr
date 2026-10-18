@@ -15,6 +15,8 @@ interface CreateSyncOrchestratorOptions<Arg, Result> {
      *  `minimumDelayMs` is the largest delay the cycle requested through
      *  `requestFollowUpAfter`; the effective delay is never below it. */
     getFollowUpDelayMs?: (lastCycleDurationMs: number, minimumDelayMs: number) => number;
+    /** Asked again when the follow-up's timer fires: a positive wait (an edit since it was scheduled) moves it back. */
+    getFollowUpWaitMs?: () => number;
 }
 
 export interface SyncOrchestrator<Arg, Result> {
@@ -29,7 +31,7 @@ export interface SyncOrchestrator<Arg, Result> {
 export const createSyncOrchestrator = <Arg, Result>(
     options: CreateSyncOrchestratorOptions<Arg, Result>,
 ): SyncOrchestrator<Arg, Result> => {
-    const { runCycle, onQueueStateChange, onDrained, onQueuedRunComplete, onQueuedRunError, getFollowUpDelayMs } = options;
+    const { runCycle, onQueueStateChange, onDrained, onQueuedRunComplete, onQueuedRunError, getFollowUpDelayMs, getFollowUpWaitMs } = options;
     let inFlight: Promise<Result> | null = null;
     let queued = false;
     let queuedArg: Arg | undefined;
@@ -121,6 +123,11 @@ export const createSyncOrchestrator = <Arg, Result>(
                 followUpTimer = null;
                 // A direct run() during the delay window already consumed the queue.
                 if (inFlight || !queued) return;
+                const waitMs = getFollowUpWaitMs?.() ?? 0;
+                if (waitMs > 0) {
+                    followUpTimer = setTimeout(startQueuedRun, waitMs);
+                    return;
+                }
                 const nextArg = queuedArg ?? cycleArg;
                 setQueued(false);
                 queuedArg = undefined;

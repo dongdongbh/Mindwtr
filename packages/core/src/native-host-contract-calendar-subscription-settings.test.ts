@@ -9,6 +9,7 @@ import { loadNativeRequestReceipts, NativeReceiptSqliteAdapter, resetNativeReque
 import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
 import { flushPendingSave, getPersistenceStatus, resetForTests, setStorageAdapter, useTaskStore } from './store';
+import { runSyncStoreSave } from './store-write-gate';
 import type { AppData } from './types';
 import type { NativeHostResult } from './native-host-contract';
 
@@ -138,6 +139,26 @@ describe('prepared calendar subscription metadata with real SQLite receipts', ()
             syncPreferencesUpdatedAt: { ...before.settings.syncPreferencesUpdatedAt, externalCalendars: envelope.prepared.stamp } } });
         expect(env.raw()).toBe(raw); expect(env.port.read).not.toHaveBeenCalled();
         if (field === 'color' && next === null) expect(Object.hasOwn(saved.settings.externalCalendars![0], 'color')).toBe(false);
+    });
+
+    it('decides a no-op only on committed rows, never on a sync save that then fails to commit', async () => {
+        const env = await open();
+        const options = value(await env.methods.getCalendarSubscriptionOptions({}));
+        const request = { requestId: ID, edit: { type: 'feed', feedId: feed.id, field: 'enabled', value: false, revision: options.expected.revision },
+            expected: options.expected } as CalendarSubscriptionSettingRequest;
+        let preparation: ReturnType<typeof env.methods.prepareCalendarSubscriptionSetting> | null = null;
+        await expect(runSyncStoreSave(async () => {
+            // A sync save's open transaction already holds the subscription off on the shared connection.
+            await env.client.run('BEGIN IMMEDIATE');
+            await env.client.run('INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',
+                [JSON.stringify({ ...initial().settings, externalCalendars: [{ ...feed, enabled: false }] })]);
+            preparation = env.methods.prepareCalendarSubscriptionSetting(request);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            await env.client.run('ROLLBACK');
+            throw new Error('COMMIT failed');
+        })).rejects.toThrow('COMMIT failed');
+        expect((await env.data()).settings.externalCalendars).toEqual([feed]);
+        expect(value(await preparation!)).toMatchObject({ kind: 'prepared' });
     });
 
     it('removes only the exact UTF8 identity and preserves canonical-equivalent IDs and order', async () => {

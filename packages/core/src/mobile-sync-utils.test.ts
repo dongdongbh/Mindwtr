@@ -140,6 +140,16 @@ describe('mobile sync utils', () => {
     )).toBe('fileLockUnavailable');
   });
 
+  it('classifies a SAF folder the provider cannot list or describe as a permission failure, never its internal code', () => {
+    expect(classifySyncFailure('Error: SAF_DOCUMENT_UNAVAILABLE: the provider could not list the folder')).toBe('permission');
+    expect(classifySyncFailure('SAF_DOCUMENTS_UNAVAILABLE: SAF document calls are unavailable in this build')).toBe('permission');
+  });
+
+  it('classifies a SAF read that could not be proven whole as a conflict to retry', () => {
+    expect(classifySyncFailure('Error: SAF_DOCUMENT_INCOMPLETE: short read')).toBe('conflict');
+    expect(classifySyncFailure('SAF_DOCUMENT_INCOMPLETE: the document is still downloading')).toBe('conflict');
+  });
+
   it('classifies terminal File Sync generation corruption separately from retryable failures', () => {
     expect(classifySyncFailure(
       'SYNC_FILE_GENERATION_CORRUPT: File Sync attachment generation remains corrupt after bounded retries',

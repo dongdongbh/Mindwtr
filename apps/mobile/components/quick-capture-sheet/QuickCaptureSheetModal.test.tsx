@@ -130,6 +130,9 @@ describe('Quick capture modal composition', () => {
     expect(closeControls.every((node) => node.props.disabled === true)).toBe(true);
     expect(save?.props.disabled).toBe(true);
     expect(save?.props.accessibilityState).toEqual({ busy: true, disabled: true });
+    const description = tree.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'taskEdit.descriptionLabel');
+    expect(description?.props.editable).toBe(false);
+    expect(description?.props.accessibilityState).toEqual({ busy: true, disabled: true });
     expect(tree.root.findByType(Modal).props.onRequestClose).not.toBe(handleClose);
     expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'Processing audio capture...')).toBe(true);
   });
@@ -820,8 +823,9 @@ describe('Quick capture modal composition', () => {
       );
     });
 
-    expect(tree.root.findByType(TextInput).props.maxFontSizeMultiplier).toBe(1.2);
-    expect(tree.root.findByType(TextInput).props.textAlignVertical).toBe('center');
+    const inputs = tree.root.findAllByType(TextInput);
+    expect(inputs.every((node) => node.props.maxFontSizeMultiplier === 1.2)).toBe(true);
+    expect(inputs.find((node) => node.props.accessibilityLabel === 'quickAdd.inputLabel')!.props.textAlignVertical).toBe('center');
     const compactTexts = tree.root
       .findAllByType(Text)
       .filter((node) => typeof node.props.children === 'string');
@@ -897,7 +901,7 @@ describe('Quick capture modal composition', () => {
         );
       });
 
-      const input = tree.root.findByType(TextInput);
+      const input = tree.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'quickAdd.inputLabel')!;
       // Return blurs and submits (no newline inserted) when not adding another.
       expect(input.props.multiline).toBe(true);
       expect(input.props.submitBehavior).toBe('blurAndSubmit');
@@ -972,7 +976,7 @@ describe('Quick capture modal composition', () => {
       );
     });
 
-    const input = tree.root.findByType(TextInput);
+    const input = tree.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'quickAdd.inputLabel')!;
     // Multiline title accepts pasted newlines, but return still submits and,
     // in add-another mode, keeps focus instead of inserting a newline.
     expect(input.props.multiline).toBe(true);
@@ -1115,7 +1119,7 @@ describe('Quick capture modal composition', () => {
       const scroll = tree.root.findByType(ScrollView);
       expect(scroll.props.testID).toBe('quick-capture-scroll');
       expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
-      // The More panel scrolls, but the title input must stay OUTSIDE it: a focused
+      // The description and metadata scroll, but the title stays OUTSIDE: a focused
       // TextInput inside an iOS ScrollView gets auto-scrolled above the keyboard and
       // flies off the top of the sheet on every refocus (#887).
       expect(scroll.findAllByType(TextInput).map((node) => node.props.accessibilityLabel))
@@ -1208,74 +1212,91 @@ describe('Quick capture modal composition', () => {
       Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
     }
   });
-  it('keeps the note field behind More instead of crowding collapsed capture', () => {
-    const renderBody = (optionsExpanded: boolean) => {
-      let tree!: ReturnType<typeof create>;
-      act(() => {
-        tree = create(
-          <QuickCaptureSheetBody
-            addAnother={false}
-            selectedPriority={null}
-            areaLabel="No Area"
-            contextLabel="Contexts"
-            dueDate={null}
-            dueLabel="Due Date"
-            dueTimeLabel="Change time"
-            handleClose={vi.fn()}
-            handleSave={vi.fn()}
-            insetsBottom={0}
-            inputRef={{ current: null }}
-            noteValue="Bring the signed form"
-            onNoteChange={vi.fn()}
-            onOpenAreaPicker={vi.fn()}
-            onOpenContextPicker={vi.fn()}
-            onOpenDueDatePicker={vi.fn()}
-            onOpenDueTimePicker={vi.fn()}
-            onOpenPriorityPicker={vi.fn()}
-            onOpenProjectPicker={vi.fn()}
-            onQuickDueDateSelect={vi.fn()}
-            onResetArea={vi.fn()}
-            onResetContexts={vi.fn()}
-            onResetDueDate={vi.fn()}
-            onResetDueTime={vi.fn()}
-            onResetPriority={vi.fn()}
-            onResetProject={vi.fn()}
-            onToggleOptions={vi.fn()}
-            onToggleAddAnother={vi.fn()}
-            onToggleRecording={vi.fn()}
-            onValueChange={vi.fn()}
-            optionsExpanded={optionsExpanded}
-            prioritiesEnabled
-            timeEstimatesEnabled
-            priorityLabel="Priority"
-            projectLabel="Project"
-            recording={false}
-            recordingBusy={false}
-            recordingReady={false}
-            sheetMaxHeight={500}
-            showDueTime={false}
-            t={(key) => key}
-            tc={tc}
-            value="Capture me"
-            visible
-          />
-        );
-      });
-      return tree;
-    };
+  it('keeps a compact multiline description first in the scrolling body outside More', () => {
+    const onNoteChange = vi.fn();
+    const onValueChange = vi.fn();
+    const renderBody = (optionsExpanded: boolean) => (
+      <QuickCaptureSheetBody
+        addAnother={false}
+        selectedPriority={null}
+        areaLabel="No Area"
+        contextLabel="Contexts"
+        dueDate={null}
+        dueLabel="Due Date"
+        dueTimeLabel="Change time"
+        handleClose={vi.fn()}
+        handleSave={vi.fn()}
+        insetsBottom={0}
+        inputRef={{ current: null }}
+        noteValue="Bring the signed form"
+        onNoteChange={onNoteChange}
+        onOpenAreaPicker={vi.fn()}
+        onOpenContextPicker={vi.fn()}
+        onOpenDueDatePicker={vi.fn()}
+        onOpenDueTimePicker={vi.fn()}
+        onOpenPriorityPicker={vi.fn()}
+        onOpenProjectPicker={vi.fn()}
+        onQuickDueDateSelect={vi.fn()}
+        onResetArea={vi.fn()}
+        onResetContexts={vi.fn()}
+        onResetDueDate={vi.fn()}
+        onResetDueTime={vi.fn()}
+        onResetPriority={vi.fn()}
+        onResetProject={vi.fn()}
+        onToggleOptions={vi.fn()}
+        onToggleAddAnother={vi.fn()}
+        onToggleRecording={vi.fn()}
+        onValueChange={onValueChange}
+        optionsExpanded={optionsExpanded}
+        prioritiesEnabled
+        timeEstimatesEnabled
+        priorityLabel="Priority"
+        projectLabel="Project"
+        recording={false}
+        recordingBusy={false}
+        recordingReady={false}
+        sheetMaxHeight={500}
+        showDueTime={false}
+        t={(key) => key}
+        tc={tc}
+        value="Capture me"
+        visible
+      />
+    );
 
     const findNote = (tree: ReturnType<typeof create>) => tree.root
       .findAllByType(TextInput)
       .filter((node) => node.props.accessibilityLabel === 'taskEdit.descriptionLabel');
 
-    // Collapsed capture stays a one-field sheet: the note is progressive
-    // disclosure behind More (#1118).
-    expect(findNote(renderBody(false))).toHaveLength(0);
+    let collapsed!: ReturnType<typeof create>;
+    act(() => {
+      collapsed = create(renderBody(false));
+    });
+    const inputs = collapsed.root.findAllByType(TextInput);
+    expect(inputs.map((node) => node.props.accessibilityLabel))
+      .toEqual(['quickAdd.inputLabel', 'taskEdit.descriptionLabel']);
+    const note = findNote(collapsed)[0];
+    expect(note.props.value).toBe('Bring the signed form');
+    expect(note.props.multiline).toBe(true);
+    expect(note.props.submitBehavior).toBe('newline');
+    expect(note.props.onSubmitEditing).toBeUndefined();
+    expect(note.props.autoFocus).not.toBe(true);
+    expect(flattenStyle(note.props.style).minHeight).toBe(44);
+    expect(flattenStyle(note.props.style).maxHeight).toBe(96);
+    const scroll = collapsed.root.findByType(ScrollView);
+    expect(scroll.findAllByType(TextInput)).toEqual([note]);
+    expect(scroll.findAllByType(TouchableOpacity).some((node) => node.props.accessibilityLabel === 'common.save')).toBe(false);
+    expect(collapsed.root.findAllByType(ScrollView)).toHaveLength(1);
+    act(() => note.props.onChangeText('Line one\n@home /due:tomorrow #literal'));
+    expect(onNoteChange).toHaveBeenCalledExactlyOnceWith('Line one\n@home /due:tomorrow #literal');
+    expect(onValueChange).not.toHaveBeenCalled();
 
-    const expanded = findNote(renderBody(true));
-    expect(expanded).toHaveLength(1);
-    expect(expanded[0].props.value).toBe('Bring the signed form');
-    expect(expanded[0].props.multiline).toBe(true);
+    act(() => collapsed.update(renderBody(true)));
+    expect(findNote(collapsed)).toHaveLength(1);
+    // Expanding metadata keeps the first editor in the scroll area mounted.
+    expect(findNote(collapsed)[0]).toBe(note);
+    expect(collapsed.root.findByType(ScrollView).findAllByType(TextInput)).toEqual([note]);
+    expect(collapsed.root.findAllByType(ScrollView)).toHaveLength(1);
   });
 
   it('carries the canonical priority flag on overlay rows and tints the trigger flag when set', () => {

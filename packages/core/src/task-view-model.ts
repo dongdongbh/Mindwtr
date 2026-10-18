@@ -3,6 +3,8 @@ import { tFallback } from './i18n';
 import { formatRecurrenceLabel, getRecurringTaskPreviewDate } from './recurrence';
 import { hasTimeComponent } from './date';
 import { isTaskCancelled } from './task-status';
+import { shouldSendTaskReminders } from './task-reminder-policy';
+import type { NotificationSettings } from './types';
 import type { Area, Attachment, Project, Section, Task, TaskStatus, TimeEstimate } from './types';
 
 /**
@@ -66,6 +68,7 @@ export type TaskViewModelInput = {
     showStatusField: boolean;
     /** A task in an archived project. */
     readOnly: boolean;
+    settings?: Pick<NotificationSettings, 'taskReminderDefault' | 'notificationsEnabled'>;
     t: (key: string) => string;
     formatDate: (value: string) => string;
     formatDueDate: (value: string) => string;
@@ -134,7 +137,7 @@ export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
     if (!isReference) {
         field('startTime', t('taskEdit.startDateLabel'), task.startTime ? input.formatDate(task.startTime) : undefined);
         field('dueDate', t('taskEdit.dueDateLabel'), task.dueDate ? input.formatDueDate(task.dueDate) : undefined);
-        if ((hasTimeComponent(task.startTime) || hasTimeComponent(task.dueDate)) && task.suppressMindwtrReminders === true) {
+        if ((hasTimeComponent(task.startTime) || hasTimeComponent(task.dueDate)) && !shouldSendTaskReminders(task, input.settings)) {
             field(
                 'reminders',
                 tFallback(t, 'taskEdit.suppressMindwtrReminders', 'Skip reminders'),

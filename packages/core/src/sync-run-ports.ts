@@ -1,12 +1,15 @@
 import type { AppData, AppSettings } from './types';
 import type { MergeStats, SyncCycleIO, SyncCycleResult, SyncHistoryEntry } from './sync-types';
 import type { FastSyncState } from './sync-fast-sync';
-import type { CloudProvider } from './sync-client-helpers';
+import type { CloudProvider, PreparedStorePublish } from './sync-client-helpers';
+import type { CooperativePass } from './cooperative';
 import type { SyncBackend } from './sync-service-utils';
 import type { buildMergeSummaryLog } from './sync-log-utils';
 import type { SyncRemoteMutationFenceLease } from './sync-remote-fence';
 import type { SyncCryptoKdfParams, SyncKeyMaterial } from './sync-crypto';
 import type { SyncEncryptionRemoteReadLogInput } from './sync-encryption-diagnostics';
+import type { AttachmentTransferAdmission } from './attachment-transfer';
+import type { SqliteReadToken, SqliteStaleOption } from './sqlite-adapter';
 
 /**
  * ADR 0014 — shared sync orchestration ports.
@@ -172,14 +175,24 @@ export type SyncStatusUpdates = Partial<Pick<AppSettings,
 export interface SyncRunStorage {
     /** Persisted local snapshot (disk), already merged with any device-local
      *  sync-status cache the platform keeps outside the synced document. */
-    readPersistedLocal(): Promise<AppData>;
+    readPersistedLocal(options?: SqliteStaleOption): Promise<AppData>;
     /** Durably persist the merged snapshot locally. Implementations must mark
-     *  the write as self-written for every watcher the platform runs. */
-    persistLocal(data: AppData): Promise<AppData | void>;
-    /** Desktop only: apply persisted data to the in-memory store immediately
-     *  after each local write (the machine then refreshes its change-tracking
-     *  from the store). Mobile refreshes once at cycle end instead. */
-    applyDataToStore?(data: AppData): void;
+     *  the write as self-written for every watcher the platform runs. A sliced cycle (design D9b W3) passes its read's
+     *  token and onStale: a refused save writes nothing and throws onStale's error. */
+    persistLocal(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<AppData | void>;
+    /** D9b W3: the token of a document readPersistedLocal returned, or of one persistLocal just committed (its successor). */
+    readTokenOf?(data: AppData): SqliteReadToken | undefined;
+    /** A check after a committed local save (File Sync's lease). It runs once the store shows that save. */
+    afterPersistLocal?(): Promise<void>;
+    /** Apply persisted data to the in-memory store right after each committed local
+     *  write, inside the store write gate (the machine then refreshes its change-tracking
+     *  from the store). Desktop and the mobile sync service bind it. A sliced cycle passes the
+     *  publish it prepared (prepareStorePublish); the result is true when that was swapped in. */
+    applyDataToStore?(data: AppData, prepared?: PreparedStorePublish): boolean | void;
+    /** D9b §2: a sliced cycle builds the save's rows for [data] in slices before the gate; the save uses them. */
+    prepareLocalSave?(data: AppData): CooperativePass<void> | undefined;
+    /** D9b W6: a sliced cycle builds the store publish for [data] in slices before the gate (applyDataToStore). */
+    prepareStorePublish?(data: AppData): CooperativePass<PreparedStorePublish>;
     /** Persist sync status fields to the device-local status cache (and the
      *  in-memory settings), never to the synced document. */
     persistSyncStatus(updates: SyncStatusUpdates): Promise<void>;
@@ -203,7 +216,7 @@ export type SyncPayloadTraceEvent =
 
 /** Phase checkpoints for mobile's elapsed-time/payload-shape diagnostics
  *  (issue #766 log analysis). Desktop leaves `onDiagnostic` unset. */
-export type SyncFollowUpReason = 'stale-local' | 'remote-conflict' | 'server-contribution'
+export type SyncFollowUpReason = 'stale-local' | 'stale-db' | 'remote-conflict' | 'server-contribution'
     | 'remote-fence-busy' | 'remote-fence-release' | 'file-lock-busy';
 
 export type SyncRunDiagnosticEvent = {
@@ -242,6 +255,12 @@ export interface SyncRunNotifier {
     onDiagnostic?(event: SyncRunDiagnosticEvent): void;
     /** Cooperative yield so long phases don't starve the renderer (desktop). */
     yieldToUi?(): Promise<void>;
+    /**
+     * D9b, native Android only: give the engine back between slices of the cycle's long passes (cooperative.ts). A host that
+     * binds it gets those passes in slices; every other host (desktop's yieldToUi included) runs them at once. No host binds
+     * it yet (design D9b change 5).
+     */
+    sliceYield?(): Promise<void>;
 }
 
 /** In-memory store access. Both apps share the core Zustand store; this is a
@@ -250,6 +269,8 @@ export interface SyncRunNotifier {
 export interface SyncRunStoreBridge {
     getLastDataChangeAt(): number;
     getInMemorySnapshot(): AppData;
+    /** The store's lists in one read, not copied (sync-client-helpers.ts); a sliced cycle copies them a few records at a time. */
+    captureInMemorySnapshot?(): AppData;
     flushPendingSave(): Promise<void>;
     setUiError(message: string | null): void;
     getSettings(): AppSettings | undefined;
@@ -311,6 +332,11 @@ export type SyncRunAttachmentHelpers = {
      * simply leaves check-on-touch detection off, same as before this field existed.
      */
     phase?: SyncRunAttachmentPhase;
+    /**
+     * The cycle's transfer admission (design D9b W7): one object for every attachment phase of one sync cycle, so a
+     * transfer one phase started is not repeated by a later phase of that cycle. Absent on activation probes.
+     */
+    transferAdmission?: AttachmentTransferAdmission;
 };
 
 export type SyncRunAttachmentCleanupContext = {

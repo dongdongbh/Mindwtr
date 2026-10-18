@@ -6,6 +6,7 @@ import {
     getUsedTaskTokens,
     formatFocusTaskLimitText,
     getFocusStarBlockedText,
+    hasTimeComponent,
     isDueForReview,
     normalizeFocusTaskLimit,
     parseStoredReviewStepSession,
@@ -27,6 +28,8 @@ import { FocusStarIcon } from '../../FocusStarIcon';
 import { InboxProcessor } from '../InboxProcessor';
 import { Dialog, DialogHeader } from '../../ui/Dialog';
 import { TaskItem } from '../../TaskItem';
+import { getUrgencyColor } from '../../Task/TaskItemDisplay';
+import { useTaskDisplayClock } from '../../../hooks/useTaskDisplayClock';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 import { useLocalDayKey } from '../../../hooks/useLocalDayKey';
@@ -119,6 +122,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     const dueTodayTasks = dailyBuckets.dueToday;
     const overdueTasks = dailyBuckets.overdue;
     const focusCandidates = dailyBuckets.focusCandidates;
+    useTaskDisplayClock(currentStep === 'focus' && focusCandidates.some((task) => Boolean(task.dueDate)));
 
     useEffect(() => {
         if (currentStep !== 'inbox' && isProcessing) {
@@ -368,6 +372,18 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                                             {task.contexts.slice(0, 2).join(', ')}
                                         </span>
                                     ) : null}
+                                    {task.startTime && (
+                                        <span className="inline-flex items-center gap-1">
+                                            <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                                            {t('taskEdit.startDateLabel')}: {safeFormatDate(task.startTime, hasTimeComponent(task.startTime) ? 'Pp' : 'P')}
+                                        </span>
+                                    )}
+                                    {task.dueDate && (
+                                        <span className={cn('inline-flex items-center gap-1', getUrgencyColor(task))}>
+                                            <Calendar className="h-3 w-3" aria-hidden="true" />
+                                            {t('taskEdit.dueDateLabel')}: {safeFormatDate(task.dueDate, hasTimeComponent(task.dueDate) ? 'Pp' : 'P')}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                             <button

@@ -6,6 +6,7 @@ import {
   getSomedaySectionMoveTasks,
   getSomedaySectionMoveText,
   planSomedaySectionMove,
+  runStoreCommand,
   sortViewSectionDefinitions,
   useTaskStore,
   type AreaFilterSelection,
@@ -62,14 +63,18 @@ export function useSomedaySectionMove(
     if (undoBusyRef.current) return;
     undoBusyRef.current = true;
     try {
-      const latest = useTaskStore.getState();
-      const latestTasks = previous.map(({ id }) => latest.tasks.find((task) => task.id === id)).filter((task): task is Task => Boolean(task));
-      const updates = buildTaskViewSectionUndoUpdates(latestTasks, 'someday', previous, destination);
       const pending = pendingUndoRef.current?.previous === previous
         && pendingUndoRef.current.destination === destination ? pendingUndoRef.current : null;
+      // Built on the rows as they are when the write is admitted, so a sync save's newer sections stay.
+      const updates = await runStoreCommand(async () => {
+        const latest = useTaskStore.getState();
+        const latestTasks = previous.map(({ id }) => latest.tasks.find((task) => task.id === id)).filter((task): task is Task => Boolean(task));
+        const built = buildTaskViewSectionUndoUpdates(latestTasks, 'someday', previous, destination);
+        if (built.length > 0) assertBulkActionSucceeded(await latest.batchUpdateTasks(built));
+        return built;
+      });
       if (updates.length === 0 && !pending) return;
       if (updates.length > 0) {
-        assertBulkActionSucceeded(await latest.batchUpdateTasks(updates));
         pendingUndoRef.current = { previous, destination, count: updates.length };
       }
       if (pending && updates.length === 0) {
@@ -110,31 +115,34 @@ export function useSomedaySectionMove(
     if (!moveTargetIds?.length || saving) return;
     setSaving(true);
     try {
-      const latest = useTaskStore.getState();
-      const sortedSections = sortViewSectionDefinitions(latest.settings?.gtd?.viewSections?.someday);
-      const section = destination ? sortedSections.find((definition) => definition.id === destination) : undefined;
-      if (destination && !section) {
-        showMoveFailure();
-        return;
-      }
-      const eligibleTasks = getLatestEligibleTasks(moveTargetIds, resolvedAreaFilter);
-      if (!eligibleTasks) {
-        showMoveFailure();
-        return;
-      }
-      const { updates, previous, resumed } = planSomedaySectionMove({
-        ids: moveTargetIds,
-        tasks: eligibleTasks,
-        destination,
-        pending: pendingMoveRef.current,
+      // The read, the plan and the write run as one command, so a sync save's newer rows are what the move builds on.
+      const planned = await runStoreCommand(async () => {
+        const latest = useTaskStore.getState();
+        const sortedSections = sortViewSectionDefinitions(latest.settings?.gtd?.viewSections?.someday);
+        const section = destination ? sortedSections.find((definition) => definition.id === destination) : undefined;
+        if (destination && !section) return null;
+        const eligibleTasks = getLatestEligibleTasks(moveTargetIds, resolvedAreaFilter);
+        if (!eligibleTasks) return null;
+        const plan = planSomedaySectionMove({
+          ids: moveTargetIds,
+          tasks: eligibleTasks,
+          destination,
+          pending: pendingMoveRef.current,
+        });
+        if (plan.previous.length > 0 && plan.updates.length > 0) {
+          assertBulkActionSucceeded(await latest.batchUpdateTasks(plan.updates));
+        }
+        return { ...plan, section };
       });
+      if (!planned) {
+        showMoveFailure();
+        return;
+      }
+      const { updates, previous, resumed, section } = planned;
       if (previous.length === 0) {
         setMoveTargetIds(null);
         exitSelectionMode();
         return;
-      }
-      if (updates.length > 0) {
-        assertBulkActionSucceeded(await latest.batchUpdateTasks(updates));
       }
       pendingMoveRef.current = { ids: moveTargetIds, destination, previous };
       if (resumed && updates.length === 0) {

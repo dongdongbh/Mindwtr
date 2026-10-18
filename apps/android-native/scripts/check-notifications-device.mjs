@@ -147,7 +147,12 @@ const reveal = async (found) => {
 const flip = async (label, stored, description) => {
     const nodes = await reveal((current) => visible(withDescription(current, label)));
     const was = switchOn(nodes, label);
-    await tapExpecting(withDescription(nodes, label), (current) => switchOn(current, label) !== was, `${label} to switch`);
+    // A first notification feature on adds core's exact-alarm row above the switch, which can push it below the fold (since
+    // #1383's Default task reminders row, Weekly review goes off screen): the switch is read again where it now is.
+    const shown = (current) => visible(withDescription(current, label));
+    const after = await tapExpecting(withDescription(nodes, label), (current) => !shown(current) || switchOn(current, label) !== was, `${label} to switch`);
+    if (!shown(after)) await reveal(shown);
+    await waitFor(`${label} to switch`, (current) => shown(current) && switchOn(current, label) !== was, 10_000);
     await waitUntil(description, async () => stored(settings()), 20_000);
     await waitUntil('the journal to empty', async () => journal().length === 0, 20_000);
     check(true, description);

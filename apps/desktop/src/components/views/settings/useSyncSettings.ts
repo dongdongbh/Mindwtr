@@ -29,6 +29,7 @@ import {
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
     summarizeBackupMerge,
     summarizeMergeStats,
+    updateSettingsFromLatest,
     useTaskStore,
     type AppData,
     type ImportDiagnostic,
@@ -86,6 +87,11 @@ const IMPORT_DIAGNOSTIC_FALLBACKS: Record<string, string> = {
     'settings.importDiagnostics.missingParent': '{{count}} record(s) had no matching parent and were imported at the nearest safe level.',
     'settings.importDiagnostics.skippedArchiveEntries': '{{count}} unsupported archive entry/entries were skipped.',
     'settings.importDiagnostics.skippedExistingRecords': '{{count}} previously imported or deleted record(s) were skipped.',
+    'settings.importDiagnostics.unknownColumns': '{{count}} unknown column(s) were ignored.',
+    'settings.importDiagnostics.csvLocation': 'row {{row}}, column {{column}}',
+    'settings.importDiagnostics.csvArchiveLocation': 'CSV entry {{entry}}, row {{row}}, column {{column}}',
+    'settings.importDiagnostics.csvLocations': 'Locations (CSV records; header = row 1): {{locations}}.',
+    'settings.importDiagnostics.csvLocationsMore': '{{count}} more location(s) not shown.',
     'settings.importDiagnostics.unmappedDate': '{{count}} date value(s) could not be mapped and were omitted.',
     'settings.importDiagnostics.unmappedStatus': '{{count}} status value(s) could not be mapped and used a safe default.',
     'settings.importDiagnostics.unsupportedRecurrence': '{{count}} unsupported repeat rule(s) were kept as notes.',
@@ -205,7 +211,6 @@ export const useSyncSettings = ({
     const [transferAction, setTransferAction] = useState<TransferAction>(null);
     const showToast = useUiStore((state) => state.showToast);
     const settings = useTaskStore((state) => state.settings) ?? ({} as AppData['settings']);
-    const updateSettings = useTaskStore((state) => state.updateSettings);
     const { t } = useLanguage();
 
     const advanceSyncConfigurationGeneration = useCallback((): number => {
@@ -2040,7 +2045,8 @@ export const useSyncSettings = ({
     const syncPreferences = settings?.syncPreferences ?? {};
     const handleUpdateSyncPreferences = useCallback(
         (updates: Partial<SyncPreferences>) => {
-            updateSettings({ syncPreferences: { ...syncPreferences, ...updates } })
+            // Built on the preferences as stored when the write is admitted, so another device's change stays.
+            updateSettingsFromLatest((latest) => ({ syncPreferences: { ...(latest.syncPreferences ?? {}), ...updates } }))
                 .then(showSaved)
                 .catch((error) => reportSettingsFailure(
                     'Failed to update sync preferences',
@@ -2048,7 +2054,7 @@ export const useSyncSettings = ({
                     resolveText('settings.feedback.saveFailed', "Couldn't save this setting. Try again."),
                 ));
         },
-        [resolveText, syncPreferences, showSaved, updateSettings],
+        [resolveText, showSaved],
     );
 
     const lastSyncAt = settings?.lastSyncAt;

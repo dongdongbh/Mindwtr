@@ -211,7 +211,9 @@ export const getSyncFailureMessage = (error: unknown, t: Translate): string => {
         default: {
             // An unclassified failure used to show only "Review Settings → Sync and
             // try again", which hid the one line that named the cause (#1151).
-            const detail = redactSyncText((error instanceof Error ? error.message : String(error ?? '')).trim());
+            const raw = (error instanceof Error ? error.message : String(error ?? '')).trim();
+            // File Sync's internal read codes are for the log, not the toast.
+            const detail = /SAF_DOCUMENTS?_[A-Z_]+/.test(raw) ? '' : redactSyncText(raw);
             return detail ? `${t('settings.syncFailureGeneric')}\n${detail}` : t('settings.syncFailureGeneric');
         }
     }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import * as nodeCrypto from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2.js';
 import type { AppData, SyncEncryptionRemotePort, SyncRemoteMutationFenceLease } from '@mindwtr/core';
@@ -156,6 +156,37 @@ vi.mock('./sync-file-transition-cas', () => ({
     return { uri: target, name };
   }),
 }));
+// SafDocumentsCore.kt's listing and lookup, served from the same in-memory folder through the
+// expo SAF mocks above, so a test that makes expo's listing fail fails this one too. The B4
+// tests below replace them directly: androidx swallowed a provider error that these surface.
+const displayNameOf = vi.hoisted(() => (uri: string): string => {
+  const decoded = decodeURIComponent(uri);
+  return decoded.slice(Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf(':')) + 1);
+});
+const safDocumentsFake = vi.hoisted(() => ({
+  /* The display name a path-like provider gives: the decoded tail of the document ID. */
+  list: async (dir: string) => {
+    const { StorageAccessFramework } = await import('./file-system');
+    const uris: string[] = await StorageAccessFramework!.readDirectoryAsync!(dir);
+    return uris.map((uri) => ({
+      uri, name: displayNameOf(uri), mime: null, size: fs.files.get(uri)?.length ?? null, lastModified: null,
+    }));
+  },
+  stat: async (uri: string) => {
+    const bytes = fs.files.get(uri);
+    return bytes ? { uri, name: displayNameOf(uri), mime: null, size: bytes.length, lastModified: null } : null;
+  },
+  read: async (uri: string) => {
+    const { StorageAccessFramework } = await import('./file-system');
+    const base64: string = await StorageAccessFramework!.readAsStringAsync!(uri, { encoding: 'base64' } as never);
+    return { bytes: new Uint8Array(Buffer.from(base64, 'base64')), lengthVerified: true };
+  },
+}));
+vi.mock('./saf-documents', () => ({
+  listSafChildren: vi.fn(safDocumentsFake.list),
+  statSafDocument: vi.fn(safDocumentsFake.stat),
+  readSafDocument: vi.fn(safDocumentsFake.read),
+}));
 vi.mock('./sync-path-bookmarks', () => ({
   createSyncPathBookmark: vi.fn(async () => null),
   readBookmarkedSyncFileText: vi.fn(async () => null),
@@ -192,8 +223,12 @@ import {
 } from '@mindwtr/core';
 import {
   FILE_SYNC_ABSENT_FINGERPRINT,
+  FileSyncRetainedGenerationError,
+  FileSyncUnverifiedReadError,
+  pickAndParseSyncFolder,
   readSyncFile,
   readSyncFileVersioned,
+  resolveSyncFileUri,
   writeSyncFile,
 } from './storage-file';
 import {
@@ -304,6 +339,14 @@ beforeEach(async () => {
   vi.mocked(fileSystem.StorageAccessFramework!.readDirectoryAsync!)
     .mockImplementation(async (dir: string) => childUrisOf(dir));
   vi.mocked(fileSystem.readAsStringAsync).mockImplementation(readStored);
+  vi.mocked(fileSystem.getInfoAsync).mockImplementation(async (uri: string) => ({
+    exists: fs.files.has(uri) || childUrisOf(uri).length > 0,
+    size: fs.files.get(uri)?.length ?? 0,
+  }) as never);
+  const safDocuments = await import('./saf-documents');
+  vi.mocked(safDocuments.listSafChildren).mockImplementation(safDocumentsFake.list);
+  vi.mocked(safDocuments.statSafDocument).mockImplementation(safDocumentsFake.stat);
+  vi.mocked(safDocuments.readSafDocument).mockImplementation(safDocumentsFake.read);
 });
 
 afterEach(() => {
@@ -319,9 +362,20 @@ const seedEncrypted = async (data: AppData, key: SyncKeyMaterial = material, uri
   return sealed;
 };
 
+/** The cycle's write: read the document's version, then write against it (every File Sync
+ *  write is versioned; an unconditional write is refused). */
+const writeVersioned = async (
+  uri: string,
+  data: AppData,
+  options: { material?: SyncKeyMaterial | null } = {},
+): Promise<void> => {
+  const { fingerprint } = await readSyncFileVersioned(uri, options);
+  await writeSyncFile(uri, data, { ...options, expectedFingerprint: fingerprint });
+};
+
 describe('File Sync encryption — off state (backward-compat invariant #1)', () => {
   it('writes and reads plain data.json with no .enc artifact and no material', async () => {
-    await writeSyncFile(SYNC_URI, appData('plain'));
+    await writeVersioned(SYNC_URI, appData('plain'));
     expect(fs.files.has(SYNC_URI)).toBe(true);
     expect(fs.files.has(ENC_URI)).toBe(false);
     expect(textOf(SYNC_URI)).toBe(JSON.stringify(appData('plain'), null, 2));
@@ -329,10 +383,10 @@ describe('File Sync encryption — off state (backward-compat invariant #1)', ()
   });
 
   it('produces byte-identical output whether material is absent or explicitly null', async () => {
-    await writeSyncFile(SYNC_URI, appData('same'));
+    await writeVersioned(SYNC_URI, appData('same'));
     const withoutOption = fs.files.get(SYNC_URI)!;
     fs.files.clear();
-    await writeSyncFile(SYNC_URI, appData('same'), { material: null });
+    await writeVersioned(SYNC_URI, appData('same'), { material: null });
     expect(Buffer.from(fs.files.get(SYNC_URI)!)).toEqual(Buffer.from(withoutOption));
   });
 
@@ -344,7 +398,7 @@ describe('File Sync encryption — off state (backward-compat invariant #1)', ()
 
 describe('File Sync encryption — round trip', () => {
   it('writes data.json.enc, leaves data.json untouched, and reads back', async () => {
-    await writeSyncFile(SYNC_URI, appData('secret'), { material });
+    await writeVersioned(SYNC_URI, appData('secret'), { material });
     expect(fs.files.has(ENC_URI)).toBe(true);
     expect(fs.files.has(SYNC_URI)).toBe(false);
     expect(inspectSyncArtifact(fs.files.get(ENC_URI)!).kind).toBe('encrypted');
@@ -355,8 +409,8 @@ describe('File Sync encryption — round trip', () => {
   });
 
   it('rotates data.json.enc.bak only after the current artifact decrypts', async () => {
-    await writeSyncFile(SYNC_URI, appData('first'), { material });
-    await writeSyncFile(SYNC_URI, appData('second'), { material });
+    await writeVersioned(SYNC_URI, appData('first'), { material });
+    await writeVersioned(SYNC_URI, appData('second'), { material });
     const backup = fs.files.get(`${SYNC_DIR}/data.json.enc.bak`);
     expect(backup).toBeDefined();
     expect(inspectSyncArtifact(backup!).kind).toBe('encrypted');
@@ -393,7 +447,7 @@ describe('File Sync encryption — fail closed (decision #4)', () => {
     tampered[60] ^= 0xff;
     fs.files.set(ENC_URI, tampered);
 
-    await expect(writeSyncFile(SYNC_URI, appData('mine'), { material }))
+    await expect(writeVersioned(SYNC_URI, appData('mine'), { material }))
       .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
     expect(Buffer.from(fs.files.get(ENC_URI)!)).toEqual(Buffer.from(tampered));
     expect(fs.files.has(`${SYNC_DIR}/data.json.enc.bak`)).toBe(false);
@@ -455,7 +509,7 @@ describe('File Sync encryption — no-key discovery (decisions #2 and #5)', () =
   });
 
   it('does not probe for .enc when the plaintext read succeeds', async () => {
-    await writeSyncFile(SYNC_URI, appData('plain'));
+    await writeVersioned(SYNC_URI, appData('plain'));
     const before = fs.files.size;
     await expect(readSyncFile(SYNC_URI)).resolves.toMatchObject({ tasks: [{ title: 'plain' }] });
     expect(fs.files.size).toBe(before);
@@ -560,6 +614,507 @@ describe('ordinary File Sync document CAS', () => {
       expectedFingerprint: baseline.fingerprint,
     })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
     expect(fs.files.get(canonicalUri)).toEqual(peer);
+  });
+});
+
+describe('SAF provider errors are never an empty folder or an absent file (B4)', () => {
+  it('fails a keyed read when the provider cannot list the folder, though androidx would list it empty', async () => {
+    await seedEncrypted(appData('peer'), material, SAF_ENC_URI);
+    const { StorageAccessFramework } = await import('./file-system');
+    // androidx's TreeDocumentFile.listFiles logs the query error and returns no children.
+    vi.mocked(StorageAccessFramework!.readDirectoryAsync!).mockResolvedValue([]);
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.listSafChildren).mockRejectedValue(
+      new Error('SAF_DOCUMENT_UNAVAILABLE: the provider could not list the folder'),
+    );
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI, { material })).rejects.toThrow('SAF_DOCUMENT_UNAVAILABLE');
+    expect(fs.files.get(SAF_ENC_URI)).toBeDefined();
+  });
+
+  it('reads an empty encrypted folder as empty, finding the plaintext sibling by listing, not by a lookup of a missing file', async () => {
+    const safDocuments = await import('./saf-documents');
+    // A document that does not exist answers no cursor, which SafDocumentsCore reports as an error.
+    vi.mocked(safDocuments.statSafDocument).mockImplementation(async (uri: string) => {
+      if (!fs.files.has(uri)) throw new Error('SAF_DOCUMENT_UNAVAILABLE: the provider gave no answer for the document');
+      return { uri, name: uri.slice(uri.lastIndexOf('/') + 1), mime: null, size: fs.files.get(uri)!.length, lastModified: null };
+    });
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI, { material })).resolves.toMatchObject({
+      fingerprint: FILE_SYNC_ABSENT_FINGERPRINT, source: 'empty',
+    });
+  });
+
+  it('fails a byte read when the provider cannot describe the document, though androidx would call it absent', async () => {
+    await seedEncrypted(appData('peer'), material, SAF_ENC_URI);
+    const fileSystem = await import('./file-system');
+    vi.mocked(fileSystem.StorageAccessFramework!.readAsStringAsync!).mockRejectedValue(new Error('Permission Denial'));
+    vi.mocked(fileSystem.readAsStringAsync).mockRejectedValue(new Error('Permission Denial'));
+    // DocumentFile.exists catches the SecurityException and answers false.
+    vi.mocked(fileSystem.getInfoAsync).mockResolvedValue({ exists: false } as never);
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.statSafDocument).mockRejectedValue(
+      new Error('SAF_DOCUMENT_UNAVAILABLE: the provider could not describe the document'),
+    );
+
+    await expect(readSyncArtifactBytes(SAF_ENC_URI)).rejects.toThrow();
+  });
+});
+
+describe('File Sync never creates data.json before it publishes one (B2)', () => {
+  it('refuses to resolve the sync file when the folder listing fails, and creates nothing', async () => {
+    const { StorageAccessFramework } = await import('./file-system');
+    vi.mocked(StorageAccessFramework!.readDirectoryAsync!).mockRejectedValue(new Error('provider listing failed'));
+
+    await expect(resolveSyncFileUri('content://provider/tree/root', { createIfMissing: true }))
+      .rejects.toThrow('provider listing failed');
+    expect(StorageAccessFramework!.createFileAsync).not.toHaveBeenCalled();
+    expect(fs.files.size).toBe(0);
+  });
+
+  it('reads a deleted data.json as absent from the folder listing, not from a lookup that proves nothing', async () => {
+    const safDocuments = await import('./saf-documents');
+    // A vanished document's lookup answers no cursor, which SafDocumentsCore reports as an error.
+    vi.mocked(safDocuments.statSafDocument).mockRejectedValue(
+      new Error('SAF_DOCUMENT_UNAVAILABLE: the provider gave no answer for the document'),
+    );
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).resolves.toMatchObject({
+      fingerprint: FILE_SYNC_ABSENT_FINGERPRINT, source: 'empty',
+    });
+  });
+
+  it('picks an empty folder without creating data.json; the first sync creates it when it publishes', async () => {
+    const { Platform } = await import('react-native');
+    const previousOs = Platform.OS;
+    (Platform as { OS: string }).OS = 'android';
+    onTestFinished(() => { (Platform as { OS: string }).OS = previousOs; });
+    const { StorageAccessFramework } = await import('./file-system');
+    vi.mocked(StorageAccessFramework!.requestDirectoryPermissionsAsync!).mockResolvedValue({
+      granted: true, directoryUri: 'content://provider/tree/root',
+    } as never);
+
+    const picked = await pickAndParseSyncFolder();
+
+    expect(picked?.__fileUri).toBe('content://provider/tree/root/document/root');
+    expect([...fs.files.keys()].filter((uri) => uri.endsWith('data.json'))).toEqual([]);
+    expect(vi.mocked(StorageAccessFramework!.createFileAsync!).mock.calls.map((call) => call[1]))
+      .not.toContain('data.json');
+
+    const remote = await readSyncFileVersioned(picked!.__fileUri!);
+    expect(remote.fingerprint).toBe(FILE_SYNC_ABSENT_FINGERPRINT);
+    await writeSyncFile(picked!.__fileUri!, appData('first'), { expectedFingerprint: remote.fingerprint });
+    expect(textOf('content://provider/tree/root/document/root/data.json')).toContain('first');
+  });
+});
+
+describe('File Sync reads are whole or refused, and an unproven read never repairs (B6)', () => {
+  const SAF_CANONICAL = 'content://provider/tree/root/document/root/data.json';
+  const full = (): Uint8Array => new TextEncoder().encode(JSON.stringify(appData('remote-only'), null, 2));
+  const traceWrites = async () => {
+    const fileSystem = await import('./file-system');
+    return () => [
+      ...vi.mocked(fileSystem.StorageAccessFramework!.writeAsStringAsync!).mock.calls,
+      ...vi.mocked(fileSystem.StorageAccessFramework!.createFileAsync!).mock.calls,
+      ...vi.mocked(fileSystem.StorageAccessFramework!.deleteAsync!).mock.calls,
+    ];
+  };
+
+  it('refuses a clean short read (32 of 113 declared bytes) instead of repairing from it', async () => {
+    fs.files.set(SAF_CANONICAL, full());
+    const fileSystem = await import('./file-system');
+    // The provider's stream ends early, as a short EOF; expo's read hands the prefix over as if whole.
+    const prefix = Buffer.from(full().slice(0, 32));
+    vi.mocked(fileSystem.StorageAccessFramework!.readAsStringAsync!).mockImplementation(
+      async (_uri: string, options?: { encoding?: string }) => prefix.toString(options?.encoding === 'base64' ? 'base64' : 'utf8'),
+    );
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.readSafDocument).mockRejectedValue(new Error('SAF_DOCUMENT_INCOMPLETE: short read'));
+    const writes = await traceWrites();
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).rejects.toThrow('SAF_DOCUMENT_INCOMPLETE');
+    expect(writes()).toEqual([]);
+  });
+
+  it('stops on a no-length document that does not parse, instead of repairing the remote from local data', async () => {
+    fs.files.set(SAF_CANONICAL, new TextEncoder().encode('{"tasks": [{"id": "t1", "ti'));
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.readSafDocument).mockImplementation(async (uri: string) => ({
+      bytes: fs.files.get(uri)!, lengthVerified: false,
+    }));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).rejects.toBeInstanceOf(FileSyncUnverifiedReadError);
+  });
+
+  it('reads a no-length document that parses', async () => {
+    fs.files.set(SAF_CANONICAL, full());
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.readSafDocument).mockImplementation(async (uri: string) => ({
+      bytes: fs.files.get(uri)!, lengthVerified: false,
+    }));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).resolves.toMatchObject({
+      source: 'primary', data: { tasks: [{ title: 'remote-only' }] },
+    });
+  });
+
+  it.each([0, 10])('stops when discovery reads %i bytes of data.json.enc that no reported length proves whole', async (length) => {
+    const sealed = await seedEncrypted(appData('peer'), material, 'content://provider/tree/root/document/root/data.json.enc');
+    fs.files.set('content://provider/tree/root/document/root/data.json.enc', sealed.slice(0, length));
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.readSafDocument).mockImplementation(async (uri: string) => ({
+      bytes: fs.files.get(uri)!, lengthVerified: false,
+    }));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).rejects.toBeInstanceOf(FileSyncUnverifiedReadError);
+    expect([...fs.files.keys()].filter((uri) => uri.endsWith('/data.json'))).toEqual([]);
+  });
+
+  it.each([['empty', ''], ['whitespace', '   \n']])(
+    'refuses a keyed read when the restored plaintext reads %s with no length proving it whole', async (_label, text) => {
+      // A peer disabled encryption: data.json.enc is gone and the plaintext original is back.
+      fs.files.set(SAF_CANONICAL, full());
+      const safDocuments = await import('./saf-documents');
+      vi.mocked(safDocuments.readSafDocument).mockImplementation(async () => ({
+        bytes: new TextEncoder().encode(text), lengthVerified: false,
+      }));
+
+      await expect(readSyncFileVersioned(SAF_SYNC_URI, { material })).rejects.toBeInstanceOf(FileSyncUnverifiedReadError);
+    },
+  );
+
+  it('keeps the remote-plaintext refusal when the restored plaintext reads whole without a length', async () => {
+    fs.files.set(SAF_CANONICAL, full());
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.readSafDocument).mockImplementation(async (uri: string) => ({
+      bytes: fs.files.get(uri)!, lengthVerified: false,
+    }));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI, { material })).rejects.toBeInstanceOf(SyncEncryptionRemotePlaintextError);
+  });
+
+  it('keeps the typed decrypt error for an unproven read of a sealed document', async () => {
+    const sealed = await seedEncrypted(appData('peer'), material, 'content://provider/tree/root/document/root/data.json.enc');
+    const tampered = new Uint8Array(sealed);
+    tampered[tampered.length - 1] ^= 0xff;
+    fs.files.set('content://provider/tree/root/document/root/data.json.enc', tampered);
+    const safDocuments = await import('./saf-documents');
+    vi.mocked(safDocuments.readSafDocument).mockImplementation(async (uri: string) => ({
+      bytes: fs.files.get(uri)!, lengthVerified: false,
+    }));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI, { material })).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+  });
+
+  it('does not repair when a provider error names the sync file, though the name contains "json"', async () => {
+    fs.files.set(SAF_CANONICAL, new TextEncoder().encode('not a document'));
+    const fileSystem = await import('./file-system');
+    let reads = 0;
+    vi.mocked(fileSystem.StorageAccessFramework!.readAsStringAsync!).mockImplementation(async () => {
+      reads += 1;
+      if (reads === 1) return Buffer.from('not a document').toString('base64');
+      throw new Error(`Permission Denial: reading ${SAF_CANONICAL}`);
+    });
+    const safDocuments = await import('./saf-documents');
+    let safReads = 0;
+    vi.mocked(safDocuments.readSafDocument).mockImplementation(async () => {
+      safReads += 1;
+      if (safReads === 1) return { bytes: new TextEncoder().encode('not a document'), lengthVerified: true };
+      throw new Error(`Permission Denial: reading ${SAF_CANONICAL}`);
+    });
+
+    await expect(readSyncFileVersioned(SAF_CANONICAL)).rejects.toThrow('Permission Denial');
+  });
+});
+
+describe('a missing or broken sync file next to an earlier copy stops the sync (B5 guard)', () => {
+  const plain = (title: string) => new TextEncoder().encode(JSON.stringify(appData(title), null, 2));
+  const SAF_DIR = 'content://provider/tree/root/document/root';
+
+  it('refuses an empty data.json next to a good data.json.bak and writes nothing', async () => {
+    fs.files.set(SYNC_URI, new Uint8Array(0));
+    fs.files.set(`${SYNC_DIR}/data.json.bak`, plain('remote-only'));
+    const before = new Map(fs.files);
+
+    await expect(readSyncFileVersioned(SYNC_URI)).rejects.toBeInstanceOf(FileSyncRetainedGenerationError);
+    expect(new Map(fs.files)).toEqual(before);
+  });
+
+  it('refuses an absent data.json.enc next to a good data.json.enc.bak on a keyed device', async () => {
+    await seedEncrypted(appData('remote-only'), material, `${SYNC_DIR}/data.json.enc.bak`);
+
+    await expect(readSyncFileVersioned(SYNC_URI, { material })).rejects.toBeInstanceOf(FileSyncRetainedGenerationError);
+  });
+
+  it.each(['data.json.bak.previous', 'data.json.enc.bak.previous', 'data.json.previous.tmp', 'mindwtr-sync.json.bak'])(
+    'refuses an empty data.json next to a retained %s', async (retained) => {
+      fs.files.set(SYNC_URI, new Uint8Array(0));
+      fs.files.set(`${SYNC_DIR}/${retained}`, plain('remote-only'));
+
+      await expect(readSyncFileVersioned(SYNC_URI)).rejects.toBeInstanceOf(FileSyncRetainedGenerationError);
+    },
+  );
+
+  it('refuses an absent data.json next to a valid quarantine left by an interrupted write', async () => {
+    fs.files.set(`${SAF_DIR}/.mindwtr-et-q-abc-1-x`, plain('remote-only'));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).rejects.toBeInstanceOf(FileSyncRetainedGenerationError);
+    expect(fs.files.has(`${SAF_DIR}/data.json`)).toBe(false);
+  });
+
+  it('refuses an absent data.json next to a non-empty in-progress stage', async () => {
+    fs.files.set(`${SAF_DIR}/.mindwtr-et-s-abc-1-x`, plain('first-publication'));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).rejects.toBeInstanceOf(FileSyncRetainedGenerationError);
+  });
+
+  it('is not blocked by a zero-byte stage or a zero-byte backup, and never deletes them', async () => {
+    fs.files.set(`${SAF_DIR}/.mindwtr-et-s-abc-1-x`, new Uint8Array(0));
+    fs.files.set(`${SAF_DIR}/data.json.bak`, new Uint8Array(0));
+
+    await expect(readSyncFileVersioned(SAF_SYNC_URI)).resolves.toMatchObject({ source: 'empty', needsRepair: true });
+    expect(fs.files.has(`${SAF_DIR}/.mindwtr-et-s-abc-1-x`)).toBe(true);
+  });
+
+  it('keeps the typed decrypt error for a broken data.json.enc next to a good backup', async () => {
+    const sealed = await seedEncrypted(appData('peer'));
+    const tampered = new Uint8Array(sealed);
+    tampered[tampered.length - 1] ^= 0xff;
+    fs.files.set(ENC_URI, tampered);
+    await seedEncrypted(appData('remote-only'), material, `${SYNC_DIR}/data.json.enc.bak`);
+
+    await expect(readSyncFileVersioned(SYNC_URI, { material })).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+  });
+
+  it('keeps the no-key discovery for a keyless device joining an encrypted folder with a backup', async () => {
+    await seedEncrypted(appData('peer'));
+    await seedEncrypted(appData('older'), material, `${SYNC_DIR}/data.json.enc.bak`);
+
+    await expect(readSyncFileVersioned(SYNC_URI)).rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
+  });
+
+  it('keeps the remote-plaintext refusal for a keyed device whose peer disabled encryption', async () => {
+    fs.files.set(SYNC_URI, plain('peer-disabled'));
+    fs.files.set(`${SYNC_DIR}/data.json.bak`, plain('older'));
+
+    await expect(readSyncFileVersioned(SYNC_URI, { material })).rejects.toBeInstanceOf(SyncEncryptionRemotePlaintextError);
+  });
+
+  it('leaves a healthy data.json with backups unchanged', async () => {
+    fs.files.set(SYNC_URI, plain('current'));
+    fs.files.set(`${SYNC_DIR}/data.json.bak`, plain('older'));
+
+    await expect(readSyncFileVersioned(SYNC_URI)).resolves.toMatchObject({ source: 'primary' });
+  });
+});
+
+describe('backup rotation never writes into an existing file (B8)', () => {
+  const SAF_DIR = 'content://provider/tree/root/document/root';
+  const writtenUris = async () => {
+    const fileSystem = await import('./file-system');
+    return () => [
+      ...vi.mocked(fileSystem.StorageAccessFramework!.writeAsStringAsync!).mock.calls.map((call) => call[0] as string),
+      ...vi.mocked(fileSystem.writeAsStringAsync).mock.calls.map((call) => call[0] as string),
+    ];
+  };
+
+  it('rotates data.json.enc.bak through a new file and a rename over two encrypted cycles', async () => {
+    await seedEncrypted(appData('first'), material, `${SAF_DIR}/data.json.enc`);
+    await seedEncrypted(appData('older'), material, `${SAF_DIR}/data.json.enc.bak`);
+    for (const title of ['second', 'third']) {
+      const existing = new Set(fs.files.keys());
+      vi.clearAllMocks();
+      const written = await writtenUris();
+      const remote = await readSyncFileVersioned(SAF_SYNC_URI, { material });
+      await writeSyncFile(SAF_SYNC_URI, appData(title), { material, expectedFingerprint: remote.fingerprint });
+      // A file created in this call may reuse an old path (the canonical is recreated under its
+      // name after the old one moved aside); only a write into a file that existed before counts.
+      const { StorageAccessFramework } = await import('./file-system');
+      const created = new Set(await Promise.all(
+        vi.mocked(StorageAccessFramework!.createFileAsync!).mock.results.map((result) => result.value as Promise<string>),
+      ));
+      expect(written().filter((uri) => existing.has(uri) && !created.has(uri))).toEqual([]);
+    }
+    const { decryptSyncArtifact } = await import('@mindwtr/core');
+    const backup = await decryptSyncArtifact(fs.files.get(`${SAF_DIR}/data.json.enc.bak`)!, material.key, mobileSyncCryptoPrimitives);
+    expect(JSON.parse(new TextDecoder().decode(backup))).toMatchObject({ tasks: [{ title: 'second' }] });
+    expect([...fs.files.keys()].filter((uri) => uri.includes('.mindwtr-et-'))).toEqual([]);
+  });
+
+  it('never replaces a backup a peer publishes while the old one is moved aside', async () => {
+    const BACKUP = `${SAF_DIR}/data.json.enc.bak`;
+    await seedEncrypted(appData('first'), material, `${SAF_DIR}/data.json.enc`);
+    await seedEncrypted(appData('older'), material, BACKUP);
+    const peerBackup = await encryptSyncArtifact(
+      new TextEncoder().encode(JSON.stringify(appData('peer-backup'))), material, mobileSyncCryptoPrimitives,
+    );
+    const cas = await import('./sync-file-transition-cas');
+    const previous = vi.mocked(cas.renameSafTransitionDocument).getMockImplementation()!;
+    // A provider whose rename replaces an existing target; a peer publishes its backup the
+    // moment this device moved the old one aside.
+    vi.mocked(cas.renameSafTransitionDocument).mockImplementation(async (uri: string, name: string) => {
+      const target = `${dirOf(uri)}/${name}`;
+      const bytes = fs.files.get(uri);
+      if (!bytes) throw new Error(`ENOENT ${uri}`);
+      fs.files.set(target, bytes);
+      fs.files.delete(uri);
+      if (uri === BACKUP && name.startsWith('.mindwtr-et-q-')) fs.files.set(BACKUP, peerBackup);
+      return { uri: target, name };
+    });
+    onTestFinished(() => { vi.mocked(cas.renameSafTransitionDocument).mockImplementation(previous); });
+
+    const remote = await readSyncFileVersioned(SAF_SYNC_URI, { material });
+    await writeSyncFile(SAF_SYNC_URI, appData('second'), { material, expectedFingerprint: remote.fingerprint });
+
+    expect(fs.files.get(BACKUP)).toEqual(peerBackup);
+  });
+
+  it('skips the rotation when the provider decorates the new backup name, so no rename can replace a peer backup', async () => {
+    const BACKUP = `${SAF_DIR}/data.json.enc.bak`;
+    await seedEncrypted(appData('first'), material, `${SAF_DIR}/data.json.enc`);
+    const older = await seedEncrypted(appData('older'), material, BACKUP);
+    const peerBackup = await encryptSyncArtifact(
+      new TextEncoder().encode(JSON.stringify(appData('peer-backup'))), material, mobileSyncCryptoPrimitives,
+    );
+    const fileSystem = await import('./file-system');
+    const create = vi.mocked(fileSystem.StorageAccessFramework!.createFileAsync!);
+    const previousCreate = create.getMockImplementation()!;
+    // This provider appends ".bin" to a new backup's name (#1113's decoration).
+    create.mockImplementation(async (dir: string, name: string, mime: string) => (
+      name === 'data.json.enc.bak' ? previousCreate(dir, `${name}.bin`, mime) : previousCreate(dir, name, mime)
+    ));
+    const cas = await import('./sync-file-transition-cas');
+    const rename = vi.mocked(cas.renameSafTransitionDocument);
+    const previousRename = rename.getMockImplementation()!;
+    // A replacing rename, and a peer that publishes its backup just before a rename onto that name.
+    rename.mockImplementation(async (uri: string, name: string) => {
+      const target = `${dirOf(uri)}/${name}`;
+      if (target === BACKUP) fs.files.set(BACKUP, peerBackup);
+      const bytes = fs.files.get(uri);
+      if (!bytes) throw new Error(`ENOENT ${uri}`);
+      fs.files.set(target, bytes);
+      fs.files.delete(uri);
+      return { uri: target, name };
+    });
+    onTestFinished(() => {
+      create.mockImplementation(previousCreate);
+      rename.mockImplementation(previousRename);
+    });
+
+    const remote = await readSyncFileVersioned(SAF_SYNC_URI, { material });
+    await writeSyncFile(SAF_SYNC_URI, appData('second'), { material, expectedFingerprint: remote.fingerprint });
+
+    expect(rename.mock.calls.filter(([, name]) => name === 'data.json.enc.bak')).toEqual([]);
+    expect(fs.files.has(`${BACKUP}.bin`)).toBe(false);
+    const kept = [...fs.files.entries()].filter(([, bytes]) => Buffer.from(bytes).equals(Buffer.from(older)));
+    expect(kept).toHaveLength(1);
+    expect(fs.files.has(BACKUP) ? fs.files.get(BACKUP) : peerBackup).toEqual(peerBackup);
+  });
+
+  it('does not rotate a sync file that does not parse into the backup', async () => {
+    fs.files.set(SYNC_URI, new TextEncoder().encode('not a document'));
+    const remote = await readSyncFileVersioned(SYNC_URI);
+    expect(remote.needsRepair).toBe(true);
+
+    await writeSyncFile(SYNC_URI, appData('mine'), { expectedFingerprint: remote.fingerprint });
+
+    expect(fs.files.has(`${SYNC_DIR}/data.json.bak`)).toBe(false);
+    expect(textOf(SYNC_URI)).toContain('mine');
+  });
+});
+
+describe('SAF providers with opaque document IDs (B7)', () => {
+  // A provider whose document IDs are numbers: names live only in COLUMN_DISPLAY_NAME.
+  const ROOT = 'content://op/tree/root/document/root';
+  const docs = new Map<string, { name: string; parent: string; bytes: Uint8Array }>();
+  let nextId = 7;
+  const uriOf = (id: number | string) => `content://op/tree/root/document/${id}`;
+  const add = (name: string, bytes: Uint8Array, parent = ROOT) => {
+    const uri = uriOf(nextId++);
+    docs.set(uri, { name, parent, bytes });
+    return uri;
+  };
+  const named = (name: string) => [...docs.entries()].filter(([, doc]) => doc.name === name);
+
+  beforeEach(async () => {
+    docs.clear();
+    nextId = 7;
+    const restore: Array<() => void> = [];
+    const swap = <T extends (...args: never[]) => unknown>(fn: T, impl: T) => {
+      const mocked = vi.mocked(fn as unknown as (...args: unknown[]) => unknown);
+      const previous = mocked.getMockImplementation();
+      mocked.mockImplementation(impl as unknown as (...args: unknown[]) => unknown);
+      restore.push(() => { if (previous) mocked.mockImplementation(previous); });
+    };
+    const fileSystem = await import('./file-system');
+    const saf = fileSystem.StorageAccessFramework!;
+    const safDocuments = await import('./saf-documents');
+    const cas = await import('./sync-file-transition-cas');
+    const row = (uri: string) => {
+      const doc = docs.get(uri);
+      return doc ? { uri, name: doc.name, mime: null, size: doc.bytes.length, lastModified: null } : null;
+    };
+    swap(safDocuments.listSafChildren, async (dir: string) => {
+      const parent = dir === 'content://op/tree/root' ? ROOT : dir;
+      return [...docs.entries()].filter(([, doc]) => doc.parent === parent).map(([uri]) => row(uri)!);
+    });
+    swap(safDocuments.statSafDocument, async (uri: string) => (uri === ROOT || uri === 'content://op/tree/root'
+      ? { uri, name: 'root', mime: null, size: null, lastModified: null } : row(uri)));
+    swap(safDocuments.readSafDocument, async (uri: string) => {
+      const doc = docs.get(uri);
+      if (!doc) throw new Error('SAF_DOCUMENT_UNAVAILABLE: the document is gone');
+      return { bytes: doc.bytes, lengthVerified: true };
+    });
+    swap(saf.createFileAsync!, async (dir: string, name: string) => add(name, new Uint8Array(0), dir === 'content://op/tree/root' ? ROOT : dir));
+    swap(saf.writeAsStringAsync!, async (uri: string, content: string, options?: { encoding?: string }) => {
+      const doc = docs.get(uri);
+      if (!doc) throw new Error('ENOENT');
+      doc.bytes = new Uint8Array(Buffer.from(content, options?.encoding === 'base64' ? 'base64' : 'utf8'));
+    });
+    swap(saf.deleteAsync!, async (uri: string) => { docs.delete(uri); });
+    swap(cas.renameSafTransitionDocument, async (uri: string, name: string) => {
+      const doc = docs.get(uri);
+      if (!doc) throw new Error('ENOENT');
+      if (named(name).some(([, other]) => other.parent === doc.parent)) throw new Error('EEXIST');
+      doc.name = name;
+      return { uri, name };
+    });
+    onTestFinished(() => { for (const undo of restore.reverse()) undo(); });
+  });
+
+  it('reads and writes data.json by its display name', async () => {
+    const dataUri = add('data.json', new TextEncoder().encode(JSON.stringify(appData('remote'), null, 2)));
+
+    const remote = await readSyncFileVersioned(dataUri);
+    expect(remote).toMatchObject({ source: 'primary', data: { tasks: [{ title: 'remote' }] } });
+
+    await writeSyncFile(dataUri, appData('mine'), { expectedFingerprint: remote.fingerprint });
+    const current = named('data.json');
+    expect(current).toHaveLength(1);
+    expect(new TextDecoder().decode(current[0][1].bytes)).toContain('mine');
+    expect([...docs.values()].map((doc) => doc.name).filter((name) => name.startsWith('.mindwtr-et-'))).toEqual([]);
+  });
+
+  it('publishes the first data.json into a picked folder by name', async () => {
+    const remote = await readSyncFileVersioned('content://op/tree/root');
+    expect(remote.fingerprint).toBe(FILE_SYNC_ABSENT_FINGERPRINT);
+    await writeSyncFile('content://op/tree/root', appData('first'), { expectedFingerprint: remote.fingerprint });
+    expect(named('data.json')).toHaveLength(1);
+  });
+
+  it('lists, writes and removes transition artifacts by display name', async () => {
+    const plainBytes = new TextEncoder().encode(JSON.stringify(appData('remote'), null, 2));
+    const dataUri = add('data.json', plainBytes);
+    const port = (await createFileSyncEncryptionRemotePort(dataUri))!;
+
+    const listed = await port.list();
+    expect(listed.map((entry) => entry.name)).toContain('data.json');
+    const current = await port.read('data.json');
+    expect(current.bytes).toEqual(plainBytes);
+    await port.write('data.json.enc', new Uint8Array([1, 2, 3]), null);
+    expect(named('data.json.enc')).toHaveLength(1);
+    await port.remove('data.json', current.version!);
+    expect(named('data.json')).toHaveLength(0);
   });
 });
 

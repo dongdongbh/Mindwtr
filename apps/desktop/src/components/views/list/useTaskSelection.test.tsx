@@ -1,7 +1,8 @@
 import renderer, { act } from 'react-test-renderer';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Task } from '@mindwtr/core';
+import { useTaskStore, type Task } from '@mindwtr/core';
+import { holdSyncSave } from '../../../test/hold-sync-save';
 
 import { useTaskSelection } from './useTaskSelection';
 
@@ -95,6 +96,47 @@ describe('useTaskSelection', () => {
         expect(batchMoveTasks).toHaveBeenLastCalledWith(['a'], 'done');
         expect(selection.selectionMode).toBe(false);
         expect(selection.selectedIdsArray).toEqual([]);
+    });
+
+    describe('token writes behind a sync save', () => {
+        const initialTaskState = useTaskStore.getState();
+        afterEach(() => { useTaskStore.setState(initialTaskState, true); });
+        const at = new Date().toISOString();
+        const stored = { id: 'a', title: 'A', status: 'next', tags: ['#x'], contexts: ['@desk'], rev: 1, createdAt: at, updatedAt: at } as Task;
+
+        const selectA = () => {
+            useTaskStore.setState({ _allTasks: [stored] });
+            let selection!: ReturnType<typeof useTaskSelection>;
+            function Probe() {
+                const { _tasksById, batchUpdateTasks } = useTaskStore.getState();
+                selection = useTaskSelection(['a'], { tasksById: _tasksById, batchUpdateTasks });
+                return null;
+            }
+            act(() => { renderer.create(<Probe />); });
+            act(() => { selection.toggleMultiSelect('a'); });
+            return selection;
+        };
+        const publishRemote = () => holdSyncSave(() => useTaskStore.setState({ _allTasks: [{
+            ...stored, rev: 3, tags: ['#remote', '#x'], contexts: ['@desk', '@phone'],
+        }] }));
+
+        it('adds a bulk tag to the tags a sync save published while the write waited', async () => {
+            const selection = selectA();
+            const finish = publishRemote();
+            let written!: Promise<boolean>;
+            act(() => { written = selection.updateSelectedTaskTokens('tags', '#new', 'add'); });
+            await act(async () => { await finish(); await written; });
+            expect(useTaskStore.getState()._tasksById.get('a')?.tags).toEqual(['#new', '#remote', '#x']);
+        });
+
+        it('organizes contexts onto the contexts a sync save published while the write waited', async () => {
+            const selection = selectA();
+            const finish = publishRemote();
+            let written!: Promise<boolean>;
+            act(() => { written = selection.organizeSelectedTasks({ contexts: ['@home'] }); });
+            await act(async () => { await finish(); await written; });
+            expect(useTaskStore.getState()._tasksById.get('a')?.contexts).toEqual(['@desk', '@phone', '@home']);
+        });
     });
 
     it('builds each selected task destination patch separately and keeps status separate', async () => {

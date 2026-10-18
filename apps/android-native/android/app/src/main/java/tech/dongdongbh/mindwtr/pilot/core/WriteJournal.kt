@@ -63,6 +63,8 @@ class WriteJournal(
             "attachmentAddFile" to "{requestId}", "attachmentLinks" to "{requestId}", "attachmentRemove" to "{requestId,attachmentId}",
             // Project details (ProjectDetails.kt): the user's edit, journaled ahead of its send (core's runProjectEdit).
             "projectEdit" to "{requestId,projectId,kind}",
+            // Settings › Data's Getting Started row: the request UUID and the app language, both frozen at the tap.
+            "gettingStarted" to "{requestId,language}",
         ) + listOf("archiveAction", "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction",
             "boardCreate", "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd",
             "savedSearchDelete", "generalSetting", "gtdSetting", "dataSetting", "notificationsSetting", "manageEditor", "manageDelete", "syncPreference",

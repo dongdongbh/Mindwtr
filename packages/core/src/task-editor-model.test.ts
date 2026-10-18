@@ -240,7 +240,7 @@ describe('task editor model parity with the mobile editor', () => {
         expect(options).toEqual(snapshot.options);
     });
 
-    it('composes the same save patch', () => {
+    it('composes the frozen save patch with explicit legacy reminder intent', () => {
         const patches = Object.fromEntries(Object.keys(snapshot.patches).map((key) => {
             const [taskId, editName] = key.split('|');
             const task = tasksById.get(taskId)!;
@@ -248,7 +248,9 @@ describe('task editor model parity with the mobile editor', () => {
             const state = applyEdit(task, edit);
             return [key, encodePatch(buildTaskEditUpdatePatch(state, task, edit.overrides))];
         }));
-        expect(JSON.stringify(patches)).toBe(JSON.stringify(snapshot.patches));
+        const expected = JSON.stringify(snapshot.patches)
+            .replaceAll('["suppressMindwtrReminders",true]', '["reminderPolicy","skip"]');
+        expect(JSON.stringify(patches)).toBe(expected);
     });
 
     it('builds the host model from the same layout and options', () => {

@@ -1,15 +1,20 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import type { Task } from '@mindwtr/core';
 import { useUiStore } from '../../store/ui-store';
 import { reportError } from '../../lib/report-error';
+import { logInfo } from '../../lib/app-log';
 import { TaskQuickActionMenu } from './TaskQuickActionMenu';
 
 vi.mock('../../lib/report-error', () => ({
     reportError: vi.fn(),
+}));
+vi.mock('../../lib/app-log', () => ({
+    logInfo: vi.fn().mockResolvedValue(undefined),
+    logWarn: vi.fn().mockResolvedValue(undefined),
 }));
 
 const now = '2026-02-01T00:00:00.000Z';
@@ -131,6 +136,229 @@ const openDestinationPanel = () => {
 };
 
 describe('TaskQuickActionMenu', () => {
+    describe('mouse hover panels', () => {
+        afterEach(() => vi.useRealTimers());
+
+        it.each([
+            ['Dates…', 'Dates…'],
+            ['Move to…', 'Destination'],
+            ['Contexts…', 'Contexts'],
+            ['Priority…', 'Priority'],
+        ])('opens %s after a delay without moving focus or saving', (label, panelLabel) => {
+            vi.useFakeTimers();
+            const props = renderMenu();
+            const menu = screen.getByRole('menu', { name: 'More options' });
+            const trigger = screen.getByRole('menuitem', { name: label });
+            fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(249));
+            expect(screen.queryByRole('dialog', { name: panelLabel })).not.toBeInTheDocument();
+            act(() => vi.advanceTimersByTime(1));
+            expect(screen.getByRole('dialog', { name: panelLabel })).toBeVisible();
+            expect(document.activeElement).toBe(menu);
+            fireEvent.pointerLeave(trigger, { pointerType: 'mouse' });
+            fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(screen.getByRole('dialog', { name: panelLabel })).toBeVisible();
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        });
+
+        it('cancels pending hover on leave, keyboard input, and unmount', () => {
+            vi.useFakeTimers();
+            const props = createMenuProps();
+            const { unmount } = render(<TaskQuickActionMenu {...props} />);
+            const dates = screen.getByRole('menuitem', { name: 'Dates…' });
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            fireEvent.pointerLeave(dates, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            fireEvent.keyDown(window, { key: 'ArrowDown' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            unmount();
+            expect(vi.getTimerCount()).toBe(0);
+            act(() => vi.advanceTimersByTime(250));
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        });
+
+        it('keeps a panel open across the gap and cancels neighboring hover on entry', () => {
+            vi.useFakeTimers();
+            renderMenu();
+            const dates = screen.getByRole('menuitem', { name: 'Dates…' });
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            fireEvent.pointerLeave(dates, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(300));
+            const panel = screen.getByRole('dialog', { name: 'Dates…' });
+            fireEvent.pointerEnter(screen.getByRole('menuitem', { name: 'Move to…' }), { pointerType: 'mouse' });
+            fireEvent.pointerEnter(panel, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(panel).toBeVisible();
+            expect(screen.queryByRole('dialog', { name: 'Destination' })).not.toBeInTheDocument();
+        });
+
+        it('cancels stale hover when the task changes and opens the latest destination on retry', () => {
+            vi.useFakeTimers();
+            const props = createMenuProps({
+                task: { ...task, areaId: 'work' },
+                areas: ['work', 'home'].map((id, order) => ({ id, name: id, color: '#000000', order, createdAt: now, updatedAt: now })),
+            });
+            const { rerender } = render(<TaskQuickActionMenu {...props} />);
+            const move = screen.getByRole('menuitem', { name: 'Move to…' });
+            fireEvent.pointerEnter(move, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(100));
+            rerender(<TaskQuickActionMenu {...props} task={{ ...props.task, areaId: 'home' }} />);
+            act(() => vi.advanceTimersByTime(250));
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+            fireEvent.pointerLeave(move, { pointerType: 'mouse' });
+            fireEvent.pointerEnter(move, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            const panel = screen.getByRole('dialog', { name: 'Destination' });
+            expect(within(panel).getByRole('button', { name: 'Destination' })).toHaveTextContent('home');
+            expect(within(panel).getByRole('button', { name: 'Save' })).toBeDisabled();
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        });
+
+        it.each([{ readOnly: true }, { prioritiesEnabled: false }])('cancels hover when its trigger becomes unavailable: %j', (changes) => {
+            vi.useFakeTimers();
+            const props = createMenuProps();
+            const { rerender } = render(<TaskQuickActionMenu {...props} />);
+            fireEvent.pointerEnter(screen.getByRole('menuitem', { name: 'Priority…' }), { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(100));
+            rerender(<TaskQuickActionMenu {...props} {...changes} />);
+            act(() => vi.advanceTimersByTime(250));
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        });
+
+        it.each(['touch', 'pen'])('ignores %s hover while retaining deliberate activation', (pointerType) => {
+            vi.useFakeTimers();
+            renderMenu();
+            const dates = screen.getByRole('menuitem', { name: 'Dates…' });
+            fireEvent.pointerEnter(dates, { pointerType });
+            act(() => vi.advanceTimersByTime(250));
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+            fireEvent.click(dates);
+            expect(screen.getByRole('dialog', { name: 'Dates…' })).toBeVisible();
+        });
+
+        it('lets ArrowRight enter a hovered submenu', () => {
+            vi.useFakeTimers();
+            renderMenu();
+            const dates = screen.getByRole('menuitem', { name: 'Dates…' });
+            dates.focus();
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(document.activeElement).toBe(dates);
+            fireEvent.keyDown(dates, { key: 'ArrowRight' });
+            expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Start Date…' }));
+        });
+
+        it('preserves dirty date and context drafts when hovering other panels', () => {
+            vi.useFakeTimers();
+            const props = renderMenu();
+            openDatePanel('Due Date…');
+            const dateInput = screen.getByRole('textbox', { name: 'Due Date' });
+            fireEvent.change(dateInput, { target: { value: '04/19/2026' } });
+            const move = screen.getByRole('menuitem', { name: 'Move to…' });
+            move.focus();
+            fireEvent.pointerEnter(move, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(dateInput).toHaveValue('04/19/2026');
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+            const contexts = screen.getByRole('textbox', { name: 'task.aria.contexts' });
+            fireEvent.change(contexts, { target: { value: '@garden' } });
+            move.focus();
+            fireEvent.pointerEnter(move, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(contexts).toHaveValue('@garden');
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        });
+
+        it('keeps a focused editor open even before its draft changes', () => {
+            vi.useFakeTimers();
+            renderMenu();
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+            const input = screen.getByRole('textbox', { name: 'task.aria.contexts' });
+            expect(document.activeElement).toBe(input);
+            fireEvent.pointerEnter(screen.getByRole('menuitem', { name: 'Priority…' }), { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(input).toBeVisible();
+            expect(document.activeElement).toBe(input);
+        });
+
+        it('preserves destination search focus and an unsaved destination', () => {
+            vi.useFakeTimers();
+            const props = renderMenu({ areas: [{ id: 'work', name: 'Work', color: '#000000', order: 0, createdAt: now, updatedAt: now }] });
+            const panel = openDestinationPanel();
+            fireEvent.click(within(panel).getByRole('button', { name: 'Destination' }));
+            const search = screen.getByPlaceholderText('Search');
+            expect(document.activeElement).toBe(search);
+            const dates = screen.getByRole('menuitem', { name: 'Dates…' });
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(panel).toBeVisible();
+            expect(document.activeElement).toBe(search);
+            fireEvent.click(screen.getByRole('option', { name: 'Work' }));
+            act(() => dates.focus());
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(within(panel).getByRole('button', { name: 'Destination' })).toHaveTextContent('Work');
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        });
+
+        it('does not switch panels during a pending save', async () => {
+            vi.useFakeTimers();
+            let finishSave!: (value: { success: true }) => void;
+            const props = renderMenu({ onUpdateTask: vi.fn(() => new Promise<{ success: true }>((resolve) => { finishSave = resolve; })) });
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Priority…' }));
+            fireEvent.click(screen.getByRole('button', { name: 'High' }));
+            const dates = screen.getByRole('menuitem', { name: 'Dates…' });
+            act(() => dates.focus());
+            fireEvent.pointerEnter(dates, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(screen.getByRole('dialog', { name: 'Priority' })).toBeVisible();
+            expect(props.onUpdateTask).toHaveBeenCalledTimes(1);
+            expect(props.onClose).not.toHaveBeenCalled();
+            await act(async () => finishSave({ success: true }));
+        });
+    });
+
+    it.each(['Start Date', 'Due Date', 'Review Date'])('opens the %s calendar on deliberate entry without saving', (label) => {
+        const props = renderMenu();
+        openDatePanel(`${label}…` as 'Start Date…' | 'Due Date…' | 'Review Date…');
+        expect(screen.getByRole('dialog', { name: `${label} Calendar` })).toBeVisible();
+        expect(document.activeElement).toBe(screen.getByRole('textbox', { name: label }));
+        expect(props.onUpdateTask).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['Copy Title', 1, 'pointer'],
+        ['Copy Title', 0, 'keyboard-or-assistive'],
+        ['Copy task link', 1, 'pointer'],
+        ['Copy task link', 0, 'keyboard-or-assistive'],
+        ['Copy task ID', 1, 'pointer'],
+        ['Copy task ID', 0, 'keyboard-or-assistive'],
+    ])('records the native click metadata for %s (detail=%s)', async (label, detail, inputKind) => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+        vi.mocked(logInfo).mockClear();
+        try {
+            const props = renderMenu();
+            fireEvent.click(screen.getByRole('menuitem', { name: label }), { detail });
+            expect(writeText).toHaveBeenCalledOnce();
+            expect(props.onClose).toHaveBeenCalledOnce();
+            await waitFor(() => expect(logInfo).toHaveBeenCalledExactlyOnceWith('Task clipboard write completed', {
+                scope: 'clipboard', extra: expect.objectContaining({
+                    releaseCheck: 'v1.3.7/task-copy-input', source: 'menu', inputKind,
+                    // DOM events dispatched by this test are untrusted.
+                    inputTrusted: false,
+                }),
+            }));
+        } finally { vi.unstubAllGlobals(); }
+    });
+
     it('surfaces clipboard failure from Copy Title without a success toast', async () => {
         const writeText = vi.fn().mockRejectedValue(new Error('Clipboard unavailable'));
         const showToast = vi.fn();
@@ -212,7 +440,7 @@ describe('TaskQuickActionMenu', () => {
         fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
         fireEvent.change(screen.getByRole('textbox', { name: 'task.aria.contexts' }), { target: { value: input } });
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: expected }));
+        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: expected }, props.task));
     });
 
     it.each(['pointer', 'keyboard'] as const)(
@@ -238,7 +466,7 @@ describe('TaskQuickActionMenu', () => {
             expect(screen.getByRole('menu')).toBeInTheDocument();
             expect(input).toHaveValue('@garden');
             fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-            await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: ['@garden'] }));
+            await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: ['@garden'] }, props.task));
         },
     );
 
@@ -248,7 +476,7 @@ describe('TaskQuickActionMenu', () => {
         const save = screen.getByRole('button', { name: 'Save' });
         expect(save).toBeEnabled();
         fireEvent.click(save);
-        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: ['@garden'] }));
+        await waitFor(() => expect(props.onUpdateTask).toHaveBeenCalledExactlyOnceWith({ contexts: ['@garden'] }, props.task));
     });
 
     it('does not write canonical contexts merely by opening or cancelling the menu (#1189)', () => {
@@ -288,14 +516,14 @@ describe('TaskQuickActionMenu', () => {
         openDatePanel('Start Date…');
 
         expect(datesButton).toHaveAttribute('aria-expanded', 'true');
-        expect(screen.getByRole('dialog', { name: /start date/i }))
+        expect(screen.getByRole('dialog', { name: /^start date$/i }))
             .toHaveClass('w-[min(30rem,calc(100vw-1rem))]');
 
         openDatePanel('Due Date…');
-        expect(screen.getByRole('dialog', { name: /due date/i })).toBeInTheDocument();
+        expect(screen.getByRole('dialog', { name: /^due date$/i })).toBeInTheDocument();
 
         openDatePanel('Review Date…');
-        expect(screen.getByRole('dialog', { name: /review date/i })).toBeInTheDocument();
+        expect(screen.getByRole('dialog', { name: /^review date$/i })).toBeInTheDocument();
     });
 
     it('uses Escape to close the active panel before closing the menu', () => {
@@ -304,7 +532,7 @@ describe('TaskQuickActionMenu', () => {
 
         fireEvent.keyDown(window, { key: 'Escape' });
         expect(props.onClose).not.toHaveBeenCalled();
-        expect(screen.queryByRole('dialog', { name: /due date/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: /^due date$/i })).not.toBeInTheDocument();
 
         fireEvent.keyDown(window, { key: 'Escape' });
         expect(props.onClose).toHaveBeenCalledTimes(1);
@@ -463,7 +691,7 @@ describe('TaskQuickActionMenu', () => {
 
         openDatePanel('Start Date…');
 
-        const dialog = screen.getByRole('dialog', { name: /start date/i });
+        const dialog = screen.getByRole('dialog', { name: /^start date$/i });
         fireEvent.change(within(dialog).getByLabelText('Start Date'), {
             target: { value: '2026-02-04' },
         });
@@ -483,7 +711,7 @@ describe('TaskQuickActionMenu', () => {
         const props = renderMenu({ onUpdateTask });
 
         openDatePanel('Start Date…');
-        const dialog = screen.getByRole('dialog', { name: /start date/i });
+        const dialog = screen.getByRole('dialog', { name: /^start date$/i });
         const input = within(dialog).getByLabelText('Start Date');
         fireEvent.change(input, { target: { value: '2026-02-04' } });
         fireEvent.keyDown(input, { key: 'Enter' });
@@ -499,7 +727,7 @@ describe('TaskQuickActionMenu', () => {
         const onUpdateTask = vi.fn(async () => ({ success: true as const }));
         renderMenu({ task: { ...task, startTime: '2026-02-04T09:30' }, onUpdateTask });
         openDatePanel('Start Date…');
-        const panel = screen.getByRole('dialog', { name: /start date/i });
+        const panel = screen.getByRole('dialog', { name: /^start date$/i });
         await user.clear(within(panel).getByLabelText('Start time'));
         await user.keyboard('{Enter}');
         await waitFor(() => expect(onUpdateTask).toHaveBeenCalledWith({ startTime: '2026-02-04' }));

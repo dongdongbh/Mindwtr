@@ -143,6 +143,39 @@ struct MindwtrOpenQuickCaptureIntent: AppIntent {
     }
 }
 
+// Paired with the widget target: small widgets use foreground buttons for task taps.
+@available(iOS 17.0, *)
+struct MindwtrOpenWidgetTaskIntent: AppIntent {
+    static var title: LocalizedStringResource = "Open Task"
+    static var description = IntentDescription("Opens a Mindwtr task.")
+    static var isDiscoverable: Bool { false }
+
+#if compiler(>=6.0)
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { .foreground(.immediate) }
+#endif
+
+    @available(*, deprecated, message: "Use supportedModes with newer App Intents SDKs.")
+    static var openAppWhenRun: Bool { true }
+
+    @Parameter(title: "Task identifier")
+    var taskId: String
+
+    init() { taskId = "" }
+    init(taskId: String) { self.taskId = taskId }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard !taskId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              taskId.utf16.count <= 1_024,
+              !taskId.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+              let url = MindwtrSiriCaptureLauncher.taskURL(taskId: taskId)
+        else { return .result() }
+        MindwtrSiriCaptureLauncher.open(url)
+        return .result()
+    }
+}
+
 @available(iOS 16.0, *)
 enum MindwtrShortcutList: String, AppEnum {
     case inbox

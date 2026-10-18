@@ -1,0 +1,8 @@
+{
+  "platforms": ["ios"],
+  "ios": {
+    "podspecPath": "ios/MindwtrIosAppBadge.podspec",
+    "swiftModuleName": "MindwtrIosAppBadge",
+    "modules": ["MindwtrIosAppBadgeModule"]
+  }
+}

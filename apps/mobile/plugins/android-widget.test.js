@@ -97,7 +97,9 @@ describe('android-widget', () => {
     expect(xml).toContain('android:widgetCategory="home_screen|keyguard"');
     expect(xml).toContain('android:initialLayout="@layout/mindwtr_widget"');
     expect(xml).toContain('android:previewImage="@drawable/mindwtr_widget_preview"');
-    expect(xml).toContain('android:updatePeriodMillis="0"');
+    expect(xml).toContain('android:updatePeriodMillis="1800000"');
+    expect(buildWidgetInfoXml(compact)).toContain('android:updatePeriodMillis="0"');
+    expect(buildWidgetInfoXml(quickCapture)).toContain('android:updatePeriodMillis="0"');
     expect(xml).toContain(`android:configure="${CONFIGURE_ACTIVITY_NAME}"`);
     // reconfigurable = the launcher's edit action on a placed widget;
     // configuration_optional = placement skips the picker and lands on the
@@ -144,7 +146,7 @@ describe('android-widget', () => {
     const application = manifest.manifest.application[0];
     expect(application.receiver).toEqual([{
       $: { 'android:name': 'tech.dongdongbh.mindwtr.androidwidget.TasksWidgetProvider', 'android:label': 'Mindwtr Dev', 'android:exported': 'true' },
-      'intent-filter': [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_UPDATE' } }] }],
+      'intent-filter': [{ action: ['android.appwidget.action.APPWIDGET_UPDATE', 'android.intent.action.DATE_CHANGED', 'android.intent.action.TIME_SET', 'android.intent.action.TIMEZONE_CHANGED'].map((action) => ({ $: { 'android:name': action } })) }],
       'meta-data': [{ $: { 'android:name': 'android.appwidget.provider', 'android:resource': '@xml/mindwtr_tasks_widget_info' } }],
     }, {
       $: { 'android:name': 'tech.dongdongbh.mindwtr.androidwidget.CompactWidgetProvider', 'android:label': '@string/mindwtr_compact_widget_label', 'android:exported': 'true' },
@@ -156,7 +158,7 @@ describe('android-widget', () => {
       'meta-data': [{ $: { 'android:name': 'android.appwidget.provider', 'android:resource': '@xml/mindwtr_quick_capture_widget_info' } }],
     }, {
       $: { 'android:name': 'tech.dongdongbh.mindwtr.dev.widget.TasksWidget', 'android:label': 'Mindwtr Dev', 'android:exported': 'true' },
-      'intent-filter': [{ action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_UPDATE' } }] }],
+      'intent-filter': [{ action: ['android.appwidget.action.APPWIDGET_UPDATE', 'android.intent.action.DATE_CHANGED', 'android.intent.action.TIME_SET', 'android.intent.action.TIMEZONE_CHANGED'].map((action) => ({ $: { 'android:name': action } })) }],
       'meta-data': [{ $: { 'android:name': 'android.appwidget.provider', 'android:resource': '@xml/mindwtr_legacy_tasks_widget_info' } }],
     }, {
       $: { 'android:name': CAPTURE_RECEIVER_NAME, 'android:exported': 'true' },
@@ -189,7 +191,7 @@ describe('android-widget', () => {
     });
   });
 
-  it('keeps the receiver filter to the widget update action only', () => {
+  it('admits widget updates and protected clock broadcasts for Tasks only', () => {
     const manifest = {
       manifest: {
         application: [{
@@ -205,7 +207,16 @@ describe('android-widget', () => {
 
     const actions = manifest.manifest.application[0].receiver[0]['intent-filter']
       .flatMap((filter) => filter.action.map((action) => action.$['android:name']));
-    expect(actions).toEqual(['android.appwidget.action.APPWIDGET_UPDATE']);
+    expect(actions).toEqual([
+      'android.appwidget.action.APPWIDGET_UPDATE',
+      'android.intent.action.DATE_CHANGED',
+      'android.intent.action.TIME_SET',
+      'android.intent.action.TIMEZONE_CHANGED',
+    ]);
+    for (const receiver of manifest.manifest.application[0].receiver.filter((entry) => /(?:Compact|QuickCapture)WidgetProvider$/.test(entry.$['android:name']))) {
+      expect(receiver['intent-filter'].flatMap((filter) => filter.action.map((action) => action.$['android:name'])))
+        .toEqual(['android.appwidget.action.APPWIDGET_UPDATE']);
+    }
   });
 
   it.each([

@@ -10,6 +10,7 @@ import {
   getCalendarWeekColumnWidth,
   getCalendarWeekContentClampX,
   getCalendarWeekMaxScrollX,
+  getCalendarWeekAutoScrollKey,
   getCalendarWeekInitialScrollX,
   getCalendarWeekInitialVisibleDayIndex,
   getCalendarWeekVisibleDaysUpdate,
@@ -150,6 +151,46 @@ describe('calendar view mode helpers', () => {
       visibleDays: 7,
       weekDays,
     })).toBe(0);
+  });
+
+  it('opens on the selected day when deadline-wide columns hold fewer days than the density', () => {
+    const weekDays = Array.from({ length: 7 }, (_, index) => new Date(2026, 9, 11 + index));
+
+    // 260pt deadline columns on a 304pt canvas: one day fits, so Thursday can lead (the density's clamp put Tuesday there).
+    expect(getCalendarWeekInitialScrollX({
+      availableWidth: 304,
+      columnWidth: 260,
+      selectedDate: new Date(2026, 9, 15, 12),
+      visibleDays: 5,
+      weekDays,
+    })).toBe(1040);
+    // Saturday stops where the week's last column meets the right edge.
+    expect(getCalendarWeekInitialScrollX({
+      availableWidth: 304,
+      columnWidth: 260,
+      selectedDate: new Date(2026, 9, 17, 12),
+      visibleDays: 5,
+      weekDays,
+    })).toBe(7 * 260 - 304);
+    // Density-sized columns keep the density's clamp.
+    expect(getCalendarWeekInitialScrollX({
+      availableWidth: 300,
+      columnWidth: 60,
+      selectedDate: new Date(2026, 9, 17, 12),
+      visibleDays: 5,
+      weekDays,
+    })).toBe(120);
+  });
+
+  it('scrolls the week again when the viewport resizes under deadline-wide columns', () => {
+    const weekDays = Array.from({ length: 7 }, (_, index) => new Date(2026, 9, 11 + index));
+    const place = { columnWidth: 260, selectedDate: new Date(2026, 9, 17, 12), visibleDays: 5, weekDays };
+
+    // Saturday leads at 1120 on a 700pt canvas; at 304pt the same 260pt columns must stop at 1516, so the key has to change.
+    expect(getCalendarWeekInitialScrollX({ ...place, availableWidth: 700 })).toBe(1120);
+    expect(getCalendarWeekInitialScrollX({ ...place, availableWidth: 304 })).toBe(1516);
+    expect(getCalendarWeekAutoScrollKey({ ...place, availableWidth: 304 })).not.toBe(getCalendarWeekAutoScrollKey({ ...place, availableWidth: 700 }));
+    expect(getCalendarWeekAutoScrollKey({ ...place, availableWidth: 304 })).toBe(getCalendarWeekAutoScrollKey({ ...place, availableWidth: 304 }));
   });
 
   it('accounts for the week gutter when aligning visible day columns', () => {

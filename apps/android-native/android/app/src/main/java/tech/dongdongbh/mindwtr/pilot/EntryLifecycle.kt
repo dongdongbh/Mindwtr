@@ -1,5 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import java.util.concurrent.Executors
+
 /**
  * EntryRouter's decisions about the [queue], apart from Android so JVM tests drive them: which entry core reads now (one at a
  * time, the oldest, never while work is open or a failed read waits), how long a failed read waits before the next try, and
@@ -50,7 +52,8 @@ class EntryLifecycle(private val queue: EntryQueue, private val now: () -> Long)
      */
     fun failed(entry: EntryQueue.Entry, message: String?): Failure {
         if (!entryRetryable(message)) return Failure.Refused(message.orEmpty().substringAfter(": "))
-        reading = null
+        // Another entry's failure (a file share staged in the background) never frees the entry being read.
+        if (reading == entry.id) reading = null
         failures += 1
         val delay = minOf(MAX_WAIT_MS, FIRST_WAIT_MS shl minOf(failures - 1, 4))
         retryAt = now() + delay
@@ -66,5 +69,33 @@ class EntryLifecycle(private val queue: EntryQueue, private val now: () -> Long)
     private companion object {
         const val FIRST_WAIT_MS = 5_000L
         const val MAX_WAIT_MS = 60_000L
+    }
+}
+
+/**
+ * EntryRouter's threads, apart from Android so JVM tests drive them: one background thread that stages file shares, and the
+ * main thread's queue ([post] runs a job there after a delay; [cancelPosts] drops what waits). After [close] (the ViewModel is
+ * gone, the process may live on) nothing starts: a waiting retry is dropped, a staging that ends later never pumps or
+ * schedules another retry (a stopped thread would throw on the main thread), and a core read that answers later neither opens
+ * nor removes its entry, so the next router opens it. [background], [close] and the jobs run on the main thread; [later] may
+ * be called from either.
+ */
+class EntryThreads(private val post: (Long, () -> Unit) -> Unit, private val cancelPosts: () -> Unit) {
+    private val worker = Executors.newSingleThreadExecutor()
+    private var closed = false
+
+    fun background(job: () -> Unit) {
+        if (!closed) worker.execute(job)
+    }
+
+    fun later(delayMs: Long = 0, job: () -> Unit) = post(delayMs, guarded(job))
+
+    /** [job] as a main-thread callback another handler runs (the ViewModel's ui, Menu's whenIdle): nothing once closed. */
+    fun guarded(job: () -> Unit): () -> Unit = { if (!closed) job() }
+
+    fun close() {
+        closed = true
+        cancelPosts()
+        worker.shutdownNow()
     }
 }

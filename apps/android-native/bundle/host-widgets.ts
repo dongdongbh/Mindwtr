@@ -84,9 +84,18 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
         if (payload === last && !input.stale) return false;
         bridge.publish(payload);
         last = payload;
+        logInfo('Android widget context and tag snapshots published', {
+            scope: 'widget', force: true,
+            context: { releaseCheck: 'v1.3.7/widget-context-selection', count: (publication.contexts?.length ?? 0) + (publication.tags?.length ?? 0) },
+        });
+        logInfo('Upcoming widget snapshot published', {
+            scope: 'widget',
+            force: true,
+            context: { releaseCheck: 'v1.3.7/widget-upcoming', platform: 'android', count: publication.lists.upcoming?.items.length ?? 0 },
+        });
         logInfo('Native Android widget payload published', {
             scope: 'widget',
-            context: { items: publication.items.length, language, scheme: input.systemColorScheme, locale: input.systemLocale, lists: input.listSelections },
+            context: { items: publication.items.length, language, scheme: input.systemColorScheme, locale: input.systemLocale, count: input.listSelections.length },
         });
         return true;
     };

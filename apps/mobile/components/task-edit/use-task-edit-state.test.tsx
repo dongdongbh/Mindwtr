@@ -1,7 +1,7 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { planAttachmentDraftSettlement, useTaskStore, type Task } from '@mindwtr/core';
+import { planAttachmentDraftSettlement, runStoreCommand, runSyncStoreSave, useTaskStore, type Task } from '@mindwtr/core';
 
 import { useTaskEditState } from './use-task-edit-state';
 
@@ -673,6 +673,233 @@ describe('useTaskEditState', () => {
             scope: 'task-edit',
             extra: { releaseCheck: 'v1.3.4/editor-attachment-save-merge', outcome: 'merged' },
         });
+    });
+
+    it('merges the draft\'s attachments over the row a sync save published while the save waited behind it', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        // onSave as the store runs it: a command behind the write gate (store-write-gate.ts).
+        const onSave = vi.fn((_id: string, _updates: Partial<Task>) => runStoreCommand(async () => ({ success: true })));
+        const at = '2026-08-27T00:00:00.000Z';
+        const file = { id: 'file-1', kind: 'file' as const, title: 'report.pdf', uri: 'file:///documents/attachments/file-1.pdf', createdAt: at, updatedAt: at };
+        const link = { id: 'link-1', kind: 'link' as const, title: 'Docs', uri: 'https://docs.example', createdAt: at, updatedAt: at };
+        const remote = { id: 'remote-1', kind: 'link' as const, title: 'Other device', uri: 'https://remote.example', createdAt: at, updatedAt: at };
+        const withFile: Task = { ...task, attachments: [file] };
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft: vi.fn(),
+                sections: [],
+                task: withFile,
+                tasks: [withFile],
+                visible: true,
+            });
+            return null;
+        }
+
+        const previous = useTaskStore.getState()._allTasks;
+        useTaskStore.setState({ _allTasks: [withFile] });
+        try {
+            renderer.act(() => {
+                renderer.create(React.createElement(Probe));
+            });
+            renderer.act(() => state.setAttachments([file, link]));
+            let release!: () => void;
+            const held = new Promise<void>((resolve) => { release = resolve; });
+            // The save is issued while a sync save holds the gate; the save then publishes another device's attachment.
+            const save = runSyncStoreSave(async () => {
+                await held;
+                useTaskStore.setState({ _allTasks: [{ ...withFile, rev: 3, attachments: [file, remote] }] });
+            });
+            let saved!: Promise<boolean>;
+            renderer.act(() => { saved = state.draftLifecycle.save(); });
+            release();
+            await renderer.act(async () => {
+                await save;
+                expect(await saved).toBe(true);
+            });
+        } finally {
+            useTaskStore.setState({ _allTasks: previous });
+        }
+        expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ attachments: [file, remote, link] }));
+    });
+
+    // The editor's tags come from the task it opened; the save merges them by token onto the row a sync save published.
+    it('keeps a tag another device synced while a tag save waited behind a sync save', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn((_id: string, _updates: Partial<Task>) => runStoreCommand(async () => ({ success: true })));
+        const tagged: Task = { ...task, tags: ['#a'] };
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft: vi.fn(),
+                sections: [],
+                task: tagged,
+                tasks: [tagged],
+                visible: true,
+            });
+            return null;
+        }
+
+        const previous = useTaskStore.getState()._allTasks;
+        useTaskStore.setState({ _allTasks: [tagged] });
+        try {
+            renderer.act(() => {
+                renderer.create(React.createElement(Probe));
+            });
+            renderer.act(() => state.setDraftField('tags', '#a, #b'));
+            let release!: () => void;
+            const held = new Promise<void>((resolve) => { release = resolve; });
+            const save = runSyncStoreSave(async () => {
+                await held;
+                useTaskStore.setState({ _allTasks: [{ ...tagged, rev: 3, tags: ['#a', '#remote'] }] });
+            });
+            let saved!: Promise<boolean>;
+            renderer.act(() => { saved = state.draftLifecycle.save(); });
+            release();
+            await renderer.act(async () => {
+                await save;
+                expect(await saved).toBe(true);
+            });
+        } finally {
+            useTaskStore.setState({ _allTasks: previous });
+        }
+        expect(onSave).toHaveBeenCalledTimes(1);
+        expect(onSave.mock.calls[0][1].tags).toEqual(['#a', '#remote', '#b']);
+    });
+
+    it('keeps the base the draft was opened on across an Android activity restore, so a tag synced meanwhile stays', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn((_id: string, _updates: Partial<Task>) => true);
+        const tagged: Task = { ...task, tags: ['#a'] };
+        let shown: Task = tagged;
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft: vi.fn(),
+                sections: [],
+                task: shown,
+                tasks: [shown],
+                visible: true,
+            });
+            return null;
+        }
+        const previous = useTaskStore.getState()._allTasks;
+        useTaskStore.setState({ _allTasks: [tagged] });
+        try {
+            nativeActivityState.current = { activityId: 201, isChangingConfigurations: false };
+            let firstTree!: renderer.ReactTestRenderer;
+            renderer.act(() => { firstTree = renderer.create(React.createElement(Probe)); });
+            renderer.act(() => state.setDraftField('tags', '#a, #b'));
+            nativeActivityState.destroyed.set(201, { activityId: 201, isChangingConfigurations: true });
+            nativeActivityState.current = { activityId: 202, isChangingConfigurations: false };
+            renderer.act(() => { firstTree.unmount(); });
+            // Another device's tag lands while the activity is recreated.
+            shown = { ...tagged, rev: 3, tags: ['#a', '#remote'] };
+            useTaskStore.setState({ _allTasks: [shown] });
+            renderer.act(() => { renderer.create(React.createElement(Probe)); });
+            await renderer.act(async () => { expect(await state.draftLifecycle.save()).toBe(true); });
+        } finally {
+            useTaskStore.setState({ _allTasks: previous });
+        }
+        expect(onSave).toHaveBeenCalledTimes(1);
+        expect(onSave.mock.calls[0][1].tags).toEqual(['#a', '#remote', '#b']);
+    });
+
+    // The task has a stored reminder policy, so core's draft patch carries it; the save writes it only when changed.
+    it('does not write an unchanged reminder policy over one another device synced', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn((_id: string, _updates: Partial<Task>) => runStoreCommand(async () => ({ success: true })));
+        const opened: Task = { ...task, tags: ['#a'], reminderPolicy: 'send' };
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft: vi.fn(),
+                sections: [],
+                task: opened,
+                tasks: [opened],
+                visible: true,
+            });
+            return null;
+        }
+
+        const previous = useTaskStore.getState()._allTasks;
+        useTaskStore.setState({ _allTasks: [opened] });
+        try {
+            renderer.act(() => {
+                renderer.create(React.createElement(Probe));
+            });
+            renderer.act(() => state.setDraftField('tags', '#a, #b'));
+            let release!: () => void;
+            const held = new Promise<void>((resolve) => { release = resolve; });
+            const save = runSyncStoreSave(async () => {
+                await held;
+                useTaskStore.setState({ _allTasks: [{ ...opened, rev: 3, reminderPolicy: 'skip' }] });
+            });
+            let saved!: Promise<boolean>;
+            renderer.act(() => { saved = state.draftLifecycle.save(); });
+            release();
+            await renderer.act(async () => {
+                await save;
+                expect(await saved).toBe(true);
+            });
+        } finally {
+            useTaskStore.setState({ _allTasks: previous });
+        }
+        expect(onSave).toHaveBeenCalledTimes(1);
+        expect(onSave.mock.calls[0][1]).toEqual({ tags: ['#a', '#b'] });
+    });
+
+    it('hands a save without attachments to onSave at once, even while a sync save holds the gate', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        const onSave = vi.fn((_id: string, _updates: Partial<Task>) => true);
+        function Probe() {
+            state = useTaskEditState({
+                onClose: vi.fn(),
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft: vi.fn(),
+                sections: [],
+                task,
+                tasks: [task],
+                visible: true,
+            });
+            return null;
+        }
+        renderer.act(() => { renderer.create(React.createElement(Probe)); });
+        renderer.act(() => {
+            state.titleDraftRef.current = 'Renamed';
+            state.setTitleDraft('Renamed');
+            state.setDraftField('title', 'Renamed');
+        });
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const save = runSyncStoreSave(async () => { await held; });
+        let saved!: Promise<boolean>;
+        try {
+            renderer.act(() => { saved = state.draftLifecycle.save(); });
+            await renderer.act(async () => { for (let tick = 0; tick < 10; tick += 1) await Promise.resolve(); });
+            // The modal's onSave ran without waiting for the sync save, so the modal can close.
+            expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ title: 'Renamed' }));
+        } finally {
+            release();
+        }
+        await renderer.act(async () => { await save; expect(await saved).toBe(true); });
     });
 
     it('settles the files against the list Save wrote: newer stored bytes at the baseline path are kept', async () => {

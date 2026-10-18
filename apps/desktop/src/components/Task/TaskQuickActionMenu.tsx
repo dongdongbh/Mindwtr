@@ -1,4 +1,5 @@
 import {
+    useCallback,
     useEffect,
     useLayoutEffect,
     useRef,
@@ -44,6 +45,7 @@ import { TimeInput } from '../ui/TimeInput';
 const VIEWPORT_MARGIN_PX = 8;
 const PANEL_GAP_PX = 8;
 const MENU_WIDTH_PX = 224;
+const HOVER_OPEN_DELAY_MS = 250;
 
 type QuickPanelId = 'dates' | 'startTime' | 'dueDate' | 'reviewAt' | 'destination' | 'contexts' | 'priority' | null;
 
@@ -85,7 +87,8 @@ export interface TaskQuickActionMenuProps {
     onStatusChange: (status: TaskStatus) => void;
     onCreateArea: (name: string) => Promise<string | null>;
     onCreateProject: (title: string) => Promise<string | null>;
-    onUpdateTask: (updates: Partial<Task>) => Promise<StoreActionResult>;
+    /** With [base] (the task an edit panel opened on), the updates merge onto the latest row field by field. */
+    onUpdateTask: (updates: Partial<Task>, base?: Task) => Promise<StoreActionResult>;
     /** Extra entries rendered above Delete. Generic by design — the menu does not interpret them. */
     extraActions?: Array<{
         id: string;
@@ -147,6 +150,14 @@ const preserveFocusedDatePanelLayout = (event: ReactMouseEvent<HTMLDivElement>) 
     event.preventDefault();
 };
 
+const focusPanelControl = (panel: HTMLElement | null) => {
+    const control = panel?.querySelector<HTMLElement>(
+        'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    control?.focus();
+    return control;
+};
+
 export function TaskQuickActionMenu({
     task,
     x,
@@ -175,6 +186,8 @@ export function TaskQuickActionMenu({
     const menuRef = useRef<HTMLDivElement | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
     const focusedPanelRef = useRef<QuickPanelId>(null);
+    const hoverTimerRef = useRef<number | null>(null);
+    const panelOpenedByHoverRef = useRef(false);
     const initialLayoutScrollSettledRef = useRef(false);
     const datesButtonRef = useRef<HTMLButtonElement | null>(null);
     const destinationButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -202,6 +215,8 @@ export function TaskQuickActionMenu({
     const [destinationDraft, setDestinationDraft] = useState<TaskMoveDestination>(initialDestinationDraft);
     const [sectionDraft, setSectionDraft] = useState(initialSectionDraft);
     const [contextsDraft, setContextsDraft] = useState(initialContextsDraft);
+    // The task the contexts draft was last reset from: the save merges against it.
+    const contextsBaseRef = useRef(task);
     const [savingPanel, setSavingPanel] = useState<Exclude<QuickPanelId, null> | null>(null);
     const startLabel = tFallback(t, 'taskEdit.startDateLabel', 'Start Date');
     const dueLabel = tFallback(t, 'taskEdit.dueDateLabel', 'Due Date');
@@ -254,6 +269,17 @@ export function TaskQuickActionMenu({
             && destinationDraft.id !== initialDestinationDraft.id);
     const sectionDraftChanged = sectionDraft !== initialSectionDraft;
     const contextsDraftChanged = normalizedDraftContexts.join('\u0000') !== normalizedInitialContexts.join('\u0000');
+    const hasDraftChanges = activePanel === 'startTime' ? startDraftChanged
+        : activePanel === 'dueDate' ? dueDraftChanged
+            : activePanel === 'reviewAt' ? reviewDraftChanged
+                : activePanel === 'destination' ? destinationDraftChanged || sectionDraftChanged
+                    : activePanel === 'contexts' && contextsDraftChanged;
+    const cancelHoverOpen = useCallback(() => {
+        if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+    }, []);
+
+    useEffect(() => cancelHoverOpen, [activePanel, cancelHoverOpen, hasDraftChanges, savingPanel, task, readOnly, prioritiesEnabled]);
 
     useEffect(() => {
         const nextStartDraft = splitDateTime(task.startTime);
@@ -272,6 +298,7 @@ export function TaskQuickActionMenu({
                 : { kind: 'none' });
         setSectionDraft(task.projectId ? task.sectionId || '' : '');
         setContextsDraft(task.contexts?.join(', ') || '');
+        contextsBaseRef.current = task;
     }, [task.areaId, task.contexts, task.dueDate, task.id, task.projectId, task.reviewAt, task.startTime]);
 
     // Focus the menu container, not the first item — like native context menus,
@@ -345,6 +372,7 @@ export function TaskQuickActionMenu({
         // keys the open menu consumes (arrows would otherwise move the list
         // selection behind the menu and close it via the scroll listener).
         const handleKeyDown = (event: KeyboardEvent) => {
+            cancelHoverOpen();
             const target = event.target instanceof Node ? event.target : null;
             const inSelectorDropdown = Boolean(
                 target instanceof Element && target.closest('[data-selector-dropdown="true"]'),
@@ -392,9 +420,12 @@ export function TaskQuickActionMenu({
                         active instanceof HTMLElement
                         && surface?.contains(active)
                         && active.getAttribute('aria-haspopup') === 'dialog'
-                        && active.getAttribute('aria-expanded') !== 'true'
                     ) {
-                        active.click();
+                        if (active.getAttribute('aria-expanded') === 'true') {
+                            focusPanelControl(panelRef.current);
+                        } else {
+                            active.click();
+                        }
                         break;
                     }
                     return;
@@ -421,7 +452,7 @@ export function TaskQuickActionMenu({
             window.removeEventListener('contextmenu', handlePointer);
             window.removeEventListener('keydown', handleKeyDown, true);
         };
-    }, [activePanel, onClose]);
+    }, [activePanel, cancelHoverOpen, onClose]);
 
     const menuPosition = {
         left: clamp(
@@ -496,20 +527,29 @@ export function TaskQuickActionMenu({
         }
         if (focusedPanelRef.current === activePanel) return;
         focusedPanelRef.current = activePanel;
-        const focusable = panelRef.current?.querySelector<HTMLElement>(
-            'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        );
-        focusable?.focus();
+        if (panelOpenedByHoverRef.current) return;
+        const control = focusPanelControl(panelRef.current);
+        if (activePanel === 'startTime' || activePanel === 'dueDate' || activePanel === 'reviewAt') {
+            control?.click();
+        }
     }, [activePanel, panelPosition]);
 
     if (typeof document === 'undefined') return null;
 
-    const openPanel = (panelId: Exclude<QuickPanelId, null>) => {
+    const openPanel = (panelId: Exclude<QuickPanelId, null>, fromHover = false) => {
+        cancelHoverOpen();
+        if (fromHover && (
+            hasDraftChanges || savingPanel
+            || panelRef.current?.contains(document.activeElement)
+            || document.activeElement?.closest('[data-selector-dropdown="true"]')
+        )) return;
         if (panelId === activePanel) {
+            if (fromHover) return;
             setPanelPosition(null);
             setActivePanel(null);
             return;
         }
+        panelOpenedByHoverRef.current = fromHover;
         setPanelPosition(null);
         if (panelId === 'startTime') {
             const nextStartDraft = splitDateTime(task.startTime);
@@ -532,8 +572,9 @@ export function TaskQuickActionMenu({
             setSectionDraft(task.projectId ? task.sectionId || '' : '');
         } else if (panelId === 'priority') {
             // The priority panel applies immediately from task state; no draft to reset.
-        } else {
+        } else if (panelId === 'contexts') {
             setContextsDraft(task.contexts?.join(', ') || '');
+            contextsBaseRef.current = task;
         }
         setActivePanel(panelId);
     };
@@ -651,7 +692,8 @@ export function TaskQuickActionMenu({
     const handleContextsSave = async () => {
         setSavingPanel('contexts');
         try {
-            const result = await onUpdateTask({ contexts: normalizedDraftContexts });
+            // Merged by token onto the latest row: a context another device added since the panel opened stays.
+            const result = await onUpdateTask({ contexts: normalizedDraftContexts }, contextsBaseRef.current);
             if (!result.success) {
                 throw new Error(result.error || 'Failed to update task contexts');
             }
@@ -718,16 +760,18 @@ export function TaskQuickActionMenu({
         showChevron = false,
         disabled = false,
         title,
+        hoverPanel,
     }: {
         key?: string;
         ref?: RefObject<HTMLButtonElement | null>;
         icon?: ReactNode;
         label: string;
         active?: boolean;
-        onClick: () => void;
+        onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
         showChevron?: boolean;
         disabled?: boolean;
         title?: string;
+        hoverPanel?: Exclude<QuickPanelId, null>;
     }) => (
         <button
             key={key}
@@ -739,6 +783,13 @@ export function TaskQuickActionMenu({
             disabled={disabled}
             title={title}
             onClick={onClick}
+            onPointerEnter={(event) => {
+                if (!hoverPanel || disabled || event.pointerType !== 'mouse') return;
+                cancelHoverOpen();
+                hoverTimerRef.current = window.setTimeout(() => openPanel(hoverPanel, true), HOVER_OPEN_DELAY_MS);
+            }}
+            onPointerLeave={cancelHoverOpen}
+            onPointerDown={cancelHoverOpen}
             className={cn(
                 // Plain focus: styles, not focus-visible: — keyboard traversal
                 // moves focus programmatically, and WebKit does not always mark
@@ -808,6 +859,7 @@ export function TaskQuickActionMenu({
                         || activePanel === 'dueDate'
                         || activePanel === 'reviewAt',
                     onClick: () => openPanel('dates'),
+                    hoverPanel: 'dates',
                     showChevron: true,
                 })}
                 {!readOnly && renderMenuAction({
@@ -816,6 +868,7 @@ export function TaskQuickActionMenu({
                     label: moveToLabel,
                     active: activePanel === 'destination',
                     onClick: () => openPanel('destination'),
+                    hoverPanel: 'destination',
                     showChevron: true,
                 })}
                 {!readOnly && renderMenuAction({
@@ -824,6 +877,7 @@ export function TaskQuickActionMenu({
                     label: `${contextsLabel}…`,
                     active: activePanel === 'contexts',
                     onClick: () => openPanel('contexts'),
+                    hoverPanel: 'contexts',
                     showChevron: true,
                 })}
                 {!readOnly && prioritiesEnabled && renderMenuAction({
@@ -832,14 +886,17 @@ export function TaskQuickActionMenu({
                     label: `${priorityLabel}…`,
                     active: activePanel === 'priority',
                     onClick: () => openPanel('priority'),
+                    hoverPanel: 'priority',
                     showChevron: true,
                 })}
                 {!readOnly ? <div className="my-1 h-px bg-border/70" role="separator" /> : null}
                 {renderMenuAction({
                     icon: <Copy className="h-4 w-4" />,
                     label: tFallback(t, 'task.copyTitle', 'Copy Title'),
-                    onClick: () => {
-                        void copyTaskTitles([task], t, false, 'menu');
+                    onClick: (event) => {
+                        void copyTaskTitles([task], t, false, 'menu', {
+                            isTrusted: event.nativeEvent.isTrusted, detail: event.nativeEvent.detail,
+                        });
                         onClose();
                     },
                 })}
@@ -849,8 +906,10 @@ export function TaskQuickActionMenu({
                     label: kind === 'link'
                         ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
                         : tFallback(t, 'task.copyTaskId', 'Copy task ID'),
-                    onClick: () => {
-                        void copyTaskReference(task.id, kind, t);
+                    onClick: (event) => {
+                        void copyTaskReference(task.id, kind, t, {
+                            isTrusted: event.nativeEvent.isTrusted, detail: event.nativeEvent.detail,
+                        });
                         onClose();
                     },
                 }))}
@@ -915,6 +974,7 @@ export function TaskQuickActionMenu({
                     }}
                     onContextMenu={(event) => event.preventDefault()}
                     onKeyDown={handlePanelKeyDown}
+                    onPointerEnter={cancelHoverOpen}
                 >
                     {activePanel === 'dates' ? (
                         <div className="space-y-1" role="menu" aria-label={datesLabel}>

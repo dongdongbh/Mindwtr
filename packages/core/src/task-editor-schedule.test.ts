@@ -603,3 +603,31 @@ describe('task editor recurrence calendar preview parity', () => {
         expect(format).toHaveBeenCalledWith('2026-10-02', 'PP');
     });
 });
+
+
+describe('task reminder policy controls', () => {
+    const task: Task = { id: 'policy', title: 'Task', status: 'next', tags: [], contexts: [],
+        createdAt: '2026-10-14', updatedAt: '2026-10-14', dueDate: '2026-10-15T10:00', repeatReminderMinutes: 15 };
+    it.each([
+        ['inherit', 'send', true], ['inherit', 'skip', false],
+        ['send', 'skip', true], ['skip', 'send', false],
+    ] as const)('resolves %s against %s without changing the saved repeat', (reminderPolicy, taskReminderDefault, showRepeat) => {
+        const draft = createTaskDraft({ ...task, reminderPolicy });
+        const before = structuredClone(draft);
+        const model = getTaskEditorReminders(draft, (key) => key, { taskReminderDefault, notificationsEnabled: false });
+        expect(model.policyOptions.map((option) => option.value)).toEqual(['inherit', 'send', 'skip']);
+        expect(model.policyOptions.filter((option) => option.selected).map((option) => option.value)).toEqual([reminderPolicy]);
+        expect(model.policyOptions[0].label).toBe(`Use default (${taskReminderDefault === 'skip' ? 'Skip' : 'Send'})`);
+        expect(model.showRepeat).toBe(showRepeat);
+        expect(model.hint).toContain('explicit time');
+        expect(model.disabledHint).toContain('turned off');
+        expect(draft).toEqual(before);
+    });
+    it('keeps date-only reminders out of the controls and never invents a time', () => {
+        const draft = createTaskDraft({ ...task, dueDate: '2026-10-15', reminderPolicy: 'send' });
+        const model = getTaskEditorReminders(draft, (key) => key);
+        expect(model.showSkip).toBe(false);
+        expect(model.showRepeat).toBe(false);
+        expect(draft.dueDate).toBe('2026-10-15');
+    });
+});

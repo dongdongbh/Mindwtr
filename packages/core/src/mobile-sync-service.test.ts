@@ -55,6 +55,9 @@ const createFakeHost = (options: FakeOptions = {}) => {
   const store = {
     lastDataChangeAt: 1,
     settings: {} as AppData['settings'],
+    // A slicing host's cycle prepares its store publish against these (D9b W6).
+    _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
+    _tasksById: new Map(), _projectsById: new Map(), _sectionsById: new Map(), _areasById: new Map(), _peopleById: new Map(),
     setError: vi.fn(),
     fetchData: vi.fn(async () => undefined),
   };
@@ -90,6 +93,7 @@ const createFakeHost = (options: FakeOptions = {}) => {
     localData: {
       getData: async () => emptyData(),
       saveData: async (data) => { saved.push(data); },
+      readTokenOf: () => ({ epoch: 0, generation: 0 }),
     },
     log: {
       info: (message, context) => { logs.push({ level: 'info', message, extra: context?.extra, force: context?.force }); },
@@ -321,7 +325,8 @@ describe('mobile sync service behind fake ports', () => {
 
     const stored = fake.saved.map((data) => data.settings);
     expect(stored.some((settings) => settings.lastSyncError?.includes('Authentication rejected'))).toBe(true);
-    const storeUpdates = vi.mocked(fake.host.core!.useTaskStore!.setState).mock.calls.map(([update]) => (typeof update === 'function' ? update({ settings: {} } as never) : update));
+    const storeUpdates = vi.mocked(fake.host.core!.useTaskStore!.setState).mock.calls.map(([update]) => (typeof update === 'function' ? update({ settings: {}, _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
+      _tasksById: new Map(), _projectsById: new Map(), _sectionsById: new Map(), _areasById: new Map(), _peopleById: new Map() } as never) : update));
     const text = JSON.stringify({ result, stored, storeUpdates, logs: fake.logs, syncErrors: fake.syncErrors, status: fake.values.get('@mindwtr_local_sync_status_v1') });
     expect(text).not.toContain(password);
   });
@@ -518,6 +523,111 @@ describe('mobile sync service behind fake ports', () => {
     }
   });
 
+  it('a slicing host saves on the token of its own read, carried across the local status merge (D9b W3)', async () => {
+    const fake = createFakeHost({ values: { ...WEBDAV_VALUES, '@mindwtr_local_sync_status_v1': JSON.stringify({ lastSyncStatus: 'success' }) } });
+    fake.host.sliceYield = async () => undefined;
+    const read = emptyData();
+    const token = { epoch: 7, generation: 3 };
+    const getData = vi.fn(async () => read);
+    const saveData = vi.fn(async () => undefined);
+    fake.host.localData = { getData, saveData, readTokenOf: (data) => (data === read ? token : undefined) };
+    const service = createMobileSyncService(fake.host);
+
+    await service.performMobileSync();
+
+    expect(getData).toHaveBeenCalledWith({ onStale: expect.any(Function) });
+    expect(saveData.mock.calls[0]?.[1]).toMatchObject({ token, onStale: expect.any(Function) });
+  });
+
+  it('a slicing host takes the store snapshot in one read and copies it in slices, never through the deep clone (D9b §2)', async () => {
+    const deepClones = async (sliceYield?: () => Promise<void>) => {
+      const fake = createFakeHost({ values: WEBDAV_VALUES });
+      fake.host.sliceYield = sliceYield;
+      const read = emptyData();
+      fake.host.localData = { getData: async () => read, saveData: async () => undefined, readTokenOf: () => ({ epoch: 0, generation: 0 }) };
+      const deep = vi.fn(() => emptyData());
+      fake.host.core!.getInMemoryAppDataSnapshot = deep;
+      await createMobileSyncService(fake.host).performMobileSync();
+      expect(vi.mocked(fake.host.core!.performSyncCycle!)).toHaveBeenCalled();
+      return deep.mock.calls.length;
+    };
+
+    expect(await deepClones(async () => undefined)).toBe(0);
+    // React Native slices nothing and keeps the deep clone.
+    expect(await deepClones()).toBeGreaterThan(0);
+  });
+
+  it('waits for a quiet period after the last edit before a follow-up on a slicing host (D9b W5)', async () => {
+    const delays = async (sliceYield?: () => Promise<void>) => {
+      const fake = createFakeHost({ values: WEBDAV_VALUES });
+      fake.host.sliceYield = sliceYield;
+      fake.store.lastDataChangeAt = Date.now() - 500;
+      const service = createMobileSyncService(fake.host);
+      const performSyncCycle = vi.mocked(fake.host.core!.performSyncCycle!);
+      performSyncCycle.mockImplementationOnce(async () => {
+        service.abortMobileSync();
+        throw new Error('aborted');
+      });
+      await service.performMobileSync();
+      await service.waitForMobileSyncIdle();
+      expect(performSyncCycle).toHaveBeenCalledTimes(2);
+      return fake.logs.filter((line) => line.message === 'Sync follow-up scheduled').map((line) => Number(line.extra?.delayMs));
+    };
+
+    // An edit 500 ms ago: a slicing cycle would abort on the next edit, so it waits until 2 s have passed without one.
+    const [sliced] = await delays(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(sliced).toBeGreaterThanOrEqual(1_400);
+    // React Native slices nothing and keeps its pacing.
+    expect(await delays()).toEqual([1_000]);
+  });
+
+  it('caps the quiet period at 2 s when the clock moved back behind the last edit (D9b W5)', async () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    fake.host.sliceYield = async () => undefined;
+    const service = createMobileSyncService(fake.host);
+    vi.mocked(fake.host.core!.performSyncCycle!).mockImplementationOnce(async () => {
+      // The last edit was stamped an hour ahead of the clock now.
+      fake.store.lastDataChangeAt = Date.now() + 3_600_000;
+      service.abortMobileSync();
+      throw new Error('aborted');
+    });
+    await service.performMobileSync();
+    await service.waitForMobileSyncIdle();
+    const delays = fake.logs.filter((line) => line.message === 'Sync follow-up scheduled').map((line) => Number(line.extra?.delayMs));
+    expect(delays).toEqual([2_000]);
+  }, 10_000);
+
+  it('refuses a slicing host without read tokens (D9b W3)', () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    fake.host.sliceYield = async () => undefined;
+    fake.host.localData = { getData: async () => emptyData(), saveData: async () => undefined };
+    expect(() => createMobileSyncService(fake.host)).toThrow('readTokenOf');
+  });
+
+  it('rechecks the quiet period when the follow-up timer fires: an edit during the wait pushes it back (D9b W5)', async () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    fake.host.sliceYield = () => new Promise((resolve) => setTimeout(resolve, 0));
+    fake.store.lastDataChangeAt = Date.now() - 500;
+    const service = createMobileSyncService(fake.host);
+    const performSyncCycle = vi.mocked(fake.host.core!.performSyncCycle!);
+    const starts: number[] = [];
+    const original = performSyncCycle.getMockImplementation()!;
+    performSyncCycle.mockImplementation(async (io) => { starts.push(Date.now()); return original(io); });
+    performSyncCycle.mockImplementationOnce(async () => {
+      starts.push(Date.now());
+      service.abortMobileSync();
+      throw new Error('aborted');
+    });
+    await service.performMobileSync();
+    // The follow-up waits ~1.5 s; an edit lands 1.4 s in.
+    await new Promise((resolve) => setTimeout(resolve, 1_400));
+    const editAt = Date.now();
+    fake.store.lastDataChangeAt = editAt;
+    await vi.waitFor(() => expect(starts).toHaveLength(2), { timeout: 5_000, interval: 50 });
+    expect(starts[1] - editAt).toBeGreaterThanOrEqual(1_950);
+  }, 10_000);
+
+
   it('treats a lifecycle abort as a success and queues a follow-up', async () => {
     const fake = createFakeHost({ values: WEBDAV_VALUES });
     const service = createMobileSyncService(fake.host);
@@ -638,6 +748,74 @@ describe('mobile sync service behind fake ports', () => {
     expect(String(result.error)).toContain('partly encrypted');
     const scope = await readSyncLocationScope({ getItem: async (key: string) => fake.values.get(key) ?? null });
     expect(JSON.parse(fake.values.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual({ state: 'off', partlyEncryptedScope: scope });
+  });
+
+  describe('hands one transfer admission to every attachment pass of a cycle (D9b W7)', () => {
+    const withFile = (): AppData => ({ ...emptyData(), tasks: [{ id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [],
+      createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+      attachments: [{ id: 'a1', kind: 'file', title: 'a.pdf', uri: 'file:///a.pdf', cloudKey: 'attachments/a1.pdf', localStatus: 'available',
+        createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }] }] } as AppData);
+    type Port = 'syncWebdav' | 'syncCloud' | 'syncDropbox' | 'syncFile';
+    const cases: [Port, () => { fake: ReturnType<typeof createFakeHost>; options: Parameters<ReturnType<typeof createMobileSyncService>['performMobileSync']>[1] }][] = [
+      ['syncWebdav', () => ({ fake: createFakeHost({ values: WEBDAV_VALUES, secrets: { [WEBDAV_PASSWORD_KEY]: 'secret' } }), options: { manual: true } })],
+      ['syncCloud', () => ({ fake: createFakeHost({ values: { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'selfhosted',
+        [CLOUD_URL_KEY]: 'https://cloud.example.com' }, secrets: { [CLOUD_TOKEN_KEY]: 'token' } }), options: { manual: true } })],
+      ['syncFile', () => ({ fake: createFakeHost(), options: { manual: true, configOverride: { backend: 'file' as const, syncPath: 'file:///sync/data.json' } } })],
+      ['syncDropbox', () => {
+        const fake = createFakeHost({ values: { [SYNC_BACKEND_KEY]: 'off' }, dropboxAppKey: 'client' });
+        const tokens = { accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3600_000 };
+        fake.host.core!.downloadDropboxAppData = vi.fn(async () => ({ data: emptyData(), rev: 'data-rev' })) as never;
+        fake.host.core!.getDropboxAppDataMetadata = vi.fn(async () => ({ rev: 'data-rev' }));
+        fake.host.core!.uploadDropboxAppData = vi.fn(async () => ({ rev: 'next-rev' }));
+        fake.host.dropboxAuth.getValidAccessTokenForTokens = vi.fn(async (_clientId, candidate) => ({ accessToken: candidate.accessToken, tokens: candidate }));
+        fake.host.fetch = vi.fn(async (input) => (String(input).endsWith('/files/list_folder')
+          ? new Response(JSON.stringify({ entries: [], has_more: false }))
+          : new Response(null, { status: 409 }))) as typeof fetch;
+        return { fake, options: { manual: true, configOverride: { backend: 'cloud' as const, cloudProvider: 'dropbox', dropbox: { tokens } } } };
+      }],
+    ];
+
+    it.each(cases)('%s: one admission per cycle, a new one the next cycle', async (port, build) => {
+      const { fake, options } = build();
+      const admissions: unknown[][] = [[], []];
+      let cycle = 0;
+      fake.host.attachments.hasPendingWork = async () => true;
+      fake.host.attachments.hasCompletedPresenceReconciliation = async () => true;
+      fake.host.attachments[port] = vi.fn(async (...args: unknown[]) => {
+        admissions[cycle].push((args[args.length - 1] as { transferAdmission?: unknown }).transferAdmission);
+        return false as const;
+      }) as never;
+      fake.host.encryption = { ...fake.host.encryption, probeLocationCiphertext: async () => 'plaintext' as const };
+      fake.host.localData.getData = async () => withFile();
+      fake.host.core!.getInMemoryAppDataSnapshot = () => withFile();
+      fake.host.core!.performSyncCycle = performSyncCycle;
+      const service = createMobileSyncService(fake.host);
+      for (cycle = 0; cycle < 2; cycle += 1) await service.performMobileSync(undefined, options);
+      for (const passes of admissions) {
+        expect(passes.length).toBeGreaterThan(0);
+        expect(passes[0]).toBeDefined();
+        expect(passes.every((admission) => admission === passes[0])).toBe(true);
+      }
+      expect(admissions[1][0]).not.toBe(admissions[0][0]);
+    });
+
+    it('gives an activation probe no admission, so its fallback passes may retry', async () => {
+      const fake = createFakeHost({ values: WEBDAV_VALUES, secrets: { [WEBDAV_PASSWORD_KEY]: 'secret' } });
+      const passes = vi.fn(async (..._args: unknown[]) => false as const);
+      fake.host.attachments.hasPendingWork = async () => true;
+      fake.host.attachments.syncWebdav = passes as never;
+      fake.host.encryption = { ...fake.host.encryption, probeLocationCiphertext: async () => 'plaintext' as const };
+      fake.host.localData.getData = async () => withFile();
+      fake.host.core!.getInMemoryAppDataSnapshot = () => withFile();
+      fake.host.core!.performSyncCycle = performSyncCycle;
+      const service = createMobileSyncService(fake.host);
+      await service.performMobileSync(undefined, {
+        activationProbe: true,
+        configOverride: { backend: 'webdav', webdav: { url: 'https://candidate.example.com/dav', username: 'bea', password: 'pw' } },
+      });
+      expect(passes).toHaveBeenCalled();
+      for (const call of passes.mock.calls) expect((call[call.length - 1] as { transferAdmission?: unknown }).transferAdmission).toBeUndefined();
+    });
   });
 
   it('runs the attachment pass a deferred pre-sync phase owes, even when the document is unchanged', async () => {

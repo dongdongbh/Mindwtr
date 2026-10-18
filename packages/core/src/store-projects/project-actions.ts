@@ -56,6 +56,7 @@ const duplicateProjectAttachmentCopy = (attachment: NonNullable<Project['attachm
     contentRev: undefined,
     contentMtimeMs: undefined,
     contentSize: undefined,
+    staleContentHash: undefined,
 });
 
 /** Exact RN duplicateProject allocation and row policy, with caller-owned IDs. */

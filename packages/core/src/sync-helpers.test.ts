@@ -18,6 +18,7 @@ import { mergeSettingsForSync } from './sync-merge-settings';
 import { toRemoteSyncDocument } from './sync-document';
 import { normalizeAiSettingsForSync } from './store-helpers';
 import type { AppData, Attachment, GtdSettings } from './types';
+import { withQuickJsArgumentLimit } from './quickjs-test-utils';
 
 describe('stable sync property-order reuse', () => {
     // Original serializer, kept as a byte-for-byte compatibility oracle. These
@@ -193,6 +194,14 @@ describe('sync-helpers pending attachment uploads', () => {
                 reason: 'missing-cloud-key',
             },
         ]);
+    });
+
+    it('lists one task\'s and one project\'s 65536 pending uploads each, more than a QuickJS call takes arguments', () => {
+        const attachments = Array.from({ length: 65_536 }, (_, index) => fileAttachment({ id: `att-${index}` }));
+        const data = createData(attachments);
+        data.projects = [{ id: 'project-1', title: 'Project', status: 'active', color: '#000000', order: 0, tagIds: [],
+            attachments, createdAt: now, updatedAt: now }];
+        expect(withQuickJsArgumentLimit(() => findPendingAttachmentUploads(data))).toHaveLength(2 * 65_536);
     });
 
     it('ignores attachments that are already uploaded, remote links, or marked missing', () => {

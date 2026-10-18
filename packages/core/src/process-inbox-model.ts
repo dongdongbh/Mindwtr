@@ -1,3 +1,4 @@
+import { getTaskReminderPolicy } from './task-reminder-policy';
 import { formatTimeEstimateLabel, resolveTimeEstimateOptions } from './calendar-scheduling';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import {
@@ -989,6 +990,7 @@ export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
             ? { ...task.recurrence }
             : task.recurrence,
         relativeStartOffset: task.relativeStartOffset ? { ...task.relativeStartOffset } : undefined,
+        reminderPolicy: getTaskReminderPolicy(task),
         suppressMindwtrReminders: task.suppressMindwtrReminders,
         repeatReminderMinutes: task.repeatReminderMinutes,
         showFutureRecurrence: task.showFutureRecurrence,

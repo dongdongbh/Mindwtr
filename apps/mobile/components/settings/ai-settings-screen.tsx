@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+    updateSettingsFromLatest,
     fetchProviderModelsCached,
     formatOpenAIExtraBodyParams,
     mergeModelOptions,
@@ -130,11 +131,11 @@ export function AISettingsScreen() {
     const speechApiKey = speechKey.provider === speechProvider ? speechKey.value : '';
     const speechModelOptions = mergeModelOptions(fetchedSpeechModels, staticSpeechModelOptions, speechModel);
 
-    // Each change merges into the settings stored when it is made, never into this render's
-    // copy: two changes in one render (the FOSS corrections) would otherwise undo each other.
+    // Each change merges into the settings stored when its write is admitted, never into this render's
+    // copy: two changes in one render (the FOSS corrections) would otherwise undo each other, and a sync
+    // save's newer keys stay.
     const updateAISettings = useCallback((next: Partial<NonNullable<AppSettings['ai']>>) => {
-        const stored = useTaskStore.getState().settings.ai;
-        updateSettings({ ai: { ...(stored ?? {}), ...next } }).catch(logSettingsError);
+        updateSettingsFromLatest((latest) => ({ ai: { ...(latest.ai ?? {}), ...next } }), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(logSettingsError);
     }, [updateSettings]);
 
     useEffect(() => {
@@ -220,9 +221,10 @@ export function AISettingsScreen() {
     const updateSpeechSettings = useCallback((
         next: Partial<NonNullable<NonNullable<AppSettings['ai']>['speechToText']>>
     ) => {
-        const stored = useTaskStore.getState().settings.ai?.speechToText;
-        updateAISettings({ speechToText: { ...(stored ?? {}), ...next } });
-    }, [updateAISettings]);
+        updateSettingsFromLatest((latest) => ({
+            ai: { ...(latest.ai ?? {}), speechToText: { ...(latest.ai?.speechToText ?? {}), ...next } },
+        }), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(logSettingsError);
+    }, [updateSettings]);
 
     useEffect(() => {
         if (needsFossAIProviderReset(settings.ai?.provider, isFossBuild)) {

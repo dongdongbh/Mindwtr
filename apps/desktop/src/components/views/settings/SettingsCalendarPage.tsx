@@ -4,6 +4,7 @@ import {
     hasExplicitExternalCalendarColor,
     themeExternalCalendarDisplayColor,
     type ExternalCalendarSubscription,
+    updateSettingsFromLatest,
     useTaskStore,
 } from '@mindwtr/core';
 import { Ban, ExternalLink } from 'lucide-react';
@@ -101,13 +102,15 @@ export function SettingsCalendarPage({
 }: SettingsCalendarPageProps) {
     const language = useDocumentationLanguage();
     const areas = useTaskStore((state) => state.areas).filter((area) => !area.deletedAt);
-    const updateSettings = useTaskStore((state) => state.updateSettings);
+    // Toggles the area on the calendar as stored when the write is admitted, so another device's edits stay.
     const toggleArea = (calendar: ExternalCalendarSubscription, areaId: string) => {
-        const current = calendar.areaIds ?? [];
-        const next = current.includes(areaId) ? current.filter((id) => id !== areaId) : [...current, areaId];
-        void updateSettings({ externalCalendars: externalCalendars.map((entry) => (
-            entry.id === calendar.id ? { ...entry, areaIds: next } : entry
-        )) });
+        void updateSettingsFromLatest((latest) => ({
+            externalCalendars: (latest.externalCalendars ?? externalCalendars).map((entry) => {
+                if (entry.id !== calendar.id) return entry;
+                const current = entry.areaIds ?? [];
+                return { ...entry, areaIds: current.includes(areaId) ? current.filter((id) => id !== areaId) : [...current, areaId] };
+            }),
+        }));
     };
     const permissionLabel = (() => {
         if (systemCalendarPermission === 'granted') return t.calendarSystemPermissionGranted;

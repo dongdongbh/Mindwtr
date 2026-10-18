@@ -295,10 +295,17 @@ try {
 
     // (e) History: Done, then Archived, each with core's rows.
     await openTile(seen.tiles.find((tile) => tile.id === 'history').label, en['nav.history']);
-    nodes = await waitFor('core\'s Done rows', (current) => tabSelected(current, en['nav.done']) && rowTitles(current).length > 0, 20_000);
-    const doneRows = rowTitles(nodes);
-    check(JSON.stringify(doneRows) === JSON.stringify(seen.done.slice(0, doneRows.length)) && seen.done.includes(titles.done),
-        `(e) Done opens first and shows core's first ${doneRows.length} rows in core's order, the run's Done capture among core's`);
+    // The rows are read once they are core's or 20 s pass (never one dump while the list may still load); a mismatch names both.
+    const doneShown = (current) => (tabSelected(current, en['nav.done']) ? rowTitles(current) : []);
+    const doneMatch = (rows) => rows.length > 0 && JSON.stringify(rows) === JSON.stringify(seen.done.slice(0, rows.length));
+    nodes = await screen();
+    const firstDone = doneShown(nodes);
+    for (const deadline = Date.now() + 20_000; !doneMatch(doneShown(nodes)) && Date.now() < deadline;) { await sleep(500); nodes = await screen(); }
+    const doneRows = doneShown(nodes);
+    if (doneMatch(doneRows) && !doneMatch(firstDone)) console.log(`note - Done's first dump showed ${JSON.stringify(firstDone)} before core's rows`);
+    check(doneMatch(doneRows) && seen.done.includes(titles.done),
+        `(e) Done opens first and shows core's first ${doneRows.length} rows in core's order, the run's Done capture among core's`
+        + (doneMatch(doneRows) ? '' : ` (screen ${JSON.stringify(doneRows)}, core ${JSON.stringify(seen.done.slice(0, 8))}, run's ${titles.done})`));
     nodes = await tapExpecting(tab(nodes, en['nav.archived']), (current) => tabSelected(current, en['nav.archived']) && rowTitles(current).length > 0, 'the Archived tab');
     const archiveRows = rowTitles(nodes);
     check(JSON.stringify(archiveRows) === JSON.stringify(seen.archive.slice(0, archiveRows.length)) && archiveRows.includes(titles.archived),

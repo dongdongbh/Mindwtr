@@ -11,6 +11,7 @@ import { taskEditValuesEqual } from './json-value-equality';
 import { ensureDeviceId } from './store-helpers';
 import { timestampAtLeastAfter } from './store-settings';
 import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
+import { gateStoreCommands } from './store-write-gate';
 import type { PreparedAreaAuthority } from './store-types';
 import type { AppSettings, Area } from './types';
 import type { ExternalCalendarSubscription } from './ics';
@@ -165,7 +166,8 @@ export function createCalendarSubscriptionSettingsMethods(deps: {
         return source ? { ok: true as const, value: { adapter, authority, source, storage, legacyRaw } }
             : fail('INVALID_INPUT', 'Saved calendar subscriptions are malformed or exceed the source bound');
     };
-    return {
+    // The bridge calls these outside the contract: each async method is a store command (store-write-gate.ts).
+    return gateStoreCommands({
         async getCalendarSubscriptionOptions(input: unknown): Promise<NativeHostResult<CalendarSubscriptionSettingsOptions>> {
             if (!record(input) || !exact(input, [])) return fail('INVALID_INPUT', 'Calendar subscription options take an empty object');
             const admitted = ready(); if (!admitted.ok) return admitted;
@@ -223,5 +225,5 @@ export function createCalendarSubscriptionSettingsMethods(deps: {
             if (outcome.ok) authorizations.delete(request.requestId);
             return outcome;
         },
-    };
+    });
 }

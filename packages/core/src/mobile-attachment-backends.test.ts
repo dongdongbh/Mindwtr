@@ -4,7 +4,7 @@ import { computeSha256Hex } from './attachment-hash';
 import { buildFileSyncGenerationCloudKey } from './attachment-paths';
 import { DropboxConflictError, DropboxFileNotFoundError } from './dropbox';
 import { WebDavRemoteWriteConflictError } from './webdav';
-import { WebdavHostUploadLimitError } from './attachment-transfer';
+import { createAttachmentTransferAdmission, WebdavHostUploadLimitError } from './attachment-transfer';
 import { ResponseTooLargeError } from './http-utils';
 import { createMobileAttachmentFiles, type MobileAttachmentSafPort } from './mobile-attachment-files';
 import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from './mobile-attachment-common';
@@ -132,6 +132,12 @@ const setup = (options: {
 };
 
 const webdavConfig = { url: `${BASE_URL}/data.json`, username: 'user', password: 'pw' };
+
+/** The host's native file hash (design D9b W7 hashes in native code, never bytes read into JS), over the memory files. */
+const nativeHash = (env: ReturnType<typeof setup>) => env.installer.hashAttachmentFileGeneration.mockImplementation(
+  async (path: string) => ({ sha256: (await computeSha256Hex(env.memory.read(path)!))!, size: env.memory.read(path)!.byteLength, modificationTimeMs: 1 }),
+);
+
 
 describe('WebDAV attachment pass', () => {
   afterEach(() => {
@@ -877,6 +883,65 @@ describe('WebDAV attachment pass', () => {
     expect(memory.read(LOCAL_URI)).toEqual(LOCAL);
   });
 
+  describe('design D9b W7: hash-checked download reuse and one transfer per cycle', () => {
+    const remoteOnly = async (bytes: Uint8Array | null) => fileAttachment({
+      uri: undefined, localStatus: 'missing', cloudKey: 'attachments/att-1.txt',
+      ...(bytes ? { fileHash: (await computeSha256Hex(bytes))! } : {}),
+    });
+
+    it('adopts a file at the download target whose native hash matches, with zero GETs', async () => {
+      const webdavGetFile = vi.fn(async () => toArrayBuffer(REMOTE));
+      const env = setup({ core: { webdavGetFile } });
+      nativeHash(env);
+      env.memory.put(LOCAL_URI, REMOTE);
+      const attachment = attachmentOf(await env.backends.syncWebdavAttachments(withAttachment(await remoteOnly(REMOTE)), webdavConfig, BASE_URL));
+      expect(webdavGetFile).not.toHaveBeenCalled();
+      expect(attachment).toMatchObject({ uri: LOCAL_URI, localStatus: 'available' });
+      expect(env.lines.some((line) => line.message === 'Attachment download reused a verified local file'
+        && line.extra?.releaseCheck === 'v1.3.7/attachment-download-reuse' && line.extra?.attachmentId === 'att-1')).toBe(true);
+    });
+
+    it('never adopts a file whose hash differs, and never adopts for a hashless attachment', async () => {
+      for (const [bytes, local] of [[REMOTE, LOCAL], [null, REMOTE]] as const) {
+        const webdavGetFile = vi.fn(async () => toArrayBuffer(REMOTE));
+        const env = setup({ core: { webdavGetFile } });
+        nativeHash(env);
+        env.memory.put(LOCAL_URI, local);
+        await env.backends.syncWebdavAttachments(withAttachment(await remoteOnly(bytes)), webdavConfig, BASE_URL);
+        // The file at the target is not adopted: the GET runs and the installer decides (a different file is kept, never named).
+        expect(webdavGetFile).toHaveBeenCalledTimes(1);
+        // A hashless attachment has nothing to compare: its target is never hashed.
+        if (bytes === null) expect(env.installer.hashAttachmentFileGeneration).not.toHaveBeenCalled();
+      }
+    });
+
+    it('makes one PUT per attachment across the phases of one cycle, one more the next cycle, and one for new content', async () => {
+      let stored = 0;
+      const requests = stubWebdavServer(() => { stored += 1; return new Response(null, { status: 500 }); });
+      const env = setup();
+      env.memory.put(LOCAL_URI, LOCAL);
+      const data = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(LOCAL))! }));
+      const puts = () => requests.filter((request) => request.method === 'PUT').length;
+      // One cycle: the final pending-upload flush and the post-merge pass share the cycle's admission. The PUT reached the
+      // server, but its answer was lost (500): the second phase does not send it again.
+      const cycle = createAttachmentTransferAdmission();
+      await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
+      await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
+      expect(puts()).toBe(1);
+      // The next cycle tries once more.
+      const next = createAttachmentTransferAdmission();
+      await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
+      await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
+      expect(puts()).toBe(2);
+      // New content is a new key in the same cycle: it transfers once.
+      env.memory.put(LOCAL_URI, REMOTE);
+      const edited = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(REMOTE))! }));
+      await env.backends.syncWebdavAttachments(edited, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
+      expect(puts()).toBe(3);
+      expect(stored).toBe(3);
+    });
+  });
+
   it('marks the attachment unrecoverable when the remote answers 404', async () => {
     const { backends } = setup({
       core: { webdavGetFile: vi.fn(async () => { throw httpError(404); }) },
@@ -1360,6 +1425,40 @@ describe('Dropbox attachment pass', () => {
     const failed = attachmentOf(await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken }));
     expect(failed).toMatchObject({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' });
     expect(failed?.deletedAt).toBeUndefined();
+  });
+});
+
+describe('design D9b W7 on the bespoke backends', () => {
+  const resolveAccessToken = async () => 'token';
+
+  it('Dropbox adopts a matching file at the download target with zero downloads, and downloads once per cycle', async () => {
+    const downloadDropboxFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(500); });
+    const env = setup({ core: { downloadDropboxFile } });
+    nativeHash(env);
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const remote = fileAttachment({ uri: undefined, localStatus: 'missing', cloudKey: 'attachments/att-1.txt', fileHash: (await computeSha256Hex(REMOTE))! });
+    const cycle = createAttachmentTransferAdmission();
+    await env.backends.syncDropboxAttachments(withAttachment(remote), 'app-key', fetcher, { resolveAccessToken, transferAdmission: cycle });
+    await env.backends.syncDropboxAttachments(withAttachment(remote), 'app-key', fetcher, { resolveAccessToken, transferAdmission: cycle });
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(1);
+    env.memory.put(LOCAL_URI, REMOTE);
+    const adopted = attachmentOf(await env.backends.syncDropboxAttachments(withAttachment(remote), 'app-key', fetcher, { resolveAccessToken }));
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(1);
+    expect(adopted).toMatchObject({ uri: LOCAL_URI, localStatus: 'available' });
+  });
+
+  it('Cloud makes one PUT per attachment across the phases of one cycle', async () => {
+    const cloudPutFile = vi.fn(async () => { throw httpError(500); });
+    const env = setup({ core: { cloudPutFile } });
+    env.memory.put(LOCAL_URI, LOCAL);
+    const data = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(LOCAL))! }));
+    const cycle = createAttachmentTransferAdmission();
+    const config = { url: 'https://cloud.example.com/v1/data', token: 'token' };
+    await env.backends.syncCloudAttachments(data, config, 'https://cloud.example.com/v1', { phase: 'post-merge', transferAdmission: cycle });
+    await env.backends.syncCloudAttachments(data, config, 'https://cloud.example.com/v1', { phase: 'post-merge', transferAdmission: cycle });
+    expect(cloudPutFile).toHaveBeenCalledTimes(1);
+    await env.backends.syncCloudAttachments(data, config, 'https://cloud.example.com/v1', { phase: 'post-merge', transferAdmission: createAttachmentTransferAdmission() });
+    expect(cloudPutFile).toHaveBeenCalledTimes(2);
   });
 });
 

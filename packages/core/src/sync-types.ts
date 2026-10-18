@@ -1,3 +1,4 @@
+import type { Slicer } from './cooperative';
 import type { AppData } from './types';
 
 export interface EntityMergeStats {
@@ -103,7 +104,6 @@ export type SyncCycleIO = {
     readLocal: () => Promise<AppData>;
     readRemote: () => Promise<AppData | null | undefined>;
     writeLocal: (data: AppData) => Promise<AppData | void>;
-    clearPendingRemoteWriteAfterLocalAbort?: (pendingAt: string) => Promise<void>;
     flushPendingLocalBeforeRetryRead?: () => Promise<void>;
     prepareRemoteWrite?: (data: AppData) => Promise<AppData | void | typeof PREPARED_UNCHANGED>;
     writeRemote: (data: AppData) => Promise<void>;
@@ -144,6 +144,8 @@ export type SyncCycleIO = {
     now?: () => string;
     onStep?: (step: SyncStep) => void;
     yieldToUi?: () => Promise<void>;
+    /** The run's slice clock (cooperative.ts) on a host that binds sliceYield; without it every pass runs at once. */
+    slicer?: Slicer;
 };
 
 export type SyncCycleWriteResult = {

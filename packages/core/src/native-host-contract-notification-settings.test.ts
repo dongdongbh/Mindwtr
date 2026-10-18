@@ -67,6 +67,25 @@ describe('prepared notification Settings', () => {
         expect(env.data().settings.deviceId).toBeUndefined();
     });
 
+    it('syncs a changed task default once while leaving device notification switches alone', async () => {
+        const data = initial(); data.settings.notificationsEnabled = false;
+        data.settings.syncPreferencesUpdatedAt = { language: AT, gtd: '2099-01-01T00:00:00.000Z' };
+        const env = await open(data);
+        const { request, envelope } = await plan(env, { type: 'taskReminderDefault', value: 'skip' });
+        expect(await env.host.commitPreparedNotificationSetting(envelope)).toMatchObject({ ok: true });
+        const after = structuredClone(env.data());
+        expect(after.settings.taskReminderDefault).toBe('skip');
+        expect(after.settings.notificationsEnabled).toBe(false);
+        expect(Date.parse(after.settings.syncPreferencesUpdatedAt!.gtd!)).toBeGreaterThan(Date.parse(data.settings.syncPreferencesUpdatedAt.gtd));
+        expect(after.settings.syncPreferencesUpdatedAt!.language).toBe(AT);
+        expect(after.tasks).toEqual(data.tasks);
+        expect(env.saves()).toBe(1);
+        expect(env.host.probeNotificationSettingOutcome(request)).toMatchObject({ ok: true });
+        expect(await env.host.commitPreparedNotificationSetting(envelope)).toMatchObject({ ok: true });
+        expect(env.data()).toEqual(after);
+        expect(env.saves()).toBe(1);
+    });
+
     it('keeps options/noop pure and distinguishes absent defaults from explicit values', async () => {
         const data = initial(); delete data.settings.notificationsEnabled;
         const env = await open(data);

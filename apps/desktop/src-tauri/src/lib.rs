@@ -649,6 +649,12 @@ struct AppConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     mcp_allow_write: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_allow_archive: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_allow_delete: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_port: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     mcp_token: Option<String>,
 }
 

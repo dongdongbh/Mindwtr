@@ -21,6 +21,7 @@ import { prepareCaptureTask, type CaptureAssemblyInput } from './capture';
 import { normalizeShortcutTags } from './capture-deeplink';
 import { safeParseDate } from './date';
 import { getChecklistEditStatus } from './task-checklist-model';
+import { runStoreCommand } from './store-write-gate';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { buildQuickAddParseOptions, parseQuickAdd } from './quick-add';
 import type { AppData, Area, Person, Project, Task } from './types';
@@ -63,6 +64,7 @@ export type PendingAudioCapture = {
     id: string;
     audioPath: string;
     title?: string;
+    note?: string;
     createdAt?: string;
     source?: string;
     outboxRetried?: true;
@@ -187,11 +189,13 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
         const audioPath = trimOrUndefined(record.audioPath);
         if (!audioPath) return null;
         const title = trimOrUndefined(record.title);
+        const note = trimOrUndefined(record.note);
         return {
             kind: 'audio',
             id,
             audioPath,
             ...(title ? { title } : {}),
+            ...(note ? { note } : {}),
             ...(createdAt ? { createdAt } : {}),
             ...(source ? { source } : {}),
             ...(outboxRetried ? { outboxRetried } : {}),
@@ -325,7 +329,7 @@ export const PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY = 'mindwtr:pending-capture
 const LAST_APPLIED_KEEP_MS = 14 * 24 * 60 * 60 * 1000;
 type LastApplied = { tapMs: number; id: string; at: number; outcome?: string };
 
-type PendingCaptureLogContext = { scope: string; extra?: Record<string, unknown> };
+type PendingCaptureLogContext = { scope: string; force?: boolean; extra?: Record<string, unknown> };
 
 /** React Native's app log shape. No task content, path or identifier goes into it. */
 export type PendingCaptureLog = {
@@ -494,8 +498,18 @@ async function applyPendingDefer(
     return outcome;
 }
 
-/** Resolve against current data; never replace the Watch's old copy of the list. */
-export async function applyPendingChecklist(
+/**
+ * Resolve against current data; never replace the Watch's old copy of the list. One store command reads the task and
+ * writes its list (store-write-gate.ts), so a list a sync save published meanwhile is the one the tick lands on.
+ */
+export function applyPendingChecklist(
+    command: PendingChecklist,
+    deps: Pick<PendingCaptureStoreDeps, 'tasks' | 'getTasks' | 'projects' | 'getProjects' | 'updateTask'>,
+): Promise<string | null> {
+    return runStoreCommand(() => applyPendingChecklistNow(command, deps));
+}
+
+async function applyPendingChecklistNow(
     command: PendingChecklist,
     deps: Pick<PendingCaptureStoreDeps, 'tasks' | 'getTasks' | 'projects' | 'getProjects' | 'updateTask'>,
 ): Promise<string | null> {
@@ -940,6 +954,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 kind: 'text',
                 id: capture.id,
                 title: capture.title ? `${capture.title} ${transcript}` : transcript,
+                ...(capture.note ? { note: capture.note } : {}),
                 tags: [],
                 createdAt: capture.createdAt,
                 source: capture.source,
@@ -995,7 +1010,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             if (isAndroidQuickCapture) {
                 void log.info('Android quick capture audio ingested', {
                     scope: 'capture',
-                    extra: { kind: 'audio', outcome: 'created' },
+                    ...(capture.note ? { force: true } : {}),
+                    extra: { kind: 'audio', outcome: 'created', ...(capture.note ? { releaseCheck: 'v1.3.7/quick-capture-description' } : {}) },
                 });
             } else {
                 void log.info('Watch capture ingested', {
@@ -1044,6 +1060,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         if (capture.source === ANDROID_QUICK_CAPTURE_SOURCE) {
             void log.info('Quick capture dialog item ingested', {
                 scope: 'capture',
+                ...(capture.note && !stored ? { force: true, extra: { releaseCheck: 'v1.3.7/quick-capture-description', kind: 'text', outcome: 'created' } } : {}),
             });
         } else if (capture.source === ANDROID_CAPTURE_INTENT_SOURCE) {
             void log.info('Android automation capture ingested', {

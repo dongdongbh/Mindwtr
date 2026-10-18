@@ -9,6 +9,7 @@ import { taskEditValuesEqual } from './json-value-equality';
 import { strToU8 } from 'fflate';
 import { logInfo } from './logger';
 import { stripSensitiveSettings } from './store-helpers';
+import { runStoreCommand } from './store-write-gate';
 
 /**
  * Exact-retry bookkeeping for native host writes, shared by every contract write
@@ -275,7 +276,18 @@ export type NativeDocumentReceiptInput = {
     data: AppData;
     /** Non-null JSON, at most 64 KiB UTF-8. The caller validates its domain shape. */
     reply: unknown;
+    /**
+     * The library's SQLite bytes (pages) this write may leave, its receipt included: checked after the receipt insert and
+     * before COMMIT, so a refusal ([UNDO_LIMIT_EXCEEDED]) rolls back the data and the receipt together.
+     */
+    maxLibraryBytes?: number;
+    /**
+     * The caller hands both documents over (core's native backup commit, which parsed them itself and keeps no reference): no
+     * detaching copy is made, and the baseline goes once the stale check has read it.
+     */
+    owned?: true;
 };
+export const UNDO_LIMIT_EXCEEDED = 'Document library exceeds the undo limit';
 export type NativeDocumentReceiptResult = { reply: unknown; replayed: boolean };
 
 const isCanonicalRequestId = (value: unknown): value is string => typeof value === 'string'
@@ -420,7 +432,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     private prerequisite: { requestId: string; fingerprint: string; originId: string; originFingerprint: string; reply: unknown } | null = null;
     private documentBusy = false;
     private ordinaryWrites = 0;
-    private documentReceipt: { requestId: string; payload: string; data: AppData; replyJson: string; savedAt: string } | null = null;
+    private documentReceipt: { requestId: string; payload: string; data: AppData; replyJson: string; savedAt: string; maxLibraryBytes?: number } | null = null;
 
     constructor(client: SqliteClient, options?: SqliteAdapterOptions) {
         let isDocumentWrite = () => false;
@@ -450,12 +462,13 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
 
     /** Read-only canonical authority check; does not advance any snapshot or receipt baseline. */
     async hasForeignKeyViolations(): Promise<boolean> {
-        return Boolean(await this.receiptClient.get('SELECT 1 AS present FROM pragma_foreign_key_check LIMIT 1'));
+        return this.exclusive('hasForeignKeyViolations', async () =>
+            Boolean(await this.receiptClient.get('SELECT 1 AS present FROM pragma_foreign_key_check LIMIT 1')));
     }
 
     /** Current durable proof for a prerequisite receipt; never updates the session cache. */
     async readDurableReceipt(requestId: string, payload: string): Promise<NativeHostResult<unknown | null>> {
-        return this.readCurrentReceipt(requestId, fingerprintOf(payload));
+        return this.exclusive('readDurableReceipt', () => this.readCurrentReceipt(requestId, fingerprintOf(payload)));
     }
 
     private async readCurrentReceipt(requestId: string, fingerprint: string): Promise<NativeHostResult<unknown | null>> {
@@ -510,14 +523,18 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             throw new Error('Invalid document receipt identity');
         }
         const { requestId, payload } = input;
+        const { maxLibraryBytes } = input;
+        if (maxLibraryBytes !== undefined && !(Number.isSafeInteger(maxLibraryBytes) && maxLibraryBytes >= 0)) {
+            throw new Error('Invalid document receipt input');
+        }
         const owner = requestPayloads.get(requestId);
         if (owner !== undefined && owner !== payload) throw new Error('Document receipt identity belongs to another action');
-        let expectedCurrent: AppData;
+        let expectedCurrent: AppData | null;
         let data: AppData;
         let replyJson: string;
         try {
-            expectedCurrent = JSON.parse(JSON.stringify(input.expectedCurrent)) as AppData;
-            data = JSON.parse(JSON.stringify(input.data)) as AppData;
+            expectedCurrent = input.owned === true ? input.expectedCurrent : JSON.parse(JSON.stringify(input.expectedCurrent)) as AppData;
+            data = input.owned === true ? input.data : JSON.parse(JSON.stringify(input.data)) as AppData;
             replyJson = documentReplyJson(input.reply);
             if (!expectedCurrent || !data) throw new Error('Invalid document');
         } catch {
@@ -526,7 +543,8 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         this.documentBusy = true;
         requestPayloads.set(requestId, payload);
         let succeeded = false;
-        try {
+        // One lock hold from the receipt lookup through the commit; inside it only …Now bodies run (no re-entry).
+        try { return await this.exclusive('saveDocumentWithReceipt', async () => {
             const rows = await this.receiptClient.all<DocumentReceiptRow>(
                 'SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?', [requestId],
             );
@@ -534,26 +552,30 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 if (rows.length !== 1 || !validDocumentReceiptRow(rows[0])) throw new Error('Invalid saved document receipt');
                 const row = rows[0];
                 if (row.request_id !== requestId || row.method !== payload) throw new Error('Document receipt identity changed');
-                durableReceipts.set(requestId, { fingerprint: payload, reply: JSON.parse(row.reply) as unknown, savedAt: row.saved_at });
+                durableReceipts!.set(requestId, { fingerprint: payload, reply: JSON.parse(row.reply) as unknown, savedAt: row.saved_at });
                 succeeded = true;
                 return { reply: JSON.parse(row.reply) as unknown, replayed: true };
             }
             // Prior success cannot authorize another application after its durable proof disappears.
-            if (durableReceipts.has(requestId)) throw new Error('Saved document receipt is missing');
-            const current = await this.getData();
+            if (durableReceipts!.has(requestId)) throw new Error('Saved document receipt is missing');
+            let current: AppData | null = await this.getDataNow();
             // A legacy settings.ai.apiKey left in the row is not part of the baseline (native-backup-document.ts never plans it).
             const withoutKey = (document: AppData): AppData => ({ ...document, settings: stripSensitiveSettings(document.settings) });
-            if (!taskEditValuesEqual(withoutKey(current), withoutKey(expectedCurrent))) throw new Error('Stale document receipt baseline');
+            if (!taskEditValuesEqual(withoutKey(current), withoutKey(expectedCurrent!))) throw new Error('Stale document receipt baseline');
+            // Both baselines are compared: neither is needed while the document is written.
+            current = null; expectedCurrent = null;
+            if (input.owned === true) (input as { expectedCurrent: AppData | null }).expectedCurrent = null;
             if (pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) throw new Error('Document receipt write is busy');
-            const context = { requestId, payload, data, replyJson, savedAt: new Date().toISOString() };
+            const context = { requestId, payload, data, replyJson, savedAt: new Date().toISOString(), maxLibraryBytes };
             this.documentReceipt = context;
-            try { await super.saveData(data); }
+            try { await this.saveDataNow(data); }
             catch (error) {
                 if (error instanceof Error && error.message.startsWith('SQLITE_BUSY:'))
                     throw new Error('Stale document receipt baseline');
+                if (error instanceof Error && error.message === UNDO_LIMIT_EXCEEDED) throw error;
                 throw new Error('Document receipt persistence failed');
             }
-            durableReceipts.set(requestId, { fingerprint: payload, reply: JSON.parse(replyJson) as unknown, savedAt: context.savedAt });
+            durableReceipts!.set(requestId, { fingerprint: payload, reply: JSON.parse(replyJson) as unknown, savedAt: context.savedAt });
             succeeded = true;
             try {
                 logInfo('Native backup document committed', {
@@ -564,11 +586,22 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 });
             } catch { /* Diagnostics cannot reverse a proven committed outcome. */ }
             return { reply: JSON.parse(replyJson) as unknown, replayed: false };
-        } finally {
+        }); } finally {
             this.documentReceipt = null;
             this.documentBusy = false;
             if (!succeeded && owner === undefined && requestPayloads.get(requestId) === payload) requestPayloads.delete(requestId);
         }
+    }
+
+    /** The library's bytes as SQLite counts them (pages × page size); inside a write transaction, its new pages too. */
+    async libraryBytes(): Promise<number> {
+        return this.exclusive('libraryBytes', () => this.libraryBytesNow());
+    }
+
+    private async libraryBytesNow(): Promise<number> {
+        const [pages] = await this.receiptClient.all<{ page_count: number }>('PRAGMA page_count');
+        const [size] = await this.receiptClient.all<{ page_size: number }>('PRAGMA page_size');
+        return Number(pages?.page_count ?? 0) * Number(size?.page_size ?? 0);
     }
 
     protected override buildSaveFailureContext(data: AppData, step: string): Record<string, unknown> {
@@ -592,6 +625,9 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 );
             } catch {
                 throw new Error('Document receipt insert failed');
+            }
+            if (context.maxLibraryBytes !== undefined && await this.libraryBytesNow() > context.maxLibraryBytes) {
+                throw new Error(UNDO_LIMIT_EXCEEDED);
             }
             return;
         }
@@ -619,11 +655,13 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         this.carried.set(write.data, { ids, savedAt });
     }
 
-    override async saveData(data: AppData): Promise<void> {
+    // The public saves keep only their synchronous busy refusal and the bookkeeping after the commit here; their SQL runs in
+    // the base class's locked body.
+    override async saveData(data: AppData, options?: Parameters<SqliteAdapter['saveData']>[1]): Promise<void> {
         if (this.documentBusy) throw new Error('Document receipt write is busy');
         this.ordinaryWrites += 1;
         try {
-            await super.saveData(data);
+            await super.saveData(data, options);
             // Committed: those receipts are durable. After a rollback they stay pending for the next save.
             const carried = this.carried.get(data);
             this.carried.delete(data);
@@ -647,10 +685,15 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     /** Complete a receipt after its data was already proven saved, without rewriting projected memory. */
     async commitReceiptOnly(requestId: string, payload: string): Promise<boolean> {
         if (this.documentBusy) throw new Error('Document receipt write is busy');
+        return this.exclusive('commitReceiptOnly', () => this.commitReceiptOnlyNow(requestId, payload));
+    }
+
+    private async commitReceiptOnlyNow(requestId: string, payload: string): Promise<boolean> {
         const pending = pendingReceipts.get(requestId);
         if (!pending || pending.fingerprint !== fingerprintOf(payload)) return false;
         const savedAt = new Date().toISOString();
         await this.receiptClient.run('BEGIN IMMEDIATE');
+        this.noteWrite();
         try {
             await this.receiptClient.run(
                 'INSERT INTO native_request_receipts (request_id, method, reply, saved_at) VALUES (?, ?, ?, ?) ON CONFLICT(request_id) DO NOTHING',
@@ -705,7 +748,9 @@ export function createNativeRequestReceipts(options: {
         return { ok: true, value: null };
     };
 
-    const save = async (requestId: string, receipt: Receipt): Promise<NativeHostResult<unknown>> => {
+    // A receipt's save is a store command for the sync gate (store-write-gate.ts): no sync save and
+    // store publish lands inside it. Its write already ran as store actions, which hold the same gate.
+    const save = (requestId: string, receipt: Receipt): Promise<NativeHostResult<unknown>> => runStoreCommand(async () => {
         // A successful save stores the whole snapshot, so every write that landed before it
         // began is durable too. A write that lands while it runs waits for its own save.
         const covered = Array.from(receipts.values()).filter((entry) => entry.written);
@@ -731,7 +776,7 @@ export function createNativeRequestReceipts(options: {
         }
         for (const entry of covered) entry.saved = true;
         return { ok: true, value: receipt.value };
-    };
+    });
 
     const makeRoom = (): boolean => {
         if (receipts.size < limit) return true;

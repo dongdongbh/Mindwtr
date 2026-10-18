@@ -732,6 +732,23 @@ describeSqlite('SqliteAdapter', () => {
         ]);
     });
 
+    it('migrates nullable reminder policy without changing legacy behavior and persists inherited values', async () => {
+        db.exec(SQLITE_BASE_SCHEMA.replace('  purgedAt TEXT,\n  reminderPolicy TEXT\n);', '  purgedAt TEXT\n);'));
+        runSql(db, "INSERT INTO tasks (id,title,status,createdAt,updatedAt,suppressMindwtrReminders) VALUES ('legacy','Legacy','next','2026-01-01','2026-01-01',0)");
+        const loaded = await adapter.getData();
+        expect(loaded.tasks[0]).toMatchObject({ id: 'legacy', suppressMindwtrReminders: false });
+        expect(loaded.tasks[0].reminderPolicy).toBeUndefined();
+        expect(allSql(db, 'SELECT reminderPolicy FROM tasks')).toEqual([{ reminderPolicy: null }]);
+        for (const reminderPolicy of ['inherit', 'send', 'skip'] as const) {
+            await adapter.saveTask({ ...loaded.tasks[0], id: reminderPolicy, reminderPolicy, repeatReminderMinutes: 15 });
+        }
+        const reloaded = await adapter.getData();
+        for (const reminderPolicy of ['inherit', 'send', 'skip'] as const) {
+            expect(reloaded.tasks.find((task) => task.id === reminderPolicy)).toMatchObject({ reminderPolicy, repeatReminderMinutes: 15 });
+        }
+        expect(reloaded.tasks.find((task) => task.id === 'legacy')?.reminderPolicy).toBeUndefined();
+    });
+
     it('declares repeat reminder minutes in the base task schema', () => {
         db.exec(SQLITE_BASE_SCHEMA);
 
@@ -1690,7 +1707,7 @@ describeSqlite('SqliteAdapter', () => {
             all: allMock,
         };
         const lightweightAdapter = new SqliteAdapter(client);
-        (lightweightAdapter as unknown as { ensureSchema: () => Promise<void> }).ensureSchema = async () => {};
+        (lightweightAdapter as unknown as { ensureSchemaNow: () => Promise<void> }).ensureSchemaNow = async () => {};
 
         const results = await lightweightAdapter.searchAll('Searchable');
 
@@ -1870,7 +1887,7 @@ describeSqlite('SqliteAdapter', () => {
             all: allMock,
         };
         const lightweightAdapter = new SqliteAdapter(client);
-        (lightweightAdapter as unknown as { ensureSchema: () => Promise<void> }).ensureSchema = async () => {};
+        (lightweightAdapter as unknown as { ensureSchemaNow: () => Promise<void> }).ensureSchemaNow = async () => {};
 
         const results = await lightweightAdapter.searchAll('anything');
 
@@ -2816,7 +2833,7 @@ describe('SqliteAdapter saveData pruning', () => {
             exec: vi.fn().mockResolvedValue(undefined),
         };
         const lightweightAdapter = new SqliteAdapter(client);
-        (lightweightAdapter as unknown as { ensureSchema: () => Promise<void> }).ensureSchema = async () => {};
+        (lightweightAdapter as unknown as { ensureSchemaNow: () => Promise<void> }).ensureSchemaNow = async () => {};
 
         const now = '2026-03-04T12:00:00.000Z';
         const data: AppData = {
@@ -2877,7 +2894,7 @@ describe('SqliteAdapter empty-snapshot backstop (#852)', () => {
             exec: vi.fn().mockResolvedValue(undefined),
         };
         const adapter = new SqliteAdapter(client);
-        (adapter as unknown as { ensureSchema: () => Promise<void> }).ensureSchema = async () => {};
+        (adapter as unknown as { ensureSchemaNow: () => Promise<void> }).ensureSchemaNow = async () => {};
         return { adapter, run };
     };
 

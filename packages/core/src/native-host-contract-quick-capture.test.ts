@@ -151,6 +151,22 @@ describe('native host contract: the capture popup', () => {
         expect(next.preview.filter((entry) => entry.kind === 'context').map((entry) => entry.value)).toEqual(['@focus time']);
     });
 
+    it('accepts an inherited skip snapshot in the prepared capture transport and retry', async () => {
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host } = await openHost('base', saveData);
+        await useTaskStore.getState().updateSettings({ taskReminderDefault: 'skip' });
+        await flushPendingSave();
+        const options = value(host.openQuickCapture()).options;
+        const captureId = generateUUID();
+        saveData.mockRejectedValue(new Error('disk unavailable'));
+        const input = { text: 'Inherited reminders', options, captureId };
+        expect(await host.submitQuickCapture(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        saveData.mockResolvedValue(undefined);
+        expect(value(await host.submitQuickCapture(input))).toMatchObject({ kind: 'saved', taskId: captureId.toLowerCase() });
+        const saved = useTaskStore.getState().tasks.find((task) => task.id === captureId.toLowerCase());
+        expect(saved).toMatchObject({ reminderPolicy: 'inherit', suppressMindwtrReminders: true });
+    });
+
     it('retries a failed capture exactly: one task, and a lost reply writes nothing again', async () => {
         const saveData = vi.fn().mockResolvedValue(undefined);
         const { host, recorder } = await openHost('base', saveData);

@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetForTests, useTaskStore, type Task } from '@mindwtr/core';
+import { resetForTests, safeFormatDate, useTaskStore, type Task } from '@mindwtr/core';
 
 import { DailyReviewGuideModal } from './DailyReviewModal';
 import { fetchExternalCalendarEvents } from '../../../lib/external-calendar-events';
@@ -39,6 +39,8 @@ vi.mock('../../../contexts/language-context', () => ({
             'review.of': 'of',
             'review.step': 'Step',
             'review.waitingEmpty': 'Nothing waiting',
+            'taskEdit.startDateLabel': 'Start Date',
+            'taskEdit.dueDateLabel': 'Due Date',
         }[key] ?? key),
     }),
 }));
@@ -263,6 +265,50 @@ describe('DailyReviewGuideModal', () => {
         expect(screen.getByRole('heading', { level: 1, name: "Today's Focus" })).toBeInTheDocument();
         expect(screen.getAllByRole('button', { name: 'Add to Focus' })).toHaveLength(11);
         expect(screen.getByText('focus task 11')).toBeInTheDocument();
+    });
+
+    it('shows labeled date-only and timed focus dates with normal row urgency without changing star behavior', () => {
+        seedStep('focus', { status: 'next' });
+        const tasks = [
+            makeTask({ id: 'undated', title: 'Undated' }),
+            makeTask({ id: 'date-only', title: 'Date only', dueDate: '2026-07-15' }),
+            makeTask({ id: 'timed', title: 'Timed', startTime: '2026-07-15T08:00', dueDate: '2026-07-15T14:00' }),
+            makeTask({ id: 'start-only', title: 'Start only', startTime: '2026-07-14' }),
+            makeTask({ id: 'overdue', title: 'Overdue', dueDate: '2026-07-14', isFocusedToday: true }),
+        ];
+        const updateTask = vi.fn();
+        useTaskStore.setState({ _allTasks: tasks, updateTask });
+
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+
+        const card = (title: string) => screen.getByText(title).parentElement!.parentElement!.parentElement!;
+        expect(within(card('Undated')).queryByText(/(?:Start|Due) Date:/)).not.toBeInTheDocument();
+        const dateOnly = within(card('Date only')).getByText(`Due Date: ${safeFormatDate('2026-07-15', 'P')}`);
+        expect(dateOnly).not.toHaveClass('text-destructive');
+        expect(dateOnly.textContent).not.toMatch(/AM|PM|00:00/);
+        expect(within(card('Timed')).getByText(`Start Date: ${safeFormatDate('2026-07-15T08:00', 'Pp')}`)).toBeInTheDocument();
+        expect(within(card('Timed')).getByText(`Due Date: ${safeFormatDate('2026-07-15T14:00', 'Pp')}`)).toBeInTheDocument();
+        expect(within(card('Start only')).getByText(`Start Date: ${safeFormatDate('2026-07-14', 'P')}`)).toBeInTheDocument();
+        expect(within(card('Start only')).queryByText(/Due Date:/)).not.toBeInTheDocument();
+        expect(within(card('Overdue')).getByText(`Due Date: ${safeFormatDate('2026-07-14', 'P')}`)).toHaveClass('text-destructive', 'font-bold');
+        expect(updateTask).not.toHaveBeenCalled();
+
+        fireEvent.click(within(card('Undated')).getByRole('button', { name: 'Add to Focus' }));
+        expect(updateTask).toHaveBeenLastCalledWith('undated', { isFocusedToday: true });
+        fireEvent.click(within(card('Overdue')).getByRole('button', { name: 'Remove from Focus' }));
+        expect(updateTask).toHaveBeenLastCalledWith('overdue', { isFocusedToday: false });
+        expect(useTaskStore.getState()._allTasks).toEqual(tasks);
+    });
+
+    it('refreshes focus due-date urgency when a timed deadline passes', () => {
+        seedStep('focus', { status: 'next', dueDate: '2026-07-15T10:00' });
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+        const dueLabel = `Due Date: ${safeFormatDate('2026-07-15T10:00', 'Pp')}`;
+        expect(screen.getAllByText(dueLabel)[0]).not.toHaveClass('text-destructive');
+
+        act(() => vi.advanceTimersByTime(60_001));
+
+        expect(screen.getAllByText(dueLabel)[0]).toHaveClass('text-destructive');
     });
 
     it.each([1, 10])('shows the configured focus limit of %i in the focus step header', (limit) => {

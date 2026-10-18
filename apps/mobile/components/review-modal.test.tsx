@@ -3,11 +3,13 @@ import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildReviewSteps, getWeeklyReviewBuckets, type Project, type Task } from '@mindwtr/core';
 
-import { ScrollView } from 'react-native';
+import { Modal, Platform, ScrollView } from 'react-native';
 import { CompactText } from './compact-text';
 import { ReviewModal } from './review-modal';
 import { styles } from './review-modal.styles';
 import { fetchExternalCalendarEvents } from '../lib/external-calendar';
+import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
+import { useTaskEditPreview } from './task-edit/use-task-edit-preview';
 
 const { mockStorageGetItem, mockStorageRemoveItem, mockStorageSetItem } = vi.hoisted(() => ({
     mockStorageGetItem: vi.fn(),
@@ -261,7 +263,10 @@ vi.mock('./swipeable-task-item', () => ({
 }));
 
 vi.mock('./task-edit-modal', () => ({
-    TaskEditModal: (props: any) => React.createElement('TaskEditModal', props),
+    TaskEditModal: (props: any) => {
+        const preview = useTaskEditPreview({ ...props, projects: [], tasks: [] });
+        return React.createElement('TaskEditModal', { ...props, ...preview });
+    },
 }));
 
 vi.mock('./inbox-processing-modal', () => ({
@@ -342,7 +347,110 @@ describe('ReviewModal', () => {
     });
 
     afterEach(() => {
+        Platform.OS = 'web';
         vi.useRealTimers();
+    });
+
+    it.each([
+        ['handlePreviewProjectPress', 'project-1', openProjectScreen],
+        ['handlePreviewContextPress', '@home', openContextsScreen],
+        ['handlePreviewTagPress', '#later', openContextsScreen],
+    ] as const)('waits for both iOS sheets before %s navigates once', async (press, target, navigate) => {
+        Platform.OS = 'ios';
+        const onClose = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        const Owner = () => {
+            const [visible, setVisible] = React.useState(true);
+            return <ReviewModal visible={visible} onClose={() => { onClose(); setVisible(false); }} />;
+        };
+        await act(async () => { tree = create(<Owner />); });
+        const review = () => tree.root.findAllByType(Modal)[0];
+        const editor = () => tree.root.findByType('TaskEditModal' as any);
+        act(() => tree.root.findByType('SwipeableTaskItem' as any).props.actions.edit(defaultTasks[0]));
+        act(() => editor().props[press](target));
+        expect(editor().props.visible).toBe(false);
+        expect(editor().props.task?.id).toBe(defaultTasks[0].id);
+        expect(review().props.visible).toBe(true);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(navigate).not.toHaveBeenCalled();
+        await act(async () => { editor().props.onDismiss(); });
+        expect(review().props.visible).toBe(false);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(navigate).not.toHaveBeenCalled();
+        act(() => editor().props.onDismiss());
+        await act(async () => { review().props.onDismiss(); });
+        act(() => review().props.onDismiss());
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(navigate).toHaveBeenCalledExactlyOnceWith(target);
+        await act(async () => tree.unmount());
+    });
+
+    it('dismisses both iOS sheets before closing an owner that unmounts the route', async () => {
+        Platform.OS = 'ios';
+        const onClose = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        const Owner = () => {
+            const [mounted, setMounted] = React.useState(true);
+            return mounted ? <ReviewModal visible onClose={() => { onClose(); setMounted(false); }} /> : null;
+        };
+        await act(async () => { tree = create(<Owner />); });
+        const editor = () => tree.root.findByType('TaskEditModal' as any);
+        act(() => tree.root.findByType('SwipeableTaskItem' as any).props.actions.edit(defaultTasks[0]));
+        act(() => editor().props.handlePreviewProjectPress('project-1'));
+        await act(async () => { editor().props.onDismiss(); });
+        expect(onClose).not.toHaveBeenCalled();
+        expect(openProjectScreen).not.toHaveBeenCalled();
+        await act(async () => { tree.root.findAllByType(Modal)[0].props.onDismiss(); });
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(openProjectScreen).toHaveBeenCalledExactlyOnceWith('project-1');
+        expect(tree.toJSON()).toBeNull();
+        await act(async () => tree.unmount());
+    });
+
+    it('navigates on Android without waiting for the iOS-only dismissal events', async () => {
+        Platform.OS = 'android';
+        const onClose = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        await act(async () => { tree = create(<ReviewModal visible onClose={onClose} />); });
+        act(() => tree.root.findByType('SwipeableTaskItem' as any).props.actions.edit(defaultTasks[0]));
+        act(() => tree.root.findByType('TaskEditModal' as any).props.handlePreviewProjectPress('project-1'));
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(openProjectScreen).toHaveBeenCalledExactlyOnceWith('project-1');
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['cancel', 'reopen', 'editor-reopen', 'external-close', 'unmount'] as const)('drops pending iOS navigation on %s', async (action) => {
+        Platform.OS = 'ios';
+        const onClose = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        await act(async () => { tree = create(<ReviewModal visible onClose={onClose} />); });
+        const editor = () => tree.root.findByType('TaskEditModal' as any);
+        act(() => tree.root.findByType('SwipeableTaskItem' as any).props.actions.edit(defaultTasks[0]));
+        act(() => editor().props.handlePreviewProjectPress('project-1'));
+        if (action === 'cancel') {
+            act(() => tree.root.findAllByType(Modal)[0].props.onRequestClose());
+        } else if (action === 'reopen') {
+            await act(async () => tree.update(<ReviewModal visible={false} onClose={onClose} />));
+            await act(async () => tree.update(<ReviewModal visible onClose={onClose} />));
+        } else if (action === 'editor-reopen') {
+            act(() => tree.root.findByType('SwipeableTaskItem' as any).props.actions.edit(defaultTasks[0]));
+        } else if (action === 'external-close') {
+            await act(async () => { editor().props.onDismiss(); });
+            await act(async () => tree.update(<ReviewModal visible={false} onClose={onClose} />));
+        } else {
+            const dismissed = editor().props.onDismiss;
+            await act(async () => tree.unmount());
+            act(() => dismissed());
+            expect(onClose).not.toHaveBeenCalled();
+            expect(openProjectScreen).not.toHaveBeenCalled();
+            return;
+        }
+        const closes = onClose.mock.calls.length;
+        act(() => editor().props.onDismiss());
+        act(() => tree.root.findAllByType(Modal)[0].props.onDismiss());
+        expect(onClose).toHaveBeenCalledTimes(closes);
+        expect(openProjectScreen).not.toHaveBeenCalled();
+        await act(async () => tree.unmount());
     });
 
     it('waits on the calendar before saving an empty review as complete', async () => {

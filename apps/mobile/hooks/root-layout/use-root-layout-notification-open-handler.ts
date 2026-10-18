@@ -18,6 +18,16 @@ const logNotificationOutcome = (message: string, extra: Record<string, string>) 
     void logInfo(`[Local Notifications] ${message}`, { scope: 'notifications', extra });
 };
 
+// Release evidence for #1386; an update returning is not proof of durable background completion.
+const logIosReminderAction = (stage: string, action = 'complete', reason = '') => {
+    if (Platform.OS !== 'ios') return;
+    void logInfo('[Local Notifications] iOS reminder action progress', {
+        scope: 'notifications',
+        extra: { releaseCheck: 'v1.3.7/ios-reminder-actions', stage, action, reason,
+            appState: AppState.currentState || 'unknown' },
+    });
+};
+
 // One replay owner across hook remounts; native receipts remain the durable owner.
 let completionReplay: Promise<void> | null = null;
 let replayRequested = false;
@@ -129,6 +139,7 @@ export function useRootLayoutNotificationOpenHandler({
                 }
                 const { taskId, actionKey } = route;
                 if (handledCompleteActionsRef.current.has(actionKey)) {
+                    logIosReminderAction('duplicate');
                     logNotificationOutcome('Complete action ignored as duplicate', { taskId });
                     return;
                 }
@@ -138,11 +149,16 @@ export function useRootLayoutNotificationOpenHandler({
                 const task = state._tasksById?.get(taskId) ?? state.tasks?.find((item) => item.id === taskId);
                 const blocker = getReminderCompletionBlocker(task);
                 if (blocker) {
+                    logIosReminderAction('blocked', 'complete', blocker);
                     logNotificationOutcome('Complete action dropped', { taskId, reason: blocker });
                     return;
                 }
                 logNotificationOutcome('Complete action applied', { taskId });
-                state.updateTask(taskId, { ...REMINDER_COMPLETE_UPDATE }).catch(() => undefined);
+                logIosReminderAction('update-started');
+                state.updateTask(taskId, { ...REMINDER_COMPLETE_UPDATE }).then(
+                    () => logIosReminderAction('update-returned'),
+                    () => logIosReminderAction('update-failed'),
+                );
                 return;
             }
             case 'review':
@@ -181,6 +197,11 @@ export function useRootLayoutNotificationOpenHandler({
         context?: string;
         kind?: string;
     }) => {
+        const rawAction = String(payload?.actionIdentifier || 'open').trim().toLowerCase();
+        const action = ['complete', 'complete_action'].includes(rawAction) ? 'complete'
+            : ['dismiss', 'dismiss_action'].includes(rawAction) ? 'dismiss'
+                : ['snooze', 'snooze_action'].includes(rawAction) ? 'snooze' : 'open';
+        logIosReminderAction(canNavigate ? 'received-ready' : 'received-deferred', action);
         if (!canNavigate) {
             logNotificationOutcome('Notification action deferred until app is ready', {
                 action: payload?.actionIdentifier || 'open',

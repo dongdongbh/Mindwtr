@@ -87,8 +87,9 @@ export const getArchiveRetentionPreview = (
             || !['archived', 'done', 'reference'].includes(child.status) || !oldEnough(child)
         )) continue;
         result.projectIds.push(project.id);
-        result.sectionIds.push(...sections.map((section) => section.id));
-        result.taskIds.push(...children.map((child) => child.id));
+        // One push per id: QuickJS (native Android) refuses a call with more than 65535 arguments.
+        for (const section of sections) result.sectionIds.push(section.id);
+        for (const child of children) result.taskIds.push(child.id);
     }
     result.taskIds = [...new Set(result.taskIds)];
     result.legacyTaskIds = [...new Set(result.legacyTaskIds)];

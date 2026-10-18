@@ -1,5 +1,6 @@
 import type { AppSettings, Area, DefaultProjectFlowMode, FeatureSettings, GtdSettings, TaskEditorFieldId, TaskEditorPresentation, TaskEditorSectionId } from '@mindwtr/core';
 import {
+    updateSettingsFromLatest,
     DEFAULT_TASK_EDITOR_ORDER,
     DEFAULT_TASK_EDITOR_VISIBLE,
     DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
@@ -158,6 +159,29 @@ type SettingsGtdPageProps = {
 
 const SHOW_TEMP_ONBOARDING_TRIGGER = false;
 
+type TaskEditorLayoutUpdate = {
+    order?: TaskEditorFieldId[];
+    hidden?: TaskEditorFieldId[];
+    sections?: Partial<Record<TaskEditorFieldId, TaskEditorSectionId>>;
+    sectionOpen?: Partial<Record<TaskEditorSectionId, boolean>>;
+    presentation?: TaskEditorPresentation;
+};
+
+// The task editor layout these settings resolve to: saved order first, then new fields; hidden falls back to the defaults.
+const resolveTaskEditorLayout = (settings: AppSettings) => {
+    const flags = resolveFeatureFlags(settings);
+    const defaultVisible = new Set<TaskEditorFieldId>(DEFAULT_TASK_EDITOR_VISIBLE);
+    const defaultHidden = DEFAULT_TASK_EDITOR_ORDER.filter((fieldId) => !defaultVisible.has(fieldId)
+        || (fieldId === 'priority' && !flags.priorities)
+        || (fieldId === 'timeEstimate' && !flags.timeEstimates));
+    const savedOrder = settings.gtd?.taskEditor?.order ?? [];
+    const order: TaskEditorFieldId[] = [
+        ...savedOrder.filter((id) => DEFAULT_TASK_EDITOR_ORDER.includes(id)),
+        ...DEFAULT_TASK_EDITOR_ORDER.filter((id) => !savedOrder.includes(id)),
+    ];
+    return { order, hidden: new Set(settings.gtd?.taskEditor?.hidden ?? defaultHidden), defaultHidden };
+};
+
 export function SettingsGtdPage({
     t,
     settings,
@@ -180,26 +204,7 @@ export function SettingsGtdPage({
         return `${days} ${t.autoArchiveDayUnit}`;
     };
     const resolvedFeatureFlags = resolveFeatureFlags(safeSettings);
-    const featureHiddenFields = new Set<TaskEditorFieldId>();
-    if (!resolvedFeatureFlags.priorities) {
-        featureHiddenFields.add('priority');
-    }
-    if (!resolvedFeatureFlags.timeEstimates) {
-        featureHiddenFields.add('timeEstimate');
-    }
-
-    const defaultTaskEditorOrder = DEFAULT_TASK_EDITOR_ORDER;
-    const defaultVisibleFields = new Set<TaskEditorFieldId>(DEFAULT_TASK_EDITOR_VISIBLE);
-    const defaultTaskEditorHidden = defaultTaskEditorOrder.filter(
-        (fieldId) => !defaultVisibleFields.has(fieldId) || featureHiddenFields.has(fieldId)
-    );
-    const savedOrder = safeSettings.gtd?.taskEditor?.order ?? [];
-    const savedHidden = safeSettings.gtd?.taskEditor?.hidden ?? defaultTaskEditorHidden;
-    const taskEditorOrder: TaskEditorFieldId[] = [
-        ...savedOrder.filter((id) => defaultTaskEditorOrder.includes(id)),
-        ...defaultTaskEditorOrder.filter((id) => !savedOrder.includes(id)),
-    ];
-    const hiddenSet = new Set(savedHidden);
+    const { order: taskEditorOrder, hidden: hiddenSet } = resolveTaskEditorLayout(safeSettings);
     const taskEditorSections = getTaskEditorSectionAssignments(safeSettings.gtd?.taskEditor);
     const taskEditorSectionOpen = getTaskEditorSectionOpenDefaults(safeSettings.gtd?.taskEditor);
     const taskEditorPresentation: TaskEditorPresentation = safeSettings.gtd?.taskEditor?.presentation === 'modal'
@@ -254,6 +259,27 @@ export function SettingsGtdPage({
         setDefaultScheduleTimeDraft(defaultScheduleTime);
     }, [defaultScheduleTime]);
 
+    // Each group write is built from the settings as stored when it is admitted, so a key another
+    // device synced since this page rendered stays. [build] changes only the edited key.
+    const saveFromLatest = (
+        build: (latest: AppSettings) => Partial<AppSettings> | null,
+        failure: string,
+        onSaved: () => void = showSaved,
+    ) => {
+        updateSettingsFromLatest(build, { write: updateSettings })
+            .then(onSaved)
+            .catch((error) => reportSettingsFailure(failure, error, t.settingsSaveFailed));
+    };
+    const saveGtdFromLatest = (build: (gtd: GtdSettings) => Partial<GtdSettings>, failure: string, onSaved?: () => void) => {
+        saveFromLatest((latest) => ({ gtd: { ...(latest.gtd ?? {}), ...build(latest.gtd ?? {}) } }), failure, onSaved);
+    };
+    const saveFeaturesFromLatest = (build: (features: FeatureSettings) => Partial<FeatureSettings>) => {
+        saveFromLatest(
+            (latest) => ({ features: { ...(latest.features ?? {}), ...build(latest.features ?? {}) } }),
+            'Failed to update feature flags',
+        );
+    };
+
     const showPomodoroAutoStartNotice = () => {
         if (pomodoroAutoStartNoticeShownRef.current) return;
         pomodoroAutoStartNoticeShownRef.current = true;
@@ -264,20 +290,12 @@ export function SettingsGtdPage({
         partial: Partial<PomodoroSettings>,
         options?: { showAutoStartNotice?: boolean }
     ) => {
-        updateSettings({
-            gtd: {
-                ...(safeSettings.gtd ?? {}),
-                pomodoro: {
-                    ...(safeSettings.gtd?.pomodoro ?? {}),
-                    ...partial,
-                },
-            },
-        }).then(() => {
+        saveGtdFromLatest((gtd) => ({ pomodoro: { ...(gtd.pomodoro ?? {}), ...partial } }), 'Failed to update Pomodoro settings', () => {
             showSaved();
             if (options?.showAutoStartNotice) {
                 showPomodoroAutoStartNotice();
             }
-        }).catch((error) => reportSettingsFailure('Failed to update Pomodoro settings', error, t.settingsSaveFailed));
+        });
     };
 
     const savePomodoroCustomDurations = (nextDurations: { focusMinutes: number; breakMinutes: number }) => {
@@ -286,12 +304,7 @@ export function SettingsGtdPage({
     };
 
     const updateGtdSettings = (partial: Partial<GtdSettings>) => {
-        updateSettings({
-            gtd: {
-                ...(safeSettings.gtd ?? {}),
-                ...partial,
-            },
-        }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update GTD settings', error, t.settingsSaveFailed));
+        saveGtdFromLatest(() => partial, 'Failed to update GTD settings');
     };
 
     const commitDefaultScheduleTime = () => {
@@ -358,104 +371,98 @@ export function SettingsGtdPage({
                 return fieldId;
         }
     };
+    // [build] answers the layout keys to change (and the feature flags, if any) for the latest settings.
     const saveTaskEditor = (
-        next: {
-            order?: TaskEditorFieldId[];
-            hidden?: TaskEditorFieldId[];
-            sections?: Partial<Record<TaskEditorFieldId, TaskEditorSectionId>>;
-            sectionOpen?: Partial<Record<TaskEditorSectionId, boolean>>;
-            presentation?: TaskEditorPresentation;
-        },
-        nextFeatures?: FeatureSettings
+        build: (latest: AppSettings) => { next: TaskEditorLayoutUpdate; features?: FeatureSettings } | null,
     ) => {
-        updateSettings({
-            ...(nextFeatures ? { features: nextFeatures } : null),
-            gtd: {
-                ...(safeSettings.gtd ?? {}),
-                taskEditor: {
-                    ...(safeSettings.gtd?.taskEditor ?? {}),
-                    ...next,
+        saveFromLatest((latest) => {
+            const update = build(latest);
+            if (!update) return null;
+            return {
+                ...(update.features ? { features: update.features } : null),
+                gtd: {
+                    ...(latest.gtd ?? {}),
+                    taskEditor: {
+                        ...(latest.gtd?.taskEditor ?? {}),
+                        ...update.next,
+                    },
                 },
-            },
-        }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update task editor layout', error, t.settingsSaveFailed));
+            };
+        }, 'Failed to update task editor layout');
     };
     const toggleFieldVisibility = (fieldId: TaskEditorFieldId) => {
-        const nextHidden = new Set(hiddenSet);
-        if (nextHidden.has(fieldId)) {
-            nextHidden.delete(fieldId);
-        } else {
-            nextHidden.add(fieldId);
-        }
-        const nextFeatures = { ...(safeSettings.features ?? {}) };
-        if (fieldId === 'priority') {
-            nextFeatures.priorities = !nextHidden.has('priority');
-        }
-        if (fieldId === 'timeEstimate') {
-            nextFeatures.timeEstimates = !nextHidden.has('timeEstimate');
-        }
-        saveTaskEditor({ order: taskEditorOrder, hidden: Array.from(nextHidden) }, nextFeatures);
+        // The value the page shows decides, as the feature toggles do: another device's change since is not flipped back.
+        const hide = !hiddenSet.has(fieldId);
+        saveTaskEditor((latest) => {
+            const { order, hidden: nextHidden } = resolveTaskEditorLayout(latest);
+            if (hide) {
+                nextHidden.add(fieldId);
+            } else {
+                nextHidden.delete(fieldId);
+            }
+            const nextFeatures = { ...(latest.features ?? {}) };
+            if (fieldId === 'priority') {
+                nextFeatures.priorities = !nextHidden.has('priority');
+            }
+            if (fieldId === 'timeEstimate') {
+                nextFeatures.timeEstimates = !nextHidden.has('timeEstimate');
+            }
+            return { next: { order, hidden: Array.from(nextHidden) }, features: nextFeatures };
+        });
     };
     const updateInboxProcessing = (partial: Partial<InboxProcessingSettings>) => {
-        updateSettings({
-            gtd: {
-                ...(safeSettings.gtd ?? {}),
-                inboxProcessing: {
-                    ...(safeSettings.gtd?.inboxProcessing ?? {}),
-                    ...partial,
-                },
-            },
-        }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update inbox processing settings', error, t.settingsSaveFailed));
+        saveGtdFromLatest((gtd) => ({ inboxProcessing: { ...(gtd.inboxProcessing ?? {}), ...partial } }), 'Failed to update inbox processing settings');
     };
     const updateWeeklyReviewConfig = (partial: GtdSettings['weeklyReview']) => {
-        updateSettings({
-            gtd: {
-                ...(safeSettings.gtd ?? {}),
-                weeklyReview: {
-                    ...(safeSettings.gtd?.weeklyReview ?? {}),
-                    ...partial,
-                },
-            },
-        }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update weekly review settings', error, t.settingsSaveFailed));
+        saveGtdFromLatest((gtd) => ({ weeklyReview: { ...(gtd.weeklyReview ?? {}), ...partial } }), 'Failed to update weekly review settings');
     };
     const moveFieldInGroup = (fieldId: TaskEditorFieldId, delta: number, groupFields: TaskEditorFieldId[]) => {
-        const groupOrder = taskEditorOrder.filter((id) => groupFields.includes(id));
-        const fromIndex = groupOrder.indexOf(fieldId);
-        if (fromIndex === -1) return;
-        const toIndex = Math.max(0, Math.min(groupOrder.length - 1, fromIndex + delta));
-        if (fromIndex === toIndex) return;
-        const nextGroupOrder = [...groupOrder];
-        const [moved] = nextGroupOrder.splice(fromIndex, 1);
-        nextGroupOrder.splice(toIndex, 0, moved);
-        let groupIndex = 0;
-        const nextOrder = taskEditorOrder.map((id) =>
-            groupFields.includes(id) ? nextGroupOrder[groupIndex++] : id
-        );
-        saveTaskEditor({ order: nextOrder, hidden: Array.from(hiddenSet) });
+        saveTaskEditor((latest) => {
+            const { order, hidden } = resolveTaskEditorLayout(latest);
+            const groupOrder = order.filter((id) => groupFields.includes(id));
+            const fromIndex = groupOrder.indexOf(fieldId);
+            if (fromIndex === -1) return null;
+            const toIndex = Math.max(0, Math.min(groupOrder.length - 1, fromIndex + delta));
+            if (fromIndex === toIndex) return null;
+            const nextGroupOrder = [...groupOrder];
+            const [moved] = nextGroupOrder.splice(fromIndex, 1);
+            nextGroupOrder.splice(toIndex, 0, moved);
+            let groupIndex = 0;
+            const nextOrder = order.map((id) =>
+                groupFields.includes(id) ? nextGroupOrder[groupIndex++] : id
+            );
+            return { next: { order: nextOrder, hidden: Array.from(hidden) } };
+        });
     };
 
     const updateFieldSection = (fieldId: TaskEditorFieldId, sectionId: TaskEditorSectionId) => {
         if (!isTaskEditorSectionableField(fieldId)) return;
-        const nextSections = { ...(safeSettings.gtd?.taskEditor?.sections ?? {}) };
-        if (sectionId === DEFAULT_TASK_EDITOR_SECTION_BY_FIELD[fieldId]) {
-            delete nextSections[fieldId];
-        } else {
-            nextSections[fieldId] = sectionId;
-        }
-        saveTaskEditor({ order: taskEditorOrder, hidden: Array.from(hiddenSet), sections: nextSections });
+        saveTaskEditor((latest) => {
+            const { order, hidden } = resolveTaskEditorLayout(latest);
+            const nextSections = { ...(latest.gtd?.taskEditor?.sections ?? {}) };
+            if (sectionId === DEFAULT_TASK_EDITOR_SECTION_BY_FIELD[fieldId]) {
+                delete nextSections[fieldId];
+            } else {
+                nextSections[fieldId] = sectionId;
+            }
+            return { next: { order, hidden: Array.from(hidden), sections: nextSections } };
+        });
     };
 
     const updateSectionOpenDefault = (sectionId: Exclude<TaskEditorSectionId, 'basic'>, isOpen: boolean) => {
-        const nextSectionOpen = { ...(safeSettings.gtd?.taskEditor?.sectionOpen ?? {}) };
-        if (isOpen === DEFAULT_TASK_EDITOR_SECTION_OPEN[sectionId]) {
-            delete nextSectionOpen[sectionId];
-        } else {
-            nextSectionOpen[sectionId] = isOpen;
-        }
-        saveTaskEditor({ sectionOpen: nextSectionOpen });
+        saveTaskEditor((latest) => {
+            const nextSectionOpen = { ...(latest.gtd?.taskEditor?.sectionOpen ?? {}) };
+            if (isOpen === DEFAULT_TASK_EDITOR_SECTION_OPEN[sectionId]) {
+                delete nextSectionOpen[sectionId];
+            } else {
+                nextSectionOpen[sectionId] = isOpen;
+            }
+            return { next: { sectionOpen: nextSectionOpen } };
+        });
     };
     const updateTaskEditorPresentation = (presentation: TaskEditorPresentation) => {
         if (presentation === taskEditorPresentation) return;
-        saveTaskEditor({ presentation });
+        saveTaskEditor(() => ({ next: { presentation } }));
     };
     const handleOpenOnboardingFlow = () => {
         dispatchDesktopOnboardingEvent();
@@ -514,12 +521,7 @@ export function SettingsGtdPage({
                         value={autoArchiveDays}
                         onChange={(e) => {
                             const value = Number.parseInt(e.target.value, 10);
-                            updateSettings({
-                                gtd: {
-                                    ...(safeSettings.gtd ?? {}),
-                                    autoArchiveDays: Number.isFinite(value) ? value : 7,
-                                },
-                            }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update auto-archive settings', error, t.settingsSaveFailed));
+                            saveGtdFromLatest(() => ({ autoArchiveDays: Number.isFinite(value) ? value : 7 }), 'Failed to update auto-archive settings');
                         }}
                         className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
                     >
@@ -620,12 +622,7 @@ export function SettingsGtdPage({
                         aria-label={t.featureTimeline}
                         checked={resolvedFeatureFlags.timeline}
                         onCheckedChange={() => {
-                            updateSettings({
-                                features: {
-                                    ...(safeSettings.features ?? {}),
-                                    timeline: !resolvedFeatureFlags.timeline,
-                                },
-                            }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update feature flags', error, t.settingsSaveFailed));
+                            saveFeaturesFromLatest(() => ({ timeline: !resolvedFeatureFlags.timeline }));
                         }}
                     />
                 </SettingRow>
@@ -634,12 +631,7 @@ export function SettingsGtdPage({
                         aria-label={t.featurePomodoro}
                         checked={pomodoroEnabled}
                         onCheckedChange={() => {
-                            updateSettings({
-                                features: {
-                                    ...(safeSettings.features ?? {}),
-                                    pomodoro: !pomodoroEnabled,
-                                },
-                            }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update feature flags', error, t.settingsSaveFailed));
+                            saveFeaturesFromLatest(() => ({ pomodoro: !pomodoroEnabled }));
                         }}
                     />
                 </SettingRow>
@@ -739,12 +731,7 @@ export function SettingsGtdPage({
                         <button
                             type="button"
                             onClick={() => {
-                                updateSettings({
-                                    gtd: {
-                                        ...(safeSettings.gtd ?? {}),
-                                        defaultCaptureMethod: 'text',
-                                    },
-                                }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update capture defaults', error, t.settingsSaveFailed));
+                                saveGtdFromLatest(() => ({ defaultCaptureMethod: 'text' }), 'Failed to update capture defaults');
                             }}
                             className={cn(
                                 'px-3 py-1 text-xs rounded-md transition-colors',
@@ -758,12 +745,7 @@ export function SettingsGtdPage({
                         <button
                             type="button"
                             onClick={() => {
-                                updateSettings({
-                                    gtd: {
-                                        ...(safeSettings.gtd ?? {}),
-                                        defaultCaptureMethod: 'audio',
-                                    },
-                                }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update capture defaults', error, t.settingsSaveFailed));
+                                saveGtdFromLatest(() => ({ defaultCaptureMethod: 'audio' }), 'Failed to update capture defaults');
                             }}
                             className={cn(
                                 'px-3 py-1 text-xs rounded-md transition-colors',
@@ -805,12 +787,7 @@ export function SettingsGtdPage({
                             aria-label={t.captureSaveAudio}
                             checked={saveAudioAttachments}
                             onCheckedChange={() => {
-                                updateSettings({
-                                    gtd: {
-                                        ...(safeSettings.gtd ?? {}),
-                                        saveAudioAttachments: !saveAudioAttachments,
-                                    },
-                                }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update audio capture settings', error, t.settingsSaveFailed));
+                                saveGtdFromLatest(() => ({ saveAudioAttachments: !saveAudioAttachments }), 'Failed to update audio capture settings');
                             }}
                         />
                     </SettingRow>
@@ -831,14 +808,7 @@ export function SettingsGtdPage({
                         aria-label={t.naturalLanguageDates}
                         checked={naturalLanguageDates}
                         onCheckedChange={() => {
-                            updateSettings({
-                                gtd: {
-                                    ...(safeSettings.gtd ?? {}),
-                                    naturalLanguageDates: !naturalLanguageDates,
-                                },
-                            })
-                                .then(showSaved)
-                                .catch((error) => reportSettingsFailure('Failed to update quick add settings', error, t.settingsSaveFailed));
+                            saveGtdFromLatest(() => ({ naturalLanguageDates: !naturalLanguageDates }), 'Failed to update quick add settings');
                         }}
                     />
                 </SettingRow>
@@ -1017,15 +987,17 @@ export function SettingsGtdPage({
                         <button
                             type="button"
                             onClick={() => {
-                                const nextFeatures = { ...(safeSettings.features ?? {}) };
-                                nextFeatures.priorities = !defaultTaskEditorHidden.includes('priority');
-                                nextFeatures.timeEstimates = !defaultTaskEditorHidden.includes('timeEstimate');
-                                saveTaskEditor({
-                                    order: [...defaultTaskEditorOrder],
-                                    hidden: [...defaultTaskEditorHidden],
-                                    sections: {},
-                                    sectionOpen: {},
-                                }, nextFeatures);
+                                saveTaskEditor((latest) => {
+                                    const { defaultHidden } = resolveTaskEditorLayout(latest);
+                                    return {
+                                        next: { order: [...DEFAULT_TASK_EDITOR_ORDER], hidden: [...defaultHidden], sections: {}, sectionOpen: {} },
+                                        features: {
+                                            ...(latest.features ?? {}),
+                                            priorities: !defaultHidden.includes('priority'),
+                                            timeEstimates: !defaultHidden.includes('timeEstimate'),
+                                        },
+                                    };
+                                });
                             }}
                             className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors text-muted-foreground"
                         >

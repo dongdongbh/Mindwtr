@@ -8,6 +8,7 @@ import { useUiStore } from '../../store/ui-store';
 import { MINDWTR_NAVIGATE_EVENT } from '../../lib/navigation-events';
 import { selectToolbarOption } from '../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../test/list-end-gap';
+import { holdSyncSave } from '../../test/hold-sync-save';
 
 // Capture the focus-drag handler so tests can drive a drop without a real
 // pointer gesture; dnd-kit contexts render as passthroughs (see BoardView.test).
@@ -2188,6 +2189,30 @@ describe('AgendaView', () => {
             ]);
         });
         expect(queryByRole('button', { name: 'Desk' })).not.toBeInTheDocument();
+    });
+
+    it('deletes a saved Focus filter on the stored list, keeping a filter another device deleted meanwhile', async () => {
+        const desk: SavedFilter = { id: 'filter-desk', name: 'Desk', view: 'focus', criteria: { contexts: ['@desk'] }, createdAt: nowIso, updatedAt: nowIso };
+        const phone: SavedFilter = { id: 'filter-phone', name: 'Phone', view: 'focus', criteria: { contexts: ['@phone'] }, createdAt: nowIso, updatedAt: nowIso };
+        useTaskStore.setState({ settings: { savedFilters: [desk, phone] } });
+        const { getByRole } = renderAgenda();
+
+        fireEvent.click(getByRole('button', { name: 'More options: Desk' }));
+        fireEvent.click(getByRole('menuitem', { name: 'Delete saved filter Desk' }));
+        // A sync save holds the gate while the user confirms, then publishes another device's delete of Phone.
+        const deletedAt = '2026-02-28T13:00:00.000Z';
+        const finish = holdSyncSave(() => useTaskStore.setState({
+            settings: { savedFilters: [desk, { ...phone, updatedAt: deletedAt, deletedAt }] },
+        }));
+        fireEvent.click(getByRole('button', { name: /^Delete$/i }));
+        await finish();
+
+        await waitFor(() => {
+            expect(useTaskStore.getState().settings.savedFilters).toEqual([
+                expect.objectContaining({ id: 'filter-desk', deletedAt: expect.any(String) }),
+                expect.objectContaining({ id: 'filter-phone', deletedAt }),
+            ]);
+        });
     });
 
     it('removes advanced synced criteria from the active saved Focus filter', async () => {

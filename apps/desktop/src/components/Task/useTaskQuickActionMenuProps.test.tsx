@@ -1,11 +1,12 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 
 import { logInfo } from '../../lib/app-log';
 import { reportError } from '../../lib/report-error';
 import { useUiStore } from '../../store/ui-store';
-import { useTaskQuickActionMenuProps } from './useTaskQuickActionMenuProps';
+import { TaskQuickActionMenuHost, useTaskQuickActionMenuProps } from './useTaskQuickActionMenuProps';
+import { holdSyncSave } from '../../test/hold-sync-save';
 
 const createProjectMock = vi.hoisted(() => vi.fn());
 const logInfoMock = vi.hoisted(() => vi.fn());
@@ -262,5 +263,28 @@ describe('task cancellation quick action', () => {
         );
         await act(async () => { showToast.mock.lastCall?.[3].onClick(); await Promise.resolve(); });
         expect(updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({ status: 'next', cancelledAt: undefined }));
+    });
+});
+
+describe('useTaskQuickActionMenuProps contexts panel', () => {
+    afterEach(() => {
+        act(() => {
+            useTaskStore.setState(initialTaskState, true);
+            useUiStore.setState(initialUiState, true);
+        });
+    });
+
+    it('merges the saved contexts onto the contexts a sync save published since the panel opened', async () => {
+        const opened: Task = { ...task, contexts: ['@a'], rev: 1 };
+        act(() => { useTaskStore.setState({ _allTasks: [opened] }); });
+        render(<TaskQuickActionMenuHost task={opened} x={0} y={0} onClose={vi.fn()} />);
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'task.aria.contexts' }), { target: { value: '@a, @mine' } });
+        // A sync save holds the gate while the user saves, then publishes another device's added context.
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{ ...opened, rev: 3, contexts: ['@a', '@remote'] }] }));
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await act(finish);
+
+        await vi.waitFor(() => expect(useTaskStore.getState()._tasksById.get(task.id)?.contexts).toEqual(['@a', '@remote', '@mine']));
     });
 });

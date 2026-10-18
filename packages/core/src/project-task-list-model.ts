@@ -161,12 +161,15 @@ export function buildProjectTaskListModel(input: ProjectTaskListModelInput): Pro
     if (statusFilter === 'all') {
         const projectTagSet = new Set((project.tagIds || []).map((tag) => String(tag).toLowerCase()));
         const referenceSelections = { criteria, searchQuery };
-        referenceTasks = sortProjectTasksByOrder(input.visibleTasks.filter((task) => {
+        const matchingReferences = input.visibleTasks.filter((task) => {
             if (task.deletedAt || task.status !== 'reference') return false;
             const inProject = task.projectId === project.id
                 || (projectTagSet.size > 0 && (task.tags || []).some((tag) => projectTagSet.has(String(tag).toLowerCase())));
             return inProject && taskMatchesFilterSelections(task, referenceSelections);
-        }));
+        });
+        referenceTasks = sortBy === 'default'
+            ? sortProjectTasksByOrder(matchingReferences)
+            : sortTasksBy(matchingReferences, sortBy);
     }
 
     const sections = getProjectSectionsForView(project, input.sections, input.allSections);

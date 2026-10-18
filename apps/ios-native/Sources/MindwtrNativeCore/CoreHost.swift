@@ -4683,7 +4683,7 @@ private final class Engine: @unchecked Sendable {
 
     private static let notificationSettingFields = Set(["notificationsEnabled", "startDateNotificationsEnabled",
         "dueDateNotificationsEnabled", "weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled",
-        "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "weeklyReviewDay"])
+        "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "weeklyReviewDay", "taskReminderDefault"])
     private static func notificationSettingRequest(_ raw: String) throws -> [String: Any] {
         guard raw.utf8.count <= 8_192,
               let input = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
@@ -4697,7 +4697,9 @@ private final class Engine: @unchecked Sendable {
             throw HostFailure("INVALID_INPUT: Notification setting needs a bounded typed edit, witness and lowercase UUID")
         }
         let valid: Bool
-        if type == "weeklyReviewDay" {
+        if type == "taskReminderDefault" {
+            valid = edit["value"] as? String == "send" || edit["value"] as? String == "skip"
+        } else if type == "weeklyReviewDay" {
             valid = isInteger(edit["value"]) && (edit["value"] as? NSNumber).map { (0...6).contains($0.doubleValue) } == true
         } else if ["weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime"].contains(type) {
             valid = (edit["value"] as? String).map { $0.range(of: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", options: .regularExpression) != nil } == true

@@ -6,23 +6,30 @@ import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
+import android.text.Editable
+import android.text.TextWatcher
+import android.widget.EditText
 import android.widget.Button
 import android.widget.RadioButton
-import android.widget.RadioGroup
+import android.content.Context
+import android.view.ViewGroup
+import android.widget.BaseAdapter
+import android.widget.ListView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Picks which list a Tasks widget shows (#1173): the fixed GTD lists, then
- * one saved filter. Runs on placement (`android:configure`), from the launcher's
+ * saved filters, contexts and tags. Runs on placement (`android:configure`), from the launcher's
  * edit action (`reconfigurable`), and as a dropdown sheet when the widget's
- * own header title is tapped. OK stores the choice for this widget id and
+ * own header chevron is tapped. OK stores the choice for this widget id and
  * redraws it; Cancel on first placement cancels the placement.
  */
 class WidgetConfigureActivity : AppCompatActivity() {
   private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
-  // Opened from the widget's header title: a top-anchored sheet, tap = pick.
+  // Opened from the widget's header chevron: a top-anchored sheet, tap = pick.
   private var dropdown = false
+  private var pendingSelection = WidgetListStore.DEFAULT_LIST
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -48,31 +55,27 @@ class WidgetConfigureActivity : AppCompatActivity() {
     val payload = WidgetPayloadStore.read(this)
     val palette = payload.resolvedPalette(this)
     val current = WidgetListStore.read(this, appWidgetId)
+    pendingSelection = savedInstanceState?.getString("listSelection") ?: current
 
-    val group = findViewById<RadioGroup>(R.id.mindwtr_widget_configure_lists)
+    val list = findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val textColor = palette?.text ?: getColor(R.color.mindwtr_widget_text)
     val mutedColor = palette?.mutedText ?: getColor(R.color.mindwtr_widget_muted_text)
-    val options = fixedOptions(payload.listTitles) +
-      payload.savedFilters.map { WidgetListStore.FILTER_PREFIX + it.id to it.name }
-    var needsFilterLabel = true
-    for ((id, title) in options) {
-      if (needsFilterLabel && id.startsWith(WidgetListStore.FILTER_PREFIX)) {
-        needsFilterLabel = false
-        group.addView(TextView(this).apply {
-          text = payload.listTitles["savedFilters"] ?: "Saved filters"
-          setTextColor(mutedColor)
-          textSize = 12f
-          setPadding(0, dp(12), 0, dp(4))
-        })
-      }
-      group.addView(RadioButton(this).apply {
-        text = title
-        tag = id
-        setTextColor(textColor)
-        textSize = 15f
-        minHeight = dp(if (dropdown) 40 else 44)
-        isChecked = id == current
-        if (dropdown) setOnClickListener { save(group) }
+    val options = chooserGroups(payload)
+    val adapter = ChooserAdapter(this, options, textColor, mutedColor, if (dropdown) 40 else 44,
+      selected = { pendingSelection },
+      pick = { id -> pendingSelection = id; if (dropdown) save() },
+    )
+    list.adapter = adapter
+    list.setOnItemClickListener { _, _, position, _ -> adapter.pick(position) }
+    findViewById<EditText>(R.id.mindwtr_widget_configure_search).apply {
+      hint = payload.listTitles["search"] ?: "Search"
+      setTextColor(textColor)
+      setHintTextColor(mutedColor)
+      visibility = if (options.sumOf { it.second.size } > 12) View.VISIBLE else View.GONE
+      addTextChangedListener(object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { adapter.search(s?.toString() ?: "") }
+        override fun afterTextChanged(s: Editable?) {}
       })
     }
 
@@ -82,18 +85,18 @@ class WidgetConfigureActivity : AppCompatActivity() {
     }
     findViewById<Button>(R.id.mindwtr_widget_configure_ok).apply {
       text = payload.quickCapture.save
-      setOnClickListener { save(group) }
+      setOnClickListener { save() }
     }
     palette?.let { applyPalette(it, textColor) }
   }
 
-  private fun fixedOptions(titles: Map<String, String>): List<Pair<String, String>> =
-    listOf("focus" to "Focus", "inbox" to "Inbox", "next" to "Next Actions", "waiting" to "Waiting For", "someday" to "Someday/Maybe")
-      .map { (id, fallback) -> id to (titles[id] ?: fallback) }
+  override fun onSaveInstanceState(outState: Bundle) {
+    outState.putString("listSelection", pendingSelection)
+    super.onSaveInstanceState(outState)
+  }
 
-  private fun save(group: RadioGroup) {
-    val checked = group.findViewById<RadioButton>(group.checkedRadioButtonId) ?: return
-    val listId = checked.tag as? String ?: WidgetListStore.DEFAULT_LIST
+  private fun save() {
+    val listId = pendingSelection
     WidgetListStore.write(this, appWidgetId, listId)
     val manager = AppWidgetManager.getInstance(this)
     WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), WidgetKind.TASKS)
@@ -113,7 +116,73 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+  /** Only visible rows are inflated; filtering never discards the pending widget selection. */
+  internal class ChooserAdapter(
+    private val context: Context,
+    private val groups: List<Pair<String?, List<Pair<String, String>>>>,
+    private val textColor: Int,
+    private val mutedColor: Int,
+    private val rowHeight: Int,
+    private val selected: () -> String,
+    private val pick: (String) -> Unit,
+  ) : BaseAdapter() {
+    private var rows: List<Pair<String?, String>> = emptyList()
+    init { search("") }
+
+    fun search(query: String) {
+      val needle = query.trim()
+      rows = groups.flatMap { (label, entries) ->
+        val matches = entries.filter { it.second.contains(needle, ignoreCase = true) }
+        if (matches.isEmpty()) emptyList()
+        else (if (label != null) listOf(null to label) else emptyList()) + matches
+      }
+      notifyDataSetChanged()
+    }
+
+    fun pick(position: Int) {
+      rows.getOrNull(position)?.first?.let { pick(it); notifyDataSetChanged() }
+    }
+    override fun getCount(): Int = rows.size
+    override fun getItem(position: Int): Pair<String?, String> = rows[position]
+    override fun getItemId(position: Int): Long = position.toLong()
+    override fun getViewTypeCount(): Int = 2
+    override fun getItemViewType(position: Int): Int = if (rows[position].first == null) 0 else 1
+    override fun areAllItemsEnabled(): Boolean = false
+    override fun isEnabled(position: Int): Boolean = rows[position].first != null
+
+    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+      val (id, title) = rows[position]
+      val density = context.resources.displayMetrics.density
+      if (id == null) return ((convertView as? TextView)?.takeUnless { it is RadioButton } ?: TextView(context)).apply {
+        text = title
+        setTextColor(mutedColor)
+        textSize = 12f
+        setPadding(0, (12 * density).toInt(), 0, (4 * density).toInt())
+      }
+      return (convertView as? RadioButton ?: RadioButton(context)).apply {
+        text = title
+        tag = id
+        setTextColor(textColor)
+        textSize = 15f
+        minHeight = (rowHeight * density).toInt()
+        isChecked = id == selected()
+        setOnClickListener { pick(position) }
+      }
+    }
+  }
+
   companion object {
     const val EXTRA_DROPDOWN = "tech.dongdongbh.mindwtr.androidwidget.dropdown"
+
+    internal fun chooserGroups(payload: WidgetPayload): List<Pair<String?, List<Pair<String, String>>>> = listOf(
+      null to fixedOptions(payload.listTitles),
+      (payload.listTitles["savedFilters"] ?: "Saved filters") to payload.savedFilters.map { WidgetListStore.FILTER_PREFIX + it.id to it.name },
+      (payload.listTitles["contexts"] ?: "Contexts") to payload.contexts.map { it.id to it.name },
+      (payload.listTitles["tags"] ?: "Tags") to payload.tags.map { it.id to it.name },
+    )
+
+    internal fun fixedOptions(titles: Map<String, String>): List<Pair<String, String>> =
+      listOf("focus" to "Focus", "inbox" to "Inbox", "next" to "Next Actions", "upcoming" to "Upcoming", "waiting" to "Waiting For", "someday" to "Someday/Maybe")
+        .map { (id, fallback) -> id to (titles[id] ?: fallback) }
   }
 }

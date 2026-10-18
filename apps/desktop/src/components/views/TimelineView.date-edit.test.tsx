@@ -52,7 +52,7 @@ describe('Timeline date editing', () => {
             const control = moveControl();
             down(control);
             move(100 + pixels * 2);
-            expect(screen.getByRole('status')).toHaveTextContent('Start date:');
+            expect(screen.getByTestId('timeline-date-preview')).toHaveTextContent('Start date:');
             expect(commitTimelineDateEdit).not.toHaveBeenCalled();
             expect(useTaskStore.getState()._allTasks[0].startTime).toBe(task.startTime);
             up(100 + pixels * 2);
@@ -73,7 +73,7 @@ describe('Timeline date editing', () => {
         else fireEvent.blur(window);
         up(124); fireEvent.click(control);
         expect(commitTimelineDateEdit).not.toHaveBeenCalled();
-        expect(screen.queryByRole('status')).toBeNull();
+        expect(screen.queryByTestId('timeline-date-preview')).toBeNull();
         expect(screen.queryByRole('dialog')).toBeNull();
     });
 

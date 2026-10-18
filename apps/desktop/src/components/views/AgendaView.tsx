@@ -15,7 +15,7 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, TIME_ESTIMATE_OPTIONS, buildFocusPools, compareProjectsByOrder, planFocusFilterCriterionRemoval, formatFocusTaskLimitText,
-    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback } from '@mindwtr/core';
+    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
 import { DEFAULT_FOCUS_SORT_BY } from '@mindwtr/core';
 import type { MultiValueFilterMatchMode, SavedFilter, SortField, Task, TaskEnergyLevel } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
@@ -376,13 +376,12 @@ function AgendaTaskList({
 
 export function AgendaView() {
     const perf = usePerformanceMonitor('AgendaView');
-    const { projects, sections: projectSections, areas, updateTask, updateSettings, reorderFocusedTasks, settings, error, highlightTaskId, setHighlightTask, taskChangeToken, hasAnyTasks } = useTaskStore(
+    const { projects, sections: projectSections, areas, updateTask, reorderFocusedTasks, settings, error, highlightTaskId, setHighlightTask, taskChangeToken, hasAnyTasks } = useTaskStore(
         (state) => ({
             projects: state.projects,
             sections: state.sections,
             areas: state.areas,
             updateTask: state.updateTask,
-            updateSettings: state.updateSettings,
             reorderFocusedTasks: state.reorderFocusedTasks,
             settings: state.settings,
             error: state.error,
@@ -556,14 +555,16 @@ export function AgendaView() {
         return translateWithFallback(t, key, fallback);
     }, [t]);
     const removeAdvancedSavedFilterCriterion = useCallback((chipId: string) => {
-        const plan = planFocusFilterCriterionRemoval({
+        // Saved-filter writes edit the list as stored when they are admitted: only the edited filter
+        // changes, so a filter another device added, changed or deleted since stays as synced.
+        const nowIso = new Date().toISOString();
+        void updateSettingsFromLatest((latest) => planFocusFilterCriterionRemoval({
             activeSavedFilter,
             criterionId: chipId,
-            savedFilters: settings?.savedFilters,
-            nowIso: new Date().toISOString(),
-        });
-        if (plan) void updateSettings(plan).catch(() => undefined);
-    }, [activeSavedFilter, settings?.savedFilters, updateSettings]);
+            savedFilters: latest.savedFilters,
+            nowIso,
+        })).catch(() => undefined);
+    }, [activeSavedFilter]);
     const chipDeps = useMemo<ActiveFilterChipDeps>(() => ({
         t,
         resolveText,
@@ -749,13 +750,13 @@ export function AgendaView() {
             createdAt: nowIso,
             updatedAt: nowIso,
         };
-        void updateSettings({
-            savedFilters: [...(settings?.savedFilters ?? []), nextFilter],
-        }).then(() => {
+        void updateSettingsFromLatest((latest) => ({
+            savedFilters: [...(latest.savedFilters ?? []), nextFilter],
+        })).then(() => {
             setSaveFilterPromptOpen(false);
             applySavedSelections(nextFilter);
         }).catch(() => undefined);
-    }, [applySavedSelections, canSaveFocusPerspective, currentFilterCriteria, effectiveFocusSortBy, effectiveNextGroupBy, settings?.savedFilters, updateSettings]);
+    }, [applySavedSelections, canSaveFocusPerspective, currentFilterCriteria, effectiveFocusSortBy, effectiveNextGroupBy]);
     const handleDeleteSavedFilter = useCallback(async (filter: SavedFilter) => {
         const confirmed = await requestConfirmation({
             title: resolveText('savedFilters.deleteTitle', 'Delete saved filter?'),
@@ -764,13 +765,12 @@ export function AgendaView() {
             cancelLabel: t('common.cancel'),
         });
         if (!confirmed) return;
-        const nextFilters = markSavedFilterDeleted(settings?.savedFilters, filter.id);
-        void updateSettings({ savedFilters: nextFilters }).then(() => {
+        void updateSettingsFromLatest((latest) => ({ savedFilters: markSavedFilterDeleted(latest.savedFilters, filter.id) })).then(() => {
             if (activeSavedFilterId === filter.id) {
                 unbindSavedFilter();
             }
         }).catch(() => undefined);
-    }, [activeSavedFilterId, requestConfirmation, resolveText, settings?.savedFilters, t, unbindSavedFilter, updateSettings]);
+    }, [activeSavedFilterId, requestConfirmation, resolveText, t, unbindSavedFilter]);
 
     useEffect(() => {
         if (!highlightTaskId) return;

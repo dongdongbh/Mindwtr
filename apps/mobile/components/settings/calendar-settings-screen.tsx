@@ -28,6 +28,7 @@ import {
     shallow,
     toggleCalendarAreaId,
     toggleCalendarFeedArea,
+    runStoreCommand,
     type ExternalCalendarSubscription,
     useTaskStore,
 } from '@mindwtr/core';
@@ -379,11 +380,20 @@ export function CalendarSettingsScreen() {
         await persistSystemCalendarState({ areaIdsByCalendar: { ...systemCalendarAreaIds, [calendarId]: next } });
     };
 
+    // Each feed edit applies to the latest stored list when its write is admitted, so a feed another device
+    // added, changed or removed since this page loaded stays as synced. Before any sync, the shown list is the base.
+    const writeCalendarFeeds = (edit: (feeds: ExternalCalendarSubscription[]) => ExternalCalendarSubscription[] | null) => (
+        runStoreCommand(async () => {
+            const next = edit(useTaskStore.getState().settings.externalCalendars ?? externalCalendars);
+            if (!next) return;
+            setExternalCalendars(next);
+            await saveExternalCalendars(next);
+            await updateSettings({ externalCalendars: next });
+        })
+    );
+
     const toggleCalendarArea = async (calendarId: string, areaId: string) => {
-        const next = toggleCalendarFeedArea(externalCalendars, calendarId, areaId);
-        setExternalCalendars(next);
-        await saveExternalCalendars(next);
-        await updateSettings({ externalCalendars: next });
+        await writeCalendarFeeds((feeds) => toggleCalendarFeedArea(feeds, calendarId, areaId));
     };
 
     const renderAreaSelector = (sourceId: string, selectedIds: string[], onToggle: (areaId: string) => void) => {
@@ -403,19 +413,18 @@ export function CalendarSettingsScreen() {
 
     const handleAddCalendar = async () => {
         if (!newCalendarUrl.trim()) return;
-        const next = addCalendarFeed(externalCalendars, {
-            id: generateUUID(),
-            name: newCalendarName,
-            url: newCalendarUrl,
-            defaultName: tr('nav.calendar'),
+        await writeCalendarFeeds((feeds) => {
+            const next = addCalendarFeed(feeds, {
+                id: generateUUID(),
+                name: newCalendarName,
+                url: newCalendarUrl,
+                defaultName: tr('nav.calendar'),
+            });
+            if (!next) return null;
+            setNewCalendarName('');
+            setNewCalendarUrl('');
+            return next;
         });
-        if (!next) return;
-
-        setExternalCalendars(next);
-        setNewCalendarName('');
-        setNewCalendarUrl('');
-        await saveExternalCalendars(next);
-        await updateSettings({ externalCalendars: next });
     };
 
     const handleChooseLocalCalendar = async () => {
@@ -428,19 +437,18 @@ export function CalendarSettingsScreen() {
             const asset = result.assets[0];
             if (!asset?.uri) return;
 
-            const next = addCalendarFile(externalCalendars, {
-                id: generateUUID(),
-                name: newCalendarName,
-                fileName: asset.name,
-                uri: asset.uri,
-                defaultName: tr('nav.calendar'),
+            await writeCalendarFeeds((feeds) => {
+                const next = addCalendarFile(feeds, {
+                    id: generateUUID(),
+                    name: newCalendarName,
+                    fileName: asset.name,
+                    uri: asset.uri,
+                    defaultName: tr('nav.calendar'),
+                });
+                setNewCalendarName('');
+                setNewCalendarUrl('');
+                return next;
             });
-
-            setExternalCalendars(next);
-            setNewCalendarName('');
-            setNewCalendarUrl('');
-            await saveExternalCalendars(next);
-            await updateSettings({ externalCalendars: next });
             showToast(calendarSettingsToasts(tr, t).localFileAdded());
         } catch (error) {
             console.error(error);
@@ -449,27 +457,17 @@ export function CalendarSettingsScreen() {
     };
 
     const handleToggleCalendar = async (id: string, enabled: boolean) => {
-        const next = setCalendarFeedEnabled(externalCalendars, id, enabled);
-        setExternalCalendars(next);
-        await saveExternalCalendars(next);
-        await updateSettings({ externalCalendars: next });
+        await writeCalendarFeeds((feeds) => setCalendarFeedEnabled(feeds, id, enabled));
     };
 
     const handleCalendarColorChange = async (id: string, color: string | undefined) => {
         // `undefined` is the Auto swatch: drop the pick so the feed hint or
         // the assigned default applies again (#974).
-        const next = setCalendarFeedColor(externalCalendars, id, color);
-        if (!next) return;
-        setExternalCalendars(next);
-        await saveExternalCalendars(next);
-        await updateSettings({ externalCalendars: next });
+        await writeCalendarFeeds((feeds) => setCalendarFeedColor(feeds, id, color));
     };
 
     const handleRemoveCalendar = async (id: string) => {
-        const next = removeCalendarFeed(externalCalendars, id);
-        setExternalCalendars(next);
-        await saveExternalCalendars(next);
-        await updateSettings({ externalCalendars: next });
+        await writeCalendarFeeds((feeds) => removeCalendarFeed(feeds, id));
     };
 
     const handleTestFetch = async () => {

@@ -149,11 +149,12 @@ describe('actual iOS search publication bridge', () => {
 
     it.each(['queued', 'inFlight', 'immediate', 'retrying'])('refuses %s saves without completing them', async (kind) => {
         const f = fixture(); await f.boot({ ...data([task('one')]), settings: { deviceId: 'search-fixture' } });
-        const adapter = f.state.fixture.adapter(), save = adapter.saveData.bind(adapter), schema = adapter.ensureSchema.bind(adapter);
+        const adapter = f.state.fixture.adapter(), save = adapter.saveData.bind(adapter), schema = adapter.ensureSchemaNow.bind(adapter);
         let release!: () => void;
         const held = new Promise<void>((resolve) => { release = resolve; });
         adapter.saveData = async (d: AppData) => { await held; return save(d); };
-        if (kind === 'immediate') adapter.ensureSchema = async () => { await held; return schema(); };
+        // A save runs its schema check in its locked body (core's ensureSchemaNow): holding it holds the immediate save.
+        if (kind === 'immediate') adapter.ensureSchemaNow = async () => { await held; return schema(); };
         let saving: Promise<unknown> | undefined;
         if (kind === 'immediate') saving = f.state.fixture.state().updateTask('one', { title: 'changed' });
         else {

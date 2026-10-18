@@ -6,6 +6,13 @@ import java.net.URI
 import java.net.URISyntaxException
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.text.DateFormat
+import java.text.ParsePosition
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -14,7 +21,7 @@ import org.json.JSONObject
  * The widget payload the React Native side publishes (widget-service.ts,
  * `AndroidTasksWidgetPayload`), shared by every widget kind. Every string the
  * widgets or the quick-capture dialog show is localized in TypeScript; Kotlin
- * only lays it out. Unknown keys (such as a future `sections` array) are ignored.
+ * refreshes Upcoming dates in the current locale/timezone. Unknown keys are ignored.
  */
 data class WidgetPayload(
   val headerTitle: String,
@@ -27,6 +34,8 @@ data class WidgetPayload(
   val lists: Map<String, ListPayload>,
   val listTitles: Map<String, String>,
   val savedFilters: List<SavedFilterOption>,
+  val contexts: List<SavedFilterOption> = emptyList(),
+  val tags: List<SavedFilterOption> = emptyList(),
   val emptyMessage: String,
   val focusUri: String,
   val themeMode: String,
@@ -54,6 +63,8 @@ data class WidgetPayload(
     val tags: List<String>,
     val startLabel: String?,
     val priorityLabel: String?,
+    val upcomingDate: String? = null,
+    val upcomingLabel: String? = null,
   )
 
   enum class DueTone { OVERDUE, TODAY, NORMAL }
@@ -118,6 +129,7 @@ data class WidgetPayload(
     val audioSaved: String,
     val audioError: String,
     val audioPermissionDenied: String,
+    val descriptionPlaceholder: String = "Description (optional)",
   )
 
   /** True when the launcher's own day/night resources should color the widget. */
@@ -149,8 +161,8 @@ data class WidgetPayload(
    * payload. [sourceTaskIds] deliberately comes from the unfiltered payload so
    * committed check-offs can still be reconciled after the app ingests them.
    */
-  fun displaySnapshot(hiddenTaskIds: Set<String>): DisplaySnapshot {
-    if (hiddenTaskIds.isEmpty()) return DisplaySnapshot(allTaskIds(), this)
+  fun displaySnapshot(hiddenTaskIds: Set<String>, now: Date = Date(), timeZone: TimeZone = TimeZone.getDefault()): DisplaySnapshot {
+    if (hiddenTaskIds.isEmpty() && UPCOMING_LIST_ID !in lists) return DisplaySnapshot(allTaskIds(), this)
     fun visible(items: List<Item>): List<Item> = items.filterNot { it.id in hiddenTaskIds }
     fun visible(sections: List<Section>): List<Section> = sections.mapNotNull { section ->
       section.copy(items = visible(section.items)).takeIf { it.items.isNotEmpty() }
@@ -171,8 +183,46 @@ data class WidgetPayload(
       payload = copy(
         items = visible(items),
         sections = visible(sections),
-        lists = lists.mapValues { (_, list) -> visible(list) },
+        lists = lists.mapValues { (id, list) ->
+          val unhidden = visible(list)
+          if (id == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(now, timeZone) else unhidden
+        },
       ),
+    )
+  }
+
+  private fun ListPayload.upcomingSnapshot(now: Date, timeZone: TimeZone): ListPayload {
+    val today = Calendar.getInstance(timeZone).apply {
+      time = now
+      set(Calendar.HOUR_OF_DAY, 0)
+      set(Calendar.MINUTE, 0)
+      set(Calendar.SECOND, 0)
+      set(Calendar.MILLISECOND, 0)
+    }
+    val tomorrow = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) }.time
+    val afterWindow = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 8) }.time
+    fun preview(items: List<Item>): List<Item> = items.mapNotNull { item ->
+      val raw = item.upcomingDate ?: return@mapNotNull null
+      val date = parseUpcomingDate(raw, timeZone) ?: return@mapNotNull null
+      if (date.before(tomorrow) || !date.before(afterWindow)) return@mapNotNull null
+      val format = if (DATE_ONLY.matches(raw)) DateFormat.getDateInstance(DateFormat.MEDIUM)
+      else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+      format.timeZone = timeZone
+      item.copy(
+        dueLabel = item.upcomingLabel?.let { "$it ${format.format(date)}" } ?: item.dueLabel,
+        dueEmphasis = false,
+        dueTone = DueTone.NORMAL,
+      )
+    }
+    val nextItems = preview(items)
+    val nextSections = sections.mapNotNull { section ->
+      section.copy(items = preview(section.items)).takeIf { it.items.isNotEmpty() }
+    }
+    val removed = taskIds() - (nextItems.map { it.id } + nextSections.flatMap { it.items.map { item -> item.id } }).toSet()
+    return copy(
+      items = nextItems,
+      sections = nextSections,
+      totalCount = totalCount?.let { (it - removed.size).coerceAtLeast(if (nextSections.isEmpty()) nextItems.size else nextSections.sumOf { section -> section.items.size }) },
     )
   }
 
@@ -193,6 +243,9 @@ data class WidgetPayload(
     lists[listId]?.title
       ?: listTitles[listId]
       ?: savedFilters.firstOrNull { listId == WidgetListStore.FILTER_PREFIX + it.id }?.name
+      ?: (contexts + tags).firstOrNull { it.id == listId }?.name
+      ?: listId.substringAfter(":").takeIf { WidgetListStore.isTokenList(listId) && navigableListIdOrNull(listId) != null }
+      ?: "Upcoming".takeIf { listId == UPCOMING_LIST_ID }
 
   /** Unknown/retired selections draw and navigate as Focus; known legacy project payloads remain usable. */
   fun resolvedListId(listId: String): String =
@@ -253,9 +306,32 @@ data class WidgetPayload(
     )
     const val DEFAULT_FOCUS_URI = "mindwtr:///focus"
     const val NEXT_LIST_ID = "next"
+    const val UPCOMING_LIST_ID = "upcoming"
     const val MAX_ITEMS = 200
     private const val MAX_LIST_ID_LENGTH = 1_024
-    private val FIXED_LIST_IDS = setOf(WidgetListStore.DEFAULT_LIST, "inbox", NEXT_LIST_ID, "waiting", "someday")
+    private val FIXED_LIST_IDS = setOf(WidgetListStore.DEFAULT_LIST, "inbox", NEXT_LIST_ID, UPCOMING_LIST_ID, "waiting", "someday")
+    private val DATE_ONLY = Regex("""\d{4}-\d{2}-\d{2}""")
+    private val DATE_TIME = Regex("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?""")
+
+    private fun parseUpcomingDate(raw: String, timeZone: TimeZone): Date? {
+      val pattern = when {
+        DATE_ONLY.matches(raw) -> "yyyy-MM-dd'T'HH:mm"
+        DATE_TIME.matches(raw) -> "yyyy-MM-dd'T'HH:mm" +
+          (if (raw.getOrNull(16) == ':') ":ss" else "") +
+          (if ('.' in raw) ".SSS" else "") +
+          (if (raw.endsWith('Z') || raw.drop(10).contains('+') || raw.drop(10).contains('-')) "XXX" else "")
+        else -> return null
+      }
+      // Noon compares calendar days even where a DST transition skips local midnight.
+      val normalized = if (DATE_ONLY.matches(raw)) "${raw}T12:00"
+      else raw.replace(Regex("""\.(\d{1,3})(?=Z|[+-]|$)""")) { ".${it.groupValues[1].padEnd(3, '0')}" }
+      val parser = SimpleDateFormat(pattern, Locale.ROOT).apply {
+        isLenient = false
+        this.timeZone = timeZone
+      }
+      val position = ParsePosition(0)
+      return parser.parse(normalized, position)?.takeIf { position.index == normalized.length }
+    }
 
     val EMPTY = WidgetPayload(
       headerTitle = "Today's Focus",
@@ -340,6 +416,7 @@ data class WidgetPayload(
       val quickCapture = QuickCaptureLabels(
         title = labels.stringOr("title", defaults.quickCapture.title),
         placeholder = labels.stringOr("placeholder", defaults.quickCapture.placeholder),
+        descriptionPlaceholder = labels.stringOr("descriptionPlaceholder", defaults.quickCapture.descriptionPlaceholder),
         save = labels.stringOr("save", defaults.quickCapture.save),
         cancel = labels.stringOr("cancel", defaults.quickCapture.cancel),
         added = labels.stringOr("added", defaults.quickCapture.added),
@@ -376,6 +453,8 @@ data class WidgetPayload(
         lists = lists,
         listTitles = listTitles,
         savedFilters = savedFilters,
+        contexts = parseTokenOptions(root, "contexts", WidgetListStore.CONTEXT_PREFIX),
+        tags = parseTokenOptions(root, "tags", WidgetListStore.TAG_PREFIX),
         emptyMessage = root.stringOr("emptyMessage", defaults.emptyMessage),
         focusUri = focusUri,
         themeMode = root.stringOr("themeMode", "system"),
@@ -428,6 +507,8 @@ data class WidgetPayload(
             tags = parseStrings(item.optJSONArray("tags")),
             startLabel = item.optString("startLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("startLabel") },
             priorityLabel = item.optString("priorityLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("priorityLabel") },
+            upcomingDate = item.optString("upcomingDate").takeIf { !item.isNull("upcomingDate") },
+            upcomingLabel = item.optString("upcomingLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("upcomingLabel") },
           ),
         )
       }
@@ -486,7 +567,7 @@ data class WidgetPayload(
             return null
           }
           decoded.takeIf {
-            it == NEXT_LIST_ID || it.startsWith(WidgetListStore.FILTER_PREFIX) || it.startsWith(WidgetListStore.PROJECT_PREFIX)
+            it == NEXT_LIST_ID || it == UPCOMING_LIST_ID || it.startsWith(WidgetListStore.FILTER_PREFIX) || it.startsWith(WidgetListStore.PROJECT_PREFIX) || WidgetListStore.isTokenList(it)
           }
             ?: return null
         }
@@ -516,8 +597,21 @@ data class WidgetPayload(
     private const val MAX_LIST_URI_LENGTH = 12_512
     private const val LIST_ROUTE_PREFIX = "/widget-list/"
 
+    private fun parseTokenOptions(root: JSONObject, field: String, prefix: String): List<SavedFilterOption> {
+      val list = root.optJSONArray(field) ?: return emptyList()
+      return (0 until list.length()).mapNotNull { index ->
+        val option = list.optJSONObject(index) ?: return@mapNotNull null
+        val id = option.optString("id")
+        val name = option.optString("name")
+        if (id.startsWith(prefix) && navigableListIdOrNull(id) != null && name.isNotBlank()) SavedFilterOption(id, name) else null
+      }.distinctBy { it.id }
+    }
+
     private fun navigableListIdOrNull(listId: String): String? = when {
       listId in FIXED_LIST_IDS -> listId
+      WidgetListStore.isTokenList(listId) &&
+        listId.length <= MAX_LIST_ID_LENGTH && listId.substringAfter(":").isNotBlank() &&
+        listId.none(Char::isISOControl) -> listId
       listId.startsWith(WidgetListStore.FILTER_PREFIX) &&
         listId.length <= MAX_LIST_ID_LENGTH &&
         listId.removePrefix(WidgetListStore.FILTER_PREFIX).isNotBlank() &&

@@ -45,6 +45,40 @@ const buildProject = (overrides: Partial<Project>): Project => ({
 });
 
 describe('schedule-utils', () => {
+    it('resolves inherited policy for start, due and repeats while preserving reviews and legacy choices', () => {
+        const now = new Date('2026-03-16T12:00:00.000Z');
+        const task = buildTask({ reminderPolicy: 'inherit', startTime: '2026-03-17T08:00:00.000Z',
+            dueDate: '2026-03-17T09:00:00.000Z', reviewAt: '2026-03-17T10:00:00.000Z', repeatReminderMinutes: 30 });
+        const skip = { taskReminderDefault: 'skip' as const, includeReviewAt: true };
+        expect(getTaskReminderPlan(task, now, skip)).toMatchObject({ next: { kind: 'review' }, repeats: [] });
+        expect(getTaskReminderPlan(task, now, { taskReminderDefault: 'send' })).toMatchObject({ next: { kind: 'start' }, repeats: expect.any(Array) });
+        expect(getDueReminderRepeatTimes(task, { taskReminderDefault: 'send' })).toHaveLength(4);
+        expect(getNextScheduledAt({ ...task, reminderPolicy: 'send', suppressMindwtrReminders: true }, now, skip))
+            .toEqual(new Date(task.startTime!));
+        expect(getNextScheduledAt({ ...task, reminderPolicy: 'skip' }, now, { taskReminderDefault: 'send' })).toBeNull();
+        expect(getNextScheduledAt({ ...task, reminderPolicy: undefined, suppressMindwtrReminders: false }, now, skip))
+            .toEqual(new Date(task.startTime!));
+        expect(getNextScheduledAt({ ...task, reminderPolicy: undefined, suppressMindwtrReminders: true }, now)).toBeNull();
+        expect(task.repeatReminderMinutes).toBe(30);
+        expect(getTaskReminderPlan({ ...task, startTime: '2026-03-17', dueDate: '2026-03-17', reviewAt: undefined }, now))
+            .toEqual({ next: null, repeats: [] });
+    });
+
+    it('uses the default in the complete schedule and retains category gates', () => {
+        const task = buildTask({ reminderPolicy: 'inherit', dueDate: '2026-03-17T09:00:00.000Z',
+            reviewAt: '2026-03-17T10:00:00.000Z', repeatReminderMinutes: 30 });
+        const input = { tasks: [task], projects: [], now: new Date('2026-03-16T12:00:00.000Z'), translations: {} };
+        const skip = buildReminderSchedule({ ...input, settings: { taskReminderDefault: 'skip' } });
+        expect(skip.requests).toMatchObject([{ key: 'task:task-1', data: { kind: 'task-review' } }]);
+        expect(skip.diagnostics.suppressedTaskReminderCount).toBe(1);
+        const send = buildReminderSchedule({ ...input, settings: { taskReminderDefault: 'send' } });
+        expect(send.requests).toHaveLength(5);
+        expect(send.requests.filter((entry) => entry.key === 'task:task-1')).toHaveLength(1);
+        expect(buildReminderSchedule({ ...input, settings: { taskReminderDefault: 'send', notificationsEnabled: false } }).requests).toEqual([]);
+        expect(buildReminderSchedule({ ...input, settings: { taskReminderDefault: 'send', dueDateNotificationsEnabled: false } }).requests)
+            .toMatchObject([{ data: { kind: 'task-review' } }]);
+    });
+
     it('skips date-only start reminders', () => {
         const task = buildTask({ startTime: '2026-03-17' });
         const now = new Date(2026, 2, 16, 20, 0, 0, 0);

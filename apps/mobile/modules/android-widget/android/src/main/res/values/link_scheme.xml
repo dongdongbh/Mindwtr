@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The scheme of the links this module opens the app with (WidgetRenderer.appIntent: the widgets' header and row links, the
+     detailed capture shortcut): RN's. The native Android app overrides it per build type (apps/android-native/scripts/
+     build-shortcuts.mjs), so each build opens links of its own scheme. -->
+<resources>
+    <string name="mindwtr_link_scheme" translatable="false">mindwtr</string>
+</resources>

@@ -209,8 +209,8 @@ describe('task-draft', () => {
         expect(taskDraftToUpdatePatch(reopened, completed)).toMatchObject({
             status: 'next',
             completedAt: undefined,
-            suppressMindwtrReminders: true,
         });
+        expect(taskDraftToUpdatePatch(reopened, completed)).not.toHaveProperty('suppressMindwtrReminders');
     });
 
     it('enforces direction-specific status invariants at the field write seam', () => {
@@ -452,5 +452,41 @@ describe('task-draft', () => {
             attachments: [{ ...withAttachment.attachments![0], deletedAt: '2026-01-02T00:00:00.000Z' }],
         });
         expect(removedAll?.attachments?.[0]?.deletedAt).toBe('2026-01-02T00:00:00.000Z');
+    });
+});
+
+
+describe('reminder policy draft roundtrip', () => {
+    it.each(['inherit', 'send', 'skip'] as const)('preserves %s during an unrelated edit', (reminderPolicy) => {
+        const task = { ...baseTask, reminderPolicy, repeatReminderMinutes: 15, suppressMindwtrReminders: true };
+        const draft = createTaskDraft(task);
+        expect(draft.reminderPolicy).toBe(reminderPolicy);
+        expect(isTaskDraftDirty(draft, task)).toBe(false);
+        const edited = setTaskDraftField(draft, 'title', 'Renamed');
+        expect(taskDraftToChangedUpdatePatch(edited, task)).toEqual({ title: 'Renamed' });
+        const patch = taskDraftToUpdatePatch(edited, task)!;
+        expect(createTaskDraft({ ...task, ...patch }).reminderPolicy).toBe(reminderPolicy);
+        expect(patch.repeatReminderMinutes).toBe(15);
+        expect(patch).not.toHaveProperty('suppressMindwtrReminders');
+    });
+
+    it.each([undefined, false, true])('retains explicit legacy intent for %s', (suppressMindwtrReminders) => {
+        const task = { ...baseTask, suppressMindwtrReminders };
+        const draft = createTaskDraft(task);
+        expect(draft.reminderPolicy).toBe(suppressMindwtrReminders ? 'skip' : 'send');
+        const patch = taskDraftToChangedUpdatePatch(setTaskDraftField(draft, 'title', 'Renamed'), task);
+        expect(patch).toEqual({ title: 'Renamed' });
+    });
+
+    it('writes an explicit policy from legacy controls and preserves repeat when skipping', () => {
+        const task = { ...baseTask, reminderPolicy: 'inherit' as const, repeatReminderMinutes: 15 };
+        expect(setTaskDraftField(createTaskDraft(task), 'suppressMindwtrReminders', false).reminderPolicy).toBe('send');
+        const skipped = setTaskDraftField(createTaskDraft(task), 'suppressMindwtrReminders', true);
+        expect(taskDraftToChangedUpdatePatch(skipped, task)).toEqual({ reminderPolicy: 'skip' });
+        expect(skipped.repeatReminderMinutes).toBe(15);
+        const sent = setTaskDraftField(skipped, 'suppressMindwtrReminders', false);
+        expect(sent.reminderPolicy).toBe('send');
+        const inherited = setTaskDraftField(sent, 'reminderPolicy', 'inherit');
+        expect(inherited.reminderPolicy).toBe('inherit');
     });
 });

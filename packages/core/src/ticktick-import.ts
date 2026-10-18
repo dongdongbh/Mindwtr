@@ -565,7 +565,8 @@ const mergeParsedData = (target: ParsedTickTickImportData, source: ParsedTickTic
         projectKeys.add(project.sourceKey);
         target.projects.push(project);
     });
-    target.tasks.push(...source.tasks);
+    // One push per task: QuickJS (native Android) refuses a call with more than 65535 arguments.
+    source.tasks.forEach((task) => target.tasks.push(task));
 };
 
 const buildPreview = (fileName: string, parsedData: ParsedTickTickImportData): TickTickImportPreview => {

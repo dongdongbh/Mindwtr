@@ -4,7 +4,7 @@
 // First: wait for the phone (one run per serial; see device-lock.mjs).
 import './device-lock.mjs';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -82,6 +82,13 @@ export const field = (nodes) => nodes.find((node) => node.class === 'android.wid
 /** A swipe that starts left of this x can be read as the system Back gesture (gesture navigation). */
 export const EDGE_SAFE_X = 160;
 export const box = (node) => node.bounds.match(/\d+/g).map(Number);
+// logcat's threadtime lines start with "MM-DD HH:MM:SS.mmm". The ring buffer drops its oldest lines while a long sync logs,
+// so a count of matching lines can stay flat after a new one arrives: count only lines newer than a stamp taken before the act.
+const LOG_STAMP = /^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}/;
+/** The newest line's stamp in [text] ('' for none). */
+export const logStamp = (text) => text.split('\n').reduce((newest, line) => (line.match(LOG_STAMP)?.[0] ?? '') > newest ? line.match(LOG_STAMP)[0] : newest, '');
+/** The lines of [text] stamped after [stamp] (all lines when [stamp] is ''). */
+export const linesAfter = (text, stamp) => text.split('\n').filter((line) => !stamp || (line.match(LOG_STAMP)?.[0] ?? '') > stamp);
 /**
  * The screen's main vertical list: the tallest scrollable node that is not horizontal. A screen can have a second
  * scrollable, as the Weekly Review's row of step chips (a HorizontalScrollView), and the first one found is not always
@@ -140,7 +147,9 @@ export const taskRows = (nodes) => {
     const [, top, , bottom] = list ? box(list) : [0, 0, 0, Infinity];
     return nodes.filter((node) => /(^|\/)task-row$/.test(node['resource-id'] ?? '')).filter((node) => {
         const [, t, , b] = box(node);
-        return t >= top && b <= bottom;
+        // The first row's title line box (RN's full line height) can stand a few px above the list's top while the row
+        // shows whole (History › Done: title at 378, list at 381), so the top gets 8 px of slack.
+        return t >= top - 8 && b <= bottom;
     });
 };
 export const taskRow = (nodes, title) => taskRows(nodes).find((node) => node.text === title);
@@ -442,6 +451,38 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? '/home/d
         return drag(Math.round(x1 + (x2 - x1) * 0.8));
     };
     const signature = (nodes) => nodes.map((node) => `${node.text}|${node['content-desc']}|${node.bounds}`).join('\n');
+    /**
+     * Scrolls the app's list until [find] picks a node inside it (its centre below the list's top, its bottom 40 px clear of
+     * the list's bottom): from the top unless [fromTop] is false, then down. The centre, not the top, because a clickable
+     * row title's 48 dp touch area reaches above its card: the list's first row sticks out over the list's top edge. A node
+     * already partly on screen comes in with one short, slow drag to the list's middle: a full swipe flings past a field
+     * just under the fold (Sync's Username, once settings rows grew to RN's height).
+     */
+    const revealNode = async (find, description, fromTop = true) => {
+        let nodes = fromTop ? await toTop() : await screen();
+        const inView = (current) => {
+            const node = find(current);
+            const list = mainList(current);
+            return node && (!list || ((box(node)[1] + box(node)[3]) / 2 >= box(list)[1] && box(node)[3] <= box(list)[3] - 40)) ? node : null;
+        };
+        for (let step = 0; step < 20 && !inView(nodes); step += 1) {
+            const partly = find(nodes);
+            const list = mainList(nodes);
+            if (!partly || !list) {
+                nodes = await swipe(nodes, 'down');
+                continue;
+            }
+            const [x1, y1, x2, y2] = box(list);
+            const [, top, , bottom] = box(partly);
+            const middle = Math.round((y1 + y2) / 2);
+            const to = Math.min(y2 - 20, Math.max(y1 + 20, middle - Math.round((top + bottom) / 2 - middle)));
+            requireAppFront();
+            sh(`input swipe ${Math.round((x1 + x2) / 2)} ${middle} ${Math.round((x1 + x2) / 2)} ${to} 1500`);
+            await sleep(500);
+            nodes = await screen();
+        }
+        return inView(nodes) ?? fail(`no ${description} on screen`);
+    };
     /** Scrolls the list to its first item (the Inbox's Process button is a list item). */
     const toTop = async () => {
         let nodes = await screen();
@@ -550,12 +591,17 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? '/home/d
         return waitFor(description, done, 20_000);
     };
     /** Exact bytes of one app-private file (run-as, so the app must be debuggable). */
-    const pull = (remote, local) => writeFileSync(local, adbRaw('exec-out', 'run-as', pkg, 'cat', remote));
+    // Streamed into the file: a large library's database or write-ahead log passes any output buffer (D1c step 0: ENOBUFS).
+    const pull = (remote, local) => {
+        const out = openSync(local, 'w');
+        try { execFileSync(adb, ['-s', serial, 'exec-out', 'run-as', pkg, 'cat', remote], { stdio: ['ignore', out, 'pipe'] }); }
+        finally { closeSync(out); }
+    };
     /** A screenshot saved to [file], and its #RRGGBB at each [x, y]. */
     const colors = (file, points) => {
         writeFileSync(file, adbRaw('exec-out', 'screencap', '-p'));
         return execFileSync('magick', [file, '-format', points.map(([x, y]) => `%[hex:p{${x},${y}}]`).join(' '), 'info:'], { encoding: 'utf8' })
             .trim().split(' ').map((hex) => hex.slice(0, 6).toUpperCase());
     };
-    return { adbRaw, sh, home, front, requireAppFront, launch, pid, stopApp, tapExpecting, focusAtEnd, logs, screen, waitFor, tap, openCapture, type, swipe, signature, toTop, settle, reveal, pull, colors, revealAction, swipeDone, completeUntil };
+    return { adbRaw, sh, home, front, requireAppFront, launch, pid, stopApp, tapExpecting, focusAtEnd, logs, screen, waitFor, tap, openCapture, type, swipe, signature, toTop, settle, reveal, revealNode, pull, colors, revealAction, swipeDone, completeUntil };
 }

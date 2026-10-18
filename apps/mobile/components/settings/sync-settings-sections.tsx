@@ -155,6 +155,8 @@ export function SyncBackupSection({
 }: SyncBackupSectionProps) {
   const [backupOpen, setBackupOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
+  // Getting Started's seed is a data write too: no export, restore or import starts while it saves.
+  const dataRowsDisabled = isSyncing || isBackupBusy || isGettingStartedBusy;
 
   return (
     <>
@@ -187,11 +189,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleBackup}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={t('settings.exportBackup')}
             accessibilityHint={t('settings.saveToSyncFolder')}
-            accessibilityState={{ busy: backupAction === 'export', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'export', disabled: dataRowsDisabled }}
             testID="data-transfer-export"
           >
             <View style={styles.settingInfo}>
@@ -203,11 +205,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleExportCsv}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={t('settings.exportCsv')}
             accessibilityHint={t('settings.exportCsvDesc')}
-            accessibilityState={{ busy: backupAction === 'export:csv', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'export:csv', disabled: dataRowsDisabled }}
             testID="data-transfer-export-csv"
           >
             <View style={styles.settingInfo}>
@@ -219,11 +221,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleExportTaskNotes}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={t('settings.exportTaskNotes')}
             accessibilityHint={t('settings.exportTaskNotesDesc')}
-            accessibilityState={{ busy: backupAction === 'export:tasknotes', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'export:tasknotes', disabled: dataRowsDisabled }}
             testID="data-transfer-export-tasknotes"
           >
             <View style={styles.settingInfo}>
@@ -235,11 +237,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleRestoreBackup}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={tr('settings.syncMobile.restoreBackup')}
             accessibilityHint={tr('settings.syncMobile.replaceLocalDataFromABackupJsonFile')}
-            accessibilityState={{ busy: backupAction === 'restore', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'restore', disabled: dataRowsDisabled }}
             testID="data-transfer-restore"
           >
             <View style={styles.settingInfo}>
@@ -253,11 +255,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleMergeBackup}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={t('settings.mergeBackup')}
             accessibilityHint={t('settings.mergeBackupDesc')}
-            accessibilityState={{ busy: backupAction === 'merge', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'merge', disabled: dataRowsDisabled }}
             testID="data-transfer-merge"
           >
             <View style={styles.settingInfo}>
@@ -325,11 +327,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleImportTodoist}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={tr('settings.syncMobile.importFromTodoist')}
             accessibilityHint={tr('settings.syncMobile.importTodoistCsvOrZipExportsIntoMindwtrProjects')}
-            accessibilityState={{ busy: backupAction === 'import:todoist', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'import:todoist', disabled: dataRowsDisabled }}
             testID="data-transfer-import-todoist"
           >
             <View style={styles.settingInfo}>
@@ -343,11 +345,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleImportTickTick}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={tr('settings.syncMobile.importFromTicktick')}
             accessibilityHint={tr('settings.syncMobile.importTicktickCsvOrZipBackupsIntoMindwtrAreas')}
-            accessibilityState={{ busy: backupAction === 'import:ticktick', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'import:ticktick', disabled: dataRowsDisabled }}
             testID="data-transfer-import-ticktick"
           >
             <View style={styles.settingInfo}>
@@ -361,11 +363,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleImportDgt}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={tr('settings.syncMobile.importFromDgtGtd')}
             accessibilityHint={tr('settings.syncMobile.importDgtGtdJsonOrZipExportsIntoMindwtrAreas')}
-            accessibilityState={{ busy: backupAction === 'import:dgt', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'import:dgt', disabled: dataRowsDisabled }}
             testID="data-transfer-import-dgt"
           >
             <View style={styles.settingInfo}>
@@ -379,11 +381,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleImportOmniFocus}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={tr('settings.syncMobile.importFromOmnifocus')}
             accessibilityHint={tr('settings.syncMobile.importOmnifocusCsvJsonOrZipExportsIntoMindwtrProjects')}
-            accessibilityState={{ busy: backupAction === 'import:omnifocus', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'import:omnifocus', disabled: dataRowsDisabled }}
             testID="data-transfer-import-omnifocus"
           >
             <View style={styles.settingInfo}>
@@ -397,11 +399,11 @@ export function SyncBackupSection({
           <TouchableOpacity
             style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
             onPress={handleImportMindwtrCsv}
-            disabled={isSyncing || isBackupBusy}
+            disabled={dataRowsDisabled}
             accessibilityRole="button"
             accessibilityLabel={tr('settings.syncMobile.importFromMindwtrCsv')}
             accessibilityHint={tr('settings.syncMobile.importMindwtrCsvFileIntoMindwtrAreasProjectsAndTasks')}
-            accessibilityState={{ busy: backupAction === 'import:mindwtr-csv', disabled: isSyncing || isBackupBusy }}
+            accessibilityState={{ busy: backupAction === 'import:mindwtr-csv', disabled: dataRowsDisabled }}
             testID="data-transfer-import-mindwtr-csv"
           >
             <View style={styles.settingInfo}>

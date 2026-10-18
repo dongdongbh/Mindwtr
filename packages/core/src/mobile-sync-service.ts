@@ -9,10 +9,12 @@
 // are unchanged, and a candidate configuration is only ever proven here (`activationProbe`),
 // never saved — the settings transaction saves it after the proof succeeds.
 import type { AppData, Attachment } from './types';
+import type { SqliteReadToken, SqliteStaleOption } from './sqlite-adapter';
 import { SYNC_ENCRYPTION_LOG_EVENTS, buildSyncEncryptionActivationExtra, buildSyncEncryptionErrorExtra, buildSyncEncryptionRemoteReadExtra, buildSyncEncryptionStateExtra, type SyncEncryptionStateDecision } from './sync-encryption-diagnostics';
 import { buildSyncLocationScope, isSyncEncryptionPartlyEncryptedError, markRemoteEncryptionDiscovered, SyncEncryptionPartlyEncryptedError, markRemotePlaintextDiscovered, restoreVerifiedRemoteEncryption, syncEncryptedArtifactName, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, type SyncEncryptionState } from './sync-encryption';
 import { SyncEncryptionNoKeyError, SyncEncryptionStateUnavailableError, type SyncEncryptionStateStore } from './sync-encryption-local-state';
 import type { SyncCryptoPrimitives, SyncKeyMaterial } from './sync-crypto';
+import type { AttachmentTransferAdmission } from './attachment-transfer';
 import type { SyncEncryptionService } from './sync-encryption-service';
 import { acquireSyncRemoteMutationFence, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS } from './sync-remote-fence';
 import { createDropboxSyncRemoteMutationFencePort, createWebdavSyncRemoteMutationFencePort, webdavMutationFenceUrl } from './sync-remote-fence-providers';
@@ -29,12 +31,13 @@ import { probeWebdavSyncCompatibility, webdavGetSyncDocument, webdavHeadFile, we
 import { deleteDropboxFileVersioned, downloadDropboxAppData, DropboxFileNotFoundError, getDropboxAppDataMetadata, getDropboxFileMetadata, isDropboxUnauthorizedError, uploadDropboxAppData } from './dropbox';
 import { hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, normalizeCloudUrl, normalizeWebdavUrl, persistExternalCalendars as persistExternalCalendarsForSync } from './sync-helpers';
 import { buildFastSyncScope, parseFastSyncState, serializeFastSyncState, type FastSyncState } from './sync-fast-sync';
-import { CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, createAbortableFetch, getInMemoryAppDataSnapshot, normalizeCloudProvider as normalizeCoreCloudProvider, type CloudProvider } from './sync-client-helpers';
+import { CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, applySyncedDataToStore, captureInMemoryAppDataSnapshot, createAbortableFetch, getInMemoryAppDataSnapshot, loadLeavesStorePass, prepareSyncedDataPublishPass, normalizeCloudProvider as normalizeCoreCloudProvider, type CloudProvider } from './sync-client-helpers';
 import { buildSyncPayloadSurfaceTraceExtra, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES } from './sync-payload-trace';
 import { isLikelyOfflineSyncError, isRemoteSyncBackend, SYNC_FILE_NAME, SyncFileLockUnavailableError, type SyncBackend } from './sync-service-utils';
 import { summarizeTaskLifecycleCounts } from './task-utils';
 import { decodeUriSafe } from './async-utils';
-import { flushPendingSave, useTaskStore } from './store';
+import { flushPendingSave, lastStoreLoadWasRecovery, sameStoreData, storeDataOf, useTaskStore } from './store';
+import { createSlicer, runSliced, type CooperativePass } from './cooperative';
 import { isSandboxMode, isWorkspaceTransitionActive } from './sandbox';
 import { performSyncCycle } from './sync';
 import { isSecretConfigKey } from './sync-secret-storage';
@@ -237,6 +240,8 @@ type MobileRequestFollowUpAfter = (delayMs: number, nextArg?: MobileSyncRequest)
 // half-duty rule exactly on the whale libraries that need it most — an 80s cycle
 // got a 60s gap, keeping a 7k-task device near-continuously mid-sync (#766).
 const MIN_FOLLOW_UP_DELAY_MS = 1_000;
+// D9b W5: a sliced cycle aborts on any edit during its run, so on a slicing host a follow-up waits until edits pause this long.
+const FOLLOW_UP_QUIET_MS = 2_000;
 const MAX_FOLLOW_UP_DELAY_MS = 5 * 60_000;
 
 /** Raw network state as the host reads it (React Native: expo-network). */
@@ -312,6 +317,7 @@ export type MobileSyncAttachmentsPort = {
     assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
     onTransferBatchDeferred?: () => void;
     material?: SyncKeyMaterial;
+    transferAdmission?: AttachmentTransferAdmission;
   }): AttachmentPassResult;
   syncCloud(data: AppData, config: MobileCloudSyncConfig, options: {
     activationProbe: boolean;
@@ -319,6 +325,7 @@ export type MobileSyncAttachmentsPort = {
     assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
     phase?: 'prepare' | 'post-merge';
     signal: AbortSignal;
+    transferAdmission?: AttachmentTransferAdmission;
   }): AttachmentPassResult;
   syncDropbox(data: AppData, clientId: string, fetcher: typeof fetch, options: {
     activationProbe: boolean;
@@ -327,11 +334,13 @@ export type MobileSyncAttachmentsPort = {
     signal: AbortSignal;
     assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
     material?: SyncKeyMaterial;
+    transferAdmission?: AttachmentTransferAdmission;
   }): AttachmentPassResult;
   syncFile(data: AppData, syncPath: string, signal: AbortSignal, options: {
     activationProbe: boolean;
     phase?: 'prepare' | 'post-merge';
     material?: SyncKeyMaterial;
+    transferAdmission?: AttachmentTransferAdmission;
   }): AttachmentPassResult;
   cleanupTempFiles(): Promise<void>;
   /** #1119: a completed attachment pass is recorded for the stored sync location. */
@@ -444,6 +453,11 @@ const CLOUDKIT_UNAVAILABLE: MobileSyncCloudKitPort = {
 export type MobileSyncServiceHost<Lease> = {
   /** Defaults to true. False leaves any later cycle to a fresh caller-owned invocation. */
   allowQueuedFollowUp?: boolean;
+  /**
+   * D9b, native Android only: the notifier's slice port (sync-run-ports.ts). A host that binds it gets sliced cycles, with
+   * token-checked saves, write-free aborts and quiet-paced follow-ups. React Native binds none. No host binds it yet.
+   */
+  sliceYield?(): Promise<void>;
   /** The device key-value store (React Native: AsyncStorage). */
   storage: SyncKeyValueStoragePort;
   /** Reads a secret sync key (`isSecretConfigKey`) from the keystore. */
@@ -459,8 +473,12 @@ export type MobileSyncServiceHost<Lease> = {
   network: MobileSyncNetworkPort;
   /** The local snapshot on disk (React Native: the SQLite storage adapter). */
   localData: {
-    getData(): Promise<AppData>;
-    saveData(data: AppData): Promise<AppData | void>;
+    getData(options?: SqliteStaleOption): Promise<AppData>;
+    saveData(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<AppData | void>;
+    /** The SQLite adapter's read token (D9b W3); a sliced cycle without it has every save refused. */
+    readTokenOf?(data: AppData): SqliteReadToken | undefined;
+    /** The SQLite adapter's prepareSaveRows (D9b §2): a sliced cycle builds a save's rows before the write gate. */
+    prepareSave?(data: AppData): CooperativePass<void>;
   };
   log: MobileSyncLogPort;
   externalCalendars: {
@@ -480,6 +498,10 @@ export type MobileSyncServiceHost<Lease> = {
 };
 
 export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease>) => {
+  // D9b W3: a sliced cycle saves only on the adapter's read tokens; a host without them would save unchecked.
+  if (host.sliceYield && !host.localData.readTokenOf) {
+    throw new Error('A slicing sync host must bind localData.readTokenOf');
+  }
   const allowQueuedFollowUp = host.allowQueuedFollowUp !== false;
   // Only a new host/service after native journal recovery may resume sync.
   let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
@@ -665,6 +687,8 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     }));
   };
 
+  // D9b W3: a sliced cycle's read document (after the status merge) and its SQLite read token.
+  const readTokens = new WeakMap<AppData, SqliteReadToken>();
   const mergeLocalSyncStatus = async (data: AppData): Promise<AppData> => {
     const status = await readLocalSyncStatus();
     if (!status) return data;
@@ -912,6 +936,8 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     private readonly requestFollowUpAfter: MobileRequestFollowUpAfter;
 
     private lastStep = 'init';
+    /** The last save's publish when it swapped in a prepared state (sliced cycles, D9b W6): the store references it left. */
+    private lastPreparedPublish: { data: AppData; storeData: readonly unknown[] } | null = null;
     private readonly syncDiagnosticStartedAt = Date.now();
     private syncDiagnosticPhaseStartedAt = this.syncDiagnosticStartedAt;
     private attachmentPrepareStartedAt = this.syncDiagnosticStartedAt;
@@ -1028,6 +1054,8 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
           store: {
             getLastDataChangeAt: () => core.useTaskStore.getState().lastDataChangeAt,
             getInMemorySnapshot: () => core.getInMemoryAppDataSnapshot(),
+            // A sliced cycle takes the lists in one turn and copies them in slices (cloneAppDataPass).
+            captureInMemorySnapshot: () => captureInMemoryAppDataSnapshot(core.useTaskStore),
             flushPendingSave: () => core.flushPendingSave(),
             setUiError: (message) => core.useTaskStore.getState().setError(message),
             getSettings: () => core.useTaskStore.getState().settings,
@@ -1393,12 +1421,34 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
 
     private createStorage(): SyncRunStorage {
       return {
-        readPersistedLocal: async () => mergeLocalSyncStatus(await host.localData.getData()),
-        persistLocal: async (data) => {
-          await this.assertFileSyncLeaseHeld();
-          await host.localData.saveData(data);
-          await this.assertFileSyncLeaseHeld();
+        readPersistedLocal: async (options) => {
+          if (!options) return mergeLocalSyncStatus(await host.localData.getData());
+          // A sliced cycle: the status merge makes a new document, so its token is carried over to it.
+          const read = await host.localData.getData(options);
+          const merged = await mergeLocalSyncStatus(read);
+          const token = host.localData.readTokenOf?.(read);
+          if (token) readTokens.set(merged, token);
+          return merged;
         },
+        persistLocal: async (data, options) => {
+          await this.assertFileSyncLeaseHeld();
+          await (options ? host.localData.saveData(data, options) : host.localData.saveData(data));
+        },
+        // The adapter's own answer first (a read or a committed save); the map only covers the status-merged copy.
+        readTokenOf: (data) => host.localData.readTokenOf?.(data) ?? readTokens.get(data),
+        // After the store shows the committed save: a lease lost now ends the cycle, never the publish.
+        afterPersistLocal: () => this.assertFileSyncLeaseHeld(),
+        // In the same gate hold as the save: a command never acts on a store older than the disk.
+        applyDataToStore: (data, prepared) => {
+          const swapped = applySyncedDataToStore(data, core.useTaskStore, prepared);
+          this.lastPreparedPublish = swapped && prepared
+            ? { data, storeData: storeDataOf(core.useTaskStore.getState()) }
+            : null;
+          return swapped;
+        },
+        // Sliced cycles only (sync-run calls these when the host binds sliceYield).
+        prepareLocalSave: (data) => host.localData.prepareSave?.(data),
+        prepareStorePublish: (data) => prepareSyncedDataPublishPass(data, core.useTaskStore),
         persistSyncStatus: async (updates) => {
           await this.assertFileSyncLeaseHeld();
           await applyLocalSyncStatus(updates);
@@ -1430,6 +1480,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
           void log.warn(message, { scope: 'sync', extra });
         },
         sanitizeLogMessage: (message) => log.sanitize(message),
+        ...(host.sliceYield ? { sliceYield: () => host.sliceYield!() } : {}),
         logSyncError: (error, context) => {
           this.logEncryptionFailure(error, context.step);
           return log.syncError(error, {
@@ -2001,8 +2052,27 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
           // whose result the identity reconcile then discards. Sync status bookkeeping
           // still reaches the store through persistSyncStatus.
           const refreshStartedAt = Date.now();
-          if (!info.localWriteSkipped) {
+          // D9b W6: the refresh is dropped when the last save swapped in a prepared publish of this document, the store
+          // has not moved since (checked again after the sliced check), and a load of the document would change nothing.
+          // After a recovery load the next load replaces every row object, so it is never dropped then.
+          const published = this.lastPreparedPublish;
+          const storeShowsPublish = () => published !== null && published.data === mergedData
+            && !lastStoreLoadWasRecovery() && !core.useTaskStore.getState().isLoading
+            && sameStoreData(storeDataOf(core.useTaskStore.getState()), published.storeData);
+          let refreshCovered = false;
+          if (!info.localWriteSkipped && host.sliceYield && storeShowsPublish()) {
+            const shown = core.useTaskStore.getState();
+            refreshCovered = await runSliced('sync:refreshCheck',
+              loadLeavesStorePass(mergedData, { tasks: shown._allTasks, projects: shown._allProjects }),
+              createSlicer(() => host.sliceYield!())) && storeShowsPublish();
+          }
+          if (refreshCovered) {
+            // The one store change the silent refresh makes even when its load changes nothing.
+            core.useTaskStore.setState((state) => (state.error === null ? state : { error: null }));
+          } else if (!info.localWriteSkipped) {
             await traceSectionAsync('sync:storeApply', () => core.useTaskStore.getState().fetchData({ silent: true, preloadedData: mergedData }));
+          }
+          if (!info.localWriteSkipped) {
             // The refresh alone never publishes this cycle's status: the store keeps its
             // previous settings object whenever the incoming one differs only in the
             // volatile lastSync* keys (reuseSettingsIfEquivalent, #766), so the Sync
@@ -2023,6 +2093,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
               releaseCheck: 'v1.2.7/sync-status-published',
               backend: this.backend,
               statusPublished: info.localWriteSkipped ? 'unchanged' : 'wrote-local',
+              ...(refreshCovered ? { storeRefresh: 'dropped' } : {}),
               lastSyncAt: String(mergedData.settings.lastSyncAt ?? 'none'),
               lastSyncStatus: String(mergedData.settings.lastSyncStatus ?? 'none'),
             },
@@ -2393,6 +2464,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             phase: helpers.phase,
             assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
             onTransferBatchDeferred: helpers.onTransferBatchDeferred,
+            transferAdmission: helpers.transferAdmission,
             ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
           });
         },
@@ -2409,6 +2481,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
             phase: helpers.phase,
             signal: this.requestAbortController.signal,
+            transferAdmission: helpers.transferAdmission,
           });
         },
         syncDropboxAttachments: async (data, helpers) => {
@@ -2419,6 +2492,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             resolveAccessToken: (forceRefresh) => this.resolveDropboxAccessToken(forceRefresh),
             signal: this.requestAbortController.signal,
             assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
+            transferAdmission: helpers.transferAdmission,
             ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
           });
         },
@@ -2431,6 +2505,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             {
               activationProbe: helpers.activationProbe,
               phase: helpers.phase,
+              transferAdmission: helpers.transferAdmission,
               ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
             },
           );
@@ -2523,12 +2598,24 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     }
   }
 
+  // On a slicing host: how long until edits have paused for FOLLOW_UP_QUIET_MS (0 elsewhere). Every follow-up waits, not
+  // only a stale-* one (D9b 4a review): the wait only bites while the user keeps editing. The timer's recheck waits again
+  // only for a newer edit, and each wait is capped: after the clock moves back, lastDataChangeAt stays ahead of now.
+  let quietMeasuredFrom: number | null = null;
+  const quietWaitMs = () => {
+    if (!host.sliceYield) return 0;
+    const lastEditAt = core.useTaskStore.getState().lastDataChangeAt;
+    if (lastEditAt === quietMeasuredFrom) return 0;
+    quietMeasuredFrom = lastEditAt;
+    return Math.min(FOLLOW_UP_QUIET_MS, Math.max(0, FOLLOW_UP_QUIET_MS - (Date.now() - lastEditAt)));
+  };
   const mobileSyncOrchestrator = createSyncOrchestrator<MobileSyncRequest | undefined, MobileSyncResult>({
+    getFollowUpWaitMs: quietWaitMs,
     getFollowUpDelayMs: (lastCycleDurationMs, minimumDelayMs) => {
       const pacedDelayMs = Math.min(Math.max(lastCycleDurationMs, MIN_FOLLOW_UP_DELAY_MS), MAX_FOLLOW_UP_DELAY_MS);
       // A busy remote fence or File Sync lock asks for a longer wait than pacing;
       // log the delay that actually applies so a 229s fence wait stops reading as 1.2s.
-      const delayMs = Math.max(pacedDelayMs, minimumDelayMs);
+      const delayMs = Math.max(pacedDelayMs, minimumDelayMs, quietWaitMs());
       logSyncInfo('Sync follow-up scheduled', {
         delayMs: String(delayMs),
         lastCycleDurationMs: String(lastCycleDurationMs),

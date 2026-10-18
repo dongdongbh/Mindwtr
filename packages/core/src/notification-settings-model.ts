@@ -8,13 +8,15 @@ export const NOTIFICATION_SETTING_FIELDS = [
     'notificationsEnabled', 'startDateNotificationsEnabled', 'dueDateNotificationsEnabled',
     'weeklyReviewEnabled', 'dailyDigestMorningEnabled', 'dailyDigestEveningEnabled',
     'weeklyReviewDay', 'weeklyReviewTime', 'dailyDigestMorningTime', 'dailyDigestEveningTime',
+    'taskReminderDefault',
 ] as const;
 export type NotificationSettingField = typeof NOTIFICATION_SETTING_FIELDS[number];
 type ToggleField = Exclude<NotificationSettingField, 'weeklyReviewDay' | 'weeklyReviewTime'
-    | 'dailyDigestMorningTime' | 'dailyDigestEveningTime'>;
+    | 'dailyDigestMorningTime' | 'dailyDigestEveningTime' | 'taskReminderDefault'>;
 type TimeField = 'weeklyReviewTime' | 'dailyDigestMorningTime' | 'dailyDigestEveningTime';
 export type NotificationSettingEdit = { type: ToggleField; value: boolean }
-    | { type: TimeField; value: string } | { type: 'weeklyReviewDay'; value: number };
+    | { type: TimeField; value: string } | { type: 'weeklyReviewDay'; value: number }
+    | { type: 'taskReminderDefault'; value: 'send' | 'skip' };
 export type NotificationSettingJson = null | boolean | number | string
     | NotificationSettingJson[] | { [name: string]: NotificationSettingJson };
 export type NotificationSettingWitness = { present: boolean; value: NotificationSettingJson };
@@ -30,6 +32,7 @@ export function isNotificationSettingEdit(value: unknown): value is Notification
         || !NOTIFICATION_SETTING_FIELDS.includes(value.type as NotificationSettingField)) return false;
     if (value.type === 'weeklyReviewDay') return Number.isInteger(value.value)
         && typeof value.value === 'number' && value.value >= 0 && value.value <= 6;
+    if (value.type === 'taskReminderDefault') return value.value === 'send' || value.value === 'skip';
     if (['weeklyReviewTime', 'dailyDigestMorningTime', 'dailyDigestEveningTime'].includes(value.type as string))
         return typeof value.value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.value);
     return typeof value.value === 'boolean';
@@ -67,7 +70,9 @@ type Toggle = { label: string; description: string; value: boolean; disabled: bo
 type Time = { label: string; value: string; disabled: boolean };
 export type NotificationSettingsModel = {
     title: string;
-    task: { master: Toggle; start: Toggle; due: Toggle };
+    task: { master: Toggle; start: Toggle; due: Toggle;
+        default: { label: string; description: string; value: 'send' | 'skip'; valueLabel: string; disabled: false;
+            options: { value: 'send' | 'skip'; label: string; selected: boolean; edit: NotificationSettingEdit }[] } };
     weekly: { enabled: Toggle; time: Time; day: { label: string; value: number; valueLabel: string; disabled: boolean;
         options: { value: number; label: string; selected: boolean; edit: NotificationSettingEdit }[] } };
     digest: { title: string; description: string; morning: { enabled: Toggle; time: Time }; evening: { enabled: Toggle; time: Time } };
@@ -98,6 +103,7 @@ export function buildNotificationSettingsModel(input: { settings: AppSettings; l
         selected: day === digest.weekly.day, edit: { type: 'weeklyReviewDay' as const, value: day } }));
     const morningTime = time('settings.dailyDigestMorningTime', digest.morning.hour, digest.morning.minute, digest.morning.enabled);
     const eveningTime = time('settings.dailyDigestEveningTime', digest.evening.hour, digest.evening.minute, digest.evening.enabled);
+    const taskReminderDefault = settings.taskReminderDefault === 'skip' ? 'skip' : 'send';
     return {
         title: tr('settings.notifications'),
         task: {
@@ -106,6 +112,16 @@ export function buildNotificationSettingsModel(input: { settings: AppSettings; l
                 areStartDateRemindersEnabled(settings), !master),
             due: toggle('dueDateNotificationsEnabled', 'settings.dueDateNotifications', 'settings.dueDateNotificationsDesc',
                 areDueDateRemindersEnabled(settings), !master),
+            default: {
+                label: tr('settings.taskReminderDefault'), description: tr('settings.taskReminderDefaultDesc'),
+                value: taskReminderDefault,
+                valueLabel: tr(taskReminderDefault === 'skip' ? 'settings.taskReminderDefaultSkip' : 'settings.taskReminderDefaultSend'),
+                disabled: false,
+                options: (['send', 'skip'] as const).map((value) => ({ value,
+                    label: tr(value === 'skip' ? 'settings.taskReminderDefaultSkip' : 'settings.taskReminderDefaultSend'),
+                    selected: value === taskReminderDefault, edit: { type: 'taskReminderDefault', value },
+                })),
+            },
         },
         weekly: { enabled: toggle('weeklyReviewEnabled', 'settings.weeklyReview', 'settings.weeklyReviewDesc', weekly),
             day: { label: tr('settings.weeklyReviewDay'), value: digest.weekly.day, valueLabel: days[digest.weekly.day].label,

@@ -3,6 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { RotateCcw, X } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+    updateSettingsFromLatest,
     DEFAULT_TASK_EDITOR_ORDER,
     DEFAULT_TASK_EDITOR_HIDDEN,
     flushPendingSave,
@@ -79,11 +80,12 @@ export function SandboxSettingsScreen() {
     const [failed, setFailed] = React.useState(false);
     const [settingsFailed, setSettingsFailed] = React.useState(false);
 
-    const save = async (updates: Partial<AppSettings>, setting: string) => {
+    // A built update reads the settings as stored when its write is admitted, so a newer key stays.
+    const save = async (updates: Partial<AppSettings> | ((latest: AppSettings) => Partial<AppSettings>), setting: string) => {
         if (!isSandboxMode()) return;
         setSettingsFailed(false);
         try {
-            await updateSettings(updates);
+            await updateSettingsFromLatest((latest) => (typeof updates === 'function' ? updates(latest) : updates), { write: updateSettings, read: () => useTaskStore.getState().settings });
             await flushPendingSave();
             void logInfo('Sandbox setting applied', {
                 scope: 'sandbox',
@@ -114,12 +116,12 @@ export function SandboxSettingsScreen() {
 
     const choosePreset = (value: string) => {
         const preset = buildTaskEditorPresetConfig(value as Exclude<TaskEditorPresetId, 'custom'>, featureHiddenFields);
-        void save({
+        void save((latest) => ({
             gtd: {
-                ...(settings.gtd ?? {}),
-                taskEditor: { ...(editor ?? {}), ...preset },
+                ...(latest.gtd ?? {}),
+                taskEditor: { ...(latest.gtd?.taskEditor ?? {}), ...preset },
             },
-        }, 'editor-layout');
+        }), 'editor-layout');
     };
 
     const run = (action: 'reset' | 'exit') => {

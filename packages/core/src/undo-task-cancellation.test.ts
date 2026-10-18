@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSerializedSyncDocumentWriteOperation } from './data-transfer-transaction';
+import { runStoreCommand, runSyncStoreSave } from './store-write-gate';
 import type { Task } from './types';
 import { createTaskCancellationUndo } from './undo-task-cancellation';
 
@@ -62,6 +63,24 @@ describe('createTaskCancellationUndo', () => {
         const undo = createTaskCancellationUndo(before, cancelledAt);
         expect(await undo()).toEqual({ success: false, retryable: false });
         expect(mocks.state.updateTask).not.toHaveBeenCalled();
+    });
+
+    it('checks the cancelled row on the state a sync save published while the Undo waited', async () => {
+        // updateTask as the store runs it: a command behind the write gate.
+        const apply = mocks.state.updateTask;
+        mocks.state.updateTask = vi.fn((id: string, patch: Partial<Task>) => runStoreCommand(() => apply(id, patch)));
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        // Another device moved the task on; the sync save publishes it before the Undo is admitted.
+        const save = runSyncStoreSave(async () => {
+            await held;
+            mocks.state._tasksById.set(before.id, { ...mocks.state._tasksById.get(before.id), status: 'waiting', cancelledAt: undefined });
+        });
+        const undo = createTaskCancellationUndo(before, cancelledAt)();
+        release();
+        await save;
+        expect(await undo).toEqual({ success: false, retryable: false });
+        expect(mocks.state._tasksById.get(before.id).status).toBe('waiting');
     });
 
     it('retries a failed mutation when no restore was applied', async () => {

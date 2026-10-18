@@ -23,9 +23,21 @@ describe('import diagnostics', () => {
         ['7 files could not be parsed', 'settings.importDiagnostics.invalidArchiveEntries'],
         ['8 tasks had no matching parent', 'settings.importDiagnostics.missingParent'],
         ['9 empty rows were skipped', 'settings.importDiagnostics.emptyRecords'],
+        ['2 unknown columns were ignored.', 'settings.importDiagnostics.unknownColumns'],
+        ['1 unknown column was ignored.', 'settings.importDiagnostics.unknownColumns'],
     ])('formats %s with its code-specific localized meaning', (message, expectedKey) => {
         const diagnostic = createImportDiagnostic(message, 'warning');
         expect(formatImportDiagnostic(diagnostic, (key) => key)).toBe(expectedKey);
+    });
+
+    it.each([
+        '0:2:private-cell', '0:0:2', '0:2:0', '0:2:2,0:3:2,0:4:2,0:5:2,0:6:2,0:7:2',
+        '0:2222222222:2', '-1:2:2', '0:2:2; private-cell',
+    ])('discards malformed or unbounded location samples: %s', (locations) => {
+        const diagnostic = createImportDiagnostic(`1 date value could not be parsed and was skipped. [csv-locations=${locations}; omitted=0]`, 'warning');
+        expect(diagnostic.params).toEqual({ count: 1 });
+        expect(formatImportDiagnostic({ ...diagnostic, params: { count: 1, locations, omittedLocations: 0 } }, (key) => key))
+            .toBe('settings.importDiagnostics.unmappedDate');
     });
 
     it.each([

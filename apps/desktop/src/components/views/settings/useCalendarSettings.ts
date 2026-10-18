@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+    updateSettingsFromLatest,
     generateUUID,
     normalizeExternalCalendarColor,
     type AppData,
@@ -150,18 +151,24 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
         };
     }, [loadEnabled, loadFailedMessage, supportsSystemCalendar, refreshCalendarPushTargets]);
 
-    const persistCalendars = useCallback(async (next: ExternalCalendarSubscription[]) => {
+    // [edit] runs on the list as stored when the write is admitted, so a calendar another device
+    // added or changed since stays. The shown list is the fallback before settings hold one.
+    const persistCalendars = useCallback(async (edit: (calendars: ExternalCalendarSubscription[]) => ExternalCalendarSubscription[]) => {
         setCalendarError(null);
-        setExternalCalendars(next);
         try {
+            let next: ExternalCalendarSubscription[] = [];
+            await updateSettingsFromLatest((latest) => {
+                next = edit(Array.isArray(latest.externalCalendars) ? latest.externalCalendars : externalCalendars);
+                return { externalCalendars: next };
+            }, { write: updateSettings });
+            setExternalCalendars(next);
             await ExternalCalendarService.setCalendars(next);
-            await updateSettings({ externalCalendars: next });
             showSaved();
         } catch (error) {
             reportSettingsFailure('Failed to save calendars', error, saveFailedMessage);
             setCalendarError(saveFailedMessage);
         }
-    }, [saveFailedMessage, showSaved, updateSettings]);
+    }, [externalCalendars, saveFailedMessage, showSaved, updateSettings]);
 
     const handleAddCalendar = useCallback(() => {
         const url = newCalendarUrl.trim();
@@ -177,14 +184,13 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
         const id = generateUUID();
         // No color yet: an unset color means "no explicit pick", so a feed
         // hint or the deterministic hash fallback can still apply (#974).
-        const next = [
-            ...externalCalendars,
-            { id, name, url, enabled: true },
-        ];
         setNewCalendarName('');
         setNewCalendarUrl('');
-        persistCalendars(next);
-    }, [externalCalendars, newCalendarName, newCalendarUrl, persistCalendars, resolveFeedback]);
+        persistCalendars((calendars) => [
+            ...calendars,
+            { id, name, url, enabled: true },
+        ]);
+    }, [newCalendarName, newCalendarUrl, persistCalendars, resolveFeedback]);
 
     const handleChooseLocalCalendarFile = useCallback(async () => {
         if (!isTauriRuntime()) {
@@ -218,28 +224,25 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
     }, [loadFailedMessage, newCalendarName, resolveFeedback]);
 
     const handleToggleCalendar = useCallback((id: string, enabled: boolean) => {
-        const next = externalCalendars.map((calendar) => (calendar.id === id ? { ...calendar, enabled } : calendar));
-        persistCalendars(next);
-    }, [externalCalendars, persistCalendars]);
+        persistCalendars((calendars) => calendars.map((calendar) => (calendar.id === id ? { ...calendar, enabled } : calendar)));
+    }, [persistCalendars]);
 
     const handleCalendarColorChange = useCallback((id: string, color: string | undefined) => {
         // `undefined` is the Auto swatch: drop the pick so the feed hint or
         // the assigned default applies again (#974).
         const normalized = color === undefined ? undefined : normalizeExternalCalendarColor(color);
         if (color !== undefined && !normalized) return;
-        const next = externalCalendars.map((calendar) => {
+        persistCalendars((calendars) => calendars.map((calendar) => {
             if (calendar.id !== id) return calendar;
             if (normalized) return { ...calendar, color: normalized };
             const { color: _cleared, ...rest } = calendar;
             return rest;
-        });
-        persistCalendars(next);
-    }, [externalCalendars, persistCalendars]);
+        }));
+    }, [persistCalendars]);
 
     const handleRemoveCalendar = useCallback((id: string) => {
-        const next = externalCalendars.filter((calendar) => calendar.id !== id);
-        persistCalendars(next);
-    }, [externalCalendars, persistCalendars]);
+        persistCalendars((calendars) => calendars.filter((calendar) => calendar.id !== id));
+    }, [persistCalendars]);
 
     const handleRequestSystemCalendarPermission = useCallback(async () => {
         if (!supportsSystemCalendar) return;

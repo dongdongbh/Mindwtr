@@ -16,6 +16,15 @@ import java.io.IOException
 class DataFilesTest {
     @get:Rule val folder = TemporaryFolder()
 
+    // D1b code review P2: every Data row (Getting Started and the imports included) is off while a sync runs, as RN's
+    // `isSyncing || isBackupBusy`; each entry point (export, pick, import, Getting Started, a snapshot) checks the same guard.
+    @Test fun dataRowsWaitForARunningSync() {
+        assertFalse(dataRowsBusy(null, syncing = false))
+        assertTrue(dataRowsBusy(null, syncing = true))
+        assertTrue(dataRowsBusy("gettingStarted", syncing = false))
+        assertTrue(dataRowsBusy("import:todoist", syncing = true))
+    }
+
     @Test fun theCopyCountsItsOwnBytesWhateverTheProviderSaid() {
         // The provider's SIZE column said 1 byte (RN's 7b7201ab6): the copy counts what it reads and stops past the production limit.
         val out = File(folder.root, "stage")
@@ -27,39 +36,54 @@ class DataFilesTest {
         assertEquals(100L, out.length())
     }
 
+    // Pass D1c §3.5 (RN 53128f68a): an import's file is capped at core's 16 MiB even when the transfer limit is larger; a JSON
+    // backup at core's 128 MiB.
+    @Test fun anImportPickIsCappedAtSixteenMiBWhateverTheTransferLimit() {
+        val mib = 1024L * 1024
+        assertEquals(16 * mib, stageLimit(import = true, transferLimit = 64 * mib))
+        assertEquals(12 * mib, stageLimit(import = true, transferLimit = 12 * mib))
+        assertEquals(64 * mib, stageLimit(import = false, transferLimit = 64 * mib))
+        assertEquals(128 * mib, stageLimit(import = false, transferLimit = 256 * mib))
+        val refused = runCatching { copyBounded(ByteArrayInputStream(ByteArray((16 * mib + 1).toInt())), File(folder.root, "import"), stageLimit(import = true, transferLimit = 64 * mib)) }
+        assertTrue(refused.exceptionOrNull() is TransferTooLarge)
+    }
+
+    // Step 0 run 4: a TaskNotes ZIP of 10k tasks did not finish in 15 min on the S23 (one synchronous zip in QuickJS, so no
+    // deadline runs), so the TaskNotes export keeps the 12 MiB library bound it had before D1c, whatever the transfer limit.
+    @Test fun aTaskNotesExportKeepsTheTwelveMiBBoundWhateverTheTransferLimit() {
+        val mib = 1024L * 1024
+        assertEquals(12 * mib, exportLimit("tasknotes", transferLimit = 128 * mib))
+        assertEquals(8 * mib, exportLimit("tasknotes", transferLimit = 8 * mib))
+        assertEquals(128 * mib, exportLimit("json", transferLimit = 128 * mib))
+        assertEquals(128 * mib, exportLimit("csv", transferLimit = 128 * mib))
+    }
+
     private val library = 4L * 1024 * 1024
     private fun stagedCopy(bytes: ByteArray) = StagedCopies.create(File(folder.root, "backup-import")).apply { writeBytes(bytes) }
 
     // D1a review P2-9 and 2 (#8, #9): a pick's production path (backupPicked's previewStaged) admits the copy with the library
-    // before decoding or inspecting it, and releases the copy on every refusal or failure.
-    @Test fun aPickedCopyIsAdmittedBeforeItIsDecodedAndReleasedUnlessItIsAsked() {
+    // before core reads it (pass D1c: core reads the copy itself, through the data channel), and releases the copy on every
+    // refusal or failure.
+    @Test fun aPickedCopyIsAdmittedBeforeItIsReadAndReleasedUnlessItIsAsked() {
         val dir = File(folder.root, "backup-import")
         var inspected = 0
         val oversized = stagedCopy(ByteArray((DataTransferLimits.LIMIT_BYTES - library + 1).toInt()) { 0xff.toByte() })
         assertTrue(runCatching { previewStaged(oversized, library) { inspected += 1; JSONObject().put("valid", true) } }.exceptionOrNull() is TransferTooLarge)
         assertEquals(0, inspected)
+        assertFalse(oversized.exists())
         val throwing = stagedCopy("{}".toByteArray())
         assertTrue(runCatching { previewStaged(throwing, library) { throw IllegalStateException("inspect failed") } }.isFailure)
+        assertFalse(throwing.exists())
         val invalid = stagedCopy("{}".toByteArray())
-        assertFalse(previewStaged(invalid, library) { JSONObject().put("valid", false) }.second.getBoolean("valid"))
+        assertFalse(previewStaged(invalid, library) { JSONObject().put("valid", false) }.getBoolean("valid"))
+        assertFalse(invalid.exists())
         val asked = stagedCopy("{}".toByteArray())
-        assertEquals("{}", previewStaged(asked, library) { JSONObject().put("valid", true) }.first)
+        var read: File? = null
+        assertTrue(previewStaged(asked, library) { read = it; JSONObject().put("valid", true) }.getBoolean("valid"))
+        assertEquals(asked, read)
         StagedCopies.sweep(dir)
         assertEquals(listOf(asked.name), dir.list().orEmpty().toList())
         StagedCopies.release(asked)
-    }
-
-    // D1a review P2-9: an operation's production path (run's admittedText) admits before it reads, and the copy goes either way.
-    @Test fun anOperationAdmitsItsSourceBeforeReadingIt() {
-        var read = 0
-        val staged = stagedCopy(ByteArray(10))
-        assertTrue(runCatching { admittedText(DataTransferLimits.LIMIT_BYTES - library + 1, library, staged) { read += 1; "{}" } }.exceptionOrNull() is TransferTooLarge)
-        assertEquals(0, read)
-        assertFalse(staged.exists())
-        val invalid = stagedCopy(ByteArray(10))
-        assertTrue(runCatching { admittedText(10, library, invalid) { null } }.exceptionOrNull()?.message?.startsWith("INVALID_INPUT:") == true)
-        assertFalse(invalid.exists())
-        assertEquals("{}", admittedText(DataTransferLimits.LIMIT_BYTES - library, library, null) { "{}" })
     }
 
     // D1a review P2-8: a start sweeps every staged copy no open question owns, a partial one too.
@@ -74,12 +98,16 @@ class DataFilesTest {
         assertFalse(live.exists())
     }
 
-    // D1a review P1-2 and 2 (#2): run's own snapshot write (writeOperationSnapshot) prunes nothing; operations that each wrote
-    // their snapshot and died before the journal cost no older recovery point.
+    // D1a review P1-2 and 2 (#2): an operation's own snapshot publish prunes nothing; operations that each published their
+    // snapshot and died before the journal cost no older recovery point.
     @Test fun repeatedDeathsBeforeTheJournalKeepEveryOlderSnapshot() {
         val dir = File(folder.root, "snapshots").apply { mkdirs() }
         val history = (1..5).map { "data.2026-08-0${it}T00-00-00.000.snapshot.json" }.onEach { File(dir, it).writeText("{}") }
-        repeat(3) { writeOperationSnapshot(dir, tech.dongdongbh.mindwtr.pilot.core.RecoverySnapshots.nextName(dir, java.util.Date()), "{}", syncDirectory = {}) }
+        repeat(3) {
+            val pending = File(dir, ".1111111$it-1111-4111-8111-111111111111.recovery.pending").apply { writeText("{}") }
+            tech.dongdongbh.mindwtr.pilot.core.RecoverySnapshots.publish(dir, pending, tech.dongdongbh.mindwtr.pilot.core.RecoverySnapshots.nextName(dir, java.util.Date()),
+                2, tech.dongdongbh.mindwtr.pilot.core.BackupOperations.sha256("{}".toByteArray()), syncDirectory = {})
+        }
         assertTrue(dir.list().orEmpty().toList().containsAll(history))
         assertEquals(8, tech.dongdongbh.mindwtr.pilot.core.RecoverySnapshots.list(dir).size)
     }
@@ -90,19 +118,24 @@ class DataFilesTest {
         val snapshots = File(folder.root, "snapshots").apply { mkdirs() }
         val ops = tech.dongdongbh.mindwtr.pilot.core.BackupOperations(File(folder.root, "ops"), snapshots, syncDirectory = {})
         val a = "11111111-1111-4111-8111-111111111111"
-        for ((record, title, message) in listOf(
+        // Each failure goes to core's failure toast (backupDocumentFailureModel) with its operation and its error, an import's too
+        // (D1b: RN's "Import failed"); a record with no error passes its outcome.
+        for ((record, operation, error) in listOf(
             Triple(JSONObject().put("operation", "merge").put("outcome", "stale").put("error", "STALE_REVISION: Local data changed after backup preparation"),
-                "settings.mergeBackupFailed", "Local data changed after backup preparation"),
+                "merge", "STALE_REVISION: Local data changed after backup preparation"),
             Triple(JSONObject().put("operation", "replace").put("outcome", "refused").put("error", "INVALID_INPUT: Backup operation files do not match"),
-                "settings.backupMobile.restoreFailed", "Backup operation files do not match"),
+                "replace", "INVALID_INPUT: Backup operation files do not match"),
+            Triple(JSONObject().put("operation", "todoist").put("outcome", "refused").put("error", "TOO_LARGE: The imported library would be too large to undo"),
+                "todoist", "TOO_LARGE: The imported library would be too large to undo"),
+            Triple(JSONObject().put("operation", "csv").put("outcome", "unresolved").put("error", ""), "csv", "unresolved"),
         )) {
             ops.writeResult(record.put("requestId", a).put("reply", JSONObject.NULL).put("undoSnapshot", ""))
             var presented: Leftover? = null
             var shown: (() -> Unit)? = null
             takeLeftover(ops, snapshots, { error("not committed") }) { leftover, done -> presented = leftover; shown = done }
             val failure = presented as Leftover.Failure
-            assertEquals(title, failure.titleKey)
-            assertEquals(message, failure.message)
+            assertEquals(operation, failure.operation)
+            assertEquals(error, failure.error)
             assertEquals(a, ops.result()?.getString("requestId"))
             shown!!()
             assertNull(ops.result())
@@ -114,14 +147,6 @@ class DataFilesTest {
         takeLeftover(ops, snapshots, { JSONObject().put("title", "Merge Backup") }) { leftover, _ -> presented = leftover }
         assertEquals(undo, (presented as Leftover.Result).undo)
         assertEquals(a, ops.result()?.getString("requestId"))
-    }
-
-    @Test fun invalidUtf8IsRefusedNotReplaced() {
-        val file = File(folder.root, "backup.json")
-        file.writeBytes(byteArrayOf(0x7b, 0xff.toByte(), 0x7d))
-        assertNull(utf8(file))
-        file.writeText("{\"title\":\"日本語 🦉\"}")
-        assertEquals("{\"title\":\"日本語 🦉\"}", utf8(file))
     }
 
     private val record get() = File(folder.root, "export-pending.json")

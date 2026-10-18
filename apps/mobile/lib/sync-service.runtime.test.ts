@@ -2529,9 +2529,13 @@ describe('mobile sync-service runtime', () => {
 
     await syncServiceModule.performMobileSync();
 
+    // The save's own store publish comes first; the status patch is the last write that carries the stamp.
+    const emptyStore = { _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
+      _tasksById: new Map(), _projectsById: new Map(), _sectionsById: new Map(), _areasById: new Map(), _peopleById: new Map() };
     const patched = coreMocks.useTaskStoreSetState.mock.calls
-      .map((call: any[]) => (call[0] as (state: any) => any)({ settings: { theme: 'dark' } }))
-      .find((next: any) => next?.settings?.lastSyncAt === syncedAt);
+      .map((call: any[]) => (call[0] as (state: any) => any)({ ...emptyStore, settings: { theme: 'dark' } }))
+      .filter((next: any) => next?.settings?.lastSyncAt === syncedAt)
+      .at(-1);
     expect(patched?.settings).toMatchObject({
       lastSyncAt: syncedAt,
       lastSyncStatus: 'success',

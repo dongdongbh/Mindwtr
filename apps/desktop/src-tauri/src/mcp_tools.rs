@@ -29,6 +29,7 @@ const TASK_FIELDS: &[&str] = &[
     "isFocusedToday",
     "timeSpentMinutes",
     "suppressMindwtrReminders",
+    "reminderPolicy",
     "repeatReminderMinutes",
     "reviewAt",
     "cancelledAt",
@@ -46,6 +47,7 @@ const TOOL_NAMES: &[(&str, &str)] = &[
     ("mindwtr_add_task", "Add a task with an explicit title. Quick-add is unavailable."),
     ("mindwtr_update_task", "Update a task. Attachment replacement and done/archived transitions are unavailable; use complete_task for completion."),
     ("mindwtr_complete_task", "Mark a task done."),
+    ("mindwtr_archive_task", "Archive a task without generating a recurring follow-up; preserve existing completion history."),
     ("mindwtr_delete_task", "Soft-delete a task."),
     ("mindwtr_get_task", "Get a task by ID."),
     ("mindwtr_restore_task", "Restore a soft-deleted task."),
@@ -95,6 +97,7 @@ fn field_schema(field: &str, project: bool) -> Value {
         "priority" => json!({"enum":["low","medium","high","urgent"]}),
         "energyLevel" => json!({"enum":["low","medium","high"]}),
         "taskMode" => json!({"enum":["task","list"]}),
+        "reminderPolicy" => json!({"enum":["inherit","send","skip"]}),
         "textDirection" => json!({"enum":["auto","ltr","rtl"]}),
         "sortBy" => json!({"enum":["updatedAt","createdAt","dueDate","title","priority"]}),
         "sortOrder" => json!({"enum":["asc","desc"]}),
@@ -300,12 +303,14 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
                 }
             }
         }
-        "mindwtr_complete_task" | "mindwtr_restore_task" => {
+        "mindwtr_complete_task" | "mindwtr_archive_task" | "mindwtr_restore_task" => {
             only(&["id"])?;
             LocalOperation::TaskAction {
                 id: id()?,
                 action: if name == "mindwtr_complete_task" {
                     "complete"
+                } else if name == "mindwtr_archive_task" {
+                    "archive"
                 } else {
                     "restore"
                 }

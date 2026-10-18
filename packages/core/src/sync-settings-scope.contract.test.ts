@@ -25,6 +25,7 @@ const SYNCED_TOP_LEVEL_KEYS = [
     'dateFormat',               // group language
     'timeFormat',               // group language
     'gtd',                      // group gtd
+    'taskReminderDefault',      // group gtd; notification capability stays device-local
     'quickAddAutoClean',        // group gtd
     'markdownEditorAssist',     // group gtd
     'features',                 // group gtd
@@ -109,6 +110,7 @@ const fullSettings = (): Settings => ({
     dateFormat: 'yyyy-MM-dd',
     timeFormat: '24h',
     gtd: { autoArchiveDays: 14 },
+    taskReminderDefault: 'skip',
     quickAddAutoClean: true,
     markdownEditorAssist: false,
     features: { priorities: true },

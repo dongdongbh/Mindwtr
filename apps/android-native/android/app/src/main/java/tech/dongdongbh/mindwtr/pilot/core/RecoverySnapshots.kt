@@ -48,17 +48,10 @@ object RecoverySnapshots {
      * interleave. [prune] false (a backup operation before its commit) leaves every older snapshot; the operation prunes once
      * it settled. [beforePublish] runs with the pending file written and synced, before its rename (a test seam).
      */
-    fun write(dir: File, fileName: String, contents: String, protect: Set<String> = emptySet(), exact: Boolean = false,
+    fun write(dir: File, fileName: String, contents: String, protect: () -> Set<String> = { emptySet() }, exact: Boolean = false,
               prune: Boolean = true, syncDirectory: (File) -> Unit = ::syncDirectory, beforePublish: () -> Unit = {}): String = synchronized(this) {
         dir.mkdirs()
-        var name = fileName
-        var clash = 0
-        while (File(dir, name).exists()) {
-            check(!exact) { "The recovery snapshot name is already taken" }
-            clash += 1
-            check(clash <= MAX_COLLISIONS) { "Snapshot storage already holds too many snapshots from this instant." }
-            name = fileName.removeSuffix(SUFFIX) + ".$clash$SUFFIX"
-        }
+        val name = freeName(dir, fileName, exact)
         val pending = File(dir, PENDING)
         try {
             FileOutputStream(pending).use { out -> out.write(contents.toByteArray()); out.fd.sync() }
@@ -69,8 +62,54 @@ object RecoverySnapshots {
             throw failure
         }
         syncDirectory(dir)
-        if (prune) prune(dir, protect + name)
+        if (prune) prune(dir) { protect() + name }
         name
+    }
+
+    /** [fileName], or (unless [exact]) its first clash-numbered twin no file has yet. */
+    private fun freeName(dir: File, fileName: String, exact: Boolean): String {
+        var name = fileName
+        var clash = 0
+        while (File(dir, name).exists()) {
+            check(!exact) { "The recovery snapshot name is already taken" }
+            clash += 1
+            check(clash <= MAX_COLLISIONS) { "Snapshot storage already holds too many snapshots from this instant." }
+            name = fileName.removeSuffix(SUFFIX) + ".$clash$SUFFIX"
+        }
+        return name
+    }
+
+    /**
+     * The capture popup's snapshot (pass D1c), which core wrote through the data channel into [written]: published as
+     * [fileName] or its clash-numbered twin, as [write] does, then the older ones pruned. Returns the name written.
+     */
+    fun publishCapture(dir: File, written: File, fileName: String, protect: () -> Set<String>, syncDirectory: (File) -> Unit = ::syncDirectory): String = synchronized(this) {
+        val name = try {
+            freeName(dir, fileName, exact = false).also { check(written.renameTo(File(dir, it))) { "Cannot save the recovery snapshot" } }
+        } catch (failure: Throwable) {
+            written.delete()
+            throw failure
+        }
+        syncDirectory(dir)
+        prune(dir) { protect() + name }
+        name
+    }
+
+    /**
+     * A backup operation's recovery snapshot (pass D1c), which core wrote through the data channel into [pending]: published
+     * under exactly [name] once the file on disk is the one the channel wrote ([bytes], [sha256]); a mismatch publishes nothing.
+     * No prune: the operation prunes once it settled. The name is reserved (BackupOperations.reserve) before this runs.
+     */
+    fun publish(dir: File, pending: File, name: String, bytes: Long, sha256: String, syncDirectory: (File) -> Unit = ::syncDirectory) = synchronized(this) {
+        try {
+            check(!File(dir, name).exists()) { "The recovery snapshot name is already taken" }
+            check(pending.isFile && pending.length() == bytes && BackupOperations.sha256(pending) == sha256) { "The recovery snapshot changed before it was published" }
+            check(pending.renameTo(File(dir, name))) { "Cannot save the recovery snapshot" }
+        } catch (failure: Throwable) {
+            pending.delete()
+            throw failure
+        }
+        syncDirectory(dir)
     }
 
     /** The snapshot names in [dir], newest first by instant, then by clash number (core's sortRecoverySnapshotNames). */
@@ -84,7 +123,9 @@ object RecoverySnapshots {
      * RN's pruneSnapshots with core's protection: the [protect]ed names stay and count toward the 5; the newest others fill the
      * places left; the rest go.
      */
-    fun prune(dir: File, protect: Set<String>) = synchronized(this) {
+    fun prune(dir: File, protect: () -> Set<String>) = synchronized(this) {
+        // Read inside the lock: an operation that reserved and published its name meanwhile is protected too.
+        val protect = protect()
         val names = list(dir)
         val places = maxOf(0, MAX_SNAPSHOTS - names.count { it in protect })
         names.filter { it !in protect }.drop(places).forEach { runCatching { File(dir, it).delete() } }

@@ -280,6 +280,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
       { getState: () => storeState },
     ),
     undoTaskCompletion,
+    // The real one reads core's store; its refusal is tested in core and in process-inbox-parity.test.tsx.
+    restoreTaskSnapshot: (taskId: string, updates: unknown) => storeState.updateTask(taskId, updates),
     loadAIKey: vi.fn(),
   };
 });

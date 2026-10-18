@@ -6,6 +6,7 @@ import { LOCALES, isEnglishResidueChecked, isMixedEnglishChecked } from '../pack
 import {
     englishResidueWords,
     hasTranslatableEnglishText,
+    hasMixedEnglishText,
     isAllowedEnglishMirrorKey,
     isAllowedEnglishResidueKey,
     missingSlashCommandTokens,
@@ -115,7 +116,7 @@ for (const target of localeTargets) {
             && hasTranslatableEnglishText(en[key])
             && !isAllowedEnglishMirrorKey(target.locale, key));
     const mixedEnglishKeys = target.mixedEnglishChecked
-        ? Object.keys(dictionary).filter((key) => hasTranslatableEnglishText(dictionary[key]))
+        ? Object.keys(dictionary).filter((key) => hasMixedEnglishText(target.locale, key, dictionary[key], en[key]))
         : [];
     // Must match locale-parity.test.ts's slot guard exactly (see the header comment in
     // i18n-locales.ts on why the script and the test derive from the same helpers). Kept out

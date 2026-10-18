@@ -153,6 +153,23 @@ describe('widget-service', () => {
         resetMobileWidgetRenderCache();
     });
 
+    it('publishes previously unselected context and tag caches and content-free proving diagnostics', async () => {
+        const source = buildData(3);
+        source.tasks[0].contexts = ['@家/desk +?'];
+        source.tasks[1].tags = ['#urgent'];
+        source.tasks[2].contexts = ['@empty'];
+        source.tasks[2].status = 'done';
+        expect(await updateMobileWidgetFromData(source)).toBe(true);
+        const payload = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0]);
+        expect(payload.lists['context:@家/desk +?'].items.map((row: { id: string }) => row.id)).toEqual(['1']);
+        expect(payload.lists['tag:#urgent'].items.map((row: { id: string }) => row.id)).toEqual(['2']);
+        expect(payload.lists['context:@empty'].items).toEqual([]);
+        expect(mockLogInfo).toHaveBeenCalledWith('Android widget context and tag snapshots published', {
+            scope: 'widget', force: true,
+            extra: { releaseCheck: 'v1.3.7/widget-context-selection', count: 4 },
+        });
+    });
+
     it('never calls the native module when it is not linked (Expo Go)', async () => {
         mockAndroidWidgetIsSupported.mockReturnValue(false);
 
@@ -160,6 +177,28 @@ describe('widget-service', () => {
 
         expect(mockAndroidWidgetSetPayload).not.toHaveBeenCalled();
         expect(mockAndroidWidgetUpdateWidgets).not.toHaveBeenCalled();
+    });
+
+    it.each(['android', 'ios'])('publishes a preview-only Upcoming snapshot and receipt on %s', async (platform) => {
+        mockPlatform.OS = platform;
+        const data = buildData(1);
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        data.tasks[0] = { ...data.tasks[0], isFocusedToday: false, startTime: tomorrow.toISOString() };
+
+        expect(await updateMobileWidgetFromData(data)).toBe(true);
+        const serialized = platform === 'android'
+            ? mockAndroidWidgetSetPayload.mock.calls.at(-1)![0]
+            : mockIosWidgetSetItem.mock.calls[0][1];
+        const upcoming = JSON.parse(serialized).lists.upcoming;
+        expect(upcoming.items).toHaveLength(1);
+        expect(upcoming.items[0].upcomingDate).toBe(tomorrow.toISOString());
+        expect(upcoming.items[0].completionToken).toBeUndefined();
+        expect(mockLogInfo).toHaveBeenCalledWith('Upcoming widget snapshot published', {
+            scope: 'widget',
+            force: true,
+            extra: { releaseCheck: 'v1.3.7/widget-upcoming', platform, count: 1 },
+        });
     });
 
     it('republishes native audio availability when only the speech setting changes (#1184)', async () => {
@@ -366,13 +405,13 @@ describe('widget-service', () => {
         // Compact also needs Next Actions. A newly placed Tasks widget must be
         // able to switch to Inbox before the app next publishes.
         expect(await updateMobileWidgetFromData(data)).toBe(true);
-        expect(Object.keys(JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0] as string).lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday']);
+        expect(Object.keys(JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0] as string).lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming']);
 
         mockAndroidWidgetGetWidgetListSelections.mockReturnValue(['waiting', 'project:missing']);
         expect(await updateMobileWidgetFromData(data)).toBe(true);
         expect(mockAndroidWidgetSetPayload).toHaveBeenCalledTimes(1);
         const payload = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0] as string);
-        expect(Object.keys(payload.lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday']);
+        expect(Object.keys(payload.lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming']);
         expect(payload.lists.waiting).toMatchObject({ title: 'Waiting For', items: [{ title: 'Waiting on Sam' }] });
         expect(payload.listTitles).toMatchObject({ inbox: 'Inbox', next: 'Next Actions', someday: 'Someday/Maybe' });
         expect(payload.headerTitle).toBe('Today');
@@ -395,7 +434,7 @@ describe('widget-service', () => {
             scope: 'widget',
             extra: {
                 releaseCheck: 'v1.3.1/android-widget-lists',
-                count: '5',
+                count: '6',
                 focusItems: '0',
                 nextItems: '25',
                 inboxItems: '1',
@@ -434,7 +473,7 @@ describe('widget-service', () => {
         expect(payloadByKey.get('mindwtr-ios-widget-payload-extra-large')?.items).toHaveLength(30);
         expect(payloadByKey.get('mindwtr-ios-widget-payload')?.items).toHaveLength(20);
         expect(payloadByKey.get('mindwtr-ios-widget-payload')?.headerTitle).toBe('Today');
-        expect(Object.keys(payloadByKey.get('mindwtr-ios-widget-payload')?.lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday']);
+        expect(Object.keys(payloadByKey.get('mindwtr-ios-widget-payload')?.lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming']);
         expect(payloadByKey.get('mindwtr-ios-widget-payload-small')?.lists.focus.items).toHaveLength(11);
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrTasksWidget');
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrCompactWidget');
@@ -454,7 +493,7 @@ describe('widget-service', () => {
         });
         expect(JSON.stringify(mockLogInfo.mock.calls)).not.toContain('Focused 1');
 
-        const listIds = ['focus', 'inbox', 'next', 'waiting', 'someday'];
+        const listIds = ['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming'];
         const expectedFamilies = new Map([
             ['mindwtr-ios-widget-payload', 20],
             ['mindwtr-ios-widget-payload-small', 11],

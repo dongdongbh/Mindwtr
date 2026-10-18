@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isProcessInboxReturningTask, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 import { useUiStore } from '../../../store/ui-store';
 import { useInboxProcessingController } from './useInboxProcessingController';
+import { holdSyncSave } from '../../../test/hold-sync-save';
 
 type InboxControllerOptions = Parameters<typeof useInboxProcessingController>[0];
 type AddTask = InboxControllerOptions['addTask'];
@@ -180,6 +181,64 @@ describe('useInboxProcessingController not-actionable destinations', () => {
             isProcessing,
             setIsProcessing,
         });
+    });
+
+    it('appends a title link to the attachments a sync save published while the write waited', async () => {
+        useTaskStore.setState({ _allTasks: tasks });
+        const updateTask: UpdateTask = (id, updates) => useTaskStore.getState().updateTask(id, updates);
+        const { result } = renderController(updateTask);
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Alice /link:https://notes.example');
+        });
+        const remote = { id: 'att-remote', kind: 'link' as const, title: 'Remote', uri: 'https://remote.example',
+            createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' };
+        // Another device's attachment, published by a sync save that holds the gate while the decision is written.
+        const finish = holdSyncSave(() => useTaskStore.setState({
+            _allTasks: useTaskStore.getState()._allTasks.map((task) => (task.id === 'one' ? { ...task, rev: 5, attachments: [remote] } : task)),
+        }));
+        let committed!: Promise<unknown>;
+        act(() => {
+            committed = Promise.resolve(result.current.wizardProps.handleConfirmReference());
+        });
+        await finish();
+        await act(async () => { await committed; });
+
+        expect(useTaskStore.getState()._tasksById.get('one')?.attachments?.map((attachment) => attachment.uri))
+            .toEqual(['https://remote.example', 'https://notes.example']);
+    });
+
+    it('merges the picked tags onto the tags a sync save published, and still appends a title link', async () => {
+        useTaskStore.setState({ _allTasks: tasks });
+        const updateTask: UpdateTask = (id, updates) => useTaskStore.getState().updateTask(id, updates);
+        const { result } = renderController(updateTask);
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Alice /link:https://notes.example');
+            result.current.wizardProps.setField('tags', '#mine');
+        });
+        const remote = { id: 'att-remote', kind: 'link' as const, title: 'Remote', uri: 'https://remote.example',
+            createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z' };
+        // Another device's tag and attachment, published by a sync save that holds the gate while the decision is written.
+        const finish = holdSyncSave(() => useTaskStore.setState({
+            _allTasks: useTaskStore.getState()._allTasks.map((task) => (task.id === 'one'
+                ? { ...task, rev: 5, tags: ['#remote'], attachments: [remote] }
+                : task)),
+        }));
+        let committed!: Promise<unknown>;
+        act(() => {
+            committed = Promise.resolve(result.current.wizardProps.handleConfirmReference());
+        });
+        await finish();
+        await act(async () => { await committed; });
+
+        const stored = useTaskStore.getState()._tasksById.get('one');
+        expect(stored?.tags).toEqual(['#remote', '#mine']);
+        expect(stored?.attachments?.map((attachment) => attachment.uri)).toEqual(['https://remote.example', 'https://notes.example']);
     });
 
     // #958: picking a project and then sending the item to Reference/Someday

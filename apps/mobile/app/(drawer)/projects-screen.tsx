@@ -4,7 +4,7 @@ import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session
 import { View, Text, TextInput, TouchableOpacity, FlatList, Platform, useWindowDimensions } from 'react-native';
 import type { GettingStartedAction } from '@/components/GettingStartedActions';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AREA_PRESET_COLORS, areaOrderIdsForIntent, Attachment, collectProjectTaskLinks, DEFAULT_PROJECT_COLOR, getProjectSectionsForView, planProjectMove, Project, type ProjectAreaGroup, projectTagsForIntent, shallow, Task, type Section, type TaskSortBy, undoProjectDelete, useTaskStore } from '@mindwtr/core';
+import { AREA_PRESET_COLORS, areaOrderIdsForIntent, Attachment, collectProjectTaskLinks, DEFAULT_PROJECT_COLOR, getProjectSectionsForView, planProjectMove, Project, type ProjectAreaGroup, projectTagsForIntent, shallow, Task, type Section, type TaskSortBy, undoProjectDelete, updateProjectFromDraft, useTaskStore } from '@mindwtr/core';
 import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { runAfterCaptureRouteGone, SHEET_DISMISS_SETTLE_MS } from '@/lib/capture-route-presence';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react-native';
@@ -132,6 +132,24 @@ export default function ProjectsScreen() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const selectedProjectRef = useRef(selectedProject);
   selectedProjectRef.current = selectedProject;
+  // The row the open project's edits started from: set when a project opens, then advanced field by field
+  // once the stored row agrees with the draft (a persist or a live write landed it). Closing then writes only
+  // what the user changed, not a field another device synced while the sheet was open.
+  const selectedProjectBaseRef = useRef<Project | null>(null);
+  if (!selectedProject || selectedProjectBaseRef.current?.id !== selectedProject.id) {
+    selectedProjectBaseRef.current = selectedProject;
+  } else {
+    const live = projects.find((project) => project.id === selectedProject.id);
+    const base = selectedProjectBaseRef.current;
+    if (live && base) {
+      selectedProjectBaseRef.current = {
+        ...base,
+        ...(selectedProject.title.trim() === live.title.trim() ? { title: live.title } : {}),
+        ...((selectedProject.areaId || undefined) === (live.areaId || undefined) ? { areaId: live.areaId } : {}),
+        ...((selectedProject.tagIds || []).join('|') === (live.tagIds || []).join('|') ? { tagIds: live.tagIds } : {}),
+      };
+    }
+  }
   const [projectActivityRecoveryEnabled, setProjectActivityRecoveryEnabled] = useState(true);
   const [projectTaskSortBy, setProjectTaskSortBy] = useState<ProjectTaskSortBy>('default');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -783,19 +801,14 @@ export default function ProjectsScreen() {
     if (!original || original.status === 'archived') return;
 
     const nextTitle = project.title.trim();
-    const nextArea = project.areaId || undefined;
-    const prevArea = original.areaId || undefined;
-
-    const updates: Partial<Project> = {};
-    if (nextTitle && nextTitle !== original.title) updates.title = nextTitle;
-    if (nextArea !== prevArea) updates.areaId = nextArea;
-    if ((project.tagIds || []).join('|') !== (original.tagIds || []).join('|')) {
-      updates.tagIds = project.tagIds || [];
-    }
-
-    if (Object.keys(updates).length > 0) {
-      return updateProject(project.id, updates);
-    }
+    const updates: Partial<Project> = { areaId: project.areaId || undefined, tagIds: project.tagIds || [] };
+    if (nextTitle) updates.title = nextTitle;
+    const opened = selectedProjectBaseRef.current?.id === project.id ? selectedProjectBaseRef.current : original;
+    // Compared as saved (trimmed), so outer spaces in the stored title do not read as the user's rename.
+    const base = { ...opened, title: opened.title.trim(), areaId: opened.areaId || undefined, tagIds: opened.tagIds || [] };
+    selectedProjectBaseRef.current = { ...base, ...updates };
+    // Only the fields changed since the sheet opened are written, onto the latest row.
+    return updateProjectFromDraft(project.id, base, updates);
   };
   const persistSelectedProjectEditsRef = useRef(persistSelectedProjectEdits);
   persistSelectedProjectEditsRef.current = persistSelectedProjectEdits;

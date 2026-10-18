@@ -16,6 +16,7 @@ import { normalizeRelativeStartOffset } from './task-relative-start';
 import { logInfo, logWarn } from './logger';
 import { keepSavedFilters } from './saved-filters';
 import { sleep } from './async-utils';
+import { mapPass, runToEnd, type CooperativePass } from './cooperative';
 import { hasRawReadRow, rawReadRow, rememberRawReadRow, rememberRawReadSettings, rawReadSettingsJson, savedFilterSqliteRow } from './sqlite-raw-snapshot';
 export { rawReadTaskSnapshot } from './sqlite-raw-snapshot';
 import { TASK_SQLITE_COLUMNS, TASK_SQLITE_MIGRATION_COLUMNS, taskFromSqliteRow, taskToSqliteRow } from './task-sync-schema';
@@ -261,6 +262,21 @@ const getTaskRowEntry = (task: Task): TaskRowEntry => {
     return entry;
 };
 
+/** A save's entity rows and their fingerprints (each row as JSON), per table, in saveData's write order. */
+type SqliteSaveRows = Record<'areas' | 'projects' | 'people' | 'sections' | 'tasks', { rows: unknown[][]; fingerprints: string[] }>;
+
+function* saveRowsPass(data: AppData, nowIso: string): CooperativePass<SqliteSaveRows> {
+    const split = (entries: TaskRowEntry[]) => ({ rows: entries.map((entry) => entry.row), fingerprints: entries.map((entry) => entry.fingerprint) });
+    const people = Array.isArray(data.people) ? data.people : [];
+    return {
+        areas: split(yield* mapPass(data.areas, (area) => rawReadRow(area, areaToSqliteRow(area, nowIso)))),
+        projects: split(yield* mapPass(data.projects, (project) => rawReadRow(project, projectToSqliteRow(project)))),
+        people: split(yield* mapPass(people, (person) => rawReadRow(person, personToSqliteRow(person, nowIso)))),
+        sections: split(yield* mapPass(data.sections, (section) => rawReadRow(section, sectionToSqliteRow(section)))),
+        tasks: split(yield* mapPass(data.tasks, getTaskRowEntry)),
+    };
+}
+
 const isFts5SyntaxError = (error: unknown): boolean => (
     error instanceof Error && /fts5: syntax error/i.test(error.message)
 );
@@ -381,6 +397,20 @@ export type SqliteSaveDataStats = {
     sqlCount: number;
 };
 
+/**
+ * The database state a guarded read came from (design.md W3): PRAGMA data_version, which moves when another connection
+ * commits, and this adapter's write generation, which moves at each of its own write transactions. A save given a token
+ * writes only while both still match.
+ */
+export type SqliteReadToken = { readonly epoch: number; readonly generation: number };
+/** A sliced sync cycle's quiet requeue: what a guarded read or a token save throws when the database moved under it. */
+export type SqliteStaleOption = { onStale?: () => Error };
+/** A table whose rows a read loaded, for a subclass's check of that read (afterReadNow). */
+export type SqliteReadTable = typeof SQLITE_ENTITY_TABLES[number];
+
+// A lock hold longer than this is logged: every other SQL caller of the connection waited for it.
+const LONG_LOCK_HOLD_MS = 1000;
+
 export type SqliteAdapterOptions = {
     /**
      * Reject a write when another connection changed the snapshot since getData().
@@ -451,6 +481,20 @@ export class SqliteAdapter {
     // fingerprints of its own (the first after a cold start) compares its rows with these instead of rewriting every row.
     // Only with rejectConcurrentWrites: that save checks inside its transaction that no other connection committed since.
     private lastReadRows: { tables: Map<string, Record<string, unknown>[]>; settingsJson: string | null; writesStarted: number } | null = null;
+    // Every write transaction this adapter has started (entity, receipt, calendar and host writes). Unlike writesStarted it
+    // voids a read token without voiding the cold-start fingerprint shortcut, which only entity writes can stale.
+    private generation = 0;
+    private readonly readTokens = new WeakMap<object, SqliteReadToken>();
+    /** Rows a sliced sync cycle built before its save (prepareSaveRows), with the write generation they were built at. */
+    private readonly preparedSaveRows = new WeakMap<AppData, { generation: number; rows: SqliteSaveRows }>();
+    // One owner at a time for a guarded adapter's SQL (design.md W2): a public method holds the lock through every statement
+    // it runs, so no other caller's SQL lands inside its transaction or between its reads. A public method takes it and runs
+    // its protected …Now body; a …Now body assumes the lock and calls only …Now bodies, never a public method (no re-entry).
+    // The store's write gate is outer: code holding this lock never waits on the gate. Unguarded adapters (React Native)
+    // stay unserialized.
+    private lockHeld = false;
+    private readonly lockWaiters: (() => void)[] = [];
+    private serializedLogged = false;
 
     constructor(client: SqliteClient, options: SqliteAdapterOptions = {}) {
         this.client = client;
@@ -459,6 +503,96 @@ export class SqliteAdapter {
 
     /** Read-only capability for prepared native writes that require a BEGIN epoch fence. */
     get concurrentWritesGuarded(): boolean { return this.rejectConcurrentWrites; }
+
+    /** Whether the caller had to wait for another holder. */
+    private async acquireLock(): Promise<boolean> {
+        if (!this.lockHeld) {
+            this.lockHeld = true;
+            return false;
+        }
+        await new Promise<void>((resolve) => { this.lockWaiters.push(resolve); });
+        return true;
+    }
+
+    // FIFO: the lock passes straight to the next waiter.
+    private releaseLock(): void {
+        const next = this.lockWaiters.shift();
+        if (next) next();
+        else this.lockHeld = false;
+    }
+
+    protected async exclusive<T>(operation: string, work: () => Promise<T>): Promise<T> {
+        if (!this.rejectConcurrentWrites) return work();
+        const askedAt = Date.now();
+        if (await this.acquireLock() && !this.serializedLogged) {
+            // Once per adapter (per boot on the phones): proof the lock kept one caller's SQL out of another's.
+            this.serializedLogged = true;
+            // Forced: the line is written even while detailed logging is off, or the one chance per boot would be lost.
+            logInfo('SQLite adapter lock serialized a caller', {
+                scope: 'sqlite', category: 'storage', force: true,
+                context: { releaseCheck: 'v1.3.7/sqlite-adapter-lock', operation, waitMs: Date.now() - askedAt },
+            });
+        }
+        const startedAt = Date.now();
+        try {
+            return await work();
+        } finally {
+            const holdMs = Date.now() - startedAt;
+            this.releaseLock();
+            if (holdMs > LONG_LOCK_HOLD_MS) {
+                logWarn('SQLite adapter lock held long', { scope: 'sqlite', category: 'storage', context: { operation, holdMs } });
+            }
+        }
+    }
+
+    /** Inside a hold, between statements: let queued SQL run while [work] waits (a sleep), then take the lock back. */
+    private async outsideLock<T>(work: () => Promise<T>): Promise<T> {
+        if (!this.rejectConcurrentWrites) return work();
+        this.releaseLock();
+        try {
+            return await work();
+        } finally {
+            await this.acquireLock();
+        }
+    }
+
+    /** A write transaction starts: every read token taken before it is void. */
+    protected noteWrite(): void {
+        this.generation += 1;
+    }
+
+    /**
+     * Host SQL on this adapter's connection (the native host's own reads and receipt maintenance), inside the lock. A
+     * [write] raises the generation, so a read token taken before it no longer authorizes a save.
+     */
+    async withConnection<T>(work: () => Promise<T>, options?: { write?: boolean }): Promise<T> {
+        return this.exclusive('withConnection', async () => {
+            if (options?.write) this.noteWrite();
+            return work();
+        });
+    }
+
+    /** The token of a guarded read's snapshot, or of a token save's document (its successor). */
+    readTokenOf(data: AppData): SqliteReadToken | undefined {
+        return this.readTokens.get(data);
+    }
+
+    /**
+     * Design D9b §2: a sliced sync cycle builds [data]'s save rows and fingerprints here, in slices, before it takes the
+     * write gate. It runs no SQL and takes no lock. saveData uses them for this exact document while no write transaction
+     * has run since; otherwise it builds them in its transaction (correct, slower, logged).
+     */
+    *prepareSaveRows(data: AppData): CooperativePass<void> {
+        const generation = this.generation;
+        const rows = yield* saveRowsPass(data, new Date().toISOString());
+        this.preparedSaveRows.set(data, { generation, rows });
+    }
+
+    /**
+     * Runs at the end of every full read (getData) and row-version read (readRowBaseline), in the read's own lock hold:
+     * a subclass checks the read against the database. A throw fails the read before it becomes a baseline.
+     */
+    protected async afterReadNow(_loaded: (table: SqliteReadTable) => number, _settings: AppData['settings']): Promise<void> {}
 
     private async loadAllRows(table: 'tasks' | 'projects' | 'sections' | 'areas' | 'people'): Promise<Record<string, unknown>[]> {
         const rows: Record<string, unknown>[] = [];
@@ -639,7 +773,8 @@ export class SqliteAdapter {
         try {
             const schemaChanged = await this.ensureFtsSchema();
             const triggersChanged = await this.ensureFtsTriggers(schemaChanged);
-            await this.ensureFtsPopulated(schemaChanged || triggersChanged);
+            // Schema setup keeps the lock while it sleeps: a caller let in meanwhile would wait on this same setup.
+            await this.ensureFtsPopulated(schemaChanged || triggersChanged, sleep);
         } catch (error) {
             logWarn('FTS setup failed, search may not work', {
                 scope: 'sqlite',
@@ -650,6 +785,10 @@ export class SqliteAdapter {
     }
 
     async ensureSchema(): Promise<void> {
+        return this.exclusive('ensureSchema', () => this.ensureSchemaNow());
+    }
+
+    protected async ensureSchemaNow(): Promise<void> {
         if (!this.schemaReadyPromise) {
             this.schemaReadyPromise = this.ensureSchemaInternal().catch((error) => {
                 this.schemaReadyPromise = null;
@@ -908,7 +1047,7 @@ export class SqliteAdapter {
         await this.client.run('CREATE INDEX IF NOT EXISTS idx_saved_filters_view ON saved_filters(view)');
     }
 
-    private async ensureFtsPopulated(forceRebuild = false) {
+    private async ensureFtsPopulated(forceRebuild: boolean, wait: (ms: number) => Promise<void>) {
         try {
             const totals = await this.client.get<{
                 tasks_total?: number;
@@ -977,7 +1116,7 @@ export class SqliteAdapter {
                         delayMs,
                     },
                 });
-                await sleep(delayMs);
+                await wait(delayMs);
                 lockOwner = await this.acquireFtsLock();
             }
             if (!lockOwner) {
@@ -1069,8 +1208,17 @@ export class SqliteAdapter {
         return keepSavedFilters([filter])[0] ?? null;
     }
 
-    async getData(options?: { rawTasks?: true }): Promise<AppData & { people: Person[] }> {
-        await this.ensureSchema();
+    async getData(options?: { rawTasks?: true } & SqliteStaleOption): Promise<AppData & { people: Person[] }> {
+        return this.exclusive('getData', () => this.getDataNow(options));
+    }
+
+    /**
+     * A guarded read is bracketed by data_version: e1 and e2 around the rows (one retry), e3 after afterReadNow's check.
+     * A move before e2 or after it is another connection's commit, never corruption: onStale (a sliced cycle's requeue),
+     * else today's SQLITE_BUSY error. Only a check that fails with e3 = e2 keeps its own error.
+     */
+    protected async getDataNow(options?: { rawTasks?: true } & SqliteStaleOption): Promise<AppData & { people: Person[] }> {
+        await this.ensureSchemaNow();
         const loadSnapshotRows = () => Promise.all([
             this.loadAllRows('tasks'),
             this.loadAllRows('projects'),
@@ -1081,6 +1229,8 @@ export class SqliteAdapter {
             this.client.all<Record<string, unknown>>('SELECT rowid as _rowid, * FROM saved_filters ORDER BY createdAt, name'),
         ]);
         let snapshotRows: Awaited<ReturnType<typeof loadSnapshotRows>> | null = null;
+        let epoch: number | undefined;
+        const generation = this.generation;
         if (this.rejectConcurrentWrites) {
             for (let attempt = 0; attempt < 2; attempt += 1) {
                 const beforeEpoch = await this.readExternalChangeEpoch();
@@ -1088,18 +1238,18 @@ export class SqliteAdapter {
                 const afterEpoch = await this.readExternalChangeEpoch();
                 if (beforeEpoch === afterEpoch) {
                     snapshotRows = candidateRows;
-                    this.lastObservedExternalChangeEpoch = afterEpoch;
+                    epoch = afterEpoch;
                     break;
                 }
             }
             if (!snapshotRows) {
-                throw this.concurrentWriteError('database changed while loading');
+                throw options?.onStale?.() ?? this.concurrentWriteError('database changed while loading');
             }
         } else {
             snapshotRows = await loadSnapshotRows();
         }
         const [tasksRows, projectsRows, sectionsRows, areasRows, peopleRows, settingsRow, savedFilterRows] = snapshotRows;
-        this.lastReadRows = this.rejectConcurrentWrites ? {
+        const lastReadRows = this.rejectConcurrentWrites ? {
             tables: new Map<string, Record<string, unknown>[]>([
                 ['tasks', tasksRows], ['projects', projectsRows], ['sections', sectionsRows], ['areas', areasRows],
                 ['people', peopleRows], ['saved_filters', savedFilterRows],
@@ -1128,6 +1278,27 @@ export class SqliteAdapter {
         const people: Person[] = peopleRows.map((row) => personFromSqliteRow(row, nowIso));
 
         const settings = this.mapSettings(settingsRow, savedFilterRows);
+        const counts: Record<SqliteReadTable, number> = {
+            tasks: tasks.length, projects: projects.length, sections: sections.length, areas: areas.length, people: people.length,
+        };
+        // e3 brackets only a read a subclass checks: without a check the rows are consistent as of e2, and a later save's
+        // epoch check refuses them after any external commit.
+        const checked = this.afterReadNow !== SqliteAdapter.prototype.afterReadNow;
+        if (epoch === undefined || !checked) {
+            await this.afterReadNow((table) => counts[table], settings);
+            if (epoch !== undefined) this.lastObservedExternalChangeEpoch = epoch;
+        } else {
+            let checkFailure: unknown = null;
+            try { await this.afterReadNow((table) => counts[table], settings); } catch (error) { checkFailure = error ?? new Error('Read check failed'); }
+            if (await this.readExternalChangeEpoch() !== epoch) {
+                const moved = options?.onStale?.() ?? (checkFailure ? this.concurrentWriteError('database changed while loading') : null);
+                if (moved) throw moved;
+            }
+            if (checkFailure) throw checkFailure;
+            if (this.generation !== generation) throw new Error('SQLite write generation moved inside a read');
+            this.lastObservedExternalChangeEpoch = epoch;
+        }
+        this.lastReadRows = lastReadRows;
 
         // A read is the deletion baseline for this adapter. Retain exact row
         // versions so later snapshot omissions can use compare-and-swap deletion.
@@ -1152,7 +1323,9 @@ export class SqliteAdapter {
             }
             if (settingsRow) rememberRawReadSettings(settings, typeof settingsRow.data === 'string' ? settingsRow.data : null);
         }
-        return { tasks, projects, sections, areas, people, settings };
+        const result = { tasks, projects, sections, areas, people, settings };
+        if (epoch !== undefined) this.readTokens.set(result, { epoch, generation });
+        return result;
     }
 
     private mapSettings(settingsRow: Record<string, unknown> | undefined, savedFilterRows: Record<string, unknown>[]): AppData['settings'] {
@@ -1176,7 +1349,11 @@ export class SqliteAdapter {
      * after another connection's commit only a full getData() is a current baseline.
      */
     async readRowBaseline(): Promise<{ ids: Record<SqliteTombstoneTable, string[]>; settings: AppData['settings'] } | null> {
-        await this.ensureSchema();
+        return this.exclusive('readRowBaseline', () => this.readRowBaselineNow());
+    }
+
+    protected async readRowBaselineNow(): Promise<{ ids: Record<SqliteTombstoneTable, string[]>; settings: AppData['settings'] } | null> {
+        await this.ensureSchemaNow();
         const accepted = this.lastObservedExternalChangeEpoch;
         if (!this.rejectConcurrentWrites || accepted === undefined) return null;
         if (await this.readExternalChangeEpoch() !== accepted) return null;
@@ -1188,18 +1365,26 @@ export class SqliteAdapter {
             this.client.all<Record<string, unknown>>('SELECT rowid as _rowid, * FROM saved_filters ORDER BY createdAt, name'),
         ]);
         if (await this.readExternalChangeEpoch() !== accepted) return null;
+        const light = {
+            ids: Object.fromEntries(SQLITE_ENTITY_TABLES.map((table, index) => [table, entityRows[index].map((row) => String(row.id))])) as Record<SqliteTombstoneTable, string[]>,
+            settings: this.mapSettings(settingsRow, savedFilterRows),
+        };
+        await this.afterReadNow((table) => light.ids[table].length, light.settings);
+        // As getData's e3: another connection's commit during the check makes this read no baseline.
+        if (this.afterReadNow !== SqliteAdapter.prototype.afterReadNow && await this.readExternalChangeEpoch() !== accepted) return null;
         this.lastKnownRowVersions = new Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>([
             ...SQLITE_ENTITY_TABLES.map((table, index) => [table, this.knownRowVersionsFromRows(entityRows[index])] as const),
             ['saved_filters', this.knownRowVersionsFromRows(savedFilterRows)],
         ]);
-        return {
-            ids: Object.fromEntries(SQLITE_ENTITY_TABLES.map((table, index) => [table, entityRows[index].map((row) => String(row.id))])) as Record<SqliteTombstoneTable, string[]>,
-            settings: this.mapSettings(settingsRow, savedFilterRows),
-        };
+        return light;
     }
 
     async queryTasks(options: TaskQueryOptions): Promise<Task[]> {
-        await this.ensureSchema();
+        return this.exclusive('queryTasks', () => this.queryTasksNow(options));
+    }
+
+    private async queryTasksNow(options: TaskQueryOptions): Promise<Task[]> {
+        await this.ensureSchemaNow();
         const { sql: where, params } = buildTaskWhere(options);
         const sql = `SELECT * FROM tasks ${where ? `WHERE ${where}` : ''}`;
         const rows = await this.client.all<Record<string, unknown>>(sql, params);
@@ -1207,7 +1392,11 @@ export class SqliteAdapter {
     }
 
     async searchAll(query: string): Promise<SearchResults> {
-        await this.ensureSchema();
+        return this.exclusive('searchAll', () => this.searchAllNow(query));
+    }
+
+    private async searchAllNow(query: string): Promise<SearchResults> {
+        await this.ensureSchemaNow();
         const safeQuery = typeof query === 'string' ? query : '';
         const cleaned = safeQuery
             .replace(/[^\p{L}\p{N}#@]+/gu, ' ')
@@ -1258,7 +1447,8 @@ export class SqliteAdapter {
                 return { tasks: [], projects: [] };
             }
             try {
-                await this.ensureFtsPopulated(true);
+                // Another process's rebuild lock: queued SQL runs while this search waits for it.
+                await this.ensureFtsPopulated(true, (ms) => this.outsideLock(() => sleep(ms)));
                 return await runSearch();
             } catch (retryError) {
                 logWarn('Search failed', { scope: 'sqlite', category: 'fts', error: retryError });
@@ -1304,9 +1494,14 @@ export class SqliteAdapter {
     }
 
     async saveTask(task: Task): Promise<void> {
-        await this.ensureSchema();
+        return this.exclusive('saveTask', () => this.saveTaskNow(task));
+    }
+
+    private async saveTaskNow(task: Task): Promise<void> {
+        await this.ensureSchemaNow();
         this.writesStarted += 1;
         await this.client.run('BEGIN IMMEDIATE');
+        this.noteWrite();
         try {
             await this.assertObservedSnapshotUnchanged();
             const columnList = TASK_UPSERT_COLUMNS.join(', ');
@@ -1338,8 +1533,22 @@ export class SqliteAdapter {
         }
     }
 
-    async saveData(data: AppData): Promise<void> {
-        await this.ensureSchema();
+    /**
+     * With [options.onStale] (a sliced sync cycle) the save is token-checked: right after BEGIN, before it touches any
+     * baseline, it refuses unless [options.token] still matches the generation and data_version. A refused save writes
+     * nothing and keeps the last save's fingerprints. A committed one gives [data] its successor token (readTokenOf).
+     */
+    async saveData(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<void> {
+        return this.exclusive('saveData', () => this.saveDataNow(data, options));
+    }
+
+    protected async saveDataNow(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<void> {
+        await this.ensureSchemaNow();
+        const token = options?.token;
+        if (options?.onStale && !token) {
+            logWarn('SQLite save refused: no read token', { scope: 'sqlite', category: 'storage' });
+            throw new Error('SQLite save refused: no read token');
+        }
         // A snapshot with zero entities while the database still holds rows is
         // accepted only when the rows are unchanged tombstones observed by this
         // adapter and every one has reached the default retention cutoff. The
@@ -1352,8 +1561,13 @@ export class SqliteAdapter {
             + (data.people?.length ?? 0);
         // A cold start's first save has no fingerprints of its own: the last full read's rows stand in for them. The
         // transaction below refuses the save if another connection committed since that read.
-        const previousSave = this.lastSavedFingerprints ?? this.fingerprintsFromLastRead();
-        this.writesStarted += 1;
+        let previousSave = null as { tables: Map<string, Map<string, string>>; settingsJson: string | null } | null;
+        // From here this save owns the baselines: a refused token save never reaches it, so it leaves them as they were.
+        const claimBaselines = () => {
+            previousSave = this.lastSavedFingerprints ?? this.fingerprintsFromLastRead();
+            this.writesStarted += 1;
+            this.lastSavedFingerprints = null;
+        };
         const previousKnownRows = this.lastKnownRowVersions;
         const nextSave: { tables: Map<string, Map<string, string>>; settingsJson: string | null } = {
             tables: new Map(),
@@ -1361,7 +1575,7 @@ export class SqliteAdapter {
         };
         const nextKnownRows = new Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>();
         const stats: SqliteSaveDataStats = {
-            incremental: previousSave !== null,
+            incremental: false,
             writtenRows: 0,
             removedRows: 0,
             totalRows: 0,
@@ -1383,10 +1597,37 @@ export class SqliteAdapter {
             }
         };
         const runTimed = (sql: string, args?: unknown[]) => timed(() => this.client.run(sql, args));
-        this.lastSavedFingerprints = null;
+        if (!token) claimBaselines();
         const beginStartedAt = Date.now();
         await runTimed('BEGIN IMMEDIATE');
         stats.beginMs = Date.now() - beginStartedAt;
+        if (token) {
+            let current: boolean;
+            try {
+                current = token.generation === this.generation && await this.readExternalChangeEpoch() === token.epoch;
+            } catch (error) {
+                await this.client.run('ROLLBACK').catch(() => undefined);
+                throw error;
+            }
+            if (!current) {
+                await this.client.run('ROLLBACK').catch(() => undefined);
+                throw options?.onStale?.() ?? this.concurrentWriteError('stale read token');
+            }
+            claimBaselines();
+        }
+        // Rows prepared for this document count only if no write ran since: a write voids them as it voids a token.
+        const prepared = this.preparedSaveRows.get(data);
+        this.preparedSaveRows.delete(data);
+        const preparedRows = prepared?.generation === this.generation ? prepared.rows : undefined;
+        if (options?.onStale && !preparedRows) {
+            logInfo('SQLite sync save built its rows in the transaction', {
+                scope: 'sqlite',
+                category: 'storage',
+                context: { reason: prepared ? 'write-since' : 'unprepared', tasks: data.tasks?.length ?? 0 },
+            });
+        }
+        this.noteWrite();
+        stats.incremental = previousSave !== null;
         let saveStep = 'begin';
         try {
             saveStep = 'concurrent-write-check';
@@ -1576,14 +1817,16 @@ export class SqliteAdapter {
                 return keptLive;
             };
 
+            saveStep = 'rows';
+            const saveRows = preparedRows ?? runToEnd(saveRowsPass(data, nowIso));
             saveStep = 'areas';
             await upsertBatch(
                 'areas',
                 [...AREA_UPSERT_COLUMNS],
-                data.areas.map((area) => rawReadRow(area, areaToSqliteRow(area, nowIso)).row),
+                saveRows.areas.rows,
                 AREA_UPSERT_UPDATE_CLAUSE,
                 200,
-                undefined,
+                saveRows.areas.fingerprints,
                 {
                     rev: AREA_UPSERT_COLUMNS.indexOf('rev'),
                     updatedAt: AREA_UPSERT_COLUMNS.indexOf('updatedAt'),
@@ -1594,10 +1837,10 @@ export class SqliteAdapter {
             await upsertBatch(
                 'projects',
                 [...PROJECT_UPSERT_COLUMNS],
-                data.projects.map((project) => rawReadRow(project, projectToSqliteRow(project)).row),
+                saveRows.projects.rows,
                 PROJECT_UPSERT_UPDATE_CLAUSE,
                 200,
-                undefined,
+                saveRows.projects.fingerprints,
                 {
                     rev: PROJECT_UPSERT_COLUMNS.indexOf('rev'),
                     updatedAt: PROJECT_UPSERT_COLUMNS.indexOf('updatedAt'),
@@ -1609,10 +1852,10 @@ export class SqliteAdapter {
             await upsertBatch(
                 'people',
                 [...PERSON_UPSERT_COLUMNS],
-                people.map((person) => rawReadRow(person, personToSqliteRow(person, nowIso)).row),
+                saveRows.people.rows,
                 PERSON_UPSERT_UPDATE_CLAUSE,
                 200,
-                undefined,
+                saveRows.people.fingerprints,
                 {
                     rev: PERSON_UPSERT_COLUMNS.indexOf('rev'),
                     updatedAt: PERSON_UPSERT_COLUMNS.indexOf('updatedAt'),
@@ -1623,10 +1866,10 @@ export class SqliteAdapter {
             await upsertBatch(
                 'sections',
                 [...SECTION_UPSERT_COLUMNS],
-                data.sections.map((section) => rawReadRow(section, sectionToSqliteRow(section)).row),
+                saveRows.sections.rows,
                 SECTION_UPSERT_UPDATE_CLAUSE,
                 200,
-                undefined,
+                saveRows.sections.fingerprints,
                 {
                     rev: SECTION_UPSERT_COLUMNS.indexOf('rev'),
                     updatedAt: SECTION_UPSERT_COLUMNS.indexOf('updatedAt'),
@@ -1634,14 +1877,13 @@ export class SqliteAdapter {
             );
 
             saveStep = 'tasks';
-            const taskRowEntries = data.tasks.map(getTaskRowEntry);
             await upsertBatch(
                 'tasks',
                 [...TASK_UPSERT_COLUMNS],
-                taskRowEntries.map((entry) => entry.row),
+                saveRows.tasks.rows,
                 TASK_UPSERT_UPDATE_CLAUSE,
                 200,
-                taskRowEntries.map((entry) => entry.fingerprint),
+                saveRows.tasks.fingerprints,
                 {
                     rev: TASK_UPSERT_COLUMNS.indexOf('rev'),
                     updatedAt: TASK_UPSERT_COLUMNS.indexOf('updatedAt'),
@@ -1747,6 +1989,7 @@ export class SqliteAdapter {
             this.lastSavedFingerprints = nextSave;
             this.lastKnownRowVersions = nextKnownRows;
             this.lastSaveDataStats = stats;
+            if (token) this.readTokens.set(data, { epoch: token.epoch, generation: this.generation });
         } catch (error) {
             await this.client.run('ROLLBACK').catch((rollbackError) => {
                 logWarn('SQLite saveData rollback failed', {
@@ -1791,7 +2034,11 @@ export class SqliteAdapter {
     // MARK: - Calendar Sync CRUD
 
     async getCalendarSyncEntry(taskId: string, platform: string): Promise<CalendarSyncEntry | null> {
-        await this.ensureSchema();
+        return this.exclusive('getCalendarSyncEntry', () => this.getCalendarSyncEntryNow(taskId, platform));
+    }
+
+    private async getCalendarSyncEntryNow(taskId: string, platform: string): Promise<CalendarSyncEntry | null> {
+        await this.ensureSchemaNow();
         const row = await this.client.get<{
             task_id: string;
             calendar_event_id: string;
@@ -1810,7 +2057,12 @@ export class SqliteAdapter {
     }
 
     async upsertCalendarSyncEntry(entry: CalendarSyncEntry): Promise<void> {
-        await this.ensureSchema();
+        return this.exclusive('upsertCalendarSyncEntry', () => this.upsertCalendarSyncEntryNow(entry));
+    }
+
+    private async upsertCalendarSyncEntryNow(entry: CalendarSyncEntry): Promise<void> {
+        await this.ensureSchemaNow();
+        this.noteWrite();
         await this.client.run(
             `INSERT INTO calendar_sync (task_id, calendar_event_id, calendar_id, platform, last_synced_at)
              VALUES (?, ?, ?, ?, ?)
@@ -1823,7 +2075,12 @@ export class SqliteAdapter {
     }
 
     async deleteCalendarSyncEntry(taskId: string, platform: string): Promise<void> {
-        await this.ensureSchema();
+        return this.exclusive('deleteCalendarSyncEntry', () => this.deleteCalendarSyncEntryNow(taskId, platform));
+    }
+
+    private async deleteCalendarSyncEntryNow(taskId: string, platform: string): Promise<void> {
+        await this.ensureSchemaNow();
+        this.noteWrite();
         await this.client.run(
             'DELETE FROM calendar_sync WHERE task_id = ? AND platform = ?',
             [taskId, platform]
@@ -1831,7 +2088,11 @@ export class SqliteAdapter {
     }
 
     async getAllCalendarSyncEntries(platform: string): Promise<CalendarSyncEntry[]> {
-        await this.ensureSchema();
+        return this.exclusive('getAllCalendarSyncEntries', () => this.getAllCalendarSyncEntriesNow(platform));
+    }
+
+    private async getAllCalendarSyncEntriesNow(platform: string): Promise<CalendarSyncEntry[]> {
+        await this.ensureSchemaNow();
         const rows = await this.client.all<{
             task_id: string;
             calendar_event_id: string;

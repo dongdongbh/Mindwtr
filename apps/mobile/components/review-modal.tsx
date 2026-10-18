@@ -87,9 +87,11 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         externalCalendarReviewItems,
         handleClose,
         handleDelete,
+        handleEditModalDismiss,
         handleFinish,
         handleNavigateToProject,
         handleNavigateToToken,
+        handleReviewDismiss,
         handleSaveTask,
         handleStatusChange,
         handleTaskPress,
@@ -97,6 +99,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         isActionableSuggestion,
         isDark,
         labels,
+        modalVisible,
         nextStep,
         openProjectTaskPrompt,
         openReviewQuickAdd,
@@ -832,7 +835,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     };
 
     return (
-        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={handleClose}>
+        <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={handleClose} onDismiss={handleReviewDismiss}>
             <GestureHandlerRootView style={{ flex: 1 }}>
                 <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top', 'bottom']}>
                     <SandboxWorkspaceCue />
@@ -924,6 +927,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                     visible={showEditModal}
                     task={editingTask}
                     onClose={closeEditModal}
+                    onDismiss={handleEditModalDismiss}
                     onSave={handleSaveTask}
                     defaultTab={editModalTab}
                     onProjectNavigate={handleNavigateToProject}

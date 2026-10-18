@@ -24,6 +24,7 @@ import {
   getContextsTokenPicker,
   getContextsTokenPickerTitle,
   resolveContextsMatchMode,
+  runStoreCommand,
   selectContextsRouteTokens,
   toggleContextsNoContext,
   toggleContextsToken,
@@ -211,13 +212,15 @@ export function ContextsView() {
     if (!bulkTokenPicker || !hasSelection) return;
     await runBulkAction(tokenPickerTitle, async () => {
       setBulkTokenPicker(null);
-      const outcome = await editContextsTaskTokens({ batchUpdateTasks }, {
+      // One store command builds each list from the task as stored and writes it: a sync save admitted
+      // first may have published a token another device added, and the rows on screen lack it.
+      const outcome = await runStoreCommand(() => editContextsTaskTokens({ batchUpdateTasks }, {
         taskIds: selectedIdsArray,
-        tasksById,
+        tasksById: Object.fromEntries(useTaskStore.getState()._tasksById),
         field: bulkTokenPicker.field,
         mode: bulkTokenPicker.action,
         values,
-      });
+      }));
       if (!outcome.changed) return;
       assertBulkActionSucceeded(outcome.result);
       exitSelectionMode();

@@ -1,4 +1,4 @@
-import { strToU8, zipSync } from 'fflate';
+import { deflateSync, strToU8, zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -38,6 +38,52 @@ const TEST_CSV_LIMITS: ImportCsvLimits = {
     maxColumns: 3,
     maxRows: 2,
 };
+
+
+type CraftedZipEntry = {
+    name: string;
+    data: Uint8Array;
+    method?: 0 | 8;
+    /** Declared sizes, written to both headers unless the local ones are overridden. */
+    compressedSize?: number;
+    size?: number;
+    localCompressedSize?: number;
+    localSize?: number;
+    flags?: number;
+    /** Bytes written after the data (a data descriptor). */
+    trailer?: Uint8Array;
+};
+
+// A ZIP written byte by byte, so a test can declare sizes and offsets the data does not have.
+// `aliases` adds central entries that point at an earlier entry's local header.
+const craftZip = (entries: CraftedZipEntry[], aliases: number[] = []): Uint8Array => {
+    const out: number[] = [];
+    const u16 = (value: number) => { out.push(value & 0xff, (value >>> 8) & 0xff); };
+    const u32 = (value: number) => { u16(value & 0xffff); u16((value >>> 16) & 0xffff); };
+    const central: Array<{ entry: CraftedZipEntry; offset: number }> = [];
+    for (const entry of entries) {
+        const name = strToU8(entry.name);
+        const offset = out.length;
+        u32(0x04034b50); u16(20); u16(entry.flags ?? 0); u16(entry.method ?? 0); u16(0); u16(0); u32(0);
+        u32(entry.localCompressedSize ?? entry.compressedSize ?? entry.data.length);
+        u32(entry.localSize ?? entry.size ?? entry.data.length);
+        u16(name.length); u16(0); out.push(...name, ...entry.data, ...(entry.trailer ?? []));
+        central.push({ entry, offset });
+    }
+    for (const index of aliases) central.push(central[index]);
+    const directoryStart = out.length;
+    for (const { entry, offset } of central) {
+        const name = strToU8(entry.name);
+        u32(0x02014b50); u16(20); u16(20); u16(entry.flags ?? 0); u16(entry.method ?? 0); u16(0); u16(0); u32(0);
+        u32(entry.compressedSize ?? entry.data.length); u32(entry.size ?? entry.data.length);
+        u16(name.length); u16(0); u16(0); u16(0); u16(0); u32(0); u32(offset); out.push(...name);
+    }
+    const directorySize = out.length - directoryStart;
+    u32(0x06054b50); u16(0); u16(0); u16(central.length); u16(central.length); u32(directorySize); u32(directoryStart); u16(0);
+    return Uint8Array.from(out);
+};
+
+const ZIP_LIMITS: ImportSourceLimits = { ...TEST_LIMITS, maxArchiveEntries: 8, maxArchiveEntryBytes: 4096, maxArchiveExpandedBytes: 8192, maxInputBytes: 8192, maxTextBytes: 4096 };
 
 describe('import-source-reader', () => {
     it('counts checklist items without splitting them so archive budgets can precharge allocation', () => {
@@ -277,5 +323,60 @@ describe('import-source-reader', () => {
         );
 
         expect(result.kind).toBe('archive');
+    });
+
+    describe('ZIP sizes are the data\'s real sizes (D1b review P1)', () => {
+        const csv = strToU8(`title\n${'task one with a long enough title\n'.repeat(26)}`);
+
+        it('refuses a DEFLATE entry whose stream holds more than its headers declare', () => {
+            const compressed = deflateSync(csv);
+            expect(csv.length).toBeGreaterThan(800);
+            const archive = craftZip([{ name: 'a.csv', data: compressed, method: 8, size: 22 }]);
+            expect(() => readImportSource({ fileName: 'forged.zip', bytes: archive }, undefined, ZIP_LIMITS)).toThrow();
+        });
+
+        it('refuses a DEFLATE entry whose stream holds fewer bytes than its headers declare', () => {
+            const archive = craftZip([{ name: 'a.csv', data: deflateSync(csv), method: 8, size: csv.length + 100 }]);
+            expect(() => readImportSource({ fileName: 'short.zip', bytes: archive }, undefined, ZIP_LIMITS)).toThrow();
+        });
+
+        it('refuses a DEFLATE entry whose compressed bytes were cut short', () => {
+            const compressed = deflateSync(csv);
+            const cut = compressed.subarray(0, Math.floor(compressed.length / 2));
+            const archive = craftZip([{ name: 'a.csv', data: cut, method: 8, size: csv.length }]);
+            expect(() => readImportSource({ fileName: 'cut.zip', bytes: archive }, undefined, ZIP_LIMITS)).toThrow();
+        });
+
+        it('refuses a STORE entry whose compressed and uncompressed sizes differ', () => {
+            const rows = strToU8('title\nthe first task\nthe second tas\n');
+            expect(rows.length).toBe(36);
+            const archive = craftZip([{ name: 'a.csv', data: rows, method: 0, compressedSize: 36, size: 25 }]);
+            expect(() => readImportSource({ fileName: 'stored.zip', bytes: archive }, undefined, ZIP_LIMITS)).toThrow();
+        });
+
+        it('refuses central entries that alias one local entry', () => {
+            const archive = craftZip([{ name: 'a.csv', data: new Uint8Array(30).fill(65) }], [0, 0]);
+            expect(() => readImportSource({ fileName: 'alias.zip', bytes: archive }, undefined, { ...ZIP_LIMITS, maxArchiveExpandedBytes: 96 })).toThrow();
+        });
+
+        it('refuses local sizes that disagree with the central directory', () => {
+            const archive = craftZip([{ name: 'a.csv', data: csv, localSize: 3, localCompressedSize: 3 }]);
+            expect(() => readImportSource({ fileName: 'mismatch.zip', bytes: archive }, undefined, ZIP_LIMITS)).toThrow();
+        });
+
+        it('accepts a valid data-descriptor entry (zero local sizes, as Java writes them)', () => {
+            const compressed = deflateSync(csv);
+            const descriptor = new Uint8Array(16);
+            const archive = craftZip([{ name: 'a.csv', data: compressed, method: 8, size: csv.length, flags: 8, localSize: 0, localCompressedSize: 0, trailer: descriptor }]);
+            const result = readImportSource({ fileName: 'java.zip', bytes: archive }, undefined, ZIP_LIMITS);
+            if (result.kind !== 'archive') throw new Error('expected archive');
+            expect(result.entries[0]?.entryBytes).toEqual(csv);
+        });
+
+        it('names no archive entry in its limit error', () => {
+            const archive = zipSync({ 'secret-name-7f3a.csv': new Uint8Array(600).fill(65) }, { level: 9 });
+            expect(() => readImportSource({ fileName: 'large.zip', bytes: archive }, undefined, { ...TEST_LIMITS, maxArchiveEntryBytes: 512, maxInputBytes: 4096 }))
+                .toThrowError(expect.objectContaining({ code: 'archive-entry-too-large', message: expect.not.stringContaining('secret-name-7f3a') }));
+        });
     });
 });

@@ -2,6 +2,8 @@ import {
     applyAttachmentContentStat,
     bumpAttachmentContentRevision,
     checkAttachmentContentChange,
+    isStaleCopyOfRemoteWinner,
+    logUninstalledRemoteWinner,
     type LocalFileStat,
 } from './attachment-change-detection';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
@@ -209,6 +211,46 @@ export type AttachmentUploadSnapshot = {
  * overwrite metadata or start a remote transfer from a false premise. */
 export type LocalAttachmentPresence = 'present' | 'confirmed-not-found' | 'unreadable';
 
+export type AttachmentTransferDirection = 'upload' | 'download';
+
+/**
+ * One sync cycle's record of the attachment transfers it already started (design D9b W7). Every attachment phase of that
+ * cycle (prepare, the final pending-upload flush, post-merge) shares it, so an attachment whose transfer one phase started,
+ * whatever its outcome, is not transferred again by a later phase of the same cycle; the next cycle tries again. The key is
+ * the attachment, the direction and the content identity (its fileHash, or its cloud key and size when it has none), so new
+ * content is a new key and transfers once. Transport retries stay inside the one transfer.
+ */
+export type AttachmentTransferAdmission = {
+    has(attachment: Attachment, direction: AttachmentTransferDirection): boolean;
+    record(attachment: Attachment, direction: AttachmentTransferDirection): void;
+};
+
+const attachmentTransferKey = (attachment: Attachment, direction: AttachmentTransferDirection): string => {
+    const hash = attachment.fileHash?.trim().toLowerCase();
+    const content = isSha256Hex(hash) ? hash : `${attachment.cloudKey ?? ''}:${attachment.size ?? ''}`;
+    return `${attachment.id}|${direction}|${content}`;
+};
+
+export const createAttachmentTransferAdmission = (
+    onRepeat?: (attachment: Attachment, direction: AttachmentTransferDirection) => void,
+): AttachmentTransferAdmission => {
+    const started = new Set<string>();
+    const repeated = new Set<string>();
+    return {
+        has: (attachment, direction) => {
+            const key = attachmentTransferKey(attachment, direction);
+            if (!started.has(key)) return false;
+            // Each skipped repeat logs once per cycle.
+            if (!repeated.has(key)) {
+                repeated.add(key);
+                onRepeat?.(attachment, direction);
+            }
+            return true;
+        },
+        record: (attachment, direction) => { started.add(attachmentTransferKey(attachment, direction)); },
+    };
+};
+
 /** Exact local generation an attachment download is allowed to replace. The
  * platform installer must enforce this at publication time, after the remote
  * bytes have been fetched and validated. */
@@ -278,6 +320,14 @@ export type AttachmentTransferLifecycleOptions = {
          *  per-attachment backoff window. */
         shouldDownload?: (attachment: Attachment) => boolean;
     };
+    /** The cycle's transfer admission (design D9b W7): checked before the policy gate, recorded once a transfer starts. */
+    admission?: AttachmentTransferAdmission;
+    /**
+     * Before a download of an attachment with no local file: adopt a file already at the backend's deterministic target path
+     * when its SHA-256 equals the attachment's fileHash (the last cycle installed it, then its save was refused). True when it
+     * adopted one: the attachment then names that file and no GET runs. Never adopts without a fileHash.
+     */
+    adoptExistingDownload?: (attachment: Attachment) => Promise<boolean>;
     /**
      * Predicate for errors that must abort the whole lifecycle run rather than being treated as
      * an isolated per-attachment failure — e.g. an AbortSignal firing mid-transfer. When it
@@ -555,6 +605,19 @@ export async function runAttachmentTransferLifecycle(
         }
     };
 
+    const admit = (
+        attachment: Attachment,
+        direction: AttachmentTransferDirection,
+        budget: ((attachment: Attachment) => boolean) | undefined,
+    ): boolean => {
+        if (options.admission?.has(attachment, direction)) return false;
+        if (budget && !budget(attachment)) return false;
+        options.admission?.record(attachment, direction);
+        return true;
+    };
+    const admitUpload = (attachment: Attachment) => admit(attachment, 'upload', options.policy?.shouldUpload);
+    const admitDownload = (attachment: Attachment) => admit(attachment, 'download', options.policy?.shouldDownload);
+
     for (const original of options.attachmentsById.values()) {
         await options.beforeEachAttachment?.();
         if (original.kind !== 'file') continue;
@@ -634,7 +697,7 @@ export async function runAttachmentTransferLifecycle(
             // or unhashable file fails closed and remains pending for the next prepare pass.
             if (
                 !existsLocally
-                && (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment))
+                && admitDownload(attachment)
             ) {
                 // A crash can land after the blob upload but before the cleared
                 // marker is durably saved. Let the adapter fetch and validate the
@@ -664,7 +727,7 @@ export async function runAttachmentTransferLifecycle(
                     options.onDownloadError(attachment, error);
                 }
             } else if (mayReadForSync && options.createUploadSnapshot) {
-                if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
+                if (admitUpload(attachment)) {
                     try {
                         if (await attemptUpload(attachment, localPath, expectedPendingHash)) {
                             attachment.pendingContentUpload = undefined;
@@ -695,7 +758,7 @@ export async function runAttachmentTransferLifecycle(
                             applyAttachmentContentStat(attachment, check.stat, check.hash);
                             itemMutated = true;
                         }
-                        if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
+                        if (admitUpload(attachment)) {
                             try {
                                 if (await attemptUpload(attachment, localPath, expectedPendingHash)) {
                                     attachment.pendingContentUpload = undefined;
@@ -721,7 +784,7 @@ export async function runAttachmentTransferLifecycle(
         }
 
         if (!hasCloudCopy(attachment) && mayReadForSync && !options.deferUploads) {
-            if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
+            if (admitUpload(attachment)) {
                 try {
                     if (await attemptUpload(attachment, localPath)) {
                         attachment.pendingContentUpload = undefined;
@@ -751,11 +814,28 @@ export async function runAttachmentTransferLifecycle(
             continue;
         }
 
-        if (hasCloudCopy(attachment) && !existsLocally && !hasPendingContentUpload) {
-            if (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment)) {
+        let adopted = false;
+        if (hasCloudCopy(attachment) && !existsLocally && !hasPendingContentUpload && options.adoptExistingDownload) {
+            try {
+                adopted = await options.adoptExistingDownload(attachment);
+            } catch (error) {
+                if (options.isFatalError?.(error)) throw error;
+            }
+            if (adopted) {
+                itemMutated = true;
+                // Adopted is installed: clear the mark exactly as the download branch below does.
+                attachment.staleContentHash = undefined;
+                const freshPath = attachment.uri ? resolveLocalPath(attachment.uri) : '';
+                if (freshPath) await refreshContentStat(attachment, freshPath, true);
+            }
+        }
+        if (hasCloudCopy(attachment) && !existsLocally && !hasPendingContentUpload && !adopted) {
+            if (admitDownload(attachment)) {
                 try {
                     if (await options.onDownload(attachment, { kind: 'absent' })) {
                         itemMutated = true;
+                        // Installed: the disk no longer holds an older marked copy, whether or not its stat is recorded below.
+                        attachment.staleContentHash = undefined;
                         // Loop safety (#1057): stat the file we just wrote and record it
                         // immediately, using the (possibly just-updated) uri — otherwise
                         // every subsequent cycle re-detects this download as a "change".
@@ -812,6 +892,10 @@ export async function runAttachmentTransferLifecycle(
                     // survives the remote merge.
                     applyAttachmentContentStat(attachment, check.stat, check.hash);
                     itemMutated = true;
+                } else if (options.contentChangePhase === 'prepare' && isStaleCopyOfRemoteWinner(attachment, check.hash)) {
+                    // Exactly the old file of a remote version the merge chose but did not download (a failed or deferred
+                    // GET, or a cycle that ended first): not this device's edit. The post-merge pass installs the winner.
+                    logUninstalledRemoteWinner(attachment);
                 } else if (options.contentChangePhase === 'prepare') {
                     // This device's own edit, detected before this cycle's remote pull.
                     // Normal sync records the content identity as a durable pending candidate
@@ -824,7 +908,7 @@ export async function runAttachmentTransferLifecycle(
                         attachment.contentRev = bumpAttachmentContentRevision(attachment);
                         attachment.pendingContentUpload = true;
                         itemMutated = true;
-                    } else if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
+                    } else if (admitUpload(attachment)) {
                         try {
                             if (await attemptUpload(attachment, localPath, check.hash ?? undefined)) {
                                 if (!options.createUploadSnapshot) {
@@ -857,13 +941,14 @@ export async function runAttachmentTransferLifecycle(
                         && restat.size === check.stat.size;
                     if (!stillMatchesDetectedState) {
                         options.onLocalEditRace?.(attachment);
-                    } else if (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment)) {
+                    } else if (admitDownload(attachment)) {
                         try {
                             if (await options.onDownload(attachment, {
                                 kind: 'present',
                                 sha256: check.hash,
                             })) {
                                 itemMutated = true;
+                                attachment.staleContentHash = undefined;
                                 const freshPath = attachment.uri ? resolveLocalPath(attachment.uri) : localPath;
                                 if (freshPath) await refreshContentStat(attachment, freshPath, true);
                             }

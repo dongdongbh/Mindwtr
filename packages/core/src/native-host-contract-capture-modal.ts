@@ -32,8 +32,10 @@
  *   React Native asks nothing with no key. A host without it is asked only for
  *   a provider that needs no key (an OpenAI-compatible endpoint).
  *
- * Shared files (initialProps.attachments) are left out: this host has no
- * managed attachments folder until the attachments pass (A2).
+ * Shared files (initialProps.attachments, which prepareSharedFiles copies into
+ * the managed attachments folder): the screen shows and saves only managed
+ * copies, as React Native's saves only files in its attachments folder
+ * (filterManagedAttachments). A host without its attachment IO takes none.
  *
  * A project a save creates (a +Project, or the link's project param) takes an id
  * from the capture UUID (a batch's first) and its name: a retry files the task
@@ -82,6 +84,7 @@ import { getQuickCaptureInvalidDateNotice, type QuickCaptureNotice } from './qui
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { useTaskStore } from './store';
 import type { Project, Task } from './types';
+import type { NativeAttachmentsHost } from './native-host-contract-attachments';
 
 type CaptureModalDeps = {
     readiness: () => NativeHostResult<null>;
@@ -94,6 +97,8 @@ type CaptureModalDeps = {
     requestIdPattern: RegExp;
     /** The host binds AI: requestAICopilot, which checks the key, answers the copilot's question. */
     aiBound: () => boolean;
+    /** The host's attachment IO (createNativeHostContract's `attachments`): which shared files are managed copies. */
+    attachments: () => NativeAttachmentsHost | null;
 };
 
 export type NativeCaptureModalView = CaptureModalView & {
@@ -220,11 +225,13 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
     });
     const notApplied = (message: string | undefined): NativeHostResult<never> => fail('ACTION_FAILED', message ?? 'Failed to add task');
 
-    /** The screen's preset from its params, without shared files (see the module comment). */
+    /** The screen's preset from its params, with only the shared files that are managed copies (see the module comment). */
     const presetOf = (params: CaptureModalParams): Partial<Task> => {
         const state = useTaskStore.getState();
-        const { attachments: _files, ...preset } = readCaptureModalInitialProps(params.initialProps, state.projects, state.areas);
-        return preset;
+        const { attachments: shared, ...preset } = readCaptureModalInitialProps(params.initialProps, state.projects, state.areas);
+        const managed = deps.attachments()?.canUploadAttachmentFrom;
+        const attachments = managed ? shared?.filter((attachment) => managed(attachment.uri)) : undefined;
+        return attachments?.length ? { ...preset, attachments } : preset;
     };
     const parse = (text: string, projects: readonly Project[]) => (
         parseQuickAdd(text, projects as Project[], new Date(), useTaskStore.getState().areas, parseOptions())

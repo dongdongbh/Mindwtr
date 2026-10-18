@@ -117,6 +117,7 @@ import { formatLocalDate } from './import-source-reader';
 import { tFallback } from './i18n';
 import type { Language } from './i18n/i18n-types';
 import { logInfo } from './logger';
+import { isSupportedLanguage } from './i18n/i18n-constants';
 import {
     buildManagePersonRow,
     getManageDeleteConfirm,
@@ -388,7 +389,8 @@ const readNotificationsEdit = (value: unknown): NotificationsSettingsEdit | null
     const v = value.value;
     const ok = NOTIFICATIONS_BOOLEANS.has(value.type) ? typeof v === 'boolean'
         : NOTIFICATIONS_TIMES.has(value.type) ? typeof v === 'string' && NOTIFICATIONS_TIME_PATTERN.test(v)
-            : value.type === 'weeklyReviewDay' && Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 6;
+            : value.type === 'taskReminderDefault' ? v === 'send' || v === 'skip'
+                : value.type === 'weeklyReviewDay' && Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 6;
     return ok ? { type: value.type, value: v } as NotificationsSettingsEdit : null;
 };
 
@@ -1140,6 +1142,43 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 // Serialization errors can contain data; the host receives only a fixed message.
                 return fail('ACTION_FAILED', 'Could not prepare the backup');
             }
+        },
+
+        /**
+         * Settings › Data's Getting Started row (RN's seedGettingStarted with the app language). The request UUID and the
+         * language are frozen at the tap and journaled with it. The seed only changes the store (`awaitSave: false`); the
+         * receipt's own save then commits the seed's rows and the receipt in one SQLite transaction. So a replay after process
+         * death either answers the first reply and writes nothing, or finds nothing and seeds once, whatever the seed copy is
+         * by then. The reply is the Getting Started project's id (null when none was made, RN's "not created" toast).
+         */
+        async seedGettingStarted(input: { requestId: string; language: string }): Promise<NativeHostResult<{ projectId: string | null }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
+                || typeof input.language !== 'string' || !isSupportedLanguage(input.language)) {
+                return fail('INVALID_INPUT', 'A request UUID and a supported language are required');
+            }
+            const { language } = input;
+            let outcome: 'created' | 'repaired' | 'unchanged' | null = null;
+            const result = await receipts.run<{ projectId: string | null }>(input.requestId, JSON.stringify(['gettingStarted', language]), async () => {
+                const before = useTaskStore.getState();
+                const known = new Set(before._allProjects.map((project) => project.id));
+                let projectId: string | null = null;
+                const written = await runStoreWrite(async () => {
+                    const seeded = await useTaskStore.getState().seedGettingStarted({ language, awaitSave: false });
+                    projectId = seeded.id ?? null;
+                    return seeded;
+                });
+                const after = useTaskStore.getState();
+                outcome = projectId !== null && !known.has(projectId) ? 'created'
+                    : after._allTasks !== before._allTasks || after._allProjects !== before._allProjects ? 'repaired' : 'unchanged';
+                return settleWrite(written, { projectId });
+            });
+            // A receipt's answer ran nothing and logs nothing; the line follows the save that committed the seed.
+            if (result.ok && outcome) {
+                logInfo('Native Getting Started seeded', { scope: 'onboarding', context: { releaseCheck: 'v1.3.7/native-getting-started', outcome } });
+            }
+            return result;
         },
 
         /**

@@ -15,6 +15,7 @@ import {
     type AttachmentTransferLifecycleOptions,
 } from './attachment-transfer';
 import { setSha256HexProvider } from './attachment-hash';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 
 const makeAttachment = (overrides: Partial<Attachment>): Attachment => ({
     id: 'attachment-1',
@@ -1838,5 +1839,49 @@ describe('normalizePendingRemoteDeletes', () => {
         ])).toEqual([
             { cloudKey: 'attachments/a.txt', attempts: 3, title: 'new', lastErrorAt: undefined },
         ]);
+    });
+});
+
+describe('a remote winner the merge took but this device has not installed yet', () => {
+    // The merge took another device's newer content (its fileHash and contentRev; no recorded stat, which never travels)
+    // and marked the bytes this device holds (staleContentHash).
+    // The download that would install it did not run this cycle, so the disk still holds this device's OLD bytes.
+    const OLD = 'a'.repeat(64);
+    const NEW = 'b'.repeat(64);
+    const winner = (): Attachment => ({
+        id: 'att-1', kind: 'file', title: 'f.txt', uri: '/managed/att-1.txt', cloudKey: 'attachments/att-1.txt',
+        fileHash: NEW, contentRev: 2, localStatus: 'available', staleContentHash: OLD,
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    } as Attachment);
+    const pass = (attachment: Attachment, phase: 'prepare' | 'post-merge', onDownload = vi.fn(async () => true)) => runAttachmentTransferLifecycle({
+        attachmentsById: new Map([[attachment.id, attachment]]),
+        getLocalFilePresence: async () => 'present',
+        onUpload: vi.fn(async () => true),
+        onUploadError: vi.fn(),
+        onDownload,
+        onDownloadError: vi.fn(),
+        deferUploads: phase === 'prepare',
+        contentChangePhase: phase,
+        getLocalFileStat: async () => ({ mtimeMs: 1000, size: 10 }),
+        computeLocalFileHash: async () => OLD,
+    });
+
+    it('is never recorded as this device\'s own edit by the next prepare pass, so its old bytes are never uploaded', async () => {
+        const lines: LogPayload[] = [];
+        setLogger((payload) => { lines.push(payload); });
+        let result: Awaited<ReturnType<typeof pass>>;
+        try { result = await pass(winner(), 'prepare'); } finally { setLogger(consoleLogger); }
+        expect(lines.filter((line) => line.context?.releaseCheck === 'v1.3.7/attachment-remote-winner-pending')
+            .map((line) => line.context?.attachmentId)).toEqual(['att-1']);
+        const patched = result.patches.get('att-1');
+        expect(patched?.pendingContentUpload).toBeUndefined();
+        expect(patched?.contentRev ?? 2).toBe(2);
+        expect(patched?.fileHash ?? NEW).toBe(NEW);
+    });
+
+    it('is installed by the post-merge pass over exactly the stale file', async () => {
+        const onDownload = vi.fn(async () => true);
+        await pass(winner(), 'post-merge', onDownload);
+        expect(onDownload).toHaveBeenCalledWith(expect.objectContaining({ id: 'att-1', fileHash: NEW }), { kind: 'present', sha256: OLD });
     });
 });

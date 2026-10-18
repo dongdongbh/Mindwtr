@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -65,7 +66,7 @@ import org.json.JSONObject
 /*
  * RN's capture confirmation screen (app/capture-modal.tsx), drawn from core's capture screen view: the Add Task card
  * centered on the background, the hide-keyboard and ? buttons, the title field with core's preview chips, the description
- * field when the entry brought one, the syntax help, the failure line, and Cancel, Save & edit and Save; over it, RN's
+ * field when the entry brought one, a file share's files, the syntax help, the failure line, and Cancel, Save & edit and Save; over it, RN's
  * several-lines question. Every word and every control's edit is core's (CaptureModalModel.kt).
  */
 
@@ -136,6 +137,18 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
                             Modifier.focusRequester(titleFocus)) { type(it) }
                         val preview = view.items("preview")
                         if (preview.isNotEmpty()) PreviewStrip(preview, Modifier)
+                        // A file share's files (RN's Attachments group): the label, then each file's paperclip and name.
+                        view.optJSONObject("attachments")?.let { files ->
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(files.getString("label"), style = rnText(12, 600, 16), color = c.secondaryText)
+                                val titles = files.getJSONArray("titles")
+                                for (index in 0 until titles.length()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(Lucide.Paperclip, null, tint = c.secondaryText, modifier = Modifier.size(14.dp))
+                                    Text(titles.getString(index), style = rnText(14, 400), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f).testTag("capture-modal-attachment"))
+                                }
+                            }
+                        }
                         // Shown while the entry brought a description or the field holds one.
                         view.optJSONObject("description")?.let { description ->
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

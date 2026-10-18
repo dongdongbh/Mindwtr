@@ -6,8 +6,10 @@ import {
   collectBulkTaskTokens,
   formatListItemCount,
   getTrashUndoLabel,
+  runStoreCommand,
   tFallback,
   updateRangeSelection,
+  useTaskStore,
   type BulkOrganizeTaskUpdateInput,
   type StoreActionResult,
   type Task,
@@ -193,24 +195,32 @@ export function useTaskListSelection({
   // Both directions go through the same core builder desktop uses. Hand-rolling
   // the merge here meant a task the lookup missed was written back as
   // `tags: [newTag]` — every other tag on it silently gone.
+  // One store command builds the lists from the rows as stored and writes them: a sync save
+  // admitted first may have published a tag another device added, and the rows on screen lack it.
+  const writeTagUpdates = useCallback((tags: string | string[], mode: 'add' | 'remove') => runStoreCommand(async () => {
+    const updates = buildBulkTaskTokenUpdates(selectedIdsArray, useTaskStore.getState()._tasksById, 'tags', tags, mode);
+    return { count: updates.length, result: updates.length > 0 ? await batchUpdateTasks(updates) : undefined };
+  }), [batchUpdateTasks, selectedIdsArray]);
+
   const handleBatchAddTag = useCallback(async () => {
     const input = tagInput.trim();
     if (!hasSelection || !input || bulkActionLoading) return;
     await runBulkAction(t('bulk.addTag'), async () => {
-      const updates = buildBulkTaskTokenUpdates(selectedIdsArray, tasksById, 'tags', input, 'add');
+      const written = writeTagUpdates(input, 'add');
       // Close first so a failure's warning toast is not under the dialog; the typed tag stays for a retry.
       setTagModalVisible(false);
-      if (updates.length > 0) assertBulkActionSucceeded(await batchUpdateTasks(updates));
+      const { count, result } = await written;
+      assertBulkActionSucceeded(result);
       setTagInput('');
-      if (updates.length === 0) return;
+      if (count === 0) return;
       exitSelectionMode();
       showToast({
         title: t('common.done'),
-        message: formatListItemCount(updates.length, 'task', t),
+        message: formatListItemCount(count, 'task', t),
         tone: 'success',
       });
     });
-  }, [batchUpdateTasks, bulkActionLoading, exitSelectionMode, hasSelection, runBulkAction, selectedIdsArray, showToast, t, tagInput, tasksById]);
+  }, [bulkActionLoading, exitSelectionMode, hasSelection, runBulkAction, showToast, t, tagInput, writeTagUpdates]);
 
   // Removal offers only the tags the selection actually carries, so a typo can
   // never look like a silent no-op.
@@ -222,29 +232,36 @@ export function useTaskListSelection({
   const handleBatchRemoveTags = useCallback(async (tags: string[]) => {
     if (!hasSelection || tags.length === 0 || bulkActionLoading) return;
     await runBulkAction(tFallback(t, 'bulk.removeTag', 'Remove tag'), async () => {
-      const updates = buildBulkTaskTokenUpdates(selectedIdsArray, tasksById, 'tags', tags, 'remove');
+      const written = writeTagUpdates(tags, 'remove');
       setRemoveTagPickerVisible(false);
-      if (updates.length === 0) return;
-      assertBulkActionSucceeded(await batchUpdateTasks(updates));
+      const { count, result } = await written;
+      if (count === 0) return;
+      assertBulkActionSucceeded(result);
       exitSelectionMode();
       showToast({
         title: t('common.done'),
-        message: formatListItemCount(updates.length, 'task', t),
+        message: formatListItemCount(count, 'task', t),
         tone: 'success',
       });
     });
-  }, [batchUpdateTasks, bulkActionLoading, exitSelectionMode, hasSelection, runBulkAction, selectedIdsArray, showToast, t, tasksById]);
+  }, [bulkActionLoading, exitSelectionMode, hasSelection, runBulkAction, showToast, t, writeTagUpdates]);
 
   const handleBatchOrganize = useCallback(async (input: BulkOrganizeTaskUpdateInput) => {
     if (!hasSelection || bulkActionLoading) return;
     const updates = buildBulkOrganizeTaskUpdates(selectedIdsArray, tasksById, input);
     if (updates.length === 0) return;
     await runBulkAction(tFallback(t, 'bulk.organize', 'Bulk organize'), async () => {
-      assertBulkActionSucceeded(await batchUpdateTasks(updates));
+      // Built again on the rows as stored when the write is admitted, as writeTagUpdates does.
+      const { count, result } = await runStoreCommand(async () => {
+        const latest = buildBulkOrganizeTaskUpdates(selectedIdsArray, useTaskStore.getState()._tasksById, input);
+        return { count: latest.length, result: latest.length > 0 ? await batchUpdateTasks(latest) : undefined };
+      });
+      if (count === 0) return;
+      assertBulkActionSucceeded(result);
       exitSelectionMode();
       showToast({
         title: t('common.done'),
-        message: formatListItemCount(updates.length, 'task', t),
+        message: formatListItemCount(count, 'task', t),
         tone: 'success',
       });
     });

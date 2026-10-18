@@ -855,17 +855,24 @@ private fun RelativeStart(model: InboxViewModel, editor: TaskEditor, state: JSON
     }
 }
 
-/** RN's reminder controls under the due date, as core decides them: Skip reminders, and Repeat reminder with core's intervals. */
+/** RN's reminder policy and repeat controls under the due date, using core's labels and selected values. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Reminders(model: InboxViewModel, editor: TaskEditor, locked: Boolean) = with(model) {
     val c = LocalTheme.current.colors
     val reminders = editor.view.fields.reminders
     if (reminders.getBoolean("showSkip")) {
-        val skip = editor.flag("suppressMindwtrReminders")
-        SwitchRow(t("taskEdit.suppressMindwtrReminders"), t("taskEdit.suppressMindwtrRemindersHint"), skip, !locked) {
-            editFields(mapOf("suppressMindwtrReminders" to !skip))
+        Text(reminders.getString("policyLabel"), style = rnText(13, 600), color = c.text, modifier = Modifier.padding(top = 8.dp))
+        FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (option in reminders.getJSONArray("policyOptions").objects()) {
+                val label = option.getString("label")
+                Chip(option.getBoolean("selected"), !locked, label, {
+                    editFields(mapOf("reminderPolicy" to option.getString("value")))
+                }) { color -> Text(label, style = rnText(14, 400), color = color) }
+            }
         }
+        Text(reminders.getString("hint"), style = rnText(12, 400, 16), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
+        if (!reminders.isNull("disabledHint")) Text(reminders.getString("disabledHint"), style = rnText(12, 400, 16), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
     }
     if (!reminders.getBoolean("showRepeat")) return
     var expanded by rememberSaveable(editor.id) { mutableStateOf(false) }

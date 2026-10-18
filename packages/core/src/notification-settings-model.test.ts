@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveDateLocaleTag } from './date';
-import { buildNotificationSettingsModel, notificationSettingWitness, readNotificationSettingWitness } from './notification-settings-model';
+import { buildNotificationSettingsModel, isNotificationSettingEdit, notificationSettingWitness, readNotificationSettingWitness } from './notification-settings-model';
 import type { AppSettings } from './types';
 
 const model = (settings: AppSettings = {}, language = 'en', systemLocale = 'en-US') =>
@@ -112,5 +112,21 @@ describe('raw notification witness', () => {
         expect(readNotificationSettingWitness({ present: true, value: Array(256).fill(0) })).toBeNull();
         expect(readNotificationSettingWitness({ present: true, value: 'x'.repeat(1022) })).not.toBeNull();
         expect(readNotificationSettingWitness({ present: true, value: 'x'.repeat(1023) })).toBeNull();
+    });
+});
+
+
+describe('default task reminder setting', () => {
+    it('offers Send and Skip independently of the device master', () => {
+        const value = model({ notificationsEnabled: false, taskReminderDefault: 'skip' });
+        expect(value.task.default.value).toBe('skip');
+        expect(value.task.default.disabled).toBe(false);
+        expect(value.task.default.options.map((option) => [option.value, option.selected, option.edit]))
+            .toEqual([['send', false, { type: 'taskReminderDefault', value: 'send' }],
+                ['skip', true, { type: 'taskReminderDefault', value: 'skip' }]]);
+        expect(model().task.default.value).toBe('send');
+    });
+    it.each(['inherit', true, false, '', null, undefined])('rejects invalid default %s at the transport boundary', (value) => {
+        expect(isNotificationSettingEdit({ type: 'taskReminderDefault', value })).toBe(false);
     });
 });

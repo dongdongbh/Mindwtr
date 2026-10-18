@@ -86,6 +86,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
     notifications: [
         'notifications',
         'notificationsEnable',
+        'taskReminderDefault',
         'startDateNotifications',
         'dueDateNotifications',
         'reviewAtNotifications',

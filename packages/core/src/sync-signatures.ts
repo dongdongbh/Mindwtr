@@ -1,3 +1,4 @@
+import { normalizeTaskReminderPolicy } from './task-reminder-policy';
 import type { Area, Attachment, Person, Project, Section, Task } from './types';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
 
@@ -132,6 +133,7 @@ export const normalizeTaskForContentComparison = (task: Task): Record<string, un
         timeSpentMinutes: task.timeSpentMinutes ? task.timeSpentMinutes : undefined,
         showFutureRecurrence: hasRecurrence && task.showFutureRecurrence ? true : undefined,
         suppressMindwtrReminders: task.suppressMindwtrReminders ? true : undefined,
+        reminderPolicy: normalizeTaskReminderPolicy(task.reminderPolicy),
         pushCount: task.pushCount === 0 ? undefined : task.pushCount,
         repeatReminderMinutes: task.repeatReminderMinutes ? task.repeatReminderMinutes : undefined,
         reviewAt: task.reviewAt,

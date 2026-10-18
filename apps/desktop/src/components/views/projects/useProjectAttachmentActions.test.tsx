@@ -1,9 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Attachment, Project } from '@mindwtr/core';
+import { useTaskStore, type Attachment, type Project } from '@mindwtr/core';
 
-import { useProjectAttachmentActions } from './useProjectAttachmentActions';
+import { appendProjectAttachments, useProjectAttachmentActions } from './useProjectAttachmentActions';
+import { holdSyncSave } from '../../../test/hold-sync-save';
 import { useUiStore } from '../../../store/ui-store';
 import { isTauriRuntime } from '../../../lib/runtime';
 
@@ -37,20 +38,26 @@ const baseProject: Project = {
     updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
+const initialTaskState = useTaskStore.getState();
+
 describe('useProjectAttachmentActions', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
     });
+    afterEach(() => {
+        useTaskStore.setState(initialTaskState, true);
+    });
 
-    const setup = (selectedProject: Project | undefined = baseProject) => {
+    /** The hook writes through the store: [updateProject] is the store write it reaches. */
+    const setup = (selectedProject: Project | undefined = baseProject, updateProject = vi.fn()) => {
+        useTaskStore.setState({ _allProjects: selectedProject ? [selectedProject] : [], updateProject });
         const params: Parameters<typeof useProjectAttachmentActions>[0] = {
             t: (key) => key,
             selectedProject,
-            updateProject: vi.fn(),
         };
 
         const hook = renderHook(() => useProjectAttachmentActions(params));
-        return { hook, params };
+        return { hook, params, updateProject };
     };
 
     it('recovers a failed project UpNote link by copying its original URI', async () => {
@@ -61,11 +68,11 @@ describe('useProjectAttachmentActions', () => {
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
         const uri = 'upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true';
         const attachment: Attachment = { id: 'note-1', kind: 'link', title: 'Note', uri, createdAt: baseProject.createdAt, updatedAt: baseProject.updatedAt };
-        const { hook, params } = setup({ ...baseProject, attachments: [attachment] });
+        const { hook, updateProject } = setup({ ...baseProject, attachments: [attachment] });
         await act(async () => hook.result.current.openAttachment(attachment));
         expect(shellOpenMock).toHaveBeenCalledWith(uri);
         expect(hook.result.current.attachmentError).toContain('Make sure the app');
-        expect(params.updateProject).not.toHaveBeenCalled();
+        expect(updateProject).not.toHaveBeenCalled();
         await act(async () => useUiStore.getState().toasts[0].action?.onClick());
         expect(copy).toHaveBeenCalledWith(uri);
         vi.mocked(isTauriRuntime).mockReturnValue(false);
@@ -104,14 +111,14 @@ describe('useProjectAttachmentActions', () => {
         vi.mocked(isTauriRuntime).mockReturnValue(true);
         dialogOpenMock.mockResolvedValue('/Users/dd/Projects/Alpha');
         invokeMock.mockResolvedValue(true);
-        const { hook, params } = setup();
+        const { hook, updateProject } = setup();
 
         await act(async () => {
             await hook.result.current.addProjectFolderLinkAttachment();
         });
 
         expect(dialogOpenMock).toHaveBeenCalledWith(expect.objectContaining({ directory: true }));
-        expect(params.updateProject).toHaveBeenCalledWith('project-1', {
+        expect(updateProject).toHaveBeenCalledWith('project-1', {
             attachments: [expect.objectContaining({
                 kind: 'link',
                 title: 'Alpha',
@@ -119,11 +126,51 @@ describe('useProjectAttachmentActions', () => {
                 mimeType: 'inode/directory',
             })],
         });
-        const [{ attachments }] = vi.mocked(params.updateProject).mock.calls[0].slice(1) as [Partial<Project>];
+        const [{ attachments }] = vi.mocked(updateProject).mock.calls[0].slice(1) as [Partial<Project>];
         expect(invokeMock).toHaveBeenCalledWith('remember_link_folder_access', {
             attachmentId: attachments?.[0].id,
             path: '/Users/dd/Projects/Alpha',
         });
         vi.mocked(isTauriRuntime).mockReturnValue(false);
+    });
+
+    describe('behind a sync save', () => {
+        const file = (id: string): Attachment => ({
+            id, kind: 'file', title: `${id}.pdf`, uri: `/data/attachments/${id}.pdf`, createdAt: baseProject.createdAt, updatedAt: baseProject.updatedAt,
+        });
+        const opened: Project = { ...baseProject, rev: 1, attachments: [file('A')] };
+        const publishSibling = () => holdSyncSave(() => useTaskStore.setState({ _allProjects: [{ ...opened, rev: 3, attachments: [file('A'), file('B')] }] }));
+        const storedIds = () => useTaskStore.getState()._projectsById.get(opened.id)?.attachments?.map((item) => [item.id, Boolean(item.deletedAt)]);
+
+        it('links a folder onto the attachments a sync save published while the write waited', async () => {
+            vi.mocked(isTauriRuntime).mockReturnValue(true);
+            dialogOpenMock.mockResolvedValue('/Users/dd/Projects/Alpha');
+            invokeMock.mockResolvedValue(true);
+            const { hook } = setup(opened, initialTaskState.updateProject as never);
+            const finish = publishSibling();
+            await act(async () => {
+                await hook.result.current.addProjectFolderLinkAttachment();
+                await finish();
+            });
+            await vi.waitFor(() => expect(storedIds()).toEqual([['A', false], ['B', false], [expect.any(String), false]]));
+            vi.mocked(isTauriRuntime).mockReturnValue(false);
+        });
+
+        it('removes an attachment by id on the row a sync save published while the write waited', async () => {
+            const { hook } = setup(opened, initialTaskState.updateProject as never);
+            const finish = publishSibling();
+            act(() => hook.result.current.removeProjectAttachment('A'));
+            await act(finish);
+            await vi.waitFor(() => expect(storedIds()).toEqual([['A', true], ['B', false]]));
+        });
+
+        it('appends prompt links onto the attachments a sync save published while the write waited', async () => {
+            setup(opened, initialTaskState.updateProject as never);
+            const finish = publishSibling();
+            const written = appendProjectAttachments(opened.id, [{ ...file('L'), kind: 'link' }]);
+            await finish();
+            await written;
+            expect(storedIds()).toEqual([['A', false], ['B', false], ['L', false]]);
+        });
     });
 });

@@ -33,6 +33,7 @@ import java.util.concurrent.Executors
  */
 class QuickCaptureActivity : AppCompatActivity() {
   private lateinit var input: EditText
+  private lateinit var description: EditText
   private lateinit var save: Button
   private lateinit var cancel: Button
   private lateinit var audio: ImageButton
@@ -74,6 +75,12 @@ class QuickCaptureActivity : AppCompatActivity() {
     input.hint = labels.placeholder
     input.setText(audioSession.snapshot.title)
     input.setSelection(input.text?.length ?: 0)
+    description = findViewById(R.id.mindwtr_quick_capture_description)
+    description.hint = labels.descriptionPlaceholder
+    description.setText(audioSession.snapshot.note)
+    description.doAfterTextChanged { text ->
+      if (!rendering) audioSession.updateNote(text?.toString().orEmpty())
+    }
     cancel = findViewById<Button>(R.id.mindwtr_quick_capture_cancel).apply {
       text = labels.cancel
       setOnClickListener { audioSession.cancelAudioOrClose() }
@@ -130,6 +137,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     visible = false
     microphonePermissionOwner.onStopped()
     audioSession.updateTitle(input.text?.toString().orEmpty())
+    audioSession.updateNote(description.text?.toString().orEmpty())
     audioSession.onHostStopped()
     super.onStop()
   }
@@ -170,10 +178,10 @@ class QuickCaptureActivity : AppCompatActivity() {
                 override fun cancel() = recorder.cancel()
               }
             },
-            publishAudio = { draft, typedTitle, complete ->
+            publishAudio = { draft, typedTitle, typedNote, complete ->
               CAPTURE_IO.execute {
                 val saved = try {
-                  PendingCaptureWriter.publishAudio(captureFilesDir, draft, typedTitle)
+                  PendingCaptureWriter.publishAudio(captureFilesDir, draft, typedTitle, typedNote)
                   Log.i(TAG, "Native quick capture audio queued")
                   true
                 } catch (_: Exception) {
@@ -220,6 +228,12 @@ class QuickCaptureActivity : AppCompatActivity() {
       input.setSelection(input.text?.length ?: 0)
       rendering = false
     }
+    if (description.text?.toString().orEmpty() != snapshot.note) {
+      rendering = true
+      description.setText(snapshot.note)
+      description.setSelection(description.text?.length ?: 0)
+      rendering = false
+    }
     audioStatus.text = when (snapshot.status) {
       QuickCaptureAudioSession.Status.RECORD -> labels.audioRecord
       QuickCaptureAudioSession.Status.RECORDING -> labels.audioRecording
@@ -241,6 +255,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     audio.setImageResource(if (recording) R.drawable.mindwtr_capture_stop else R.drawable.mindwtr_capture_mic)
     audio.contentDescription = if (recording) labels.audioStop else labels.audioRecord
     input.isEnabled = editable || recording || snapshot.state == QuickCaptureAudioSession.State.STOPPING
+    description.isEnabled = input.isEnabled
 
     if (snapshot.state == QuickCaptureAudioSession.State.SAVED) {
       if (audioSession.consumeSaved()) {
@@ -260,6 +275,9 @@ class QuickCaptureActivity : AppCompatActivity() {
     input.setTextColor(palette.text)
     input.setHintTextColor(palette.mutedText)
     tint(input, palette.card)
+    description.setTextColor(palette.text)
+    description.setHintTextColor(palette.mutedText)
+    tint(description, palette.card)
     cancel.setTextColor(palette.accent)
     tint(save, palette.accent)
     save.setTextColor(palette.onAccent)
@@ -282,7 +300,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     }
     val title = input.text?.toString().orEmpty()
     val written = try {
-      PendingCaptureWriter.write(filesDir, title)
+      PendingCaptureWriter.write(filesDir, title, note = description.text?.toString().orEmpty())
     } catch (error: IOException) {
       Log.w(TAG, "quick capture write failed: ${error.message}")
       Toast.makeText(this, error.message ?: "Could not save", Toast.LENGTH_SHORT).show()

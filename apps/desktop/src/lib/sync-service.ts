@@ -95,6 +95,7 @@ import {
     type SyncRunResult,
     type SyncTransport,
     type WebdavSyncReadResult,
+    runSyncStoreSave,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { getTauriHttpFetch } from './tauri-http';
@@ -3385,8 +3386,14 @@ export class SyncService {
                     getAttachmentCleanupDeps(),
                     { ensureLocalSnapshotFresh },
                 );
-                ensureLocalSnapshotFresh();
-                await persistLocalDataForSync(cleaned, { baseline: data });
+                // The last freshness check, the save and its publication hold the store write gate alone, so no
+                // command reads the pre-cleanup store after the commit. The load runs after the gate is released:
+                // it is a store command and would wait on this save.
+                await runSyncStoreSave(async () => {
+                    ensureLocalSnapshotFresh();
+                    const canonical = await persistLocalDataForSync(cleaned, { baseline: data });
+                    syncServiceDependencies.applySyncedDataToStore(canonical ?? cleaned);
+                });
                 await getStoreState().fetchData({ silent: true });
             } finally {
                 if (leaseToken) await releaseFileSyncLease(leaseToken);

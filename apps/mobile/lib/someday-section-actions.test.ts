@@ -14,8 +14,8 @@ const storeState = vi.hoisted(() => ({
 
 vi.mock('@mindwtr/core', async (importOriginal) => ({
   // The section list edits are core's own logic.
-  ...(({ buildSomedaySectionsSettingsUpdate, planSomedaySectionCreate, sortViewSectionDefinitions }) => ({
-    buildSomedaySectionsSettingsUpdate, planSomedaySectionCreate, sortViewSectionDefinitions,
+  ...(({ buildSomedaySectionsSettingsUpdate, planSomedaySectionCreate, runStoreCommand, sortViewSectionDefinitions }) => ({
+    buildSomedaySectionsSettingsUpdate, planSomedaySectionCreate, runStoreCommand, sortViewSectionDefinitions,
   }))(await importOriginal<typeof import('@mindwtr/core')>()),
   flushPendingSave: storeState.flushPendingSave,
   useTaskStore: {

@@ -525,6 +525,97 @@ describe('createAutoSyncController', () => {
         controller.dispose();
     });
 
+    it('reports periodic lateness and gate decisions without changing timer or editor reads', async () => {
+        const intervalMs = 15 * 60 * 1000;
+        const scheduler = createManualScheduler();
+        let active = true;
+        let editing = false;
+        const logInfo = vi.fn();
+        const editorGate = vi.fn(() => editing);
+        const performSync = vi.fn(async () => ({ success: true }));
+        const controller = createAutoSyncController({
+            performSync,
+            flushPendingSave: async () => undefined,
+            reportError: vi.fn(),
+            isRuntimeActive: () => active,
+            shouldPauseWindowSync: editorGate,
+            now: scheduler.now,
+            setTimer: scheduler.setTimer,
+            clearTimer: scheduler.clearTimer,
+            logInfo,
+        });
+        expect(logInfo).toHaveBeenCalledExactlyOnceWith('Auto sync periodic scheduled', { delayMs: String(intervalMs) });
+        expect(scheduler.getTimerCount()).toBe(1);
+
+        await scheduler.advanceBy(intervalMs + 25_000);
+        await settle();
+        expect(logInfo).toHaveBeenCalledWith('Auto sync periodic fired', {
+            delayMs: String(intervalMs), latenessMs: '25000', runtimeActive: 'true', editorPause: 'false', outcome: 'requested',
+        });
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(editorGate).toHaveBeenCalledTimes(1);
+        expect(scheduler.getTimerCount()).toBe(1);
+
+        editing = true;
+        editorGate.mockClear();
+        await scheduler.advanceBy(intervalMs);
+        await settle();
+        expect(logInfo).toHaveBeenCalledWith('Auto sync periodic fired', {
+            delayMs: String(intervalMs), latenessMs: '0', runtimeActive: 'true', editorPause: 'true', outcome: 'editor-paused',
+        });
+        expect(editorGate).toHaveBeenCalledTimes(1);
+        expect(performSync).toHaveBeenCalledTimes(1);
+
+        active = false;
+        editorGate.mockClear();
+        await scheduler.advanceBy(intervalMs);
+        await settle();
+        expect(logInfo).toHaveBeenCalledWith('Auto sync periodic fired', {
+            delayMs: String(intervalMs), latenessMs: '0', runtimeActive: 'false', editorPause: 'not-checked', outcome: 'inactive',
+        });
+        expect(editorGate).not.toHaveBeenCalled();
+        expect(performSync).toHaveBeenCalledTimes(1);
+
+        controller.dispose();
+        const receiptCount = logInfo.mock.calls.length;
+        expect(scheduler.getTimerCount()).toBe(0);
+        await scheduler.advanceBy(intervalMs);
+        await settle();
+        expect(logInfo).toHaveBeenCalledTimes(receiptCount);
+        expect(performSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('distinguishes a fired heartbeat rejected by the backend gate from a completed cycle', async () => {
+        const scheduler = createManualScheduler();
+        let backendAvailable = false;
+        const logInfo = vi.fn();
+        const performSync = vi.fn(async () => ({ success: true }));
+        const controller = createAutoSyncController({
+            performSync,
+            canSync: async () => backendAvailable,
+            flushPendingSave: async () => undefined,
+            reportError: vi.fn(),
+            isRuntimeActive: () => true,
+            now: scheduler.now,
+            setTimer: scheduler.setTimer,
+            clearTimer: scheduler.clearTimer,
+            logInfo,
+        });
+        await scheduler.advanceBy(15 * 60 * 1000);
+        await settle();
+        expect(logInfo).toHaveBeenCalledWith('Auto sync run skipped', { source: 'periodic', reason: 'backend-unavailable' });
+        expect(logInfo.mock.calls.some(([message]) => message === 'Auto sync run start')).toBe(false);
+        expect(performSync).not.toHaveBeenCalled();
+
+        backendAvailable = true;
+        await scheduler.advanceBy(15 * 60 * 1000);
+        await settle();
+        expect(logInfo).toHaveBeenCalledWith('Auto sync run start', { source: 'periodic', minIntervalMs: '5000' });
+        expect(logInfo).toHaveBeenCalledWith('Auto sync run complete', { source: 'periodic', success: 'true', error: '' });
+        expect(performSync).toHaveBeenCalledTimes(1);
+        controller.dispose();
+    });
+
     it('names the encryption state that suppressed an automatic run', async () => {
         // The Dropbox device test logged "the remote is encrypted and unreadable" for a
         // device that was itself the encrypted side of a remote that had gone plaintext.

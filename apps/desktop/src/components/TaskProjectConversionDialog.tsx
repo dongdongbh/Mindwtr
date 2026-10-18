@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { checklistProjectBlockReason, type Task } from '@mindwtr/core';
+import { checklistProjectBlockReason, useTaskStore, type Task } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { Dialog, DialogBody, DialogFooter } from './ui/Dialog';
 import { Button } from './ui/Button';
@@ -11,7 +11,8 @@ export function TaskProjectConversionDialog({ task, onConfirm, onClose }: {
     const [title, setTitle] = useState(task.title);
     const [expand, setExpand] = useState(false);
     const [busy, setBusy] = useState(false);
-    const blocked = checklistProjectBlockReason(task);
+    const taskReminderDefault = useTaskStore(state => state.settings.taskReminderDefault);
+    const blocked = checklistProjectBlockReason(task, { taskReminderDefault });
     return <Dialog label={t('task.createProjectFromTask')} onClose={busy ? () => {} : onClose}>
         <DialogBody className="p-6 space-y-4">
             <h2 className="font-semibold">{t('task.createProjectFromTask')}</h2>

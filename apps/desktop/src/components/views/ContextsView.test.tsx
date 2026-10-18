@@ -12,6 +12,7 @@ import * as dataTransfer from '../../lib/data-transfer';
 import { useUiStore } from '../../store/ui-store';
 import { CALENDAR_TASK_DRAG_MIME, setCalendarTaskDragData } from '../../lib/calendar-task-drag';
 import { clearUndoableAction, takeUndoableAction } from '../../lib/undo-registry';
+import { holdSyncSave } from '../../test/hold-sync-save';
 
 // Its own key, separate from the view state above: see the note in ContextsView.
 const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
@@ -94,6 +95,30 @@ describe('ContextsView', () => {
         useTaskStore.setState({ updateTask });
         return updateTask;
     };
+
+    it('adds and undoes a dropped context on the contexts a sync save published while each write waited', async () => {
+        vi.spyOn(core, 'flushPendingSave').mockResolvedValue(undefined);
+        const toast = vi.spyOn(useUiStore.getState(), 'showToast');
+        const view = renderContextsView();
+        const target = view.getByRole('button', { name: '@Office (1)' });
+        const transfer = taskDrag('task-2');
+        const publishContexts = (contexts: string[]) => holdSyncSave(() => useTaskStore.setState({
+            _allTasks: useTaskStore.getState()._allTasks.map((task) => task.id === 'task-2' ? { ...task, contexts } : task),
+        }));
+
+        let finish = publishContexts(['@Home', '@Phone']);
+        fireEvent.dragOver(target, { dataTransfer: transfer });
+        await act(async () => { fireEvent.drop(target, { dataTransfer: transfer }); });
+        await act(finish);
+        await vi.waitFor(() => expect(useTaskStore.getState()._tasksById.get('task-2')?.contexts).toEqual(['@Home', '@Phone', '@Office']));
+
+        await vi.waitFor(() => expect(toast).toHaveBeenCalledWith('Added @Office', 'info', 5000, expect.objectContaining({ label: 'Undo' })));
+        const undo = toast.mock.calls[0]![3]!.onClick;
+        finish = publishContexts(['@Home', '@Phone', '@Office', '@Later']);
+        await act(async () => { undo(); });
+        await act(finish);
+        await vi.waitFor(() => expect(useTaskStore.getState()._tasksById.get('task-2')?.contexts).toEqual(['@Home', '@Phone', '@Later']));
+    });
 
     it('adds the dropped context only after a durable save and undoes only that addition', async () => {
         const updateTask = mockContextWrite();

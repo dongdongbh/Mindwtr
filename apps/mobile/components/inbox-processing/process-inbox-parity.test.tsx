@@ -17,6 +17,7 @@ import {
   formatTimeEstimateLabel,
   loadTranslations,
   resetForTests,
+  runSyncStoreSave,
   setStorageAdapter,
   useTaskStore,
   type AppSettings,
@@ -34,7 +35,7 @@ const CAPTURE = process.env.MINDWTR_CAPTURE_PROCESS_INBOX === '1';
 const CAPTURE_ONLY = process.env.MINDWTR_CAPTURE_PROCESS_INBOX_SCENARIOS?.split('|').filter(Boolean) ?? [];
 
 const english = vi.hoisted(() => ({ strings: {} as Record<string, string> }));
-const toastLog = vi.hoisted(() => ({ entries: [] as unknown[] }));
+const toastLog = vi.hoisted(() => ({ entries: [] as unknown[], lastAction: null as null | (() => void) }));
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: { getItem: vi.fn().mockResolvedValue(null), setItem: vi.fn().mockResolvedValue(undefined), removeItem: vi.fn() },
@@ -56,8 +57,9 @@ vi.mock('../../contexts/theme-context', () => ({ useTheme: () => ({ isDark: fals
 vi.mock('expo-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('../../contexts/toast-context', () => ({
   useToast: () => ({
-    showToast: (toast: { title?: string; message?: string; tone?: string; actionLabel?: string }) => {
+    showToast: (toast: { title?: string; message?: string; tone?: string; actionLabel?: string; onAction?: () => void }) => {
       toastLog.entries.push([toast.tone ?? null, toast.title ?? null, toast.message ?? null, toast.actionLabel ?? null]);
+      if (toast.onAction) toastLog.lastAction = toast.onAction;
     },
     dismissToast: vi.fn(),
   }),
@@ -924,5 +926,101 @@ describe('React Native Process Inbox parity fixture', () => {
     expect(dates('dated-3')).toEqual(['2026-10-06', '2026-10-12', '2026-10-07']);
     expect(dates('dated-4')).toEqual(['2026-10-08', '2026-10-13', '2026-10-09']);
     expect(observed.at(-1)!.writes[0][2]).toMatchObject({ startTime: '2026-10-08', dueDate: '2026-10-13', reviewAt: '2026-10-09' });
+  }, 60_000);
+
+  // The draft was built from the task as shown; filing it writes only what the user changed, field by field.
+  it('keeps a context and a note another device synced while the decision waited', async () => {
+    await seedStore(settingsVariants.base, scenarioTasks(['inbox-a', 'inbox-c']));
+    useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, deviceId: 'this-device' } });
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Root onClose={() => undefined} />); });
+    await flush();
+    const harness: Harness = { renderer, closed: () => 0 };
+    const stored = () => useTaskStore.getState()._tasksById.get('inbox-a')!;
+    for (const action of guidedToFile) await perform(harness, action);
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const save = runSyncStoreSave(async () => {
+      await held;
+      useTaskStore.setState({
+        _allTasks: useTaskStore.getState()._allTasks.map((entry) => (entry.id === 'inbox-a'
+          ? { ...entry, rev: 5, revBy: 'other-device', contexts: ['@phone', '@remote'], description: 'Synced note' }
+          : entry)),
+      });
+    });
+    await perform(harness, ['press', 'fileIt']);
+    release();
+    await save;
+    await flush();
+    expect(stored()).toMatchObject({ status: 'next', contexts: ['@phone', '@remote'], description: 'Synced note' });
+    await act(async () => { renderer.unmount(); });
+    await flushPendingSave();
+  }, 60_000);
+
+  it('keeps a context and a note another device synced before File it was pressed, after the screen re-rendered', async () => {
+    await seedStore(settingsVariants.base, scenarioTasks(['inbox-a', 'inbox-c']));
+    useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, deviceId: 'this-device' } });
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Root onClose={() => undefined} />); });
+    await flush();
+    const harness: Harness = { renderer, closed: () => 0 };
+    const stored = () => useTaskStore.getState()._tasksById.get('inbox-a')!;
+    for (const action of guidedToFile) await perform(harness, action);
+    // The sync lands and the screen re-renders on the new row before the decision: the draft was filled before it.
+    await act(async () => {
+      useTaskStore.setState({
+        _allTasks: useTaskStore.getState()._allTasks.map((entry) => (entry.id === 'inbox-a'
+          ? { ...entry, rev: 5, revBy: 'other-device', contexts: ['@phone', '@remote'], description: 'Synced note' }
+          : entry)),
+      });
+    });
+    await flush();
+    await perform(harness, ['press', 'fileIt']);
+    await flush();
+    expect(stored()).toMatchObject({ status: 'next', contexts: ['@phone', '@remote'], description: 'Synced note' });
+    await act(async () => { renderer.unmount(); });
+    await flushPendingSave();
+  }, 60_000);
+
+  it('keeps an attachment a sync save published while a title link waited, and refuses Undo once another device changed the task', async () => {
+    toastLog.entries.length = 0;
+    await seedStore(settingsVariants.base, scenarioTasks(['inbox-a', 'inbox-c']));
+    useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, deviceId: 'this-device' } });
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Root onClose={() => undefined} />); });
+    await flush();
+    const harness: Harness = { renderer, closed: () => 0 };
+    const stored = () => useTaskStore.getState()._tasksById.get('inbox-a')!;
+    const publish = (task: Task) => useTaskStore.setState({
+      _allTasks: useTaskStore.getState()._allTasks.map((entry) => (entry.id === task.id ? task : entry)),
+    });
+    await perform(harness, ['set', 'title', 'Call Alice /link:https://notes.example']);
+    for (const action of guidedToFile) await perform(harness, action);
+
+    // The decision is filed while a sync save holds the gate; the save then publishes another device's attachment.
+    const remote = { id: 'att-remote', kind: 'link' as const, title: 'Remote', uri: 'https://remote.example', createdAt: at('22'), updatedAt: at('22') };
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const save = runSyncStoreSave(async () => {
+      await held;
+      publish({ ...stored(), rev: 5, attachments: [remote] });
+    });
+    await perform(harness, ['press', 'fileIt']);
+    release();
+    await save;
+    await flush();
+    expect(stored().status).toBe('next');
+    expect(stored().attachments?.map((attachment) => attachment.uri)).toEqual(['https://remote.example', 'https://notes.example']);
+
+    // Another device then edits the task; Undo must not put this device's old fields back over it.
+    publish({ ...stored(), title: 'Edited elsewhere', rev: 9, revBy: 'other-device' });
+    toastLog.entries.length = 0;
+    await act(async () => { toastLog.lastAction?.(); });
+    await flush();
+    expect(stored()).toMatchObject({ title: 'Edited elsewhere', status: 'next' });
+    expect(toastLog.entries).toEqual([['error', 'Error', expect.stringMatching(/^STALE_REVISION/), null]]);
+    await act(async () => { renderer.unmount(); });
+    await flushPendingSave();
   }, 60_000);
 });

@@ -1,4 +1,4 @@
-import { Area, Project, projectTagsForIntent, translateWithFallback, type TranslateFn, tFallback, useTaskStore } from '@mindwtr/core';
+import { Area, Project, projectTagsForIntent, runStoreCommand, translateWithFallback, type TranslateFn, tFallback, useTaskStore } from '@mindwtr/core';
 import { ActionSheetIOS, Alert, Keyboard, Platform } from 'react-native';
 
 import type { ToastOptions } from '@/contexts/toast-context';
@@ -43,10 +43,19 @@ export const applyLiveProjectUpdate = ({
         onBlocked?.();
         return false;
     }
-    const patch = typeof updates === 'function' ? updates(project) : updates;
-    if (!patch) return false;
-    updateProject(project.id, patch);
-    setSelectedProject({ ...project, ...patch });
+    if (typeof updates !== 'function') {
+        updateProject(project.id, updates);
+        setSelectedProject({ ...project, ...updates });
+        return true;
+    }
+    // A built patch (a tag toggle) reads the project as it is when the write is admitted, so a sync save's newer tags stay.
+    void runStoreCommand(async () => {
+        const latest = getLiveMutableProject(projectId, getProjectById);
+        const patch = latest ? updates(latest) : null;
+        if (!latest || !patch) return;
+        setSelectedProject({ ...latest, ...patch });
+        await updateProject(latest.id, patch);
+    });
     return true;
 };
 

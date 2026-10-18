@@ -9,7 +9,10 @@ import { createImportDiagnostics, formatImportDiagnostic, type ImportDiagnostic,
 type Translate = ImportDiagnosticTranslator;
 type ProjectLine = { name: string; taskCount: number; areaName?: string };
 
-const warningLines = (warnings: readonly string[], t: Translate): string[] => createImportDiagnostics(warnings, 'warning')
+// A warning is RN's sentence, or a diagnostic the native backup document already built from its stored code and count.
+type Warning = string | ImportDiagnostic;
+const warningLines = (warnings: readonly Warning[], t: Translate): string[] => warnings
+    .map((warning) => typeof warning === 'string' ? createImportDiagnostics([warning], 'warning')[0] : warning)
     .map((diagnostic) => formatImportDiagnostic(diagnostic, t));
 
 /** The first four projects (`• [area / ]name: count`), then how many more. */
@@ -136,7 +139,7 @@ export const buildMergeResultMessage = (merged: { added: number; updated: number
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
 ].join('\n');
 
-export const buildTodoistResultMessage = (result: { importedTaskCount: number; importedProjectCount: number; importedChecklistItemCount: number; warnings: readonly string[] },
+export const buildTodoistResultMessage = (result: { importedTaskCount: number; importedProjectCount: number; importedChecklistItemCount: number; warnings: readonly Warning[] },
     snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTodoistTasksIntoProjects', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.subtasksBecameChecklistItems', { subtaskCount: result.importedChecklistItemCount }) : null,
@@ -146,7 +149,7 @@ export const buildTodoistResultMessage = (result: { importedTaskCount: number; i
 
 /** TickTick's and DGT GTD's result (the same lines). */
 export const buildAreaImportResultMessage = (result: {
-    importedTaskCount: number; importedProjectCount: number; importedAreaCount: number; importedChecklistItemCount: number; warnings: readonly string[];
+    importedTaskCount: number; importedProjectCount: number; importedAreaCount: number; importedChecklistItemCount: number; warnings: readonly Warning[];
 }, snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTaskProjectAreaCounts', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount, areaCount: result.importedAreaCount }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.checklistItemsPreserved', { checklistItemCount: result.importedChecklistItemCount }) : null,
@@ -156,7 +159,7 @@ export const buildAreaImportResultMessage = (result: {
 
 export const buildOmniFocusResultMessage = (result: {
     importedTaskCount: number; importedProjectCount: number; importedAreaCount: number; importedChecklistItemCount: number;
-    importedStandaloneTaskCount: number; warnings: readonly string[];
+    importedStandaloneTaskCount: number; warnings: readonly Warning[];
 }, snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTaskProjectCounts', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount }),
     result.importedAreaCount > 0 ? t('settings.backupMobile.omnifocusAreasCreated', { areaCount: result.importedAreaCount }) : null,
@@ -168,7 +171,7 @@ export const buildOmniFocusResultMessage = (result: {
 
 export const buildMindwtrCsvResultMessage = (result: {
     importedTaskCount: number; importedProjectCount: number; importedSectionCount: number; importedAreaCount: number;
-    importedChecklistItemCount: number; warnings: readonly string[];
+    importedChecklistItemCount: number; warnings: readonly Warning[];
 }, snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTaskProjectSectionAreaCounts', {
         taskCount: result.importedTaskCount,

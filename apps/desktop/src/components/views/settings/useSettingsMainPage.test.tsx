@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSettingsMainPage } from './useSettingsMainPage';
@@ -133,5 +133,29 @@ describe('useSettingsMainPage', () => {
             window.matchMedia = originalMatchMedia;
             delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
         }
+    });
+});
+
+describe('useSettingsMainPage appearance writes', () => {
+    // The store merges appearance into the latest settings; sending the page's whole copy would put back
+    // a key another device changed since this page last rendered.
+    it('sends only the changed appearance key', async () => {
+        const updateSettings = vi.fn().mockResolvedValue(undefined);
+        const { result } = renderHook(() => useSettingsMainPage({
+            globalQuickAddShortcut: 'Control+Alt+M', isFlatpak: false, isLinux: true, isTauri: false, keybindingStyle: 'vim',
+            language: 'en', openHelp: vi.fn(), setGlobalQuickAddShortcut: vi.fn(), setKeybindingStyle: vi.fn(), setLanguage: vi.fn(),
+            settings: { appearance: { density: 'compact', textSize: 'large', showTaskAge: true } },
+            showSaved: vi.fn(), updateSettings,
+        }));
+        result.current.onDensityChange('comfortable');
+        result.current.onTextSizeChange('default');
+        result.current.onFontFamilyChange('');
+        result.current.onShowTaskAgeChange(false);
+        expect(updateSettings.mock.calls.map(([updates]) => updates)).toEqual([
+            { appearance: { density: 'comfortable' } },
+            { appearance: { textSize: 'default' } },
+            { appearance: { fontFamily: undefined } },
+            { appearance: { showTaskAge: false } },
+        ]);
     });
 });

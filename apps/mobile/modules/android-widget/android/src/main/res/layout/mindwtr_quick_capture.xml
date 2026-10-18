@@ -19,52 +19,83 @@
         android:textSize="18sp"
         android:textStyle="bold" />
 
-    <EditText
-        android:id="@+id/mindwtr_quick_capture_input"
+    <ScrollView
+        android:id="@+id/mindwtr_quick_capture_scroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:background="@drawable/mindwtr_dialog_field"
-        android:gravity="top|start"
-        android:imeOptions="actionDone"
-        android:importantForAutofill="no"
-        android:inputType="textMultiLine|textCapSentences|textAutoCorrect"
-        android:maxLength="2000"
-        android:maxLines="6"
-        android:minLines="2"
-        android:padding="12dp"
-        android:textColor="@color/mindwtr_widget_text"
-        android:textColorHint="@color/mindwtr_widget_muted_text"
-        android:textSize="16sp" />
+        android:layout_weight="1"
+        android:fillViewport="true">
 
-    <LinearLayout
-        android:id="@+id/mindwtr_quick_capture_audio_row"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:visibility="gone">
-
-        <ImageButton
-            android:id="@+id/mindwtr_quick_capture_audio"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:padding="12dp"
-            android:src="@drawable/mindwtr_capture_mic"
-            android:tint="@color/mindwtr_widget_accent" />
-
-        <TextView
-            android:id="@+id/mindwtr_quick_capture_audio_status"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:accessibilityLiveRegion="polite"
-            android:textColor="@color/mindwtr_widget_muted_text"
-            android:textSize="13sp" />
-    </LinearLayout>
+            android:orientation="vertical">
+
+            <EditText
+                android:id="@+id/mindwtr_quick_capture_input"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/mindwtr_dialog_field"
+                android:gravity="top|start"
+                android:imeOptions="actionDone"
+                android:importantForAutofill="no"
+                android:inputType="textMultiLine|textCapSentences|textAutoCorrect"
+                android:maxLength="2000"
+                android:maxLines="6"
+                android:minLines="2"
+                android:padding="12dp"
+                android:textColor="@color/mindwtr_widget_text"
+                android:textColorHint="@color/mindwtr_widget_muted_text"
+                android:textSize="16sp" />
+
+            <EditText
+                android:id="@+id/mindwtr_quick_capture_description"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/mindwtr_dialog_field"
+                android:gravity="top|start"
+                android:importantForAutofill="no"
+                android:inputType="textMultiLine|textCapSentences|textAutoCorrect"
+                android:maxLines="4"
+                android:minLines="1"
+                android:padding="12dp"
+                android:textColor="@color/mindwtr_widget_text"
+                android:textColorHint="@color/mindwtr_widget_muted_text"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:id="@+id/mindwtr_quick_capture_audio_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <ImageButton
+                    android:id="@+id/mindwtr_quick_capture_audio"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:padding="12dp"
+                    android:src="@drawable/mindwtr_capture_mic"
+                    android:tint="@color/mindwtr_widget_accent" />
+
+                <TextView
+                    android:id="@+id/mindwtr_quick_capture_audio_status"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:accessibilityLiveRegion="polite"
+                    android:textColor="@color/mindwtr_widget_muted_text"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
 
     <LinearLayout
         android:layout_width="match_parent"

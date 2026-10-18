@@ -21,7 +21,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
-import tech.dongdongbh.mindwtr.pilot.core.RecoverySnapshots
 import tech.dongdongbh.mindwtr.pilot.core.debugProperty
 import java.io.File
 import java.io.FileOutputStream
@@ -257,7 +256,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** The open project's Details (ProjectDetails.kt): its pickers and core's prepared commits. */
     val projectDetails = ProjectDetailsModel(this)
     /** A link, share or assistant note waiting to open (EntryPoints.kt). */
-    val entries = EntryRouter(this, File(app.noBackupFilesDir, "entries"))
+    // A file share's files are staged in the cache, where core's file port reads them (HostFiles), as RN's share module copies them.
+    val entries = EntryRouter(this, File(app.noBackupFilesDir, "entries"), SharedFileStager(File(app.cacheDir, "shared-entries"), ContentSharedFileSource(app)))
     /** A system capture's screen closed: MainActivity puts the app behind the previous one, as RN's returnToPreviousApp (#1169). */
     var leaveApp by mutableStateOf(false); internal set
     @Volatile private var host: CoreHost? = null
@@ -271,6 +271,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** The sync badge (RN's useMobileSyncBadge, core's state): the Menu tab's dot and the Settings row's badge. */
     data class SyncBadge(val state: String, val color: String?)
     var syncBadge by mutableStateOf(badgeOf(ProcessCoreHost.syncState)); private set
+    /** A sync is running now (core's activity state, not a pending write): Settings › Data's rows wait for it, as RN's do. */
+    var syncActive by mutableStateOf(ProcessCoreHost.syncState?.optBoolean("active") == true); private set
     private var syncCycles = ProcessCoreHost.syncState?.optInt("cycles") ?: 0
     /** The JS host's events arrive on the engine thread; each is handed to the main thread. */
     private val syncListener: (JSONObject) -> Unit = { event -> ui { syncEvent(event) } }
@@ -285,6 +287,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         when (event.optString("type")) {
             "sync" -> {
                 syncBadge = badgeOf(event)
+                syncActive = event.optBoolean("active")
                 val cycles = event.optInt("cycles")
                 if (cycles != syncCycles) {
                     syncCycles = cycles
@@ -325,6 +328,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     override fun onCleared() {
         ProcessCoreHost.unlistenSync(syncListener)
+        entries.close()
         super.onCleared()
     }
 
@@ -1355,8 +1359,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 .put("captureIds", ids).put("snapshotFileName", name ?: JSONObject.NULL).toString())
         }
         val fresh = {
-            val taken = runtime.createQuickCaptureSnapshot().optJSONObject("snapshot")
-            val written = taken?.let { RecoverySnapshots.write(snapshots, it.getString("fileName"), it.getString("contents"), menu.settings.transfer.operations.protectedNames()) }
+            val written = runtime.createQuickCaptureSnapshot(snapshots, menu.settings.transfer.operations::protectedNames)
             onMain { capture?.let { keepCapture(it.copy(snapshot = written, snapshotTaken = true)) } }
             submit(written)
         }

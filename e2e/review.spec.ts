@@ -26,10 +26,9 @@ const seedReviewFixture = async (page: Page) => {
 };
 
 const openDailyReview = async (page: Page): Promise<Locator> => {
-    const reviewNav = page.locator('[data-sidebar-item][data-view="review"]');
+    const reviewNav = page.getByRole('complementary').getByRole('button', { name: 'Review', exact: true });
     await expect(reviewNav).toBeVisible();
     await reviewNav.click();
-    await expect(reviewNav).toHaveAttribute('aria-current', 'page');
 
     await page.getByRole('button', { name: 'Daily Review', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Daily Review' });
@@ -97,4 +96,58 @@ test('daily review focus step honours the configured limit', async ({ page }) =>
 
     await expect(dialog.getByRole('button', { name: REMOVE_FROM_FOCUS })).toHaveCount(FOCUS_LIMIT);
     await expect(addButtons.first(), 'starring must stop at the configured limit').toBeDisabled();
+});
+
+
+test('daily review focus cards show dates without changing the star action', async ({ page }) => {
+    await dismissOnboarding(page);
+    await seedAppData(page, {
+        settings: { language: 'en', dateFormat: 'ymd' },
+        tasks: [
+            { id: 'focus-dated', title: 'Send revised proposal', status: 'next', dueDate: localDateKey(-1), startTime: localDateKey(-2) },
+            { id: 'focus-undated', title: 'Choose a book', status: 'next' },
+        ],
+    });
+    await page.goto('/');
+    const dialog = await openDailyReview(page);
+    await dialog.getByRole('button', { name: 'Next Step' }).click();
+    await expect(dialog.getByRole('heading', { name: 'Today’s Focus', level: 1 })).toBeVisible();
+    const card = dialog.locator('div.rounded-lg').filter({ hasText: 'Send revised proposal' }).filter({ has: page.getByRole('button', { name: /Add to today's focus|Remove from focus/ }) });
+    await expect(card).toHaveCount(1);
+    await expect(card).toContainText(localDateKey(-1));
+    await expect(card).toContainText(localDateKey(-2));
+    await card.getByRole('button', { name: ADD_TO_FOCUS }).click();
+    await expect(card.getByRole('button', { name: REMOVE_FROM_FOCUS })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => {
+        const data = JSON.parse(localStorage.getItem('mindwtr-data')!);
+        return data.tasks.find((task: { id: string }) => task.id === 'focus-dated').isFocusedToday;
+    })).toBe(true);
+});
+
+
+test('weekly review confirms remaining work and completes a project in place', async ({ page }) => {
+    await dismissOnboarding(page);
+    await seedAppData(page, {
+        settings: { language: 'en', ai: { enabled: false } },
+        projects: [{ id: 'review-project', title: 'Prepare garden' }],
+        tasks: [{ id: 'future-work', title: 'Plant in spring', status: 'next', projectId: 'review-project', startTime: localDateKey(90) }],
+    });
+    await page.goto('/?view=review');
+    await page.getByRole('button', { name: 'Weekly Review', exact: true }).click();
+    const complete = page.getByRole('button', { name: 'Complete project', exact: true });
+    for (let step = 0; step < 8 && !(await complete.isVisible()); step += 1) {
+        await page.getByRole('button', { name: /Next/ }).last().click();
+    }
+    await complete.click();
+    await expect(page.getByText('Mark this project completed and finish all its tasks?', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(complete).toBeEnabled();
+    await complete.click();
+    await page.getByRole('dialog').filter({ hasText: 'Mark this project completed and finish all its tasks?' }).getByRole('button', { name: 'Complete project', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Review Projects', exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => {
+        const data = JSON.parse(localStorage.getItem('mindwtr-data')!);
+        return [data.projects.find((p: { id: string }) => p.id === 'review-project').status,
+            data.tasks.find((t: { id: string }) => t.id === 'future-work').status];
+    })).toEqual(['archived', 'done']);
 });

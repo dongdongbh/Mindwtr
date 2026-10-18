@@ -1,3 +1,4 @@
+import { getTaskReminderPolicy, normalizeTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
 import type { Task, TaskStatus } from './types';
 import type { TaskStore } from './store-types';
 import { getReferenceTaskFieldClears, getTaskOrder, resolveCaptureStatusForStart, type ProjectOrderReserver } from './store-helpers';
@@ -67,6 +68,9 @@ export function buildNewTask({
     const resolvedOrder = !hasTaskOrder && resolvedProjectId
         ? projectOrderReserver(resolvedProjectId)
         : explicitOrder;
+    const reminderPolicy = normalizeTaskReminderPolicy(initialTaskProps.reminderPolicy)
+        ?? (typeof initialTaskProps.suppressMindwtrReminders === 'boolean'
+            ? getTaskReminderPolicy(initialTaskProps) : 'inherit');
     let newTask: Task = {
         ...initialTaskProps,
         id,
@@ -91,7 +95,8 @@ export function buildNewTask({
         // omission here only shows up on a path that uploads the
         // in-memory snapshot. Keep the creation literal canonical.
         isFocusedToday: initialTaskProps.isFocusedToday ?? false,
-        suppressMindwtrReminders: initialTaskProps.suppressMindwtrReminders ?? false,
+        reminderPolicy,
+        suppressMindwtrReminders: !shouldSendTaskReminders({ reminderPolicy }, state.settings),
         ...referenceClears,
         areaId: resolvedAreaId,
         projectId: resolvedProjectId,

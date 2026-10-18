@@ -13,6 +13,7 @@ import type {
     SyncStatusUpdates,
 } from './sync-run-ports';
 import { SyncRemoteWriteConflict } from './sync-run-ports';
+import { runStoreCommand } from './store-write-gate';
 import { clearIdleSyncCycleSnapshot, normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
@@ -43,6 +44,11 @@ import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cle
 import { LocalSyncAbort } from './sync-client-helpers';
 import { resetForTests } from './store';
 import { isArchiveRetentionSyncCompleted } from './store-archive-retention';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openScratchSqlite } from './screen-parity.replay';
+import { SqliteAdapter } from './sqlite-adapter';
 
 // Each harness stands up its own fake store, so the process-wide idle-cycle
 // snapshot (keyed on sync scope + the store's change stamp, unique inside a
@@ -134,6 +140,15 @@ const createHarness = (config: HarnessConfig = {}) => {
     const store: SyncRunStoreBridge = {
         getLastDataChangeAt: () => harness.lastDataChangeAt,
         getInMemorySnapshot: () => cloneAppData(harness.inMemory),
+        // A sliced run takes the lists in one turn and copies them in slices (change 3 review P3-2).
+        captureInMemorySnapshot: () => ({
+            tasks: [...harness.inMemory.tasks],
+            projects: [...harness.inMemory.projects],
+            sections: [...harness.inMemory.sections],
+            areas: [...harness.inMemory.areas],
+            people: [...(harness.inMemory.people ?? [])],
+            settings: harness.inMemory.settings,
+        }),
         flushPendingSave: vi.fn(async () => {
             harness.callOrder.push('flush');
         }),
@@ -150,6 +165,8 @@ const createHarness = (config: HarnessConfig = {}) => {
         persistSyncStatus: vi.fn(async (updates) => {
             harness.statusUpdates.push(updates);
         }),
+        // A sliced run (a test that binds sliceYield) saves only with a token; this fake checks none.
+        readTokenOf: () => ({ epoch: 0, generation: 0 }),
         readFastSyncState: vi.fn(async (scope: string) => harness.fastStates.get(scope) ?? null),
         writeFastSyncState: vi.fn(async (state: FastSyncState) => {
             harness.fastStates.set(state.scope, state);
@@ -2162,7 +2179,7 @@ describe('runSharedSyncCycle', () => {
         expect(io.writeRemote).toHaveBeenCalledTimes(1);
     });
 
-    it('requeues on a remote write conflict and clears the pending-remote-write flag', async () => {
+    it('requeues on a remote write conflict and keeps the pending-remote-write flag', async () => {
         const { harness, hooks, run } = createHarness({
             remote: createData([createTask('t-remote', 'Remote task')]),
             io: {
@@ -2178,7 +2195,8 @@ describe('runSharedSyncCycle', () => {
 
         expect(result).toMatchObject({ success: true, skipped: 'requeued' });
         expect(hooks.requestFollowUp).toHaveBeenCalled();
-        expect(harness.persisted.settings.pendingRemoteWriteAt).toBeUndefined();
+        // A stale exit writes nothing more: the follow-up cycle publishes and clears the marker.
+        expect(harness.persisted.settings.pendingRemoteWriteAt).toBeTruthy();
         expect(harness.diagnosticEvents).toContainEqual(expect.objectContaining({
             event: 'follow-up-requested', followUpReason: 'remote-conflict',
         }));
@@ -2586,7 +2604,7 @@ describe('runSharedSyncCycle', () => {
         );
     });
 
-    it('requeues before applying or uploading data when a local edit lands during persistence', async () => {
+    it('publishes the committed save, then requeues before uploading, when an ungated edit lands during persistence', async () => {
         const local = createData([createTask('t-local', 'Before sync')]);
         let raceMidPersist: () => void = () => {
             throw new Error('Harness mutation was not initialized');
@@ -2623,11 +2641,138 @@ describe('runSharedSyncCycle', () => {
         const result = await run();
 
         expect(result).toMatchObject({ success: true, skipped: 'requeued' });
-        expect(harness.inMemory.tasks[0]?.title).toBe('Edited while saving');
-        expect(applyDataToStore).not.toHaveBeenCalled();
+        // The store shows what the commit wrote: a gated writer cannot land here, and the disk holds this.
+        expect(applyDataToStore).toHaveBeenCalledWith(harness.persisted);
+        expect(harness.inMemory).toEqual(harness.persisted);
         expect(io.writeRemote).not.toHaveBeenCalled();
         expect(hooks.requestFollowUp).toHaveBeenCalled();
         expect(hooks.onStaleSnapshot).toHaveBeenCalled();
+    });
+
+    it('traces each store publish and logs every local save\'s gate wait on the one published line', async () => {
+        const applyDataToStore = vi.fn((data: AppData) => {
+            harness.inMemory = cloneAppData(data);
+        });
+        const { harness, io, run } = createHarness({
+            local: createData([createTask('t-local', 'Local task')]),
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            storage: { applyDataToStore },
+        });
+        const sections: string[] = [];
+        const traced = globalThis as { __mindwtrTraceSection?: (name: string) => void };
+        traced.__mindwtrTraceSection = (name) => { if (name) sections.push(name); };
+        // A command holds the gate from the remote read on, so the first save waits for it.
+        let release!: () => void;
+        const held = runStoreCommand(() => new Promise<void>((resolve) => { release = resolve; }));
+        vi.mocked(io.readRemote).mockImplementationOnce(async () => {
+            // Date is faked in this suite: the command's 40 ms pass on the clock as it ends.
+            setTimeout(() => { vi.setSystemTime(Date.now() + 40); release(); }, 5);
+            return cloneAppData(harness.remote!);
+        });
+        try {
+            expect((await run()).success).toBe(true);
+        } finally {
+            delete traced.__mindwtrTraceSection;
+            await held;
+        }
+        const saves = applyDataToStore.mock.calls.length;
+        expect(saves).toBeGreaterThanOrEqual(2);
+        expect(sections.filter((name) => name === 'sync:storePublish')).toHaveLength(saves);
+        const lines = harness.infos.filter((entry) => entry.message === 'Sync save published to the store');
+        expect(lines).toHaveLength(1);
+        const waits = String(lines[0].extra?.gateWaitMs).split(',').map(Number);
+        expect(waits).toHaveLength(saves);
+        expect(waits[0]).toBeGreaterThanOrEqual(40);
+        expect(lines[0].extra).toMatchObject({ step: 'write-local', releaseCheck: 'v1.3.7/sync-write-gate' });
+    });
+
+    it('gives the same documents in slices on a host that binds sliceYield, and never yields on one that does not (D9b change 3)', async () => {
+        const many = (prefix: string, title: string, count: number) => Array.from({ length: count }, (_, index) => createTask(`${prefix}-${index}`, `${title} ${index}`));
+        const cycle = async (bindSlices: boolean, count = 300) => {
+            const bundle = createHarness({
+                local: createData([...many('shared', 'Local', count), ...many('local', 'Only local', count)]),
+                remote: createData([...many('shared', 'Remote', count), ...many('remote', 'Only remote', count)]),
+            });
+            let yields = 0;
+            const sliceYield = vi.fn(async () => { yields += 1; });
+            if (bindSlices) bundle.notifier.sliceYield = sliceYield;
+            // Desktop's renderer yield is not a slice port: it must not slice a cycle (D9 O1/C4).
+            const yieldToUi = vi.fn(async () => undefined);
+            if (!bindSlices) bundle.notifier.yieldToUi = yieldToUi;
+            // Every slice is due at once: the most interleaved run there can be.
+            let clock = 0;
+            const now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10));
+            try {
+                expect((await bundle.run()).success).toBe(true);
+            } finally {
+                now.mockRestore();
+            }
+            return { persisted: bundle.harness.persisted, remote: bundle.harness.remote, yields, uiYields: yieldToUi.mock.calls.length };
+        };
+        const atOnce = await cycle(false);
+        const sliced = await cycle(true);
+        expect(atOnce.yields).toBe(0);
+        // The renderer yields once per step, however large the library: never once per slice.
+        expect(atOnce.uiYields).toBe((await cycle(false, 3)).uiYields);
+        expect(sliced.yields).toBeGreaterThan(10);
+        expect(sliced.persisted).toEqual(atOnce.persisted);
+        expect(sliced.remote).toEqual(atOnce.remote);
+    });
+
+    it('prepares each save\'s rows and store publish in slices before the gate, and never yields from the gate through the publish (D9b W6)', async () => {
+        const bundle = createHarness({ remote: createData([createTask('t-local', 'Local task'), createTask('t-remote', 'Remote task')]) });
+        // Is the write gate held? A store command cannot start while a sync save holds it.
+        const gateHeld = () => Promise.race([
+            runStoreCommand(async () => false),
+            new Promise<boolean>((resolve) => { setTimeout(() => resolve(true), 0); }),
+        ]);
+        const yieldsInGate: boolean[] = [];
+        bundle.notifier.sliceYield = async () => { yieldsInGate.push(await gateHeld()); };
+        const prepared: unknown[] = [];
+        const order = bundle.harness.callOrder;
+        bundle.storage.prepareLocalSave = vi.fn((data: AppData) => (function* () { order.push('prepareSave'); yield; yield; return void data; })());
+        bundle.storage.prepareStorePublish = vi.fn((data: AppData) => (function* () {
+            order.push('preparePublish');
+            yield;
+            const publish = { data, against: [], update: {} };
+            prepared.push(publish);
+            return publish;
+        })());
+        bundle.storage.applyDataToStore = vi.fn((data: AppData) => { bundle.harness.inMemory = cloneAppData(data); return true; });
+        let clock = 0;
+        const now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10));
+        try {
+            expect((await bundle.run()).success).toBe(true);
+        } finally {
+            now.mockRestore();
+        }
+
+        const saves = vi.mocked(bundle.storage.persistLocal).mock.calls.length;
+        expect(saves).toBeGreaterThanOrEqual(1);
+        // Each save: its rows, then its publish, then the gate.
+        expect(order.filter((step) => ['prepareSave', 'preparePublish', 'persistLocal'].includes(step)))
+            .toEqual(Array.from({ length: saves }, () => ['prepareSave', 'preparePublish', 'persistLocal']).flat());
+        expect(vi.mocked(bundle.storage.applyDataToStore!).mock.calls.map((call) => call[1])).toEqual(prepared);
+        expect(yieldsInGate.length).toBeGreaterThanOrEqual(3 * saves);
+        expect(yieldsInGate.every((held) => !held)).toBe(true);
+    });
+
+    it('hands every attachment phase of one cycle the same transfer admission, and a new cycle a new one (D9b W7)', async () => {
+        const seen: unknown[] = [];
+        const syncAttachments = vi.fn(async (_data: AppData, helpers: { transferAdmission?: unknown; phase?: string }) => {
+            seen.push(helpers.transferAdmission);
+            return null;
+        });
+        const first = createHarness({ remote: createData([createTask('t-remote', 'Remote task')]), io: { syncAttachments } });
+        await first.run();
+        expect(seen.length).toBeGreaterThanOrEqual(2);
+        expect(seen[0]).toBeDefined();
+        expect(seen.every((admission) => admission === seen[0])).toBe(true);
+        const count = seen.length;
+        const second = createHarness({ remote: createData([createTask('t-remote', 'Remote task')]), io: { syncAttachments } });
+        await second.run();
+        expect(seen[count]).toBeDefined();
+        expect(seen[count]).not.toBe(seen[0]);
     });
 
     it('accepts a covered snapshot instead of aborting when the platform hook approves it', async () => {
@@ -3209,9 +3354,12 @@ describe('runSharedSyncCycle', () => {
         });
         let atCleanup: (() => void) | undefined;
         const runAttachmentCleanup = vi.fn(async () => { atCleanup!(); throw fatal; });
+        // The cycle publishes its saves before the refusal, so it has a published line it must not log after it.
+        const applyDataToStore = vi.fn((data: AppData) => { bundle.harness.inMemory = cloneAppData(data); });
         const bundle = createHarness({
             local, remote: createData([createTask('t-remote', 'Remote task')]), fastSyncScope: 'fatal-scope',
             io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+            storage: { applyDataToStore },
             hooks: {
                 runAttachmentCleanup,
                 handleRunErrorBeforeRequeue: vi.fn(async () => null),
@@ -3235,6 +3383,7 @@ describe('runSharedSyncCycle', () => {
             expect(io.acquireRemoteMutationFence).toHaveBeenCalledTimes(1);
             expect(lease.assertHeld).toHaveBeenCalled();
             expect(storage.persistLocal).toHaveBeenCalled();
+            expect(applyDataToStore).toHaveBeenCalled();
             expect(io.writeRemote).toHaveBeenCalled();
             acknowledged = cloneAppData(harness.persisted);
             expect(acknowledged.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(['t-local', 't-remote']));
@@ -4684,5 +4833,169 @@ describe('device-local AI settings survive a disk-vs-memory reconcile', () => {
         expect(ai?.speechToText?.baseUrl).toBe('http://old-speech/v1');
         expect(ai?.speechToText?.offlineModelPath).toBe('/old/model.bin');
         expect(harness.remote?.settings.ai?.baseUrl).toBeUndefined();
+    });
+});
+
+// D9b change 4a (design.md W1, W3): a sliced cycle (a host that binds sliceYield) saves only on its own read's token, and an
+// abort writes nothing: no recovery save, no status. The storage is a real guarded SQLite adapter; a calendar write is the
+// foreign write that voids the token. Every unsliced cycle keeps today's saves.
+describe('sliced cycle write safety (D9b W1, W3)', () => {
+    const closers: (() => void)[] = [];
+    afterEach(() => { closers.splice(0).forEach((close) => close()); });
+    const NETWORK_ERROR = 'Network request failed';
+
+    const adapterHarness = async (config: HarnessConfig & { sliced: boolean; refuseAtSave?: number }) => {
+        const dir = mkdtempSync(join(tmpdir(), 'mindwtr-sliced-safety-'));
+        const sql = openScratchSqlite(join(dir, 'mindwtr.db'));
+        closers.push(() => { sql.close(); rmSync(dir, { recursive: true, force: true }); });
+        const local = config.local ?? createData([createTask('t-local', 'Local task')]);
+        await new SqliteAdapter(sql.client).saveData(local);
+        const adapter = new SqliteAdapter(sql.client, { rejectConcurrentWrites: true });
+        let saves = 0;
+        const voidToken = () => adapter.upsertCalendarSyncEntry({ taskId: 't-local', calendarEventId: `e-${saves}`, calendarId: 'c', platform: 'android', lastSyncedAt: STAMP });
+        const bundle = createHarness({
+            ...config,
+            local,
+            storage: {
+                readPersistedLocal: vi.fn(async (options?: Parameters<SyncRunStorage['readPersistedLocal']>[0]) => adapter.getData(options)),
+                persistLocal: vi.fn(async (data: AppData, options?: Parameters<SyncRunStorage['persistLocal']>[1]) => {
+                    saves += 1;
+                    if (saves === config.refuseAtSave) await voidToken();
+                    await (options ? adapter.saveData(data, options) : adapter.saveData(data));
+                }),
+                readTokenOf: (data) => adapter.readTokenOf(data),
+                ...config.storage,
+            },
+        });
+        if (config.sliced) bundle.notifier.sliceYield = async () => undefined;
+        return { ...bundle, adapter, voidToken };
+    };
+    const remoteWithNewTask = () => createData([createTask('t-local', 'Local task'), createTask('t-remote', 'Remote task')]);
+    // A prepare pass that changed attachment bookkeeping: an abort would have saved it through the recovery save.
+    const preparedAttachments = { syncAttachments: vi.fn(async (data: AppData, helpers: { phase?: string }) => (helpers.phase === 'prepare' ? cloneAppData(data) : false)) };
+
+    it.each([1, 2])('a foreign write before save %i refuses it: nothing more is written, no status, the marker stays, and the next cycle publishes', async (refuseAtSave) => {
+        const bundle = await adapterHarness({ sliced: true, refuseAtSave, remote: remoteWithNewTask(), io: preparedAttachments });
+
+        const result = await bundle.run();
+
+        expect(result).toMatchObject({ success: true, skipped: 'requeued' });
+        expect(bundle.hooks.requestFollowUp).toHaveBeenCalled();
+        expect(bundle.harness.infos.find((line) => line.message === 'Sync cycle requeued')?.extra?.reason).toBe('stale-db');
+        // No recovery save after the refusal, and no sync status.
+        expect(bundle.storage.persistLocal).toHaveBeenCalledTimes(refuseAtSave);
+        expect(bundle.harness.statusUpdates).toEqual([]);
+        const disk = await bundle.adapter.getData();
+        if (refuseAtSave === 1) {
+            expect(disk.tasks.map((task) => task.id)).toEqual(['t-local']);
+            expect(bundle.io.writeRemote).not.toHaveBeenCalled();
+        } else {
+            // Save 1 committed the merge with the pending-write marker; the refused save 2 leaves it for the next cycle.
+            expect(disk.tasks.map((task) => task.id).sort()).toEqual(['t-local', 't-remote']);
+            expect(disk.settings.pendingRemoteWriteAt).toBeTruthy();
+        }
+
+        const next = await bundle.run();
+        expect(next.success).toBe(true);
+        expect(next.skipped).toBeUndefined();
+        const after = await bundle.adapter.getData();
+        expect(after.tasks.map((task) => task.id).sort()).toEqual(['t-local', 't-remote']);
+        expect(after.settings.pendingRemoteWriteAt).toBeUndefined();
+    });
+
+    it('an unsliced cycle passes no token, so the same foreign write refuses nothing', async () => {
+        const bundle = await adapterHarness({ sliced: false, refuseAtSave: 1, remote: remoteWithNewTask() });
+
+        expect((await bundle.run()).success).toBe(true);
+        expect(vi.mocked(bundle.storage.readPersistedLocal).mock.calls.every((call) => call.length === 0)).toBe(true);
+        expect(vi.mocked(bundle.storage.persistLocal).mock.calls.every((call) => call.length === 1)).toBe(true);
+        expect((await bundle.adapter.getData()).tasks.map((task) => task.id).sort()).toEqual(['t-local', 't-remote']);
+    });
+
+    it('a sliced cycle flushes pending store saves right before its read, so the save gate\'s flush cannot void the token', async () => {
+        const bundle = await adapterHarness({ sliced: true, remote: remoteWithNewTask() });
+        const read = bundle.storage.readPersistedLocal;
+        bundle.storage.readPersistedLocal = vi.fn(async (options) => { bundle.harness.callOrder.push('read'); return read(options); });
+        // A store save pending since the cycle-start flush: the next flush writes its row through the same adapter.
+        const [row] = (await bundle.adapter.getData()).tasks;
+        let flushes = 0;
+        bundle.store.flushPendingSave = vi.fn(async () => {
+            bundle.harness.callOrder.push('flush');
+            flushes += 1;
+            if (flushes === 2) await bundle.adapter.saveTask(row);
+        });
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(true);
+        expect(result.skipped).toBeUndefined();
+        // The cycle-start flush, then the one right before the read.
+        const order = bundle.harness.callOrder;
+        expect(order.slice(0, order.indexOf('read'))).toEqual(['flush', 'flush']);
+    });
+
+    it('a sliced cycle on a host without read tokens refuses its save as an error, never a requeue (fails closed)', async () => {
+        // Today's Android host-sync shape: no readTokenOf, and a saveData that ignores its options.
+        const bundle = await adapterHarness({ sliced: true, remote: remoteWithNewTask() });
+        bundle.storage.readTokenOf = undefined;
+        bundle.storage.persistLocal = vi.fn(async (data: AppData) => { await bundle.adapter.saveData(data); });
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('no read token');
+        expect(bundle.storage.persistLocal).not.toHaveBeenCalled();
+        expect(bundle.hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect((await bundle.adapter.getData()).tasks.map((task) => task.id)).toEqual(['t-local']);
+    });
+
+    it.each([true, false])('the offline hook\'s pre-sync save runs only on an unsliced cycle (sliced: %s)', async (sliced) => {
+        const bundle = await adapterHarness({
+            sliced,
+            remote: remoteWithNewTask(),
+            io: { ...preparedAttachments, readRemote: vi.fn(async () => { throw new Error(NETWORK_ERROR); }) },
+            hooks: {
+                handleRunErrorAfterRequeue: async (_error, context) => {
+                    await context.persistPreSyncedData();
+                    return { success: true, skipped: 'offline' };
+                },
+            },
+        });
+
+        expect(await bundle.run()).toMatchObject({ success: true, skipped: 'offline' });
+        expect(bundle.storage.persistLocal).toHaveBeenCalledTimes(sliced ? 0 : 1);
+    });
+
+    it('a refused retry-schedule save after a failed remote write keeps the network error, not a requeue', async () => {
+        const bundle = await adapterHarness({
+            sliced: true,
+            refuseAtSave: 2,
+            remote: remoteWithNewTask(),
+            io: { writeRemote: vi.fn(async () => { throw new Error(NETWORK_ERROR); }) },
+        });
+
+        const result = await bundle.run();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(NETWORK_ERROR);
+        expect(bundle.hooks.finalizeErrorStatus).toHaveBeenCalledTimes(1);
+        // Save 1's marker stays; the refused save recorded no backoff.
+        const disk = await bundle.adapter.getData();
+        expect(disk.settings.pendingRemoteWriteAt).toBeTruthy();
+        expect(disk.settings.pendingRemoteWriteAttempts ?? 0).toBe(0);
+    });
+
+    it('an idle cycle carries its token to the next cycle, whose save then commits', async () => {
+        const bundle = await adapterHarness({ sliced: true, fastSyncScope: 'scope-sliced-idle', policy: { carryIdleCycleSnapshot: true } });
+        await bundle.run();
+        await bundle.run();
+        vi.mocked(bundle.storage.readPersistedLocal).mockClear();
+        bundle.harness.remote = remoteWithNewTask();
+
+        const third = await bundle.run({ manual: true });
+
+        expect(bundle.storage.readPersistedLocal).not.toHaveBeenCalled();
+        expect(third.success).toBe(true);
+        expect((await bundle.adapter.getData()).tasks.map((task) => task.id).sort()).toEqual(['t-local', 't-remote']);
     });
 });

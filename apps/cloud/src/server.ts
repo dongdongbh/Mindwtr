@@ -33,6 +33,7 @@ import {
     resolveTaskFocusCreation,
     resolveTaskFocusUpdate,
     selectFocusedCount,
+    shouldSendTaskReminders,
     type Area,
     type AppData,
     type Project,
@@ -739,10 +740,15 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
             // sibling (missing order is +Infinity in compareTasksByProjectOrder).
             const hasExplicitOrder = Object.prototype.hasOwnProperty.call(props, 'order')
                 || Object.prototype.hasOwnProperty.call(props, 'orderNum');
+            const reminderPolicy = restProps.reminderPolicy ?? (typeof restProps.suppressMindwtrReminders === 'boolean'
+                ? (restProps.suppressMindwtrReminders ? 'skip' : 'send')
+                : 'inherit');
             const task: Task = normalizeTaskLifecycleFields({
                 id: generateUUID(),
                 title,
                 ...restProps,
+                reminderPolicy,
+                suppressMindwtrReminders: !shouldSendTaskReminders({ reminderPolicy }, data.settings),
                 status: effectiveStatus,
                 archivedAt: effectiveStatus === 'archived' ? nowIso : undefined,
                 tags,
@@ -797,7 +803,7 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
             // boardOrder/focusOrder clearing) before the shared core
             // completion/recurrence logic in applyTaskUpdates runs, so
             // REST writes obey the same rules as the desktop/mobile store.
-            const normalizedUpdates = normalizeTaskUpdate(existing, updates);
+            const normalizedUpdates = normalizeTaskUpdate(existing, updates, { settings: data.settings });
             const focusedCount = selectFocusedCount([...data.tasks]);
             const focusDecision = resolveTaskFocusUpdate(existing, { ...existing, ...normalizedUpdates }, {
                 focusedCount,

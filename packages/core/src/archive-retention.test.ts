@@ -9,6 +9,7 @@ import { mergeAppDataWithStats } from './sync';
 import { repairMergedSyncReferences } from './sync-normalization';
 import { mockAppData } from './sync-test-utils';
 import { markArchiveRetentionSyncCompleted } from './store-archive-retention';
+import { withQuickJsArgumentLimit } from './quickjs-test-utils';
 
 const NOW = '2026-10-01T12:00:00.000Z';
 const OLD = '2026-08-01T12:00:00.000Z';
@@ -59,6 +60,15 @@ describe('Archive retention', () => {
         setLogger(consoleLogger);
         vi.useRealTimers();
         vi.restoreAllMocks();
+    });
+
+    it('selects an archived project with 65536 sections and children, more than a QuickJS call takes arguments', () => {
+        const sections = Array.from({ length: 65_536 }, (_, index) => section(`section-${index}`, 'old'));
+        const tasks = Array.from({ length: 65_536 }, (_, index) => task(`child-${index}`, { projectId: 'old', status: 'done' }));
+        const preview = withQuickJsArgumentLimit(() => getArchiveRetentionPreview({ projects: [project('old')], sections, tasks }, 30, Date.parse(NOW)));
+        expect(preview.projectIds).toEqual(['old']);
+        expect(preview.sectionIds).toHaveLength(65_536);
+        expect(preview.taskIds).toHaveLength(65_536);
     });
 
     it('selects only old standalone tasks and complete archived project groups', () => {

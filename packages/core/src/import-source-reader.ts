@@ -2,7 +2,7 @@
 // DGT). Every importer used to hand-write its own copy of "sniff bytes -> unzip or decode ->
 // sanitize -> split CSV into rows/header index" — this module owns that once. Per-format parse
 // logic (what a row/record MEANS) stays in each importer; only the byte/CSV mechanics move here.
-import { strFromU8, unzipSync } from 'fflate';
+import { inflateSync, strFromU8 } from 'fflate';
 
 const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
 
@@ -212,11 +212,13 @@ export const parseCsvRows = (
     delimiter: string,
     limits: Readonly<ImportCsvLimits> = DEFAULT_IMPORT_CSV_LIMITS,
     archiveBudget?: ImportArchiveBudget,
+    recordNumbers?: number[],
 ): { hasUnclosedQuote: boolean; rows: string[][] } => {
     const rows: string[][] = [];
     let currentRow: string[] = [];
     let currentCell = '';
     let inQuotes = false;
+    let recordNumber = 0;
 
     const appendCharacter = (character: string): void => {
         if (currentCell.length >= limits.maxCellChars) {
@@ -240,6 +242,7 @@ export const parseCsvRows = (
     };
 
     const finishRow = (): void => {
+        recordNumber += 1;
         if (currentCell.length === 0 && currentRow.every((cell) => cell.length === 0)) {
             currentRow = [];
             return;
@@ -253,6 +256,7 @@ export const parseCsvRows = (
         }
         archiveBudget?.consumeRows();
         rows.push(currentRow);
+        recordNumbers?.push(recordNumber);
         currentRow = [];
     };
 
@@ -381,6 +385,115 @@ export type ReadImportSourceResult =
     | { entries: ImportArchiveEntry[]; fileName: string; kind: 'archive' }
     | { fileName: string; kind: 'text'; text: string };
 
+const ZIP_LOCAL_HEADER = 0x04034b50;
+const ZIP_CENTRAL_HEADER = 0x02014b50;
+const ZIP_END_RECORD = 0x06054b50;
+const readU16 = (bytes: Uint8Array, at: number): number => bytes[at] | (bytes[at + 1] << 8);
+const readU32 = (bytes: Uint8Array, at: number): number => (readU16(bytes, at) | (readU16(bytes, at + 2) << 16)) >>> 0;
+// No file content or name in the message: the error can reach a toast and a stored result.
+const damagedArchive = (): never => {
+    throw new Error('The selected archive is damaged or uses an unsupported ZIP feature.');
+};
+
+type ZipCentralEntry = {
+    compressedSize: number; flags: number; localOffset: number; method: number; name: string; nameBytes: Uint8Array; size: number;
+};
+
+/**
+ * A ZIP's entries, reading only sizes the data itself proves. The central directory's sizes are checked against each local
+ * header (unless a data descriptor follows the data), every entry's bytes lie apart from every other's (one local entry listed
+ * twice is refused), the count and size budgets run on those checked sizes before anything is inflated, a STORE entry is
+ * exactly its size, and a DEFLATE entry is inflated into a buffer one byte larger than declared and refused unless exactly the
+ * declared size came out. fflate's own unzip trusted the declared sizes: a forged header imported part of a file, or one entry
+ * many times over the budget. Encrypted, ZIP64 and multi-disk archives are refused.
+ */
+const readZipEntries = (bytes: Uint8Array, limits: Readonly<ImportSourceLimits>): ImportArchiveEntry[] => {
+    let end = -1;
+    for (let at = bytes.length - 22; at >= Math.max(0, bytes.length - 22 - 0xffff); at -= 1) {
+        if (readU32(bytes, at) === ZIP_END_RECORD) { end = at; break; }
+    }
+    if (end < 0) damagedArchive();
+    const count = readU16(bytes, end + 10);
+    const directorySize = readU32(bytes, end + 12);
+    const directoryStart = readU32(bytes, end + 16);
+    if (readU16(bytes, end + 4) !== 0 || readU16(bytes, end + 6) !== 0 || readU16(bytes, end + 8) !== count
+        || count === 0xffff || directoryStart + directorySize > end) damagedArchive();
+    const central: ZipCentralEntry[] = [];
+    let expandedBytes = 0;
+    let at = directoryStart;
+    for (let index = 0; index < count; index += 1) {
+        if (index + 1 > limits.maxArchiveEntries) {
+            throw new ImportSourceLimitError(
+                'archive-too-many-entries',
+                `The selected archive contains too many files. Choose one with no more than ${limits.maxArchiveEntries} entries.`,
+            );
+        }
+        if (at + 46 > directoryStart + directorySize || readU32(bytes, at) !== ZIP_CENTRAL_HEADER) damagedArchive();
+        const flags = readU16(bytes, at + 8);
+        const method = readU16(bytes, at + 10);
+        const compressedSize = readU32(bytes, at + 20);
+        const size = readU32(bytes, at + 24);
+        const nameLength = readU16(bytes, at + 28);
+        const localOffset = readU32(bytes, at + 42);
+        const nameBytes = bytes.subarray(at + 46, at + 46 + nameLength);
+        if ((flags & 1) !== 0 || (method !== 0 && method !== 8)
+            || compressedSize === 0xffffffff || size === 0xffffffff || localOffset === 0xffffffff) damagedArchive();
+        if (size > limits.maxArchiveEntryBytes) {
+            throw new ImportSourceLimitError(
+                'archive-entry-too-large',
+                `An archive entry is too large. Choose an export whose files are no larger than ${formatLimit(limits.maxArchiveEntryBytes)} each.`,
+            );
+        }
+        expandedBytes += size;
+        if (expandedBytes > limits.maxArchiveExpandedBytes) {
+            throw new ImportSourceLimitError(
+                'archive-expanded-too-large',
+                `The selected archive expands to too much data. Choose an export no larger than ${formatLimit(limits.maxArchiveExpandedBytes)} when unpacked.`,
+            );
+        }
+        central.push({ compressedSize, flags, localOffset, method, name: strFromU8(nameBytes, (flags & 0x800) === 0), nameBytes, size });
+        at += 46 + nameLength + readU16(bytes, at + 30) + readU16(bytes, at + 32);
+    }
+    if (at !== directoryStart + directorySize) damagedArchive();
+    const spans = central.map((entry) => {
+        const header = entry.localOffset;
+        if (header + 30 > directoryStart || readU32(bytes, header) !== ZIP_LOCAL_HEADER) damagedArchive();
+        const nameLength = readU16(bytes, header + 26);
+        const dataStart = header + 30 + nameLength + readU16(bytes, header + 28);
+        const localName = bytes.subarray(header + 30, header + 30 + nameLength);
+        if (readU16(bytes, header + 8) !== entry.method || nameLength !== entry.nameBytes.length
+            || localName.some((byte, index) => byte !== entry.nameBytes[index])) damagedArchive();
+        if ((readU16(bytes, header + 6) & 8) === 0
+            && (readU32(bytes, header + 18) !== entry.compressedSize || readU32(bytes, header + 22) !== entry.size)) damagedArchive();
+        const dataEnd = dataStart + entry.compressedSize;
+        if (dataEnd > directoryStart) damagedArchive();
+        return { entry, header, dataStart, dataEnd };
+    });
+    const ordered = [...spans].sort((left, right) => left.header - right.header);
+    for (let index = 1; index < ordered.length; index += 1) {
+        if (ordered[index].header < ordered[index - 1].dataEnd) damagedArchive();
+    }
+    // fflate's unzip kept the last entry of a repeated name; so does this.
+    const entries = new Map<string, Uint8Array>();
+    for (const { entry, dataStart, dataEnd } of spans) {
+        const data = bytes.subarray(dataStart, dataEnd);
+        let entryBytes: Uint8Array;
+        if (entry.method === 0) {
+            if (entry.compressedSize !== entry.size) damagedArchive();
+            entryBytes = data.slice();
+        } else {
+            try {
+                entryBytes = inflateSync(data, { out: new Uint8Array(entry.size + 1) });
+            } catch {
+                return damagedArchive();
+            }
+            if (entryBytes.length !== entry.size) damagedArchive();
+        }
+        entries.set(entry.name, entryBytes);
+    }
+    return [...entries].map(([entryName, entryBytes]) => ({ entryName, entryBytes }));
+};
+
 // Bytes -> either a decoded single-file text blob or the raw entries of a ZIP archive. Each
 // importer still walks `entries` itself and owns its own per-entry extension/counter logic
 // (nested zip, wrong extension, invalid parse) since the exact warning message and which
@@ -394,39 +507,7 @@ export const readImportSource = (
     const fileName = basename(input.fileName);
     const bytes = toImportBytes(input.bytes);
     assertImportSourceFileSize(bytes?.byteLength, limits);
-    if (bytes && isZipBytes(bytes)) {
-        let entryCount = 0;
-        let expandedBytes = 0;
-        const unzipped = unzipSync(bytes, {
-            // fflate calls this with central-directory sizes before inflating the entry. Rejecting
-            // here prevents a small compressed payload from allocating an unbounded output buffer.
-            filter: (entry) => {
-                entryCount += 1;
-                if (entryCount > limits.maxArchiveEntries) {
-                    throw new ImportSourceLimitError(
-                        'archive-too-many-entries',
-                        `The selected archive contains too many files. Choose one with no more than ${limits.maxArchiveEntries} entries.`,
-                    );
-                }
-                if (entry.originalSize > limits.maxArchiveEntryBytes) {
-                    throw new ImportSourceLimitError(
-                        'archive-entry-too-large',
-                        `The archive entry “${entry.name}” is too large. Choose an export whose files are no larger than ${formatLimit(limits.maxArchiveEntryBytes)} each.`,
-                    );
-                }
-                expandedBytes += entry.originalSize;
-                if (expandedBytes > limits.maxArchiveExpandedBytes) {
-                    throw new ImportSourceLimitError(
-                        'archive-expanded-too-large',
-                        `The selected archive expands to too much data. Choose an export no larger than ${formatLimit(limits.maxArchiveExpandedBytes)} when unpacked.`,
-                    );
-                }
-                return true;
-            },
-        });
-        const entries = Object.entries(unzipped).map(([entryName, entryBytes]) => ({ entryName, entryBytes }));
-        return { kind: 'archive', fileName, entries };
-    }
+    if (bytes && isZipBytes(bytes)) return { kind: 'archive', fileName, entries: readZipEntries(bytes, limits) };
     if (bytes) assertTextSize(bytes.byteLength, limits);
     const text = input.text ?? (bytes ? decodeText(bytes) : '');
     if (text.length > limits.maxTextBytes) assertTextSize(text.length, limits);

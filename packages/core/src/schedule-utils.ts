@@ -2,12 +2,14 @@ import { isAfter } from 'date-fns';
 import { hasTimeComponent, safeParseDate } from './date';
 import { isTaskActionable } from './task-status';
 import { stripMarkdown } from './markdown';
+import { shouldSendTaskReminders } from './task-reminder-policy';
 import type { NotificationSettings, Project, Task } from './types';
 
 export type ScheduleOptions = {
     includeStartTime?: boolean;
     includeDueDate?: boolean;
     includeReviewAt?: boolean;
+    taskReminderDefault?: NotificationSettings['taskReminderDefault'];
 };
 
 export type TaskReminderIntentKind = 'start' | 'due' | 'review' | 'due-repeat';
@@ -66,7 +68,7 @@ function getNextTaskReminderIntent(
 ): TaskReminderIntent | null {
     if (isInactiveTask(task)) return null;
 
-    const includeTaskReminders = task.suppressMindwtrReminders !== true;
+    const includeTaskReminders = shouldSendTaskReminders(task, options);
     const candidates: TaskReminderIntent[] = [];
     const addCandidate = (
         kind: Exclude<TaskReminderIntentKind, 'due-repeat'>,
@@ -124,7 +126,7 @@ export function getNextScheduledAt(task: Task, now: Date = new Date(), options: 
  */
 export function getDueReminderRepeatTimes(task: Task, options: ScheduleOptions = {}): Date[] {
     if (isInactiveTask(task)) return [];
-    if (task.suppressMindwtrReminders === true) return [];
+    if (!shouldSendTaskReminders(task, options)) return [];
     if (options.includeDueDate === false) return [];
 
     const interval = normalizeRepeatReminderMinutes(task.repeatReminderMinutes);
@@ -485,7 +487,7 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
             // actual request both read this same task/now/options, in the same iteration, so
             // they cannot disagree with each other the way two separate traversals could.
             if (trackDiagnostics) {
-                const suppressTaskReminders = task.suppressMindwtrReminders === true;
+                const suppressTaskReminders = !shouldSendTaskReminders(task, settings);
                 const hasSuppressibleReminder = (includeDueDate && hasTimeComponent(task.dueDate))
                     || (includeStartTime && hasTimeComponent(task.startTime));
                 if (suppressTaskReminders && hasSuppressibleReminder) {
@@ -516,7 +518,7 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
                 }
             }
 
-            const plan = getTaskReminderPlan(task, now, { includeStartTime, includeDueDate, includeReviewAt });
+            const plan = getTaskReminderPlan(task, now, { includeStartTime, includeDueDate, includeReviewAt, taskReminderDefault: settings.taskReminderDefault });
 
             // Bounded due-time repeat occurrences (after the due moment). Scheduled independently
             // of the base reminder below: a task whose due time already passed has no future

@@ -1,6 +1,9 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
-import type { Attachment, Task } from '@mindwtr/core';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { useTaskStore, type Attachment, type Task } from '@mindwtr/core';
+import { readFile } from '@tauri-apps/plugin-fs';
+import { processAudioCapture, resolveSpeechCapture } from '../../lib/speech-to-text';
+import { holdSyncSave } from '../../test/hold-sync-save';
 import { LanguageProvider } from '../../contexts/language-context';
 import { TaskAttachmentOverlays } from './TaskAttachmentOverlays';
 import { useTaskItemAttachments } from './useTaskItemAttachments';
@@ -27,6 +30,7 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     BaseDirectory: { Data: 1 },
     readFile: vi.fn(),
     readTextFile: vi.fn(),
+    exists: vi.fn(async () => true),
     mkdir: (...args: unknown[]) => mkdirMock(...args),
     writeFile: (...args: unknown[]) => writeFileMock(...args),
     remove: (...args: unknown[]) => removeMock(...args),
@@ -247,6 +251,38 @@ describe('useTaskItemAttachments addDroppedFileAttachments', () => {
         expect(writeFileMock).not.toHaveBeenCalled();
         expect(result.current.editAttachments).toHaveLength(0);
         expect(result.current.attachmentError).toBe('attachments.fileTooLarge');
+    });
+});
+
+describe('useTaskItemAttachments audio transcription', () => {
+    const initialTaskState = useTaskStore.getState();
+    afterEach(() => {
+        act(() => useTaskStore.setState(initialTaskState, true));
+    });
+
+    it('adds spoken tags to the tags a sync save published while the transcription ran', async () => {
+        const stored = { ...task, tags: ['#a'], contexts: [], rev: 1 } as Task;
+        act(() => useTaskStore.setState({ _allTasks: [stored], tasks: [stored] }));
+        vi.mocked(readFile).mockResolvedValue(new Uint8Array([1]));
+        vi.mocked(resolveSpeechCapture).mockResolvedValueOnce({ ready: true, config: { provider: 'gemini', model: '' } } as never);
+        let transcribe!: (value: unknown) => void;
+        vi.mocked(processAudioCapture).mockReturnValueOnce(new Promise((resolve) => { transcribe = resolve; }) as never);
+        const audio = { id: 'audio-1', kind: 'file', title: 'memo.wav', uri: '/data/mindwtr/audio/memo.wav', mimeType: 'audio/wav', createdAt: stored.createdAt, updatedAt: stored.updatedAt } as Attachment;
+        const { result } = renderHook(() => useTaskItemAttachments({ task: stored, t }));
+        act(() => result.current.openAttachment(audio));
+
+        let retried!: Promise<void>;
+        act(() => { retried = result.current.retryAudioTranscription(); });
+        await waitFor(() => expect(processAudioCapture).toHaveBeenCalled());
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{ ...stored, rev: 3, tags: ['#a', '#remote'] }] }));
+        transcribe({ transcript: 'call mom', tags: ['spoken'] });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await act(async () => {
+            await finish();
+            await retried;
+        });
+
+        expect(useTaskStore.getState()._tasksById.get(stored.id)?.tags).toEqual(['#a', '#remote', '#spoken']);
     });
 });
 

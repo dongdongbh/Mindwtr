@@ -402,6 +402,8 @@ describe('iOS self-hosted foreground admission', () => {
     const data = (): AppData => ({ tasks: [], projects: [], sections: [], areas: [], settings: {} });
     const configured = async (extra: Record<string, string> = {}, local = data()) => {
         resetForTests(); iosFiles();
+        // An earlier test's sync publishes its merged document to the shared store; start from an empty one.
+        core.useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} } as never);
         const fixture = host({ [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_URL_KEY]: endpoint, ...extra }, false,
             async () => structuredClone(local), async () => false);
         fixture.sync.settingsHost.encryption.mode = 'saved-webdav-or-local';

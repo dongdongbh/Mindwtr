@@ -120,16 +120,17 @@ export function useQuickCaptureKeyboardDiagnostics(options: Options) {
     settle(attempt);
   }, [options.appliedInset, options.avoidanceEnabled, options.expanded, emit, settle]);
 
-  const observe = useCallback((phase: Phase) => {
+  const observe = useCallback((phase: Phase, extra: Record<string, unknown> = {}) => {
     if (!options.visible || !latest.current.visible || latest.current.openRequestId !== options.openRequestId) return;
     const attempt = attemptRef.current;
     if (!attempt) return;
-    emit(attempt, phase);
+    emit(attempt, phase, extra);
     settle(attempt);
   }, [options.visible, options.openRequestId, emit, settle]);
   return {
     onModalShow: useCallback(() => observe('modal-shown'), [observe]),
-    onAutoFocusRequest: useCallback(() => observe('auto-focus-request'), [observe]),
+    onAutoFocusRequest: useCallback((afterModalShow = false) => observe('auto-focus-request', afterModalShow
+      ? { releaseCheck: 'v1.3.7/quick-capture-focus-after-show' } : {}), [observe]),
     onInputFocus: useCallback(() => observe('input-focus'), [observe]),
     onInputBlur: useCallback(() => observe('input-blur'), [observe]),
   };

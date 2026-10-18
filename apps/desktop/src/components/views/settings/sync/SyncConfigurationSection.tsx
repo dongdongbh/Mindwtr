@@ -5,6 +5,7 @@ import { cn } from '../../../../lib/utils';
 import { Switch } from '../../../ui/Switch';
 import { SettingField, SettingRow } from '../SettingRow';
 import type { SettingsSyncPageProps } from './types';
+import { getCleartextSyncDestination } from '../../../../lib/cleartext-sync-warning';
 
 const isDocumentPortalPath = (path: string): boolean => (
     /^\/run\/user\/\d+\/doc(?:\/|$)/.test(path.trim())
@@ -314,6 +315,9 @@ const renderSelfHostedCloudPanel = ({
                 )}
             />
             <p className="text-xs text-muted-foreground">{t.cloudHint}</p>
+            {getCleartextSyncDestination('cloud', cloudUrl) && (
+                <p className="text-xs text-warning">{t.cleartextSyncWarningCloud}</p>
+            )}
             {cloudUrlError && (
                 <p className="text-xs text-destructive">{t.invalidUrlHttp}</p>
             )}
@@ -441,6 +445,9 @@ const renderWebDavPanel = ({
                 )}
             />
             <p className="text-xs text-muted-foreground">{t.webdavHint}</p>
+            {getCleartextSyncDestination('webdav', webdavUrl) && (
+                <p className="text-xs text-warning">{t.cleartextSyncWarningWebdav}</p>
+            )}
             {webdavUrlError && (
                 <p className="text-xs text-destructive">{t.invalidUrlHttp}</p>
             )}

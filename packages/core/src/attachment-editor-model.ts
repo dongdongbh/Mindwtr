@@ -323,29 +323,34 @@ export async function resolveAttachmentAvailability(attachment: Attachment, port
     availability: AttachmentAvailabilityPort;
     /** The attachment as the screen holds it now, while it still has `identity`. */
     current: (attachmentId: string, identity: string) => Attachment | null;
-    /** Applies `patch` while the attachment still has `identity`; the patched attachment, or null. */
-    update: (attachmentId: string, identity: string, patch: Partial<Attachment>) => Attachment | null;
+    /**
+     * Applies `patch` while the attachment still has `identity`; the patched attachment, or null. A caller outside a store
+     * command answers a Promise: it reads the row and builds its write inside one admission (store-write-gate.ts), since a
+     * sync save admitted first may publish newer rows than the caller read before.
+     */
+    update: (attachmentId: string, identity: string, patch: Partial<Attachment>) => Attachment | null | Promise<Attachment | null>;
 }): Promise<AttachmentResolution> {
     if (attachment.kind !== 'file') return { status: 'available', attachment };
     const { availability } = ports;
     const identity = availability.getAttachmentDownloadIdentity(attachment);
     if (!ports.current(attachment.id, identity)) return { status: 'stale' };
     const shouldDownload = Boolean(attachment.cloudKey && (attachment.localStatus === 'missing' || !attachment.uri));
-    if (shouldDownload && attachment.localStatus !== 'downloading') {
-        ports.update(attachment.id, identity, { localStatus: 'downloading' });
-    }
+    // The download starts at once; a queued store command marks the row meanwhile, in order before the outcome's write.
+    const marking = shouldDownload && attachment.localStatus !== 'downloading'
+        ? ports.update(attachment.id, identity, { localStatus: 'downloading' }) : null;
     const outcome = await availability.ensureAttachmentAvailableDetailed(attachment);
+    await marking;
     if (outcome.status === 'available') {
         const current = ports.current(attachment.id, identity);
         if (!current) return { status: 'stale' };
-        const resolved = ports.update(attachment.id, identity, availability.getAttachmentAvailabilityPatch(current, outcome.attachment));
+        const resolved = await ports.update(attachment.id, identity, availability.getAttachmentAvailabilityPatch(current, outcome.attachment));
         return resolved ? { status: 'available', attachment: resolved } : { status: 'stale' };
     }
     if (outcome.status === 'unrecoverable') {
-        const resolved = ports.update(attachment.id, identity, availability.getAttachmentUnrecoverablePatch(outcome.attachment));
+        const resolved = await ports.update(attachment.id, identity, availability.getAttachmentUnrecoverablePatch(outcome.attachment));
         return resolved ? { status: 'unrecoverable', attachment: resolved } : { status: 'stale' };
     }
-    if (shouldDownload && !ports.update(attachment.id, identity, { localStatus: 'missing' })) return { status: 'stale' };
+    if (shouldDownload && !await ports.update(attachment.id, identity, { localStatus: 'missing' })) return { status: 'stale' };
     return outcome;
 }
 
@@ -416,7 +421,7 @@ export const getAttachmentRowState = (attachment: Attachment): AttachmentRowStat
 // The fields that describe an attachment's bytes. The editor changes them only by a download
 // (or its terminal "unrecoverable" mark), which belongs to the content it started on.
 const CONTENT_FIELDS = new Set<string>(['uri', 'cloudKey', 'fileHash', 'contentRev', 'contentMtimeMs', 'contentSize',
-    'size', 'mimeType', 'pendingContentUpload', 'localStatus']);
+    'size', 'mimeType', 'pendingContentUpload', 'staleContentHash', 'localStatus']);
 
 const sameAttachmentContent = (left: Attachment, right: Attachment): boolean => (
     left.cloudKey === right.cloudKey && left.fileHash === right.fileHash && (left.contentRev ?? 0) === (right.contentRev ?? 0)

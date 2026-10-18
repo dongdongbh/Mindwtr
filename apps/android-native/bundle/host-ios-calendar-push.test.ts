@@ -274,10 +274,11 @@ describe('actual private iOS Calendar push host facade', () => {
 
     it.each(['queued', 'inFlight', 'immediate', 'retrying'])('refuses %s persistence without flushing it or reaching private admission', async (kind) => {
         const f = fixture(); await f.boot();
-        const adapter = f.state.fixture.adapter(), save = adapter.saveData.bind(adapter), schema = adapter.ensureSchema.bind(adapter);
+        const adapter = f.state.fixture.adapter(), save = adapter.saveData.bind(adapter), schema = adapter.ensureSchemaNow.bind(adapter);
         let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve; });
         adapter.saveData = async (value: AppData) => { await held; return save(value); };
-        if (kind === 'immediate') adapter.ensureSchema = async () => { await held; return schema(); };
+        // A save runs its schema check in its locked body (core's ensureSchemaNow): holding it holds the immediate save.
+        if (kind === 'immediate') adapter.ensureSchemaNow = async () => { await held; return schema(); };
         let saving: Promise<unknown> | undefined;
         if (kind === 'immediate') saving = f.state.fixture.state().updateTask('task-é', { title: 'PRIVATE changed' });
         else { await f.state.fixture.state().addTask('PRIVATE added');

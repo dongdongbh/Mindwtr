@@ -650,9 +650,19 @@ assert.match(hostEntry, /createNativeSync\(nativeSyncBindings\)/);
 {
     assert.match(hostEntry, /class ValidatedSqliteAdapter extends NativeReceiptSqliteAdapter \{/);
     const bootBody = hostEntry.slice(hostEntry.indexOf('const boot = '), hostEntry.indexOf('globalThis.MindwtrHost ='));
-    const bootOrder = ['setStorageAdapter(adapter)', 'if (journaled) await loadNativeRequestReceipts(sqlite)', "else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] })", 'await adapter.getData()', 'await activateAndVerify(adapter'].map((text) => bootBody.indexOf(text));
+    const bootOrder = ['setStorageAdapter(adapter)', 'if (journaled) await adapter.withConnection(() => loadNativeRequestReceipts(sqlite), { write: true })', "else await adapter.withConnection(() => loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] }), { write: true })", 'await adapter.getData()', 'await activateAndVerify(adapter'].map((text) => bootBody.indexOf(text));
     assert(bootOrder.every((index, i) => index > (i ? bootOrder[i - 1] : -1)), `receipts boot order ${bootOrder}`);
-    assert.match(hostEntry, /pruneReceipts\(\): string \{\s*return submit\(async \(\) => \(\{ pruned: await pruneNativeRequestReceipts\(sqlite\) \}\)\);/);
+    assert.match(hostEntry, /pruneReceipts\(\): string \{\s*return submit\(async \(\) => \(\{ pruned: await withHostConnection\(\(\) => pruneNativeRequestReceipts\(sqlite\)\) \}\)\);/);
+    // D9b change 1 (design.md W2): the host's own SQL runs inside core's adapter lock, and the read check runs in the read's
+    // own hold (afterReadNow), never after a public getData returned: a queued write then could fake "Incomplete … load".
+    const validatedAdapter = hostEntry.slice(hostEntry.indexOf('class ValidatedSqliteAdapter'), hostEntry.indexOf('type Pending = '));
+    assert.match(validatedAdapter, /protected override afterReadNow\(loaded: \(table: EntityTable\) => number, settings: LoadedData\['settings'\]\): Promise<void> \{\s*return this\.validate\(loaded, settings\);/);
+    assert.doesNotMatch(validatedAdapter, /override async (getData|readRowBaseline|saveData|saveTask)\(/);
+    assert.equal(validatedAdapter.match(/this\.validate\(/g)?.length, 1, 'validation only through afterReadNow');
+    const rawSql = hostEntry.replace(validatedAdapter, '').split('\n')
+        .filter((line) => /\(sqlite\b|\bsqlite\.(get|all|run|exec)\b/.test(line) && !line.includes('new ValidatedSqliteAdapter(sqlite'));
+    assert(rawSql.length >= 6 && rawSql.every((line) => /withConnection\(|withHostConnection\(/.test(line)), `host SQL outside the adapter lock: ${rawSql.filter((line) => !/withConnection\(|withHostConnection\(/.test(line)).join(' | ')}`);
+    assert.match(hostEntry, /const withHostConnection = <T,>\(work: \(\) => Promise<T>\): Promise<T> => \(bootAdapter \? bootAdapter\.withConnection\(work, \{ write: true \}\) : work\(\)\);/);
     const coreAdapter = readFileSync(resolve(app, '../../packages/core/src/sqlite-adapter.ts'), 'utf8');
     assert.match(coreAdapter, /await this\.beforeCommit\(\{ data \}\);\s*saveStep = 'commit';\s*const commitStartedAt = Date\.now\(\);\s*await runTimed\('COMMIT'\);/);
     assert.match(coreAdapter, /await this\.beforeCommit\(\{ task \}\);\s*await this\.client\.run\('COMMIT'\);/);
@@ -680,13 +690,13 @@ assert.match(sqliteBridge, /syncFile\(partial\)[\s\S]*?renameTo\(checkpointFile\
     const order = ['val opened = FutureTask {', 'database.ensureRecoveryCheckpoint()', 'val database = { opened.get() }', 'executor.submit(Callable {',
         'install(engine, database)', 'load(engine, database, bundle)', 'opened.run()', 'return onEngine {', '                loading.get()\n                sqlite = database()',
         'activationOwed = pendingBackupIds().isNotEmpty()',
-        '(if (activationOwed) callAsync("bootRecovery", legacyState, legacyBackup, "journaled") else callAsync("boot", legacyState, legacyBackup, "journaled"))'].map((text) => start.indexOf(text));
+        '(if (activationOwed) callAsync("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline)\n                else callAsync("boot", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline))'].map((text) => start.indexOf(text));
     assert(order.every((index, i) => index > (i ? order[i - 1] : -1)), `start order ${order}`);
     // Pass D1a: a journaled backup commit boots in recovery (no load maintenance before its replay), and the replay resumes normal
     // activation once its last backup commit has a final reply, before the entries after it.
     assert.match(coreHost, /if \(index == lastBackup && activationOwed\) resumeActivation\(\)/);
     assert.match(coreHost, /if \(owed == null && activationOwed\) resumeActivation\(\)/);
-    assert.match(hostEntry, /bootRecovery\(legacyState: string, legacyBackup: string, writeJournal = ''\): string \{\s*return boot\(legacyState, legacyBackup, true, writeJournal === 'journaled'\);/);
+    assert.match(hostEntry, /bootRecovery\(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''\): string \{\s*return boot\(legacyState, legacyBackup, true, writeJournal === 'journaled', budgetJSON\);/);
     // Audit C: core's stricter legacy-import preflight runs once the bundle has loaded and before the RN database opens; a
     // refusal closes only the engine (the open never ran, so nothing waits on it).
     const preflight = ['load(engine, database, bundle)', 'if (preflight) {', '                    loading.get()\n', 'answer("legacyCheck", arrayOf(legacyState, legacyBackup)',
@@ -878,8 +888,9 @@ assert.equal(code(editorUi).match(/toggle = true/g).length, 2, 'only the quick t
 assert.match(editorUi, /if \(status == "waiting" && !active\) openWaitingPrompt\(\) else editFields\(mapOf\("status" to status\)\)/);
 assert.match(model, /keepEditor\(current\.assignWaiting\(person\)\)\s+editFields\(mapOf\("status" to "waiting", "assignedTo" to person\)\)/);
 // One host per process: the Activity and ViewModel never close it, and only the owner constructs it.
-// The ViewModel's only onCleared stops its sync event listener (ProcessCoreHost keeps the listeners); it closes nothing.
-const listenerOnly = /\n    override fun onCleared\(\) \{\n        ProcessCoreHost\.unlistenSync\(syncListener\)\n        super\.onCleared\(\)\n    \}\n/;
+// The ViewModel's only onCleared stops its sync event listener (ProcessCoreHost keeps the listeners) and the entry router's
+// file-share staging thread (EntryRouter.close); it closes no host.
+const listenerOnly = /\n    override fun onCleared\(\) \{\n        ProcessCoreHost\.unlistenSync\(syncListener\)\n        entries\.close\(\)\n        super\.onCleared\(\)\n    \}\n/;
 assert.match(model, listenerOnly);
 for (const file of [activity, model.replace(listenerOnly, '\n'), editorUi, focusUi, projectsUi, labelsKt, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, captureModalModel, menuModel, ...Object.values(menuScreens)]) {
     assert.doesNotMatch(file, /close\(|onDestroy|onCleared|CoreHost\(/);
@@ -914,10 +925,10 @@ assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'),
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCoreTest", "AndroidAttachmentInstallerFileOpsTest"\)\.map \{ "test\/java\/\$installer\/\$it\.kt" \}\)/);
 // The Kotlin host journals every write, and says so at boot: core then requires each write's replay tokens. Only this
 // flag sets 'required'; iOS boots and recovers with none (its bootRecovery sends two arguments).
-assert.match(coreHost, /\(if \(activationOwed\) callAsync\("bootRecovery", legacyState, legacyBackup, "journaled"\) else callAsync\("boot", legacyState, legacyBackup, "journaled"\)\)/);
+assert.match(coreHost, /\(if \(activationOwed\) callAsync\("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\s+else callAsync\("boot", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\)/);
 assert.equal(coreHost.match(/"journaled"/g).length, 2);
 assert.match(hostEntry, /setNativeReplayTokens\(journaled \? 'required' : 'optional'\)/);
-assert.match(hostEntry, /bootRecovery\(legacyState: string, legacyBackup: string, writeJournal = ''\): string \{\s*return boot\(legacyState, legacyBackup, true, writeJournal === 'journaled'\);/);
+assert.match(hostEntry, /bootRecovery\(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''\): string \{\s*return boot\(legacyState, legacyBackup, true, writeJournal === 'journaled', budgetJSON\);/);
 assert.equal(hostEntry.match(/setNativeReplayTokens\(/g).length, 1);
 assert.equal(kotlinFiles.join('\n').match(/LegacyRnStoreGuard\.requireClear\(/g).length, 1);
 assert.match(guard, /private const val DATABASE = "files\/SQLite\/mindwtr\.db"/);
@@ -1035,7 +1046,7 @@ assert.match(model, /ProcessCoreHost\.get\(/);
 // Storage exceptions never cross the QuickJS JNI boundary.
 assert.equal(coreHost.match(/JSCallFunction \{/g).length, 1, 'the only JS callback constructor is guarded');
 const bridgeCallbacks = coreHost.match(/bridge\.setProperty\([^\n]*/g);
-assert.equal(bridgeCallbacks.length, 42, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, and the device calendar call: each guarded');
+assert.equal(bridgeCallbacks.length, 47, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, and the device calendar call: each guarded');
 // C3: the device calendar call only starts on the engine thread; HostIo's calendar thread runs it (a prompt answers later).
 assert(bridgeCallbacks.includes('bridge.setProperty("calendarCall", guarded { args -> io.calendar(args[0] as String, device::call) }) }'));
 assert(bridgeCallbacks.includes('bridge.setProperty("fileAbort", guarded { args -> io.fileAbort(args[0] as String); null })'));
@@ -1146,7 +1157,10 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     const deadline = product(/const val OPERATION_DEADLINE_MS = ([^\n]+)/.exec(coreHost)[1]);
     assert(deadline >= product(/export const DEFAULT_TIMEOUT_MS = ([^;]+);/.exec(coreHttp)[1]) && deadline >= product(/const STORAGE_TIMEOUT_MS = ([^;]+);/.exec(coreStorage)[1]));
     assert.match(coreHost, /const val NETWORK_DEADLINE_MS = HostIo\.CALL_TIMEOUT_MS \+ OPERATION_DEADLINE_MS/);
-    assert.match(coreHost, /private fun callAsync\(method: String, vararg args: Any\?, deadlineMs: Long = deadlineOf\(method, args\.toList\(\)\)\): JSONObject \{/);
+    assert.match(coreHost, /private fun callAsync\(method: String, vararg args: Any\?, deadlineMs: Long = deadline\(method, args\.toList\(\)\)\): JSONObject \{/);
+    // D1c: a backup commit's deadline is the one frozen in its manifest; every other call's is deadlineOf's.
+    assert.match(coreHost, /private fun deadline\(method: String, args: List<Any\?>\): Long =\s+if \(method == BackupOperations\.METHOD\) frozenBudget\(args\[0\] as String\) else deadlineOf\(method, args\)/);
+    assert.match(coreHost, /else backups\?\.budgetMs\(reference, budget\) \?: BACKUP_DEADLINE_MS/);
     // D9: a nested call (on the engine) pumps until its answer; any other starts its operation in one engine task and is answered
     // from the pump's turns, so it never holds the engine while the operation waits. Past its deadline it is cancelled, drained,
     // or stops the host, as a nested one.
@@ -1170,7 +1184,7 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     assert.equal(/CONNECT_TIMEOUT_MS = ([\d_]+L)/.exec(hostIo)[1], /CONNECT_TIMEOUT_MS = ([\d_]+L)/.exec(rnClient)[1]);
     assert.match(hostIo, /\.connectTimeout\(CONNECT_TIMEOUT_MS, TimeUnit\.MILLISECONDS\)/);
     assert.match(coreHost, /if \(io\.busy\(\)\) io\.await\(if \(delay < 0\) 25L else minOf\(delay, 25L\)\)\s+else if \(delay > 0\) Thread\.sleep\(minOf\(delay, 25L\)\)/);
-    assert.match(coreHost, /\(if \(activationOwed\) callAsync\("bootRecovery", legacyState, legacyBackup, "journaled"\) else callAsync\("boot", legacyState, legacyBackup, "journaled"\)\)\.also \{ netCheck\(\) \}/);
+    assert.match(coreHost, /\(if \(activationOwed\) callAsync\("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\s+else callAsync\("boot", legacyState, legacyBackup, "journaled", storageBudget\(\), deadlineMs = bootDeadline\)\)\.also \{ netCheck\(\) \}/);
     assert.match(coreHost, /val port = debugFault\("net_check"\)\.ifEmpty \{ return \}/, 'the net check is debug-only');
     // RN's network security config (cleartext as RN allows it, user CAs trusted), and the INTERNET permission.
     const rnConfig = /NETWORK_SECURITY_CONFIG_XML = `([\s\S]*?)`;/.exec(readFileSync(resolve(app, '../mobile/plugins/android-network-security-config.js'), 'utf8'))[1];
@@ -1241,8 +1255,9 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     // holds library data. Core's commit is receipted itself (native-backup-document.ts), not a task command.
     const backupCommit = 'backupDocumentCommit';
     assert.deepEqual(shapes[backupCommit], ['{id,sha256}', 'id'], 'the backup commit journals its reference and snapshot name');
-    assert.match(host, /\n    backupDocumentCommit\(referenceJSON: string, planJSON: string, snapshotName: string\): string \{/);
-    assert.match(coreHost, /else arrayOf\(args\[0\], checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\), args\[1\]\)/);
+    assert.match(host, /\n    backupDocumentCommit\(referenceJSON: string, planJSON: string, snapshotName: string, budgetMs\?: number\): string \{/);
+    // D1c: the checked plan goes as a read handle whose close checks the same hash again.
+    assert.match(coreHost, /val \(plan, sha256\) = checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\)(?:\s*\/\/[^\n]*)?\s+return arrayOf\(args\[0\], data\.openRead\(plan, expectedSha256 = sha256\), args\[1\], deadline\(method, args\.toList\(\)\)\)/);
     assert.deepEqual(methods.filter((m) => m.body.includes('taskResult(') && !iosPreparedCommits.includes(m.name)).map((m) => m.name).sort(), writes.filter((name) => name !== backupCommit), 'the journal\'s write list is host-entry\'s task commands');
     const table = (name) => hostEntry.slice(hostEntry.indexOf(`const ${name}`), hostEntry.indexOf('\n};', hostEntry.indexOf(`const ${name}`)));
     const called = (text) => [...text.matchAll(/contract\.(\w+)\(/g)].map((m) => m[1]);
@@ -1280,7 +1295,9 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // Settings › Notifications' controls (pass R2): each the state it asks for, under its receipt.
         'setNotificationsSetting',
         // Settings › Calendar (pass C3): an edit the view gave (a receipt of its own), and a new subscription (never journaled).
-        'setCalendarSetting', 'addCalendarFeed'];
+        'setCalendarSetting', 'addCalendarFeed',
+        // Settings › Data's Getting Started (pass D1b): the seed and its receipt in one transaction, frozen language.
+        'seedGettingStarted'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -1299,8 +1316,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     // A task draft's Add file, link Save and Remove write nothing (they answer the draft's next list), so they are never journaled
     // (a replay would copy a file no draft owns): they go here too, each refused for any owner but a task.
     const draftCommands = ['addAttachmentFile', 'submitAttachmentLinks', 'removeAttachment'];
-    assert.deepEqual(called(table('ATTACHMENT_REQUESTS')).sort(), ['addAttachmentFile', 'downloadAttachment', 'openAttachment', 'removeAttachment',
-        'settleTaskDraftAttachments', 'submitAttachmentLinks'], 'ATTACHMENT_REQUESTS are core\'s attachment downloads, opens, draft settlement and task draft commands');
+    assert.deepEqual(called(table('ATTACHMENT_REQUESTS')).sort(), ['addAttachmentFile', 'downloadAttachment', 'openAttachment', 'prepareSharedFiles', 'removeAttachment',
+        'settleTaskDraftAttachments', 'submitAttachmentLinks'], 'ATTACHMENT_REQUESTS are core\'s attachment downloads, opens, draft settlement, task draft commands and a file share\'s copies');
     assert.deepEqual(called(table('ATTACHMENT_REQUESTS')).filter((name) => !draftCommands.includes(name) && (coreWrites.includes(name) || unwiredWrites.includes(name))), [],
         'no attachment request calls a core write but a task draft\'s');
     for (const name of draftCommands) {
@@ -1506,7 +1523,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.equal(callAsyncFn.match(/\bcall\(call\.method, \*sent\)/g).length, 1, 'start() starts a call\'s operation, after begin() journaled it');
     assert.match(callAsyncFn, /val sent = try \{ sendArgs\(call\.method, call\.args\) \} catch \(mismatch: BackupOperations\.Mismatch\)/);
     // Pass D1a review: commit_stop (check-data-device E4c) is set as each journaled write is sent, debug builds only.
-    assert.match(callAsyncFn, /if \(entry != null\) \{\s+checkNotNull\(sqlite\)\.failCommits = debugFault\("fail_commit"\) == "1"\s+sqlite\?\.stopAfterCommit = debugFault\("commit_stop"\) == method\s+debugDelay\("delay_before_ms"\)\s+journalStop\(stop, "before", entry\)\s+\}/);
+    assert.match(callAsyncFn, /if \(entry != null\) \{\s+checkNotNull\(sqlite\)\.failCommits = debugFault\("fail_commit"\) == "1"\s+\/\/ [^\n]*\n\s+sqlite\?\.stopAfterCommit = debugFault\("commit_stop"\) == WriteJournal\.key\(method, args\.toList\(\)\)\s+debugDelay\("delay_before_ms"\)\s+journalStop\(stop, "before", entry\)\s+\}/);
     assert.equal(coreHost.match(/\banswer\(/g).length, 4, 'answer(): its definition, answerChecked (a backup commit\'s plan put in, callAsync and replayJournal), resumeActivation and the legacy preflight');
     assert.equal(coreHost.match(/\banswerChecked\(/g).length, 3, 'answerChecked(): its definition, callAsync and replayJournal');
     assert.equal(coreHost.match(/\bcall\(method, \*args\)/g).length, 2, 'answer() and callLong (an unjournaled command only) start host methods');
@@ -1522,7 +1539,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     // Replay: in journal order, one at a time, stopped by a kept entry or no reply; at boot after the validated load and the
     // language, before this boot hands the host to any screen (get() waits on the boot); a stop is the screens' owed retry.
     const replayFn = coreHost.slice(coreHost.indexOf('fun replayJournal()'), coreHost.indexOf('private fun journalStop('));
-    assert.match(replayFn, /for \(\(index, entry\) in entries\.withIndex\(\)\) \{[\s\S]*?answerChecked\(entry\.method, entry\.args\.toTypedArray\(\), deadlineOf\(entry\.method, entry\.args\)\)\.also \{\s+val left = if \(entry\.method == BackupOperations\.METHOD\) backupFinish\(entry, entry\.args, it, replay = true\) else settle\(entry, it, replay = true\)\s+if \(left\) dropped \+= 1\s+\}\.error\(\)\s+\} catch \(failure: Throwable\) \{\s+owed = [^\n]+\s+break\s+\}\s+if \(WriteJournal\.keeps\(error\)\) \{ owed = error; break \}/);
+    assert.match(replayFn, /for \(\(index, entry\) in entries\.withIndex\(\)\) \{[\s\S]*?answerChecked\(entry\.method, entry\.args\.toTypedArray\(\), deadline\(entry\.method, entry\.args\)\)\.also \{\s+val left = if \(entry\.method == BackupOperations\.METHOD\) backupFinish\(entry, entry\.args, it, replay = true\) else settle\(entry, it, replay = true\)\s+if \(left\) dropped \+= 1\s+\}\.error\(\)\s+\} catch \(failure: Throwable\) \{\s+owed = [^\n]+\s+break\s+\}\s+if \(WriteJournal\.keeps\(error\)\) \{ owed = error; break \}/);
     assert.match(replayFn, /val entries = journal\.pending\(\)/);
     assert.match(replayFn, /Log\.i\(TAG, "Native Android journal replay sent=/);
     assert(coreHost.indexOf('journal = WriteJournal(journalDir') < coreHost.indexOf('engine.evaluate(bundle'));
@@ -1809,6 +1826,15 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     // C3: the external calendars' device binding and each screen's feed (bundle/host-calendar.test.ts, bun).
     const calendarTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-calendar.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(calendarTested.status, 0, `bundle/host-calendar.test.ts: ${calendarTested.stderr.slice(-1500)}`);
+    // D1c cut i: the storage adapter keeps no read document after a boot (bundle/host-backup-memory.test.ts, bun).
+    const memoryTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-backup-memory.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(memoryTested.status, 0, `bundle/host-backup-memory.test.ts: ${memoryTested.stderr.slice(-1500)}`);
+    // D1c: host-entry's side of Settings › Data's file channel, each JS fix with its red run (bundle/host-data-channel.test.ts, bun).
+    const channelTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-data-channel.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(channelTested.status, 0, `bundle/host-data-channel.test.ts: ${channelTested.stderr.slice(-1500)}`);
+    // D1c step 0: the transfer limit's rule (the whole matrix, a failing smaller row caps it, imports by the library they left).
+    const limitTested = spawnSync('bun', ['test', 'apps/android-native/scripts/data-transfer-limit.test.mjs'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(limitTested.status, 0, `scripts/data-transfer-limit.test.mjs: ${limitTested.stderr.slice(-1500)}`);
     // D8: the channel is the build's flavor, read by core as RN's isFossBuild; no host passes a fixed false any more.
     assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /create\("play"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "false"\)[^}]*\}\s+create\("foss"\) \{\s+dimension = "channel"\s+buildConfigField\("boolean", "FOSS", "true"\)/);
     assert.match(coreHost, /engine\.globalObject\.setProperty\("__mindwtrFossBuild", BuildConfig\.FOSS\)/);
@@ -2097,10 +2123,15 @@ assert.doesNotMatch(code(activity), /"\$inbox · \$total"/, 'the "Inbox · N" co
 
 // The capture popup (pass 5): core's quick capture contract, every write through perform with its exact request on disk first.
 for (const [fn, js] of [['openQuickCapture', 'captureOpen'], ['quickCaptureView', 'captureView'], ['editQuickCapture', 'captureEdit'],
-    ['submitQuickCapture', 'captureSubmit'], ['createQuickCaptureSnapshot', 'captureSnapshot'], ['submitQuickCaptureLines', 'captureLines'],
+    ['submitQuickCapture', 'captureSubmit'], ['submitQuickCaptureLines', 'captureLines'],
     ['submitQuickCapturePickerQuery', 'capturePicker']]) {
     assert.match(coreHost, new RegExp(`fun ${fn}\\([^)]*\\): JSONObject = callAsync\\("${js}"`), `CoreHost.${fn} reaches host method ${js}`);
 }
+// Pass D1c: the capture's snapshot goes through the data channel (captureSnapshotFile), never as text, on a handle capped at
+// core's 128 MiB backup limit (code review P2), as an operation's recovery snapshot is.
+assert.match(coreHost, /val handle = data\.openRecoveryWrite\(written\)/);
+assert.match(coreHost, /val recoveryHandle = recovery\?\.let\(data::openRecoveryWrite\)/);
+assert.match(coreHost, /fun createQuickCaptureSnapshot\(snapshots: File, protect: \(\) -> Set<String>\): String\? \{[\s\S]{0,400}?callAsync\("captureSnapshotFile", handle, deadlineMs = sized\(OPERATION_DEADLINE_MS, libraryFileBytes\(\)\)\)/);
 for (const read of ['captureOpen(): string', 'captureView(json: string): string', 'captureEdit(json: string): string']) {
     assert.match(hostEntry, new RegExp(`${read.replace(/[()]/g, '\\$&')} \\{\\s*return submit\\(async \\(\\) => \\{\\s*requireSaved\\(\\);`), `${read} waits for an owed save`);
 }
@@ -2133,7 +2164,9 @@ assert.match(model, /CaptureStore\(File\(app\.noBackupFilesDir, "capture"\)\)/);
 assert.match(captureUi, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
 // Several lines: core's snapshot is written as mobile writes it (a temporary file, a clash number, the 5 newest) before the batch.
 // An open backup operation's snapshot and the last result's Undo snapshot are never pruned by it (pass D1a).
-assert.match(model, /RecoverySnapshots\.write\(snapshots, it\.getString\("fileName"\), it\.getString\("contents"\), menu\.settings\.transfer\.operations\.protectedNames\(\)\)/);
+// Pass D1c: core writes it through the data channel; CoreHost publishes it with RecoverySnapshots' clash and prune rules.
+assert.match(model, /runtime\.createQuickCaptureSnapshot\(snapshots, menu\.settings\.transfer\.operations::protectedNames\)/);
+assert.match(coreHost, /return RecoverySnapshots\.publishCapture\(snapshots, written, snapshot\.getString\("fileName"\), protect\)/);
 assert.match(model, /private val snapshots = File\(app\.filesDir, "snapshots"\)/);
 assert.match(snapshotsKt, /private const val MAX_SNAPSHOTS = 5/);
 assert.match(snapshotsKt, /name = fileName\.removeSuffix\(SUFFIX\) \+ "\.\$clash\$SUFFIX"/);
@@ -2153,7 +2186,7 @@ assert.match(captureUi, /if \(landscape\) footer\(\)\s+\}\s+if \(!landscape\) fo
 assert.match(model, /storedCapture\?\.takeIf \{ saved\.get<Boolean>\("capturing"\) == true \|\| it\.pending != null \}/);
 assert.match(model, /keepCapture\(current\.copy\(requests = current\.requests \+ JSONObject\(\)\.put\("edit", edit\)\)\)\n/, 'an edit is persisted before it is sent');
 assert.match(captureUi, /\.put\("edits", /);
-assert.match(model, /val written = taken\?\.let \{ RecoverySnapshots\.write\(snapshots, it\.getString\("fileName"\), it\.getString\("contents"\), menu\.settings\.transfer\.operations\.protectedNames\(\)\) \}\s+onMain \{ capture\?\.let \{ keepCapture\(it\.copy\(snapshot = written, snapshotTaken = true\)\) \} \}\s+submit\(written\)/);
+assert.match(model, /val written = runtime\.createQuickCaptureSnapshot\(snapshots, menu\.settings\.transfer\.operations::protectedNames\)\s+onMain \{ capture\?\.let \{ keepCapture\(it\.copy\(snapshot = written, snapshotTaken = true\)\) \} \}\s+submit\(written\)/);
 assert.equal(code(model).match(/snapshotFileName/g).length, 1);
 assert.match(model, /\.put\("snapshotFileName", name \?: JSONObject\.NULL\)/);
 assert.match(model, /if \(!taken\) fresh\(\) else try \{ submit\(name\) \} catch \(failure: Exception\) \{\s+if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+fresh\(\)/,
@@ -2169,7 +2202,7 @@ assert.match(coreHost, /fun menuCommand\(name: String, json: String\): JSONObjec
 // A project's attachment command copies a picked file, which can outlast the 30 s deadline: it gets a request's deadline, on its
 // first send and on the journal's replay alike, so a slow copy never stops the host (pass A2 review 1).
 assert.match(coreHost, /fun deadlineOf\(method: String, args: List<Any\?>\): Long = when \{\s*method == "menuCommand" && args\.firstOrNull\(\) in ATTACHMENT_COMMANDS -> NETWORK_DEADLINE_MS\s*method == BackupOperations\.METHOD -> BACKUP_DEADLINE_MS\s*else -> OPERATION_DEADLINE_MS\s*\}/);
-assert.match(coreHost, /answerChecked\(entry\.method, entry\.args\.toTypedArray\(\), deadlineOf\(entry\.method, entry\.args\)\)/);
+assert.match(coreHost, /answerChecked\(entry\.method, entry\.args\.toTypedArray\(\), deadline\(entry\.method, entry\.args\)\)/);
 assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)[1].matchAll(/"(\w+)"/g)].map((m) => m[1]),
     [.../val ATTACHMENT_KINDS = setOf\(([^)]*)\)/.exec(source('Attachments.kt'))[1].matchAll(/"(\w+)"/g)].map((m) => m[1]), 'CoreHost\'s long-deadline commands are the attachment commands');
 {
@@ -2189,8 +2222,24 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     const projectDetailKinds = [.../val PROJECT_DETAIL_KINDS = setOf\(([^)]*)\)/.exec(source('ProjectDetails.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     // Settings › Calendar's new subscription (pass C3), sent by CalendarSettings.kt; its other writes are the Settings kind calendarSetting.
     const calendarKinds = [.../val CALENDAR_COMMANDS = setOf\(([^)]*)\)/.exec(source('CalendarSettings.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    assert.deepEqual(hostKinds.sort(), [...kinds, ...syncKinds, ...aiKinds, ...calendarKinds, ...attachmentKinds, ...projectDetailKinds].sort(), 'every menu command kind is one host command, logged as its operation');
-    assert.match(hostEntry, new RegExp(`type MenuCommand = ${kinds.map((kind) => `'${kind}'`).join('\\s*\\| ')}\\s*\\| SyncScreenCommand \\| AIScreenCommand \\| CalendarScreenCommand \\| AttachmentCommand \\| ProjectDetailCommand;`));
+    // Settings › Data's rows (pass D1b code review): off while one runs or a sync runs, every entry point and row on that guard.
+    {
+        const transferSource = source('DataTransfer.kt');
+        assert.match(transferSource, /val busy get\(\) = dataRowsBusy\(action, shell\.syncActive\)/);
+        for (const entry of ['export', 'pickBackup', 'pickImport', 'askSnapshot', 'gettingStarted']) {
+            assert.match(transferSource, new RegExp(`fun ${entry}\\([^)]*\\) \\{\\s+if \\(busy\\) return`), `${entry} waits while a Data action or a sync runs`);
+        }
+        const settingsScreenSource = source('SettingsScreen.kt');
+        assert.match(settingsScreenSource, /val enabled = !transfer\.busy/);
+        assert.match(settingsScreenSource, /c\.tint, !transfer\.busy, running == "import:\$key"/);
+        assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /active: service\.getMobileSyncActivityState\(\) === 'syncing'/);
+        assert.match(source('InboxViewModel.kt'), /syncActive = event\.optBoolean\("active"\)/);
+    }
+    // Settings › Data's own (pass D1b): Getting Started's seed, sent by DataTransfer.kt.
+    const dataKinds = [.../val DATA_COMMANDS = setOf\(([^)]*)\)/.exec(source('DataTransfer.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
+    assert.deepEqual(hostKinds.sort(), [...kinds, ...syncKinds, ...aiKinds, ...calendarKinds, ...attachmentKinds, ...projectDetailKinds, ...dataKinds].sort(), 'every menu command kind is one host command, logged as its operation');
+    assert.match(hostEntry, new RegExp(`type MenuCommand = ${kinds.map((kind) => `'${kind}'`).join('\\s*\\| ')}\\s*\\| SyncScreenCommand \\| AIScreenCommand \\| CalendarScreenCommand \\| AttachmentCommand \\| ProjectDetailCommand \\| DataCommand;`));
+    assert.match(hostEntry, new RegExp(`type DataCommand = ${dataKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type ProjectDetailCommand = ${projectDetailKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${projectDetailKinds.join('|')})"`), 'the Menu tab never sends a Project details command itself');
     // A Project details edit is the user's intent, journaled at once before anything else (CoreHost.journalAhead), then sent
@@ -3069,8 +3118,13 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const filter = (action) => filters.find((entry) => entry.includes(`android:name="${action}"`));
     assert.match(filter('android.intent.action.MAIN'), /android\.intent\.category\.LAUNCHER/);
     assert.match(filter('android.intent.action.VIEW'), /category\.DEFAULT[\s\S]*category\.BROWSABLE[\s\S]*<data android:scheme="\$\{urlScheme\}" \/>/);
-    assert.match(filter('android.intent.action.SEND'), /category\.DEFAULT[\s\S]*<data android:mimeType="text\/plain" \/>/);
-    assert.doesNotMatch(filter('android.intent.action.SEND'), /image|audio|video|application|SEND_MULTIPLE/, 'files wait for the attachments pass');
+    // RN's share filters, as app.json's expo-share-intent config lists them: SEND for text and files, SEND_MULTIPLE for files.
+    const shareConfig = JSON.parse(readFileSync(resolve(app, '../mobile/app.json'), 'utf8')).expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-share-intent')[1];
+    const mimeTypes = (entry) => [...entry.matchAll(/<data android:mimeType="([^"]+)" \/>/g)].map((m) => m[1]);
+    assert.match(filter('android.intent.action.SEND'), /category\.DEFAULT/);
+    assert.deepEqual(mimeTypes(filter('android.intent.action.SEND')), shareConfig.androidIntentFilters, 'SEND takes RN\'s types');
+    assert.match(filter('android.intent.action.SEND_MULTIPLE'), /category\.DEFAULT/);
+    assert.deepEqual(mimeTypes(filter('android.intent.action.SEND_MULTIPLE')), shareConfig.androidMultiIntentFilters, 'SEND_MULTIPLE takes RN\'s types');
     assert.match(filter('com.google.android.gms.actions.CREATE_NOTE'), /category\.DEFAULT[\s\S]*category\.VOICE[\s\S]*mimeType="text\/plain"[\s\S]*mimeType="\*\/\*"/);
     assert.match(alias[0], /android:name="android\.app\.shortcuts"\s+android:resource="@xml\/mindwtr_shortcuts"/);
     assert.equal(manifest.match(/category\.LAUNCHER/g).length, 1, 'one launcher entry: the alias');
@@ -3089,8 +3143,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // D6: each build type's scheme, and the scheme reaches the manifest, the shortcuts and BuildConfig from one map.
     assert.match(gradle, /val urlSchemes = mapOf\("debug" to "mindwtr-native-dev", "upgradetest" to "mindwtr-upgradetest", "release" to "mindwtr"\)/);
     assert.match(gradle, /buildConfigField\("String", "URL_SCHEME", "\\"\$scheme\\""\)\s+manifestPlaceholders\["urlScheme"\] = scheme/);
-    for (const type of ['debug', 'release']) assert.match(gradle, new RegExp(`getByName\\("${type}"\\) \\{ urlScheme\\(\\) \\}`));
-    assert.match(gradle, /create\("upgradetest"\) \{[^}]*urlScheme\(\)\s+\}/);
+    assert.match(gradle, /getByName\("debug"\) \{ launcherIdentity\(\) \}/);
+    assert.match(gradle, /getByName\("release"\) \{[^}]*launcherIdentity\(\)\s+\}/);
+    assert.match(gradle, /create\("upgradetest"\) \{[^}]*launcherIdentity\(\)\s+\}/);
     assert.match(gradle, /tasks\.named\("preBuild"\) \{ dependsOn\(buildCoreBundle, buildShortcuts, buildWidgets, rnAttachmentInstaller, rnPersistentCapture\) \}/);
     // The bytecode cache's keys (BytecodeCache.kt): the engine version is the QuickJS dependency's, and the bundle carries the
     // SHA-256 of its own body in its first line, written with it in one file (build-bundle.mjs), so a bundle and a hash from
@@ -3120,6 +3175,14 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         }
         assert.match(gradle, /val verifyBundle = [^\n]*verify-bundle\.mjs[\s\S]{0,300}?tasks\.withType<com\.android\.build\.gradle\.tasks\.MergeSourceSetFolders>\(\)\.configureEach \{\s+if \(name\.startsWith\("merge"\) && name\.endsWith\("Assets"\) && !name\.contains\("Test"\)\) \{[\s\S]{0,300}?commandLine\(listOfNotNull\("node", verifyBundle, outputDir\.get\(\)\.asFile\.resolve\("core-host\.js"\)\.path, traced\)\)\s*\}\.result\.get\(\)\.assertNormalExitValue\(\)/, 'every variant\'s merged assets are verified and a mismatch fails the build');
         assert.match(buildBundle, /renameSync\(/, 'the bundle is written under a temporary name and renamed into place');
+    }
+    // The store write gate (store-write-gate.ts gateStoreCommands) wraps a contract method when its constructor is named
+    // AsyncFunction. A bundle that lowers async functions (an older target or another minifier) would ship every native
+    // command ungated, with no error: the shipped bundle keeps saveTaskDraft an async method and the name check intact.
+    {
+        const shipped = readFileSync(resolve(app, 'android/app/src/main/assets/core-host.js'), 'utf8');
+        assert.match(shipped, /async saveTaskDraft\(/, 'saveTaskDraft stays an async method in the shipped bundle, so the write gate wraps it');
+        assert.match(shipped, /constructor\.name\s*!==\s*["']AsyncFunction["']/, 'the write gate still tells a command by its AsyncFunction constructor');
     }
     // Module instrumentation (build-bundle.mjs --trace-modules) is a measurement build's only: its own output, merged only
     // into the benchmarkTrace variant. The bundle every other variant ships has no module hook, and no environment variable
@@ -3183,17 +3246,25 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const intentRead = code(entryKt.slice(entryKt.indexOf('fun Intent.entryInput()'), entryKt.indexOf('fun Context.readPickedText')));
     assert.match(intentRead, /= runCatching \{/);
     assert.match(intentRead, /Intent\.ACTION_VIEW -> dataString\?\.let \{ JSONObject\(\)\.put\("kind", "link"\)\.put\("url", it\)\.put\("scheme", BuildConfig\.URL_SCHEME\) \}/);
-    assert.match(intentRead, /Intent\.ACTION_SEND -> if \(type\?\.startsWith\("text\/plain"\) != true\) null else/);
+    assert.match(intentRead, /Intent\.ACTION_SEND -> when \{\s+type == null -> null\s+type!!\.startsWith\("text\/plain"\) -> JSONObject\(\)\.put\("kind", "share"\)/);
     assert.match(intentRead, /\.extra\("text", getStringExtra\(Intent\.EXTRA_TEXT\)\)\.extra\("title", getCharSequenceExtra\(Intent\.EXTRA_TITLE\)\?\.toString\(\)\)\s+\.extra\("subject", getStringExtra\(Intent\.EXTRA_SUBJECT\)\)/);
     assert.match(intentRead, /\.extra\("text", getStringExtra\(NOTE_TEXT\)\)\.extra\("extraText", getStringExtra\(Intent\.EXTRA_TEXT\)\)/);
     assert.match(entryKt, /private const val NOTE_NAME = "com\.google\.android\.gms\.actions\.extra\.NAME"\s+private const val NOTE_TEXT = "com\.google\.android\.gms\.actions\.extra\.TEXT"/);
-    assert.doesNotMatch(code(entryKt), /EXTRA_STREAM|getParcelable|getSerializable|getBundleExtra/);
+    // A file share reads only EXTRA_STREAM's URIs, typed (IntentCompat), at most RN's six; never another parcel.
+    assert.match(intentRead, /else -> fileShare\(listOfNotNull\(IntentCompat\.getParcelableExtra\(this, Intent\.EXTRA_STREAM, Uri::class\.java\)\)\)/);
+    assert.match(intentRead, /Intent\.ACTION_SEND_MULTIPLE -> fileShare\(IntentCompat\.getParcelableArrayListExtra\(this, Intent\.EXTRA_STREAM, Uri::class\.java\)\.orEmpty\(\)\)/);
+    assert.match(code(entryKt), /\.put\("uris", JSONArray\(uris\.take\(SharedFileStager\.MAX_FILES\)\.map \{ it\.toString\(\) \}\)\)/);
+    assert.equal(code(entryKt).match(/getParcelable/g).length, 2, 'only the two EXTRA_STREAM reads');
+    // RN's Android share module sends a file share's files only: no text or subject (keeping them is RN bug (d), changed with RN).
+    assert.match(code(entryKt), /private fun fileShare\(uris: List<Uri>\): JSONObject = JSONObject\(\)\.put\("kind", "files"\)\s+\.put\("uris", [^\n]*\n(?!\s+\.put)/);
+    assert.match(entryKt, /\.put\("files", staged\)\.put\("text", JSONObject\.NULL\)\.put\("subject", JSONObject\.NULL\)/);
+    assert.doesNotMatch(code(entryKt), /getSerializable|getBundleExtra/);
     // Entries wait in the persisted FIFO queue (EntryQueue.kt, JVM-tested) from the intent's arrival; the oldest opens only while
     // the app is free, is read in one perform (a capture's popup view too), and opens once the action ends; the editor opens
     // through whenIdle, as it refuses while busy.
     const queueKt = source('EntryQueue.kt');
     assert.match(entryKt, /private val queue = EntryQueue\(dir\)/);
-    assert.match(model, /val entries = EntryRouter\(this, File\(app\.noBackupFilesDir, "entries"\)\)/);
+    assert.match(model, /val entries = EntryRouter\(this, File\(app\.noBackupFilesDir, "entries"\), SharedFileStager\(File\(app\.cacheDir, "shared-entries"\), ContentSharedFileSource\(app\)\)\)/);
     assert.doesNotMatch(code(entryKt), /saved\[|SavedStateHandle/, 'the queue lives on disk, not in the saved state');
     assert.match(entryKt, /if \(!queue\.add\(input\.toString\(\)\)\)/);
     // Any open unsaved work holds the entry back (the capture popup and its draft included): a share never replaces it.
@@ -3202,13 +3273,38 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // Settings field before its commit (a GTD text field, a Someday section's inline rename).
     assert.match(entryKt, /\|\| \(menu\.screen == MenuScreen\.Settings && menu\.settings\.uncommitted\)\s+\|\| \(projectDraft\.isNotBlank\(\) && openProjectId == null && \(menu\.screen == MenuScreen\.Projects\s+\|\| \(menu\.screen == null && screen == Screen\.Projects && menu\.quickView == "projects"\)\)\)/);
     assert.match(source('SettingsModel.kt'), /val uncommitted: Boolean get\(\) = local\.has\("renaming"\) \|\| local\.keys\(\)\.asSequence\(\)\.any \{ it\.startsWith\("typed:"\) \}/);
-    assert.match(entryKt, /val reply = runtime\.menuRead\("entryPoint", entry\.input\)/);
+    assert.match(entryKt, /val reply = if \(staged == null\) runtime\.menuRead\("entryPoint", entry\.input\) else runtime\.attachmentRequest\("prepareSharedFiles",/);
+    // A file share is queued before any copy, staged off the main thread while its grant holds, read once staged (prepareSharedFiles
+    // with the entry's id as its request UUID), and its staged files go once the entry opened or was refused.
+    assert.match(entryKt, /if \(!queue\.add\(input\.toString\(\)\)\) [^\n]*\s+else if \(input\.optString\("kind"\) == "files"\) queue\.all\(\)\.lastOrNull\(\)\?\.let \{ stage\(it\) \}/);
+    assert.match(entryKt, /threads\.background \{\s+val failure = runCatching \{ stager\.stage\(entry\.id, uris\) \}\.exceptionOrNull\(\)/);
+    // A failed staging waits as a failed read does (EntryLifecycle's back-off), never a loop; the router stops staging with its ViewModel.
+    assert.match(entryKt, /if \(failure != null && lifecycle\.head == entry\.id\) failed\(entry, "Staging failed"\) else pump\(\)/);
+    assert.match(entryKt, /shell\.coreHost\(\)\?\.logLine\("Native file share staging failed releaseCheck=v1\.3\.7\/native-share-files", context\)/);
+    assert.match(entryKt, /override fun authority\(uri: String\): String\? = Uri\.parse\(uri\)\.authority/);
+    assert.match(model, /entries\.close\(\)\s+super\.onCleared\(\)/);
+    // Closing stops staging and drops every main-thread job of the router (a retry, a staging's completion): EntryThreads, JVM-tested.
+    assert.match(entryKt, /fun close\(\) \{\s+threads\.close\(\)\s+\}/);
+    assert.match(entryKt, /EntryThreads\(\{ delayMs, job -> main\.postDelayed\(\{ job\(\) \}, delayMs\) \}, \{ main\.removeCallbacksAndMessages\(null\) \}\)/);
+    // The staging's completion, a core read's answer and its failure all run through EntryThreads; no other handler post.
+    assert.match(entryKt, /threads\.later \{\s+staging\.remove\(entry\.id\)/);
+    // (Focus's editor opens through whenIdle once the entry opened: it takes nothing from the queue.)
+    const routerJobs = code(entryKt).replace('{ delayMs, job -> main.postDelayed({ job() }, delayMs) }', '').replace('menu.whenIdle { openEditor(id, "view") }', '');
+    assert.doesNotMatch(routerJobs, /\bpost(Delayed)?\(|\bui \{|\bui\((?!threads\.guarded \{)|whenIdle \{|whenIdle\((?!threads\.guarded \{)|\.execute\(|Executors/, 'every router job goes through EntryThreads');
+    assert.match(source('EntryLifecycle.kt'), /fun later\(delayMs: Long = 0, job: \(\) -> Unit\) = post\(delayMs, guarded\(job\)\)\s+[^\n]*\s+fun guarded\(job: \(\) -> Unit\): \(\) -> Unit = \{ if \(!closed\) job\(\) \}/);
+    assert.match(source('EntryLifecycle.kt'), /fun close\(\) \{\s+closed = true\s+cancelPosts\(\)\s+worker\.shutdownNow\(\)\s+\}/);
+    assert.match(readFileSync(resolve(app, 'android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EntryLifecycleTest.kt'), 'utf8'), /fun aStagingThatEndsAfterTheRouterClosedNeverPumpsOrRetries\(\)[\s\S]*fun aCoreReadThatAnswersAfterTheRouterClosedLeavesTheShareForTheNextRouter\(\)/);
+    // Only another app's content:// file is opened (a file:// URI or this app's own provider would attach the app's private files).
+    assert.match(entryKt, /override fun ownProvider\(authority: String\): Boolean = context\.packageManager\.resolveContentProvider\(authority, 0\)\?\.packageName == context\.packageName\s+&& !\(BuildConfig\.DEBUG && authority == "\$\{context\.packageName\}\.sharetest"\)/);
+    assert.match(entryKt, /JSONObject\(\)\.put\("requestId", entry\.id\)\.put\("files", staged\)/);
+    assert.match(entryKt, /lifecycle\.dismissed\(entry\)\s+stager\.discard\(entry\.id\)/);
+    assert.match(entryKt, /lifecycle\.opened\(entry\)\s+\/\/[^\n]*\s+stager\.discard\(entry\.id\)/);
     assert.match(entryKt, /runtime\.openQuickCapture\(\)\s+runtime\.quickCaptureView\(JSONObject\(\)\.put\("text", open\.getString\("text"\)\)\.put\("options", open\.getJSONObject\("options"\)\)\.toString\(\)\)/);
     // An entry leaves the queue only after it opened, or when core refused its input; a failed read keeps it for a later try.
     assert.match(entryKt, /private val lifecycle = EntryLifecycle\(queue\) \{ SystemClock\.uptimeMillis\(\) \}/);
     assert.match(entryKt, /val entry = lifecycle\.next\(blocked\) \?: return/);
-    assert.match(entryKt, /\} catch \(failure: Throwable\) \{\s+ui \{ failed\(entry, failure\.message\) \}\s+\/\/[^\n]*\s+if \(!entryRetryable\(failure\.message\)\) return@perform\s+throw failure\s+\}\s+ui \{ menu\.whenIdle \{ opened\(entry, reply, view\) \} \}/);
-    assert.match(entryKt, /is EntryLifecycle\.Failure\.Retry -> main\.postDelayed\(\{ pump\(\) \}, outcome\.delayMs\)\s+is EntryLifecycle\.Failure\.Refused -> \{\s+shell\.showToast\(null, outcome\.notice, \"warning\"\)\s+lifecycle\.dismissed\(entry\)/, 'a refused entry shows its notice before it leaves');
+    assert.match(entryKt, /\} catch \(failure: Throwable\) \{\s+ui\(threads\.guarded \{ failed\(entry, failure\.message\) \}\)\s+\/\/[^\n]*\s+if \(!entryRetryable\(failure\.message\)\) return@perform\s+throw failure\s+\}\s+\/\/[^\n]*\s+ui\(threads\.guarded \{ menu\.whenIdle\(threads\.guarded \{ opened\(entry, reply, view\) \}\) \}\)/);
+    assert.match(entryKt, /is EntryLifecycle\.Failure\.Retry -> threads\.later\(outcome\.delayMs\) \{ pump\(\) \}\s+is EntryLifecycle\.Failure\.Refused -> \{\s+shell\.showToast\(null, outcome\.notice, \"warning\"\)\s+lifecycle\.dismissed\(entry\)/, 'a refused entry shows its notice before it leaves');
     assert.match(entryKt, /if \(blocked\) \{\s+lifecycle\.deferred\(entry\)\s+return\s+\}\s+open\(reply, view\)\s+lifecycle\.opened\(entry\)/);
     assert.doesNotMatch(code(entryKt), /queue\.remove\(/, 'only EntryLifecycle takes an entry out of the queue');
     assert.equal(code(source('EntryLifecycle.kt')).match(/queue\.remove\(/g).length, 2, 'an entry leaves only after it opened, or when core refused its input');
@@ -3706,8 +3802,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const { buildManifest, buildTileSource, TILE_PACKAGE } = await import('./build-widgets.mjs');
     // The debug build's entries: one more manifest of each variant, so the debug build type's own manifest stays.
     const overlay = buildManifest('tech.dongdongbh.mindwtr.nativeclient.dev', 'Mindwtr Native Dev');
-    assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /onVariants \{ variant ->\s+variant\.sources\.manifests\?\.addStaticManifestFile\(layout\.buildDirectory\.file\("generated\/widgets\/\$\{variant\.buildType\}\/AndroidManifest\.xml"\)/);
-    const merged = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8') + overlay;
+    // RN's widget components (buildWidgets) and its shortcuts' target activity (buildShortcuts), both registered for every variant.
+    assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /onVariants \{ variant ->\s+listOf\("widgets", "shortcuts"\)\.forEach \{ set ->\s+variant\.sources\.manifests\?\.addStaticManifestFile\(layout\.buildDirectory\.file\("generated\/\$set\/\$\{variant\.buildType\}\/AndroidManifest\.xml"\)/);
+    const { buildShortcutsManifest } = await import('./build-shortcuts.mjs');
+    const merged = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8') + overlay + buildShortcutsManifest();
     const exportedNames = (text) => [...text.matchAll(/<(?:activity-alias|activity|receiver|service|provider)\s[^>]*?android:name="([^"]+)"[^>]*?android:exported="true"/g)].map((m) => m[1]).sort();
     assert.deepEqual(exportedNames(merged), ['${applicationId}.MainActivity', '.ReminderRescheduleReceiver', 'tech.dongdongbh.mindwtr.androidwidget.CaptureIntentReceiver',
         'tech.dongdongbh.mindwtr.androidwidget.CompactWidgetProvider', 'tech.dongdongbh.mindwtr.androidwidget.QuickCaptureWidgetProvider',
@@ -3715,7 +3813,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         'tech.dongdongbh.mindwtr.contextautomation.ContextAutomationReceiver', 'tech.dongdongbh.mindwtr.nativeclient.dev.widget.TasksWidget',
         'tech.dongdongbh.mindwtr.quicksettings.CaptureTileService'], 'only RN\'s exported components');
     const debugManifest = readFileSync(resolve(app, 'android/app/src/debug/AndroidManifest.xml'), 'utf8');
-    assert.deepEqual(exportedNames(debugManifest), ['${applicationId}.DebugQuickCapture', 'tech.dongdongbh.mindwtr.pilot.WidgetHostActivity'], 'the debug build adds only the check\'s two entries');
+    assert.deepEqual(exportedNames(debugManifest), ['${applicationId}.DebugQuickCapture', 'tech.dongdongbh.mindwtr.pilot.ShareTestProvider',
+        'tech.dongdongbh.mindwtr.pilot.ShareTestSender', 'tech.dongdongbh.mindwtr.pilot.WidgetHostActivity'],
+        'the debug build adds only the checks\' entries: the widget host and quick capture alias, and the file share provider and sender');
     assert(!existsSync(resolve(app, 'android/app/src/release')) && !existsSync(resolve(app, 'android/app/src/upgradetest')), 'no other build type adds an entry');
     assert.doesNotMatch(overlay, /android:process=/);
     for (const info of ['mindwtr_tasks_widget_info', 'mindwtr_compact_widget_info', 'mindwtr_quick_capture_widget_info', 'mindwtr_legacy_tasks_widget_info']) {
@@ -3861,6 +3961,10 @@ export function buildNativeBackupDocumentResult(reply, t) {
   return { title: t('settings.mergeBackup'), message: t('settings.mergeBackupSummary', { addedCount: reply.added, updatedCount: reply.updated }),
     undoLabel: t('settings.undoImport'), doneLabel: t('common.done') };
 }
+export function buildNativeBackupDocumentFailure(operation, error, t, limitMb) {
+  globalThis.backupInputs.push(JSON.stringify(['failure', operation, error, limitMb]));
+  return { title: t('settings.backupMobile.restoreFailed'), message: error };
+}
 export function buildNativeBackupSnapshotRestoreConfirmation(snapshotName, t) {
   globalThis.backupInputs.push(JSON.stringify(['restoreModel', snapshotName]));
   return { title: t('settings.undoImportConfirmTitle'), message: t('settings.undoImportConfirm', { snapshotName }),
@@ -3870,18 +3974,25 @@ export function setLogger(logger) { globalThis.coreLogger = logger; setRealLogge
 export function consoleLogger() {}
 export class SqliteAdapter {
   async ensureSchema() { globalThis.events.push('schema'); }
+  async withConnection(work) { return work(); }
+  async afterReadNow() {}
   // core's row-version read after activation: the ids and the mapped settings a full read would give (rowBaseline overrides;
   // rowBaselineNull is another connection's commit since the last full read).
   async readRowBaseline() {
     globalThis.events.push('baseline');
     if (globalThis.rowBaselineNull) return null;
     const data = globalThis.fakeData;
-    return globalThis.rowBaseline || { ids: Object.fromEntries(['tasks', 'projects', 'sections', 'areas', 'people'].map((table) =>
+    const light = globalThis.rowBaseline || { ids: Object.fromEntries(['tasks', 'projects', 'sections', 'areas', 'people'].map((table) =>
       [table, data[table].map((row) => row.id)])), settings: data.settings };
+    await this.afterReadNow((table) => light.ids[table].length, light.settings);
+    return light;
   }
-  async getData() {
+  // core's public read runs its protected body, which ends with the subclass's check (afterReadNow) in the same hold.
+  async getData(options) { return this.getDataNow(options); }
+  async getDataNow() {
     globalThis.events.push('load');
     globalThis.lastLoaded = globalThis.fakeDataSequence.shift() || globalThis.fakeData;
+    await this.afterReadNow((table) => globalThis.lastLoaded[table].length, globalThis.lastLoaded.settings);
     return globalThis.lastLoaded;
   }
   async saveData(data) {
@@ -3909,6 +4020,9 @@ export function setStorageAdapter(adapter) { globalThis.adapter = adapter; }
 export function getStorageAdapter() { return globalThis.adapter; }
 export async function flushPendingSave() { globalThis.events.push('flush'); await globalThis.flushHold;
   if (globalThis.flushError) throw new Error(globalThis.flushError); }
+export const runSerializedSyncDocumentWriteOperation = (operation) => operation();
+export const setStorageTimeoutMs = (ms) => { globalThis.storageTimeouts?.push(ms); };
+export const getStorageTimeoutMs = () => 15000;
 export function getPersistenceStatus() { globalThis.onPersistenceStatus?.(); return globalThis.persistenceStatus ||
   { generation: 0, queued: false, inFlight: false, immediate: false, retrying: false, failed: false }; }
 export function isSupportedLanguage(value) { return ['en', 'zh', 'fa', 'de'].includes(value); }
@@ -7383,11 +7497,13 @@ assert.equal((await poll(ready, ready.MindwtrHost.strings('["tab.inbox"]'))).ok,
 // The RN legacy import runs after the validated load and before activation. RN state changes only
 // after the saved import is read back, and a failed RN state change never fails the boot.
 const bootBody = hostEntry.slice(hostEntry.indexOf('const boot = '), hostEntry.indexOf('globalThis.MindwtrHost ='));
-const bootOrder = ['await adapter.getData();', 'await importLegacyJson(adapter,', 'await activateAndVerify(adapter, recoveryLoad)'].map((text) => bootBody.indexOf(text));
+const bootOrder = ['legacyState ? await adapter.getData() : null', 'await importLegacyJson(adapter, loaded,', 'loaded = null;', 'await activateAndVerify(adapter, recoveryLoad)'].map((text) => bootBody.indexOf(text));
 assert(bootOrder.every((index, i) => index > (i ? bootOrder[i - 1] : -1)), `boot order ${bootOrder}`);
-assert.match(hostEntry, /boot\(legacyState: string, legacyBackup: string, writeJournal = ''\): string \{\s*return boot\(legacyState, legacyBackup, false, writeJournal === 'journaled'\);/);
+assert.match(hostEntry, /boot\(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''\): string \{\s*return boot\(legacyState, legacyBackup, false, writeJournal === 'journaled', budgetJSON\);/);
 const importBody = hostEntry.slice(hostEntry.indexOf('const importLegacyJson'), hostEntry.indexOf('// After a failed save'));
-const importOrder = ['adapter.latestData', 'planLegacyJsonImport(', 'legacyImportMismatch(plan.merged, loaded)', 'await adapter.saveData(plan.merged)',
+// The import plans from the boot's own validated read; the adapter caches no document (pass D1c, cut i).
+assert.doesNotMatch(hostEntry, /latestData/);
+const importOrder = ['planLegacyJsonImport(', 'legacyImportMismatch(plan.merged, loaded)', 'await adapter.saveData(plan.merged)',
     'legacyImportMismatch(plan.merged, await adapter.getData())', 'Legacy import not confirmed', 'native().rnStateCommit(',
     "if (rnState === 'failed') throw new Error("].map((text) => importBody.indexOf(text));
 assert(importOrder.every((index, i) => index > (i ? importOrder[i - 1] : -1)), `import order ${importOrder}`);

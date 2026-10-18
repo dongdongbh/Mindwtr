@@ -9,6 +9,7 @@ import {
     previewProjectToSection,
 } from './project-to-section';
 import { mergeAppData } from './sync';
+import { getSequentialProjectTaskCues } from './project-utils';
 
 const NOW = '2026-10-01T12:00:00.000Z';
 const project = (id: string, extra: Partial<Project> = {}): Project => ({ id, title: id,
@@ -63,7 +64,6 @@ describe('project to section', () => {
     it('blocks each unsupported source and destination shape before writing', () => {
         const sourceCases: Array<[Partial<Project>, string]> = [
             [{ status: 'waiting' }, 'source-inactive'],
-            [{ isSequential: true }, 'source-sequential'],
             [{ attachments: [{ id: 'a', kind: 'link', title: 'x', url: 'https://example.com', createdAt: NOW, updatedAt: NOW }] }, 'source-attachments'],
             [{ dueDate: '2026-10-02' }, 'source-dates'],
             [{ tagIds: ['tag'] }, 'source-tags'],
@@ -94,6 +94,56 @@ describe('project to section', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it.each([undefined, 'project', 'section'] as const)('preserves a sequential source (%s) as an independent section and restores it with Undo', async (sequentialScope) => {
+        const source = project('source', { isSequential: true, sequentialScope });
+        const destination = project('destination', { isSequential: true, sequentialScope: 'section' });
+        const existing = task('existing', { projectId: 'destination', sectionId: 'other', order: 1 });
+        rows([source, destination], [task('second', { order: 2 }), existing, task('first', { order: 1 })],
+            [section('other', { projectId: 'destination' })]);
+        expect(getProjectToSectionEligibility(useTaskStore.getState(), 'source')).toEqual({ ok: true });
+        const command = prepare();
+        const converted = await useTaskStore.getState().convertProjectToSection(command);
+        expect(converted.success).toBe(true);
+        expect(saved.projects.find((row) => row.id === 'destination')).toEqual(destination);
+        expect(saved.tasks.find((row) => row.id === 'existing')).toEqual(existing);
+        const cues = () => getSequentialProjectTaskCues(destination,
+            saved.tasks.filter((row) => row.projectId === 'destination'), saved.sections);
+        expect(cues().get('first')).toBe('available');
+        expect(cues().get('second')).toBe('later');
+        expect(cues().get('existing')).toBe('available');
+        saved.tasks.find((row) => row.id === 'first')!.status = 'done';
+        expect(cues().get('second')).toBe('available');
+        expect(cues().get('existing')).toBe('available');
+        expect(await useTaskStore.getState().undoProjectToSection(command)).toMatchObject({ success: true });
+        expect(saved.projects.find((row) => row.id === 'source')?.isSequential).toBe(true);
+        expect(saved.projects.find((row) => row.id === 'source')?.sequentialScope).toBe(sequentialScope);
+        expect(saved.tasks.find((row) => row.id === 'first')).toMatchObject({ projectId: 'source', order: 1 });
+        expect(saved.tasks.find((row) => row.id === 'second')).toMatchObject({ projectId: 'source', order: 2 });
+        expect(saved.projects.find((row) => row.id === 'destination')).toEqual(destination);
+    });
+
+    it.each([
+        [true, false, undefined, 'destination-section-sequence'],
+        [true, true, undefined, 'destination-section-sequence'],
+        [true, true, 'project', 'destination-section-sequence'],
+        [false, true, 'section', 'destination-sequential'],
+    ] as const)('blocks incompatible flow modes (%s, %s, %s)', (sourceSequential, destinationSequential, scope, reason) => {
+        rows([project('source', { isSequential: sourceSequential }),
+            project('destination', { isSequential: destinationSequential, sequentialScope: scope })]);
+        expect(previewProjectToSection(useTaskStore.getState(), 'source', 'destination')).toEqual({ ok: false, reason });
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('refuses confirmation when the destination flow changes', async () => {
+        rows([project('source', { isSequential: true }),
+            project('destination', { isSequential: true, sequentialScope: 'section' })], [task('first')]);
+        const command = prepare();
+        useTaskStore.setState({ _allProjects: useTaskStore.getState()._allProjects.map((row) =>
+            row.id === 'destination' ? { ...row, sequentialScope: 'project' } : row) });
+        expect(await useTaskStore.getState().convertProjectToSection(command)).toMatchObject({ success: false, reason: 'conflict' });
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
     it('previews every destination exactly as previewProjectToSection does, for every source', () => {
         const projects = [
             project('source', { areaId: 'area-a', supportNotes: 'notes' }),
@@ -102,6 +152,7 @@ describe('project to section', () => {
             project('archived', { status: 'archived' }), project('archived-at', { archivedAt: NOW }),
             project('cancelled', { cancelledAt: NOW }), project('deleted', { deletedAt: NOW }),
             project('purged', { deletedAt: NOW, purgedAt: NOW }), project('sequential', { isSequential: true }),
+            project('section-sequential', { isSequential: true, sequentialScope: 'section' }),
             project('dup'), project('dup', { title: 'dup twin' }),
             project('tagged', { tagIds: ['tag'] }), project('dated', { reviewAt: NOW }),
             project('archive-linked'), project('dead-section-only'),

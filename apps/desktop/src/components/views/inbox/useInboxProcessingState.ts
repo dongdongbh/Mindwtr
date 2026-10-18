@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
     createProcessInboxSession,
     createTaskDraft,
@@ -231,10 +231,13 @@ export function useInboxProcessingState({
         setDirtyScheduleFieldKeys(new Set());
     }, [defaultProcessingMode]);
 
+    // The task the draft was hydrated from: a step's write merges against it.
+    const processingBaseRef = useRef<Task | null>(null);
     const hydrateProcessingTask = useCallback((
         task: Task,
         session?: ProcessInboxSession<ProcessingStep>,
     ) => {
+        processingBaseRef.current = task;
         setProcessingSession((current) => openProcessInboxTask(session ?? current, task.id, 'refine'));
         setQuickActionability('actionable');
         setQuickTwoMinuteChoice('no');
@@ -518,6 +521,7 @@ export function useInboxProcessingState({
         remainingInboxCount,
         resetProcessingSession,
         hydrateProcessingTask,
+        processingBaseRef,
         suggestedContexts,
         suggestedTags,
         scheduleDate,

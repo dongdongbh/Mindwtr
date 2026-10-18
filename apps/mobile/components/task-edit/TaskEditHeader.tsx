@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, Pressable, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MoreHorizontal, X } from 'lucide-react-native';
 import { tFallback } from '@mindwtr/core';
 
 import { AppPressable } from '../app-pressable';
+
+import { useToast } from '../../contexts/toast-context';
+import { copyTaskReference } from '../../lib/task-reference-clipboard';
 
 import { useLanguage } from '../../contexts/language-context';
 import { useReducedMotion } from '../../hooks/use-reduced-motion';
@@ -24,6 +27,7 @@ type TaskEditHeaderProps = {
   onConvertToSection?: () => void;
   showConvertToSection?: boolean;
   readOnly?: boolean;
+  taskId?: string;
 };
 
 export function TaskEditHeader({
@@ -41,8 +45,10 @@ export function TaskEditHeader({
   onConvertToSection,
   showConvertToSection = false,
   readOnly = false,
+  taskId,
 }: TaskEditHeaderProps) {
   const { t } = useLanguage();
+  const { showToast } = useToast();
   const tc = useThemeColors();
   const reducedMotion = useReducedMotion();
   const [menuVisible, setMenuVisible] = useState(false);
@@ -58,16 +64,16 @@ export function TaskEditHeader({
     <>
       <View style={[styles.header, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <View style={[styles.headerSide, styles.headerLeft]}>
-          {!readOnly ? (
+          {!readOnly || taskId ? (
             <View style={styles.headerLeftActions}>
-              <TouchableOpacity
+              {!readOnly && <TouchableOpacity
                 style={styles.closeAction}
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityLabel={closeLabel}
               >
                 <X size={22} strokeWidth={2.25} color={tc.tint} accessible={false} />
-              </TouchableOpacity>
+              </TouchableOpacity>}
               <TouchableOpacity
                 style={styles.headerActionTouchable}
                 onPress={() => setMenuVisible(true)}
@@ -92,7 +98,7 @@ export function TaskEditHeader({
         </View>
       </View>
 
-      {!readOnly && menuVisible ? (
+      {(!readOnly || taskId) && menuVisible ? (
         <Modal
           visible
           transparent
@@ -110,104 +116,127 @@ export function TaskEditHeader({
               style={[styles.menuCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
               accessibilityViewIsModal
             >
-              <AppPressable
-                style={styles.menuItem}
-                accessibilityRole="button"
-                accessibilityLabel={t('common.share')}
-                onPress={() => {
-                  setMenuVisible(false);
-                  onShare();
-                }}
-              >
-                <Text style={[styles.menuItemText, { color: tc.text }]}>{t('common.share')}</Text>
-              </AppPressable>
-              <AppPressable
-                style={styles.menuItem}
-                accessibilityRole="button"
-                accessibilityLabel={t('taskEdit.duplicateTask')}
-                onPress={() => {
-                  setMenuVisible(false);
-                  onDuplicate();
-                }}
-              >
-                <Text style={[styles.menuItemText, { color: tc.text }]}>{t('taskEdit.duplicateTask')}</Text>
-              </AppPressable>
-              {onPromoteToProject && (
-                <AppPressable
-                  style={styles.menuItem}
-                  accessibilityRole="button"
-                  accessibilityLabel={createProjectFromTaskLabel}
-                  onPress={() => {
-                    setMenuVisible(false);
-                    onPromoteToProject();
-                  }}
-                >
-                  <Text style={[styles.menuItemText, { color: tc.text }]}>{createProjectFromTaskLabel}</Text>
-                </AppPressable>
-              )}
-              {showConvertToAction && onConvertToAction && (
-                <AppPressable
-                  style={styles.menuItem}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('reference.convertToAction')}
-                  onPress={() => {
-                    setMenuVisible(false);
-                    onConvertToAction();
-                  }}
-                >
-                  <Text style={[styles.menuItemText, { color: tc.text }]}>{t('reference.convertToAction')}</Text>
-                </AppPressable>
-              )}
-              {showConvertToSection && onConvertToSection && (
-                <AppPressable
-                  style={styles.menuItem}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('task.convertToSection')}
-                  onPress={() => {
-                    setMenuVisible(false);
-                    onConvertToSection();
-                  }}
-                >
-                  <Text style={[styles.menuItemText, { color: tc.text }]}>{t('task.convertToSection')}</Text>
-                </AppPressable>
-              )}
-              {onSkipOccurrence ? (
-                <AppPressable
-                  style={styles.menuItem}
-                  accessibilityRole="button"
-                  accessibilityLabel={skipOccurrenceLabel}
-                  onPress={() => {
-                    setMenuVisible(false);
-                    onSkipOccurrence();
-                  }}
-                >
-                  <Text style={[styles.menuItemText, { color: tc.text }]}>{skipOccurrenceLabel}</Text>
-                </AppPressable>
-              ) : null}
-              {onCancelTask && cancelTaskLabel ? (
-                <AppPressable
-                  style={styles.menuItem}
-                  accessibilityRole="button"
-                  accessibilityLabel={cancelTaskLabel}
-                  onPress={() => {
-                    setMenuVisible(false);
-                    onCancelTask();
-                  }}
-                >
-                  <Text style={[styles.menuItemText, { color: tc.danger }]}>{cancelTaskLabel}</Text>
-                </AppPressable>
-              ) : null}
-              <AppPressable
-                style={styles.menuItem}
-                accessibilityRole="button"
-                accessibilityLabel={t('common.delete')}
-                onPress={() => {
-                  setMenuVisible(false);
-                  onDelete();
-                }}
-              >
-                <Text style={[styles.menuItemText, { color: tc.danger }]}>{t('common.delete')}</Text>
-              </AppPressable>
+              <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
+                {taskId ? (['link', 'id'] as const).map((kind) => {
+                  const label = kind === 'link'
+                    ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
+                    : tFallback(t, 'task.copyTaskId', 'Copy task ID');
+                  return (
+                    <AppPressable
+                      key={kind}
+                      style={styles.menuItem}
+                      accessibilityRole="button"
+                      accessibilityLabel={label}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        void copyTaskReference(taskId, kind, t, showToast);
+                      }}
+                    >
+                      <Text style={[styles.menuItemText, { color: tc.text }]}>{label}</Text>
+                    </AppPressable>
+                  );
+                }) : null}
+                {!readOnly && <>
+                  <AppPressable
+                    style={styles.menuItem}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.share')}
+                    onPress={() => {
+                      setMenuVisible(false);
+                      onShare();
+                    }}
+                  >
+                    <Text style={[styles.menuItemText, { color: tc.text }]}>{t('common.share')}</Text>
+                  </AppPressable>
+                  <AppPressable
+                    style={styles.menuItem}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('taskEdit.duplicateTask')}
+                    onPress={() => {
+                      setMenuVisible(false);
+                      onDuplicate();
+                    }}
+                  >
+                    <Text style={[styles.menuItemText, { color: tc.text }]}>{t('taskEdit.duplicateTask')}</Text>
+                  </AppPressable>
+                  {onPromoteToProject && (
+                    <AppPressable
+                      style={styles.menuItem}
+                      accessibilityRole="button"
+                      accessibilityLabel={createProjectFromTaskLabel}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onPromoteToProject();
+                      }}
+                    >
+                      <Text style={[styles.menuItemText, { color: tc.text }]}>{createProjectFromTaskLabel}</Text>
+                    </AppPressable>
+                  )}
+                  {showConvertToAction && onConvertToAction && (
+                    <AppPressable
+                      style={styles.menuItem}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('reference.convertToAction')}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onConvertToAction();
+                      }}
+                    >
+                      <Text style={[styles.menuItemText, { color: tc.text }]}>{t('reference.convertToAction')}</Text>
+                    </AppPressable>
+                  )}
+                  {showConvertToSection && onConvertToSection && (
+                    <AppPressable
+                      style={styles.menuItem}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('task.convertToSection')}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onConvertToSection();
+                      }}
+                    >
+                      <Text style={[styles.menuItemText, { color: tc.text }]}>{t('task.convertToSection')}</Text>
+                    </AppPressable>
+                  )}
+                  {onSkipOccurrence ? (
+                    <AppPressable
+                      style={styles.menuItem}
+                      accessibilityRole="button"
+                      accessibilityLabel={skipOccurrenceLabel}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onSkipOccurrence();
+                      }}
+                    >
+                      <Text style={[styles.menuItemText, { color: tc.text }]}>{skipOccurrenceLabel}</Text>
+                    </AppPressable>
+                  ) : null}
+                  {onCancelTask && cancelTaskLabel ? (
+                    <AppPressable
+                      style={styles.menuItem}
+                      accessibilityRole="button"
+                      accessibilityLabel={cancelTaskLabel}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        onCancelTask();
+                      }}
+                    >
+                      <Text style={[styles.menuItemText, { color: tc.danger }]}>{cancelTaskLabel}</Text>
+                    </AppPressable>
+                  ) : null}
+                  <AppPressable
+                    style={styles.menuItem}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.delete')}
+                    onPress={() => {
+                      setMenuVisible(false);
+                      onDelete();
+                    }}
+                  >
+                    <Text style={[styles.menuItemText, { color: tc.danger }]}>{t('common.delete')}</Text>
+                  </AppPressable>
+                </>}
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -270,15 +299,20 @@ const styles = StyleSheet.create({
   },
   menuCard: {
     width: 220,
+    maxHeight: '82%',
     borderRadius: 12,
     borderWidth: 1,
     paddingVertical: 8,
     overflow: 'hidden',
   },
+  menuScroll: {
+    flexGrow: 0,
+  },
   menuItem: {
     minHeight: 44,
     justifyContent: 'center',
     paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   menuItemText: {
     fontSize: 14,

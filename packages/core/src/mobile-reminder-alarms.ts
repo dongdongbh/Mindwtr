@@ -37,6 +37,7 @@ import {
     type ReminderScheduleRequest,
 } from './schedule-utils';
 import { isTaskActionable } from './task-status';
+import { shouldSendTaskReminders } from './task-reminder-policy';
 import type { AppLanguage, NotificationSettings, Project, Task } from './types';
 
 export const REMINDER_ALARM_MAP_STORAGE_KEY = 'mindwtr:local:alarms:v1';
@@ -284,7 +285,7 @@ export function getActiveCancelReason(
     key: string,
     entry: ReminderAlarmEntry,
     requested: boolean,
-    context: { diagnostics: ReminderScheduleDiagnostics; tasks: Map<string, Task>; projects: Map<string, Project> },
+    context: { settings: NotificationSettings; diagnostics: ReminderScheduleDiagnostics; tasks: Map<string, Task>; projects: Map<string, Project> },
 ): ReminderAlarmCancelReason {
     if (key.startsWith('digest:')) return requested ? 'expired' : 'withdrawn';
     const { diagnostics } = context;
@@ -297,6 +298,7 @@ export function getActiveCancelReason(
             includeStartTime: diagnostics.includeStartTime,
             includeDueDate: diagnostics.includeDueDate,
             includeReviewAt: diagnostics.includeReviewAt,
+            taskReminderDefault: context.settings.taskReminderDefault,
         });
         return [plan.next, ...plan.repeats].some((intent) => intent?.key === key && intent.scheduledAt.getTime() === firedAtMs)
             ? 'expired'
@@ -341,6 +343,7 @@ export function planReminderAlarms(input: ReminderAlarmPlanInput): ReminderAlarm
     const oneShot = requests.filter((request) => !request.repeatInterval).map(toReminderAlarmRequest);
     const requested = new Set([...recurring, ...oneShot].map((request) => request.key));
     const context = {
+        settings: input.settings,
         diagnostics,
         tasks: new Map(input.tasks.map((task) => [task.id, task])),
         projects: new Map(input.projects.map((project) => [project.id, project])),
@@ -588,6 +591,7 @@ function getReminderSettingsSignature(settings: ReminderStoreSnapshot['settings'
         settings.notificationsEnabled,
         settings.startDateNotificationsEnabled,
         settings.dueDateNotificationsEnabled,
+        settings.taskReminderDefault,
         settings.weeklyReviewEnabled,
         settings.reviewAtNotificationsEnabled,
         settings.dailyDigestMorningEnabled,
@@ -637,13 +641,15 @@ export function isReminderOwnerGone(key: string, tasks: ReadonlyMap<string, Task
  * The Android alarm rows (`getScheduledAlarms`: id, scheduleType, local year/month/day/hour/
  * minute/second, data) that no cycle can cancel and nothing still wants, with why each goes.
  * A row whose id the alarm map holds, or a Pomodoro alarm, is never listed. Withdrawn: it
- * names a task or project that is gone, done or archived. Expired: it repeats (every digest
+ * names a task or project that is gone, done or archived, or a start/due reminder whose
+ * effective task policy is Skip. Expired: it repeats (every digest
  * is in the map), or its time is over 24 h past. A recent or future one-shot
- * of a live task stays: it may be a late or pending snooze.
+ * of a live task whose reminders remain enabled stays: it may be a late or pending snooze.
  */
 export function findStaleNativeReminderAlarms(input: {
     rows: unknown;
     trackedIds: ReadonlySet<number>;
+    settings?: NotificationSettings;
     tasks: Task[];
     projects: Project[];
     now: Date;
@@ -656,12 +662,16 @@ export function findStaleNativeReminderAlarms(input: {
         if (!row || typeof row !== 'object') continue;
         const id = Number(row.id);
         if (!Number.isSafeInteger(id) || id <= 0 || input.trackedIds.has(id) || isPomodoroNativeAlarm(row)) continue;
-        const key = readNativeAlarmData(row.data).alarmKey ?? '';
+        const data = readNativeAlarmData(row.data);
+        const key = data.alarmKey ?? '';
+        const task = key.startsWith('task:') ? tasks.get(key.slice('task:'.length).replace(/:r\d+$/, '')) : undefined;
+        const taskDateReminder = data.kind === 'task-start' || data.kind === 'task-due' || data.kind === 'task-reminder';
+        const remindersSkipped = taskDateReminder && task && !shouldSendTaskReminders(task, input.settings);
         const ownerGone = isReminderOwnerGone(key, tasks, projects);
         const fireAtMs = new Date(
             Number(row.year), Number(row.month) - 1, Number(row.day), Number(row.hour), Number(row.minute), Number(row.second),
         ).getTime();
-        if (ownerGone) stale.push({ id, reason: 'withdrawn' });
+        if (ownerGone || remindersSkipped) stale.push({ id, reason: 'withdrawn' });
         // A live snooze may be pending just after its fire time; Android can
         // deliver it late. Match the native 24 h grace before expiring it.
         else if (row.scheduleType === 'repeat' || fireAtMs < input.now.getTime() - 24 * 60 * 60 * 1000) {

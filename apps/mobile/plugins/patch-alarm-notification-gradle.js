@@ -1444,6 +1444,13 @@ API_AVAILABLE(ios(10.0)) {
     );
   }
 
+  // Dismiss silences this alert. The stock foreground option opens Mindwtr
+  // even though the action does not need UI; also upgrade already-patched sources.
+  next = next.replace(
+    /(actionWithIdentifier:@"DISMISS_ACTION"\s+title:@"[^"]*"\s+options:)UNNotificationActionOptionForeground/g,
+    '$1UNNotificationActionOptionNone'
+  );
+
   return next;
 };
 

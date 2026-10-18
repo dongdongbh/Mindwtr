@@ -182,7 +182,7 @@ mod tests {
             fs::write(
                 &executable,
                 format!(
-                    "#!{}\nprintf '%s\\0' \"$@\" > \"${{0%/*}}/argv.bin\"\n",
+                    "#!{}\n: > \"${{0%/*}}/argv.bin\"\nsleep 0.05\nprintf '%s\\0' \"$@\" > \"${{0%/*}}/argv.bin\"\n",
                     shell.display()
                 ),
             )
@@ -204,13 +204,15 @@ mod tests {
                 .unwrap()
                 .success());
             let output = dir.path().join("argv.bin");
+            let expected = [uri.as_bytes(), b"\0"].concat();
+            // Creation precedes the child's write; wait for complete argv bytes.
             for _ in 0..100 {
-                if output.exists() {
+                if fs::read(&output).is_ok_and(|bytes| bytes == expected) {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            assert_eq!(fs::read(output).unwrap(), [uri.as_bytes(), b"\0"].concat());
+            assert_eq!(fs::read(output).unwrap(), expected);
         }
     }
 }

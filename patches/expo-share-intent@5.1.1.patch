@@ -17,10 +17,27 @@ diff --git a/node_modules/expo-share-intent/.bun-tag-faed239bdb186319 b/.bun-tag
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cde77bc784 100644
+index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..6ca7fb8a2899b556d5f19fcfe6d0035d4bff9f92 100644
 --- a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-@@ -44,15 +44,26 @@ class ExpoShareIntentModule : Module() {
+@@ -18,7 +18,6 @@ import android.graphics.BitmapFactory
+ import android.media.MediaMetadataRetriever;
+ import android.net.Uri
+ import android.os.Build
+-import android.os.Environment
+ import android.os.Parcelable
+ import android.os.Bundle
+ import android.provider.DocumentsContract
+@@ -31,7 +30,7 @@ import expo.modules.kotlin.modules.Module
+ import expo.modules.kotlin.modules.ModuleDefinition
+ import java.io.File
+ import java.io.FileOutputStream
+-import java.util.Date
++import java.util.UUID
+ 
+ 
+ class ExpoShareIntentModule : Module() {
+@@ -44,15 +43,26 @@ class ExpoShareIntentModule : Module() {
      companion object {
          private var instance: ExpoShareIntentModule? = null
  
@@ -49,7 +66,7 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cd
          }
  
          @SuppressLint("Range")
-@@ -66,26 +77,49 @@ class ExpoShareIntentModule : Module() {
+@@ -66,28 +76,53 @@ class ExpoShareIntentModule : Module() {
                      "filePath" to instance?.getAbsolutePath(uri),
                  )
              }
@@ -107,11 +124,16 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cd
 -                mediaWidth = options.outWidth.toString()
              }
 -            if (mimeType.startsWith("video/")) {
++            // Mindwtr: one copy per shared file (each copy has a new name, so a second call would leave an orphan).
++            val filePath = instance?.getAbsolutePath(uri)
 +            if (mimeType.startsWith("video/")) try {
                  val retriever = MediaMetadataRetriever()
-                 retriever.setDataSource(instance?.getAbsolutePath(uri))
+-                retriever.setDataSource(instance?.getAbsolutePath(uri))
++                retriever.setDataSource(filePath)
                  mediaWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
-@@ -97,6 +131,8 @@ class ExpoShareIntentModule : Module() {
+                 mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt().toString() ?: null
+                 // Check orientation and flip size if required
+@@ -97,11 +132,13 @@ class ExpoShareIntentModule : Module() {
                      mediaHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt().toString() ?: null
                  }
                  mediaDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toInt().toString() ?: null
@@ -120,7 +142,39 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cd
              }
  
              return mapOf(
-@@ -129,7 +165,8 @@ class ExpoShareIntentModule : Module() {
+                     "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
++                    "filePath" to filePath,
+                     "fileName" to fileName,
+                     "fileSize" to fileSize,
+                     "mimeType" to mimeType,
+@@ -111,6 +148,25 @@ class ExpoShareIntentModule : Module() {
+             )
+         }
+ 
++        /**
++         * Mindwtr: a shared file must be another app's content URI. A file:// URI is a path inside this process, and a
++         * content URI of this app's own providers serves its private files: either lets a hostile share attach the app's
++         * own database ("Dirty Stream"). Refused URIs are dropped; with none left, the share fails as an empty one does.
++         */
++        fun isForeignContentUri(uri: Uri): Boolean {
++            if (!"content".equals(uri.scheme, ignoreCase = true)) return false
++            // ContentResolver opens content://0@<authority> as <authority> (the text after the last @ is the provider; the
++            // number is a user), so the check must look up the same name. A real cross-profile share carries 10@.
++            val authority = uri.authority?.substringAfterLast('@')?.takeIf { it.isNotEmpty() } ?: return false
++            val context = try { instance?.context } catch (e: Exception) { null } ?: return false
++            val owner = try {
++                context.packageManager.resolveContentProvider(authority, 0)?.packageName
++            } catch (e: Exception) {
++                return false
++            }
++            return owner != context.packageName
++        }
++
+         fun handleShareIntent(intent: Intent) {
+             val activity = instance?.currentActivity
+             if (activity != null && !activity.isTaskRoot) {
+@@ -129,7 +185,8 @@ class ExpoShareIntentModule : Module() {
                          "text" to intent.getStringExtra(Intent.EXTRA_TEXT),
                          "type" to "text",
                          "meta" to mapOf(
@@ -130,11 +184,13 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cd
                          )
                      ))
                  } else if (intent.action == Intent.ACTION_VIEW) {
-@@ -142,7 +179,10 @@ class ExpoShareIntentModule : Module() {
+@@ -141,14 +198,17 @@ class ExpoShareIntentModule : Module() {
+                 // files / medias
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
-                     if (uri != null) {
+-                    if (uri != null) {
 -                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
++                    if (uri != null && isForeignContentUri(uri)) {
 +                        // Upstream misplaces the closing paren: the "type" Pair lands INSIDE the
 +                        // files array, and expo-modules-core cannot convert a kotlin.Pair to a JS
 +                        // value, so single-file shares never reach JS at all (#1117).
@@ -142,7 +198,15 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cd
                      } else {
                          notifyError("empty uri for file sharing: " + intent.action)
                      }
-@@ -186,10 +226,17 @@ class ExpoShareIntentModule : Module() {
+                 } else if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+-                    val uris = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)
+-                    if (uris != null) {
++                    val uris = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)?.filter { isForeignContentUri(it) }
++                    if (!uris.isNullOrEmpty()) {
+                         notifyShareIntent(mapOf( "files" to uris.map { getFileInfo(it) }, "type" to "file"))
+                     } else {
+                         notifyError("empty uris array for file sharing: " + intent.action)
+@@ -186,10 +246,17 @@ class ExpoShareIntentModule : Module() {
                  handleShareIntent(ExpoShareIntentSingleton.intent!!);
                  ExpoShareIntentSingleton.intent = null
              }
@@ -160,7 +224,7 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cd
          }
  
          Function("hasShareIntent") { _: String ->
-@@ -200,6 +247,20 @@ class ExpoShareIntentModule : Module() {
+@@ -200,6 +267,20 @@ class ExpoShareIntentModule : Module() {
              handleShareIntent(it)
          }
  
@@ -181,6 +245,85 @@ index 0153c89c7e2ce4fa20351bc2d5e7b1c6cd341dbe..8cd5db2903ff751747cefd996a5de6cd
          OnCreate {
              instance = this@ExpoShareIntentModule
          }
+@@ -223,15 +304,9 @@ class ExpoShareIntentModule : Module() {
+             if (DocumentsContract.isDocumentUri(context, uri)) {
+                 // ExternalStorageProvider
+                 if (isExternalStorageDocument(uri)) {
+-                    val docId = DocumentsContract.getDocumentId(uri)
+-                    val split = docId.split(":".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
+-                    val type = split[0]
+-
+-                    return if ("primary".equals(type, ignoreCase = true)) {
+-                        Environment.getExternalStorageDirectory().toString() + "/" + split[1]
+-                    } else {
+-                        getDataColumn(uri, null, null)
+-                    }
++                    // Mindwtr: never a path built from the document id (the sender's text, as in primary:../..); the copy
++                    // goes through the provider, which checks the sender's grant.
++                    return getDataColumn(uri, null, null)
+                 } else if (isDownloadsDocument(uri)) {
+                     return try {
+                         val id = DocumentsContract.getDocumentId(uri)
+@@ -268,11 +343,23 @@ class ExpoShareIntentModule : Module() {
+             return uri.path
+         } catch (e: Exception) {
+             e.printStackTrace()
+-            notifyError("cannot retreive absoluteFilePath for $uri: ${e.message}")
++            // Mindwtr: no URI or exception text in the message (it reaches the diagnostics log and can name the file).
++            notifyError("cannot retrieve the shared file's path")
+             return null
+         }
+     }
+ 
++    /**
++     * Mindwtr: the cache copy of a shared file, under a generated name. The provider's display name is the sender's text
++     * (it can hold ../), so it stays a title only (getFileInfo's fileName); at most its short alphanumeric extension is kept,
++     * else the MIME type's.
++     */
++    private fun sharedCacheFile(displayName: String?, mimeType: String?): File {
++        val named = displayName?.substringAfterLast('.', "")?.takeIf { it.matches(Regex("[A-Za-z0-9]{1,8}")) }
++        val extension = named ?: MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
++        return File(context.cacheDir, "share-${UUID.randomUUID()}" + (extension?.let { ".$it" } ?: ""))
++    }
++
+     /**
+      * Get the value of the data column for this Uri. This is useful for
+      * MediaStore Uris, and other file-based ContentProviders.
+@@ -294,31 +381,17 @@ class ExpoShareIntentModule : Module() {
+             var cursor: Cursor? = null
+             val column = "_display_name"
+             val projection = arrayOf(column)
+-            var targetFile: File? = null
++            var displayName: String? = null
+             try {
+                 cursor = resolver.query(uri, projection, selection, selectionArgs, null)
+                 if (cursor != null && cursor.moveToFirst()) {
+                     val columnIndex = cursor.getColumnIndexOrThrow(column)
+-                    val fileName = cursor.getString(columnIndex)
+-                    Log.i("FileDirectory", "File name: $fileName")
+-                    targetFile = File(context.cacheDir, fileName)
++                    displayName = cursor.getString(columnIndex)
+                 }
+             } finally {
+                 cursor?.close()
+             }
+-
+-            if (targetFile == null) {
+-                val mimeType = resolver.getType(uri)
+-                val prefix = with(mimeType ?: "") {
+-                    when {
+-                        startsWith("image") -> "IMG"
+-                        startsWith("video") -> "VID"
+-                        else -> "FILE"
+-                    }
+-                }
+-                val type = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+-                targetFile = File(context.cacheDir, "${prefix}_${Date().time}.$type")
+-            }
++            val targetFile = sharedCacheFile(displayName, resolver.getType(uri))
+ 
+             resolver.openInputStream(uri)?.use { input ->
+                 FileOutputStream(targetFile).use { fileOut ->
 diff --git a/build/useShareIntent.js b/build/useShareIntent.js
 index 1ab12c4c9e429ef8adfdac61c096acc906063dcf..4562fc6fce078529698773ee85efbbd65f14db34 100644
 --- a/build/useShareIntent.js

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildMergeSummaryLog, listMergeConflictSamples, summarizeMergeStats } from './sync-log-utils';
 import type { EntityMergeStats, MergeConflictSample, MergeStats } from './sync-types';
+import { withQuickJsArgumentLimit } from './quickjs-test-utils';
 
 const entityStats = (overrides: Partial<EntityMergeStats> = {}): EntityMergeStats => ({
     localTotal: 0,
@@ -33,6 +34,12 @@ const mergeStats = (overrides: Partial<MergeStats> = {}): MergeStats => ({
 });
 
 describe('sync log utils', () => {
+    it('summarizes 65536 conflict ids, more than a QuickJS call takes arguments', () => {
+        const conflictIds = Array.from({ length: 65_536 }, (_, index) => `task-${index}`);
+        const summary = withQuickJsArgumentLimit(() => summarizeMergeStats(mergeStats({ tasks: entityStats({ conflictIds }) })));
+        expect(summary.conflictIds).toEqual(conflictIds);
+    });
+
     it('summarizes merge stats across all synced entity types', () => {
         const summary = summarizeMergeStats(mergeStats({
             tasks: entityStats({ conflicts: 1, conflictIds: ['task-1'], maxClockSkewMs: 1000, timestampAdjustments: 2 }),

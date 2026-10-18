@@ -415,6 +415,18 @@ describe('mobile attachment common: pre-passes', () => {
     expect(memory.calls.filter((call) => /^(readBytes|copy|sha256) /.test(call))).toEqual([]);
   });
 
+  it('never records a remote winner the merge took, but has not installed, as an own edit (bespoke prepare)', async () => {
+    const { common, memory } = setup();
+    const OLD = bytes(1, 2, 3);
+    // The merge took another device's content (its fileHash and contentRev; no recorded stat) and marked the bytes held here.
+    const item = attachment({ cloudKey: 'attachments/att-1.txt', fileHash: 'b'.repeat(64), contentRev: 2,
+      staleContentHash: (await computeSha256Hex(OLD))! });
+    memory.put(item.uri!, OLD);
+    const before = { ...item };
+    expect(await common.prepareBespokeAttachmentContentCandidate(item, item.uri!)).toBe(false);
+    expect(item).toEqual(before);
+  });
+
   it('invokes optional upload stat admission before copying an empty foreign source', async () => {
     const { common, memory } = setup();
     const uri = 'file:///data/files/provider-copy.txt';

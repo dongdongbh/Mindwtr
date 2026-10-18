@@ -107,7 +107,8 @@ export const createProjectToSectionActions = ({ set, get, debouncedSave, flushPe
         }
         if (!hasConvertedFootprint(get(), command)) return fail('conflict');
         logInfo('Project converted to section', { scope: 'store', category: 'storage',
-            context: { releaseCheck: 'v1.3.4/project-to-section', operation: 'convert',
+            context: { releaseCheck: command.source.before.isSequential
+                ? 'v1.3.7/sequential-project-to-section' : 'v1.3.4/project-to-section', operation: 'convert',
                 outcome: 'confirmed', count: command.tasks.length } });
         return { success: true, receipt: command,
             sectionId: command.sectionId, destinationProjectId: command.destinationProjectId };

@@ -18,6 +18,7 @@ import type { SyncBackend } from './sync-service-utils';
 import { logInfo, logWarn } from './app-log';
 import { areJsTimersPaused } from './js-timers';
 import { drainPendingCapturesInBackground } from './pending-capture-drain';
+import { reconcileLocalMobileNotificationsInBackground } from './notification-service-local';
 import { quiesceMobileStorage } from './storage-adapter';
 import { abortMobileSync, getMobileSyncConfigurationStatus, performMobileSync, setMobileSyncRequestDeadline } from './sync-service';
 import {
@@ -137,7 +138,11 @@ const backgroundSyncRunner = (): MobileBackgroundSyncRunner => {
     },
     sync: {
       getConfigurationStatus: () => getMobileSyncConfigurationStatus(),
-      performSync: () => performMobileSync(),
+      performSync: async () => {
+        const result = await performMobileSync();
+        if (result.success) await reconcileLocalMobileNotificationsInBackground('sync');
+        return result;
+      },
       abort: () => abortMobileSync('deadline'),
       setRequestDeadline: (at) => setMobileSyncRequestDeadline(at),
     },

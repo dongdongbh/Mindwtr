@@ -530,7 +530,7 @@ jobs:
 
       - name: Run Android native recovery and system bar tests
         working-directory: apps/mobile/android
-        run: ./gradlew :attachment-file-installer:testDebugUnitTest :sync-file-lock:testDebugUnitTest :android-widget:testDebugUnitTest :system-bars:testDebugUnitTest --no-daemon
+        run: ./gradlew :attachment-file-installer:testDebugUnitTest :sync-file-lock:testDebugUnitTest :sync-file-transition-cas:testDebugUnitTest :android-widget:testDebugUnitTest :system-bars:testDebugUnitTest --no-daemon
 
   android-client:
     if: needs.changes.outputs.android_client == 'true'
@@ -579,7 +579,7 @@ jobs:
 
       - name: Build Android Compose client
         working-directory: apps/android-native/android
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:assembleDebug :app:checkVariantIdentity --no-daemon
 
   ios-client:
     # shortcut: paused during native iOS migration; remove false && when migration is complete.

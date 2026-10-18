@@ -24,7 +24,7 @@ import { Attachment,
     stripMarkdown,
     resolveTaskSortByForFeatures,
     sortTasksBy,
-    splitCompletedTasks, tFallback, undoProjectDelete, useTaskStore, } from '@mindwtr/core';
+    splitCompletedTasks, tFallback, undoProjectDelete, updateProjectFromDraft, useTaskStore, } from '@mindwtr/core';
 import { useDndMonitor } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -48,7 +48,7 @@ import { cn } from '../../../lib/utils';
 import { reportError } from '../../../lib/report-error';
 import { showUndoToast } from '../../../lib/undo-registry';
 import { useMiddleMousePan } from './use-column-pan';
-import { useProjectAttachmentActions } from './useProjectAttachmentActions';
+import { appendProjectAttachments, useProjectAttachmentActions } from './useProjectAttachmentActions';
 import { useProjectSectionActions } from './useProjectSectionActions';
 import { useProjectWorkspaceStore } from './useProjectWorkspaceStore';
 import { ProjectDetailsHeader } from './ProjectDetailsHeader';
@@ -467,6 +467,8 @@ export function ProjectWorkspace({
     const [sectionNotesOpen, setSectionNotesOpen] = useState<Record<string, boolean>>({});
     const [archivedSectionCollapsed, setArchivedSectionCollapsed] = useState<Record<string, boolean>>({});
     const [tagDraft, setTagDraft] = useState('');
+    // The project the tag draft was last filled from: its save merges against it.
+    const tagDraftBaseRef = useRef<Project | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [editProjectTitle, setEditProjectTitle] = useState('');
     // Effective sort is read straight from the selected project so it persists
@@ -595,6 +597,7 @@ export function ProjectWorkspace({
     }, [isArchivedProject, selectedProject?.id, selectedProject?.title]);
 
     useEffect(() => {
+        tagDraftBaseRef.current = selectedProject ?? null;
         if (!selectedProject) {
             setTagDraft('');
             return;
@@ -1631,7 +1634,6 @@ export function ProjectWorkspace({
         t,
         selectedProject,
         readOnly: isArchivedProject,
-        updateProject,
     });
 
     const selectedProjectAreaLabel = (() => {
@@ -1826,7 +1828,12 @@ export function ProjectWorkspace({
                                         tagSuggestions={addTagOptions}
                                         onTagDraftChange={setTagDraft}
                                         onCommitTags={() => {
-                                            updateMutableSelectedProject({ tagIds: parseTagInput(tagDraft) });
+                                            // Merged by token onto the latest row against the project the draft was
+                                            // filled from: a tag another device added since stays.
+                                            const current = getMutableSelectedProject();
+                                            if (!current) return;
+                                            const base = tagDraftBaseRef.current?.id === current.id ? tagDraftBaseRef.current : current;
+                                            void updateProjectFromDraft(current.id, base, { tagIds: parseTagInput(tagDraft) });
                                         }}
                                         onNewArea={() => {
                                             const current = getMutableSelectedProject();
@@ -2064,9 +2071,7 @@ export function ProjectWorkspace({
                         createdAt: now,
                         updatedAt: now,
                     }));
-                    updateProject(current.id, {
-                        attachments: [...(current.attachments || []), ...attachments],
-                    });
+                    void appendProjectAttachments(current.id, attachments);
                     setShowLinkPrompt(false);
                 }}
             />

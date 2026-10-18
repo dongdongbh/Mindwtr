@@ -43,6 +43,7 @@ import {
   resolveProcessInboxPlan,
   resolveProcessInboxProjectSearchSubmit,
   resolveProcessInboxStep,
+  restoreTaskSnapshot,
   safeFormatDate,
   safeParseDate,
   selectProcessInboxProject,
@@ -52,6 +53,8 @@ import {
   tFallback,
   toggleProcessInboxToken,
   undoTaskCompletion,
+  saveTaskDraftOntoLatest,
+  runStoreCommand,
   resolveAutoTextDirection,
   useTaskStore,
   type AIProviderId,
@@ -247,6 +250,7 @@ export function useInboxProcessingController({
     () => getProcessInboxRemainingCandidates(processingSession, inboxTasks),
     [inboxTasks, processingSession],
   );
+  const processingBaseRef = useRef<Task | null>(null);
   const currentTask = useMemo(
     () => getProcessInboxCurrentCandidate(processingSession, inboxTasks),
     [inboxTasks, processingSession],
@@ -406,6 +410,9 @@ export function useInboxProcessingController({
   }, []);
 
   const primeTaskState = useCallback((task: Task | null | undefined) => {
+    // The task the draft is filled from: the base its save merges against. currentTask follows the live store, so a
+    // sync that lands before the decision would read as the draft's own change.
+    processingBaseRef.current = task ?? null;
     const defaults = getProcessInboxTaskDefaults(task);
     const { startTime, dueDate, reviewAt } = defaults.dates;
     dirtyScheduleFieldsRef.current.clear();
@@ -679,6 +686,15 @@ export function useInboxProcessingController({
       if (projectConversionInFlightRef.current) return false;
       projectConversionInFlightRef.current = true;
     }
+    // The draft is saved field by field onto the row as stored when the write is admitted (base: the task the draft
+    // was filled from), so a field, tag or context another device synced since stays. Attachments merge the same way,
+    // which appends the title's /link: attachments to the latest list. Fields nobody changed are written as before.
+    const base = processingBaseRef.current?.id === currentTask.id ? processingBaseRef.current : currentTask;
+    const updateTaskKeepingAttachments: typeof updateTask = (id, updates) => saveTaskDraftOntoLatest(id, base, updates, {
+      write: updateTask,
+      read: (taskId) => (taskId === base.id ? useTaskStore.getState()._tasksById?.get(taskId) : undefined),
+      keepUntouched: true,
+    });
     try {
       const result = await commitProcessInboxDecision(kind, {
         task: currentTask,
@@ -689,7 +705,7 @@ export function useInboxProcessingController({
         parseTitle: parseProcessingTitle,
         session: processingSession,
         candidates: inboxTasks,
-        actions: { updateTask, deleteTask, addTask, addProject },
+        actions: { updateTask: updateTaskKeepingAttachments, deleteTask, addTask, addProject },
         t,
       });
       if (!result.ok) {
@@ -764,16 +780,18 @@ export function useInboxProcessingController({
         );
         return;
       }
+      // Refused (STALE_REVISION) when another device changed the task since; the toast says so.
       const result = receipt.kind === 'discarded'
         ? await restoreTask(receipt.taskId)
-        : await updateTask(receipt.taskId, receipt.restoreUpdates);
+        : await restoreTaskSnapshot(receipt.taskId, receipt.restoreUpdates);
       if (isActionFailure(result)) {
         showProcessingError(getActionFailureMessage(result));
       }
     } catch (error) {
+      // undoTaskCompletion throws its STALE_REVISION refusal.
       showProcessingError(getUnknownErrorMessage(error));
     }
-  }, [restoreTask, showProcessingError, updateTask]);
+  }, [restoreTask, showProcessingError]);
 
   const handleSendDelegateRequest = useCallback(async () => {
     if (!currentTask) return;

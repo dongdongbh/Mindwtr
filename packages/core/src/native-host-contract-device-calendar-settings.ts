@@ -8,6 +8,7 @@ import { isSystemCalendarSettings, planDeviceCalendarSetting,
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { createNativeRequestReceipts, isNativeRequestReceiptDurable, NativeReceiptSqliteAdapter } from './native-request-receipts';
 import { getPersistenceStatus, getStorageAdapter } from './store';
+import { gateStoreCommands } from './store-write-gate';
 
 export type DeviceCalendarSettingStorage = {
     /** Exact setting and private mutation-marker cells from one checked snapshot. */
@@ -134,7 +135,8 @@ export function createDeviceCalendarSettingsMethods(deps: { readiness: () => Nat
             ? { ok: true, value: cells as [string | null, string | null] }
             : fail('INVALID_INPUT', 'Device calendar storage exceeds the cell bound');
     };
-    return {
+    // The bridge calls these outside the contract: each async method is a store command (store-write-gate.ts).
+    return gateStoreCommands({
         async prepareDeviceCalendarSetting(input: unknown): Promise<NativeHostResult<DeviceCalendarSettingPreparation>> {
             const request = requestOf(input);
             if (!request) return fail('INVALID_INPUT', 'A bounded device calendar request is required');
@@ -196,5 +198,5 @@ export function createDeviceCalendarSettingsMethods(deps: { readiness: () => Nat
             const admitted = ready(); if (!admitted.ok) return admitted;
             return saved(request) ?? fail('STALE_REVISION', 'Device calendar outcome is unknown; retry the original prepared request');
         },
-    };
+    });
 }

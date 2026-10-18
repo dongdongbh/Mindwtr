@@ -1,8 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTaskDraft, type Task } from '@mindwtr/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTaskDraft, useTaskStore, type Attachment, type Task } from '@mindwtr/core';
 
 import { useTaskItemSubmit } from './useTaskItemSubmit';
+import { holdSyncSave } from '../../test/hold-sync-save';
 
 const flushPendingSaveMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
@@ -21,10 +22,20 @@ const task: Task = {
     updatedAt: '2026-08-27T00:00:00.000Z',
 };
 
+const initialTaskState = useTaskStore.getState();
+/** The editor saves through the store: [stored] is the row it finds, [updateTask] the store write it reaches. */
+const seedStore = (stored: Task, updateTask = vi.fn().mockResolvedValue({ success: true })) => {
+    useTaskStore.setState({ _allTasks: [stored], updateTask });
+    return updateTask;
+};
+
 describe('useTaskItemSubmit attachment durability', () => {
     beforeEach(() => {
         flushPendingSaveMock.mockReset();
         flushPendingSaveMock.mockResolvedValue(undefined);
+    });
+    afterEach(() => {
+        useTaskStore.setState(initialTaskState, true);
     });
 
     it('keeps the editor and attachment files unsettled until persistence completes', async () => {
@@ -45,6 +56,7 @@ describe('useTaskItemSubmit attachment durability', () => {
         }];
         const draft = createTaskDraft(task);
         draft.title = 'Edited';
+        seedStore(task);
         const { result } = renderHook(() => useTaskItemSubmit({
             baselineTask: task,
             draft,
@@ -55,7 +67,6 @@ describe('useTaskItemSubmit attachment durability', () => {
             showToast: vi.fn(),
             t: (key) => key,
             task,
-            updateTask: vi.fn().mockResolvedValue({ success: true }),
             beginAttachmentSave: beginAttachmentSave.mockReturnValue(true),
             cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
             settlePersistedAttachmentSave,
@@ -85,6 +96,7 @@ describe('useTaskItemSubmit attachment durability', () => {
         const showToast = vi.fn();
         const draft = createTaskDraft(task);
         draft.title = 'Edited';
+        seedStore(task);
         const { result } = renderHook(() => useTaskItemSubmit({
             baselineTask: task,
             draft,
@@ -102,7 +114,6 @@ describe('useTaskItemSubmit attachment durability', () => {
             showToast,
             t: (key) => key,
             task,
-            updateTask: vi.fn().mockResolvedValue({ success: true }),
             beginAttachmentSave: vi.fn(() => true),
             cancelAttachmentSaveBeforeStoreUpdate,
             settlePersistedAttachmentSave,
@@ -132,7 +143,7 @@ describe('useTaskItemSubmit attachment durability', () => {
         };
         const draft = createTaskDraft(baselineTask);
         draft.title = 'Edited title';
-        const updateTask = vi.fn().mockResolvedValue({ success: true });
+        const updateTask = seedStore(liveTask);
         const { result } = renderHook(() => useTaskItemSubmit({
             baselineTask,
             draft,
@@ -143,7 +154,6 @@ describe('useTaskItemSubmit attachment durability', () => {
             showToast: vi.fn(),
             t: (key) => key,
             task: liveTask,
-            updateTask,
             beginAttachmentSave: vi.fn(() => false),
             cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
             settlePersistedAttachmentSave: vi.fn(),
@@ -154,6 +164,140 @@ describe('useTaskItemSubmit attachment durability', () => {
         });
 
         expect(updateTask).toHaveBeenCalledWith(task.id, { title: 'Edited title' });
+    });
+
+    it('keeps a relative start when the editor saves a new due date', async () => {
+        const offset = { amount: -3, unit: 'day' } as Task['relativeStartOffset'];
+        const opened: Task = { ...task, rev: 1, dueDate: '2026-10-20', startTime: '2026-10-17', relativeStartOffset: offset };
+        useTaskStore.setState({ _allTasks: [opened] });
+        const { result } = renderHook(() => useTaskItemSubmit({
+            baselineTask: opened,
+            // The editor moves the start with the due date, as its relative start says.
+            draft: createTaskDraft({ ...opened, dueDate: '2026-10-25', startTime: '2026-10-22' }),
+            editAttachments: undefined,
+            editingTaskId: task.id,
+            setEditingTaskId: vi.fn(),
+            setIsEditing: vi.fn(),
+            showToast: vi.fn(),
+            t: (key) => key,
+            task: opened,
+            beginAttachmentSave: vi.fn(() => false),
+            cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
+            settlePersistedAttachmentSave: vi.fn(),
+        }));
+        await act(async () => { await result.current(); });
+        expect(useTaskStore.getState()._tasksById.get(task.id)).toMatchObject({ dueDate: '2026-10-25', relativeStartOffset: offset });
+    });
+
+    describe('behind a sync save', () => {
+        const file = (id: string): Attachment => ({
+            id, kind: 'file', title: `${id}.pdf`, uri: `/data/attachments/${id}.pdf`,
+            createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+        });
+        const opened: Task = { ...task, rev: 1, attachments: [file('A')] };
+        const submitHook = (draftTask: Partial<Task>, editAttachments = opened.attachments, showToast = vi.fn()) => {
+            const draft = createTaskDraft({ ...opened, ...draftTask });
+            return renderHook((props: { draft: typeof draft }) => useTaskItemSubmit({
+                baselineTask: opened,
+                draft: props.draft,
+                editAttachments,
+                editingTaskId: task.id,
+                setEditingTaskId: vi.fn(),
+                setIsEditing: vi.fn(),
+                showToast,
+                t: (key) => key,
+                task: opened,
+                beginAttachmentSave: vi.fn(() => false),
+                cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
+                settlePersistedAttachmentSave: vi.fn(),
+            }), { initialProps: { draft } });
+        };
+        const submitBehind = async (submit: () => Promise<unknown>, published: Partial<Task>) => {
+            const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{ ...opened, rev: 3, ...published }] }));
+            let outcome: unknown;
+            await act(async () => {
+                const saving = submit();
+                await finish();
+                outcome = await saving;
+            });
+            return outcome;
+        };
+
+        it('merges the draft attachment onto the attachments a sync save published, keeping the synced sibling', async () => {
+            useTaskStore.setState({ _allTasks: [opened] });
+            const { result } = submitHook({}, [file('A'), file('D')]);
+            await submitBehind(() => result.current(), { attachments: [file('A'), file('B')] });
+            expect(useTaskStore.getState()._tasksById.get(task.id)?.attachments?.map((item) => item.id)).toEqual(['A', 'B', 'D']);
+        });
+
+        it('writes a field another device changed since the editor opened as the draft holds it, as before the gate', async () => {
+            useTaskStore.setState({ _allTasks: [opened] });
+            const { result } = submitHook({ title: 'Draft title' });
+            const outcome = await submitBehind(() => result.current(), { title: 'Remote title' });
+            expect(outcome).toMatchObject({ success: true });
+            expect(useTaskStore.getState()._tasksById.get(task.id)?.title).toBe('Draft title');
+        });
+
+        it('keeps the tombstone of an attachment another device deleted while the draft edited it', async () => {
+            useTaskStore.setState({ _allTasks: [opened] });
+            const { result } = submitHook({}, [{ ...file('A'), title: 'Renamed.pdf' }]);
+            await submitBehind(() => result.current(), { attachments: [{ ...file('A'), deletedAt: '2026-08-28T00:00:00.000Z' }] });
+            expect(useTaskStore.getState()._tasksById.get(task.id)?.attachments?.[0]?.deletedAt).toBe('2026-08-28T00:00:00.000Z');
+        });
+
+        it('writes only the fields the draft changed, merging tags onto the tags a sync save published', async () => {
+            useTaskStore.setState({ _allTasks: [{ ...opened, tags: ['#a'] }] });
+            const { result } = renderHook(() => useTaskItemSubmit({
+                baselineTask: { ...opened, tags: ['#a'] },
+                draft: createTaskDraft({ ...opened, title: 'Draft title', tags: ['#a', '#mine'] }),
+                editAttachments: opened.attachments,
+                editingTaskId: task.id,
+                setEditingTaskId: vi.fn(),
+                setIsEditing: vi.fn(),
+                showToast: vi.fn(),
+                t: (key) => key,
+                task: opened,
+                beginAttachmentSave: vi.fn(() => false),
+                cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
+                settlePersistedAttachmentSave: vi.fn(),
+            }));
+            await submitBehind(() => result.current(), { tags: ['#a', '#remote'], description: 'Remote note' });
+            expect(useTaskStore.getState()._tasksById.get(task.id)).toMatchObject({
+                title: 'Draft title', tags: ['#a', '#remote', '#mine'], description: 'Remote note',
+            });
+        });
+
+        it('keeps a reminder policy another device changed when the draft left it as opened', async () => {
+            const withPolicy: Task = { ...opened, reminderPolicy: 'send' };
+            useTaskStore.setState({ _allTasks: [withPolicy] });
+            const { result } = renderHook(() => useTaskItemSubmit({
+                baselineTask: withPolicy,
+                draft: createTaskDraft({ ...withPolicy, title: 'Draft title' }),
+                editAttachments: opened.attachments,
+                editingTaskId: task.id,
+                setEditingTaskId: vi.fn(),
+                setIsEditing: vi.fn(),
+                showToast: vi.fn(),
+                t: (key) => key,
+                task: withPolicy,
+                beginAttachmentSave: vi.fn(() => false),
+                cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
+                settlePersistedAttachmentSave: vi.fn(),
+            }));
+            await submitBehind(() => result.current(), { reminderPolicy: 'skip' });
+            expect(useTaskStore.getState()._tasksById.get(task.id)).toMatchObject({ title: 'Draft title', reminderPolicy: 'skip' });
+        });
+
+        it('takes its own earlier save as the base, so a second save merges its attachments against it', async () => {
+            useTaskStore.setState({ _allTasks: [opened] });
+            const { result, rerender } = submitHook({ title: 'First' });
+            await act(async () => { await result.current(undefined, { keepEditing: true }); });
+            rerender({ draft: createTaskDraft({ ...opened, title: 'Second' }) });
+            let outcome: unknown;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome).toMatchObject({ success: true });
+            expect(useTaskStore.getState()._tasksById.get(task.id)?.title).toBe('Second');
+        });
     });
 });
 

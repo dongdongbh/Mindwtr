@@ -17,6 +17,7 @@ describe('widget list destination', () => {
   beforeEach(resetFocusWidgetFilter);
   it('accepts exact Next and filter identifiers, not route or criteria payloads', () => {
     expect(normalizeWidgetListDestinationId('next')).toBe('next');
+    expect(normalizeWidgetListDestinationId('upcoming')).toBe('upcoming');
     expect(normalizeWidgetListDestinationId('filter:desk')).toBe('filter:desk');
     expect(normalizeWidgetListDestinationId('project:alpha')).toBe('project:alpha');
     for (const invalid of [undefined, ['next'], 'inbox', 'filter:', 'filter:  ', 'project:', 'project:  ', 'next/../settings', 'next?status=done', 'filter:a\u0000b', 'project:a\u0000b', 'x'.repeat(1025)]) {

@@ -329,10 +329,8 @@ const restoreTimestampAfter = (
     knownValues: unknown[],
     minimumGapMs = 0,
 ): string => {
-    const knownLatest = Math.max(
-        ...knownValues.map(timestampMs).filter((value): value is number => value !== undefined),
-        Number.NEGATIVE_INFINITY,
-    );
+    // A reduction, not Math.max(...values): QuickJS (native Android) refuses a call with more than 65535 arguments.
+    const knownLatest = knownValues.reduce<number>((latest, value) => Math.max(latest, timestampMs(value) ?? latest), Number.NEGATIVE_INFINITY);
     const restoreFloor = new Date(Math.max(
         Date.parse(restoredAt) - 1,
         knownLatest + minimumGapMs,
@@ -458,6 +456,8 @@ const prepareRestoredAttachmentsForSync = <T extends { attachments?: Attachment[
                 )),
             } : {}),
             ...(shouldPublishRestoredBytes ? { pendingContentUpload: true } : {}),
+            // Device-local state of another install: the restored bytes are this device's own content now.
+            staleContentHash: undefined,
             ...(attachment.deletedAt ? { deletedAt: restoredAt } : {}),
             updatedAt: restoredAt,
         };

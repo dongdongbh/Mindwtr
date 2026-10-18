@@ -7,6 +7,7 @@ import { TaskItem } from '../components/TaskItem';
 import { Area, Project, Section, Task, configureDateFormatting, safeFormatDate, useTaskStore } from '@mindwtr/core';
 import { LanguageProvider } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
+import { holdSyncSave } from '../test/hold-sync-save';
 
 const mockTask: Task = {
     id: '1',
@@ -2814,6 +2815,49 @@ describe('TaskItem', () => {
         );
 
         expect(secondRender.getByText('Checklist item')).toBeInTheDocument();
+    });
+
+    it('ticks a checklist item on the row a sync save published while the tick waited', async () => {
+        const task: Task = {
+            ...mockTask,
+            id: 'checklist-sync-task',
+            rev: 1,
+            checklist: [{ id: 'c1', title: 'One', isCompleted: false }],
+        };
+        act(() => useTaskStore.setState({ _allTasks: [task], tasks: [task] }));
+        const view = render(<LanguageProvider><TaskItem task={task} /></LanguageProvider>);
+        fireEvent.click(view.getByRole('button', { name: /toggle task details/i }));
+
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{
+            ...task,
+            rev: 3,
+            checklist: [{ id: 'c1', title: 'One', isCompleted: false }, { id: 'c2', title: 'Two', isCompleted: false }],
+        }] }));
+        fireEvent.click(view.getByRole('button', { name: 'One' }));
+        await act(finish);
+
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get(task.id)?.checklist?.map((item) => [item.id, item.isCompleted]))
+            .toEqual([['c1', true], ['c2', false]]));
+    });
+
+    it('sets the value the row showed, so a tick another device made while the tap waited is not undone', async () => {
+        const task: Task = {
+            ...mockTask,
+            id: 'checklist-set-task',
+            rev: 1,
+            checklist: [{ id: 'c1', title: 'One', isCompleted: false }],
+        };
+        act(() => useTaskStore.setState({ _allTasks: [task], tasks: [task] }));
+        const view = render(<LanguageProvider><TaskItem task={task} /></LanguageProvider>);
+        fireEvent.click(view.getByRole('button', { name: /toggle task details/i }));
+
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{
+            ...task, rev: 3, checklist: [{ id: 'c1', title: 'One', isCompleted: true }],
+        }] }));
+        fireEvent.click(view.getByRole('button', { name: 'One' }));
+        await act(finish);
+
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get(task.id)?.checklist?.[0]?.isCompleted).toBe(true));
     });
 
     it('does not rerender for unrelated project updates while not editing', () => {

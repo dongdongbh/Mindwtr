@@ -1,8 +1,8 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import type { Task } from '@mindwtr/core';
-import { Pressable, ScrollView } from 'react-native';
+import { runStoreCommand, runSyncStoreSave, type Task } from '@mindwtr/core';
+import { Pressable, ScrollView, TouchableOpacity } from 'react-native';
 import { ContextsView } from './contexts-view';
 
 const now = '2026-06-11T00:00:00.000Z';
@@ -19,6 +19,7 @@ const makeTask = (id: string, title: string): Task => ({
 
 const storeState = vi.hoisted(() => ({
   tasks: [] as Task[],
+  _tasksById: new Map<string, Task>(),
   projects: [],
   settings: { appearance: {}, taskSortBy: 'default' },
   updateTask: vi.fn(async () => undefined),
@@ -26,7 +27,7 @@ const storeState = vi.hoisted(() => ({
   restoreTask: vi.fn(async () => undefined),
   batchMoveTasks: vi.fn(async () => undefined),
   batchDeleteTasks: vi.fn(async () => undefined),
-  batchUpdateTasks: vi.fn(async () => undefined),
+  batchUpdateTasks: vi.fn(async (_updates: { id: string; updates: Partial<Task> }[]): Promise<unknown> => undefined),
 }));
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
@@ -34,7 +35,10 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   return {
     ...actual,
     shallow: Object.is,
-    useTaskStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
+    useTaskStore: Object.assign(
+      (selector: (state: typeof storeState) => unknown) => selector(storeState),
+      { getState: () => storeState },
+    ),
   };
 });
 
@@ -195,6 +199,45 @@ describe('ContextsView', () => {
     await act(async () => { none.props.onPress(); });
     expect(titles()).toEqual(['Untagged']);
     expect(tree.root.findAllByType(Pressable).filter((node) => node.props.accessibilityRole === 'radio')).toHaveLength(0);
+  });
+
+  it('adds a tag to the row a sync save published while the bulk write waited behind it', async () => {
+    const setTasks = (tasks: Task[]) => {
+      storeState.tasks = tasks;
+      storeState._tasksById = new Map(tasks.map((task) => [task.id, task]));
+    };
+    const original = storeState.batchUpdateTasks;
+    // batchUpdateTasks as the store runs it: a command behind the write gate (store-write-gate.ts).
+    storeState.batchUpdateTasks = vi.fn((updates) => runStoreCommand(async () => {
+      const byId = new Map(updates.map((entry) => [entry.id, entry.updates]));
+      setTasks(storeState.tasks.map((task) => ({ ...task, ...byId.get(task.id) })));
+      return { success: true };
+    }));
+    setTasks([{ ...makeTask('task-1', 'First'), tags: ['#old'] }]);
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView />); });
+      const row = tree.root.find((node) => (node.type as unknown) === 'SwipeableTaskItem');
+      await act(async () => { row.props.actions.toggleSelect(row.props.task); });
+      const addTag = tree.root.findAllByType(TouchableOpacity).find((node) => node.findAllByProps({ children: 'bulk.addTag' }).length > 0)!;
+      await act(async () => { addTag.props.onPress(); });
+
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      // Another device's tag: the sync save holds the gate, then publishes it.
+      const save = runSyncStoreSave(async () => {
+        await held;
+        setTasks([{ ...storeState.tasks[0], rev: 3, tags: ['#old', '#remote'] }]);
+      });
+      act(() => { tree.root.find((node) => (node.type as unknown) === 'TokenPickerModal').props.onConfirm(['#new']); });
+      release();
+      await act(async () => { await save; await runStoreCommand(async () => undefined); });
+
+      expect(storeState.tasks[0].tags).toEqual(['#new', '#old', '#remote']);
+    } finally {
+      storeState.batchUpdateTasks = original;
+      setTasks([]);
+    }
   });
 
   // Rows carry the #766 memo boundary, which only holds while the screen hands

@@ -5,6 +5,9 @@ import {
     taskToSqliteRow,
 } from './sqlite-adapter';
 import { normalizeTaskForSyncMerge } from './sync-normalization';
+import { mergeAppDataWithStats } from './sync';
+import { mockAppData } from './sync-test-utils';
+import { shouldSendTaskReminders } from './task-reminder-policy';
 import { normalizeTaskForContentComparison, TASK_CONTENT_COMPARISON_EXCLUDED_KEYS } from './sync-signatures';
 import {
     TASK_SYNC_FIELD_SCHEMA,
@@ -73,6 +76,67 @@ describe('Task sync schema contract', () => {
 
         const mapped = mapSqliteTaskRow(rowRecord);
         expect(Object.keys(mapped).sort()).toEqual(sorted(fieldNames));
+    });
+
+    it.each(['inherit', 'send', 'skip'] as const)('round-trips %s reminder policy through SQLite and a sync document', (reminderPolicy) => {
+        const task = { ...TASK_SYNC_SCHEMA_FIXTURE, deletedAt: undefined, purgedAt: undefined, reminderPolicy };
+        const values = taskToSqliteRow(task);
+        const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, values[index]]));
+        const reloaded = mapSqliteTaskRow(row);
+        expect(reloaded.reminderPolicy).toBe(reminderPolicy);
+        const normalized = normalizeTaskForSyncMerge(reloaded, task.updatedAt);
+        expect(normalizeTaskForSyncMerge(normalized, task.updatedAt)).toEqual(normalized);
+        expect(normalizeTaskForContentComparison(reloaded).reminderPolicy).toBe(reminderPolicy);
+        const aligned = mockAppData([reloaded]);
+        const first = mergeAppDataWithStats(aligned, JSON.parse(JSON.stringify(aligned)), { nowIso: task.updatedAt });
+        expect(first.stats.tasks.conflicts).toBe(0);
+        expect(first.data.tasks[0].reminderPolicy).toBe(reminderPolicy);
+        const second = mergeAppDataWithStats(first.data, first.data, { nowIso: task.updatedAt });
+        expect(second.stats.tasks.conflicts).toBe(0);
+        expect(second.data).toEqual(first.data);
+    });
+
+    it.each([true, false])('keeps absent legacy policy explicit after SQLite and older-client sync (skip=%s)', (suppressMindwtrReminders) => {
+        const task = { ...TASK_SYNC_SCHEMA_FIXTURE, deletedAt: undefined, purgedAt: undefined, reminderPolicy: undefined, suppressMindwtrReminders };
+        const values = taskToSqliteRow(task);
+        const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, values[index]]));
+        expect(row.reminderPolicy).toBeNull();
+        const reloaded = mapSqliteTaskRow(row);
+        expect(reloaded.reminderPolicy).toBeUndefined();
+        expect(shouldSendTaskReminders(reloaded, { taskReminderDefault: 'skip' })).toBe(!suppressMindwtrReminders);
+        const aligned = mockAppData([reloaded]);
+        const merged = mergeAppDataWithStats(aligned, JSON.parse(JSON.stringify(aligned)), { nowIso: task.updatedAt });
+        expect(merged.stats.tasks.conflicts).toBe(0);
+        expect(merged.data.tasks[0].reminderPolicy).toBeUndefined();
+        expect(shouldSendTaskReminders(merged.data.tasks[0], { taskReminderDefault: 'skip' })).toBe(!suppressMindwtrReminders);
+    });
+
+    it('retains a newer policy when merging with an older client that omits the field', () => {
+        const current = { ...TASK_SYNC_SCHEMA_FIXTURE, deletedAt: undefined, purgedAt: undefined, reminderPolicy: 'inherit' as const, rev: 2 };
+        const legacy = { ...current, reminderPolicy: undefined, rev: 1 };
+        const forward = mergeAppDataWithStats(mockAppData([current]), mockAppData([legacy]), { nowIso: current.updatedAt });
+        const reverse = mergeAppDataWithStats(mockAppData([legacy]), mockAppData([current]), { nowIso: current.updatedAt });
+        expect(forward.data.tasks[0].reminderPolicy).toBe('inherit');
+        expect(reverse.data).toEqual(forward.data);
+        const second = mergeAppDataWithStats(forward.data, forward.data, { nowIso: current.updatedAt });
+        expect(second.stats.tasks.conflicts).toBe(0);
+        expect(second.data).toEqual(forward.data);
+    });
+
+    it('drops malformed reminder policy without converting old data to inherit', () => {
+        const malformed = { ...TASK_SYNC_SCHEMA_FIXTURE, reminderPolicy: 'sometimes' } as unknown as Task;
+        const normalized = normalizeTaskForSyncMerge(malformed, malformed.updatedAt);
+        expect(normalized.reminderPolicy).toBeUndefined();
+        expect(normalizeTaskForContentComparison(malformed).reminderPolicy).toBeUndefined();
+        const values = taskToSqliteRow(malformed);
+        expect(values[TASK_SQLITE_COLUMNS.indexOf('reminderPolicy')]).toBeNull();
+        expect(mapSqliteTaskRow({ id: 'old', title: 'Legacy', status: 'next', reminderPolicy: 'sometimes' }).reminderPolicy).toBeUndefined();
+        expect(normalizeTaskForSyncMerge(normalized, malformed.updatedAt)).toEqual(normalized);
+    });
+
+    it('records reminderPolicy as requiring CloudKit production deployment', () => {
+        expect(cloudKitProductionSchema.records.MindwtrTask.pendingProduction).toContain('reminderPolicy');
+        expect(cloudKitProductionSchema.records.MindwtrTask.deployed).not.toContain('reminderPolicy');
     });
 
     it('records the new CloudKit task key as deployed to production', () => {

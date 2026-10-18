@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+    batchUpdateTasksFromLatest,
+    buildBulkOrganizeTaskUpdate,
     buildBulkOrganizeTaskUpdates,
     buildBulkTaskTokenUpdates,
     buildTaskMovePatch,
@@ -301,9 +303,13 @@ export function useTaskSelection(
         }
         const updates = buildBulkOrganizeTaskUpdates(selectedIdsArray, tasksById, input);
         if (updates.length === 0) return Promise.resolve(false);
+        // Merge tags/contexts into each task's latest row, so a token a sync save added meanwhile is kept.
         return runSelectedTaskAction(
             'organize',
-            () => batchUpdateTasks(updates),
+            (taskIds) => batchUpdateTasksFromLatest(taskIds, (task) => {
+                const latest = buildBulkOrganizeTaskUpdate(task, input);
+                return Object.keys(latest).length > 0 ? latest : null;
+            }),
             options,
         );
     }, [batchUpdateTasks, runSelectedTaskAction, selectedIdsArray, tasksById]);
@@ -326,8 +332,16 @@ export function useTaskSelection(
             options?.afterNoop?.();
             return Promise.resolve(false);
         }
-        return updateSelectedTasks(updates, options);
-    }, [selectedIdsArray, tasksById, updateSelectedTasks]);
+        if (!batchUpdateTasks) return Promise.resolve(false);
+        // Add or remove the token on each task's latest row, so a token a sync save added meanwhile is kept.
+        return runSelectedTaskAction(
+            'update',
+            (taskIds) => batchUpdateTasksFromLatest(taskIds, (task) => (
+                buildBulkTaskTokenUpdates([task.id], new Map([[task.id, task]]), field, value, action)[0]?.updates ?? null
+            )),
+            options,
+        );
+    }, [batchUpdateTasks, runSelectedTaskAction, selectedIdsArray, tasksById]);
 
     return {
         activeAction,

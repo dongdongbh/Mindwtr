@@ -559,6 +559,16 @@ export function getTaskDeferUntil(
         : null);
 }
 
+/** Original date-only or datetime value, without adding a time or changing its timezone. */
+export function getTaskDeferUntilSource(
+    task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
+): string | null {
+    const date = getTaskDeferUntil(task);
+    if (!date) return null;
+    return [task.startTime, task.dueDate, task.reviewAt]
+        .find((value) => safeParseDate(value)?.getTime() === date.getTime()) ?? null;
+}
+
 export function isTaskFutureStart(
     task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
     now: Date = new Date(),

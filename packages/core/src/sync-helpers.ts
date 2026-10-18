@@ -1,4 +1,5 @@
 import type { AppData, Attachment } from './types';
+import { mapPass, runToEnd, SLICE_ITEMS, type CooperativePass } from './cooperative';
 import { keepSavedFilters } from './saved-filters';
 import { getGtdSyncSnapshot, isSettingsSyncGroupEnabled } from './settings-options';
 import { normalizeRevision } from './sync-revision';
@@ -133,12 +134,13 @@ export const findPendingAttachmentUploads = (data: AppData): PendingAttachmentUp
 
     for (const task of data.tasks) {
         if (task.deletedAt) continue;
-        pending.push(...collectPendingUploads('task', task.id, task.attachments));
+        // One push per upload: QuickJS (native Android) refuses a call with more than 65535 arguments.
+        for (const upload of collectPendingUploads('task', task.id, task.attachments)) pending.push(upload);
     }
 
     for (const project of data.projects) {
         if (project.deletedAt) continue;
-        pending.push(...collectPendingUploads('project', project.id, project.attachments));
+        for (const upload of collectPendingUploads('project', project.id, project.attachments)) pending.push(upload);
     }
 
     return pending;
@@ -229,6 +231,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
     if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {
         const gtdSnapshot = getGtdSyncSnapshot(settings);
         next.gtd = gtdSnapshot.gtd;
+        next.taskReminderDefault = gtdSnapshot.taskReminderDefault;
         next.quickAddAutoClean = gtdSnapshot.quickAddAutoClean;
         next.markdownEditorAssist = gtdSnapshot.markdownEditorAssist;
         next.features = gtdSnapshot.features;
@@ -267,7 +270,10 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
     return next;
 };
 
-export const sanitizeAppDataForRemote = (data: AppData): AppData => {
+export const sanitizeAppDataForRemote = (data: AppData): AppData => runToEnd(sanitizeAppDataForRemotePass(data));
+
+/** {@link sanitizeAppDataForRemote} as a cooperative pass (cooperative.ts): it only reads [data] and returns new objects. */
+export function* sanitizeAppDataForRemotePass(data: AppData): CooperativePass<AppData> {
     const hasNonEmptyValue = (value: unknown): boolean => (
         typeof value === 'string' && value.trim().length > 0
     );
@@ -290,6 +296,7 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
                         contentMtimeMs: undefined,
                         contentSize: undefined,
                         pendingContentUpload: undefined,
+                        staleContentHash: undefined,
                     };
                 }
             }
@@ -306,19 +313,20 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
                 contentMtimeMs: undefined,
                 contentSize: undefined,
                 pendingContentUpload: undefined,
+                staleContentHash: undefined,
             };
         });
     };
 
     return {
         ...data,
-        tasks: data.tasks.map((task) => task.purgedAt
+        tasks: yield* mapPass(data.tasks, (task) => task.purgedAt
             ? compactPurgedTaskTombstone(task)
             : {
                 ...task,
                 attachments: sanitizeAttachments(task.attachments, Boolean(task.deletedAt)),
             }),
-        projects: data.projects.map((project) => project.purgedAt
+        projects: yield* mapPass(data.projects, (project) => project.purgedAt
             ? compactPurgedProjectTombstone(project)
             : {
                 ...project,
@@ -327,7 +335,7 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
         sections: compactSectionsForPurgedProjects(data.sections, data.projects),
         settings: sanitizeSettingsForRemote(data.settings),
     };
-};
+}
 
 const isIdKeyed = (item: unknown): item is { id: string } => (
     !!item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string'
@@ -367,13 +375,16 @@ const getSortedSyncProperties = (value: object, orders: SyncPropertyOrder[]): st
 // though this comparison can no longer see the position change directly. A
 // hypothetical path that reordered checklist items without touching the
 // owning task would NOT sync — nothing here would notice.
+const sortIdKeyed = (items: unknown[]): unknown[] => {
+    if (items.length > 1 && items.every(isIdKeyed)) {
+        items.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    }
+    return items;
+};
+
 const normalizeForSyncComparison = (value: unknown, orders: SyncPropertyOrder[] = []): unknown => {
     if (Array.isArray(value)) {
-        const items = value.map((item) => normalizeForSyncComparison(item, orders));
-        if (items.length > 1 && items.every(isIdKeyed)) {
-            items.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
-        }
-        return items;
+        return sortIdKeyed(value.map((item) => normalizeForSyncComparison(item, orders)));
     }
     if (value && typeof value === 'object') {
         const record = value as Record<string, unknown>;
@@ -392,7 +403,26 @@ export const areSyncPayloadsEqual = (left: AppData, right: AppData): boolean =>
 export const toStableSyncJson = (value: unknown): string =>
     JSON.stringify(normalizeForSyncComparison(value));
 
-const hashStableSyncJson = (value: string): string => {
+/**
+ * {@link toStableSyncJson} as a cooperative pass (cooperative.ts): the same JSON, with a yield point every few records of a
+ * top-level list (a sync document's tasks). It only reads [value].
+ */
+export function* toStableSyncJsonPass(value: unknown): CooperativePass<string> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return toStableSyncJson(value);
+    const orders: SyncPropertyOrder[] = [];
+    const record = value as Record<string, unknown>;
+    const normalized: Record<string, unknown> = {};
+    for (const key of getSortedSyncProperties(record, orders)) {
+        const field = record[key];
+        normalized[key] = Array.isArray(field)
+            ? sortIdKeyed(yield* mapPass(field, (item) => normalizeForSyncComparison(item, orders)))
+            : normalizeForSyncComparison(field, orders);
+        yield;
+    }
+    return JSON.stringify(normalized);
+}
+
+function* hashStableSyncJsonPass(value: string): CooperativePass<string> {
     let left = 0x811c9dc5;
     let right = 0x9e3779b9;
     for (let index = 0; index < value.length; index += 1) {
@@ -402,12 +432,18 @@ const hashStableSyncJson = (value: string): string => {
         right ^= code + index;
         right = Math.imul(right, 0x85ebca6b);
         right ^= right >>> 13;
+        if ((index & 0xffff) === 0xffff) yield;
     }
     return `${(left >>> 0).toString(16).padStart(8, '0')}${(right >>> 0).toString(16).padStart(8, '0')}`;
-};
+}
+
+/** The fingerprint of stable JSON already made by {@link toStableSyncJson}, as a cooperative pass over its characters. */
+export function* fingerprintStableSyncJsonPass(json: string): CooperativePass<string> {
+    return `stable-v2:${json.length}:${yield* hashStableSyncJsonPass(json)}`;
+}
 
 /** The fingerprint of stable JSON already made by {@link toStableSyncJson}. */
-export const fingerprintStableSyncJson = (json: string): string => `stable-v2:${json.length}:${hashStableSyncJson(json)}`;
+export const fingerprintStableSyncJson = (json: string): string => runToEnd(fingerprintStableSyncJsonPass(json));
 
 export const computeStableValueFingerprint = (value: unknown): string => fingerprintStableSyncJson(toStableSyncJson(value));
 
@@ -525,14 +561,17 @@ type RevisionedEntity = {
     purgedAt?: string;
 };
 
-const appendEntityRevisions = (parts: string[], entities: readonly RevisionedEntity[] | undefined): void => {
+function* appendEntityRevisions(parts: string[], entities: readonly RevisionedEntity[] | undefined): CooperativePass<void> {
     parts.push(String(entities?.length ?? 0));
+    let count = 0;
     for (const entity of entities ?? []) {
         parts.push(
             `${entity.id}|${normalizeRevision(entity.rev)}|${entity.revBy ?? ''}|${entity.updatedAt ?? ''}|${entity.deletedAt ?? ''}|${entity.purgedAt ?? ''}`
         );
+        count += 1;
+        if (count % SLICE_ITEMS === 0) yield;
     }
-};
+}
 
 /**
  * Cheap "did anything sync-worthy change since last time" fingerprint.
@@ -547,17 +586,20 @@ const appendEntityRevisions = (parts: string[], entities: readonly RevisionedEnt
  * fingerprint when the bytes themselves matter (remote comparison); use this
  * one when the only question is whether to schedule work.
  */
-export const computeSyncChangeFingerprint = (data: AppData): string => {
+export const computeSyncChangeFingerprint = (data: AppData): string => runToEnd(computeSyncChangeFingerprintPass(data));
+
+/** {@link computeSyncChangeFingerprint} as a cooperative pass (cooperative.ts): it only reads [data]. */
+export function* computeSyncChangeFingerprintPass(data: AppData): CooperativePass<string> {
     const parts: string[] = [];
-    appendEntityRevisions(parts, data.tasks);
-    appendEntityRevisions(parts, data.projects);
-    appendEntityRevisions(parts, data.sections);
-    appendEntityRevisions(parts, data.areas);
-    appendEntityRevisions(parts, data.people);
+    yield* appendEntityRevisions(parts, data.tasks);
+    yield* appendEntityRevisions(parts, data.projects);
+    yield* appendEntityRevisions(parts, data.sections);
+    yield* appendEntityRevisions(parts, data.areas);
+    yield* appendEntityRevisions(parts, data.people);
     parts.push(computeStableValueFingerprint(sanitizeSettingsForRemote(data.settings ?? {})));
     const digest = parts.join('\n');
-    return `change-v1:${digest.length}:${hashStableSyncJson(digest)}`;
-};
+    return `change-v1:${digest.length}:${yield* hashStableSyncJsonPass(digest)}`;
+}
 
 type ExternalCalendarProvider = {
     load: () => Promise<AppData['settings']['externalCalendars'] | undefined>;

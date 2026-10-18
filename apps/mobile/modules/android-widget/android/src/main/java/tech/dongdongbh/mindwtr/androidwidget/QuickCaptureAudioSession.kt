@@ -3,11 +3,11 @@ package tech.dongdongbh.mindwtr.androidwidget
 /**
  * Retained state machine for one quick-capture dialog. Android recreation may
  * replace the Activity, but it must not replace the in-flight recorder/draft,
- * typed prefix, or publication retry state.
+ * typed title/description, or publication retry state.
  */
 internal class QuickCaptureAudioSession(
   private val startRecorder: ((QuickCaptureAudioRecorder.Outcome) -> Unit) -> RecordingControl,
-  private val publishAudio: (QuickCaptureAudioDraft, String, (Boolean) -> Unit) -> Unit,
+  private val publishAudio: (QuickCaptureAudioDraft, String, String, (Boolean) -> Unit) -> Unit,
   private val discardAudio: (QuickCaptureAudioDraft) -> Unit,
   private val onTerminal: () -> Unit = {},
 ) {
@@ -24,6 +24,7 @@ internal class QuickCaptureAudioSession(
     val state: State,
     val status: Status,
     val title: String,
+    val note: String,
     val hasDraft: Boolean,
   ) {
     val canSaveText: Boolean get() = state == State.IDLE && title.isNotBlank()
@@ -33,6 +34,7 @@ internal class QuickCaptureAudioSession(
   private var state = State.IDLE
   private var status = Status.RECORD
   private var title = ""
+  private var note = ""
   private var recorder: RecordingControl? = null
   private var draft: QuickCaptureAudioDraft? = null
   private var saveWhenReady = false
@@ -45,7 +47,7 @@ internal class QuickCaptureAudioSession(
   private var observerToken: Any? = null
   private var observer: ((Snapshot) -> Unit)? = null
 
-  val snapshot: Snapshot get() = Snapshot(state, status, title, draft != null)
+  val snapshot: Snapshot get() = Snapshot(state, status, title, note, draft != null)
 
   val activeIds: Set<String>
     get() = listOfNotNull(recorder?.id, draft?.id).toSet()
@@ -70,6 +72,11 @@ internal class QuickCaptureAudioSession(
 
   fun updateTitle(nextTitle: String) {
     title = nextTitle
+    notifyChanged()
+  }
+
+  fun updateNote(nextNote: String) {
+    note = nextNote
     notifyChanged()
   }
 
@@ -147,7 +154,7 @@ internal class QuickCaptureAudioSession(
     status = Status.READY
     notifyChanged()
     try {
-      publishAudio(ready, title, ::onPublicationFinished)
+      publishAudio(ready, title, note, ::onPublicationFinished)
     } catch (_: Exception) {
       onPublicationFinished(false)
     }
@@ -164,6 +171,7 @@ internal class QuickCaptureAudioSession(
   fun completeTextCapture() {
     if (state != State.IDLE) return
     title = ""
+    note = ""
     state = State.CLOSED
     onTerminal()
     notifyChanged()
@@ -184,7 +192,7 @@ internal class QuickCaptureAudioSession(
 
     discardRequested = true
     saveWhenReady = false
-    keepTextAfterCancel = title.isNotBlank()
+    keepTextAfterCancel = title.isNotBlank() || note.isNotBlank()
     if (readyDraft != null) {
       draft = null
       discardAudio(readyDraft)

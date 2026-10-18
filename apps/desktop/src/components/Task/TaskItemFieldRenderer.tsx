@@ -14,14 +14,15 @@ import {
     getProjectedRecurringTaskCalendarDate,
     getRecurrenceCompletedOccurrencesValue,
     getTaskDateCoherenceIssues,
+    getTaskEditorReminders,
     hasTimeComponent,
     isMarkdownEditorAssistEnabled,
     parseRRuleString,
-    REPEAT_REMINDER_INTERVAL_OPTIONS,
     resolveAutoTextDirection,
     safeFormatDate,
     safeParseDate,
     tFallback,
+    updateTaskFromLatest,
     useTaskStore,
     type Attachment,
     type MarkdownSelection,
@@ -146,7 +147,6 @@ export type TaskEditorActions = {
     openCustomRecurrence: () => void;
     createAssignedToPerson: (name: string) => void | Promise<void>;
     requestBackdatedComplete?: () => void;
-    updateTask: (taskId: string, updates: Partial<Task>) => void;
     resetTaskChecklist: (taskId: string) => void;
 };
 
@@ -208,7 +208,6 @@ export function TaskItemFieldRenderer({
         openCustomRecurrence,
         createAssignedToPerson,
         requestBackdatedComplete,
-        updateTask,
         resetTaskChecklist,
     } = actions;
     const taskId = task.id;
@@ -224,7 +223,6 @@ export function TaskItemFieldRenderer({
         dueDate: editDueDate,
         reviewAt: editReviewAt,
         repeatReminderMinutes: editRepeatReminderMinutes,
-        suppressMindwtrReminders: editSuppressMindwtrReminders,
         status: editStatus,
         priority: editPriority,
         energyLevel: editEnergyLevel,
@@ -245,7 +243,6 @@ export function TaskItemFieldRenderer({
     const setEditDueDate = (value: string) => setField('dueDate', value);
     const setEditReviewAt = (value: string) => setField('reviewAt', value);
     const setEditRepeatReminderMinutes = (value: number | undefined) => setField('repeatReminderMinutes', value);
-    const setEditSuppressMindwtrReminders = (value: boolean) => setField('suppressMindwtrReminders', value);
     const setEditStatus = (value: TaskStatus) => setField('status', value);
     const setEditPriority = (value: TaskPriority | '') => setField('priority', value);
     const setEditEnergyLevel = (value: NonNullable<TaskEnergyLevel> | '') => setField('energyLevel', value);
@@ -261,6 +258,8 @@ export function TaskItemFieldRenderer({
     const setEditLocation = (value: string) => setField('location', value);
 
     const markdownEditorAssist = useTaskStore((state) => isMarkdownEditorAssistEnabled(state.settings));
+    const reminderSettings = useTaskStore((state) => state.settings);
+    const reminders = getTaskEditorReminders(draft, t, reminderSettings);
 
     const [remindersExpanded, setRemindersExpanded] = useState(false);
     const [descriptionExpanded, setDescriptionExpanded] = useState(false);
@@ -691,7 +690,7 @@ export function TaskItemFieldRenderer({
             // the task instead of deleting it (#1245). Transcription runs for
             // many seconds, so the list to append to is the one the store holds
             // now, never the one captured when this callback was built.
-            const { tasks: currentTasks, updateTask: updateTaskNow } = useTaskStore.getState();
+            const { tasks: currentTasks } = useTaskStore.getState();
             const existing = currentTasks.find((item) => item.id === taskId);
             if (capture && existing) {
                 const nowIso = new Date().toISOString();
@@ -707,9 +706,11 @@ export function TaskItemFieldRenderer({
                 };
                 appendRetainedAttachment(retainedAttachment, existing.attachments ?? []);
                 try {
-                    const updateResult = await updateTaskNow(taskId, {
-                        attachments: [...(existing.attachments ?? []), retainedAttachment],
-                    });
+                    // Appended on the row as it is when the write is admitted, so an attachment a sync
+                    // save brought meanwhile is kept.
+                    const updateResult = await updateTaskFromLatest(taskId, (latest) => ({
+                        attachments: [...(latest.attachments ?? []), retainedAttachment],
+                    }));
                     if (!updateResult.success) {
                         throw new Error(updateResult.error || tFallback(t, 'task.updateFailed', 'Could not update task.'));
                     }
@@ -1036,30 +1037,14 @@ export function TaskItemFieldRenderer({
                             warning: dateIssueLabel,
                         })}
                         {hasReminderHandoffSchedule && (() => {
-                            const repeatLabel = tFallback(t, 'taskEdit.repeatReminderLabel', 'Repeat reminder');
+                            const repeatLabel = reminders.repeatLabel;
                             const current = editRepeatReminderMinutes ?? 0;
-                            const showRepeat = hasTime && !editSuppressMindwtrReminders;
-                            const formatValue = (minutes: number) => (
-                                minutes === 0
-                                    ? tFallback(t, 'taskEdit.repeatReminderOff', 'Off')
-                                    : tFallback(t, 'taskEdit.repeatReminderEveryMinutes', 'Every {count} min').replace('{count}', String(minutes))
-                            );
-                            const formatOption = (minutes: number) => (
-                                minutes === 0
-                                    ? tFallback(t, 'taskEdit.repeatReminderOff', 'Off')
-                                    : tFallback(t, 'taskEdit.repeatReminderMinutesShort', '{count} min').replace('{count}', String(minutes))
-                            );
-                            // One quiet line for both correction-path options; it has to
-                            // say when either one is off its default without being opened.
-                            // A stored repeat interval is unreachable once the due time is
-                            // gone, so it must not light up a summary that cannot show it.
-                            const isDefault = !editSuppressMindwtrReminders && (!showRepeat || current === 0);
-                            const summary = editSuppressMindwtrReminders
-                                ? tFallback(t, 'taskEdit.suppressMindwtrRemindersViewValue', 'Mindwtr reminders off')
-                                : [
-                                    tFallback(t, 'taskEdit.remindersSummaryOn', 'Reminders on'),
-                                    ...(showRepeat ? [`${repeatLabel}: ${formatValue(current)}`] : []),
-                                ].join(' · ');
+                            const showRepeat = reminders.showRepeat;
+                            const isDefault = draft.reminderPolicy === 'inherit' && (!showRepeat || current === 0);
+                            const summary = [
+                                `${reminders.policyLabel}: ${reminders.policyValueLabel}`,
+                                ...(showRepeat ? [`${repeatLabel}: ${reminders.repeatValueLabel}`] : []),
+                            ].join(' · ');
                             return (
                                 <div className="mt-1 space-y-1.5">
                                     <button
@@ -1075,27 +1060,27 @@ export function TaskItemFieldRenderer({
                                     </button>
                                     {remindersExpanded && (
                                         <>
-                                            <label className="flex items-start gap-2 rounded border border-border/70 bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={editSuppressMindwtrReminders}
-                                                    onChange={(event) => setEditSuppressMindwtrReminders(event.target.checked)}
-                                                    className="mt-0.5 shrink-0 accent-primary"
-                                                />
-                                                <span className="min-w-0">
-                                                    <span className="block font-medium text-foreground">
-                                                        {tFallback(t, 'taskEdit.suppressMindwtrReminders', 'Skip reminders')}
-                                                    </span>
-                                                    <span className="block leading-snug">
-                                                        {tFallback(t, 'taskEdit.suppressMindwtrRemindersHint', 'Skip start and due reminders for this task. It still appears in Focus and your lists.')}
-                                                    </span>
-                                                </span>
+                                            <label className="block rounded border border-border/70 bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
+                                                <span className="block font-medium text-foreground">{reminders.policyLabel}</span>
+                                                <select
+                                                    aria-label={reminders.policyLabel}
+                                                    value={draft.reminderPolicy}
+                                                    onChange={(event) => setField('reminderPolicy', event.target.value as TaskDraft['reminderPolicy'])}
+                                                    className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground"
+                                                >
+                                                    {reminders.policyOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                                    ))}
+                                                </select>
+                                                <span className="mt-1 block leading-snug">{reminders.hint}</span>
+                                                {reminders.disabledHint && <span className="mt-1 block leading-snug">{reminders.disabledHint}</span>}
                                             </label>
                                             {showRepeat && (
                                                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={repeatLabel}>
                                                     <span className="text-xs text-muted-foreground">{repeatLabel}</span>
-                                                    {[0, ...REPEAT_REMINDER_INTERVAL_OPTIONS].map((minutes) => {
-                                                        const active = current === minutes;
+                                                    {reminders.repeatOptions.map((option) => {
+                                                        const minutes = option.value ?? 0;
+                                                        const active = option.selected;
                                                         return (
                                                             <button
                                                                 key={minutes}
@@ -1107,7 +1092,7 @@ export function TaskItemFieldRenderer({
                                                                     }`}
                                                                 onClick={() => setEditRepeatReminderMinutes(minutes > 0 ? minutes : undefined)}
                                                             >
-                                                                {formatOption(minutes)}
+                                                                {option.label}
                                                             </button>
                                                         );
                                                     })}
@@ -1249,7 +1234,6 @@ export function TaskItemFieldRenderer({
                     taskId={taskId}
                     checklist={task.checklist}
                     plainList={editStatus === 'reference'}
-                    updateTask={updateTask}
                     resetTaskChecklist={resetTaskChecklist}
                 />
             );

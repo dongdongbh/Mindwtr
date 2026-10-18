@@ -435,6 +435,7 @@ describe('Sync document lifecycle', () => {
             contentMtimeMs: 1234,
             contentSize: 42,
             pendingContentUpload: true,
+            staleContentHash: 'b'.repeat(64),
             localStatus: 'available' as const,
             createdAt: NOW,
             updatedAt: NOW,

@@ -9,6 +9,10 @@ import { SettingRow } from './SettingRow';
 type Labels = {
     notificationsDesc: string;
     notificationsEnable: string;
+    taskReminderDefault: string;
+    taskReminderDefaultDesc: string;
+    taskReminderDefaultSend: string;
+    taskReminderDefaultSkip: string;
     startDateNotifications: string;
     startDateNotificationsDesc: string;
     dueDateNotifications: string;
@@ -30,6 +34,7 @@ type WeekdayOption = { value: number; label: string };
 export type SettingsNotificationsPageProps = {
     t: Labels;
     notificationsEnabled: boolean;
+    taskReminderDefault?: 'send' | 'skip';
     startDateNotificationsEnabled: boolean;
     dueDateNotificationsEnabled: boolean;
     reviewAtNotificationsEnabled: boolean;
@@ -48,6 +53,7 @@ export type SettingsNotificationsPageProps = {
 export function SettingsNotificationsPage({
     t,
     notificationsEnabled,
+    taskReminderDefault = 'send',
     startDateNotificationsEnabled,
     dueDateNotificationsEnabled,
     reviewAtNotificationsEnabled,
@@ -85,6 +91,18 @@ export function SettingsNotificationsPage({
                     onCheckedChange={(checked) => handleUpdate({ notificationsEnabled: checked })}
                     aria-label={t.notificationsEnable}
                 />
+            </SettingRow>
+
+            <SettingRow settingsKey="taskReminderDefault" title={t.taskReminderDefault} description={t.taskReminderDefaultDesc}>
+                <select
+                    aria-label={t.taskReminderDefault}
+                    value={taskReminderDefault}
+                    onChange={(event) => handleUpdate({ taskReminderDefault: event.target.value as 'send' | 'skip' })}
+                    className="bg-muted px-2 py-1 rounded text-sm border border-border"
+                >
+                    <option value="send">{t.taskReminderDefaultSend}</option>
+                    <option value="skip">{t.taskReminderDefaultSkip}</option>
+                </select>
             </SettingRow>
 
             <SettingRow

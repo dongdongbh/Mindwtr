@@ -18,11 +18,99 @@ const MCP_PORT: u16 = 8722;
 const PROTOCOL_VERSION: &str = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[PROTOCOL_VERSION];
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct McpConfig {
     enabled: bool,
     allow_write: bool,
+    allow_archive: bool,
+    allow_delete: bool,
+    port: u16,
     token: Option<String>,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_write: false,
+            allow_archive: false,
+            allow_delete: false,
+            port: MCP_PORT,
+            token: None,
+        }
+    }
+}
+
+impl McpConfig {
+    fn permissions(&self) -> McpPermissions {
+        McpPermissions {
+            allow_write: self.allow_write,
+            allow_archive: self.allow_archive,
+            allow_delete: self.allow_delete,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct McpPermissions {
+    pub(crate) allow_write: bool,
+    pub(crate) allow_archive: bool,
+    pub(crate) allow_delete: bool,
+}
+
+impl McpPermissions {
+    pub(crate) fn any_write(self) -> bool {
+        self.allow_write || self.allow_archive || self.allow_delete
+    }
+
+    fn denied_category(self, operation: &LocalOperation) -> Option<&'static str> {
+        let archives = |body: &Map<String, Value>| {
+            body.get("status").and_then(Value::as_str) == Some("archived")
+                || body.get("cancelledAt").is_some_and(Value::is_string)
+        };
+        let (edit, archive, delete) = match operation {
+            LocalOperation::DeleteTask(_)
+            | LocalOperation::ProjectLifecycle { restore: false, .. } => (false, false, true),
+            LocalOperation::TaskAction { action, .. } if action == "archive" => {
+                (false, true, false)
+            }
+            LocalOperation::CreateTask(body) | LocalOperation::CreateProject(body) => (
+                true,
+                body.get("props")
+                    .and_then(Value::as_object)
+                    .is_some_and(archives),
+                false,
+            ),
+            LocalOperation::PatchTask { body, .. } | LocalOperation::PatchProject { body, .. } => {
+                let archive = archives(body);
+                let edit = !archive
+                    || body
+                        .keys()
+                        .any(|field| !matches!(field.as_str(), "status" | "cancelledAt"));
+                (edit, archive, false)
+            }
+            _ => (operation.writes(), false, false),
+        };
+        if edit && !self.allow_write {
+            Some("edit")
+        } else if archive && !self.allow_archive {
+            Some("archive")
+        } else if delete && !self.allow_delete {
+            Some("delete")
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct McpConfigRequest {
+    enabled: bool,
+    allow_write: bool,
+    allow_archive: Option<bool>,
+    allow_delete: Option<bool>,
+    port: Option<f64>,
+    regenerate_token: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +119,7 @@ enum McpError {
     StartFailed,
     Exited,
     ConfigFailed,
+    InvalidPort,
 }
 
 impl McpError {
@@ -40,6 +129,7 @@ impl McpError {
             Self::StartFailed => "start_failed",
             Self::Exited => "exited",
             Self::ConfigFailed => "config_failed",
+            Self::InvalidPort => "invalid_port",
         }
     }
 }
@@ -50,6 +140,8 @@ pub(crate) struct McpServerStatus {
     enabled: bool,
     running: bool,
     allow_write: bool,
+    allow_archive: bool,
+    allow_delete: bool,
     port: u16,
     url: Option<String>,
     token: Option<String>,
@@ -62,18 +154,38 @@ fn lock_recovering<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn config_from_toml(config: &AppConfigToml) -> McpConfig {
+fn normalize_port(port: f64) -> Result<u16, McpError> {
+    if !port.is_finite() || port.fract() != 0.0 || !(1024.0..=u16::MAX as f64).contains(&port) {
+        return Err(McpError::InvalidPort);
+    }
+    Ok(port as u16)
+}
+
+fn config_from_toml(config: &AppConfigToml) -> Result<McpConfig, McpError> {
     let enabled =
         |value: Option<&String>| value.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("true"));
-    McpConfig {
+    let allow_write = enabled(config.mcp_allow_write.as_ref());
+    Ok(McpConfig {
         enabled: enabled(config.mcp_enabled.as_ref()),
-        allow_write: enabled(config.mcp_allow_write.as_ref()),
+        allow_write,
+        allow_archive: enabled(config.mcp_allow_archive.as_ref()),
+        // Old Allow changes granted deletion; preserve that existing grant.
+        allow_delete: config
+            .mcp_allow_delete
+            .as_ref()
+            .map_or(allow_write, |value| enabled(Some(value))),
+        port: match config.mcp_port.as_ref() {
+            Some(value) => {
+                normalize_port(value.trim().parse().map_err(|_| McpError::InvalidPort)?)?
+            }
+            None => MCP_PORT,
+        },
         token: config
             .mcp_token
             .as_ref()
             .map(|raw| raw.trim().to_string())
             .filter(|raw| !raw.is_empty()),
-    }
+    })
 }
 
 fn generate_token() -> String {
@@ -85,6 +197,9 @@ fn generate_token() -> String {
 fn apply_config(config: &mut AppConfigToml, next: &McpConfig) {
     config.mcp_enabled = Some(next.enabled.to_string());
     config.mcp_allow_write = Some(next.allow_write.to_string());
+    config.mcp_allow_archive = Some(next.allow_archive.to_string());
+    config.mcp_allow_delete = Some(next.allow_delete.to_string());
+    config.mcp_port = Some(next.port.to_string());
     config.mcp_token = next.token.clone();
 }
 
@@ -93,8 +208,8 @@ fn read_mcp_config(app: &tauri::AppHandle) -> Result<McpConfig, McpError> {
     // Protect that possible write from concurrent settings transactions too.
     let _guard = lock_config_read_modify_write().map_err(|_| McpError::ConfigFailed)?;
     read_config_verified(app)
-        .map(|config| config_from_toml(&config))
         .map_err(|_| McpError::ConfigFailed)
+        .and_then(|config| config_from_toml(&config))
 }
 
 /// The outer RMW lock remains held across read, token creation, and publication;
@@ -102,7 +217,7 @@ fn read_mcp_config(app: &tauri::AppHandle) -> Result<McpConfig, McpError> {
 /// snapshot. Persistence always precedes starting a new listener.
 fn update_config(
     app: &tauri::AppHandle,
-    requested: Option<(bool, bool, bool)>,
+    requested: Option<McpConfigRequest>,
 ) -> Result<McpConfig, McpError> {
     let _guard = lock_config_read_modify_write().map_err(|_| McpError::ConfigFailed)?;
     update_config_with(
@@ -114,22 +229,36 @@ fn update_config(
 
 fn update_config_with(
     read: impl FnOnce() -> Result<AppConfigToml, String>,
-    requested: Option<(bool, bool, bool)>,
+    requested: Option<McpConfigRequest>,
     write: impl FnOnce(&AppConfigToml) -> Result<(), String>,
 ) -> Result<McpConfig, McpError> {
     let mut stored = read().map_err(|_| McpError::ConfigFailed)?;
-    let mut next = config_from_toml(&stored);
-    if let Some((enabled, allow_write, regenerate)) = requested {
-        next.enabled = enabled;
-        next.allow_write = allow_write;
-        if regenerate {
+    // A valid explicit port can repair malformed stored configuration.
+    if let Some(port) = requested.and_then(|request| request.port) {
+        stored.mcp_port = Some(normalize_port(port)?.to_string());
+    }
+    let original = config_from_toml(&stored)?;
+    let mut next = original.clone();
+    if let Some(requested) = requested {
+        next.enabled = requested.enabled;
+        next.allow_write = requested.allow_write;
+        if let Some(value) = requested.allow_archive {
+            next.allow_archive = value;
+        }
+        if let Some(value) = requested.allow_delete {
+            next.allow_delete = value;
+        }
+        if let Some(port) = requested.port {
+            next.port = normalize_port(port)?;
+        }
+        if requested.regenerate_token {
             next.token = Some(generate_token());
         }
     }
     if next.enabled && next.token.is_none() {
         next.token = Some(generate_token());
     }
-    if requested.is_some() || next != config_from_toml(&stored) {
+    if requested.is_some() || next != original {
         apply_config(&mut stored, &next);
         write(&stored).map_err(|_| McpError::ConfigFailed)?;
     }
@@ -193,9 +322,9 @@ impl McpRuntime {
             local_api::start_mcp_listener(
                 app.clone(),
                 local_api,
-                MCP_PORT,
+                config.port,
                 token,
-                config.allow_write,
+                config.permissions(),
             )
             .map_err(|error| {
                 if error == "port_in_use" {
@@ -226,6 +355,7 @@ impl McpRuntime {
                     log::info!(
                         "In-process MCP listener ready extra.releaseCheck=v1.3.5/in-process-mcp"
                     );
+                    log::info!("MCP access controls applied extra.releaseCheck=v1.3.7/mcp-access-controls allowWrite={} allowArchive={} allowDelete={} port={}", config.allow_write, config.allow_archive, config.allow_delete, config.port);
                 }
                 Err(error) => {
                     self.last_error = Some(error);
@@ -240,11 +370,16 @@ impl McpRuntime {
             enabled: config.enabled,
             running: self.listener.is_some(),
             allow_write: config.allow_write,
-            port: MCP_PORT,
+            allow_archive: config.allow_archive,
+            allow_delete: config.allow_delete,
+            port: self
+                .listener
+                .as_ref()
+                .map_or(config.port, |listener| listener.port),
             url: self
                 .listener
                 .as_ref()
-                .map(|_| format!("http://127.0.0.1:{MCP_PORT}/mcp")),
+                .map(|listener| format!("http://127.0.0.1:{}/mcp", listener.port)),
             token: config.enabled.then_some(config.token).flatten(),
             error: self.last_error.map(|error| error.code().to_string()),
         }
@@ -296,8 +431,14 @@ pub(crate) fn set_mcp_server_config(
     local_api: tauri::State<'_, LocalApiServerState>,
     enabled: bool,
     allow_write: bool,
+    allow_archive: Option<bool>,
+    allow_delete: Option<bool>,
+    port: Option<f64>,
     regenerate_token: Option<bool>,
 ) -> Result<McpServerStatus, String> {
+    if let Some(port) = port {
+        normalize_port(port).map_err(|error| error.code().to_string())?;
+    }
     let mut runtime = lock_recovering(&state.inner);
     if state.shutting_down.load(Ordering::SeqCst) {
         runtime.stop();
@@ -305,7 +446,14 @@ pub(crate) fn set_mcp_server_config(
     }
     match update_config(
         &app,
-        Some((enabled, allow_write, regenerate_token.unwrap_or(false))),
+        Some(McpConfigRequest {
+            enabled,
+            allow_write,
+            allow_archive,
+            allow_delete,
+            port,
+            regenerate_token: regenerate_token.unwrap_or(false),
+        }),
     ) {
         Ok(config) => {
             runtime.reconcile(&app, &local_api, &config, &state.shutting_down);
@@ -347,6 +495,7 @@ fn accepts(request: &ApiRequest, media_type: &str) -> bool {
 pub(crate) fn handle_mcp_request(
     token: &str,
     access: &LocalApiAccess,
+    permissions: McpPermissions,
     port: u16,
     request: ApiRequest,
     mut execute: impl FnMut(LocalOperation) -> Result<Value, String>,
@@ -487,7 +636,15 @@ pub(crate) fn handle_mcp_request(
                 Err(_) => return rpc_error(id, -32602, "Invalid or unsupported tool arguments"),
             };
             let writing = operation.writes();
-            if writing && access.ensure_write().is_err() {
+            if let Some(category) = permissions.denied_category(&operation) {
+                log::info!("MCP operation denied extra.releaseCheck=v1.3.7/mcp-access-controls category={category}");
+                let (code, message) = match category {
+                    "archive" => ("archive_not_allowed", "MCP archiving is disabled. Enable archiving in desktop settings."),
+                    "delete" => ("delete_not_allowed", "MCP deletion is disabled. Enable deletion in desktop settings."),
+                    _ => ("read_only", "MCP edits are disabled. Enable task and project edits in desktop settings."),
+                };
+                crate::mcp_tools::error_response(code, message)
+            } else if writing && access.ensure_write().is_err() {
                 crate::mcp_tools::error_response(
                     "read_only",
                     "MCP is read-only. Enable writes in desktop settings to edit.",
@@ -536,6 +693,27 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    fn permissions(allowed: bool) -> McpPermissions {
+        McpPermissions {
+            allow_write: allowed,
+            allow_archive: allowed,
+            allow_delete: allowed,
+        }
+    }
+    fn config_request(
+        enabled: bool,
+        allow_write: bool,
+        regenerate_token: bool,
+    ) -> McpConfigRequest {
+        McpConfigRequest {
+            enabled,
+            allow_write,
+            allow_archive: None,
+            allow_delete: None,
+            port: None,
+            regenerate_token,
+        }
+    }
     fn access(allow_write: bool) -> LocalApiAccess {
         LocalApiAccess {
             allow_write,
@@ -563,6 +741,7 @@ mod tests {
         handle_mcp_request(
             "fixture-token",
             &access(allow_write),
+            permissions(allow_write),
             MCP_PORT,
             request(json!({"jsonrpc":"2.0","id":1,"method":method,"params":params})),
             |_| Ok(json!({"tasks":[]})),
@@ -591,7 +770,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            13
+            14
         );
         assert_eq!(
             call("tools/list", json!({"cursor":"bogus"}), false).body["error"]["code"],
@@ -605,6 +784,7 @@ mod tests {
         let notification = handle_mcp_request(
             "fixture-token",
             &access(false),
+            permissions(false),
             MCP_PORT,
             request(json!({"jsonrpc":"2.0","method":"notifications/initialized"})),
             |_| panic!(),
@@ -621,6 +801,7 @@ mod tests {
                 handle_mcp_request(
                     "fixture-token",
                     &access(false),
+                    permissions(false),
                     MCP_PORT,
                     request(invalid),
                     |_| panic!()
@@ -648,6 +829,7 @@ mod tests {
                 handle_mcp_request(
                     "fixture-token",
                     &access(false),
+                    permissions(false),
                     MCP_PORT,
                     request,
                     |_| panic!()
@@ -664,6 +846,7 @@ mod tests {
                 handle_mcp_request(
                     "fixture-token",
                     &access(false),
+                    permissions(false),
                     MCP_PORT,
                     request,
                     |_| panic!()
@@ -678,6 +861,7 @@ mod tests {
             handle_mcp_request(
                 "fixture-token",
                 &disabled,
+                permissions(true),
                 MCP_PORT,
                 request(json!({"jsonrpc":"2.0","id":1,"method":"ping"})),
                 |_| panic!()
@@ -692,6 +876,7 @@ mod tests {
             ("mindwtr_add_task", json!({"title":"Task"})),
             ("mindwtr_update_task", json!({"id":"task","title":"Task"})),
             ("mindwtr_complete_task", json!({"id":"task"})),
+            ("mindwtr_archive_task", json!({"id":"task"})),
             ("mindwtr_delete_task", json!({"id":"task"})),
             ("mindwtr_restore_task", json!({"id":"task"})),
             ("mindwtr_add_project", json!({"title":"Project"})),
@@ -704,6 +889,7 @@ mod tests {
             let response = handle_mcp_request(
                 "fixture-token",
                 &access(false),
+                permissions(false),
                 MCP_PORT,
                 request(
                     json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":arguments}}),
@@ -714,7 +900,7 @@ mod tests {
             assert!(response.body["result"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
-                .contains("read_only"));
+                .contains("disabled"));
         }
         for (name, args) in [
             ("mindwtr_get_task", json!({"id":1})),
@@ -739,6 +925,207 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn mcp_permissions_are_independent_and_check_payload_lifecycle_before_execution() {
+        for mask in 0..8 {
+            let permissions = McpPermissions {
+                allow_write: mask & 1 != 0,
+                allow_archive: mask & 2 != 0,
+                allow_delete: mask & 4 != 0,
+            };
+            for (name, arguments, required) in [
+                ("mindwtr_get_task", json!({"id":"task"}), 0),
+                ("mindwtr_add_task", json!({"title":"Task"}), 1),
+                (
+                    "mindwtr_update_task",
+                    json!({"id":"task","title":"Edit"}),
+                    1,
+                ),
+                ("mindwtr_complete_task", json!({"id":"task"}), 1),
+                ("mindwtr_restore_task", json!({"id":"task"}), 1),
+                ("mindwtr_archive_task", json!({"id":"task"}), 2),
+                ("mindwtr_delete_task", json!({"id":"task"}), 4),
+                ("mindwtr_delete_project", json!({"id":"project"}), 4),
+                ("mindwtr_add_project", json!({"title":"Project"}), 1),
+                (
+                    "mindwtr_update_project",
+                    json!({"id":"project","title":"Edit"}),
+                    1,
+                ),
+                (
+                    "mindwtr_add_task",
+                    json!({"title":"Task","status":"archived"}),
+                    3,
+                ),
+                (
+                    "mindwtr_add_task",
+                    json!({"title":"Task","cancelledAt":"2026-10-13T12:00:00Z"}),
+                    3,
+                ),
+                (
+                    "mindwtr_update_task",
+                    json!({"id":"task","cancelledAt":"2026-10-13T12:00:00Z"}),
+                    2,
+                ),
+                (
+                    "mindwtr_update_task",
+                    json!({"id":"task","title":"Edit","cancelledAt":"2026-10-13T12:00:00Z"}),
+                    3,
+                ),
+                (
+                    "mindwtr_update_task",
+                    json!({"id":"task","cancelledAt":null}),
+                    1,
+                ),
+                (
+                    "mindwtr_add_project",
+                    json!({"title":"Project","status":"archived"}),
+                    3,
+                ),
+                (
+                    "mindwtr_update_project",
+                    json!({"id":"project","status":"archived"}),
+                    2,
+                ),
+                (
+                    "mindwtr_update_project",
+                    json!({"id":"project","title":"Edit","status":"archived"}),
+                    3,
+                ),
+                (
+                    "mindwtr_update_project",
+                    json!({"id":"project","status":"active"}),
+                    1,
+                ),
+            ] {
+                let allowed = mask & required == required;
+                let mut executed = false;
+                let response = handle_mcp_request(
+                    "fixture-token",
+                    &access(permissions.any_write()),
+                    permissions,
+                    MCP_PORT,
+                    request(
+                        json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":arguments}}),
+                    ),
+                    |_| {
+                        executed = true;
+                        Ok(json!({"task":{},"project":{}}))
+                    },
+                );
+                assert_eq!(
+                    executed, allowed,
+                    "mask={mask} name={name} arguments={arguments}"
+                );
+                assert_eq!(response.body["result"]["isError"] == true, !allowed);
+                if !allowed {
+                    let error: Value = serde_json::from_str(
+                        response.body["result"]["content"][0]["text"]
+                            .as_str()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let expected = if required & 1 != 0 && mask & 1 == 0 {
+                        "read_only"
+                    } else if required & 2 != 0 && mask & 2 == 0 {
+                        "archive_not_allowed"
+                    } else {
+                        "delete_not_allowed"
+                    };
+                    assert_eq!(error["code"], expected);
+                }
+            }
+        }
+        for (name, arguments) in [
+            (
+                "mindwtr_update_task",
+                json!({"id":"task","deletedAt":"2026-10-13T12:00:00Z"}),
+            ),
+            (
+                "mindwtr_add_task",
+                json!({"title":"Task","props":{"status":"archived"}}),
+            ),
+            (
+                "mindwtr_update_project",
+                json!({"id":"project","deletedAt":"2026-10-13T12:00:00Z"}),
+            ),
+            (
+                "mindwtr_batch_update_tasks",
+                json!({"ids":["task"],"status":"archived"}),
+            ),
+            ("mindwtr_archive_task", json!({"id":"task","title":"Edit"})),
+        ] {
+            let response = handle_mcp_request(
+                "fixture-token",
+                &access(true),
+                permissions(true),
+                MCP_PORT,
+                request(
+                    json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":arguments}}),
+                ),
+                |_| panic!("invalid lifecycle shortcut must not execute"),
+            );
+            assert_eq!(response.body["error"]["code"], -32602);
+        }
+        let batch = handle_mcp_request(
+            "fixture-token",
+            &access(true),
+            permissions(true),
+            MCP_PORT,
+            request(
+                json!([{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mindwtr_delete_task","arguments":{"id":"task"}}}]),
+            ),
+            |_| panic!("JSON-RPC batches must not execute"),
+        );
+        assert_eq!(batch.body["error"]["code"], -32600);
+    }
+
+    #[test]
+    fn mcp_arbitrary_port_validates_http_host_and_origin() {
+        let port = 9123;
+        let mut valid = request(json!({"jsonrpc":"2.0","id":1,"method":"ping"}));
+        valid
+            .headers
+            .insert("host".into(), format!("127.0.0.1:{port}"));
+        valid
+            .headers
+            .insert("origin".into(), format!("http://127.0.0.1:{port}"));
+        assert_eq!(
+            handle_mcp_request(
+                "fixture-token",
+                &access(false),
+                permissions(false),
+                port,
+                valid,
+                |_| panic!()
+            )
+            .body["result"],
+            json!({})
+        );
+        for (field, value) in [
+            ("host", "127.0.0.1:8722"),
+            ("origin", "http://127.0.0.1:8722"),
+        ] {
+            let mut invalid = request(json!({"jsonrpc":"2.0","id":1,"method":"ping"}));
+            invalid
+                .headers
+                .insert("host".into(), format!("127.0.0.1:{port}"));
+            invalid.headers.insert(field.into(), value.into());
+            assert_eq!(
+                handle_mcp_request(
+                    "fixture-token",
+                    &access(false),
+                    permissions(false),
+                    port,
+                    invalid,
+                    |_| panic!()
+                )
+                .status,
+                403
+            );
+        }
+    }
     #[test]
     fn mcp_patch_focus_limit_preserves_exact_message() {
         let mut data = json!({
@@ -754,6 +1141,7 @@ mod tests {
         let response = handle_mcp_request(
             "fixture-token",
             &access(true),
+            permissions(true),
             MCP_PORT,
             request(
                 json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
@@ -785,6 +1173,7 @@ mod tests {
         let response = handle_mcp_request(
             "fixture-token",
             &access(true),
+            permissions(true),
             MCP_PORT,
             request(
                 json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
@@ -807,7 +1196,7 @@ mod tests {
     }
 
     fn fixture_listener(port: u16, token: String, allow_write: bool) -> LocalApiHandle {
-        local_api::start_http_listener(port,allow_write,move |access,port,request| handle_mcp_request(&token,access,port,request,|operation| {
+        local_api::start_http_listener(port,allow_write,move |access,port,request| handle_mcp_request(&token,access,permissions(allow_write),port,request,|operation| {
             let data=json!({"tasks":[{"id":"native-fixture-task","title":"Native MCP fixture","status":"inbox","tags":[],"contexts":[],"createdAt":"2026-10-05T12:00:00Z","updatedAt":"2026-10-05T12:00:00Z","rev":1}],"projects":[],"areas":[]});
             match operation {
                 LocalOperation::QueryTasks(input)=>Ok(json!({"tasks":crate::local_query::query_tasks(&data,&input)?})),
@@ -825,6 +1214,7 @@ mod tests {
             enabled: true,
             token: Some("old".into()),
             allow_write: true,
+            ..McpConfig::default()
         };
         runtime.reconcile_with(&config, |_| Ok(fixture_listener(0, "old".into(), true)));
         let port = runtime.listener.as_ref().unwrap().port;
@@ -861,6 +1251,54 @@ mod tests {
         );
     }
     #[test]
+    fn mcp_permission_and_port_changes_revoke_old_listener_before_restart() {
+        let mut runtime = McpRuntime::default();
+        let config = McpConfig {
+            enabled: true,
+            allow_write: true,
+            allow_archive: true,
+            allow_delete: true,
+            token: Some("fixture".into()),
+            ..McpConfig::default()
+        };
+        runtime.reconcile_with(&config, |_| Ok(fixture_listener(0, "fixture".into(), true)));
+        let old_port = runtime.listener.as_ref().unwrap().port;
+        let revoked = runtime.listener.as_ref().unwrap().test_access(true);
+        let reserved = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let next_port = reserved.local_addr().unwrap().port();
+        drop(reserved);
+        let restricted = McpConfig {
+            allow_write: false,
+            allow_archive: false,
+            allow_delete: true,
+            port: next_port,
+            ..config
+        };
+        runtime.reconcile_with(&restricted, |next| {
+            assert!(
+                revoked.ensure_write().is_err(),
+                "old permissions revoke before replacement starts"
+            );
+            assert!(std::net::TcpListener::bind(("127.0.0.1", old_port)).is_ok());
+            Ok(fixture_listener(next.port, "fixture".into(), true))
+        });
+        let status = runtime.status(restricted);
+        assert!(status.running);
+        assert_eq!(status.port, next_port);
+        assert_eq!(
+            status.url.as_deref(),
+            Some(format!("http://127.0.0.1:{next_port}/mcp").as_str())
+        );
+        assert!(!status.allow_write);
+        assert!(!status.allow_archive);
+        assert!(status.allow_delete);
+        let access = runtime.listener.as_ref().unwrap().test_access(true);
+        let failed = runtime.status_after_read(Err(McpError::ConfigFailed));
+        assert!(!failed.running);
+        assert_eq!(failed.error.as_deref(), Some("config_failed"));
+        assert!(access.ensure_write().is_err());
+    }
+    #[test]
     fn mcp_configuration_is_persisted_before_start_and_keeps_unrelated_fields() {
         let original = AppConfigToml {
             local_api_enabled: Some("true".into()),
@@ -869,7 +1307,7 @@ mod tests {
         };
         let config = update_config_with(
             || Ok(original),
-            Some((true, false, false)),
+            Some(config_request(true, false, false)),
             |stored| {
                 assert_eq!(stored.local_api_token.as_deref(), Some("rest-token"));
                 assert_eq!(stored.mcp_enabled.as_deref(), Some("true"));
@@ -883,7 +1321,7 @@ mod tests {
         assert_eq!(
             update_config_with(
                 || Ok(AppConfigToml::default()),
-                Some((true, true, true)),
+                Some(config_request(true, true, true)),
                 |_| Err("secret fixture".into())
             )
             .err(),
@@ -895,7 +1333,129 @@ mod tests {
             &directory.path().join("secrets.toml"),
         )
         .unwrap();
-        assert!(!config_from_toml(&original).enabled);
+        assert!(!config_from_toml(&original).unwrap().enabled);
+    }
+    #[test]
+    fn mcp_config_migrates_existing_deletion_grant_and_preserves_explicit_controls() {
+        let new_install = config_from_toml(&AppConfigToml::default()).unwrap();
+        assert!(!new_install.permissions().any_write());
+        assert_eq!(new_install.port, MCP_PORT);
+        let legacy = AppConfigToml {
+            mcp_allow_write: Some("true".into()),
+            ..AppConfigToml::default()
+        };
+        let migrated = config_from_toml(&legacy).unwrap();
+        assert!(migrated.allow_write);
+        assert!(migrated.allow_delete);
+        assert!(!migrated.allow_archive);
+        let explicit = AppConfigToml {
+            mcp_allow_delete: Some("false".into()),
+            mcp_allow_archive: Some("true".into()),
+            mcp_port: Some("9123".into()),
+            local_api_port: Some("4567".into()),
+            ..legacy.clone()
+        };
+        assert!(!config_from_toml(&explicit).unwrap().allow_delete);
+        let kept = update_config_with(
+            || Ok(explicit),
+            Some(config_request(false, false, false)),
+            |stored| {
+                assert_eq!(stored.mcp_allow_delete.as_deref(), Some("false"));
+                assert_eq!(stored.mcp_allow_archive.as_deref(), Some("true"));
+                assert_eq!(stored.mcp_port.as_deref(), Some("9123"));
+                assert_eq!(stored.local_api_port.as_deref(), Some("4567"));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(!kept.allow_write);
+        assert!(!kept.allow_delete);
+        assert!(kept.allow_archive);
+        assert_eq!(kept.port, 9123);
+        let preserved = update_config_with(
+            || Ok(legacy),
+            Some(config_request(false, false, false)),
+            |stored| {
+                assert_eq!(stored.mcp_allow_delete.as_deref(), Some("true"));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            preserved.allow_delete,
+            "changing edit permission does not erase migrated deletion permission"
+        );
+    }
+    #[test]
+    fn mcp_port_validation_and_config_roundtrip_fail_closed() {
+        for port in [
+            -1.0,
+            0.0,
+            1.0,
+            1023.0,
+            9123.5,
+            65536.0,
+            f64::INFINITY,
+            f64::NAN,
+        ] {
+            let request = McpConfigRequest {
+                port: Some(port),
+                ..config_request(true, true, false)
+            };
+            assert_eq!(
+                update_config_with(
+                    || Ok(AppConfigToml::default()),
+                    Some(request),
+                    |_| panic!("invalid port must not persist")
+                )
+                .err(),
+                Some(McpError::InvalidPort)
+            );
+        }
+        for port in [1024.0, 9123.0, 65535.0] {
+            let request = McpConfigRequest {
+                port: Some(port),
+                allow_archive: Some(true),
+                allow_delete: Some(false),
+                ..config_request(true, true, false)
+            };
+            let config = update_config_with(
+                || Ok(AppConfigToml::default()),
+                Some(request),
+                |stored| {
+                    let roundtrip: AppConfigToml =
+                        toml::from_str(&toml::to_string(stored).unwrap()).unwrap();
+                    let read = config_from_toml(&roundtrip).unwrap();
+                    assert_eq!(read.port, port as u16);
+                    assert!(read.allow_archive);
+                    assert!(!read.allow_delete);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(config.port, port as u16);
+        }
+        for invalid in ["bad", "-1", "1023", "65536"] {
+            let stored = AppConfigToml {
+                mcp_port: Some(invalid.into()),
+                ..AppConfigToml::default()
+            };
+            assert_eq!(config_from_toml(&stored).err(), Some(McpError::InvalidPort));
+            assert_eq!(
+                update_config_with(|| Ok(stored.clone()), None, |_| panic!()).err(),
+                Some(McpError::InvalidPort)
+            );
+            let repaired = update_config_with(
+                || Ok(stored),
+                Some(McpConfigRequest {
+                    port: Some(9123.0),
+                    ..config_request(false, false, false)
+                }),
+                |_| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(repaired.port, 9123);
+        }
     }
     #[test]
     #[ignore = "Driven by scripts/test-native-mcp.ts with the official MCP SDK"]

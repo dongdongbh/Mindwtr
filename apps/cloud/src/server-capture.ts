@@ -4,6 +4,7 @@ import {
     ATTACHMENTS_DIR_NAME,
     buildCloudKey,
     generateUUID,
+    shouldSendTaskReminders,
     type AppData,
     type Attachment,
     type Task,
@@ -378,6 +379,7 @@ export async function handleCaptureRequest(
         id: payload.captureId ?? generateUUID(),
         title,
         status: 'inbox',
+        reminderPolicy: 'inherit',
         tags: [],
         contexts: [],
         rev: 1,
@@ -402,6 +404,7 @@ export async function handleCaptureRequest(
                 { status: 200 },
             );
         }
+        task.suppressMindwtrReminders = !shouldSendTaskReminders(task, data.settings);
         data.tasks.push(task);
         const finalized = options.finalizeForWrite(data, nowIso);
         if ('error' in finalized) return finalized.error;

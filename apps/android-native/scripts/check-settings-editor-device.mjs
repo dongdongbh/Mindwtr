@@ -419,9 +419,10 @@ try {
     nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await device.settle(nodes);
     await tapExpecting(withDescription(nodes, english.tiles.history) ?? fail('no History'), (current) => Boolean(tagged(current, 'menu-screen')), 'History');
-    nodes = await device.reveal(names.task, 60);
+    // The injected task is the newest completion, so it heads History's Done.
+    const row = await device.revealNode((current) => current.find((node) => node.text === names.task), `${names.task} in History's Done`);
     const inView = (current) => inEditor(current) && Boolean(tagged(current, 'task-view')) && isOn(withDescription(current, en['markdown.preview']));
-    nodes = await tapExpecting(nodes.find((node) => node.text === names.task) ?? fail(`${names.task} is not in History's Done`), inView, 'the editor on its View tab');
+    nodes = await tapExpecting(row, inView, 'the editor on its View tab');
     check(true, '(f) the Done task opens on the View tab (RN\'s defaultEditTab "view")');
     await rotateKeeps(inView, 'the View tab');
     nodes = await killAndRelaunch(inView, 'the View tab after process death');

@@ -18,7 +18,12 @@
 //       Per trace: the sync's engine-thread sections (sync:*, io:*, sql:*), the engine's uninterrupted blocks during sync,
 //       the engine thread's states, and each screen command's wait (core:wait on its own thread) with its queue time and the
 //       tap before it. With --budget=<ms> it exits 1 unless the p90 tap-to-answer of the taps whose wait began inside the
-//       sync's span is at most <ms> (D9's target is 300); no such tap also fails.
+//       sync's span is at most <ms> (D9's target is 300); no such tap also fails. A tap (its DOWN and UP input events, by
+//       eventTimeNano) is answered by its own tab's read on the read thread (merge-tap-matching.mjs): one sample per tap, a
+//       delayed answer kept with its own tap. The start taps are not measured: two on a cold start, one on a resume
+//       (merge-tap-matching.mjs measuredTaps). A trace whose app did not see all nine taps is an error (the tab order would be
+//       wrong). A series whose share of unanswered taps in the sync's span is above 5% fails the budget too: their answers, if
+//       any, went unmeasured.
 //
 // Every phone command runs inside the coordinator's lock: flock -o -w 14400 /home/dd/scratch/s23.lock node ...
 // Only the benchmark package (its own application id): the dev app's data is never touched.
@@ -29,6 +34,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { serveWebdav } from './sync-harness.mjs';
+import { assignTapAnswers, measuredTaps, TAPS_PER_SAMPLE } from './merge-tap-matching.mjs';
 
 const ADB = process.env.ADB ?? '/opt/android-sdk/platform-tools/adb';
 const TP = process.env.TRACE_PROCESSOR ?? '/home/dd/.cache/mindwtr-performance-tmp/mindwtr-perfetto/trace_processor';
@@ -186,7 +192,7 @@ duration_ms: 16000
         let tapper = null;
         if (taps) {
             const steps = [];
-            for (let i = 0; i < 9; i += 1) steps.push(`input tap ${(i % 2 ? targets.inbox : targets.focus).join(' ')}; sleep 0.4`);
+            for (let i = 0; i < TAPS_PER_SAMPLE; i += 1) steps.push(`input tap ${(i % 2 ? targets.inbox : targets.focus).join(' ')}; sleep 0.4`);
             const child = spawn(ADB, ['-s', serial, 'shell', `sleep 0.3; ${steps.join('; ')}`], { stdio: 'ignore' });
             tapper = new Promise((done) => child.on('exit', done));
         }
@@ -259,25 +265,58 @@ WHERE utid = ${engine} AND ts < ${span.end} AND ts + dur > ${span.start} GROUP B
      AND NOT EXISTS (SELECT 1 FROM ancestor_slice(d.id) a WHERE a.name GLOB 'sync:*' OR a.name GLOB 'io:*'))`;
         const own = `FROM slice e JOIN thread_track et ON e.track_id = et.id WHERE et.utid = ${engine} AND e.depth = 0 AND e.name GLOB 'core:*'
      AND e.name != 'core:idlePump' AND e.ts >= s.ts AND e.ts + e.dur <= s.ts + s.dur ORDER BY e.ts + e.dur DESC LIMIT 1`;
+        const inputs = `FROM slice i JOIN thread_track it ON i.track_id = it.id JOIN thread ti USING (utid) JOIN process pi USING (upid)
+     WHERE pi.name GLOB '${PKG_GLOB}' AND ti.tid = pi.pid AND i.name GLOB 'deliverInputEvent*'`;
+        // The steps query turns the line's commas into ';' and drops its quotes: gateWaitMs:12;40.
+        const gateWaitsOf = (msg) => /gateWaitMs[^\d]{0,6}(\d+(?:[;,]\d+)*)/.exec(String(msg))?.[1].split(/[;,]/).map(Number);
+        const tapOf = (name) => /eventTimeNano=(\d+)/.exec(String(name ?? ''))?.[1] ?? null;
         const waits = query(trace, `
-SELECT s.ts, round(s.dur / 1e6, 1) AS waitMs, t.name AS thread,
+SELECT s.ts, s.dur, round(s.dur / 1e6, 1) AS waitMs, t.name AS thread,
   (SELECT e.name ${own}) AS op,
   (SELECT round((e.ts - s.ts) / 1e6, 1) ${own}) AS queueMs,
   (SELECT round(e.dur / 1e6, 1) ${own}) AS runMs,
   round(${syncWork} / 1e6, 1) AS syncWorkMs,
-  (SELECT round((s.ts + s.dur - i.ts) / 1e6, 1) FROM slice i JOIN thread_track it ON i.track_id = it.id JOIN thread ti USING (utid) JOIN process pi USING (upid)
-     WHERE pi.name GLOB '${PKG_GLOB}' AND ti.tid = pi.pid AND i.name GLOB 'deliverInputEvent*' AND i.ts <= s.ts AND i.ts > s.ts - 150e6 ORDER BY i.ts DESC LIMIT 1) AS tapToAnswerMs,
   round((s.ts - ${span.start}) / 1e6, 1) AS atSyncMs
 FROM slice s JOIN thread_track tt ON s.track_id = tt.id JOIN thread t USING (utid) JOIN process p USING (upid)
 WHERE p.name GLOB '${PKG_GLOB}' AND s.name = 'core:wait' AND tt.utid != ${engine} ORDER BY s.ts;`)
             .map((w) => Object.fromEntries(Object.entries(w).map(([k, v]) => [k, v === '[NULL]' ? null : v])));
+        // Every tap's first and last event (DOWN, UP), in time order, matched to its own tab's read on the read thread.
+        const tapEvents = new Map();
+        for (const row of query(trace, `SELECT i.name, i.ts ${inputs} ORDER BY i.ts;`)) {
+            const tap = tapOf(row.name);
+            if (!tap) continue;
+            const known = tapEvents.get(tap);
+            tapEvents.set(tap, { tap, first: known?.first ?? row.ts, last: row.ts });
+        }
+        if (tapEvents.size !== 0 && tapEvents.size !== TAPS_PER_SAMPLE) {
+            results.push({ trace, error: `the app saw ${tapEvents.size} taps, not ${TAPS_PER_SAMPLE}` });
+            continue;
+        }
+        const reads = waits.filter((w) => w.thread === 'mindwtr-read' && w.op).map((w) => ({ ts: w.ts, end: w.ts + w.dur, op: w.op, wait: w }));
+        const answers = assignTapAnswers([...tapEvents.values()].sort((a, b) => a.first - b.first), reads);
+        // The app process starts in a cold trace (its bindApplication); a resume trace's process was already running.
+        const [{ n: binds } = { n: 0 }] = query(trace, `SELECT COUNT(*) AS n FROM slice s JOIN thread_track tt ON s.track_id = tt.id
+     JOIN thread t USING (utid) JOIN process p USING (upid) WHERE p.name GLOB '${PKG_GLOB}' AND s.name GLOB 'bindApplication*';`);
+        // The start taps are no measurement (measuredTaps). In the sync's span: an answered tap whose read began there, an
+        // unanswered tap whose UP fell there.
+        const measured = measuredTaps(answers, binds > 0);
+        const inSpan = measured.filter((a) => (a.call ? a.call.ts : a.last) >= span.start && (a.call ? a.call.ts : a.last) <= span.end);
+        for (const answer of measured) if (answer.call) answer.call.wait.tapToAnswerMs = answer.answerMs;
+        const taps = { inSpan: inSpan.length, answered: inSpan.filter((a) => a.call).length,
+            unanswered: inSpan.filter((a) => !a.call).length, answersMs: inSpan.filter((a) => a.call).map((a) => a.answerMs),
+            // Which taps of the run (0 = the first, a Focus tap) went unanswered.
+            unansweredAt: inSpan.filter((a) => !a.call).map((a) => answers.indexOf(a)),
+            startTapsSkipped: answers.length - measured.length, coldStart: binds > 0 };
         const steps = query(trace, `
 SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',', ';'), '"', '') AS msg FROM android_logs WHERE tag = '${TAG}'
-  AND (msg GLOB '*Sync step*' OR msg GLOB '*Full sync merge*' OR msg GLOB '*Sync local reconcile*' OR msg GLOB '*sync state*') ORDER BY ts;`);
+  AND (msg GLOB '*Sync step*' OR msg GLOB '*Full sync merge*' OR msg GLOB '*Sync local reconcile*' OR msg GLOB '*sync state*'
+    OR msg GLOB '*Sync save published to the store*') ORDER BY ts;`);
+        // Each published line's waits for the store write gate, in save order (core's v1.3.7/sync-write-gate line, once per cycle).
+        const gateWaitsMs = steps.map((step) => gateWaitsOf(step.msg)).filter(Boolean);
         results.push({
             trace, syncSpanMs: Math.round((span.end - span.start) / 1e5) / 10,
             longestBlocks: blocks.slice(0, 6).map(({ name, ms, inner }) => ({ name, ms, inner })),
-            sections, states, waits, steps,
+            sections, states, waits, steps, taps, gateWaitsMs,
         });
     }
     // Across traces: the sync's sections (median of each sample's total), its longest block, and the waits behind sync vs idle.
@@ -300,12 +339,26 @@ SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',
         tapsOutsideSync: tapWaits(false),
         // Every host call that waited while sync work ran on the engine (taps, the screens' own reads, workers).
         // A tap whose wait began inside the sync's span (its first to last sync section), whatever ran in the wait.
-        tapsInSyncSpan: stats(ok.flatMap((r) => r.waits.filter((w) => w.tapToAnswerMs != null && w.atSyncMs >= 0 && w.atSyncMs <= r.syncSpanMs).map((w) => w.tapToAnswerMs))),
+        // One sample per answered tap in the sync's span (merge-tap-matching.mjs).
+        tapsInSyncSpan: stats(ok.flatMap((r) => r.taps.answersMs)),
+        // Each cycle's first local save's gate wait, and its later saves' (save 2, cleanup), over every published line.
+        gateWaitMs: { first: stats(ok.flatMap((r) => r.gateWaitsMs.map((line) => line[0]))),
+            later: stats(ok.flatMap((r) => r.gateWaitsMs.flatMap((line) => line.slice(1)))) },
+        taps: (() => {
+            const sum = (key) => ok.reduce((total, r) => total + r.taps[key], 0);
+            const inSpan = sum('inSpan');
+            return { inSpan, answered: sum('answered'), unanswered: sum('unanswered'),
+                unansweredShare: inSpan ? Math.round((sum('unanswered') / inSpan) * 1000) / 1000 : null };
+        })(),
         callsDuringSync: { n: waits.filter((w) => w.syncWorkMs > 10).length, waitMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.waitMs)), syncWorkMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.syncWorkMs)) },
     };
     console.log(JSON.stringify({ summary, results }, null, 2));
     if (budgetMs !== null && !(summary.tapsInSyncSpan.p90 <= budgetMs)) {
         console.error(`budget failed: tap in sync span p90 ${summary.tapsInSyncSpan.p90 ?? 'none'} ms > ${budgetMs} ms (n ${summary.tapsInSyncSpan.n})`);
+        process.exitCode = 1;
+    }
+    if (budgetMs !== null && !(summary.taps.unansweredShare <= 0.05)) {
+        console.error(`budget failed: ${summary.taps.unanswered} of ${summary.taps.inSpan} taps in the sync span have no read of their own tab, unmeasured (share ${summary.taps.unansweredShare} > 0.05)`);
         process.exitCode = 1;
     }
 } else {

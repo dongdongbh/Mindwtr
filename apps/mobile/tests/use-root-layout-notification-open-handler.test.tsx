@@ -1,4 +1,6 @@
 import React from 'react';
+import { Platform } from 'react-native';
+import { logInfo } from '@/lib/app-log';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -38,6 +40,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     updateTask,
   }));
 });
+
+vi.mock('@/lib/app-log', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
 vi.mock('@/lib/notification-service', () => ({
   setNotificationOpenHandler,
@@ -81,7 +85,8 @@ describe('useRootLayoutNotificationOpenHandler', () => {
   beforeEach(() => {
     setNotificationOpenHandler.mockReset();
     setHighlightTask.mockReset();
-    updateTask.mockClear();
+    updateTask.mockReset().mockResolvedValue(undefined);
+    vi.mocked(logInfo).mockClear();
     storeTasksById.clear();
     consumePendingNotificationOpenPayload.mockReset();
     consumePendingNotificationOpenPayload.mockResolvedValue(null);
@@ -353,4 +358,25 @@ describe('useRootLayoutNotificationOpenHandler', () => {
 
     expect(setNotificationOpenHandler).toHaveBeenLastCalledWith(null);
   });
+  it.each([false, true])('records iOS completion update outcome without task data (failure=%s)', async (failed) => {
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    const router = createRouter();
+    storeTasksById.set('private-id', { id: 'private-id', title: 'private title', status: 'next' });
+    if (failed) updateTask.mockRejectedValueOnce(new Error('private storage detail'));
+    let tree!: ReturnType<typeof create>;
+    try {
+      await act(async () => { tree = create(<TestHarness router={router} />); });
+      const handler = setNotificationOpenHandler.mock.calls[0][0];
+      await act(async () => handler({ actionIdentifier: 'complete', taskId: 'private-id', notificationId: 'private-alarm' }));
+      const diagnostics = vi.mocked(logInfo).mock.calls.filter((call) => call[1]?.extra?.releaseCheck === 'v1.3.7/ios-reminder-actions');
+      expect(diagnostics.map((call) => call[1]?.extra?.stage)).toEqual(['received-ready', 'update-started', failed ? 'update-failed' : 'update-returned']);
+      expect(JSON.stringify(diagnostics)).not.toContain('private');
+      expect(router.push).not.toHaveBeenCalled();
+    } finally {
+      act(() => tree?.unmount());
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
+    }
+  });
+
 });

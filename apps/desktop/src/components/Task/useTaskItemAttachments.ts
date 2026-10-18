@@ -1,6 +1,6 @@
 import { isUpNoteHref, showExternalLinkFailure } from '../../lib/external-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, isSandboxMode, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, useTaskStore, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, isSandboxMode, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, updateTaskFromLatest, useTaskStore, type Task } from '@mindwtr/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment, pickFolderLinkAttachment } from '../../lib/attachment-import';
@@ -279,7 +279,6 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
                 tasks: currentTasks,
                 projects: currentProjects,
                 addProject: addProjectNow,
-                updateTask: updateTaskNow,
                 settings: currentSettings,
             } = useTaskStore.getState();
             const existing = currentTasks.find((item) => item.id === task.id);
@@ -329,9 +328,14 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
                 }
             }
 
-            if (Object.keys(updates).length > 0) {
-                await updateTaskNow(task.id, updates);
-            }
+            // Transcription takes seconds: build tags/contexts on the row as it is when the write is admitted,
+            // so a tag a sync save brought meanwhile is kept.
+            const projectId = updates.projectId;
+            await updateTaskFromLatest(task.id, (latest) => {
+                const { updates: latestUpdates } = buildTaskUpdatesFromSpeechResult(latest, result, currentSettings);
+                if (projectId && !latest.projectId) latestUpdates.projectId = projectId;
+                return Object.keys(latestUpdates).length > 0 ? latestUpdates : null;
+            });
             closeAudio();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

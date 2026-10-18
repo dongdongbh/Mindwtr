@@ -19,6 +19,9 @@ import { TaskEditCustomRecurrenceModal } from './task-edit/TaskEditCustomRecurre
 import { MarkdownFormatToolbar } from './markdown-format-toolbar';
 import { syncTaskEditPagerPosition } from './task-edit/task-edit-modal.utils';
 
+const referenceClipboard = vi.hoisted(() => ({ write: vi.fn(), toast: vi.fn() }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: referenceClipboard.write }));
+
 const taskEditStore = vi.hoisted(() => ({ current: null as Record<string, any> | null }));
 const taskOpenPreference = vi.hoisted(() => ({
   current: { hydrated: true, mode: 'automatic' as 'automatic' | 'preview' | 'edit' },
@@ -94,10 +97,14 @@ vi.mock('../contexts/language-context', () => ({
 
 vi.mock('../contexts/toast-context', () => ({
   useToast: () => ({
-    showToast: vi.fn(),
+    showToast: referenceClipboard.toast,
     dismissToast: vi.fn(),
   }),
   ToastViewport: () => null,
+}));
+
+vi.mock('../hooks/use-theme-tokens', () => ({
+  useThemeTokens: () => ({ isMaterial: false, roles: null, shape: { medium: 10 } }),
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
@@ -201,6 +208,8 @@ vi.mock('./task-edit/task-edit-modal.utils', async () => {
 describe('TaskEditModal', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    referenceClipboard.write.mockReset().mockResolvedValue(undefined);
+    referenceClipboard.toast.mockClear();
     vi.mocked(syncTaskEditPagerPosition).mockClear();
     taskOpenPreference.current = { hydrated: true, mode: 'automatic' };
     if (taskEditStore.current) {
@@ -224,6 +233,84 @@ describe('TaskEditModal', () => {
         sequentialProjectIds: new Set<string>(), sequentialWithinSectionProjectIds: new Set<string>(),
       });
     }
+  });
+
+  it('keeps the native editor mounted until dismissal and updates its dismissal callback', async () => {
+    const task: Task = {
+      id: 'dismiss-task', title: 'Original', status: 'next', contexts: [], tags: [],
+      createdAt: '2026-10-14T00:00:00.000Z', updatedAt: '2026-10-14T00:00:00.000Z',
+    };
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    const firstDismiss = vi.fn();
+    const nextDismiss = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    const editor = (visible: boolean, onDismiss: () => void) => (
+      <TaskEditModal visible={visible} task={task} onSave={onSave} onClose={onClose} onDismiss={onDismiss} />
+    );
+    await act(async () => { tree = renderer.create(editor(true, firstDismiss)); });
+    act(() => tree.root.findByType('TaskEditFormTab' as any).props.onTitleDraftChange('Unsaved'));
+    await act(async () => tree.update(editor(false, firstDismiss)));
+    expect(tree.root.findAllByType(Modal)[0].props.visible).toBe(false);
+    expect(firstDismiss).not.toHaveBeenCalled();
+    await act(async () => tree.update(editor(false, nextDismiss)));
+    act(() => tree.root.findAllByType(Modal)[0].props.onDismiss());
+    expect(nextDismiss).toHaveBeenCalledTimes(1);
+    expect(firstDismiss).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(task.title).toBe('Original');
+    await act(async () => tree.unmount());
+  });
+
+  it.each([false, true])('copies persisted task references without saving or closing (readOnly=%s)', async (readOnly) => {
+    const task: Task = {
+      id: 'saved /?&#', title: 'Original title', status: 'next', contexts: [], tags: [],
+      createdAt: '2026-10-14T00:00:00.000Z', updatedAt: '2026-10-14T00:00:00.000Z',
+    };
+    taskEditStore.current!._allTasks = [task];
+    taskEditStore.current!.tasks = readOnly ? [] : [task];
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<TaskEditModal visible task={task} readOnly={readOnly} onSave={onSave} onClose={onClose} />);
+    });
+    if (!readOnly) {
+      act(() => tree.root.findByType('TaskEditFormTab' as any).props.onTitleDraftChange('Unsaved title'));
+    }
+    for (const [label, payload] of [
+      ['Copy task link', 'mindwtr://open?task=saved%20%2F%3F%26%23'],
+      ['Copy task ID', task.id],
+    ]) {
+      act(() => tree.root.findByProps({ accessibilityLabel: 'common.more' }).props.onPress());
+      await act(async () => tree.root.findByProps({ accessibilityLabel: label }).props.onPress());
+      expect(referenceClipboard.write).toHaveBeenLastCalledWith(payload);
+    }
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(task.title).toBe('Original title');
+    if (!readOnly) expect(tree.root.findByType('TaskEditFormTab' as any).props.titleDraft).toBe('Unsaved title');
+    await act(async () => tree.unmount());
+  });
+
+  it.each(['unsaved', 'projected'])('hides task references for %s tasks', async (kind) => {
+    const task: Task = {
+      id: 'temporary-task', title: 'Task', status: 'next', contexts: [], tags: [],
+      createdAt: '2026-10-14T00:00:00.000Z', updatedAt: '2026-10-14T00:00:00.000Z',
+      ...(kind === 'projected' ? { isProjectedRecurringTask: true, sourceTaskId: 'recurrence-source' } : {}),
+    };
+    // Even a projected instance accidentally present in the list cannot expose a reference.
+    taskEditStore.current!._allTasks = kind === 'projected' ? [task] : [];
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<TaskEditModal visible task={task} onSave={vi.fn()} onClose={vi.fn()} />);
+    });
+    act(() => tree.root.findByProps({ accessibilityLabel: 'common.more' }).props.onPress());
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task link' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task ID' })).toHaveLength(0);
+    expect(tree.root.findByProps({ accessibilityLabel: 'common.share' })).toBeTruthy();
+    expect(referenceClipboard.write).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
   });
 
   it.each(['android', 'ios'])('renders no task fallback for a closed empty editor on %s', async (platform) => {

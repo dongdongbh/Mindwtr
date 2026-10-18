@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getModelOptions } from '@mindwtr/core';
+import { getModelOptions, useTaskStore } from '@mindwtr/core';
 import type { AppData } from '@mindwtr/core';
 
 import { useAiSettings } from './useAiSettings';
@@ -84,7 +84,13 @@ const settingsWithSpeech = (speechToText: NonNullable<NonNullable<AppData['setti
     },
 });
 
+const initialTaskState = useTaskStore.getState();
+
 describe('useAiSettings speech provider changes', () => {
+    afterEach(() => {
+        useTaskStore.setState(initialTaskState, true);
+    });
+
     beforeEach(() => {
         vi.clearAllMocks();
         languageMocks.t.mockImplementation((key: string) => key);
@@ -350,6 +356,8 @@ describe('useAiSettings speech provider changes', () => {
             provider: 'whisper',
             model: 'whisper-tiny',
         });
+        // The write is built on the stored settings, which the page renders.
+        useTaskStore.setState({ settings });
 
         function Probe() {
             result = useAiSettings({
@@ -395,6 +403,7 @@ describe('useAiSettings speech provider changes', () => {
             provider: 'parakeet',
             model: 'parakeet-tdt-0.6b-v3-int8',
         });
+        useTaskStore.setState({ settings });
 
         function Probe() {
             result = useAiSettings({

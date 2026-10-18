@@ -199,15 +199,16 @@ final class NativeNotificationSettingsHostTests: XCTestCase {
         let io = NotificationSettingsIO(), core = host(io); _ = try await core.start(); io.reset()
         let before = try rows(), local = try Data(contentsOf: manifest)
         let options = try object(await core.readNotificationSettingsOptions())
-        XCTAssertEqual((options["expected"] as? [String: Any])?.count, 10)
+        XCTAssertEqual((options["expected"] as? [String: Any])?.count, 11)
         let raw = try await request(core, value: true), original = try object(raw)
         XCTAssertEqual(io.writeCounts, [0, 0, 0]); io.reset()
         var hinted = original; hinted["permissionGranted"] = true
         var numeric = original; numeric["edit"] = ["type": "notificationsEnabled", "value": 1]
         var booleanDay = original; booleanDay["edit"] = ["type": "weeklyReviewDay", "value": true]
         var badTime = original; badTime["edit"] = ["type": "weeklyReviewTime", "value": "9:00"]
+        var badDefault = original; badDefault["edit"] = ["type": "taskReminderDefault", "value": "inherit"]
         var large = original; large["expected"] = ["present": true, "value": String(repeating: "x", count: 1025)]
-        for input in [hinted, numeric, booleanDay, badTime, large] {
+        for input in [hinted, numeric, booleanDay, badTime, badDefault, large] {
             await rejected { try await core.setNotificationSetting(requestJSON: json(input), readmission: { true }) }
         }
         for method in ["notificationSetting", "notificationSettingOptions", "notificationSettingPrepare", "notificationSettingValidate",
@@ -238,12 +239,12 @@ final class NativeNotificationSettingsHostTests: XCTestCase {
         XCTAssertEqual(enabled["changed"] as? Bool, true)
         await permissionCounts([1, 1]); XCTAssertEqual(try markers().count, 1)
         for (type, value) in [("notificationsEnabled", false as Any), ("weeklyReviewTime", "09:31"), ("weeklyReviewDay", 2),
-                              ("dailyDigestMorningTime", "07:32"), ("dailyDigestEveningTime", "21:33")] {
+                              ("dailyDigestMorningTime", "07:32"), ("dailyDigestEveningTime", "21:33"), ("taskReminderDefault", "skip")] {
             let edit = try await request(core, type: type, value: value)
             _ = try await core.setNotificationSetting(requestJSON: edit, readmission: { true })
             XCTAssertEqual(try json(["value": XCTUnwrap(settings()[type])]), try json(["value": value]))
         }
-        await permissionCounts([1, 1]); XCTAssertEqual(try markers().count, 6)
+        await permissionCounts([1, 1]); XCTAssertEqual(try markers().count, 7)
         let count = try markers().count, noop = try await request(core, type: "weeklyReviewDay", value: 2)
         let unchanged = try object(await core.setNotificationSetting(requestJSON: noop, readmission: { true }))
         XCTAssertEqual(unchanged["changed"] as? Bool, false)

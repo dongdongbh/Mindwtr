@@ -10,6 +10,9 @@ object WidgetListStore {
   const val DEFAULT_LIST = "focus"
   /** Kept for installed widgets that still carry a project selection. */
   const val PROJECT_PREFIX = "project:"
+  const val CONTEXT_PREFIX = "context:"
+  const val TAG_PREFIX = "tag:"
+  fun isTokenList(id: String): Boolean = id.startsWith(CONTEXT_PREFIX) || id.startsWith(TAG_PREFIX)
   const val FILTER_PREFIX = "filter:"
 
   fun read(context: Context, appWidgetId: Int): String {

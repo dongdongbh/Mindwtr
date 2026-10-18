@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { act, createEvent, fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { Project } from '@mindwtr/core';
+import { useTaskStore, type Project } from '@mindwtr/core';
 
 import { TaskInput } from './TaskInput';
 
@@ -187,8 +187,8 @@ describe('TaskInput autocomplete', () => {
         });
     });
 
-    it('completes an accepted slash command prefix when no argument is present', async () => {
-        const { getByRole } = render(<TaskInputHarness initialValue="/du" />);
+    it.each([['/du', '/due:'], ['/est', '/estimate:'], ['/dur', '/duration:']])('completes %s without inserting a placeholder', async (prefix, completed) => {
+        const { getByRole } = render(<TaskInputHarness initialValue={prefix} />);
         const input = getByRole('combobox') as HTMLInputElement;
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
@@ -197,10 +197,26 @@ describe('TaskInput autocomplete', () => {
         fireEvent.keyDown(input, { key: 'Enter' });
 
         await waitFor(() => {
-            expect(input.value).toBe('/due:');
-            expect(input.selectionStart).toBe('/due:'.length);
-            expect(input.selectionEnd).toBe('/due:'.length);
+            expect(input.value).toBe(completed);
+            expect(input.selectionStart).toBe(completed.length);
+            expect(input.selectionEnd).toBe(completed.length);
         });
+    });
+
+    it('hides estimate commands while Time estimates is disabled', () => {
+        const settings = useTaskStore.getState().settings;
+        useTaskStore.setState({ settings: { ...settings, features: { ...settings.features, timeEstimates: false } } });
+        try {
+            const { getByRole, queryByRole } = render(<TaskInputHarness initialValue="/" />);
+            const input = getByRole('combobox') as HTMLInputElement;
+            input.setSelectionRange(input.value.length, input.value.length);
+            fireEvent.click(input);
+            expect(queryByRole('option', { name: '/estimate:<duration>' })).toBeNull();
+            expect(queryByRole('option', { name: '/duration:<duration>' })).toBeNull();
+            expect(getByRole('option', { name: '/due:<when>' })).toBeInTheDocument();
+        } finally {
+            act(() => useTaskStore.setState({ settings }));
+        }
     });
 
     it('lists every parser-supported slash command in the popup', () => {

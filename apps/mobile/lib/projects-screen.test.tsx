@@ -363,6 +363,66 @@ describe('ProjectsScreen project tag picker', () => {
   });
 });
 
+describe('ProjectsScreen project edits on close', () => {
+  // Leaving the sheet writes only what the user changed since it opened: an area another device set meanwhile stays.
+  it('keeps an area another device set while the sheet was open', async () => {
+    const actualCore = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+    const remote = { ...testProject, areaId: 'area-remote', updatedAt: '2026-02-01T00:00:00.000Z' };
+    actualCore.resetForTests();
+    actualCore.setStorageAdapter({
+      getData: async () => ({ tasks: [], projects: [remote], sections: [], areas: [{ ...testArea, id: 'area-remote' }], people: [], settings: {} }),
+      saveData: async () => undefined,
+    });
+    await actualCore.useTaskStore.getState().fetchData({ silent: true });
+    routeParams.current = { projectId: testProject.id };
+    storeState.updateProject.mockClear();
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<ProjectsScreen />);
+      await Promise.resolve();
+    });
+    // The sync lands while the sheet still shows the project as opened.
+    storeState.projects = [remote];
+    storeState._allProjects = [remote];
+    await act(async () => { tree.update(<ProjectsScreen />); await Promise.resolve(); });
+    await act(async () => { detailModal.props?.onProjectChange?.({ ...detailModal.props?.project, title: 'Renamed' }); });
+    await act(async () => { detailModal.props?.onOpenQuickAdd?.(testProject); await Promise.resolve(); });
+    for (const [, patch] of storeState.updateProject.mock.calls) expect(patch).not.toHaveProperty('areaId');
+    await vi.waitFor(() => expect(actualCore.useTaskStore.getState()._projectsById.get(testProject.id)?.title).toBe('Renamed'));
+    expect(actualCore.useTaskStore.getState()._projectsById.get(testProject.id)?.areaId).toBe('area-remote');
+    await act(async () => { tree.unmount(); });
+    actualCore.resetForTests();
+  });
+
+  it('keeps a rename another device made when the opened title had outer spaces and the user did not rename', async () => {
+    const actualCore = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+    const padded = { ...testProject, title: '  Padded title  ' };
+    const remote = { ...padded, title: 'Remote name', updatedAt: '2026-02-01T00:00:00.000Z' };
+    actualCore.resetForTests();
+    actualCore.setStorageAdapter({ getData: async () => ({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} }), saveData: async () => undefined });
+    // The store holds the other device's rename; the sheet opens on the copy from before it.
+    actualCore.useTaskStore.setState({ _allProjects: [remote], _allAreas: [testArea] });
+    storeState.projects = [padded];
+    storeState._allProjects = [padded];
+    routeParams.current = { projectId: testProject.id };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<ProjectsScreen />);
+      await Promise.resolve();
+    });
+    storeState.projects = [remote];
+    storeState._allProjects = [remote];
+    await act(async () => { tree.update(<ProjectsScreen />); await Promise.resolve(); });
+    await act(async () => { detailModal.props?.onOpenQuickAdd?.(testProject); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(actualCore.useTaskStore.getState()._projectsById.get(testProject.id)?.title).toBe('Remote name');
+    await act(async () => { tree.unmount(); });
+    storeState.projects = [testProject];
+    storeState._allProjects = [testProject];
+    actualCore.resetForTests();
+  });
+});
+
 describe('ProjectsScreen project quick add', () => {
   // The detail sheet is a native modal driven by selectedProject. Leaving it set
   // while quick add pushes a route desyncs state from the native sheet, and

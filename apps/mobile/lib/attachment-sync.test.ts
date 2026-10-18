@@ -95,6 +95,26 @@ vi.mock('expo-file-system', () => ({
 vi.mock('expo-file-system/legacy', () => fileSystemMock);
 
 vi.mock('./attachment-file-installer', () => attachmentFileInstallerMock);
+// SafDocumentsCore's listing and lookup through the expo SAF mock above (a path-like provider:
+// the display name is the decoded tail of the document ID).
+vi.mock('./saf-documents', () => {
+  const nameOf = (uri: string) => {
+    const decoded = decodeURIComponent(uri).replace(/\/+$/, '');
+    return decoded.slice(Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf(':')) + 1);
+  };
+  return {
+    listSafChildren: vi.fn(async (uri: string) => {
+      const uris: string[] = await fileSystemMock.StorageAccessFramework.readDirectoryAsync(uri);
+      return uris.map((child) => ({ uri: child, name: nameOf(child), mime: null, size: null, lastModified: null }));
+    }),
+    statSafDocument: vi.fn(async (uri: string) => ({ uri, name: nameOf(uri), mime: null, size: null, lastModified: null })),
+    // Lands where the legacy write landed, so the folder fakes below see the bytes.
+    writeSafDocument: vi.fn(async (uri: string, bytes: Uint8Array) => (
+      fileSystemMock.writeAsStringAsync(uri, Buffer.from(bytes).toString('base64'), { encoding: 'base64' })
+    )),
+  };
+});
+
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -1510,6 +1530,44 @@ describe('attachment sync', () => {
       { encoding: 'base64' }
     );
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(createdRemoteFileUri, expect.anything());
+  });
+
+  // RSAF (rclone) never sets FLAG_SUPPORTS_WRITE, so expo's legacy SAF write refuses every
+  // attempt (#1001); attachments must write through SafDocumentsCore, which has no pre-check (B1).
+  it('uploads a SAF attachment to a provider whose metadata denies writes, through the unchecked write', async () => {
+    const syncFileUri = 'content://com.chiller3.rsaf.documents/tree/remote%3AMindwtr/document/remote%3AMindwtr%2Fdata.json';
+    const attachmentsDirUri = 'content://com.chiller3.rsaf.documents/tree/remote%3AMindwtr/document/remote%3AMindwtr%2Fattachments';
+    const uploadHash = sha256Hex(new Uint8Array([1, 2, 3]));
+    const generationName = `upload-me.${uploadHash}.jpg`;
+    const createdRemoteFileUri = `${attachmentsDirUri}%2F${generationName}`;
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      const exists = uri === 'file://document/attachments/upload-me.jpg' || uri.startsWith('file://cache/mindwtr-upload-');
+      return { exists, size: exists ? 3 : 0, modificationTime: 1 };
+    });
+    fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => (
+      uri === attachmentsDirUri ? [] : [attachmentsDirUri]
+    ));
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockResolvedValue(createdRemoteFileUri);
+    const notWritable = new Error(`Location '${createdRemoteFileUri}' isn't writable.`);
+    fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockRejectedValue(notWritable);
+    fileSystemMock.writeAsStringAsync.mockRejectedValue(notWritable);
+    const safDocuments = await import('./saf-documents');
+    // SafDocumentsCore writes through the output stream, which this provider accepts.
+    vi.mocked(safDocuments.writeSafDocument).mockResolvedValueOnce(undefined);
+    const appData = singleAttachmentData({
+      id: 'upload-me',
+      title: 'photo.jpg',
+      uri: 'file://document/attachments/upload-me.jpg',
+      localStatus: 'available',
+    });
+
+    const { data } = syncResult(await attachmentSync.syncFileAttachments(appData, syncFileUri), appData);
+
+    expect(data.tasks[0].attachments?.[0]?.cloudKey).toBe(`attachments/${generationName}`);
+    expect(safDocuments.writeSafDocument).toHaveBeenCalledWith(createdRemoteFileUri, new Uint8Array([1, 2, 3]));
+    fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockResolvedValue(undefined);
+    fileSystemMock.writeAsStringAsync.mockResolvedValue(undefined);
   });
 
   it('fails closed when SAF attachment inventory is unreadable and preserves cloud metadata', async () => {

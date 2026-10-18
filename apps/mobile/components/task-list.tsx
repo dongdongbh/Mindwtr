@@ -459,6 +459,7 @@ function TaskListComponent({
   const timeSpentEnabled = resolvedFeatureFlags.pomodoro
     && settings?.gtd?.pomodoro?.linkTask === true;
   const showTaskAge = settings?.appearance?.showTaskAge === true;
+  const showStatusBadge = !settings?.gtd?.taskEditor?.hidden?.includes('status');
   const sectionById = useMemo(() => new Map(sections.map((section) => [section.id, section])), [sections]);
   const rowContext = useMemo<SwipeableTaskItemRowContext>(() => ({
     addTask,
@@ -473,6 +474,7 @@ function TaskListComponent({
     timeEstimatesEnabled,
     timeSpentEnabled,
     showTaskAge,
+    showStatusBadge,
   }), [
     addTask,
     areas,
@@ -483,6 +485,7 @@ function TaskListComponent({
     sectionById,
     restoreTask,
     showTaskAge,
+    showStatusBadge,
     timeEstimatesEnabled,
     timeSpentEnabled,
     updateTask,

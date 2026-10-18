@@ -8,7 +8,7 @@ import {
     type TimeEstimate,
     createAIProvider,
     generateUUID,
-    useTaskStore,
+    updateTaskFromLatest,
 } from '@mindwtr/core';
 import { buildAIConfig, buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
 import { logWarn } from '../../lib/app-log';
@@ -375,14 +375,13 @@ export function useTaskItemAi({
     // consume.
     const addBreakdownStepsToChecklist = useCallback(() => {
         if (!aiBreakdownSteps?.length) return;
-        const { _tasksById, updateTask } = useTaskStore.getState();
-        const checklist = _tasksById.get(taskId)?.checklist ?? [];
         const newItems = aiBreakdownSteps.map((step) => ({
             id: generateUUID(),
             title: step,
             isCompleted: false,
         }));
-        void updateTask(taskId, { checklist: [...checklist, ...newItems] });
+        // Append to the latest row, so an item a sync save added meanwhile is kept.
+        void updateTaskFromLatest(taskId, (latest) => ({ checklist: [...(latest.checklist ?? []), ...newItems] }));
         setAiBreakdownSteps(null);
     }, [aiBreakdownSteps, taskId]);
 

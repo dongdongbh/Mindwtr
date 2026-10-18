@@ -363,16 +363,27 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
             const opened = await call('captureOpen');
             return call('captureSubmit', JSON.stringify({ text: title, options: opened.options, captureId: randomUUID(), openAfterSave: false }));
         },
-        /** Every Inbox title, window by window at one revision (the phone's library outgrows one window). */
+        /**
+         * Every Inbox title, window by window at one revision (the phone's library outgrows one window). This device's own
+         * automatic sync can change the Inbox between windows: core then answers STALE_REVISION, and paging restarts at
+         * offset zero, as the contract says.
+         */
         async titles() {
-            const first = await call('window', 0, 100, '');
-            const rows = [...first.rows];
-            while (rows.length < first.total) {
-                const next = await call('window', rows.length, 100, first.revision);
-                if (next.rows.length === 0) break;
-                rows.push(...next.rows);
+            for (let attempt = 0; ; attempt += 1) {
+                try {
+                    const first = await call('window', 0, 100, '');
+                    const rows = [...first.rows];
+                    while (rows.length < first.total) {
+                        const next = await call('window', rows.length, 100, first.revision);
+                        if (next.rows.length === 0) break;
+                        rows.push(...next.rows);
+                    }
+                    return rows.map((row) => row.title);
+                } catch (error) {
+                    if (attempt >= 10 || !String(error.message).startsWith('STALE_REVISION')) throw error;
+                    log(`${name}: the Inbox changed while paging; restarting at offset zero`);
+                }
             }
-            return rows.map((row) => row.title);
         },
         /** Configures [kind] ('webdav' or 'selfhosted') from the Sync screen as a user does: choose, fill, Save. */
         async configure(kind, fields) {

@@ -16,6 +16,7 @@ import {
     flushPendingSave,
     formatI18nTemplate,
     tFallback,
+    updateTaskFromLatest,
     type Task,
     type ContextOrTagMatchMode,
 } from '@mindwtr/core';
@@ -434,7 +435,11 @@ export function ContextsView() {
         if (!task || task.deletedAt) return;
         pendingContextDrops.current.add(id);
         try {
-            const result = await useTaskStore.getState().updateTask(id, { contexts: [...task.contexts, context] });
+            // Add and remove the context on the latest row, so a context a sync save added meanwhile is kept.
+            const hasContext = (contexts: string[]) => contexts.some((token) => normalizeBulkTaskTokenInput(token, 'contexts') === context);
+            const result = await updateTaskFromLatest(id, (latest) => (
+                hasContext(latest.contexts) ? null : { contexts: [...latest.contexts, context] }
+            ));
             if (!result.success) throw new Error(result.error);
             await flushPendingSave();
             let undone = false;
@@ -445,14 +450,15 @@ export function ContextsView() {
                     undone = true;
                     return;
                 }
-                const contexts = latest.contexts.filter((token) => normalizeBulkTaskTokenInput(token, 'contexts') !== context);
-                if (contexts.length === latest.contexts.length) {
+                if (!hasContext(latest.contexts)) {
                     undone = true;
                     return;
                 }
                 pendingContextDrops.current.add(id);
                 try {
-                    const result = await useTaskStore.getState().updateTask(id, { contexts });
+                    const result = await updateTaskFromLatest(id, (current) => (hasContext(current.contexts)
+                        ? { contexts: current.contexts.filter((token) => normalizeBulkTaskTokenInput(token, 'contexts') !== context) }
+                        : null));
                     if (!result.success) throw new Error(result.error);
                     await flushPendingSave();
                     undone = true;

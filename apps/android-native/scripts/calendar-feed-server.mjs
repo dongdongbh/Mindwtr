@@ -49,11 +49,15 @@ const day = (offset) => {
 export const eventHour = () => Math.min(new Date().getHours(), 22);
 const hh = (hour) => String(hour).padStart(2, '0');
 
-/** A calendar with a timed event today ([timed], this hour, one hour long) and an all-day event tomorrow ([allDay]). */
-export const icsCalendar = ({ timed, allDay, name = 'Team calendar' }) => [
+/**
+ * A calendar with a timed event today ([timed], this hour, one hour long) and an all-day event tomorrow ([allDay]), plus one
+ * more all-day event tomorrow for each title in [moreAllDay] (rows stacked in the day view's all-day card).
+ */
+export const icsCalendar = ({ timed, allDay, moreAllDay = [], name = 'Team calendar' }) => [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Mindwtr check//EN', `X-WR-CALNAME:${name}`,
     'BEGIN:VEVENT', 'UID:check-timed@mindwtr', `DTSTART:${day(0)}T${hh(eventHour())}0000`, `DTEND:${day(0)}T${hh(eventHour() + 1)}0000`, `SUMMARY:${timed}`, 'END:VEVENT',
-    'BEGIN:VEVENT', 'UID:check-all-day@mindwtr', `DTSTART;VALUE=DATE:${day(1)}`, `DTEND;VALUE=DATE:${day(2)}`, `SUMMARY:${allDay}`, 'END:VEVENT',
+    ...[allDay, ...moreAllDay].flatMap((title, index) => ['BEGIN:VEVENT', `UID:check-all-day${index || ''}@mindwtr`,
+        `DTSTART;VALUE=DATE:${day(1)}`, `DTEND;VALUE=DATE:${day(2)}`, `SUMMARY:${title}`, 'END:VEVENT']),
     'END:VCALENDAR', '',
 ].join('\r\n');
 

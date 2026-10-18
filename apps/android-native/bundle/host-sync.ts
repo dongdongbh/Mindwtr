@@ -379,7 +379,10 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     };
     const state = () => {
         const current = badge();
-        return { type: 'sync', badge: current, color: current === 'hidden' ? null : SETTINGS_SYNC_BADGE_COLORS[current], cycles };
+        // `active`: a sync runs now (Settings › Data's rows wait for it, as RN's isSyncing does); the badge's own "syncing" also
+        // covers a pending write.
+        return { type: 'sync', badge: current, color: current === 'hidden' ? null : SETTINGS_SYNC_BADGE_COLORS[current], cycles,
+            active: service.getMobileSyncActivityState() === 'syncing' };
     };
     const emitState = () => {
         if (fatalCleanupError) return;

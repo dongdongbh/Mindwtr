@@ -7,6 +7,7 @@ import {
     DEFAULT_POMODORO_DURATIONS,
     recordPomodoroFocusSessions,
     resetPomodoroState,
+    runStoreCommand,
     sanitizePomodoroDurations,
     sanitizePomodoroSessionHistory,
     useTaskStore,
@@ -197,16 +198,19 @@ const creditCompletedFocusSessions = (prev: PomodoroSnapshot, next: PomodoroSnap
     const prevByTask = prev.sessionHistory.completedFocusSessionsByTaskId;
     const nextByTask = next.sessionHistory.completedFocusSessionsByTaskId;
     if (prevByTask === nextByTask) return;
-    const { tasks, updateTask } = useTaskStore.getState();
     for (const [taskId, count] of Object.entries(nextByTask)) {
         const delta = count - (prevByTask[taskId] ?? 0);
         if (delta <= 0) continue;
-        const task = tasks.find((candidate) => candidate.id === taskId);
-        if (!task) continue;
-        const nextTotal = addTimeSpentMinutes(task.timeSpentMinutes, delta * next.durations.focusMinutes);
-        if (nextTotal !== undefined && nextTotal !== task.timeSpentMinutes) {
-            void updateTask(taskId, { timeSpentMinutes: nextTotal });
-        }
+        // The total is read and written in one command, so time a sync save brought is added to, not replaced.
+        void runStoreCommand(async () => {
+            const { tasks, updateTask } = useTaskStore.getState();
+            const task = tasks.find((candidate) => candidate.id === taskId);
+            if (!task) return;
+            const nextTotal = addTimeSpentMinutes(task.timeSpentMinutes, delta * next.durations.focusMinutes);
+            if (nextTotal !== undefined && nextTotal !== task.timeSpentMinutes) {
+                await updateTask(taskId, { timeSpentMinutes: nextTotal });
+            }
+        });
     }
 };
 

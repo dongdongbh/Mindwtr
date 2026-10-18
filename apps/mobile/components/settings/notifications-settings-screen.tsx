@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Modal, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Check } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +20,7 @@ import {
     readPersistentCaptureEnabled,
     writePersistentCaptureEnabled,
 } from '@/lib/persistent-capture-notification';
+import { isIosAppBadgeSupported, readIosAppBadgeEnabled, setIosAppBadgeEnabled } from '@/lib/ios-app-badge';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
 import { ExactAlarmNoticeRow, useExactAlarmPermission } from './exact-alarm-notice';
@@ -50,8 +51,50 @@ export function NotificationsSettingsScreen() {
     const scrollContentStyle = useSettingsScrollContent();
     const [timePicker, setTimePicker] = useState<TimeRow['type'] | null>(null);
     const [timeDraft, setTimeDraft] = useState<Date | null>(null);
-    const [weeklyReviewDayPickerOpen, setWeeklyReviewDayPickerOpen] = useState(false);
+    const [choicePicker, setChoicePicker] = useState<'weeklyReviewDay' | 'taskReminderDefault' | null>(null);
     const [persistentCaptureEnabled, setPersistentCaptureEnabled] = useState(false);
+    const badgeSupported = isIosAppBadgeSupported();
+    const [badgeEnabled, setBadgeEnabled] = useState(false);
+    const [badgeReady, setBadgeReady] = useState(false);
+    const [badgeBusy, setBadgeBusy] = useState(false);
+    const badgePending = useRef(false);
+    const badgeMounted = useRef(false);
+    const badgeTranslate = useRef(t);
+    badgeTranslate.current = t;
+    useEffect(() => {
+        badgeMounted.current = true;
+        let cancelled = false;
+        if (badgeSupported) {
+            readIosAppBadgeEnabled().then((enabled) => {
+                if (cancelled) return;
+                setBadgeEnabled(enabled);
+                setBadgeReady(true);
+            }).catch(() => {
+                if (!cancelled) Alert.alert(badgeTranslate.current('settings.appIconBadge'), badgeTranslate.current('settings.appIconBadgeError'));
+            });
+        }
+        return () => { cancelled = true; badgeMounted.current = false; };
+    }, [badgeSupported]);
+    const changeBadge = async (enabled: boolean) => {
+        if (!badgeReady || badgePending.current) return;
+        badgePending.current = true;
+        setBadgeBusy(true);
+        try {
+            const result = await setIosAppBadgeEnabled(enabled);
+            if (!badgeMounted.current) return;
+            if (result === 'enabled' || result === 'disabled') {
+                setBadgeEnabled(result === 'enabled');
+            } else {
+                Alert.alert(t('settings.appIconBadge'), t(result === 'denied'
+                    ? 'settings.appIconBadgeDenied' : 'settings.appIconBadgeError'));
+            }
+        } catch {
+            if (badgeMounted.current) Alert.alert(t('settings.appIconBadge'), t('settings.appIconBadgeError'));
+        } finally {
+            badgePending.current = false;
+            if (badgeMounted.current) setBadgeBusy(false);
+        }
+    };
     const persistentCaptureSupported = isPersistentCaptureSupported();
 
     const systemLocale = typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function'
@@ -65,6 +108,7 @@ export function NotificationsSettingsScreen() {
         persistentCapture: persistentCaptureSupported ? { enabled: persistentCaptureEnabled } : undefined,
     }), [language, persistentCaptureEnabled, persistentCaptureSupported, settings, systemLocale, t]);
     const { reminders, weeklyReview, dailyDigest } = model;
+    const choiceRow = choicePicker === 'taskReminderDefault' ? reminders.taskDefault : weeklyReview.day;
     const { showNotice: showExactAlarmNotice } = useExactAlarmPermission(reminders.exactAlarmNotice !== null);
     const timeRows: Record<TimeRow['type'], TimeRow> = {
         weeklyReviewTime: weeklyReview.time,
@@ -154,6 +198,15 @@ export function NotificationsSettingsScreen() {
             <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
                 <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
                     {toggleRow(reminders.enable, false)}
+                    <SettingRow
+                        testID="task-reminder-default"
+                        divider
+                        onPress={() => setChoicePicker('taskReminderDefault')}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${reminders.taskDefault.label}: ${reminders.taskDefault.description}`}
+                        label={reminders.taskDefault.label}
+                        description={reminders.taskDefault.description}
+                    />
                     {toggleRow(reminders.startReminders)}
                     {toggleRow(reminders.dueReminders)}
 
@@ -169,13 +222,27 @@ export function NotificationsSettingsScreen() {
                     {reminders.persistentCapture && toggleRow(reminders.persistentCapture)}
                 </View>
 
+                {badgeSupported && (
+                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
+                        <SettingToggleRow
+                            testID="app-icon-badge"
+                            label={t('settings.appIconBadge')}
+                            description={t('settings.appIconBadgeHint')}
+                            value={badgeEnabled}
+                            disabled={!badgeReady || badgeBusy}
+                            onChange={(enabled) => { void changeBadge(enabled); }}
+                        />
+                    </View>
+                )}
+
                 <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
+
                     {toggleRow(weeklyReview.enable, false)}
 
                     <SettingRow
                         divider
                         dimmed={weeklyReview.day.disabled}
-                        onPress={() => setWeeklyReviewDayPickerOpen(true)}
+                        onPress={() => setChoicePicker('weeklyReviewDay')}
                         disabled={weeklyReview.day.disabled}
                         label={weeklyReview.day.label}
                         description={weeklyReview.day.description}
@@ -186,27 +253,30 @@ export function NotificationsSettingsScreen() {
 
                 <Modal
                     transparent
-                    visible={weeklyReviewDayPickerOpen}
+                    visible={choicePicker !== null}
                     animationType="fade"
-                    onRequestClose={() => setWeeklyReviewDayPickerOpen(false)}
+                    onRequestClose={() => setChoicePicker(null)}
                 >
-                    <Pressable style={styles.pickerOverlay} onPress={() => setWeeklyReviewDayPickerOpen(false)}>
+                    <Pressable style={styles.pickerOverlay} onPress={() => setChoicePicker(null)}>
                         <View
                             style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
                             onStartShouldSetResponder={() => true}
                         >
-                            <Text style={[styles.pickerTitle, { color: tc.text }]}>{weeklyReview.day.pickerTitle}</Text>
+                            <Text style={[styles.pickerTitle, { color: tc.text }]}>{choiceRow.pickerTitle}</Text>
                             <ScrollView style={styles.pickerList} contentContainerStyle={styles.pickerListContent}>
-                                {weeklyReview.day.options.map((option) => (
+                                {choiceRow.options.map((option) => (
                                     <TouchableOpacity
                                         key={option.label}
+                                        accessibilityRole="radio"
+                                        accessibilityLabel={option.label}
+                                        accessibilityState={{ checked: option.selected }}
                                         style={[
                                             styles.pickerOption,
                                             { borderColor: tc.border, backgroundColor: option.selected ? tc.filterBg : 'transparent' },
                                         ]}
                                         onPress={() => {
                                             applyEdit(option.edit);
-                                            setWeeklyReviewDayPickerOpen(false);
+                                            setChoicePicker(null);
                                         }}
                                     >
                                         <Text style={[styles.pickerOptionText, { color: option.selected ? tc.tint : tc.text }]}>

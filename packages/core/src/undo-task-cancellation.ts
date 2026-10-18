@@ -1,5 +1,6 @@
 import { flushPendingSave, useTaskStore } from './store';
 import { runAfterStoreWriteLock } from './data-transfer-transaction';
+import { runStoreCommand } from './store-write-gate';
 import type { Task } from './types';
 
 type UndoResult = { success: true } | { success: false; error?: string; retryable: boolean };
@@ -31,33 +32,41 @@ export function createTaskCancellationUndo(before: Task, cancelledAt: string | u
         && task.cancelledAt === before.cancelledAt
         && task.completedAt === before.completedAt;
 
+    // The cancelled row's check and the restore write are one store command (store-write-gate.ts): a sync save admitted
+    // between them could publish another device's status change, which the restore would then overwrite.
+    const restore = (): Promise<UndoResult | null> => runStoreCommand(async () => {
+        const current = useTaskStore.getState()._tasksById.get(before.id);
+        if (!cancelledAt || !current || current.deletedAt || current.purgedAt
+            || current.status !== 'archived' || current.cancelledAt !== cancelledAt) {
+            return { success: false, retryable: false };
+        }
+        let applied = false;
+        try {
+            const write = useTaskStore.getState().updateTask(before.id, restoreFields);
+            // Capture an immediate optimistic write; the failure paths also
+            // check again for stores that apply it after an earlier await.
+            const immediate = useTaskStore.getState()._tasksById.get(before.id);
+            applied = immediate !== current && matchesRestoredFields(immediate);
+            const result = await write;
+            written = result.success;
+            if (!result.success) {
+                written = applied || matchesRestoredFields(useTaskStore.getState()._tasksById.get(before.id));
+                retryPersistence = written;
+                return { success: false, error: result.error, retryable: true };
+            }
+        } catch (error) {
+            written = applied || matchesRestoredFields(useTaskStore.getState()._tasksById.get(before.id));
+            retryPersistence = written;
+            return { success: false, error: error instanceof Error ? error.message : undefined, retryable: true };
+        }
+        return null;
+    });
+
     const run = (): Promise<UndoResult> => runAfterStoreWriteLock(async () => {
         if (finished) return { success: true };
         if (!written) {
-            const current = useTaskStore.getState()._tasksById.get(before.id);
-            if (!cancelledAt || !current || current.deletedAt || current.purgedAt
-                || current.status !== 'archived' || current.cancelledAt !== cancelledAt) {
-                return { success: false, retryable: false };
-            }
-            let applied = false;
-            try {
-                const write = useTaskStore.getState().updateTask(before.id, restoreFields);
-                // Capture an immediate optimistic write; the failure paths also
-                // check again for stores that apply it after an earlier await.
-                const immediate = useTaskStore.getState()._tasksById.get(before.id);
-                applied = immediate !== current && matchesRestoredFields(immediate);
-                const result = await write;
-                written = result.success;
-                if (!result.success) {
-                    written = applied || matchesRestoredFields(useTaskStore.getState()._tasksById.get(before.id));
-                    retryPersistence = written;
-                    return { success: false, error: result.error, retryable: true };
-                }
-            } catch (error) {
-                written = applied || matchesRestoredFields(useTaskStore.getState()._tasksById.get(before.id));
-                retryPersistence = written;
-                return { success: false, error: error instanceof Error ? error.message : undefined, retryable: true };
-            }
+            const stopped = await restore();
+            if (stopped) return stopped;
         }
         try {
             if (!isStillRestored(useTaskStore.getState()._tasksById.get(before.id))) {

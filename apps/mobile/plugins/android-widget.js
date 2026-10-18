@@ -17,6 +17,7 @@ const PEEK_ACTIVITY_NAME = `${MODULE_PACKAGE}.TaskPeekActivity`;
 const CAPTURE_RECEIVER_NAME = `${MODULE_PACKAGE}.CaptureIntentReceiver`;
 const CAPTURE_ACTION = 'tech.dongdongbh.mindwtr.action.CAPTURE';
 const WIDGET_UPDATE_ACTION = 'android.appwidget.action.APPWIDGET_UPDATE';
+const WIDGET_DATE_ACTIONS = ['android.intent.action.DATE_CHANGED', 'android.intent.action.TIME_SET', 'android.intent.action.TIMEZONE_CHANGED'];
 const WIDGET_PROVIDER_META = 'android.appwidget.provider';
 const LEGACY_TASKS_RECEIVER_CLASS_SUFFIX = '.widget.TasksWidget';
 const LEGACY_TASKS_INFO_RESOURCE = 'mindwtr_legacy_tasks_widget_info';
@@ -125,7 +126,7 @@ const buildWidgetInfoXml = (kind) => `<?xml version="1.0" encoding="utf-8"?>
     android:minResizeHeight="${kind.minResizeHeight}"
     android:targetCellWidth="${kind.targetCellWidth}"
     android:targetCellHeight="${kind.targetCellHeight}"
-    android:updatePeriodMillis="0"
+    android:updatePeriodMillis="${kind.configure ? 30 * 60 * 1000 : 0}"
     android:initialLayout="@layout/${kind.layout}"${kind.previewImage ? `
     android:previewImage="@drawable/${kind.layout}_preview"` : ''}
     android:previewLayout="@layout/${kind.layout}_preview"
@@ -183,14 +184,14 @@ const ensureWidgetReceiver = (application, kind) => {
     receiver = { $: {} };
     receivers.push(receiver);
   }
-  // Exported only because the launcher's APPWIDGET_UPDATE broadcast needs it;
-  // the intent filter admits nothing else.
+  // Launchers update widgets; protected clock broadcasts re-evaluate cached Upcoming dates.
   receiver.$ = {
     'android:name': kind.receiver,
     'android:label': kind.labelResource ? `@string/${kind.labelResource}` : kind.label,
     'android:exported': 'true',
   };
-  receiver['intent-filter'] = [{ action: [{ $: { 'android:name': WIDGET_UPDATE_ACTION } }] }];
+  receiver['intent-filter'] = [{ action: [WIDGET_UPDATE_ACTION, ...(kind.configure ? WIDGET_DATE_ACTIONS : [])]
+    .map((action) => ({ $: { 'android:name': action } })) }];
   receiver['meta-data'] = [{ $: { 'android:name': WIDGET_PROVIDER_META, 'android:resource': `@xml/${kind.infoResource}` } }];
 };
 

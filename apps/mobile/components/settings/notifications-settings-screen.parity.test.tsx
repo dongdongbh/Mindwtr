@@ -296,6 +296,8 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
 function hosts(root: ReactTestInstance, type: string, modals = false): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
+    // This frozen fixture predates the default selector; dedicated tests cover that control.
+    if (node.props.testID === 'task-reminder-default') return;
     if (String(node.type) === 'Modal' && (!modals || !node.props.visible)) return;
     if (String(node.type) === type) out.push(node);
     node.children.forEach((child) => { if (typeof child !== 'string') walk(child); });

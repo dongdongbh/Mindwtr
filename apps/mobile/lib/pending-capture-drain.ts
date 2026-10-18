@@ -77,5 +77,9 @@ export async function drainPendingCapturesInBackground(trigger: 'scheduled' | 'c
     if (useTaskStore.getState().error || isSandboxMode()) return 0;
 
     const count = await drainPendingCapturesFromStore();
+    if (count > 0) {
+        const { reconcileLocalMobileNotificationsInBackground } = await import('./notification-service-local');
+        await reconcileLocalMobileNotificationsInBackground('capture');
+    }
     return count;
 }

@@ -73,10 +73,20 @@ const scenario = (name: string) => fixture.scenarios.find((candidate) => candida
 
 describe('project task list model', () => {
     it.each(fixture.scenarios.map((item) => [item.name, item] as const))(
-        'matches what mobile rendered before the move: %s',
+        'matches the frozen list with the #1401 reference-sort correction: %s',
         (name, item) => {
             const { model, cues } = buildLikeMobile(item);
-            expect(shape(model.items, cues)).toEqual(fixture.mobileSnapshot[name]);
+            // Keep the historical fixture intact; #1401 deliberately corrects only
+            // the title-sorted Reference pile (Loose reading precedes Style guide).
+            const expected = name === 'live-sorted-title'
+                ? fixture.mobileSnapshot[name].map((row) => {
+                    const item = row as { id?: string };
+                    if (item.id === 'live-ref') return { ...item, id: 'loose-ref-tag' };
+                    if (item.id === 'loose-ref-tag') return { ...item, id: 'live-ref' };
+                    return row;
+                })
+                : fixture.mobileSnapshot[name];
+            expect(shape(model.items, cues)).toEqual(expected);
         },
     );
 
@@ -106,6 +116,32 @@ describe('project task list model', () => {
         expect(model.items.flatMap((item) => item.type === 'section' ? [[item.id, item.synthetic ?? 'real']] : []))
             .toEqual([['no-section', 'real'], ['no-section:1', 'none'],
                 ['project-completed-tasks:1', 'completed'], ['project-reference-tasks:1', 'reference']]);
+    });
+
+    it.each([
+        ['default', ['ref-z', 'ref-a', 'ref-m']],
+        ['title', ['ref-a', 'ref-m', 'ref-z']],
+        ['due', ['ref-m', 'ref-z', 'ref-a']],
+    ] as const)('applies %s sort to direct and tag-matched references without changing stored order', (sortBy, expected) => {
+        const base = fixture.tasks.find((task) => task.status === 'reference')!;
+        const references: Task[] = [
+            { ...base, id: 'ref-z', title: 'Zulu', status: 'reference', projectId: 'p-live', tags: [], order: 1, dueDate: '2026-10-20' },
+            { ...base, id: 'ref-a', title: 'Alpha', status: 'reference', projectId: 'p-live', tags: [], order: 2, dueDate: '2026-10-21' },
+            { ...base, id: 'ref-m', title: 'Mike', status: 'reference', projectId: 'other', tags: ['shared'], order: 3, dueDate: '2026-10-19' },
+        ];
+        const visibleTasks = [
+            ...references,
+            { ...references[0], id: 'excluded', projectId: 'other' },
+            { ...references[1], id: 'deleted', deletedAt: '2026-10-18T00:00:00Z' },
+        ];
+        const before = JSON.stringify(visibleTasks);
+        const { model } = buildLikeMobile(scenario('live-default'), {
+            project: { id: 'p-live', status: 'active', tagIds: ['shared'] },
+            visibleTasks, sortBy,
+        });
+        const referenceRows = model.items.flatMap((item) => item.type === 'task' && item.task.status === 'reference' ? [item.task.id] : []);
+        expect(referenceRows).toEqual(expected);
+        expect(JSON.stringify(visibleTasks)).toBe(before);
     });
 
     it('applies the search box to the list and the Reference pile alike', () => {

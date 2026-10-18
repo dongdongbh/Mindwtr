@@ -253,6 +253,26 @@ describe('SyncBackupSection', () => {
   });
 });
 
+describe('Getting Started while it saves (D1b RN bug 1)', () => {
+  it('turns every Backup and Import row off, so no restore or import starts under the seed', () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SyncBackupSection {...baseProps} isGettingStartedDisabled isGettingStartedBusy />,
+      );
+    });
+    act(() => { tree.root.findByProps({ testID: 'backup-disclosure' }).props.onPress(); });
+    act(() => { tree.root.findByProps({ testID: 'import-disclosure' }).props.onPress(); });
+    for (const testID of ['data-transfer-export', 'data-transfer-export-csv', 'data-transfer-export-tasknotes', 'data-transfer-restore',
+      'data-transfer-merge', 'data-transfer-import-todoist', 'data-transfer-import-ticktick', 'data-transfer-import-dgt',
+      'data-transfer-import-omnifocus', 'data-transfer-import-mindwtr-csv']) {
+      const row = tree.root.findByProps({ testID });
+      expect(row.props.disabled).toBe(true);
+      expect(row.props.accessibilityState).toMatchObject({ busy: false, disabled: true });
+    }
+  });
+});
+
 describe('sync settings disclosure accessibility', () => {
   it('shows activity only on the exact recovery snapshot', () => {
     let tree!: renderer.ReactTestRenderer;

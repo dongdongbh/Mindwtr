@@ -5,9 +5,14 @@ import {
   getSystemDefaultLanguage,
   getTranslations,
   hasActiveMobileNotificationFeature,
+  getStorageAdapter,
+  isSandboxMode,
+  isWorkspaceTransitionActive,
+  noopStorage,
   isWeeklyReviewReminderEnabled,
   loadStoredLanguage,
   nameNotifyListener,
+  shouldSendTaskReminders,
   type Language,
   useTaskStore,
 } from '@mindwtr/core';
@@ -405,6 +410,13 @@ function attachNativeEventListeners(): void {
       logNotificationWarn('Notification event payload was unreadable');
       return;
     }
+    if (Platform.OS === 'ios') {
+      void logInfo('[Local Notifications] iOS reminder opened', {
+        scope: 'notifications',
+        extra: { releaseCheck: 'v1.3.7/ios-reminder-actions',
+          stage: notificationOpenHandler ? 'native-open-ready' : 'native-open-no-handler' },
+      });
+    }
     // Receipt evidence for #1028: every tap that reaches JS is logged, so a
     // dead action button with no line here means the tap died in the native
     // layer (receiver never ran, or the alarm row it looks up is gone).
@@ -439,6 +451,12 @@ function attachNativeEventListeners(): void {
   dismissSubscription?.remove();
   dismissSubscription = emitter.addListener('OnNotificationDismissed', (payload: unknown) => {
     const data = parseEventPayload(payload);
+    if (Platform.OS === 'ios') {
+      void logInfo('[Local Notifications] iOS reminder dismissed', {
+        scope: 'notifications',
+        extra: { releaseCheck: 'v1.3.7/ios-reminder-actions', stage: 'native-dismiss-received', action: 'dismiss' },
+      });
+    }
     logNotificationInfo('Notification dismissed event', {
       alarmKey: data?.alarmKey || data?.id || '',
       taskId: data?.taskId || '',
@@ -513,10 +531,11 @@ async function deleteStaleNativeAlarms(api: AlarmNotificationsApi): Promise<void
     logNotificationError('Failed to read native alarms', error);
     return;
   }
-  const { tasks, projects } = useTaskStore.getState();
+  const { settings, tasks, projects } = useTaskStore.getState();
   const stale = findStaleNativeReminderAlarms({
     rows,
     trackedIds: new Set(Array.from(alarmMap.values(), (entry) => entry.id)),
+    settings,
     tasks,
     projects,
     now: new Date(),
@@ -572,7 +591,7 @@ async function rearmRetainedNativeAlarms(api: AlarmNotificationsApi): Promise<vo
     const ids = new Set(Array.from(alarmMap, ([key, entry]) => (
       isReminderOwnerGone(key, taskMap, projectMap) ? 0 : entry.id
     )).filter((id) => Number.isSafeInteger(id) && id > 0));
-    const stale = new Set(findStaleNativeReminderAlarms({ rows, trackedIds: ids, tasks, projects, now: new Date() }).map(({ id }) => id));
+    const stale = new Set(findStaleNativeReminderAlarms({ rows, trackedIds: ids, settings, tasks, projects, now: new Date() }).map(({ id }) => id));
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
       const id = Number(row.id);
@@ -584,7 +603,7 @@ async function rearmRetainedNativeAlarms(api: AlarmNotificationsApi): Promise<vo
       if (Number.isSafeInteger(id) && id > 0 && !stale.has(id) && row.scheduleType === 'once'
         && areTaskRemindersEnabled(settings)
         && data.kind?.startsWith('task-') && data.alarmKey?.startsWith('task:')
-        && !taskMap.get(data.alarmKey.slice('task:'.length).replace(/:r\d+$/, ''))?.suppressMindwtrReminders
+        && (data.kind === 'task-review' || shouldSendTaskReminders(taskMap.get(data.alarmKey.slice('task:'.length).replace(/:r\d+$/, '')) ?? {}, settings))
         && !isReminderOwnerGone(data.alarmKey, taskMap, projectMap)) ids.add(id);
     }
     const result = await native.rearmAlarms(Array.from(ids));
@@ -730,9 +749,10 @@ async function loadReminderTranslations(activeFeature: boolean): Promise<Record<
   return getTranslations(language);
 }
 
-async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteStale?: boolean } = {}): Promise<void> {
+async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteStale?: boolean } = {}, canRun?: () => boolean): Promise<boolean> {
   const cycleStartedAtMs = Date.now();
   await loadAlarmMapIfNeeded();
+  if (canRun && !canRun()) return false;
 
   const { settings, tasks, projects } = useTaskStore.getState();
   const taskRemindersEnabled = areTaskRemindersEnabled(settings);
@@ -753,11 +773,12 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
     weeklyReviewEnabled,
   });
 
-  if (options.deleteStale) await deleteStaleNativeAlarms(api);
+  if (options.deleteStale || tasks.some((task) => !shouldSendTaskReminders(task, settings))) await deleteStaleNativeAlarms(api);
 
   const port = toReminderAlarmPort(api);
   const delivered = activeFeature ? await readDeliveredCandidates(Date.now()) : [];
   const translations = await loadReminderTranslations(activeFeature);
+  if (canRun && !canRun()) return false;
   const now = new Date();
 
   // Derivation and the diff live in core (`planReminderAlarms` over `buildReminderSchedule`):
@@ -786,7 +807,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
       scheduledOneShotReminderCount: 0,
       durationMs: Date.now() - cycleStartedAtMs,
     });
-    return;
+    return true;
   }
 
   const { diagnostics, recurring: recurringRequests, oneShot: oneShotRequests } = plan;
@@ -823,6 +844,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
     });
   }
   await withdrawDeliveredReminders(api, {
+    settings,
     diagnostics,
     tasks: new Map(tasks.map((task) => [task.id, task])),
     projects: new Map(projects.map((project) => [project.id, project])),
@@ -847,6 +869,9 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
     }
   }
   logCancelReasons(plan);
+  if (settings.taskReminderDefault || tasks.some((task) => task.reminderPolicy)) {
+    logNotificationInfo('Task reminder policy reconciled', { releaseCheck: 'v1.3.7/task-reminder-policy', outcome: 'reconciled' });
+  }
   logNotificationInfo('Reschedule cycle complete', {
     activeFeature,
     scheduledAlarmCount: alarmMap.size,
@@ -869,6 +894,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
     suppressedTaskReminderCount: diagnostics.suppressedTaskReminderCount,
     durationMs: Date.now() - cycleStartedAtMs,
   });
+  return true;
 }
 
 // Every reschedule cycle must run through this one queue. Two cycles in flight
@@ -877,12 +903,43 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
 // On Android that overlap is routine: coming back to the foreground fires the
 // overdue one-shot top-up timer and the AppState start request together.
 // The returned promise rejects with the cycle's error; the queue itself never does.
-function queueRescheduleCycle(api: AlarmNotificationsApi, options: { deleteStale?: boolean } = {}): Promise<void> {
+function queueRescheduleCycle(api: AlarmNotificationsApi, options: { deleteStale?: boolean } = {}, canRun?: () => boolean): Promise<boolean> {
   const cycle = rescheduleQueue
     .catch(() => undefined)
-    .then(() => runRescheduleCycle(api, options));
-  rescheduleQueue = cycle.catch(() => undefined);
+    .then(async () => {
+      if (canRun && !canRun()) return false;
+      return runRescheduleCycle(api, options, canRun);
+    });
+  rescheduleQueue = cycle.then(() => undefined, () => undefined);
   return cycle;
+}
+
+/** Headless captures and sync cannot wait for the foreground store debounce timer. */
+export async function reconcileLocalMobileNotificationsInBackground(reason: 'capture' | 'sync'): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const canRun = () => !isSandboxMode() && !isWorkspaceTransitionActive()
+    && getStorageAdapter() !== noopStorage && !useTaskStore.getState().error;
+  const receipt = (outcome: string) => {
+    return logInfo('Background reminder reconciliation', {
+      scope: 'notifications', force: true,
+      extra: { releaseCheck: 'v1.3.7/background-capture-reminders', reason, outcome },
+    });
+  };
+  try {
+    if (!canRun()) { await receipt('skipped-store-unavailable'); return; }
+    const permission = await getAndroidNotificationPermissionStatus();
+    if (!permission.granted) { await receipt('skipped-permission'); return; }
+    const api = await loadAlarmApi();
+    if (!api) { await receipt('skipped-api-unavailable'); return; }
+    if (!canRun()) { await receipt('skipped-store-unavailable'); return; }
+    await ensureLocalReminderNotificationChannel();
+    void receipt('requested');
+    const ran = await queueRescheduleCycle(api, {}, canRun);
+    // Completion means the cycle ran; its normal diagnostics report per-alarm refusals.
+    await receipt(ran ? 'cycle-completed' : 'skipped-store-unavailable');
+  } catch {
+    await receipt('failed');
+  }
 }
 
 function enqueueReschedule(api: AlarmNotificationsApi): void {

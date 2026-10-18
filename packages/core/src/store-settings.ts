@@ -44,6 +44,15 @@ import { backfillArchiveClocks, getArchiveRetentionPreview, isArchiveRetentionDa
 import { calendarSubscriptionModules } from './store-calendar-subscription-modules';
 
 const STORAGE_TIMEOUT_MS = 15_000;
+let storageTimeoutMs = STORAGE_TIMEOUT_MS;
+/**
+ * How long a load waits for storage's whole read. Android's native host sizes it to its library and to each backup
+ * operation (pass D1c), so a large library loads within its own budget; RN, desktop and iOS keep the default (no argument).
+ */
+export const setStorageTimeoutMs = (ms?: number): void => {
+    storageTimeoutMs = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : STORAGE_TIMEOUT_MS;
+};
+export const getStorageTimeoutMs = (): number => storageTimeoutMs;
 // Runtime diagnostic threshold: loads slower than this get a phase-breakdown log line.
 const SLOW_FETCH_LOG_THRESHOLD_MS = 1_000;
 const getFetchDataErrorMessage = (error: unknown): string => {
@@ -394,6 +403,11 @@ type SettingsActionContext = {
 
 type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'commitPreparedGeneralPreference' | 'commitPreparedGtdWorkflow' | 'commitPreparedAppLock' | 'retryPreparedAppLockSnapshot' | 'commitPreparedNotificationSetting' | 'retryPreparedNotificationSettingSnapshot' | 'commitPreparedCalendarSubscriptionSetting' | 'commitPreparedCalendarSubscriptionAdd' | 'retryPreparedCalendarSubscriptionSettingSnapshot' | 'commitPreparedFocusSavedFilter' | 'commitPreparedSavedSearchWrite' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
 
+// Whether the store's last completed load was a recovery load (raw adapter rows). The next normal load then reuses no
+// row object (reuseEntities below), so it is not a no-op even for an unchanged document (D9b W6 refresh drop).
+let lastLoadWasRecovery = false;
+export const lastStoreLoadWasRecovery = (): boolean => lastLoadWasRecovery;
+
 export const createSettingsActions = ({
     set,
     get,
@@ -403,7 +417,7 @@ export const createSettingsActions = ({
     getSaveGeneration,
     getStorage,
 }: SettingsActionContext): SettingsActions => {
-    let lastLoadWasRecovery = false;
+    lastLoadWasRecovery = false;
     return {
     seedGettingStarted: createSeedGettingStartedAction(set, debouncedSave, flushPendingSave),
 
@@ -468,7 +482,7 @@ export const createSettingsActions = ({
             const sourceStorage = options?.preloadedData ? undefined : getStorage();
             const data = options?.preloadedData
                 ?? await measureCoreStartupPhase('core.fetch_data.storage_get_data', async () =>
-                    withTimeout(sourceStorage!.getData(), STORAGE_TIMEOUT_MS, 'Storage request timed out')
+                    withTimeout(sourceStorage!.getData(), storageTimeoutMs, 'Storage request timed out')
                 );
             if (!isResultStillRelevant()) {
                 finishIrrelevantFetch();
@@ -827,6 +841,10 @@ export const createSettingsActions = ({
      * @param updates Settings to update
      */
     updateSettings: async (updates: Partial<AppData['settings']>) => {
+        if (updates.taskReminderDefault !== undefined && updates.taskReminderDefault !== 'send' && updates.taskReminderDefault !== 'skip') {
+            set({ error: 'Task reminder default must be send or skip' });
+            return;
+        }
         const focusStartDates = updates.gtd?.focusIncludeStartDates;
         if (focusStartDates !== undefined && typeof focusStartDates !== 'boolean') {
             set({ error: 'Focus start-date inclusion must be a boolean' });
@@ -1178,7 +1196,12 @@ export const createSettingsActions = ({
             const current = notificationSettingWitness(durable.settings, request.edit.type);
             if (!current || !taskEditValuesEqual(current, request.expected)
                 || current.present && current.value === request.edit.value) return memory;
-            const settings = { ...durable.settings, [request.edit.type]: request.edit.value };
+            const settings = { ...durable.settings, [request.edit.type]: request.edit.value,
+                ...(request.edit.type === 'taskReminderDefault' ? {
+                    syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
+                        gtd: timestampAtLeastAfter(new Date().toISOString(), durable.settings.syncPreferencesUpdatedAt?.gtd) },
+                } : {}),
+            };
             const rawSnapshot = { ...durable, settings };
             const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
             const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);

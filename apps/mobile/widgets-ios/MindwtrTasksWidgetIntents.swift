@@ -38,13 +38,14 @@ struct MindwtrWidgetListEntityQuery: EntityQuery {
             "focus": "Focus",
             "inbox": "Inbox",
             "next": "Next",
+            "upcoming": "Upcoming",
             "waiting": "Waiting",
             "someday": "Someday",
         ]
         var seen = Set<String>()
         var options: [MindwtrWidgetListEntity] = []
 
-        for id in ["focus", "inbox", "next", "waiting", "someday"] {
+        for id in ["focus", "inbox", "next", "upcoming", "waiting", "someday"] {
             let name = payload.title(forList: id) ?? fallbackNames[id] ?? id
             if seen.insert(id).inserted {
                 options.append(MindwtrWidgetListEntity(id: id, name: name))
@@ -79,7 +80,7 @@ struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent {
 @available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider {
     func placeholder(in _: Context) -> MindwtrTasksWidgetEntry {
-        MindwtrTasksWidgetEntry(date: Date(), payload: .fallback, pendingActions: [])
+        MindwtrTasksWidgetEntry(date: Date(), payload: .fallback, pendingActions: [], listId: "focus")
     }
 
     func snapshot(
@@ -115,6 +116,31 @@ struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider {
             date: date
         )
     }
+}
+
+// The app target has the same intent and opens the task through its existing launcher.
+@available(iOSApplicationExtension 17.0, iOS 17.0, *)
+struct MindwtrOpenWidgetTaskIntent: AppIntent {
+    static var title: LocalizedStringResource = "Open Task"
+    static var description = IntentDescription("Opens a Mindwtr task.")
+    static var isDiscoverable: Bool { false }
+
+#if compiler(>=6.0)
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { .foreground(.immediate) }
+#endif
+
+    @available(*, deprecated, message: "Use supportedModes with newer App Intents SDKs.")
+    static var openAppWhenRun: Bool { true }
+
+    @Parameter(title: "Task identifier")
+    var taskId: String
+
+    init() { taskId = "" }
+    init(taskId: String) { self.taskId = taskId }
+
+    @MainActor
+    func perform() async throws -> some IntentResult { .result() }
 }
 
 private enum MindwtrWidgetTaskIntentError: LocalizedError {

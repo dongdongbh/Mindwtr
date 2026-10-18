@@ -2,7 +2,7 @@ import React, { type ComponentProps } from 'react';
 import { Platform, Text, TextInput, TouchableOpacity } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { configureDateFormatting, type Task } from '@mindwtr/core';
+import { configureDateFormatting, useTaskStore, type Task } from '@mindwtr/core';
 import { createTaskDraft, type TaskDraft } from '@mindwtr/core/task-draft';
 
 import { TaskEditScheduleField } from './TaskEditScheduleField';
@@ -336,7 +336,7 @@ describe('TaskEditScheduleField', () => {
             );
         });
 
-        expect(dateOnlyTree.root.findAllByProps({ accessibilityRole: 'switch' })).toHaveLength(0);
+        expect(dateOnlyTree.root.findAllByProps({ accessibilityRole: 'radio' })).toHaveLength(0);
 
         let startFieldTree!: renderer.ReactTestRenderer;
         act(() => {
@@ -372,7 +372,7 @@ describe('TaskEditScheduleField', () => {
             );
         });
 
-        expect(startFieldTree.root.findAllByProps({ accessibilityRole: 'switch' })).toHaveLength(0);
+        expect(startFieldTree.root.findAllByProps({ accessibilityRole: 'radio' })).toHaveLength(0);
 
         let timedTree!: renderer.ReactTestRenderer;
         act(() => {
@@ -408,14 +408,31 @@ describe('TaskEditScheduleField', () => {
             );
         });
 
-        const handoffSwitch = timedTree.root.findByProps({ accessibilityRole: 'switch' });
-        expect(handoffSwitch.props.accessibilityState).toEqual({ checked: false });
+        const options = timedTree.root.findAllByType(TouchableOpacity).filter((option) => option.props.accessibilityRole === 'radio');
+        expect(options.map((option) => option.props.accessibilityLabel)).toEqual(['Use default (Send)', 'Send', 'Skip']);
+        expect(options.map((option) => option.props.accessibilityState.checked)).toEqual([false, true, false]);
+        const handoffSwitch = options[2];
 
         act(() => {
             handoffSwitch.props.onPress();
         });
 
-        expect(setDraftField).toHaveBeenCalledWith('suppressMindwtrReminders', true);
+        expect(setDraftField).toHaveBeenCalledWith('reminderPolicy', 'skip');
+
+        const previousSettings = useTaskStore.getState().settings;
+        act(() => { useTaskStore.setState({ settings: { ...previousSettings, taskReminderDefault: 'skip', notificationsEnabled: false } }); });
+        const originalProps = timedTree.root.findByType(TaskEditScheduleField).props as ComponentProps<typeof TaskEditScheduleField>;
+        act(() => { timedTree.update(<TaskEditScheduleField {...originalProps} draft={makeDraft({
+            dueDate: '2026-04-28T09:20:00', reminderPolicy: 'inherit', repeatReminderMinutes: 15,
+        })} />); });
+        const inheritedOptions = timedTree.root.findAllByType(TouchableOpacity).filter((option) => option.props.accessibilityRole === 'radio');
+        expect(inheritedOptions[0].props.accessibilityLabel).toBe('Use default (Skip)');
+        expect(inheritedOptions[0].props.accessibilityState.checked).toBe(true);
+        const texts = timedTree.root.findAllByType(Text).map((node) => String(node.props.children));
+        expect(texts.some((text) => text.includes('turned off in Notifications'))).toBe(true);
+        expect(texts.some((text) => text.includes('explicit time'))).toBe(true);
+        expect(timedTree.root.findAllByType(TouchableOpacity).some((node) => String(node.props.accessibilityLabel).startsWith('Repeat reminder:'))).toBe(false);
+        act(() => { useTaskStore.setState({ settings: previousSettings }); timedTree.unmount(); });
     });
 
     it('collapses repeat reminder options until the compact row is pressed', () => {

@@ -291,6 +291,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             const notSet = t('common.notSet');
             const rows = buildTaskViewModel({
                 task: shown,
+                settings: state.settings,
                 projects: state.projects,
                 sections: readOnly
                     ? getProjectSectionsForView(state._allProjects.find((project) => project.id === task.projectId), state.sections, state._allSections)

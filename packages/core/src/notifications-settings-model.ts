@@ -41,6 +41,7 @@ export type NotificationsSettingsEdit =
     | { type: typeof NOTIFICATIONS_BOOLEAN_SETTINGS[number]; value: boolean }
     | { type: typeof NOTIFICATIONS_TIME_SETTINGS[number]; value: string }
     | { type: 'weeklyReviewDay'; value: number }
+    | { type: 'taskReminderDefault'; value: 'send' | 'skip' }
     | { type: 'persistentCapture'; value: boolean };
 
 type Toggle = {
@@ -63,6 +64,7 @@ export type NotificationsSettingsModel = {
         enable: Toggle;
         startReminders: Toggle;
         dueReminders: Toggle;
+        taskDefault: { label: string; description: string; disabled: false; pickerTitle: string; options: { label: string; selected: boolean; edit: NotificationsSettingsEdit }[] };
         /** RN's exact-alarm row while a notification feature is on; the host shows it only while Android 12+ denies exact alarms. */
         exactAlarmNotice: { label: string; description: string; actionLabel: string } | null;
         /** Android only: the persistent capture notification's switch. */
@@ -142,6 +144,17 @@ export function buildNotificationsSettingsModel(input: NotificationsSettingsInpu
                 startDateNotificationsEnabled, !notificationsEnabled),
             dueReminders: toggle('dueDateNotificationsEnabled', t('settings.dueDateNotifications'), t('settings.dueDateNotificationsDesc'),
                 dueDateNotificationsEnabled, !notificationsEnabled),
+            taskDefault: {
+                label: t('settings.taskReminderDefault'),
+                description: `${t(settings.taskReminderDefault === 'skip' ? 'settings.taskReminderDefaultSkip' : 'settings.taskReminderDefaultSend')} · ${t('settings.taskReminderDefaultDesc')}`,
+                disabled: false,
+                pickerTitle: t('settings.taskReminderDefault'),
+                options: (['send', 'skip'] as const).map((value) => ({
+                    label: t(value === 'skip' ? 'settings.taskReminderDefaultSkip' : 'settings.taskReminderDefaultSend'),
+                    selected: (settings.taskReminderDefault === 'skip' ? 'skip' : 'send') === value,
+                    edit: { type: 'taskReminderDefault', value },
+                })),
+            },
             exactAlarmNotice: hasActiveMobileNotificationFeature(settings)
                 ? { label: t('settings.exactAlarmsLabel'), description: t('settings.exactAlarmsDesc'), actionLabel: t('settings.exactAlarmsAllow') }
                 : null,

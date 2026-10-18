@@ -2248,6 +2248,7 @@ export function buildNextRecurringTask(
         dueDate: nextDueDate,
         recurrence: nextRecurrence,
         showFutureRecurrence: task.showFutureRecurrence ? true : undefined,
+        reminderPolicy: task.reminderPolicy,
         suppressMindwtrReminders: task.suppressMindwtrReminders ? true : undefined,
         repeatReminderMinutes: task.repeatReminderMinutes,
         tags: [...(task.tags || [])],

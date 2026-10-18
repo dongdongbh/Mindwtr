@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+    updateSettingsFromLatest,
     AREA_PRESET_COLORS,
     DEFAULT_AREA_COLOR,
     DEFAULT_MANAGE_OPEN_SECTIONS,
@@ -29,6 +30,7 @@ import {
     type ManageSectionKey,
     type ManageUntranslatedText,
     type Person,
+    type ViewSectionDefinition,
     useTaskStore,
 } from '@mindwtr/core';
 import { useRouter } from 'expo-router';
@@ -203,11 +205,28 @@ export function ManageSettingsScreen() {
                 confirmSomedaySectionDelete(id);
                 return;
             }
-            void updateSettings(buildSomedaySectionsSettingsUpdate(
-                current,
-                removeSomedaySection(current.gtd?.viewSections?.someday, id),
-            ));
+            // Built from the settings as stored when the write is admitted, so a sync save's newer keys stay.
+            void updateSettingsFromLatest((latest) => buildSomedaySectionsSettingsUpdate(
+                latest,
+                removeSomedaySection(latest.gtd?.viewSections?.someday, id),
+            ), { write: updateSettings, read: () => useTaskStore.getState().settings });
         });
+    };
+
+    // The manager edits the shown list; only the sections it changed (by id) go onto the latest stored list.
+    const saveSomedaySections = (definitions: ViewSectionDefinition[]) => {
+        const shown = new Map((settings.gtd?.viewSections?.someday ?? []).map((section) => [section.id, JSON.stringify(section)]));
+        const edited = definitions.filter((section) => shown.get(section.id) !== JSON.stringify(section));
+        if (edited.length === 0) return;
+        const editedById = new Map(edited.map((section) => [section.id, section]));
+        return updateSettingsFromLatest((latest) => {
+            const stored = latest.gtd?.viewSections?.someday ?? [];
+            const storedIds = new Set(stored.map((section) => section.id));
+            return buildSomedaySectionsSettingsUpdate(latest, [
+                ...stored.map((section) => editedById.get(section.id) ?? section),
+                ...edited.filter((section) => !shown.has(section.id) && !storedIds.has(section.id)),
+            ]);
+        }, { write: updateSettings, read: () => useTaskStore.getState().settings }).then(() => undefined);
     };
 
     const closeEditor = () => {
@@ -509,7 +528,7 @@ export function ManageSettingsScreen() {
                             // every other entry, including ones this build cannot show.
                             definitions={settings.gtd?.viewSections?.someday ?? []}
                             onDelete={confirmSomedaySectionDelete}
-                            onChange={(definitions) => updateSettings(buildSomedaySectionsSettingsUpdate(settings, definitions))}
+                            onChange={saveSomedaySections}
                             t={t}
                             themeColors={tc}
                         />

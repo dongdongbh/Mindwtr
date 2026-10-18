@@ -79,7 +79,7 @@ class RecoverySnapshotsTest {
         val old = "data.2020-01-01T00-00-00.000.snapshot.json"
         File(dir, old).writeText("{}")
         (1..6).forEach { File(dir, "data.2026-08-0${it}T00-00-00.000.snapshot.json").writeText("{}") }
-        RecoverySnapshots.prune(dir, setOf(old))
+        RecoverySnapshots.prune(dir) { setOf(old) }
         assertTrue(File(dir, old).isFile)
         assertEquals(5, names().size)
     }
@@ -95,5 +95,20 @@ class RecoverySnapshotsTest {
         other!!.join(2_000)
         assertEquals("backup", File(dir, name).readText())
         assertEquals("capture", File(dir, RecoverySnapshots.name(at, 1)).readText())
+    }
+
+    // Pass D1c §3.2: a recovery snapshot written through the channel is renamed only when its bytes are the channel's.
+    @Test fun aPendingSnapshotThatChangedIsNeverPublished() {
+        dir.mkdirs()
+        val name = RecoverySnapshots.name(at)
+        val pending = File(dir, ".11111111-1111-4111-8111-111111111111.recovery.pending").apply { writeText("{\"x\":2}") }
+        val sha = BackupOperations.sha256("{\"x\":1}".toByteArray())
+        assertTrue(runCatching { RecoverySnapshots.publish(dir, pending, name, 7, sha, syncDirectory = noSync) }.isFailure)
+        assertFalse(File(dir, name).exists())
+        assertFalse(pending.exists())
+        File(dir, name).writeText("{}")
+        val again = File(dir, ".22222222-2222-4222-8222-222222222222.recovery.pending").apply { writeText("{\"x\":1}") }
+        assertTrue(runCatching { RecoverySnapshots.publish(dir, again, name, 7, sha, syncDirectory = noSync) }.isFailure)
+        assertEquals("{}", File(dir, name).readText())
     }
 }

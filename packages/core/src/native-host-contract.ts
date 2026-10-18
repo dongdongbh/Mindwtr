@@ -3,6 +3,7 @@ import { MAX_FOCUSED_PROJECTS } from './store-projects/project-actions';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToFilters, areaFilterSelectionToValue, cycleAreaFilterSelection, isAreaFilterSelectionActive, isTaskVisibleInArea, isTaskVisibleInInbox, resolveAreaFilterSelection, taskMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
+import { gateStoreCommands } from './store-write-gate';
 import { noopStorage, type StorageAdapter } from './storage';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import { getProjectSectionsForView, getSequentialProjectTaskCues, isSelectableProjectForTaskAssignment, type ProjectSequenceTaskCue } from './project-utils';
@@ -19,6 +20,7 @@ import { resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime }
 import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
+import { getTaskReminderPolicy } from './task-reminder-policy';
 import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
 import {
     applyTaskDraftPatch,
@@ -776,6 +778,7 @@ const DRAFT_VALUE_CHECKS: Record<TaskDraftField, (value: unknown) => boolean> = 
     reviewAt: isDraftDate,
     repeatReminderMinutes: isUnsetOrMinutes,
     suppressMindwtrReminders: isBoolean,
+    reminderPolicy: (value) => value === 'inherit' || value === 'send' || value === 'skip',
 };
 const toDraftValues = (input: Record<string, unknown>): Partial<TaskDraft> => Object.fromEntries(
     Object.entries(input).map(([field, value]) => [field, value === null && UNSET_DRAFT_FIELDS.has(field) ? undefined : value]),
@@ -839,8 +842,9 @@ const readTaskDraft = (value: unknown): TaskDraft | null => {
     if (!isObjectRecord(value) || Object.keys(value).some((field) => !DRAFT_FIELD_SET.has(field) && field !== 'dateInputBaseline')) return null;
     if (Object.prototype.hasOwnProperty.call(value, 'dateInputBaseline') && !isTaskDraftDateInputBaseline(value.dateInputBaseline)) return null;
     const draft = toDraftValues(value) as TaskDraft;
+    if (!Object.prototype.hasOwnProperty.call(value, 'reminderPolicy')) draft.reminderPolicy = getTaskReminderPolicy(draft);
     return TASK_DRAFT_FIELD_KEYS.every((field) => (
-        (Object.prototype.hasOwnProperty.call(value, field) || UNSET_DRAFT_FIELDS.has(field))
+        (Object.prototype.hasOwnProperty.call(value, field) || UNSET_DRAFT_FIELDS.has(field) || field === 'reminderPolicy')
         // Stored history must round-trip without making Archived an editable status.
         && ((field === 'status' && draft.status === 'archived') || DRAFT_VALUE_CHECKS[field](draft[field]))
     )) ? draft : null;
@@ -955,6 +959,36 @@ const applyNativeTaskDraftEdit = (
  * `replayTokens` (NativeReplayTokens, native-request-receipts.ts): 'required' for a host that
  * journals its writes; the default, 'optional', lets a write leave its replay tokens out.
  */
+/**
+ * Settings › Sync's screen commands are not store commands (store-write-gate.ts): each starts a sync cycle and
+ * waits for it, so holding the gate there would wait on that cycle's own save. They write the store only through
+ * store actions and receipt saves, which take the gate themselves.
+ */
+export const NATIVE_CONTRACT_SYNC_SCREEN_METHODS: ReadonlySet<string> = new Set([
+    'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection',
+    'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction',
+]);
+
+/**
+ * Reads that wait on the network and write nothing to the store (AI, update check, feedback, the heartbeat,
+ * calendar feeds), so a slow endpoint never delays a sync save. They read only the published store.
+ */
+export const NATIVE_CONTRACT_NETWORK_READS: ReadonlySet<string> = new Set([
+    'loadAIModels', 'requestTaskEditorCopilot', 'requestAICopilot', 'requestTaskEditorClarify', 'requestTaskEditorBreakdown',
+    'requestInboxClarify', 'requestWeeklyReviewAnalysis', 'runAboutUpdateCheck', 'submitAboutFeedback', 'sendAboutHeartbeat',
+    'testCalendarFeeds', 'loadExternalCalendarFeed',
+]);
+
+/** Contract methods that are not store commands. */
+export const NATIVE_CONTRACT_UNGATED_METHODS: ReadonlySet<string> = new Set([
+    ...NATIVE_CONTRACT_SYNC_SCREEN_METHODS, ...NATIVE_CONTRACT_NETWORK_READS,
+]);
+
+/** Focus controls' writes: not `async` functions, but each answers a Promise (its receipt's). */
+const NATIVE_CONTRACT_PROMISE_COMMANDS: ReadonlySet<string> = new Set([
+    'setFocusGroupBy', 'saveFocusFilter', 'removeFocusFilterCriterion', 'deleteFocusFilter', 'reorderFocus',
+]);
+
 export function createNativeHostContract(options: {
     syncSettings?: NativeSyncSettingsHost;
     calendar?: NativeCalendarHost;
@@ -1686,7 +1720,7 @@ export function createNativeHostContract(options: {
             requestIdPattern: CAPTURE_ID_PATTERN,
         }),
         // Links, shares, assistant notes and Import .txt: native-host-contract-entry-points.ts.
-        ...createEntryPointMethods({ readiness, t: () => translate }),
+        ...createEntryPointMethods({ readiness, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN, attachments: () => options.attachments ?? null }),
         // The Inbox tab's list, toolbar and screen parts: native-host-contract-inbox-view.ts.
         ...inboxViewMethods,
         // Selection mode on those lists: native-host-contract-bulk-actions.ts.
@@ -1825,6 +1859,7 @@ export function createNativeHostContract(options: {
             revision: (now) => `${revision()}:${displayRevision(now)}`,
             requestIdPattern: CAPTURE_ID_PATTERN,
             aiBound: () => Boolean(options.ai),
+            attachments: () => options.attachments ?? null,
         }),
         // A saved search's screen: native-host-contract-saved-search.ts.
         ...createSavedSearchMethods({
@@ -3310,6 +3345,9 @@ export function createNativeHostContract(options: {
         },
     };
     self = contract as unknown as Record<string, unknown>;
+    // Every asynchronous contract method is a store command, so a sync save never publishes between what a
+    // command checked and what it wrote (store-write-gate.ts). Synchronous methods are reads and answer at once.
+    gateStoreCommands(self, { ungated: NATIVE_CONTRACT_UNGATED_METHODS, promiseCommands: NATIVE_CONTRACT_PROMISE_COMMANDS });
     return contract;
 }
 

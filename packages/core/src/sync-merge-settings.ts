@@ -843,9 +843,11 @@ export const sanitizeMergedSettingsForSync = (
 
     for (const key of GTD_SYNCED_APP_SETTINGS_FIELD_KEYS) {
         const value = next[key];
-        if (value === undefined || typeof value === 'boolean') continue;
+        const valid = (candidate: unknown) => key === 'taskReminderDefault'
+            ? candidate === 'send' || candidate === 'skip' : typeof candidate === 'boolean';
+        if (value === undefined || valid(value)) continue;
         const fallbackValue = localSettings[key];
-        if (typeof fallbackValue === 'boolean') {
+        if (valid(fallbackValue)) {
             (next as Record<string, unknown>)[key] = fallbackValue;
         } else {
             delete (next as Record<string, unknown>)[key];
@@ -1011,6 +1013,9 @@ export const mergeSettingsForSync = (
             incomingWins,
         );
         const value: GtdSyncSnapshot = {
+            taskReminderDefault: chooseGroupFieldValue(
+                localValue.taskReminderDefault, incomingValue.taskReminderDefault, incomingWins,
+            ),
             quickAddAutoClean: chooseGroupFieldValue(
                 localValue.quickAddAutoClean,
                 incomingValue.quickAddAutoClean,

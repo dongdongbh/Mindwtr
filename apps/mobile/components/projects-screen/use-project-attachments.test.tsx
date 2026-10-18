@@ -2,7 +2,7 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type Attachment, type Project } from '@mindwtr/core';
+import { runStoreCommand, runSyncStoreSave, type Attachment, type Project } from '@mindwtr/core';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { useProjectAttachments } from './use-project-attachments';
@@ -109,19 +109,25 @@ type HarnessApi = {
   addProjectFileAttachment: ReturnType<typeof useProjectAttachments>['addProjectFileAttachment'];
   downloadAttachment: ReturnType<typeof useProjectAttachments>['downloadAttachment'];
   openAttachment: ReturnType<typeof useProjectAttachments>['openAttachment'];
+  removeProjectAttachment: ReturnType<typeof useProjectAttachments>['removeProjectAttachment'];
   replaceProject: (project: Project) => void;
 };
 
-function Harness({ expose, initial }: {
+function Harness({ expose, initial, gated = false }: {
   expose: React.MutableRefObject<HarnessApi | null>;
   initial: Project;
+  /** updateProject as the store runs it: a command behind the write gate (store-write-gate.ts). */
+  gated?: boolean;
 }) {
   const [selectedProject, setSelectedProject] = React.useState<Project | null>(initial);
   const updateProject = React.useCallback((id: string, updates: Partial<Project>) => {
-    coreStoreState._allProjects = coreStoreState._allProjects.map((project) => (
-      project.id === id ? { ...project, ...updates } : project
-    ));
-  }, []);
+    const apply = () => {
+      coreStoreState._allProjects = coreStoreState._allProjects.map((project) => (
+        project.id === id ? { ...project, ...updates } : project
+      ));
+    };
+    return gated ? runStoreCommand(async () => apply()) : apply();
+  }, [gated]);
   const hook = useProjectAttachments({
     selectedProject,
     setSelectedProject,
@@ -137,6 +143,7 @@ function Harness({ expose, initial }: {
     addProjectFileAttachment: hook.addProjectFileAttachment,
     downloadAttachment: hook.downloadAttachment,
     openAttachment: hook.openAttachment,
+    removeProjectAttachment: hook.removeProjectAttachment,
     replaceProject: (project) => {
       coreStoreState._allProjects = [project];
       setSelectedProject(project);
@@ -200,6 +207,76 @@ describe('useProjectAttachments download settlement', () => {
     expect(coreStoreState._allProjects[0]).toEqual(saved);
     vi.mocked(Alert.alert).mock.calls.at(-1)![2]!.find((button) => button.text === 'Copy link')!.onPress!();
     expect(Clipboard.setStringAsync).toHaveBeenCalledWith(uri);
+    act(() => tree.unmount());
+  });
+
+  it('keeps a sibling a sync save published while the download waited, when the completion lands behind that save', async () => {
+    const attachment = makeAttachment(1);
+    const project = makeProject(attachment);
+    coreStoreState._allProjects = [project];
+    const download = deferred<{ status: 'available'; attachment: Attachment }>();
+    availabilityMock.ensureAttachmentAvailableDetailed.mockReturnValue(download.promise);
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={project} gated />); });
+
+    let pending!: Promise<void>;
+    await act(async () => { pending = expose.current!.downloadAttachment(attachment); });
+    await vi.waitFor(() => expect(availabilityMock.ensureAttachmentAvailableDetailed).toHaveBeenCalled());
+    const sibling = makeAttachment(1, { id: 'attachment-2', title: 'Other device.pdf', cloudKey: 'attachments/attachment-2.pdf' });
+    const releaseSave = deferred<void>();
+    // Another device's sibling: the sync save holds the gate, then publishes revision 3 [A, B].
+    const save = runSyncStoreSave(async () => {
+      await releaseSave.promise;
+      coreStoreState._allProjects = [{ ...coreStoreState._allProjects[0], rev: 3, attachments: [...coreStoreState._allProjects[0].attachments!, sibling] }];
+    });
+    download.resolve({ status: 'available', attachment: { ...attachment, uri: 'file:///managed/attachment-1', localStatus: 'available' } });
+    for (let tick = 0; tick < 5; tick += 1) await Promise.resolve();
+    releaseSave.resolve();
+    await act(async () => { await save; await pending; });
+
+    expect(coreStoreState._allProjects[0].attachments!.map((item) => [item.id, item.localStatus])).toEqual([
+      ['attachment-1', 'available'], ['attachment-2', 'missing'],
+    ]);
+    act(() => tree.unmount());
+  });
+
+  it('keeps a sibling a sync save published while an added link or a removal waited behind it', async () => {
+    const attachment = makeAttachment(1);
+    const project = makeProject(attachment);
+    const sibling = (id: string) => makeAttachment(1, { id, title: 'Other device.pdf', cloudKey: `attachments/${id}.pdf` });
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    coreStoreState._allProjects = [project];
+    act(() => { tree = create(<Harness expose={expose} initial={project} gated />); });
+    // Each write is issued while a sync save holds the gate; the save then publishes another device's sibling.
+    const behindSyncSave = async (siblingId: string, write: () => void) => {
+      const releaseSave = deferred<void>();
+      const save = runSyncStoreSave(async () => {
+        await releaseSave.promise;
+        const [stored] = coreStoreState._allProjects;
+        coreStoreState._allProjects = [{ ...stored, rev: (stored.rev ?? 1) + 1, attachments: [...stored.attachments!, sibling(siblingId)] }];
+      });
+      act(() => write());
+      releaseSave.resolve();
+      await act(async () => {
+        await save;
+        await runStoreCommand(async () => undefined);
+      });
+    };
+
+    act(() => { expose.current!.setLinkInput('https://one.example'); });
+    await behindSyncSave('attachment-2', () => expose.current!.confirmAddProjectLink());
+    expect(coreStoreState._allProjects[0].attachments!.map((item) => item.title)).toEqual([
+      'Generation 1.pdf', 'Other device.pdf', 'one.example',
+    ]);
+    expect(expose.current!.selectedProject?.attachments).toEqual(coreStoreState._allProjects[0].attachments);
+
+    coreStoreState._allProjects = [{ ...coreStoreState._allProjects[0], attachments: [attachment] }];
+    await behindSyncSave('attachment-3', () => expose.current!.removeProjectAttachment('attachment-1'));
+    expect(coreStoreState._allProjects[0].attachments!.map((item) => [item.id, Boolean(item.deletedAt)])).toEqual([
+      ['attachment-1', true], ['attachment-3', false],
+    ]);
     act(() => tree.unmount());
   });
 

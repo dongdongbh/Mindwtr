@@ -51,6 +51,7 @@ export function useSettingsNotificationsPage({
 
     return {
         notificationsEnabled: settings?.notificationsEnabled !== false,
+        taskReminderDefault: settings?.taskReminderDefault ?? 'send',
         startDateNotificationsEnabled: settings?.startDateNotificationsEnabled !== false,
         dueDateNotificationsEnabled: settings?.dueDateNotificationsEnabled !== false,
         reviewAtNotificationsEnabled: settings?.reviewAtNotificationsEnabled !== false,

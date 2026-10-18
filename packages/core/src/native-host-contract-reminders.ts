@@ -40,7 +40,7 @@
  *   shows nothing twice, and none is made without permission or for a task or project
  *   done, gone or archived (a replay after a plan withdrew it). Each plan then keeps it: one never made is made (unless a day
  *   late), a reboot's remake makes it again while its time is ahead, and no permission or
- *   its task or project done, gone or archived withdraws it, as React Native's start does
+ *   its task or project done, gone or archived, or effective Skip on a task-date reminder, withdraws it, as React Native's start does
  *   with a Snooze of such a task. It is forgotten 30 days after its time.
  * - `remake: 'all'` (a reboot, a clock change, exact alarms just allowed, the first plan of
  *   a process) plans every held alarm as not made yet, so each is made again under its id.
@@ -54,7 +54,7 @@
  */
 import { loadTranslations } from './i18n/i18n-loader';
 import type { Language } from './i18n/i18n-types';
-import { logWarn } from './logger';
+import { logInfo, logWarn } from './logger';
 import {
     buildReminderAlarmDetails,
     buildReminderSnooze,
@@ -83,6 +83,8 @@ import { exact, record } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { useTaskStore } from './store';
 import { getDigestSchedule } from './schedule-utils';
+import { shouldSendTaskReminders } from './task-reminder-policy';
+import type { NotificationSettings, Task } from './types';
 
 export type NativeReminderAlarm = {
     key: string;
@@ -243,6 +245,16 @@ const snoozedKey = (entry: SnoozeReminder): string => {
     return isObjectRecord(data) && typeof data.alarmKey === 'string' ? data.alarmKey : '';
 };
 
+const isSnoozedTaskSkipped = (entry: SnoozeReminder, tasks: ReadonlyMap<string, Task>, settings: NotificationSettings): boolean => {
+    const key = snoozedKey(entry);
+    if (!key.startsWith('task:') || !isObjectRecord(entry.details.data)) return false;
+    const kind = entry.details.data.kind;
+    // Old task Snoozes omit kind; an explicit review Snooze remains independent.
+    if (kind !== undefined && kind !== 'task-start' && kind !== 'task-due' && kind !== 'task-reminder') return false;
+    const task = tasks.get(key.slice('task:'.length).replace(/:r\d+$/, ''));
+    return Boolean(task && !shouldSendTaskReminders(task, settings));
+};
+
 const signedFireAtMs = (signature: string | undefined): number | null => {
     try {
         const fireAtMs = Date.parse((JSON.parse(signature ?? '') as { fireAt?: string }).fireAt ?? '');
@@ -353,7 +365,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             const nowMs = Date.now();
             // Delivered reminders it remembers: withdrawn by core's rule for a held alarm, else kept (up to 30 days), their ids taken.
             const judge = plan.mode === 'active'
-                ? { diagnostics: plan.diagnostics, tasks: new Map(state.tasks.map((task) => [task.id, task])), projects: new Map(state.projects.map((project) => [project.id, project])) }
+                ? { settings: state.settings, diagnostics: plan.diagnostics, tasks: new Map(state.tasks.map((task) => [task.id, task])), projects: new Map(state.projects.map((project) => [project.id, project])) }
                 : null;
             const remembered: NativeReminderState = new Map();
             const withdrawnDelivered: NativeReminderAlarmPlan['cancel'] = [];
@@ -366,7 +378,8 @@ export function createReminderMethods(deps: ReminderDeps) {
             for (const [key, entry] of readNativeReminderState(input.storedState)) {
                 if (entry.kind === 'snooze') {
                     const late = entry.fireAtMs < nowMs - SNOOZE_LATE_LIMIT_MS;
-                    if (plan.mode === 'revoked' || isReminderOwnerGone(snoozedKey(entry), owners.tasks, owners.projects)) {
+                    if (plan.mode === 'revoked' || isReminderOwnerGone(snoozedKey(entry), owners.tasks, owners.projects)
+                        || isSnoozedTaskSkipped(entry, owners.tasks, state.settings)) {
                         withdrawnDelivered.push({ key, id: entry.id, reason: 'withdrawn' });
                     } else if (fired.has(entry.id)) {
                         // It showed: never made again; kept while it may be in the tray, so its task's completion withdraws it.
@@ -427,6 +440,10 @@ export function createReminderMethods(deps: ReminderDeps) {
                 }
                 return [{ key, id: entry.id, reason }];
             });
+            if (state.settings.taskReminderDefault || state.tasks.some((task) => task.reminderPolicy)) {
+                logInfo('Task reminder policy planned', { scope: 'notifications',
+                    context: { releaseCheck: 'v1.3.7/task-reminder-policy', outcome: 'planned' } });
+            }
             return {
                 ok: true,
                 value: {
@@ -493,15 +510,15 @@ export function createReminderMethods(deps: ReminderDeps) {
             const nothing = { ok: true as const, value: { schedule: [], stateAhead: null, state: null } };
             if (held?.kind === 'snooze' && held.armed) return nothing;
             const entry: SnoozeReminder = { kind: 'snooze', id, fireAtMs, details, armed: false };
+            // A replay after withdrawal must not make the Snooze again before the next reconciliation.
+            const { tasks, projects, settings } = useTaskStore.getState();
+            const tasksById = new Map(tasks.map((task) => [task.id, task]));
+            if (!input.permissionGranted || isReminderOwnerGone(snoozedKey(entry), tasksById,
+                new Map(projects.map((project) => [project.id, project]))) || isSnoozedTaskSkipped(entry, tasksById, settings)) return nothing;
             // Made by an earlier try that stopped before storing it as made, and it showed already: store it as made, make nothing.
             if (held?.kind === 'snooze' && input.fired?.includes(id)) {
                 return { ok: true, value: { schedule: [], stateAhead: null, state: writeNativeReminderState(new Map(state).set(key, { ...entry, armed: true })) } };
             }
-            // A replay after a plan withdrew it (no permission, its task or project done or gone) makes nothing: the plan would
-            // withdraw it again, after it may have shown.
-            const { tasks, projects } = useTaskStore.getState();
-            if (!input.permissionGranted || isReminderOwnerGone(snoozedKey(entry), new Map(tasks.map((task) => [task.id, task])),
-                new Map(projects.map((project) => [project.id, project])))) return nothing;
             const stateAhead = writeNativeReminderState(new Map(state).set(key, entry));
             return { ok: true, value: { schedule: [snoozeAlarm(key, entry)], stateAhead, state: writeNativeReminderState(new Map(state).set(key, { ...entry, armed: true })) } };
         },

@@ -1,11 +1,65 @@
-import { fireEvent, render, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, waitFor, within } from '@testing-library/react';
+import { useTaskStore } from '@mindwtr/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getEnglishSettingsLabels } from './labels';
 import { SettingsGtdPage } from './SettingsGtdPage';
 import { useUiStore } from '../../../store/ui-store';
+import { holdSyncSave } from '../../../test/hold-sync-save';
+
+const initialTaskState = useTaskStore.getState();
 
 describe('SettingsGtdPage', () => {
+    afterEach(() => {
+        useTaskStore.setState(initialTaskState, true);
+    });
+
+    it('keeps a GTD key another device synced while the page showed older settings', async () => {
+        const updateSettings = useTaskStore.getState().updateSettings;
+        useTaskStore.setState({ settings: { gtd: { defaultProjectFlowMode: 'parallel' } } });
+        const { getByRole } = render(
+            <SettingsGtdPage
+                t={getEnglishSettingsLabels()}
+                language="en"
+                settings={useTaskStore.getState().settings}
+                updateSettings={updateSettings}
+                showSaved={vi.fn()}
+                autoArchiveDays={7}
+                areas={[]}
+            />
+        );
+        // A sync save holds the gate while the user clicks, then publishes another device's auto-archive change.
+        const finish = holdSyncSave(() => useTaskStore.setState({
+            settings: { gtd: { defaultProjectFlowMode: 'parallel', autoArchiveDays: 3 } },
+        }));
+
+        fireEvent.click(getByRole('button', { name: /sequential/i }));
+        await finish();
+
+        await waitFor(() => {
+            expect(useTaskStore.getState().settings.gtd).toEqual({ defaultProjectFlowMode: 'sequential', autoArchiveDays: 3 });
+        });
+    });
+
+    it('hides a task editor field the page showed, even when another device hid it meanwhile', async () => {
+        const updateSettings = useTaskStore.getState().updateSettings;
+        const t = getEnglishSettingsLabels();
+        useTaskStore.setState({ settings: { gtd: { taskEditor: { hidden: [] } } } });
+        const { getByRole, getByText } = render(
+            <SettingsGtdPage t={t} language="en" settings={useTaskStore.getState().settings} updateSettings={updateSettings}
+                showSaved={vi.fn()} autoArchiveDays={7} areas={[]} />
+        );
+        fireEvent.click(getByRole('button', { name: new RegExp(t.taskEditorLayout) }));
+        // The other device hid Status after this page rendered it as visible.
+        useTaskStore.setState({ settings: { gtd: { taskEditor: { hidden: ['status'] } } } });
+        const row = getByText(t.taskEditorFieldStatus).closest('div.flex') as HTMLElement;
+        fireEvent.click(within(row).getByRole('button', { name: t.visible }));
+
+        await waitFor(() => {
+            expect(useTaskStore.getState().settings.gtd?.taskEditor?.hidden).toContain('status');
+        });
+    });
+
     it('saves the task editor presentation setting', async () => {
         const updateSettings = vi.fn().mockResolvedValue(undefined);
         const showSaved = vi.fn();

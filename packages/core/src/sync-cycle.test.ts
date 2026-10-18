@@ -925,10 +925,9 @@ describe('performSyncCycle', () => {
         expect(result.data.settings.pendingRemoteWriteAt).toBeUndefined();
     });
 
-    it('clears the pending remote write marker when the final local write aborts after remote success', async () => {
+    it('keeps the pending remote write marker when the final local write aborts after remote success', async () => {
         const localWrites: AppData[] = [];
         let remoteWriteData: AppData | null = null;
-        let clearedPendingAt: string | null = null;
         const abort = new Error('Local changes detected during sync');
         abort.name = 'LocalSyncAbort';
 
@@ -941,20 +940,18 @@ describe('performSyncCycle', () => {
                     throw abort;
                 }
             },
-            clearPendingRemoteWriteAfterLocalAbort: async (pendingAt) => {
-                clearedPendingAt = pendingAt;
-            },
             writeRemote: async (data) => {
                 remoteWriteData = data;
             },
             now: () => '2026-01-01T00:00:00.000Z',
         })).rejects.toThrow('Local changes detected during sync');
 
+        // The refused final write wrote nothing, so the first write's marker stays on disk: the
+        // next cycle takes the pending-write path and settles it (no cleanup save on a stale exit).
         expect(localWrites).toHaveLength(2);
         expect(localWrites[0].settings.pendingRemoteWriteAt).toBe('2026-01-01T00:00:00.000Z');
         expect(localWrites[1].settings.pendingRemoteWriteAt).toBeUndefined();
         expect(remoteWriteData?.settings.pendingRemoteWriteAt).toBeUndefined();
-        expect(clearedPendingAt).toBe('2026-01-01T00:00:00.000Z');
     });
 
     it('records retry backoff when remote write fails after the local pending flag is saved', async () => {
@@ -982,9 +979,8 @@ describe('performSyncCycle', () => {
         expect(localWrites[1].settings.pendingRemoteWriteAttempts).toBe(1);
     });
 
-    it('clears the pending remote write marker without retry backoff when a local abort requeues sync', async () => {
+    it('keeps the pending remote write marker without retry backoff when a local abort requeues sync', async () => {
         const localWrites: AppData[] = [];
-        let clearedPendingAt: string | null = null;
         const abort = new Error('Local changes detected during sync');
         abort.name = 'LocalSyncAbort';
 
@@ -994,19 +990,16 @@ describe('performSyncCycle', () => {
             writeLocal: async (data) => {
                 localWrites.push(data);
             },
-            clearPendingRemoteWriteAfterLocalAbort: async (pendingAt) => {
-                clearedPendingAt = pendingAt;
-            },
             writeRemote: async () => {
                 throw abort;
             },
             now: () => '2026-01-01T00:00:00.000Z',
         })).rejects.toThrow('Local changes detected during sync');
 
+        // Nothing after the stale exit writes: the remote never got the merge, so the marker stays.
         expect(localWrites).toHaveLength(1);
         expect(localWrites[0].settings.pendingRemoteWriteAt).toBe('2026-01-01T00:00:00.000Z');
         expect(localWrites[0].settings.pendingRemoteWriteRetryAt).toBeUndefined();
-        expect(clearedPendingAt).toBe('2026-01-01T00:00:00.000Z');
     });
 
     it('preserves remote-write preparation mutations across the pending-write lifecycle', async () => {

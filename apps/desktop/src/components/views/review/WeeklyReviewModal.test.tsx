@@ -1,10 +1,11 @@
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetForTests, useTaskStore, type Task } from '@mindwtr/core';
+import { resetForTests, useTaskStore, type Project, type Task } from '@mindwtr/core';
 
 import { WeeklyReviewGuideModal } from './WeeklyReviewModal';
 import { fetchExternalCalendarEvents } from '../../../lib/external-calendar-events';
 import { useCalendarExternalEvents } from '../calendar/use-calendar-external-events';
+import { reportError } from '../../../lib/report-error';
 
 vi.mock('../../../contexts/language-context', () => ({
     useLanguage: () => ({
@@ -39,6 +40,11 @@ vi.mock('../../../contexts/language-context', () => ({
             'mindSweep.title': 'Mind Sweep',
             'mindSweep.intro': 'Capture anything on your mind.',
             'common.close': 'Close',
+            'common.cancel': 'Cancel',
+            'projects.addTask': 'Add task',
+            'projects.nextActionPromptComplete': 'Complete project',
+            'projects.completeConfirm': 'Mark this project completed and finish all its tasks?',
+            'projects.archiveFailed': 'Failed to archive project',
         }[key] ?? key),
     }),
 }));
@@ -63,6 +69,8 @@ vi.mock('../../MindSweepModal', () => ({
 vi.mock('../../PromptModal', () => ({
     PromptModal: () => null,
 }));
+
+vi.mock('../../../lib/report-error', () => ({ reportError: vi.fn() }));
 
 vi.mock('../../ShareCardDialog', () => ({
     ShareCardDialog: ({ onClose, reviewDate }: { onClose: () => void; reviewDate: string }) => (
@@ -116,6 +124,150 @@ describe('WeeklyReviewGuideModal', () => {
 
         expect(screen.getByRole('heading', { level: 2, name: 'Review Complete!' })).toBeInTheDocument();
         expect(screen.queryByText('This week')).not.toBeInTheDocument();
+    });
+
+    const seedProjects = (tasks: Task[] = []) => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 6, 15, 10));
+        const projects: Project[] = ['Finish me', 'Keep reviewing'].map((title, index) => ({
+            id: `project-${index}`, title, status: 'active', color: '#3B82F6',
+            order: index, tagIds: [], createdAt: now, updatedAt: now,
+        }));
+        const updateProject = vi.fn(initialTaskState.updateProject);
+        useTaskStore.setState({ _allTasks: tasks, _allProjects: projects, updateProject });
+        window.localStorage.setItem(storageKey, JSON.stringify({ step: 'projects', startedAt: new Date().toISOString() }));
+        return updateProject;
+    };
+    const completeFirstProject = () => {
+        const card = screen.getByRole('heading', { level: 3, name: 'Finish me' }).parentElement!.parentElement!;
+        fireEvent.click(within(card).getByRole('button', { name: 'Complete project' }));
+    };
+
+    it.each(['empty', 'done', 'reference', 'deleted'] as const)('completes a project with %s tasks through the existing lifecycle and keeps reviewing', async (kind) => {
+        const tasks = kind === 'empty' ? [] : [makeTask({
+            id: 'child', projectId: 'project-0', status: kind === 'done' ? 'done' : kind === 'reference' ? 'reference' : 'next',
+            ...(kind === 'deleted' ? { deletedAt: now } : {}),
+        })];
+        const updateProject = seedProjects(tasks);
+        const onClose = vi.fn();
+        render(<WeeklyReviewGuideModal onClose={onClose} />);
+
+        completeFirstProject();
+
+        await waitFor(() => expect(updateProject).toHaveBeenCalledWith('project-0', { status: 'archived' }));
+        expect(screen.queryByText('Mark this project completed and finish all its tasks?')).not.toBeInTheDocument();
+        const completedProject = useTaskStore.getState()._allProjects.find((project) => project.id === 'project-0');
+        expect(completedProject?.status).toBe('archived');
+        expect(completedProject?.cancelledAt).toBeUndefined();
+        expect(screen.queryByRole('heading', { name: 'Finish me' })).not.toBeInTheDocument();
+        expect(screen.getByRole('heading', { level: 1, name: 'Projects' })).toBeInTheDocument();
+        expect(JSON.parse(window.localStorage.getItem(storageKey) ?? '{}').step).toBe('projects');
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('confirms and completes a deferred unfinished section task absent from the review cards', async () => {
+        const deferred = makeTask({ id: 'deferred', title: 'Hidden deferred task', sectionId: 'section', startTime: '2027-01-01' });
+        const updateProject = seedProjects([deferred]);
+        useTaskStore.setState({ _allSections: [{
+            id: 'section', projectId: 'project-0', title: 'Section', order: 0, createdAt: now, updatedAt: now,
+        }] });
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        expect(screen.queryByTestId('task-deferred')).not.toBeInTheDocument();
+
+        completeFirstProject();
+
+        const confirmation = screen.getByRole('dialog', { name: 'Finish me' });
+        expect(within(confirmation).getByText('Mark this project completed and finish all its tasks?')).toBeInTheDocument();
+        expect(updateProject).not.toHaveBeenCalled();
+        fireEvent.click(within(confirmation).getByRole('button', { name: 'Complete project' }));
+
+        await waitFor(() => expect(updateProject).toHaveBeenCalledTimes(1));
+        expect(useTaskStore.getState()._allTasks.find((task) => task.id === 'deferred')).toMatchObject({
+            status: 'done', projectId: 'project-0', projectArchivedAt: expect.any(String),
+        });
+    });
+
+    it('keeps the projects step after the final project is completed until the reviewer advances', async () => {
+        seedProjects();
+        useTaskStore.setState({ _allProjects: [useTaskStore.getState()._allProjects[0]] });
+        const onClose = vi.fn();
+        render(<WeeklyReviewGuideModal onClose={onClose} />);
+
+        completeFirstProject();
+
+        await waitFor(() => expect(screen.queryByRole('heading', { name: 'Finish me' })).not.toBeInTheDocument());
+        expect(screen.getByRole('heading', { level: 1, name: 'Projects' })).toBeInTheDocument();
+        expect(JSON.parse(window.localStorage.getItem(storageKey) ?? '{}').step).toBe('projects');
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'review.nextStepBtn' }));
+        expect(screen.getByRole('heading', { level: 2, name: 'Review Complete!' })).toBeInTheDocument();
+    });
+
+    it('does not complete a project removed while its confirmation was open', async () => {
+        const updateProject = seedProjects([makeTask({ projectId: 'project-0' })]);
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        completeFirstProject();
+        act(() => useTaskStore.setState({
+            _allProjects: useTaskStore.getState()._allProjects.map((project) => project.id === 'project-0' ? { ...project, deletedAt: now } : project),
+        }));
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Finish me' })).getByRole('button', { name: 'Complete project' }));
+
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Finish me' })).not.toBeInTheDocument());
+        expect(updateProject).not.toHaveBeenCalled();
+    });
+
+    it('checks the current underlying tasks at activation and leaves everything unchanged when confirmation is canceled', async () => {
+        const updateProject = seedProjects();
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        const lateTask = makeTask({ id: 'late', title: 'Later task', projectId: 'project-0', status: 'someday', startTime: '2027-01-01' });
+        act(() => useTaskStore.setState({ _allTasks: [lateTask] }));
+
+        completeFirstProject();
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Finish me' })).getByRole('button', { name: 'Cancel' }));
+
+        await waitFor(() => expect(screen.getAllByRole('button', { name: 'Complete project' })[0]).toBeEnabled());
+        expect(updateProject).not.toHaveBeenCalled();
+        expect(useTaskStore.getState()._allTasks).toEqual([lateTask]);
+        expect(useTaskStore.getState()._allProjects[0].status).toBe('active');
+        expect(screen.getByRole('heading', { level: 1, name: 'Projects' })).toBeInTheDocument();
+    });
+
+    it.each(['result', 'rejection'] as const)('reports a failed completion %s and lets the reviewer retry', async (failure) => {
+        seedProjects();
+        vi.mocked(reportError).mockClear();
+        const updateProject = failure === 'result'
+            ? vi.fn(async () => ({ success: false as const, error: 'Save failed' }))
+            : vi.fn(async () => { throw new Error('Save failed'); });
+        useTaskStore.setState({ updateProject });
+        const onClose = vi.fn();
+        render(<WeeklyReviewGuideModal onClose={onClose} />);
+
+        completeFirstProject();
+
+        await waitFor(() => expect(reportError).toHaveBeenCalledWith(
+            'Failed to complete project during weekly review', expect.any(Error), { userMessage: 'Failed to archive project' },
+        ));
+        expect(screen.getAllByRole('button', { name: 'Complete project' })[0]).toBeEnabled();
+        expect(screen.getByRole('heading', { level: 3, name: 'Finish me' })).toBeInTheDocument();
+        expect(useTaskStore.getState()._allProjects[0].status).toBe('active');
+        expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('waits for completion and prevents duplicate writes while it is pending', async () => {
+        seedProjects();
+        let resolve!: (value: { success: true }) => void;
+        const updateProject = vi.fn(() => new Promise<{ success: true }>((done) => { resolve = done; }));
+        useTaskStore.setState({ updateProject });
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+
+        completeFirstProject();
+        expect(screen.getAllByRole('button', { name: 'Complete project' }).every((button) => button.hasAttribute('disabled'))).toBe(true);
+        completeFirstProject();
+        expect(updateProject).toHaveBeenCalledTimes(1);
+
+        await act(async () => resolve({ success: true }));
+
+        expect(screen.getAllByRole('button', { name: 'Complete project' })[0]).toBeEnabled();
     });
 
     it('honors calendar toggles and disabled sources when loading the calendar step', async () => {

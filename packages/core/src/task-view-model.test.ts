@@ -295,3 +295,18 @@ describe('checklist edits', () => {
         expect(getChecklistEditStatus({ taskMode: 'list', status: 'waiting', checklist: allDone })).toBe('done');
     });
 });
+
+
+describe('effective reminders in the task View tab', () => {
+    it.each([['inherit', 'skip', true], ['inherit', 'send', false], ['send', 'skip', false], ['skip', 'send', true]] as const)(
+        'shows suppression for policy %s and default %s: %s', (reminderPolicy, taskReminderDefault, skipped) => {
+            const rows = buildTaskViewModel({
+                task: { status: 'next', dueDate: '2026-10-15T10:00', reminderPolicy, suppressMindwtrReminders: true },
+                settings: { taskReminderDefault }, projects: [], sections: [], areas: [], attachments: [],
+                prioritiesEnabled: false, timeEstimatesEnabled: false, showStatusField: false, readOnly: true,
+                t: (key) => key, formatDate: (value) => value, formatDueDate: (value) => value, formatTimeEstimateLabel: (value) => value,
+            });
+            expect(rows.some((row) => row.type === 'field' && row.field === 'reminders')).toBe(skipped);
+        },
+    );
+});

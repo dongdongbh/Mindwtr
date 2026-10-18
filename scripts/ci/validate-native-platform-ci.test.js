@@ -23,7 +23,7 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(clientJob.if).toContain("needs.changes.outputs.android_client == 'true'");
   expect(clientJob.steps.find((step) => step.name === 'Build Android Compose client')).toMatchObject({
     'working-directory': 'apps/android-native/android',
-    run: './gradlew :app:assembleDebug --no-daemon',
+    run: './gradlew :app:assembleDebug :app:checkVariantIdentity --no-daemon',
   });
   expect(workflow).toContain('apps/mobile/modules/**/ios/**');
   expect(
@@ -79,6 +79,7 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(androidJob).toContain("name: Run Android native recovery and system bar tests");
   expect(androidJob).toContain(":attachment-file-installer:testDebugUnitTest");
   expect(androidJob).toContain(":sync-file-lock:testDebugUnitTest");
+  expect(androidJob).toContain(":sync-file-transition-cas:testDebugUnitTest");
   expect(androidJob).toContain(":system-bars:testDebugUnitTest");
 
   expect(workflow).toContain("name: iOS Swift compile");

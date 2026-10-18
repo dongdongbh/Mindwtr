@@ -1,5 +1,5 @@
 import type { AppData, Attachment } from './types';
-import type { CloudProvider } from './sync-client-helpers';
+import type { CloudProvider, PreparedStorePublish } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
 import {
     isSyncFileGenerationCorruptError,
@@ -23,10 +23,10 @@ import type {
     SyncRunStoreBridge,
 } from './sync-run-ports';
 import { SyncRemoteWriteConflict, type SyncFollowUpReason } from './sync-run-ports';
-import { LocalSyncAbort, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
+import { LocalSyncAbort, captureInMemoryAppDataSnapshot, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
-import { isAttachmentUploadTooLargeError, isCloudHostUploadLimitError, isWebdavHostUploadLimitError } from './attachment-transfer';
+import { createAttachmentTransferAdmission, isAttachmentUploadTooLargeError, isCloudHostUploadLimitError, isWebdavHostUploadLimitError } from './attachment-transfer';
 import { isSyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { isHostResponseTooLargeError } from './http-utils';
 import { flushPendingSave, useTaskStore } from './store';
@@ -35,14 +35,16 @@ import {
     assertNoPendingAttachmentContentReplacements,
     assertNoPendingAttachmentUploads,
     computeSyncChangeFingerprint,
+    computeSyncChangeFingerprintPass,
     findPendingAttachmentUploads,
     hasPendingSyncSideEffects,
     isLocalPersistEquivalent,
-    fingerprintStableSyncJson,
+    fingerprintStableSyncJsonPass,
     toStableSyncJson,
 } from './sync-helpers';
 import {
     parseSyncDocument,
+    remoteSyncDocumentStableJsonPass,
     toRemoteSyncDocument,
 } from './sync-document';
 import { buildHttpRemoteFileFingerprint } from './webdav';
@@ -51,8 +53,11 @@ import type { CloudJsonWriteResult } from './cloud';
 import { normalizeAppData } from './sync-normalization';
 import { isWebdavInvalidJsonError } from './retry-utils';
 import { isRemoteSyncBackend } from './sync-service-utils';
-import { cloneAppData } from './sync-runtime-utils';
+import { cloneAppData, cloneAppDataPass } from './sync-runtime-utils';
+import { createSlicer, runSliced, type Slicer } from './cooperative';
 import { traceSection, traceSectionAsync } from './perf-trace';
+import { runSyncStoreSave } from './store-write-gate';
+import type { SqliteReadToken } from './sqlite-adapter';
 import { buildMergeSummaryLog, buildPendingAttachmentUploadLogExtra } from './sync-log-utils';
 import { CLOCK_SKEW_THRESHOLD_MS } from './sync-types';
 import { appendSyncHistory, mergeAppData, performSyncCycle } from './sync';
@@ -110,6 +115,8 @@ type SharedSyncRunState = {
     fastSyncScope: string | null;
     localSnapshotChangeAt: number;
     localDataCache: { changeAt: number; data: AppData } | null;
+    /** Sliced cycles only (design D9b W3): the token of the local read this cycle's next save rests on. */
+    localReadToken: SqliteReadToken | undefined;
     /** `localDataCache.data` is byte-identical to the persisted document, so a
      *  write of content-equal data can be skipped. False whenever the snapshot
      *  was reconciled from the in-memory store, carries attachment pre-sync
@@ -119,6 +126,12 @@ type SharedSyncRunState = {
     fastSyncStateCache: { scope: string; value: FastSyncState | null } | null;
     preSyncedLocalData: AppData | null;
     wroteLocal: boolean;
+    /** Each store publish's wait for the write gate, in ms, and the step of the first: the cycle's one published line. */
+    publishedGateWaitsMs: number[];
+    /** Sliced cycles: each save's time in the gate (ms), and whether its prepared store publish was swapped in. */
+    publishedCommitMs: number[];
+    publishedSwaps: ('prepared' | 'in-gate')[];
+    publishedStep: string | null;
     remoteDataForCompare: AppData | null;
     /** The authoritative remote read repaired a legacy attachment shape and
      *  must be rewritten even when its repaired view equals the merge output. */
@@ -177,7 +190,7 @@ const computeAttachmentIdentityDigest = (data: AppData): string => {
  * ponytail: one retained AppData per process. Drop it to a fingerprint-only
  * cache if the retained copy ever shows up in a memory profile.
  */
-let idleCycleSnapshot: { scope: string; changeAt: number; data: AppData; fingerprint: string } | null = null;
+let idleCycleSnapshot: { scope: string; changeAt: number; data: AppData; fingerprint: string; token?: SqliteReadToken } | null = null;
 
 /** Hand the snapshot to the starting run and drop it: only a run that reaches
  *  an unchanged-skip publishes a new one, so any run that writes, errors or
@@ -286,6 +299,7 @@ const buildExactLocalActivationFallback = (
         contentSize: local.contentSize,
         localStatus: 'available',
         pendingContentUpload: true,
+        staleContentHash: undefined,
         deletedAt: undefined,
     };
 };
@@ -582,6 +596,18 @@ class SharedSyncRunMachine {
     private io: SyncBackendIO | null = null;
     private remoteMutationFence: SyncRemoteMutationFenceLease | null = null;
     private carriedIdleSnapshot = takeIdleCycleSnapshot();
+    /** A host that binds sliceYield (cooperative.ts) gets this run's long passes in slices; every other host at once. */
+    private readonly slicer: Slicer | undefined;
+    // One run is one cycle: every attachment phase of it shares this admission (design D9b W7).
+    private readonly transferAdmission = createAttachmentTransferAdmission((attachment, direction) => {
+        this.notifier.logInfo('Attachment transfer already started this cycle; skipped', {
+            attachmentId: attachment.id,
+            kind: direction,
+            releaseCheck: 'v1.3.7/attachment-download-reuse',
+        });
+    });
+    /** Design D9b §3: a sliced cycle's saves are token-checked, and an abort writes nothing (W1). Set only by sliceYield. */
+    private readonly slicedCycle: boolean;
     private readonly state: SharedSyncRunState = {
         backend: 'off',
         cloudProvider: 'selfhosted',
@@ -589,11 +615,16 @@ class SharedSyncRunMachine {
         fastSyncScope: null,
         localSnapshotChangeAt: 0,
         localDataCache: null,
+        localReadToken: undefined,
         localSnapshotMatchesDisk: false,
         localDocumentFingerprint: null,
         fastSyncStateCache: null,
         preSyncedLocalData: null,
         wroteLocal: false,
+        publishedGateWaitsMs: [],
+        publishedCommitMs: [],
+        publishedSwaps: [],
+        publishedStep: null,
         remoteDataForCompare: null,
         remoteLegacyAttachmentsChanged: false,
         readCheckRemoteData: undefined,
@@ -615,6 +646,15 @@ class SharedSyncRunMachine {
         this.nowFn = ports.now ?? (() => new Date());
         this.cleanupIntervalMs = ports.attachmentCleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
         this.performSyncCycleImpl = ports.performSyncCycle ?? performSyncCycle;
+        const sliceYield = ports.notifier.sliceYield?.bind(ports.notifier);
+        this.slicer = sliceYield ? createSlicer(sliceYield) : undefined;
+        this.slicedCycle = this.slicer !== undefined;
+    }
+
+    /** A sliced cycle's read or save met another write to the database: requeue quietly (design D9b W4). */
+    private staleDatabase(): Error {
+        this.requestFollowUp('stale-db');
+        return new LocalSyncAbort('stale-db');
     }
 
     async run(): Promise<SyncRunResult> {
@@ -632,6 +672,8 @@ class SharedSyncRunMachine {
                 result = await this.handleRunError(error);
             }
         } finally {
+            // A refused native cleanup quarantines the cycle: nothing more is logged or written.
+            if (!cleanupUnconfirmed) this.logSavesPublished();
             // A retained native cleanup owner forbids another remote request; the lease expires naturally.
             if (!cleanupUnconfirmed) cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
         }
@@ -846,6 +888,7 @@ class SharedSyncRunMachine {
             ...(activationContinuation ? { activationContinuation: true } : {}),
             onTransferBatchDeferred,
             phase,
+            ...(this.options.activationProbe === true ? {} : { transferAdmission: this.transferAdmission }),
         };
     }
 
@@ -909,6 +952,7 @@ class SharedSyncRunMachine {
         ) {
             this.state.localSnapshotChangeAt = currentChangeAt;
             this.state.localDataCache = { changeAt: currentChangeAt, data: carried.data };
+            this.state.localReadToken = carried.token;
             this.state.localSnapshotMatchesDisk = true;
             this.state.localDocumentFingerprint = { data: carried.data, fingerprint: carried.fingerprint };
             this.notifier.logInfo('Sync local reconcile', {
@@ -918,7 +962,11 @@ class SharedSyncRunMachine {
             });
             return carried.data;
         }
-        const inMemorySnapshot = traceSection('sync:storeSnapshot', () => this.store.getInMemorySnapshot());
+        // Sliced (a host that binds sliceYield): the store's lists are taken in this turn, with the stamp read above, then
+        // copied a few records at a time.
+        const inMemorySnapshot = this.slicer && this.store.captureInMemorySnapshot
+            ? await runSliced('sync:storeSnapshot', cloneAppDataPass(this.store.captureInMemorySnapshot()), this.slicer)
+            : traceSection('sync:storeSnapshot', () => this.store.getInMemorySnapshot());
         // The persisted-vs-in-memory reconcile is a full-library merge — the
         // single most expensive step of an idle cycle at whale scale — and after
         // the flush at cycle start the two sides are almost always identical.
@@ -958,9 +1006,18 @@ class SharedSyncRunMachine {
                 tasks: String(baseData.tasks.length),
             });
         } else {
-            const persisted = await traceSectionAsync('sync:readPersisted', () => this.storage.readPersistedLocal());
+            // Sliced: pending store saves land before the read, so the flush inside the save's gate cannot void its token.
+            if (this.slicedCycle) await this.store.flushPendingSave();
+            const persisted = await traceSectionAsync('sync:readPersisted', () => (this.slicedCycle
+                ? this.storage.readPersistedLocal({ onStale: () => this.staleDatabase() })
+                : this.storage.readPersistedLocal()));
+            if (this.slicedCycle) this.state.localReadToken = this.storage.readTokenOf?.(persisted);
             const reconcileStart = Date.now();
-            const aligned = traceSection('sync:reconcileCheck', () => computeSyncChangeFingerprint(persisted) === computeSyncChangeFingerprint(inMemorySnapshot));
+            const slicer = this.slicer;
+            const aligned = slicer
+                ? await runSliced('sync:reconcileCheck', computeSyncChangeFingerprintPass(persisted), slicer)
+                    === await runSliced('sync:reconcileCheck', computeSyncChangeFingerprintPass(inMemorySnapshot), slicer)
+                : traceSection('sync:reconcileCheck', () => computeSyncChangeFingerprint(persisted) === computeSyncChangeFingerprint(inMemorySnapshot));
             const reconciled = aligned ? persisted : traceSection('sync:reconcileMerge', () => mergeAppData(persisted, inMemorySnapshot));
             baseData = restoreDeviceLocalAiSettings(reconciled, inMemorySnapshot);
             // A restored endpoint means this snapshot holds content the disk copy
@@ -994,35 +1051,102 @@ class SharedSyncRunMachine {
         return data;
     }
 
-    private async persistLocalDataWithTracking(data: AppData): Promise<AppData> {
+    /**
+     * One local save and its store publish, inside the store write gate (store-write-gate.ts): no command
+     * runs from the freshness check through the commit. A commit always reaches the store, before any check
+     * after the save can end the cycle. A save that fails publishes nothing: the store still matches the disk.
+     * [data] is a builder when the document must be read from the store inside the gate.
+     */
+    private async persistLocalDataWithTracking(data: AppData | (() => AppData)): Promise<AppData> {
+        if (this.slicedCycle && !this.state.localReadToken) {
+            // Fail closed, as an error and never a requeue: a host that loses the token shows as a failed sync, not a loop.
+            this.notifier.logWarning('Sliced sync save refused: no read token');
+            throw new Error('Sliced sync save refused: no read token');
+        }
         await this.assertRemoteMutationFenceHeld();
-        const persisted = await traceSectionAsync('sync:saveData', () => this.storage.persistLocal(data)) ?? data;
-        this.ensureLocalSnapshotFresh(persisted);
-        // Disk has moved past the snapshot this cycle read, so it is no longer
-        // a baseline for the unchanged-write guard.
-        this.state.localSnapshotMatchesDisk = false;
-        if (this.storage.applyDataToStore) {
-            this.storage.applyDataToStore(persisted);
+        // Design D9b §2, W6: a sliced cycle builds the save's rows and the store publish in slices before the gate, so
+        // the gate holds only the save's transaction and the swap. Each is keyed to this document; the gate checks it.
+        let prepared: PreparedStorePublish | undefined;
+        if (this.slicer && typeof data !== 'function') {
+            const rows = this.storage.prepareLocalSave?.(data);
+            if (rows) await runSliced('sync:prepareSave', rows, this.slicer);
+            if (this.storage.applyDataToStore && this.storage.prepareStorePublish) {
+                prepared = await runSliced('sync:preparePublish', this.storage.prepareStorePublish(data), this.slicer);
+            }
+        }
+        return runSyncStoreSave(async (gateWaitMs) => {
+            const heldAt = Date.now();
+            // From the gate to the publish, in one turn on the native host (its SQLite calls settle in the turn).
+            const { persisted, staleDuringSave } = await traceSectionAsync('sync:commitPublish', async () => {
+                // Pending store saves land first; a command they carry moved the change stamp, which the
+                // check below turns into a requeue before anything of this cycle is written.
+                await this.store.flushPendingSave();
+                const next = typeof data === 'function' ? data() : data;
+                this.ensureLocalSnapshotFresh(next);
+                const committed = await traceSectionAsync('sync:saveData', () => (this.slicedCycle
+                    ? this.storage.persistLocal(next, { token: this.state.localReadToken, onStale: () => this.staleDatabase() })
+                    : this.storage.persistLocal(next))) ?? next;
+                // The committed save's successor token authorizes only this cycle's next save.
+                if (this.slicedCycle) this.state.localReadToken = this.storage.readTokenOf?.(next);
+                // Disk has moved past the snapshot this cycle read, so it is no longer
+                // a baseline for the unchanged-write guard.
+                this.state.localSnapshotMatchesDisk = false;
+                // Behind the gate only an ungated writer can move the stamp during the save. The committed
+                // document is published anyway, so the store matches the disk; then the cycle requeues.
+                let stale: unknown = null;
+                try { this.ensureLocalSnapshotFresh(committed); } catch (error) { stale = error; }
+                this.publishToStore(committed, gateWaitMs, prepared);
+                return { persisted: committed, staleDuringSave: stale };
+            });
+            if (this.slicedCycle) this.state.publishedCommitMs.push(Date.now() - heldAt);
+            this.state.wroteLocal = true;
+            if (staleDuringSave) throw staleDuringSave;
+            await this.storage.afterPersistLocal?.();
+            return persisted;
+        });
+    }
+
+    private publishToStore(data: AppData, gateWaitMs: number, prepared?: PreparedStorePublish): void {
+        if (!this.storage.applyDataToStore) return;
+        traceSection('sync:storePublish', () => {
+            const swapped = prepared ? this.storage.applyDataToStore!(data, prepared) : this.storage.applyDataToStore!(data);
+            if (prepared) this.state.publishedSwaps.push(swapped ? 'prepared' : 'in-gate');
             const currentChangeAt = this.store.getLastDataChangeAt();
             this.state.localSnapshotChangeAt = currentChangeAt;
             this.state.localDataCache = {
                 changeAt: currentChangeAt,
-                data: normalizeAppData(persisted),
+                data: normalizeAppData(data),
             };
-        }
-        this.state.wroteLocal = true;
-        return persisted;
+        });
+        if (this.state.publishedStep === null) this.state.publishedStep = this.state.step ?? '-';
+        this.state.publishedGateWaitsMs.push(gateWaitMs);
+    }
+
+    /** Once per cycle that published a save, when it ends: every save's gate wait, so none is lost to a later save. */
+    private logSavesPublished(): void {
+        if (this.state.publishedStep === null) return;
+        this.notifier.logInfo('Sync save published to the store', {
+            backend: this.backend,
+            step: this.state.publishedStep,
+            gateWaitMs: this.state.publishedGateWaitsMs.join(','),
+            // Sliced cycles only (D9b W6): each save's time in the gate, and whether its prepared publish was swapped in.
+            ...(this.slicedCycle ? {
+                commitPublishMs: this.state.publishedCommitMs.join(','),
+                storePublish: this.state.publishedSwaps.join(','),
+            } : {}),
+            releaseCheck: 'v1.3.7/sync-write-gate',
+        });
     }
 
     private async persistPreSyncedDataAfterAbort(): Promise<void> {
-        if (!this.state.preSyncedLocalData || this.state.wroteLocal) return;
-        this.state.localSnapshotChangeAt = this.store.getLastDataChangeAt();
-        const inMemorySnapshot = this.store.getInMemorySnapshot();
-        const reconciledData = restoreDeviceLocalAiSettings(
-            mergeAppData(this.state.preSyncedLocalData, inMemorySnapshot),
-            inMemorySnapshot,
-        );
-        await this.persistLocalDataWithTracking(reconciledData);
+        const preSynced = this.state.preSyncedLocalData;
+        if (!preSynced || this.state.wroteLocal) return;
+        // Built inside the gate: the store it merges with is the one the save lands on.
+        await this.persistLocalDataWithTracking(() => {
+            this.state.localSnapshotChangeAt = this.store.getLastDataChangeAt();
+            const inMemorySnapshot = this.store.getInMemorySnapshot();
+            return restoreDeviceLocalAiSettings(mergeAppData(preSynced, inMemorySnapshot), inMemorySnapshot);
+        });
     }
 
     private async readRemoteForCycle(requireMutationFence = false): Promise<AppData | null> {
@@ -1146,7 +1270,7 @@ class SharedSyncRunMachine {
             && !state.remoteLegacyAttachmentsChanged
             && this.requireIo().requiresRemoteRepair?.() !== true
             // areRemoteSyncDocumentsEqual over the two remote documents, through the memoized stable JSON.
-            && traceSection('sync:remoteCompare', () => this.stableDocument(previousRemoteData).json === this.stableDocument(data).json)) {
+            && (await this.stableDocument(previousRemoteData)).json === (await this.stableDocument(data)).json) {
             if (this.backend !== 'cloudkit') {
                 this.notifier.tracePayload?.('remote-write-skipped-unchanged', remoteDocument, { backend: this.backend });
             }
@@ -1235,7 +1359,7 @@ class SharedSyncRunMachine {
         this.ensureLocalSnapshotFresh();
         if (this.hasPendingCycleSideEffects(localData)) return null;
 
-        const localFingerprint = this.localDocumentFingerprint(localData);
+        const localFingerprint = await this.localDocumentFingerprint(localData);
         const cached = await this.readFastSyncState(scope);
         if (!cached || cached.localFingerprint !== localFingerprint) return null;
 
@@ -1339,7 +1463,7 @@ class SharedSyncRunMachine {
         if (!cached) return false;
         // Nothing changed locally either — that is the fast check's business,
         // and it has already had its turn.
-        if (cached.localFingerprint === this.localDocumentFingerprint(localData)) return false;
+        if (cached.localFingerprint === await this.localDocumentFingerprint(localData)) return false;
 
         let remoteFingerprint: string | null = null;
         try {
@@ -1387,8 +1511,8 @@ class SharedSyncRunMachine {
         // the fast check above already compares, and the same one the remote
         // write records. Comparing documents here serialized both sides in
         // full to reach the identical verdict.
-        const localFingerprint = this.localDocumentFingerprint(localData);
-        const remoteFingerprint = this.documentFingerprint(remoteData);
+        const localFingerprint = await this.localDocumentFingerprint(localData);
+        const remoteFingerprint = await this.documentFingerprint(remoteData);
         if (localFingerprint !== remoteFingerprint) return null;
 
         await this.recordFastSyncState(localData, { allowRemoteFingerprintRead: false });
@@ -1425,7 +1549,7 @@ class SharedSyncRunMachine {
         if (!remoteFingerprint) return;
         await this.writeFastSyncState({
             scope,
-            localFingerprint: this.localDocumentFingerprint(data),
+            localFingerprint: await this.localDocumentFingerprint(data),
             remoteFingerprint,
             checkedAt: this.nowIso(),
         });
@@ -1449,10 +1573,10 @@ class SharedSyncRunMachine {
     /** Sanitized-document fingerprint of a local snapshot, memoized on the
      *  snapshot's identity: the fast check, the read check and the fast-sync
      *  bookkeeping all ask for the same one within a cycle. */
-    private localDocumentFingerprint(data: AppData): string {
+    private async localDocumentFingerprint(data: AppData): Promise<string> {
         const cached = this.state.localDocumentFingerprint;
         if (cached && cached.data === data) return cached.fingerprint;
-        const fingerprint = this.documentFingerprint(data);
+        const fingerprint = await this.documentFingerprint(data);
         this.state.localDocumentFingerprint = { data, fingerprint };
         return fingerprint;
     }
@@ -1469,18 +1593,19 @@ class SharedSyncRunMachine {
      */
     private readonly stableDocuments = new WeakMap<AppData, { json: string; fingerprint?: string }>();
 
-    private stableDocument(data: AppData): { json: string; fingerprint?: string } {
-        let entry = this.stableDocuments.get(data);
-        if (!entry) {
-            entry = { json: traceSection('sync:stableJson', () => toStableSyncJson(toRemoteSyncDocument(data))) };
-            this.stableDocuments.set(data, entry);
-        }
+    private async stableDocument(data: AppData): Promise<{ json: string; fingerprint?: string }> {
+        const known = this.stableDocuments.get(data);
+        if (known) return known;
+        const json = await runSliced('sync:stableJson', remoteSyncDocumentStableJsonPass(data), this.slicer);
+        // Another step may have made it while this one yielded: the same document, so the same JSON.
+        const entry = this.stableDocuments.get(data) ?? { json };
+        this.stableDocuments.set(data, entry);
         return entry;
     }
 
-    private documentFingerprint(data: AppData): string {
-        const entry = this.stableDocument(data);
-        entry.fingerprint ??= traceSection('sync:fingerprint', () => fingerprintStableSyncJson(entry.json));
+    private async documentFingerprint(data: AppData): Promise<string> {
+        const entry = await this.stableDocument(data);
+        entry.fingerprint ??= await runSliced('sync:fingerprint', fingerprintStableSyncJsonPass(entry.json), this.slicer);
         return entry.fingerprint;
     }
 
@@ -1527,6 +1652,7 @@ class SharedSyncRunMachine {
             changeAt: this.state.localSnapshotChangeAt,
             data,
             fingerprint,
+            token: this.state.localReadToken,
         };
     }
 
@@ -1855,20 +1981,6 @@ class SharedSyncRunMachine {
                 }
                 return this.persistLocalDataWithTracking(data);
             },
-            clearPendingRemoteWriteAfterLocalAbort: async (pendingAt) => {
-                if (this.options.activationProbe) return;
-                const current = this.store.getInMemorySnapshot();
-                if (current.settings.pendingRemoteWriteAt && current.settings.pendingRemoteWriteAt !== pendingAt) return;
-                await this.persistLocalDataWithTracking({
-                    ...current,
-                    settings: {
-                        ...current.settings,
-                        pendingRemoteWriteAt: undefined,
-                        pendingRemoteWriteRetryAt: undefined,
-                        pendingRemoteWriteAttempts: undefined,
-                    },
-                });
-            },
             flushPendingLocalBeforeRetryRead: () => this.options.activationProbe
                 ? Promise.resolve()
                 : this.store.flushPendingSave(),
@@ -1898,6 +2010,7 @@ class SharedSyncRunMachine {
             skipEmptyRemoteMerge: () => this.state.localOnlyUploadFingerprint !== null,
             onStep: (next) => this.setStep(next),
             yieldToUi: this.notifier.yieldToUi ? () => this.notifier.yieldToUi!() : undefined,
+            slicer: this.slicer,
             historyContext: {
                 backend: this.backend,
                 type: 'merge',
@@ -2072,7 +2185,8 @@ class SharedSyncRunMachine {
         const errorContext: SyncRunErrorContext = {
             step: this.state.step,
             getWroteLocal: () => this.state.wroteLocal,
-            persistPreSyncedData: () => this.persistPreSyncedDataAfterAbort(),
+            // A sliced cycle's abort writes nothing (design D9b W1): the next cycle redoes the attachment work.
+            persistPreSyncedData: () => (this.slicedCycle ? Promise.resolve() : this.persistPreSyncedDataAfterAbort()),
         };
         const beforeResult = this.options.activationProbe
             ? null
@@ -2084,7 +2198,7 @@ class SharedSyncRunMachine {
             // completed before a requeue. Candidate probes operate on a clone,
             // though: none of that destination-specific metadata is durable
             // until the configuration has activated and a normal sync runs.
-            if (!this.options.activationProbe) {
+            if (!this.options.activationProbe && !this.slicedCycle) {
                 await this.persistPreSyncedDataAfterAbort();
             }
             // Desktop has no onDiagnostic sink, so a requeued cycle used to leave
@@ -2180,6 +2294,7 @@ export const runSharedSyncCycle = async (ports: SyncRunPorts): Promise<SyncRunRe
 export const createDefaultSyncRunStoreBridge = (): SyncRunStoreBridge => ({
     getLastDataChangeAt: () => useTaskStore.getState().lastDataChangeAt,
     getInMemorySnapshot: () => getInMemoryAppDataSnapshot(),
+    captureInMemorySnapshot: () => captureInMemoryAppDataSnapshot(),
     flushPendingSave: () => flushPendingSave(),
     setUiError: (message) => useTaskStore.getState().setError(message),
     getSettings: () => useTaskStore.getState().settings,

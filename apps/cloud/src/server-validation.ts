@@ -49,6 +49,13 @@ const hasOwnField = (value: object, field: PropertyKey): boolean => (
 const CLOUD_RECURRENCE_ALLOWED_KEYS = new Set(TASK_RECURRENCE_FIELD_KEYS);
 const ATTACHMENT_LOCAL_STATUS_VALUES = new Set(['available', 'missing', 'uploading', 'downloading']);
 
+function validateTaskReminderPolicy(value: Record<string, unknown>): string | null {
+    const policy = value.reminderPolicy;
+    return policy == null || policy === 'inherit' || policy === 'send' || policy === 'skip'
+        ? null
+        : 'Invalid task reminderPolicy';
+}
+
 function validateTaskRepeatReminderMinutes(value: Record<string, unknown>): string | null {
     if (!hasOwnField(value, 'repeatReminderMinutes')) return null;
     const minutes = value.repeatReminderMinutes;
@@ -174,6 +181,7 @@ function validateAttachments(value: Record<string, unknown>, entity: 'task' | 'p
 function validateTaskPropValues(value: Record<string, unknown>): string | null {
     return validateCancellationTimestamp(value, 'task')
         ?? validateAttachments(value, 'task')
+        ?? validateTaskReminderPolicy(value)
         ?? validateTaskRepeatReminderMinutes(value)
         ?? validateTaskTimeSpentMinutes(value)
         ?? validateTaskRelativeStartOffset(value)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useTaskStore, type Task } from '@mindwtr/core';
+import { runStoreCommand, useTaskStore, type Task } from '@mindwtr/core';
 
 import {
     DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY,
@@ -8,6 +8,7 @@ import {
     usePomodoroStore,
 } from './pomodoro-store';
 import { armPomodoroCompletionSound } from '../lib/pomodoro-alert';
+import { holdSyncSave } from '../test/hold-sync-save';
 
 vi.mock('../lib/pomodoro-alert', () => ({
     armPomodoroCompletionSound: vi.fn(),
@@ -96,6 +97,25 @@ describe('pomodoro store', () => {
         usePomodoroStore.getState().hydratePomodoro({});
 
         expect(updates).toEqual([{ id: 'task-1', patch: { timeSpentMinutes: 75 } }]);
+    });
+
+    it('adds to the total a sync save published while the credit waited', async () => {
+        const updates: Array<{ id: string; patch: Partial<Task> }> = [];
+        useTaskStore.setState({
+            tasks: [task({ timeSpentMinutes: 50 })],
+            _allTasks: [task({ timeSpentMinutes: 50 })],
+            // A store command, as the real updateTask is: it waits for the save.
+            updateTask: (id: string, patch: Partial<Task>) => runStoreCommand(async () => { updates.push({ id, patch }); }),
+        } as never);
+        seedRunningSession({ selectedTaskId: 'task-1', focusMinutes: 25 });
+        // Another device logged time on the task; the sync save publishes it.
+        const finish = holdSyncSave(() => useTaskStore.setState({ tasks: [task({ timeSpentMinutes: 60 })] } as never));
+
+        usePomodoroStore.getState().hydratePomodoro({});
+        await finish();
+        await vi.waitFor(() => expect(updates).toHaveLength(1));
+
+        expect(updates).toEqual([{ id: 'task-1', patch: { timeSpentMinutes: 85 } }]);
     });
 
     it('does not touch tasks when the completed session has no linked task', () => {

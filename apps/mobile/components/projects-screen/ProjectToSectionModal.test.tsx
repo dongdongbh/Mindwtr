@@ -29,6 +29,13 @@ const button = (tree: ReturnType<typeof create>, label: string) => tree.root.fin
 const text = (tree: ReturnType<typeof create>) => tree.root.findAllByType(Text).map((item) => item.props.children).filter((value) => typeof value === 'string').join(' ');
 
 describe('ProjectToSectionModal', () => {
+    it('explains the required destination flow for a sequential source', () => {
+        let tree!: ReturnType<typeof create>;
+        act(() => { tree = create(<ProjectToSectionModal visible source={{ ...source, isSequential: true }} projects={[destination]} onClose={vi.fn()} onSuccess={vi.fn()} />); });
+        expect(text(tree)).toContain('Choose a destination set to Sequential → Within sections');
+        act(() => tree.unmount());
+    });
+
     it('does not rebuild the destination list while the section name is typed', () => {
         let tree!: ReturnType<typeof create>;
         act(() => { tree = create(<ProjectToSectionModal visible source={source} projects={[source, destination]} onClose={vi.fn()} onSuccess={vi.fn()} />); });

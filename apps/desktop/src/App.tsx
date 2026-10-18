@@ -114,6 +114,7 @@ import { installWebviewZoomShortcuts } from './lib/webview-zoom';
 import { isEditableManualSyncShortcutTarget, isManualSyncShortcut } from './lib/manual-sync-shortcut';
 import {
     isDesktopSyncRuntimeActive,
+    logDesktopAutoSyncTrace,
     resolveVisibilitySyncAction,
     shouldHandleDesktopManualSyncShortcut,
 } from './lib/desktop-sync-runtime';
@@ -938,6 +939,10 @@ function App() {
             }
         };
 
+        const traceAutoSync = (message: string, extra?: Record<string, string>) => {
+            logDesktopAutoSyncTrace(message, extra, document.visibilityState, logInfo);
+        };
+        traceAutoSync('Desktop auto sync lifecycle', { phase: 'start', runtimeActive: 'true' });
         const autoSyncController = createAutoSyncController({
             canSync: () => canDesktopAutoSync(SyncService),
             syncEncryptionSuspension: async () => {
@@ -957,9 +962,7 @@ function App() {
                 || useUiStore.getState().editingTaskId !== null
             ),
             hasPendingLocalChanges: () => SyncService.hasPendingLocalChangesForAutoSync(),
-            logInfo: (message, extra) => {
-                void logInfo(message, { scope: 'sync', extra });
-            },
+            logInfo: traceAutoSync,
         });
 
         let emailCaptureController: EmailCaptureController | null = null;
@@ -998,6 +1001,10 @@ function App() {
         };
 
         const visibilityListener = () => {
+            traceAutoSync('Desktop auto sync lifecycle', {
+                phase: 'visibility',
+                runtimeActive: String(isActiveRef.current),
+            });
             const action = resolveVisibilitySyncAction(document.visibilityState);
             if (action === 'focus') {
                 autoSyncController.handleFocus();
@@ -1031,6 +1038,7 @@ function App() {
             }
             storeUnsubscribe();
             autoSyncController.dispose();
+            traceAutoSync('Desktop auto sync lifecycle', { phase: 'dispose', runtimeActive: 'false' });
             registerEmailCaptureController(null);
             emailCaptureController?.dispose();
             stopCalendarPush?.();

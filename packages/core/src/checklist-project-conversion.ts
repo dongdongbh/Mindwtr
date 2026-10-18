@@ -1,4 +1,4 @@
-import type { Task, Project } from './types';
+import type { Task, Project, NotificationSettings } from './types';
 import type { TaskStore } from './store-types';
 import { buildNewProject } from './store-projects/project-actions';
 import { buildNewTask } from './task-creation';
@@ -6,6 +6,7 @@ import { createProjectOrderReserver, ensureDeviceId, nextRevision, persist, getN
 import { taskEditValuesEqual as same } from './json-value-equality';
 import { generateUUID } from './uuid';
 import { logInfo } from './logger';
+import { shouldSendTaskReminders } from './task-reminder-policy';
 
 type State = Pick<TaskStore, '_allTasks' | '_allProjects' | '_allSections' | '_allAreas' | 'settings'>;
 export type ChecklistProjectConversion = {
@@ -14,12 +15,12 @@ export type ChecklistProjectConversion = {
 };
 
 /** These task-only commitments cannot be transferred to a project safely. */
-export function checklistProjectBlockReason(task: Partial<Task>): string | null {
+export function checklistProjectBlockReason(task: Partial<Task>, settings: Pick<NotificationSettings, 'taskReminderDefault'> = {}): string | null {
     if (!task.checklist?.length || task.checklist.some(item => !item.title.trim())) return 'task.expandChecklistInvalid';
     if (task.deletedAt || task.purgedAt || task.cancelledAt || task.archivedAt
         || (task.status && !['inbox', 'next', 'done'].includes(task.status))) return 'task.expandChecklistInactive';
     if (task.recurrence || task.relativeStartOffset || task.repeatReminderMinutes || task.reviewAt?.includes('T')
-        || (!task.suppressMindwtrReminders && [task.startTime, task.dueDate].some(value => value?.includes('T'))))
+        || (shouldSendTaskReminders(task, settings) && [task.startTime, task.dueDate].some(value => value?.includes('T'))))
         return 'task.expandChecklistSchedule';
     if (task.assignedTo || task.location || task.timeEstimate || task.timeSpentMinutes)
         return 'task.expandChecklistMetadata';
@@ -29,7 +30,7 @@ export function checklistProjectBlockReason(task: Partial<Task>): string | null 
 export function prepareChecklistProjectConversion(state: State, source: Task, title: string,
     ids = { project: generateUUID(), tasks: source.checklist?.map(() => generateUUID()) ?? [] },
     now = new Date().toISOString(), deviceId?: string): { success: true; command: ChecklistProjectConversion } | { success: false; error: string } {
-    const blocked = checklistProjectBlockReason(source);
+    const blocked = checklistProjectBlockReason(source, state.settings);
     if (blocked) return { success: false, error: blocked };
     if (!title.trim()) return { success: false, error: 'common.validationRequired' };
     if (ids.tasks.length !== source.checklist!.length

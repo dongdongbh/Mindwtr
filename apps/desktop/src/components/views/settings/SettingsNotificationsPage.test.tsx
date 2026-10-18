@@ -30,6 +30,12 @@ describe('SettingsNotificationsPage', () => {
             />,
         );
 
+        const defaultSelect = screen.getByRole('combobox', { name: t.taskReminderDefault });
+        expect(defaultSelect).toBeEnabled();
+        expect(defaultSelect).toHaveValue('send');
+        fireEvent.change(defaultSelect, { target: { value: 'skip' } });
+        expect(updateSettings).toHaveBeenCalledWith({ taskReminderDefault: 'skip' });
+
         const morningSwitch = screen.getByRole('switch', { name: t.dailyDigestMorning });
         expect(morningSwitch).toBeEnabled();
         expect(screen.getByRole('textbox', { name: t.dailyDigestMorning })).toBeEnabled();

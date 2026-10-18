@@ -69,7 +69,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { bootFailure, box, button, check, connect, draftText, evidenced, fail, field, hasText, Stopped, inboxCount, tab, tagged, withDescription } from './device.mjs';
 import { serveWebdav, webdavDocument } from './sync-harness.mjs';
-import { PUBLISHED, REFRESHED, WIDGET_PREFS, corePublication, count, firstDifference, isRnPayloadPrefsWrite, publicationContext, widgetPrefs } from './widget-payload.mjs';
+import { PUBLISHED, REFRESHED, WIDGET_PREFS, WIDGET_LIST_PREFS, widgetSelections, corePublication, count, firstDifference, isRnPayloadPrefsWrite, publicationContext, widgetPrefs } from './widget-payload.mjs';
 
 const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '7', '8', '9', '10'];
 const USAGE = `usage: node check-upgrade-device.mjs <adb-serial> [--only=${SCENARIOS.join(',')}] [--keep]`;
@@ -246,6 +246,8 @@ const snapshot = () => new Map(runAs(
 // process start: the same library's state, never user data.
 const PLATFORM_STATE = new Set(['files/profileInstalled', 'shared_prefs/android.app.ActivityThread.IDS.xml']);
 const isPlatformState = (path) => PLATFORM_STATE.has(path) || /^no_backup\/androidx\.work\.workdb(-wal|-shm|-journal)?$/.test(path);
+// The app's diagnostics log (RN's and native's): release-check lines are forced, so any boot may append to it. Never user data.
+const isLog = (path) => /^files\/logs\/mindwtr\.log(\.\d+)?$/.test(path);
 // The native app's reminder ledger (Reminders.kt ReminderLedger): its own new file, written once it holds an alarm; RN never has
 // it. Allowed only as a new file whose every entry is an alarm id armed or fired at a time (checkLedger reads it).
 const LEDGER = 'shared_prefs/mindwtr_reminder_ledger.xml';
@@ -266,9 +268,9 @@ const checkOwedUploads = (label, after) => {
     check(/<int name="owedUploads" value="\d+" \/>/.test(text) && other === '', `(${label}) the native owed-upload count file holds only its count`);
 };
 const differences = (before, after, { changedOk = () => false, newOk = () => false } = {}) => [
-    ...[...before].filter(([path, hash]) => !isPlatformState(path) && !changedOk(path) && after.get(path) !== hash)
+    ...[...before].filter(([path, hash]) => !isPlatformState(path) && !isLog(path) && !changedOk(path) && after.get(path) !== hash)
         .map(([path]) => `${after.has(path) ? 'changed' : 'removed'} ${path}`),
-    ...[...after.keys()].filter((path) => !before.has(path) && !isPlatformState(path) && !newOk(path) && path !== LEDGER && path !== OWED_UPLOADS).map((path) => `new ${path}`),
+    ...[...after.keys()].filter((path) => !before.has(path) && !isPlatformState(path) && !isLog(path) && !newOk(path) && path !== LEDGER && path !== OWED_UPLOADS).map((path) => `new ${path}`),
 ];
 const isDatabase = (path) => /^files\/SQLite\/mindwtr\.db(-wal|-shm)?$/.test(path);
 
@@ -296,7 +298,7 @@ const verifyWidgetPayload = (label, before, context) => {
     const after = widgetPrefsNow();
     check(isRnPayloadPrefsWrite(before, after),
         `(${label}) ${WIDGET_PREFS} is RN's widget payload store, its one key \`payload\` (before: ${before.entries.join(', ') || 'no file'}; after: ${after.entries.join(', ')})`);
-    const expected = corePublication({ db: pullDatabase(`${label}-widgets`), language: context.language, context, zone: phoneZone, out: resolve(work, `${label}-widgets.json`) });
+    const expected = corePublication({ listSelections: widgetSelections(runAs(`cat ${WIDGET_LIST_PREFS} 2>/dev/null || true`)), db: pullDatabase(`${label}-widgets`), language: context.language, context, zone: phoneZone, out: resolve(work, `${label}-widgets.json`) });
     const difference = firstDifference(JSON.parse(after.payload), JSON.parse(expected));
     check(difference === null, `(${label}) the payload equals core's publication on a copy of the database the native app left (${context.language}, ${context.locale}, `
         + `${context.scheme}, ${after.payload.length} characters)${difference ? `: ${difference}` : ''}`);

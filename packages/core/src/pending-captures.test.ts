@@ -9,6 +9,7 @@ import {
     type PendingChecklist,
 } from './pending-captures';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
+import { runSyncStoreSave } from './store-write-gate';
 import type { AppData, Task } from './types';
 
 // React Native's own tests (apps/mobile/lib/pending-captures.test.ts) replay every
@@ -141,6 +142,22 @@ describe('Watch checklist delivery', () => {
         await drainPendingCaptureQueue(storeDeps(queue.port, { settleWatchChecklist: settle }));
         expect(saved().tasks[0].checklist?.map((item) => item.isCompleted)).toEqual([false, true]);
         expect(settle).toHaveBeenCalledWith(CAPTURE_ID, 'stale');
+    });
+
+    it('ticks the item on the list a sync save published while the delivery waited, keeping its new item', async () => {
+        await openStore([task('shopping', { checklist: [milk] })]);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const rice = { id: 'rice', title: 'Rice', isCompleted: false };
+        const save = runSyncStoreSave(async () => {
+            await held;
+            useTaskStore.setState((state) => ({ _allTasks: state._allTasks.map((row) => ({ ...row, rev: 3, checklist: [milk, rice] })) }));
+        });
+        const applied = applyPendingChecklist(command(), storeDeps(fakeQueue({}).port));
+        release();
+        await save;
+        expect(await applied).toBe('applied');
+        expect(useTaskStore.getState()._tasksById.get('shopping')?.checklist).toEqual([{ ...milk, isCompleted: true }, rice]);
     });
 
     it('rejects ambiguous, renamed, removed and terminal items', async () => {
@@ -367,5 +384,47 @@ describe('drainPendingCaptureQueue', () => {
         const deps = storeDeps(broken);
         expect(await drainPendingCaptureQueue(deps)).toBe(0);
         expect(deps.log.error).toHaveBeenCalledWith(expect.any(Error), { scope: 'shortcuts', extra: { message: 'Failed to read pending captures' } });
+    });
+});
+
+
+describe('Android capture description persistence', () => {
+    it('emits a content-free receipt after a new noted text capture is durable', async () => {
+        await openStore([]);
+        const queue = fakeQueue({ [`${CAPTURE_ID}.json`]: {
+            id: CAPTURE_ID, title: 'Private title', note: 'Private note', source: 'android-quick-capture',
+        } });
+        const deps = storeDeps(queue.port);
+        await drainPendingCaptureQueue(deps);
+        expect(saved().tasks[0].description).toBe('Private note');
+        expect(queue.stored.size).toBe(0);
+        expect(deps.log.info).toHaveBeenCalledWith('Quick capture dialog item ingested', {
+            scope: 'capture', force: true,
+            extra: { releaseCheck: 'v1.3.7/quick-capture-description', kind: 'text', outcome: 'created' },
+        });
+    });
+
+    it.each(['text', 'audio'] as const)('persists literal notes once across %s queue cleanup retry', async (kind) => {
+        await openStore([]);
+        const note = '- Tell @Todd\n- /due:tomorrow is supporting text';
+        const queue = fakeQueue({ [`${AUDIO_ID}.json`]: {
+            kind, id: AUDIO_ID, title: 'Tell Todd', note, source: 'android-quick-capture',
+            ...(kind === 'audio' ? { audioPath: `file:///data/files/quick-capture-audio/${AUDIO_ID}.wav` } : {}),
+        } });
+        queue.failDelete.add(`${AUDIO_ID}.json`);
+        const deps = storeDeps(queue.port, {
+            audio: { resolvePath: (capture) => capture.audioPath, transcribe: async () => 'about the event', delete: async () => undefined },
+        });
+        await drainPendingCaptureQueue(deps);
+        expect(saved().tasks).toHaveLength(1);
+        expect(saved().tasks[0]).toMatchObject({ description: note, contexts: [] });
+        expect(saved().tasks[0].dueDate).toBeUndefined();
+        expect(queue.stored.size).toBe(1);
+        expect(JSON.stringify(vi.mocked(deps.log.info).mock.calls)).not.toContain('v1.3.7/quick-capture-description');
+        await restartStore();
+        await drainPendingCaptureQueue(storeDeps(queue.port, { audio: deps.audio }));
+        expect(saved().tasks).toHaveLength(1);
+        expect(saved().tasks[0].description).toBe(note);
+        expect(queue.stored.size).toBe(0);
     });
 });

@@ -34,6 +34,7 @@ import {
 import { logWarn } from './app-log';
 import { base64ToBytes, bytesToBase64 } from './attachment-sync-utils';
 import * as FileSystem from './file-system';
+import { listSafChildren, readSafDocument, statSafDocument } from './saf-documents';
 import { renameSafTransitionDocument } from './sync-file-transition-cas';
 
 const StorageAccessFramework = FileSystem.StorageAccessFramework;
@@ -57,21 +58,29 @@ const getLeafName = (uri: string): string => {
 /** Reads a sync artifact as raw bytes, or `null` when it does not exist. Never throws for
  *  a missing file — callers distinguish "absent" from "unreadable" and an absent `.enc`
  *  sibling is the normal case on every plaintext folder. */
+/** Bytes a SAF read returned without a provider-reported length to prove them whole. They may
+ *  be used, but a document that fails to parse from them is never repaired (dd, 10-18). */
+const unverifiedLengthReads = new WeakSet<Uint8Array>();
+export const isUnverifiedLengthRead = (bytes: Uint8Array): boolean => unverifiedLengthReads.has(bytes);
+
 export const readSyncArtifactBytes = async (uri: string): Promise<Uint8Array | null> => {
     try {
         if (isSaf(uri)) {
-            if (!StorageAccessFramework?.readAsStringAsync) {
-                throw new Error('This Android build does not support Storage Access Framework (SAF).');
-            }
-            const base64 = await StorageAccessFramework.readAsStringAsync(uri, {
-                encoding: FileSystem.EncodingType.Base64,
-            });
-            return base64 ? base64ToBytes(base64) : new Uint8Array(0);
+            const read = await readSafDocument(uri);
+            if (!read.lengthVerified) unverifiedLengthReads.add(read.bytes);
+            return read.bytes;
         }
         const file = new ExpoFile(uri);
         if (!file.exists) return null;
         return await file.bytes();
     } catch (error) {
+        if (isSaf(uri)) {
+            // A failed SAF read is absence only when the provider says the document is gone
+            // (SafDocumentsCore.stat). Any other failure, including one the lookup itself
+            // hits, propagates: an unreadable generation is never "missing".
+            if (!(await statSafDocument(uri))) return null;
+            throw error;
+        }
         // The modern File API is unavailable on some legacy paths; the legacy Base64 read
         // is the same fallback ladder readFileText uses for text.
         try {
@@ -79,12 +88,7 @@ export const readSyncArtifactBytes = async (uri: string): Promise<Uint8Array | n
             if (!info.exists) return null;
             const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
             return base64 ? base64ToBytes(base64) : new Uint8Array(0);
-        } catch (fallbackError) {
-            // A failed SAF read is absence only when the explicit info probe above confirms
-            // `exists: false`. If both read ladders fail, propagate that provider error:
-            // treating an unreadable opposite encryption generation as missing can license
-            // an ordinary sync write beside (or over) peer bytes.
-            if (isSaf(uri)) throw fallbackError;
+        } catch {
             throw error;
         }
     }
@@ -224,29 +228,30 @@ type DirectoryHandle = {
     refresh(): Promise<void>;
     resolve(name: string, options: { createIfMissing: boolean; mimeType?: string }): Promise<string | null>;
     listExact(name: string): Promise<string[]>;
-    createNew(name: string, mimeType?: string): Promise<string>;
+    /** `repairDecoratedName: false` refuses a provider-decorated create instead of renaming it
+     *  onto `name` (a rename that may replace a document a peer just published there). */
+    createNew(name: string, mimeType?: string, options?: { repairDecoratedName?: boolean }): Promise<string>;
     rename(uri: string, name: string): Promise<string>;
 };
 
 const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     const entries = new Map<string, string>();
+    // Names come from the provider's display name: document IDs are opaque, and only a
+    // path-like provider puts the file name in the URI's tail.
+    const listNamed = async (): Promise<{ uri: string; name: string }[]> => (await listSafChildren(dirUri))
+        .map((entry) => ({ uri: entry.uri, name: entry.name || getLeafName(entry.uri) }));
+    const nameOf = async (uri: string): Promise<string> => (await statSafDocument(uri))?.name || getLeafName(uri);
     const refresh = async (): Promise<void> => {
-        if (!StorageAccessFramework?.readDirectoryAsync) {
-            throw new Error('This Android build cannot enumerate SAF transition files.');
-        }
         const next = new Map<string, string>();
-        for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
-            const name = getLeafName(entry);
-            if (name && !next.has(name)) next.set(name, entry);
+        for (const entry of await listNamed()) {
+            if (entry.name && !next.has(entry.name)) next.set(entry.name, entry.uri);
         }
         entries.clear();
         for (const [name, uri] of next) entries.set(name, uri);
     };
     await refresh();
     const listExact = async (name: string): Promise<string[]> => {
-        if (!StorageAccessFramework?.readDirectoryAsync) return [];
-        const matches = (await StorageAccessFramework.readDirectoryAsync(dirUri))
-            .filter((entry) => getLeafName(entry) === name);
+        const matches = (await listNamed()).filter((entry) => entry.name === name).map((entry) => entry.uri);
         if (matches.length === 1) entries.set(name, matches[0]);
         else entries.delete(name);
         return matches;
@@ -256,11 +261,11 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
         refresh,
         resolve: async (name, options) => {
             let existing = entries.get(name);
-            if (!existing && StorageAccessFramework?.readDirectoryAsync) {
-                for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
-                    if (getLeafName(entry) === name) {
-                        existing = entry;
-                        entries.set(name, entry);
+            if (!existing) {
+                for (const entry of await listNamed()) {
+                    if (entry.name === name) {
+                        existing = entry.uri;
+                        entries.set(name, entry.uri);
                         break;
                     }
                 }
@@ -278,7 +283,7 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
             // therefore ask for application/octet-stream (no canonical extension, so
             // nothing is appended) — but providers vary, and a silently renamed artifact
             // is invisible to every other device, so say so loudly rather than never.
-            const createdName = getLeafName(created);
+            const createdName = await nameOf(created);
             if (createdName !== name) {
                 void logWarn('SAF provider renamed a sync artifact on create', {
                     scope: 'sync',
@@ -289,18 +294,33 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
             return created;
         },
         listExact,
-        createNew: async (name, mimeType = DEFAULT_ARTIFACT_MIME) => {
+        createNew: async (name, mimeType = DEFAULT_ARTIFACT_MIME, options = {}) => {
             if (!StorageAccessFramework?.createFileAsync) {
                 throw new Error('This Android build cannot create SAF transition files.');
             }
             let created = await StorageAccessFramework.createFileAsync(dirUri, name, mimeType);
-            if (created && getLeafName(created) !== name) {
+            const createdName = created ? await nameOf(created) : name;
+            if (created && createdName !== name && options.repairDecoratedName === false) {
+                // The caller cannot publish by rename: delete only what this call created.
+                await deleteSyncArtifact(created).catch(() => undefined);
+                void logWarn('SAF provider renamed a new document on create; not published', {
+                    scope: 'sync',
+                    extra: { requested: name, created: createdName },
+                });
+                throw new SyncEncryptionRemoteConflictError(`${name} could not be created under its own name`);
+            }
+            if (created && createdName !== name) {
                 // Some providers decorate the display name on create (an extension derived
                 // from the MIME type, most often ".bin" for application/octet-stream), which
                 // used to read as "another writer" and fail every File Sync write (#1113).
                 // Repair with the exact-rename CAS; the listExact guard below still catches
-                // a real racing peer.
-                const createdName = getLeafName(created);
+                // a real racing peer. A provider that dedupes names on create may have done so
+                // because a peer holds the name: never rename onto a name already taken (some
+                // providers' rename replaces its target).
+                if ((await listExact(name)).length > 0) {
+                    await deleteSyncArtifact(created).catch(() => undefined);
+                    throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
+                }
                 try {
                     const repaired = await renameSafTransitionDocument(created, name);
                     void logWarn('SAF provider renamed a transition scratch on create; repaired', {
@@ -329,7 +349,7 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
             return created;
         },
         rename: async (uri, name) => {
-            const previousName = getLeafName(uri);
+            const previousName = [...entries].find(([, entryUri]) => entryUri === uri)?.[0] ?? getLeafName(uri);
             let renamed: { uri: string; name: string };
             try {
                 renamed = await renameSafTransitionDocument(uri, name);
@@ -442,6 +462,58 @@ const isSyncDocumentName = (name: string): boolean => {
     return base === SYNC_FILE_NAME || base === LEGACY_SYNC_FILE_NAME || isSeedBackupDocumentName(name);
 };
 
+const CANONICAL_SYNC_DOCUMENT_NAMES = new Set<string>([
+    SYNC_FILE_NAME,
+    `${SYNC_FILE_NAME}.enc`,
+    LEGACY_SYNC_FILE_NAME,
+    `${LEGACY_SYNC_FILE_NAME}.enc`,
+]);
+
+/** A copy an interrupted write, a backup rotation or a peer's tool can leave beside the sync
+ *  file: transition scratch (quarantine, stage), `.bak`, `.previous`, `.tmp`. Dated seed backups
+ *  are whole exports, not interrupted writes, so they are not counted. */
+const isRetainedGenerationName = (name: string): boolean => {
+    if (isTransitionScratchName(name)) return true;
+    if (CANONICAL_SYNC_DOCUMENT_NAMES.has(name) || isSeedBackupDocumentName(name)) return false;
+    // Any chain of managed suffixes on a sync document name: `data.json.bak`,
+    // `data.json.enc.bak.previous`, `data.json.previous.tmp`, ...
+    let base = name;
+    let stripped = false;
+    for (let match = RETAINED_SUFFIX.exec(base); match; match = RETAINED_SUFFIX.exec(base)) {
+        base = base.slice(0, -match[0].length);
+        stripped = true;
+    }
+    return stripped && (base === SYNC_FILE_NAME || base === LEGACY_SYNC_FILE_NAME);
+};
+const RETAINED_SUFFIX = /\.(?:enc|bak|tmp|previous)$/;
+
+/**
+ * The retained generations in the sync folder that are not provably empty (an unknown size
+ * counts as not empty). B5's guard: while one exists, a missing or broken sync file is never
+ * repaired from local data, because that copy may hold rows nothing else has. Nothing is read,
+ * moved or deleted here; recovering such a copy is a later pass.
+ */
+export const listBlockingRetainedGenerations = async (syncFileUri: string): Promise<string[]> => {
+    const target = await resolveFileSyncEncryptionTarget(syncFileUri);
+    if (!target) return [];
+    if (isSaf(target.dirUri)) {
+        return (await listSafChildren(target.dirUri))
+            .map((entry) => ({ name: entry.name || getLeafName(entry.uri), size: entry.size }))
+            .filter((entry) => isRetainedGenerationName(entry.name) && entry.size !== 0)
+            .map((entry) => entry.name);
+    }
+    const normalized = target.dirUri.endsWith('/') ? target.dirUri : `${target.dirUri}/`;
+    const blocking: string[] = [];
+    for (const name of await FileSystem.readDirectoryAsync(normalized)) {
+        if (!isRetainedGenerationName(name)) continue;
+        const info = await FileSystem.getInfoAsync(`${normalized}${name}`) as { exists?: boolean; size?: number };
+        if (info.exists === false) continue;
+        if (typeof info.size === 'number' && info.size === 0) continue;
+        blocking.push(name);
+    }
+    return blocking;
+};
+
 const FIXED_SYNC_DOCUMENT_NAMES = [
     SYNC_FILE_NAME,
     `${SYNC_FILE_NAME}.enc`,
@@ -474,17 +546,9 @@ export const resolveFileSyncEncryptionTarget = async (syncFileUri: string): Prom
         const prefixMatch = syncFileUri.match(/^(content:\/\/[^/]+)/);
         const treeMatch = syncFileUri.match(/\/tree\/([^/?#]+)/);
         if (!prefixMatch || !treeMatch) return null;
-        const treeUri = `${prefixMatch[1]}/tree/${treeMatch[1]}`;
-        const docMatch = syncFileUri.match(/\/document\/([^/?#]+)/);
-        // The document id of data.json's PARENT is the sync directory. Fall back to the
-        // tree root when the URI is already a bare tree URI.
-        let dirUri = treeUri;
-        if (docMatch) {
-            const documentId = decodeURIComponent(docMatch[1]);
-            const lastSlash = documentId.lastIndexOf('/');
-            const parentId = lastSlash >= 0 ? documentId.slice(0, lastSlash) : documentId;
-            if (parentId) dirUri = `${treeUri}/document/${encodeURIComponent(parentId)}`;
-        }
+        // The sync folder is the picked tree's root document (as the folder lock takes it):
+        // document IDs are opaque, so a parent is never cut out of a child's ID.
+        const dirUri = `${prefixMatch[1]}/tree/${treeMatch[1]}/document/${treeMatch[1]}`;
         const attachmentsDirUri = await (await openSafDirectory(dirUri)).resolve(ATTACHMENTS_DIR_NAME, {
             createIfMissing: false,
         });
@@ -545,9 +609,9 @@ export type FileSyncTransitionTestHooks = {
     onInventoryPoint?: (point: FileSyncTransitionInventoryPoint) => void | Promise<void>;
 };
 
-const transitionScratchName = (kind: 'stage' | 'quarantine'): string => {
+const transitionScratchName = (kind: 'stage' | 'quarantine' | 'backup'): string => {
     transitionScratchCounter += 1;
-    const kindCode = kind === 'stage' ? 's' : 'q';
+    const kindCode = kind === 'stage' ? 's' : kind === 'quarantine' ? 'q' : 'b';
     const nonce = Math.random().toString(36).slice(2, 10);
     return `${TRANSITION_SCRATCH_MARKER}${kindCode}-${Date.now().toString(36)}-${transitionScratchCounter.toString(36)}-${nonce}`;
 };
@@ -568,10 +632,21 @@ type ArtifactLocation = { directory: DirectoryHandle; leaf: string; mimeType: st
  * peer therefore causes a conflict without being overwritten or deleted; staged and
  * quarantined generations remain available for retry/recovery.
  */
+/** The transition port, plus the ordinary write's backup rotation over the same folder handle. */
+export type FileSyncRemotePort = SyncEncryptionRemotePort & {
+    /**
+     * Replaces backup document `name` with `bytes` without ever writing into an existing file:
+     * the old backup is renamed aside, a new document is created exclusively under the backup's
+     * name and written, its identity and bytes are verified, and only then is the old backup
+     * deleted. A failure leaves the old backup in place (by name or as the renamed copy) and throws.
+     */
+    rotateBackup(name: string, bytes: Uint8Array): Promise<void>;
+};
+
 export const createFileSyncEncryptionRemotePort = async (
     syncFileUri: string,
     testHooks: FileSyncTransitionTestHooks = {},
-): Promise<SyncEncryptionRemotePort | null> => {
+): Promise<FileSyncRemotePort | null> => {
     const target = await resolveFileSyncEncryptionTarget(syncFileUri);
     if (!target) return null;
 
@@ -758,7 +833,39 @@ export const createFileSyncEncryptionRemotePort = async (
         }
     };
 
+    const rotateBackup = async (name: string, bytes: Uint8Array): Promise<void> => {
+        const mimeType = name.endsWith('.json') ? 'application/json' : DEFAULT_ARTIFACT_MIME;
+        const existing = await documents.listExact(name);
+        if (existing.length > 1) throw new SyncEncryptionRemoteConflictError(`${name} is ambiguous`);
+        let displacedUri: string | null = null;
+        let displacedName: string | null = null;
+        if (existing.length === 1) {
+            displacedName = transitionScratchName('quarantine');
+            displacedUri = await documents.rename(existing[0], displacedName);
+        }
+        // Exclusive install: a new document under the backup's name, never a rename onto it (a
+        // provider's rename may replace a backup a peer published meanwhile). createNew fails
+        // closed when that name is taken; the old backup then stays in its quarantine.
+        const installedUri = await documents.createNew(name, mimeType, { repairDecoratedName: false });
+        await writeSyncArtifactBytes(installedUri, bytes);
+        const installed = await documents.listExact(name);
+        const written = await readSyncArtifactBytes(installedUri);
+        if (
+            installed.length !== 1
+            || installed[0] !== installedUri
+            || !written
+            || await versionFor(written) !== await versionFor(bytes)
+        ) {
+            throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after backup rotation`);
+        }
+        if (displacedUri && displacedName) {
+            await deleteSyncArtifact(displacedUri);
+            documents.entries.delete(displacedName);
+        }
+    };
+
     return {
+        rotateBackup,
         list: async (): Promise<SyncEncryptionRemoteEntry[]> => (await captureInventory()).entries,
         captureInventory,
         read,

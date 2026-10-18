@@ -29,7 +29,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, connect, evidenced, fail, inboxCount, inEditor, mainList, Stopped, switchOn, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, inboxCount, inEditor, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 import { hostDevice, serveWebdav, startCloud, webdavDocument } from './sync-harness.mjs';
 
@@ -145,16 +145,7 @@ const toInbox = async () => {
     return waitFor('the Inbox', onInbox, 30_000);
 };
 /** Settings' scroll moves the node [find] picks into view: from the top, then down. */
-const reveal = async (find, description) => {
-    let nodes = await device.toTop();
-    const inView = (current) => {
-        const node = find(current);
-        const list = mainList(current);
-        return node && (!list || (box(node)[1] >= box(list)[1] && box(node)[3] <= box(list)[3] - 40)) ? node : null;
-    };
-    for (let step = 0; step < 14 && !inView(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
-    return inView(nodes) ?? fail(`no ${description} on screen`);
-};
+const reveal = (find, description) => device.revealNode(find, description);
 /** Settings › Sync from the More sheet (core's row reads "Sync. <description>…"). */
 const openSync = async () => {
     const nodes = await screen();
@@ -214,19 +205,21 @@ const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) =
     }
 };
 /** How many times the Sync screen's [operation] answered (host-entry.ts taskResult's line: its context's quotes arrive escaped). */
-const commands = (operation, outcome = 'saved') => logs().replace(/\\/g, '').split('\n')
+/** The [operation] answers logged with [outcome] after [since] (a logStamp; '' counts the whole buffer). */
+const commands = (operation, outcome = 'saved', since = '') => linesAfter(logs().replace(/\\/g, ''), since)
     .filter((line) => line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
+const stamp = () => logStamp(logs());
 /**
  * Taps the control [tag] and waits for its command's answer in the log (a toast shows for 3.2 s only, so it is evidence, not
  * the wait); [toast] seen on screen meanwhile is printed.
  */
 // A Save runs a verification sync and then a normal sync; on the test phone's ~5,600-task library that measured ~95 s (10-13).
 const runCommand = async (tag, operation, description, toast, timeoutMs = 240_000) => {
-    const before = commands(operation);
+    const since = stamp();
     let seen = false;
     await tapTag(tag, (current) => {
         seen ||= Boolean(toast) && current.some((node) => node.text === toast);
-        return commands(operation) > before;
+        return commands(operation, 'saved', since) > 0;
     }, description, timeoutMs);
     if (toast) {
         const nodes = await screen();
@@ -420,7 +413,7 @@ try {
     // (7) Off again, tapped while a choice of the saved WebDAV backend still waits on a slow server (review S3 4): RN sends
     // each choice, so both run, in tap order, and Off is what stays.
     nodes = await openSync();
-    const choicesBefore = commands('selectSyncBackend');
+    const choicesSince = stamp();
     dav.state.delayMs = 2_000;
     await hideKeyboard();
     const webdavChip = await reveal((current) => tagged(current, 'sync-backend-webdav'), 'the WebDAV chip');
@@ -428,8 +421,11 @@ try {
     const offChip = tagged(await screen(), 'sync-backend-off') ?? fail('no Off chip beside WebDAV');
     await tap(webdavChip);
     await tap(offChip);
-    await until('both backend choices to answer', () => commands('selectSyncBackend') >= choicesBefore + 2, 240_000, 1_000);
+    // The slow server only has to hold the WebDAV choice while Off is tapped. Then it runs at full speed, so the rest of
+    // its activation (probe, verification sync, sync) no longer grows with the phone's attachments (run11: 241 s).
+    await sleep(3_000);
     dav.state.delayMs = 0;
+    await until('both backend choices to answer', () => commands('selectSyncBackend', 'saved', choicesSince) >= 2, 240_000, 1_000);
     await until('Off stored', () => rkStorage().keys['@mindwtr_sync_backend'] === 'off', 15_000, 1_000);
     check(true, '(7) Off tapped during a slow WebDAV choice is not dropped: both choices answered, and RKStorage holds "off"');
     await toTabs();

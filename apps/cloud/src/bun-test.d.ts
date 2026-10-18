@@ -9,6 +9,7 @@ declare module 'bun:test' {
         toBe(expected: unknown): void;
         toEqual(expected: unknown): void;
         toMatch(expected: string | RegExp): void;
+        toMatchObject(expected: object): void;
         toContain(expected: unknown): void;
         toHaveLength(expected: number): void;
         toBeGreaterThan(expected: number | bigint): void;

@@ -19,6 +19,7 @@ export type ImportDiagnosticCode =
     | 'resource-limit-exceeded'
     | 'skipped-archive-entry'
     | 'skipped-existing-records'
+    | 'unknown-columns'
     | 'unmapped-date'
     | 'unmapped-status'
     | 'unsupported-recurrence';
@@ -32,6 +33,16 @@ export type ImportDiagnostic = {
 const countFromMessage = (message: string): number => {
     const match = /^\s*(\d+)/u.exec(message);
     return match ? Number(match[1]) : 1;
+};
+
+// Bounded numeric CSV entry/record/column positions, with no source text accepted.
+export const importDiagnosticLocationParams = (message: string): Record<string, number | string> => {
+    const match = / \[csv-locations=((?:\d{1,9}:\d{1,9}:\d{1,9})(?:,\d{1,9}:\d{1,9}:\d{1,9}){0,4}); omitted=(\d{1,9})\]$/u.exec(message);
+    if (!match || match[1].split(',').some((location) => {
+        const [, row, column] = location.split(':').map(Number);
+        return row < 1 || column < 1;
+    })) return {};
+    return { locations: match[1], omittedLocations: Number(match[2]) };
 };
 
 export const createImportDiagnostic = (
@@ -72,8 +83,11 @@ export const createImportDiagnostic = (
     if (/recurr|repeat rule/u.test(normalized)) {
         return { code: 'unsupported-recurrence', params: { count }, severity };
     }
+    if (/^\d+ unknown columns? (?:was|were) ignored\./u.test(normalized)) {
+        return { code: 'unknown-columns', params: { count, ...importDiagnosticLocationParams(message) }, severity };
+    }
     if (/date.*(?:could not|skipped)/u.test(normalized)) {
-        return { code: 'unmapped-date', params: { count }, severity };
+        return { code: 'unmapped-date', params: { count, ...importDiagnosticLocationParams(message) }, severity };
     }
     if (/status.*could not/u.test(normalized)) {
         return { code: 'unmapped-status', params: { count }, severity };
@@ -150,15 +164,31 @@ export const formatImportDiagnostic = (
         'missing-parent': 'settings.importDiagnostics.missingParent',
         'skipped-archive-entry': 'settings.importDiagnostics.skippedArchiveEntries',
         'skipped-existing-records': 'settings.importDiagnostics.skippedExistingRecords',
+        'unknown-columns': 'settings.importDiagnostics.unknownColumns',
         'unmapped-date': 'settings.importDiagnostics.unmappedDate',
         'unmapped-status': 'settings.importDiagnostics.unmappedStatus',
         'unsupported-recurrence': 'settings.importDiagnostics.unsupportedRecurrence',
     };
     const warningKey = warningKeys[diagnostic.code];
     if (warningKey) {
-        return translate(warningKey, {
+        const summary = translate(warningKey, {
             count: typeof diagnostic.params.count === 'number' ? diagnostic.params.count : 1,
         });
+        const { locations, omittedLocations } = diagnostic.params;
+        if ((diagnostic.code === 'unknown-columns' || diagnostic.code === 'unmapped-date') && typeof locations === 'string') {
+            const safeParams = importDiagnosticLocationParams(` [csv-locations=${locations}; omitted=${omittedLocations}]`);
+            if (typeof safeParams.locations === 'string') {
+                const samples = safeParams.locations.split(',').map((location) => {
+                    const [entry, row, column] = location.split(':').map(Number);
+                    return translate(entry ? 'settings.importDiagnostics.csvArchiveLocation' : 'settings.importDiagnostics.csvLocation', { entry, row, column });
+                });
+                const detail = translate('settings.importDiagnostics.csvLocations', { locations: samples.join('; ') });
+                const more = typeof safeParams.omittedLocations === 'number' && safeParams.omittedLocations > 0
+                    ? ` ${translate('settings.importDiagnostics.csvLocationsMore', { count: safeParams.omittedLocations })}` : '';
+                return `${summary} ${detail}${more}`;
+            }
+        }
+        return summary;
     }
     return translate('settings.importDiagnostics.adjustedRecords', {
         count: typeof diagnostic.params.count === 'number' ? diagnostic.params.count : 1,

@@ -91,6 +91,7 @@ export function ProjectToSectionModal({ visible, source, projects, onClose, onSu
             <View style={[styles.linkModalCard, { backgroundColor: tc.cardBg, borderColor: tc.border, maxHeight: '85%' }]}>
                 <Text accessibilityRole="header" style={[styles.linkModalTitle, { color: tc.text }]}>{tFallback(t, 'projects.convertToSection', 'Convert to section…')}</Text>
                 <ScrollView keyboardShouldPersistTaps="handled">
+                    {sourceForSummary?.isSequential && <Text style={{ color: tc.secondaryText }}>{tFallback(t, 'projects.convertBlocked.destination-section-sequence', 'Choose a destination set to Sequential → Within sections. The new section keeps its task sequence; other sections keep progressing independently.')}</Text>}
                     {!prepared ? <>
                         <Text style={{ color: tc.text, marginBottom: 8 }}>{tFallback(t, 'projects.convertDestination', 'Destination project')}</Text>
                         {destinations.map((project) =>

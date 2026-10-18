@@ -92,11 +92,12 @@ export function resolveDueRepeatToFire(
     task: Task,
     now: Date,
     alreadyNotifiedKey: string | undefined,
-    options: { includeDueDate: boolean; catchUpMs?: number },
+    options: { includeDueDate: boolean; catchUpMs?: number; taskReminderDefault?: NotificationSettings['taskReminderDefault'] },
 ): { key: string; index: number; scheduledAt: Date } | null {
     const catchUpMs = options.catchUpMs ?? REPEAT_CATCH_UP_MS;
     const repeats = getTaskReminderPlan(task, now, {
         includeDueDate: options.includeDueDate,
+        taskReminderDefault: options.taskReminderDefault,
     }).repeats;
     if (repeats.length === 0) return null;
     const nowMs = now.getTime();
@@ -413,7 +414,7 @@ function checkDueAndNotify() {
     // below: a task whose due time already passed has no future "next", but its remaining
     // repeat occurrences must still fire (#905).
     tasks.forEach((task: Task) => {
-        const repeat = resolveDueRepeatToFire(task, now, repeatNotifiedByTask.get(task.id), { includeDueDate, catchUpMs });
+        const repeat = resolveDueRepeatToFire(task, now, repeatNotifiedByTask.get(task.id), { includeDueDate, catchUpMs, taskReminderDefault: settings.taskReminderDefault });
         if (!repeat) return;
         logReminderFired('due-repeat', repeat.scheduledAt.toISOString());
         void sendNotification(task.title, buildDesktopTaskNotificationBody(task, 'due-repeat', tr), getTaskReminderNotificationTag(task.id));
@@ -511,7 +512,8 @@ export async function startDesktopNotifications() {
         // Re-check on data changes.
         storeSubscription?.();
         storeSubscription = useTaskStore.subscribe((state, prevState) => {
-            if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
+            if (state.lastDataChangeAt === prevState.lastDataChangeAt
+                && state.settings.taskReminderDefault === prevState.settings.taskReminderDefault) return;
             if (checkDebounceTimer) {
                 clearTimeout(checkDebounceTimer);
             }
@@ -520,6 +522,8 @@ export async function startDesktopNotifications() {
                 if (now - lastCheckAt < 2_000) return;
                 lastCheckAt = now;
                 checkDueAndNotify();
+                void logInfo('Task reminder policy reevaluated', { scope: 'notifications',
+                    extra: { releaseCheck: 'v1.3.7/task-reminder-policy', outcome: 'planned' } });
             }, 750);
         });
     })();

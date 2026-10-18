@@ -321,15 +321,15 @@ pub(crate) fn start_mcp_listener(
     state: &LocalApiServerState,
     port: u16,
     token: String,
-    allow_write: bool,
+    permissions: crate::mcp_server::McpPermissions,
 ) -> Result<LocalApiHandle, String> {
     start_runtime_with_access(
         app,
         port,
         token,
         state.write_lock.clone(),
-        allow_write,
-        true,
+        permissions.any_write(),
+        Some(permissions),
     )
 }
 
@@ -339,7 +339,7 @@ fn start_runtime(
     token: String,
     write_lock: Arc<Mutex<()>>,
 ) -> Result<LocalApiHandle, String> {
-    start_runtime_with_access(app, port, token, write_lock, true, false)
+    start_runtime_with_access(app, port, token, write_lock, true, None)
 }
 
 fn start_runtime_with_access(
@@ -348,14 +348,19 @@ fn start_runtime_with_access(
     token: String,
     write_lock: Arc<Mutex<()>>,
     allow_write: bool,
-    mcp: bool,
+    mcp_permissions: Option<crate::mcp_server::McpPermissions>,
 ) -> Result<LocalApiHandle, String> {
     ensure_data_file(&app)?;
     start_http_listener(port, allow_write, move |access, port, request| {
-        if mcp {
-            crate::mcp_server::handle_mcp_request(&token, access, port, request, |operation| {
-                execute_operation(&app, &write_lock, access, operation)
-            })
+        if let Some(permissions) = mcp_permissions {
+            crate::mcp_server::handle_mcp_request(
+                &token,
+                access,
+                permissions,
+                port,
+                request,
+                |operation| execute_operation(&app, &write_lock, access, operation),
+            )
         } else {
             handle_api_request(&app, &token, &write_lock, access, request)
         }
@@ -2888,7 +2893,15 @@ fn patch_task_in_data_at(
     let was_counted = local_api_task_is_counted_as_focused(&candidate, now, local_wall);
     let star_turning_on = patch.get("isFocusedToday").and_then(Value::as_bool) == Some(true)
         && candidate.get("isFocusedToday").and_then(Value::as_bool) != Some(true);
-    apply_task_patch_with_containers(&mut candidate, patch, &device_id, &live_containers)?;
+    apply_task_patch_with_containers(
+        &mut candidate,
+        patch,
+        &device_id,
+        &live_containers,
+        data.pointer("/settings/taskReminderDefault")
+            .and_then(Value::as_str)
+            == Some("skip"),
+    )?;
     if star_turning_on {
         if candidate.get("status").and_then(Value::as_str) == Some("inbox") {
             candidate.insert("status".to_string(), Value::String("next".to_string()));
@@ -3379,6 +3392,7 @@ fn create_next_recurring_task_for_local_api(
             "areaId",
             "timeEstimate",
             "repeatReminderMinutes",
+            "reminderPolicy",
         ],
     );
     if let Some(value) = next_start_time {
@@ -3811,6 +3825,8 @@ fn duplicate_attachment_value(value: Option<&Value>, timestamp: &str) -> Option<
             attachment.remove("contentRev");
             attachment.remove("contentMtimeMs");
             attachment.remove("contentSize");
+            attachment.remove("pendingContentUpload");
+            attachment.remove("staleContentHash");
             Some(Value::Object(attachment))
         })
         .collect::<Vec<_>>();
@@ -4194,6 +4210,17 @@ fn create_task_from_body(
     }
     sanitize_task_patch_map(&mut task)?;
     task.retain(|_, value| !value.is_null());
+    if task.get("reminderPolicy").is_none_or(Value::is_null)
+        && !task.contains_key("suppressMindwtrReminders")
+    {
+        task.insert("reminderPolicy".to_string(), json!("inherit"));
+    }
+    normalize_task_reminder_patch(
+        &mut task,
+        data.pointer("/settings/taskReminderDefault")
+            .and_then(Value::as_str)
+            == Some("skip"),
+    );
     normalize_created_task_containers(&mut task, &LiveContainers::from_data(data))?;
     let had_explicit_status = task.contains_key("status");
     let now = now_iso();
@@ -4235,7 +4262,7 @@ pub(crate) fn apply_task_patch(
     patch: &Map<String, Value>,
     device_id: &str,
 ) -> Result<(), String> {
-    apply_task_patch_internal(task, patch, device_id, None)
+    apply_task_patch_internal(task, patch, device_id, None, false)
 }
 
 fn apply_task_patch_with_containers(
@@ -4243,8 +4270,9 @@ fn apply_task_patch_with_containers(
     patch: &Map<String, Value>,
     device_id: &str,
     live_containers: &LiveContainers,
+    default_skip: bool,
 ) -> Result<(), String> {
-    apply_task_patch_internal(task, patch, device_id, Some(live_containers))
+    apply_task_patch_internal(task, patch, device_id, Some(live_containers), default_skip)
 }
 
 fn apply_task_patch_internal(
@@ -4252,6 +4280,7 @@ fn apply_task_patch_internal(
     patch: &Map<String, Value>,
     device_id: &str,
     live_containers: Option<&LiveContainers>,
+    default_skip: bool,
 ) -> Result<(), String> {
     let previous_status = task
         .get("status")
@@ -4301,6 +4330,7 @@ fn apply_task_patch_internal(
     };
     let mut sanitized = patch.clone();
     sanitize_task_patch_map(&mut sanitized)?;
+    normalize_task_reminder_patch(&mut sanitized, default_skip);
     let explicit_order = if sanitized.contains_key("order") {
         sanitized.get("order").cloned()
     } else {
@@ -4438,6 +4468,23 @@ fn normalize_task_triage_patch(
     }
 }
 
+fn normalize_task_reminder_patch(patch: &mut Map<String, Value>, default_skip: bool) {
+    if let Some(policy) = patch.get("reminderPolicy").and_then(Value::as_str) {
+        let skip = policy == "skip" || (policy == "inherit" && default_skip);
+        patch.insert("suppressMindwtrReminders".to_string(), Value::Bool(skip));
+    } else if patch.contains_key("reminderPolicy") {
+        patch.remove("reminderPolicy");
+    } else if let Some(skip) = patch
+        .get("suppressMindwtrReminders")
+        .and_then(Value::as_bool)
+    {
+        patch.insert(
+            "reminderPolicy".to_string(),
+            json!(if skip { "skip" } else { "send" }),
+        );
+    }
+}
+
 pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<(), String> {
     for key in ["tags", "contexts"] {
         if let Some(items) = patch.get_mut(key).and_then(Value::as_array_mut) {
@@ -4489,6 +4536,12 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
                     || value
                         .as_str()
                         .is_some_and(|item| matches!(item, "task" | "list"))
+            }
+            "reminderPolicy" => {
+                value.is_null()
+                    || value
+                        .as_str()
+                        .is_some_and(|policy| matches!(policy, "inherit" | "send" | "skip"))
             }
             "textDirection" => {
                 value.is_null()
@@ -5211,7 +5264,9 @@ fn valid_attachments(value: &Value) -> bool {
                 "kind" => value
                     .as_str()
                     .is_some_and(|kind| matches!(kind, "file" | "link")),
-                "mimeType" | "deletedAt" | "fileHash" => value.is_string(),
+                "mimeType" | "deletedAt" | "fileHash" | "staleContentHash" => value.is_string(),
+                // Device-local sync state a GET returns, so a GET-edit-PATCH round trip carries it back unchanged.
+                "pendingContentUpload" => value.is_boolean(),
                 "cloudKey" => value.as_str().is_some_and(valid_attachment_cloud_key),
                 "size" | "contentRev" | "contentMtimeMs" | "contentSize" => {
                     value.as_u64().is_some()
@@ -5270,6 +5325,69 @@ fn hex_value(value: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reminder_policy_create_and_patch_preserve_legacy_intent_and_inherit_default() {
+        let data = json!({"tasks": [], "projects": [], "sections": [], "areas": [],
+            "settings": {"taskReminderDefault": "skip"}});
+        for (props, expected, skip) in [
+            (json!({}), "inherit", true),
+            (json!({"suppressMindwtrReminders": false}), "send", false),
+            (json!({"suppressMindwtrReminders": true}), "skip", true),
+            (
+                json!({"reminderPolicy": "send", "suppressMindwtrReminders": true}),
+                "send",
+                false,
+            ),
+        ] {
+            let body = json!({"title": "Reminder policy", "props": props});
+            let mut task =
+                create_task_from_body(body.as_object().unwrap(), "device-a", &data).unwrap();
+            assert_eq!(task["reminderPolicy"], expected);
+            assert_eq!(task["suppressMindwtrReminders"], skip);
+            let patch = json!({"title": "Unrelated edit"});
+            apply_task_patch(&mut task, patch.as_object().unwrap(), "device-a").unwrap();
+            assert_eq!(task["reminderPolicy"], expected);
+            assert_eq!(task["suppressMindwtrReminders"], skip);
+        }
+        let mut data = json!({"tasks": [{"id":"policy", "title":"Policy", "status":"next", "reminderPolicy":"send"}],
+            "settings":{"taskReminderDefault":"skip"}});
+        patch_task_in_data(
+            &mut data,
+            "policy",
+            json!({"reminderPolicy":"inherit"}).as_object().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(data["tasks"][0]["reminderPolicy"], "inherit");
+        assert_eq!(data["tasks"][0]["suppressMindwtrReminders"], true);
+        patch_task_in_data(
+            &mut data,
+            "policy",
+            json!({"suppressMindwtrReminders":false})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(data["tasks"][0]["reminderPolicy"], "send");
+        assert_eq!(data["tasks"][0]["suppressMindwtrReminders"], false);
+        let mut legacy = json!({"id":"legacy", "title":"Legacy", "status":"next", "suppressMindwtrReminders":false}).as_object().unwrap().clone();
+        apply_task_patch(
+            &mut legacy,
+            json!({"title":"Retitled"}).as_object().unwrap(),
+            "device-a",
+        )
+        .unwrap();
+        assert!(!legacy.contains_key("reminderPolicy"));
+        for policy in [json!(true), json!("sometimes"), json!(1)] {
+            assert!(sanitize_task_patch_map(
+                &mut json!({"reminderPolicy":policy})
+                    .as_object()
+                    .unwrap()
+                    .clone()
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn local_api_patch_focus_accepts_past_no_offset_review_for_rest_and_mcp() {
@@ -5888,6 +6006,99 @@ mod tests {
     }
 
     #[test]
+    fn mcp_archive_permission_preserves_history_and_never_spawns_recurring_tasks() {
+        use crate::mcp_server::{handle_mcp_request, McpPermissions};
+        use crate::storage::{
+            local_operation_test_commit, local_operation_test_seed, read_sqlite_data,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mcp-archive.sqlite");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        let mut seed = empty_local_api_data();
+        let completed_at = "2026-10-01T12:00:00Z";
+        seed["tasks"] = json!([
+            {"id":"history", "title":"History", "status":"done", "completedAt":completed_at,
+                "recurrence":{"rule":"daily","count":5,"completedOccurrences":2},
+                "createdAt":completed_at,"updatedAt":completed_at,"rev":1,"tags":[],"contexts":[]},
+            {"id":"recurring", "title":"Recurring", "status":"next",
+                "recurrence":{"rule":"daily","count":5,"completedOccurrences":2},
+                "createdAt":completed_at,"updatedAt":completed_at,"rev":1,"tags":[],"contexts":[]}
+        ]);
+        local_operation_test_seed(&mut conn, &seed).unwrap();
+        let before = read_sqlite_data(&conn).unwrap();
+        let access = LocalApiAccess {
+            allow_write: true,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        for allowed in [false, true] {
+            for id in ["history", "recurring"] {
+                let request = ApiRequest {
+                    method: "POST".into(),
+                    path: "/mcp".into(),
+                    query: HashMap::new(),
+                    headers: HashMap::from([
+                        ("host".into(), "127.0.0.1:9123".into()),
+                        ("authorization".into(), "Bearer fixture".into()),
+                        ("content-type".into(), "application/json".into()),
+                        (
+                            "accept".into(),
+                            "application/json, text/event-stream".into(),
+                        ),
+                    ]),
+                    body: serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                        "params":{"name":"mindwtr_archive_task","arguments":{"id":id}}}))
+                    .unwrap(),
+                };
+                let mut executed = false;
+                let response = handle_mcp_request(
+                    "fixture",
+                    &access,
+                    McpPermissions {
+                        allow_write: !allowed,
+                        allow_archive: allowed,
+                        allow_delete: false,
+                    },
+                    9123,
+                    request,
+                    |operation| {
+                        executed = true;
+                        let persisted = local_operation_test_commit(
+                            &conn,
+                            TaskMutationReadScope::existing(id, false),
+                            |data| mutate_task_operation(data, &operation),
+                        )?;
+                        Ok(json!({"task":find_task(&persisted, id).unwrap()}))
+                    },
+                );
+                assert_eq!(executed, allowed);
+                assert_eq!(response.body["result"]["isError"] == true, !allowed);
+                if !allowed {
+                    assert_eq!(
+                        read_sqlite_data(&conn).unwrap(),
+                        before,
+                        "denial leaves durable rows unchanged"
+                    );
+                }
+            }
+        }
+        drop(conn);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let reopened = read_sqlite_data(&conn).unwrap();
+        assert_eq!(reopened["tasks"].as_array().unwrap().len(), 2);
+        for id in ["history", "recurring"] {
+            let task = find_task(&reopened, id).unwrap();
+            assert_eq!(task["status"], "archived");
+            assert_eq!(task["rev"], 2);
+            assert_eq!(task["recurrence"]["completedOccurrences"], 2);
+            assert!(valid_cancellation_timestamp(task.get("archivedAt")));
+        }
+        assert_eq!(
+            find_task(&reopened, "history").unwrap()["completedAt"],
+            completed_at
+        );
+    }
+
+    #[test]
     fn local_operation_auth_and_read_only_block_mutations_before_storage() {
         let access = LocalApiAccess {
             allow_write: false,
@@ -6234,18 +6445,64 @@ mod tests {
         } else {
             body.to_string()
         };
-        let mut stream = TcpStream::connect((LOCAL_API_HOST, port)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
+        // HTTP framing completes the response without waiting for a clean socket EOF.
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .retry(reqwest::retry::never())
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(5))
+            .build()
             .unwrap();
-        write!(stream, "{method} /areas/{id} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        let (headers, body) = response.split_once("\r\n\r\n").unwrap();
-        (
-            headers.split_whitespace().nth(1).unwrap().parse().unwrap(),
-            serde_json::from_str(body).unwrap(),
-        )
+        let response = client
+            .request(
+                method.parse().unwrap(),
+                format!("http://{LOCAL_API_HOST}:{port}/areas/{id}"),
+            )
+            .bearer_auth(token)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .unwrap();
+        (response.status().as_u16(), response.json().unwrap())
+    }
+
+    #[test]
+    fn area_http_request_requires_a_complete_framed_response_without_waiting_for_eof() {
+        for content_length in [2, 3] {
+            let listener = TcpListener::bind((LOCAL_API_HOST, 0)).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let (finished, completion) = std::sync::mpsc::channel();
+            let server = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                read_request(&mut stream, far_future_deadline())
+                    .unwrap()
+                    .unwrap();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n{{}}"
+                )
+                .unwrap();
+                if content_length == 2 {
+                    completion.recv_timeout(Duration::from_secs(2)).unwrap();
+                }
+            });
+            let result = std::panic::catch_unwind(|| {
+                area_http_request(port, "GET", "area-1", Value::Null, "token")
+            });
+            if content_length == 2 {
+                assert_eq!(result.unwrap(), (200, json!({})));
+                finished.send(()).unwrap();
+            } else {
+                assert!(
+                    result.is_err(),
+                    "a truncated body must fail even if it is valid JSON"
+                );
+            }
+            server.join().unwrap();
+        }
     }
 
     #[test]
@@ -7258,8 +7515,21 @@ mod tests {
             "contentRev": 3,
             "contentMtimeMs": 1750000000000_u64,
             "contentSize": 4096,
+            "pendingContentUpload": true,
+            "staleContentHash": "b".repeat(64),
         }]);
         assert!(valid_attachments(&round_trip));
+        for (field, bad_value) in [
+            ("pendingContentUpload", json!("yes")),
+            ("staleContentHash", json!(7)),
+        ] {
+            let mut attachment = round_trip[0].clone();
+            attachment[field] = bad_value.clone();
+            assert!(
+                !valid_attachments(&json!([attachment])),
+                "{field} should reject {bad_value:?}"
+            );
+        }
 
         for field in ["contentRev", "contentMtimeMs", "contentSize"] {
             for bad_value in [json!("not-a-number"), json!(null), json!(-1)] {
@@ -7346,6 +7616,8 @@ mod tests {
             "contentRev": 3,
             "contentMtimeMs": 1750000000000_u64,
             "contentSize": 4096,
+            "pendingContentUpload": true,
+            "staleContentHash": "b".repeat(64),
         }]);
         let duplicated = duplicate_attachment_value(Some(&original), "2026-01-02T00:00:00.000Z")
             .expect("duplicated attachments");
@@ -7357,6 +7629,8 @@ mod tests {
         assert!(!copy.contains_key("contentRev"));
         assert!(!copy.contains_key("contentMtimeMs"));
         assert!(!copy.contains_key("contentSize"));
+        assert!(!copy.contains_key("pendingContentUpload"));
+        assert!(!copy.contains_key("staleContentHash"));
     }
 
     #[test]

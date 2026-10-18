@@ -51,7 +51,7 @@ const TASK_FIELDS = new Set([
   'recurrence', 'contexts', 'tags', 'description', 'priority', 'energyLevel',
   'assignedTo', 'timeEstimate', 'taskMode', 'relativeStartOffset', 'showFutureRecurrence',
   'pushCount', 'checklist', 'textDirection', 'location', 'isFocusedToday',
-  'timeSpentMinutes', 'suppressMindwtrReminders', 'repeatReminderMinutes',
+  'timeSpentMinutes', 'suppressMindwtrReminders', 'reminderPolicy', 'repeatReminderMinutes',
   'reviewAt', 'cancelledAt', 'order', 'boardOrder', 'focusOrder', 'attachments',
 ]);
 const taskStatusSchema = z.enum(TASK_STATUS_VALUES as [TaskStatus, ...TaskStatus[]]);

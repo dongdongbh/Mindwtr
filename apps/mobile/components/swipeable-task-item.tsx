@@ -130,6 +130,7 @@ export type SwipeableTaskItemRowContext = {
     timeEstimatesEnabled: boolean;
     timeSpentEnabled: boolean;
     showTaskAge: boolean;
+    showStatusBadge: boolean;
 };
 
 
@@ -218,6 +219,7 @@ function StoreBackedSwipeableTaskItem(props: Omit<SwipeableTaskItemInnerProps, '
             timeEstimatesEnabled: features.timeEstimates,
             timeSpentEnabled: features.timeSpent,
             showTaskAge: features.taskAge,
+            showStatusBadge: !state.settings?.gtd?.taskEditor?.hidden?.includes('status'),
         };
     }, shallow);
     return <SwipeableTaskItemInner {...props} rowContext={rowContext} />;
@@ -285,6 +287,7 @@ function SwipeableTaskItemInner({
         timeEstimatesEnabled,
         timeSpentEnabled,
         showTaskAge,
+        showStatusBadge,
     } = rowContext;
     const isReference = task.status === 'reference';
     const {
@@ -772,7 +775,7 @@ function SwipeableTaskItemInner({
             accessibilityActions={accessibilityActions}
             accessibilityHint={swipeAccessibilityHint}
             canShowFocusToggle={canShowFocusToggle}
-            hideStatusBadge={hideStatusBadge}
+            hideStatusBadge={hideStatusBadge || !showStatusBadge}
             hideDetails={hideDetails}
             statusBadgeAsIcon={statusBadgeAsIcon}
             isDark={isDark}

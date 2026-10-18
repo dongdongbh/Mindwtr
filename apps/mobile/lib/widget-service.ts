@@ -177,6 +177,15 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
             scope: 'widget',
             extra: { releaseCheck: ANDROID_WIDGET_RELEASE_CHECK, items: String(payload.items.length) },
         });
+        void logInfo('Android widget context and tag snapshots published', {
+            scope: 'widget', force: true,
+            extra: { releaseCheck: 'v1.3.7/widget-context-selection', count: (payload.contexts?.length ?? 0) + (payload.tags?.length ?? 0) },
+        });
+        void logInfo('Upcoming widget snapshot published', {
+            scope: 'widget',
+            force: true,
+            extra: { releaseCheck: 'v1.3.7/widget-upcoming', platform: 'android', count: payload.lists.upcoming?.items.length ?? 0 },
+        });
         void logInfo('Android widget fixed lists published', {
             scope: 'widget',
             extra: {
@@ -257,6 +266,11 @@ async function updateIosWidgetPayloads(projection: WidgetPayloadProjection): Pro
             extra: { releaseCheck: 'v1.3.0/widget-batch-derivation', count: 5 },
         });
         const payload = payloadEntries[0][1];
+        void logInfo('Upcoming widget snapshot published', {
+            scope: 'widget',
+            force: true,
+            extra: { releaseCheck: 'v1.3.7/widget-upcoming', platform: 'ios', count: payload.lists.upcoming?.items.length ?? 0 },
+        });
         void logInfo('iOS Focus widget payload published', {
             scope: 'widget',
             extra: {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { checklistProjectBlockReason, type Task } from '@mindwtr/core';
+import { checklistProjectBlockReason, useTaskStore, type Task } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { useThemeColors } from '../../hooks/use-theme-colors';
 import { useKeyboardInset } from '../../lib/use-android-keyboard-inset';
@@ -15,7 +15,8 @@ export function TaskProjectConversionModal({ task, onConfirm, onClose }: {
     const [expand, setExpand] = useState(false);
     const [busy, setBusy] = useState(false);
     const inset = useKeyboardInset(true);
-    const blocked = checklistProjectBlockReason(task);
+    const taskReminderDefault = useTaskStore(state => state.settings.taskReminderDefault);
+    const blocked = checklistProjectBlockReason(task, { taskReminderDefault });
     return <Modal transparent animationType="fade" onRequestClose={busy ? () => {} : onClose}>
         <View style={[styles.overlay, inset > 0 && { paddingBottom: inset }]}>
             <View style={[styles.modalCard, { backgroundColor: tc.cardBg, borderColor: tc.border, maxHeight: '100%' }]}>

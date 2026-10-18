@@ -26,7 +26,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, inboxCount, inEditor, mainList, Stopped, switchOn, tab, tabSelected, tagged, withDescription, button } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, inboxCount, inEditor, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 import { hostDevice, serveWebdav } from './sync-harness.mjs';
 import { encryptionCard, remoteArtifacts, runEncryption } from './encryption-harness.mjs';
@@ -117,16 +117,7 @@ const toTabs = async () => {
     return fail('the tabs did not come back');
 };
 /** Settings' scroll moves the node [find] picks into view: from the top, then down. */
-const reveal = async (find, description) => {
-    let nodes = await device.toTop();
-    const inView = (current) => {
-        const node = find(current);
-        const list = mainList(current);
-        return node && (!list || (box(node)[1] >= box(list)[1] && box(node)[3] <= box(list)[3] - 40)) ? node : null;
-    };
-    for (let step = 0; step < 18 && !inView(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
-    return inView(nodes) ?? fail(`no ${description} on screen`);
-};
+const reveal = (find, description) => device.revealNode(find, description);
 const openSync = async () => {
     const nodes = await screen();
     if (onSync(nodes)) return nodes;
@@ -170,8 +161,10 @@ const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) =
         await sleep(everyMs);
     }
 };
-const commands = (operation, outcome = 'saved') => logs().replace(/\\/g, '').split('\n')
+/** The [operation] answers logged with [outcome] after [since] (a logStamp; '' counts the whole buffer). */
+const commands = (operation, outcome = 'saved', since = '') => linesAfter(logs().replace(/\\/g, ''), since)
     .filter((line) => line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
+const stamp = () => logStamp(logs());
 const argonTimes = () => [...logs().matchAll(/Native Android sync crypto argon2id ms=(\d+) m=(\d+) t=(\d+) p=(\d+)/g)].map(([, ms, m, t, p]) => ({ ms: Number(ms), m: Number(m), t: Number(t), p: Number(p) }));
 /** The encryption card's action row named [label] (its content description). */
 const action = (label) => (nodes) => withDescription(nodes, label);
@@ -194,9 +187,9 @@ const saveWebdav = async (port) => {
     if (!switchOn(await screen(), label)) await tapExpecting(insecure, (current) => switchOn(current, label), 'insecure HTTP on');
     await fillTag('sync-username', USER);
     await fillTag('sync-password', PASSWORD);
-    const before = commands('saveSyncBackend');
+    const since = stamp();
     // A Save runs a verification sync and then a normal sync; on the test phone's ~5,600-task library that measured ~95 s (10-13).
-    await tapNode((current) => tagged(current, 'sync-save'), () => commands('saveSyncBackend') > before, 'Save', 240_000);
+    await tapNode((current) => tagged(current, 'sync-save'), () => commands('saveSyncBackend', 'saved', since) > 0, 'Save', 240_000);
 };
 /**
  * A change an earlier run left unfinished (its server stopped for good) pauses sync everywhere: take "Abandon setup" when the

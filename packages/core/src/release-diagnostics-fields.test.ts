@@ -14,7 +14,24 @@ import { sanitizeLogContext } from './log-sanitize';
  */
 const RELEASE_CHECK_FIELD_NAMES = [
     // description-clipboard-images reuses releaseCheck and count; no attachment contents or identifiers.
+    // quick-capture-description reuses releaseCheck, kind and outcome; no captured text.
+    // ios-reminder-actions reuses releaseCheck, stage, action, reason, and appState below.
+    // ios-task-badge reuses releaseCheck, count, and enabled below.
+    'result',
+    // windowless-sync: existing periodic timer timing and lifecycle gates only.
+    'delayMs', 'latenessMs', 'runtimeActive', 'editorPause', 'minIntervalMs', 'success',
+    // sync-field-merge reuses entity below; fields is a comma list of task/project field names, never values.
+    'fields',
+    // timeline-shared-order reuses releaseCheck, kind, and outcome below; no content or IDs.
+    // mcp-access-controls: device-local grants, loopback port, fixed denied category; no payload.
+    'allowWrite', 'allowArchive', 'allowDelete', 'port', 'category',
+    // mcp-codex-copy reuses releaseCheck, operation, outcome, backend below.
     // linux-task-link-launcher reuses releaseCheck and outcome below; no executable paths.
+    // sync-write-gate reuses backend below; step is the sync step name; gateWaitMs lists each save's wait for the gate.
+    // Sliced cycles add commitPublishMs (each save's time in the gate) and storePublish (prepared or in-gate, per save).
+    'step', 'gateWaitMs', 'commitPublishMs', 'storePublish',
+    // sync-status-published (v1.2.7 line): storeRefresh=dropped when a sliced cycle skipped its end-of-cycle load.
+    'storeRefresh',
     // linux-quick-add-focus reuses backend and outcome below; no window or input content.
     // inactive-sync-credential: fixed service category only; no endpoint or secret.
     'service',
@@ -25,6 +42,10 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'requestClass', 'comparison',
     'outgoingTasksSig', 'outgoingProjectsSig', 'outgoingSectionsSig', 'outgoingAreasSig', 'outgoingPeopleSig', 'outgoingSettingsSig',
     'priorRemoteTasksSig', 'priorRemoteProjectsSig', 'priorRemoteSectionsSig', 'priorRemoteAreasSig', 'priorRemotePeopleSig', 'priorRemoteSettingsSig',
+    // native-large-transfer: Settings › Data's operation sizes and memory peaks in whole MiB, and its seconds (pass D1c).
+    'sourceMiB', 'libraryMiB', 'seconds', 'nativePeakMiB', 'javaPeakMiB',
+    // native-share-files reuses skipped below; counts only.
+    'candidates', 'attached', 'unreadable',
     // reminder-boot-recovery: native scheduling acknowledgments, not a DB-row inventory count.
     'requested', 'rearmed', 'skipped', 'failed', 'bootEnabled', 'exactAllowed',
     // renderer-navigation: fixed route categories, a runtime token, and coarse library sizes.
@@ -38,8 +59,12 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // task-link-open reuses releaseCheck and outcome below.
     // task-copy-diagnostics reuses releaseCheck and outcome below; source is the menu/shortcut category.
     'source', 'documentFocused', 'activationSupported', 'activationActive', 'clipboardAvailable', 'errorKind',
+    // task-copy-input: click trust and coarse pointer/keyboard-or-assistive classification only.
+    'inputTrusted', 'inputKind',
     // ios-search-publication reuses releaseCheck, operation, outcome, enabled, and count below.
     // ios-search-snapshot reuses releaseCheck and count below.
+    // widget-context-selection reuses releaseCheck and count below.
+    // widget-upcoming reuses releaseCheck, platform, and count below.
     // ios-entity-link reuses releaseCheck, kind, and outcome below.
     // obsidian-inline-tag reuses releaseCheck and count below.
     // webdav-host-upload-limit and webdav-host-download-limit reuse releaseCheck, operation, and outcome below.
@@ -212,9 +237,20 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'imeVisible', 'imeMetricsX', 'imeMetricsY', 'imeMetricsWidth', 'imeMetricsHeight',
     'imeEventX', 'imeEventY', 'imeEventWidth', 'imeEventHeight',
     'inputX', 'inputY', 'inputWidth', 'inputHeight', 'inputBottom',
+    // sqlite-adapter-lock reuses operation above; waitMs is how long the caller waited for the lock.
+    'waitMs',
+    // attachment-remote-winner-pending and attachment-download-reuse (which reuses kind above): the attachment's own id, no title or path.
+    'attachmentId',
 ];
 
 describe('release diagnostics field names', () => {
+    it('preserves the content-free windowless sync timer receipt', () => {
+        const receipt = {
+            releaseCheck: 'v1.3.7/windowless-sync', documentVisibility: 'hidden', delayMs: '900000',
+            latenessMs: '25000', runtimeActive: 'true', editorPause: 'false', outcome: 'requested',
+        };
+        expect(sanitizeLogContext(receipt)).toEqual(receipt);
+    });
     it('preserves the bounded WebDAV setup probe receipt', () => {
         const receipt = {
             releaseCheck: 'v1.3.5/webdav-setup-probe', phase: 'compatibility', outcome: 'failed',

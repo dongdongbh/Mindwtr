@@ -9,7 +9,8 @@
 // while the app is closed are stored by the boot, and the payload Kotlin stored equals core's buildAndroidWidgetPublication on a
 // copy of the database, with the inputs the app logged (the phone's locale and night mode, checked against the phone); (3) a
 // Tasks widget hosted by the debug-only WidgetHostActivity (its own AppWidgetHost: the launcher's home screen is never touched)
-// draws RN's rows and header from that payload; (4) a ring tap on a row completes the task through the queue and CoreWork, once;
+// draws RN's rows and header from that payload; (3b) its header's title opens the app on Focus (RN's mindwtr: link in the build's
+// scheme); (4) a ring tap on a row completes the task through the queue and CoreWork, once;
 // (5) a ring tap whose CoreWork job is held back (debug core_work_delay_ms), the app killed after the queue file is written: the
 // task is still open, then JobScheduler runs the job in a new process and completes it once, and a relaunch writes nothing
 // more; (6) RN's quick capture dialog (through the debug-only exported alias; RN's activity is not exported) stores its capture
@@ -25,8 +26,8 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, Stopped } from './device.mjs';
-import { WIDGET_PREFS, REFRESHED, PUBLISHED, corePublication, count, firstDifference, publicationContext, widgetPrefs } from './widget-payload.mjs';
+import { box, check, connect, evidenced, fail, Stopped, tab, tabSelected } from './device.mjs';
+import { WIDGET_PREFS, WIDGET_LIST_PREFS, widgetSelections, REFRESHED, PUBLISHED, corePublication, count, firstDifference, publicationContext, widgetPrefs } from './widget-payload.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -180,7 +181,7 @@ const closeHost = async () => {
 const parity = (step) => {
     const context = lastInputs();
     const stored = storedPayload() ?? fail(`${step} no stored payload`);
-    const expected = corePublication({ db: pullDatabase(), language: context.language, context, zone: phoneZone, out: resolve(work, 'core-publication.json') });
+    const expected = corePublication({ listSelections: widgetSelections(runAs(`cat ${WIDGET_LIST_PREFS} 2>/dev/null || true`)), db: pullDatabase(), language: context.language, context, zone: phoneZone, out: resolve(work, 'core-publication.json') });
     const difference = firstDifference(JSON.parse(stored), JSON.parse(expected));
     check(difference === null, `${step} the payload Kotlin stored equals core's publication on a copy of the database (${context.language}, ${context.locale}, `
         + `${context.scheme}, ${stored.length} characters)${difference ? `: ${difference}` : ''}`);
@@ -245,6 +246,26 @@ try {
             `(3) the widget's header shows the payload's "${payload.dateLabel}" and "${payload.subtitle}"`);
         writeFileSync(resolve(work, 'widget.png'), device.adbRaw('exec-out', 'screencap', '-p'));
         console.log(`info - the hosted widget: ${resolve(work, 'widget.png')}`);
+    }
+
+    // (3b) The header's title opens the widget's list in the app: RN's mindwtr: link, in this build's own scheme
+    // (mindwtr_link_scheme), which core routes. The app is on the Inbox first, so only the link can select Focus.
+    {
+        start(ACTIVITY);
+        const tabs = await waitUntil('the app\'s tabs', async () => { const shown = await screen(); return tab(shown, 'Inbox') ? shown : null; }, 30_000);
+        const [ix1, iy1, ix2, iy2] = box(tab(tabs, 'Inbox'));
+        sh(`input tap ${Math.round((ix1 + ix2) / 2)} ${Math.round((iy1 + iy2) / 2)}`);
+        await waitUntil('the Inbox tab', async () => tabSelected(await screen(), 'Inbox'), 15_000);
+        nodes = await hostWidget(title(1));
+        const header = nodes.find((node) => resourceId(node) === 'mindwtr_widget_title_target') ?? fail('no widget header title');
+        const [x1, y1, x2, y2] = box(header);
+        sh(`input tap ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)}`);
+        const opened = await waitUntil('the app on its Focus tab', async () => {
+            if (!front().includes(`${PKG}/`) || front().includes('WidgetHostActivity')) return false;
+            return tabSelected(await screen(), 'Focus');
+        }, 30_000).catch(() => false);
+        check(opened, '(3b) the widget header\'s link opened the app on its Focus tab');
+        nodes = await hostWidget(title(1));
     }
 
     // (4) A ring tap: RN's Undo window, then the queue and CoreWork complete the task once.

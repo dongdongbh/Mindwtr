@@ -5,6 +5,7 @@ import {
   applyTaskChecklistEdit,
   buildTaskViewModel,
   generateUUID,
+  useTaskStore,
   type TaskViewRow,
 } from '@mindwtr/core';
 import type {
@@ -149,8 +150,10 @@ function TaskEditViewTabComponent({
     </View>
   );
 
+  const reminderSettings = useTaskStore((state) => state.settings);
   const rows = buildTaskViewModel({
     task: mergedTask,
+    settings: reminderSettings,
     projects,
     sections,
     areas,

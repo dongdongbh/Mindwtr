@@ -142,7 +142,7 @@ enum MindwtrWidgetListNavigation {
         }
     }
 
-    private static let fixedListIds: Set<String> = ["focus", "inbox", "next", "waiting", "someday"]
+    private static let fixedListIds: Set<String> = ["focus", "inbox", "next", "upcoming", "waiting", "someday"]
     private static let componentAllowed = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
     )
@@ -200,7 +200,7 @@ enum MindwtrWidgetListNavigation {
             guard !segment.isEmpty,
                   !segment.contains("/"),
                   let decoded = segment.removingPercentEncoding,
-                  decoded == "next" || decoded.hasPrefix("filter:")
+                  decoded == "next" || decoded == "upcoming" || decoded.hasPrefix("filter:")
             else {
                 return nil
             }

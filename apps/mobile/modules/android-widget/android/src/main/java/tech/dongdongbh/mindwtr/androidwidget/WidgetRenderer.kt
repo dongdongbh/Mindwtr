@@ -503,11 +503,19 @@ object WidgetRenderer {
 
   private fun immutableFlags(): Int = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
-  /** Explicit VIEW intent to the app's MainActivity, same shape as the tile and notification. */
+  /**
+   * Explicit VIEW intent to the app's MainActivity, same shape as the tile and notification. A `mindwtr:` link (the payload's,
+   * a shortcut's) takes the app's link scheme, mindwtr_link_scheme: RN's `mindwtr`, so RN opens the link as it is; an app that
+   * links on another scheme (the native development builds) overrides the resource.
+   */
   fun appIntent(context: Context, uri: String?): Intent =
     Intent(Intent.ACTION_VIEW).apply {
-      if (uri != null) data = Uri.parse(uri)
+      if (uri != null) data = Uri.parse(linkInScheme(uri, context.getString(R.string.mindwtr_link_scheme)))
       setClassName(context.packageName, "${context.packageName}.MainActivity")
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
+
+  /** [uri] with [scheme] in place of `mindwtr`, when it is a `mindwtr:` link; any other URI as it is. */
+  fun linkInScheme(uri: String, scheme: String): String =
+    if (uri.startsWith("mindwtr:")) scheme + uri.substring("mindwtr".length) else uri
 }

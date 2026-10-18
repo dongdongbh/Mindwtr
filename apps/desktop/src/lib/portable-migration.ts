@@ -1,4 +1,4 @@
-import { useTaskStore, type Attachment } from '@mindwtr/core';
+import { runStoreCommand, useTaskStore, type Attachment } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { logInfo, logWarn } from './app-log';
 import { normalizeAttachmentPathForUrl } from './attachment-paths';
@@ -81,19 +81,26 @@ export async function migratePortableAttachments(): Promise<void> {
         };
 
         let rewritten = 0;
+        // Each list is rewritten on the row as stored when its write is admitted (a sync save may publish first).
         for (const taskId of taskTargets.keys()) {
-            const task = useTaskStore.getState()._allTasks.find((item) => item.id === taskId);
-            const next = rewriteAttachments(task?.attachments);
-            if (!next) continue;
-            await useTaskStore.getState().updateTask(taskId, { attachments: next });
-            rewritten += 1;
+            const wrote = await runStoreCommand(async () => {
+                const task = useTaskStore.getState()._allTasks.find((item) => item.id === taskId);
+                const next = rewriteAttachments(task?.attachments);
+                if (!next) return false;
+                await useTaskStore.getState().updateTask(taskId, { attachments: next });
+                return true;
+            });
+            if (wrote) rewritten += 1;
         }
         for (const projectId of projectTargets.keys()) {
-            const project = useTaskStore.getState()._allProjects.find((item) => item.id === projectId);
-            const next = rewriteAttachments(project?.attachments);
-            if (!next) continue;
-            await useTaskStore.getState().updateProject(projectId, { attachments: next });
-            rewritten += 1;
+            const wrote = await runStoreCommand(async () => {
+                const project = useTaskStore.getState()._allProjects.find((item) => item.id === projectId);
+                const next = rewriteAttachments(project?.attachments);
+                if (!next) return false;
+                await useTaskStore.getState().updateProject(projectId, { attachments: next });
+                return true;
+            });
+            if (wrote) rewritten += 1;
         }
         void logInfo('Migrated portable attachments into the profile dir', {
             scope: 'storage',

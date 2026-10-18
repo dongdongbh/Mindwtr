@@ -384,7 +384,7 @@ describe('QuickCaptureSheet save handling', () => {
     mockThemeTokens.value = { isMaterial: false, roles: null, shape: { large: 16 } };
   });
 
-  it.each([false, true])('wires Android focus diagnostics without blocking the existing focus timer (logger throws: %s)', async (throws) => {
+  it.each([false, true])('waits for Android modal show before requesting focus (logger throws: %s)', async (throws) => {
     vi.useFakeTimers();
     await withPlatform('android', async () => {
       vi.spyOn(appLog, 'isLoggingEnabled').mockReturnValue(true);
@@ -397,12 +397,44 @@ describe('QuickCaptureSheet save handling', () => {
       const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
       const focus = vi.fn();
       body.props.inputRef.current = { focus, isFocused: () => false, measureInWindow: vi.fn() };
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(focus).not.toHaveBeenCalled();
       act(() => { body.props.onModalShow(); body.props.onInputFocus(); body.props.onInputBlur(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(120); });
       expect(focus).toHaveBeenCalledOnce();
       expect(log.mock.calls.map(([, context]) => context?.extra?.phase)).toEqual([
         'open', 'inset-applied', 'modal-shown', 'input-focus', 'input-blur', 'auto-focus-request',
       ]);
+      expect(log.mock.calls.some(([, context]) => context?.extra?.releaseCheck === 'v1.3.7/quick-capture-focus-after-show')).toBe(true);
+      act(() => tree.unmount());
+    });
+  });
+
+  it('cancels pending Android focus on close and focuses a new request in an already shown modal', async () => {
+    vi.useFakeTimers();
+    await withPlatform('android', async () => {
+      const onClose = vi.fn();
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<QuickCaptureSheet visible openRequestId={1} onClose={onClose} />); });
+      const getBody = () => tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+      const focus = vi.fn();
+      getBody().props.inputRef.current = { focus, isFocused: () => false, measureInWindow: vi.fn() };
+      const staleShow = getBody().props.onModalShow;
+      act(() => staleShow());
+      await act(async () => { tree.update(<QuickCaptureSheet visible={false} openRequestId={1} onClose={onClose} />); });
+      act(() => staleShow());
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(focus).not.toHaveBeenCalled();
+      await act(async () => { tree.update(<QuickCaptureSheet visible openRequestId={2} onClose={onClose} />); });
+      act(() => staleShow());
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(focus).not.toHaveBeenCalled();
+      act(() => getBody().props.onModalShow());
+      await act(async () => { await vi.advanceTimersByTimeAsync(120); });
+      expect(focus).toHaveBeenCalledTimes(1);
+      await act(async () => { tree.update(<QuickCaptureSheet visible openRequestId={3} onClose={onClose} />); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(120); });
+      expect(focus).toHaveBeenCalledTimes(2);
       act(() => tree.unmount());
     });
   });
@@ -443,7 +475,7 @@ describe('QuickCaptureSheet save handling', () => {
     expect(body.props.saveButtonTextColor).toBe('#ffffff');
   });
 
-  it.each(['android', 'ios'] as const)('preserves initial focus timing on %s', async (platform) => {
+  it.each(['android', 'ios'] as const)('requests focus 120ms after readiness on %s', async (platform) => {
     vi.useFakeTimers();
     await withPlatform(platform, async () => {
       let tree!: ReturnType<typeof create>;
@@ -451,6 +483,7 @@ describe('QuickCaptureSheet save handling', () => {
       const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
       const focus = vi.fn();
       body.props.inputRef.current = { focus, blur: vi.fn() };
+      if (platform === 'android') act(() => body.props.onModalShow());
       act(() => { vi.advanceTimersByTime(119); });
       expect(focus).not.toHaveBeenCalled();
       act(() => { vi.advanceTimersByTime(1); });
@@ -461,8 +494,10 @@ describe('QuickCaptureSheet save handling', () => {
     });
   });
 
-  it.each(['close', 'more', 'audio', 'hidden', 'unmount'] as const)(
-    'cancels pending Android initial focus after %s', async (reason) => {
+  it.each(['close', 'more', 'audio', 'hidden', 'unmount'].flatMap((reason) =>
+    [false, true].map((shown) => ({ reason, shown })),
+  ))(
+    'cancels pending Android initial focus after $reason (shown: $shown)', async ({ reason, shown }) => {
       vi.useFakeTimers();
       await withPlatform('android', async () => {
         let tree!: ReturnType<typeof create>;
@@ -471,6 +506,7 @@ describe('QuickCaptureSheet save handling', () => {
         const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
         const focus = vi.fn();
         body.props.inputRef.current = { focus, blur: vi.fn() };
+        if (shown) act(() => body.props.onModalShow());
         act(() => { vi.advanceTimersByTime(119); });
         await act(async () => {
           if (reason === 'close') body.props.handleClose();
@@ -479,6 +515,7 @@ describe('QuickCaptureSheet save handling', () => {
           if (reason === 'hidden') tree.update(<QuickCaptureSheet visible={false} openRequestId={1} onClose={onClose} />);
           if (reason === 'unmount') tree.unmount();
         });
+        if (!shown && reason !== 'unmount') act(() => body.props.onModalShow());
         act(() => { vi.advanceTimersByTime(500); });
         expect(focus).not.toHaveBeenCalled();
         if (reason !== 'unmount') act(() => { tree.unmount(); });
@@ -1443,7 +1480,7 @@ describe('QuickCaptureSheet save handling', () => {
     });
   });
 
-  it('toasts a rejected capture instead of closing silently', async () => {
+  it('retains the title and multiline description after a rejected capture for retry', async () => {
     addTask.mockResolvedValue({ success: false, error: 'Archived project' });
     const onClose = vi.fn();
 
@@ -1457,8 +1494,12 @@ describe('QuickCaptureSheet save handling', () => {
 
     const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
     if (!body) throw new Error('QuickCaptureSheetBody not found');
+    const description = 'First line\n@home /due:tomorrow #literal';
     await act(async () => {
-      body.props.handleSave();
+      body.props.onNoteChange(description);
+    });
+    await act(async () => {
+      tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0].props.handleSave();
       await Promise.resolve();
     });
 
@@ -1467,6 +1508,15 @@ describe('QuickCaptureSheet save handling', () => {
       message: 'Failed to add task',
     }));
     expect(onClose).not.toHaveBeenCalled();
+    const retryBody = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    expect(retryBody.props.value).toBe('Rejected capture');
+    expect(retryBody.props.noteValue).toBe(description);
+    addTask.mockResolvedValue({ success: true, id: 'task-retry' });
+    await act(async () => {
+      retryBody.props.handleSave();
+    });
+    expect(addTask).toHaveBeenLastCalledWith('Rejected capture', expect.objectContaining({ description }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('queues a late failed capture without overwriting a newer draft and consumes it once', async () => {
@@ -2258,7 +2308,7 @@ describe('QuickCaptureSheet save handling', () => {
     }));
     expect(onClose).not.toHaveBeenCalled();
   });
-  it('saves the More-panel note as the task description', async () => {
+  it('saves the optional quick-capture description without parsing its lines', async () => {
     addTask.mockResolvedValue({ success: true, id: 'task-1' });
 
     let tree!: ReturnType<typeof create>;
@@ -2283,7 +2333,7 @@ describe('QuickCaptureSheet save handling', () => {
     expect(getBody().props.noteValue).toBe('');
 
     await act(async () => {
-      getBody().props.onNoteChange('  Bring the old one and two photos  ');
+      getBody().props.onNoteChange('  Bring the old one and two photos\n@home /due:tomorrow #literal  ');
       await Promise.resolve();
     });
 
@@ -2293,7 +2343,7 @@ describe('QuickCaptureSheet save handling', () => {
     });
 
     expect(addTask).toHaveBeenCalledWith('Renew passport', expect.objectContaining({
-      description: 'Bring the old one and two photos',
+      description: 'Bring the old one and two photos\n@home /due:tomorrow #literal',
       status: 'inbox',
     }));
   });

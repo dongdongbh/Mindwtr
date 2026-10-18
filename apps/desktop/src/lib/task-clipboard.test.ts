@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { copyTaskTitles } from './task-clipboard';
+import { copyTaskReference, copyTaskTitles } from './task-clipboard';
 
 const mocks = vi.hoisted(() => ({
     info: vi.fn(), warn: vi.fn(), toast: vi.fn(), write: vi.fn(),
@@ -28,7 +28,8 @@ describe('task clipboard diagnostics', () => {
         expect(mocks.toast).toHaveBeenCalledExactlyOnceWith('Title copied', 'success');
         expect(mocks.info).toHaveBeenCalledExactlyOnceWith('Task clipboard write completed', {
             scope: 'clipboard',
-            extra: { releaseCheck: 'v1.3.5/task-copy-diagnostics', source: 'menu', outcome: 'copied',
+            extra: { releaseCheck: 'v1.3.7/task-copy-input', source: 'menu', outcome: 'copied',
+                inputTrusted: null, inputKind: 'not-provided',
                 documentFocused: true, activationSupported: true, activationActive: true, clipboardAvailable: true },
         });
         expect(JSON.stringify(mocks.info.mock.calls)).not.toContain('Private');
@@ -39,6 +40,28 @@ describe('task clipboard diagnostics', () => {
         expect(mocks.write).toHaveBeenCalledExactlyOnceWith('Private task\n\nPrivate description\nSecond');
         expect(mocks.toast).toHaveBeenCalledExactlyOnceWith('Task copied to clipboard', 'success');
         expect(mocks.info.mock.calls[0][1].extra.source).toBe('shortcut');
+        expect(mocks.info.mock.calls[0][1].extra).toMatchObject({ inputTrusted: null, inputKind: 'not-provided' });
+    });
+
+    it.each([
+        [true, 1, 'pointer'],
+        [false, 2, 'pointer'],
+        [true, 0, 'keyboard-or-assistive'],
+    ])('reports only bounded menu input metadata (trusted=%s, detail=%s)', async (isTrusted, detail, inputKind) => {
+        const input = { isTrusted, detail, privateEventData: 'Private event text' };
+        await copyTaskTitles(tasks, t, false, 'menu', input);
+        expect(mocks.info.mock.calls[0][1].extra).toMatchObject({ inputTrusted: isTrusted, inputKind });
+        expect(JSON.stringify(mocks.info.mock.calls)).not.toMatch(/Private|detail|privateEventData/);
+    });
+
+    it.each(['link', 'id'] as const)('preserves input diagnostics for task %s failures', async (kind) => {
+        mocks.write.mockRejectedValueOnce(new DOMException('Private error', 'NotAllowedError'));
+        await copyTaskReference('Private ID', kind, t, { isTrusted: true, detail: 0 });
+        expect(mocks.warn.mock.calls[0][1].extra).toMatchObject({
+            source: 'menu', inputTrusted: true, inputKind: 'keyboard-or-assistive', errorKind: 'NotAllowedError',
+        });
+        expect(mocks.toast).toHaveBeenCalledExactlyOnceWith('Could not copy task', 'error');
+        expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain('Private');
     });
 
     it('does nothing for empty input', async () => {
@@ -60,7 +83,8 @@ describe('task clipboard diagnostics', () => {
         expect(mocks.info).not.toHaveBeenCalled();
         expect(mocks.warn).toHaveBeenCalledExactlyOnceWith('Task clipboard write failed', {
             scope: 'clipboard',
-            extra: { releaseCheck: 'v1.3.5/task-copy-diagnostics', source: 'menu', outcome: 'failed',
+            extra: { releaseCheck: 'v1.3.7/task-copy-input', source: 'menu', outcome: 'failed',
+                inputTrusted: null, inputKind: 'not-provided',
                 documentFocused: true, activationSupported: true, activationActive: true, clipboardAvailable: true, errorKind },
         });
         expect(mocks.toast).toHaveBeenCalledExactlyOnceWith('Could not copy task', 'error');

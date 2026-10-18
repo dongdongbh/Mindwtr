@@ -232,6 +232,7 @@ export type GtdSyncedSettings = Pick<GtdSettings, GtdSyncedFieldKey> & {
 };
 
 export const GTD_SYNCED_APP_SETTINGS_FIELD_KEYS = [
+    'taskReminderDefault',
     'quickAddAutoClean',
     'markdownEditorAssist',
 ] as const satisfies readonly (keyof AppData['settings'])[];

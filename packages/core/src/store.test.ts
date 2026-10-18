@@ -4432,6 +4432,24 @@ describe('TaskStore', () => {
         expect(lastSaved.tasks[0].title).toBe('Alpha Updated');
     });
 
+    it('waits the real retry schedule between failed saves (250, 500, 1000, 2000 ms)', async () => {
+        // vitest.setup.ts skips these waits for every other test; this one runs them on fake timers.
+        // Only exactly true skips them: a truthy stray value still waits.
+        const flags = globalThis as { __mindwtrSkipSaveRetryWait?: unknown };
+        const skipped = flags.__mindwtrSkipSaveRetryWait;
+        flags.__mindwtrSkipSaveRetryWait = 'yes';
+        try {
+            const attemptsAt: number[] = [];
+            mockStorage.saveData = vi.fn(async () => { attemptsAt.push(Date.now()); throw new Error('disk full'); });
+            setStorageAdapter(mockStorage);
+            useTaskStore.getState().addTask('Unsaveable task');
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(attemptsAt.slice(1).map((at, index) => at - attemptsAt[index])).toEqual([250, 500, 1000, 2000]);
+        } finally {
+            flags.__mindwtrSkipSaveRetryWait = skipped;
+        }
+    });
+
     it('stops retrying after repeated terminal save failures', async () => {
         mockStorage.saveData = vi.fn().mockRejectedValue(new Error('disk full'));
         setStorageAdapter(mockStorage);

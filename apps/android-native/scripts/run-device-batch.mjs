@@ -29,7 +29,7 @@ const apkDir = 'apps/android-native/android/app/build/outputs/apk/play';
 const ORDER = ['check-projects-device', 'check-bgsync-device', 'check-encryption-device', 'check-widgets-device',
     'check-project-details-device', 'capture-parity-screens', 'check-startup-device', 'check-lifecycle-device',
     'check-editor-device', 'check-search-device', 'check-process-inbox-device', 'check-capture-device',
-    'check-capture-modal-device', 'check-entry-points-device', 'check-journal-device', 'check-menu-device',
+    'check-capture-modal-device', 'check-entry-points-device', 'check-share-files-device', 'check-journal-device', 'check-menu-device',
     'check-review-device', 'check-calendar-board-device', 'check-toolbars-device', 'check-settings-editor-device',
     'check-sweep-saved-device', 'check-review-organize-device', 'check-app-lock-device', 'check-net-device',
     'check-intl-device', 'check-sync-device', 'check-language-device', 'check-focus-device', 'check-log-device',

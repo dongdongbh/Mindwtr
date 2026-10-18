@@ -12,7 +12,7 @@ import { Sparkles } from 'lucide-react';
 
 type TriggerType = 'project' | 'context' | 'tag' | 'area' | 'person' | 'command';
 type SlashCommand =
-    | 'due' | 'start' | 'review' | 'note' | 'link' | 'energy' | 'priority' | 'area'
+    | 'due' | 'start' | 'review' | 'note' | 'link' | 'energy' | 'priority' | 'area' | 'estimate' | 'duration'
     | 'inbox' | 'next' | 'waiting' | 'someday' | 'reference' | 'done' | 'archived' | '*';
 
 interface TriggerState {
@@ -116,6 +116,8 @@ const SLASH_COMMANDS: Array<{
     { command: 'link', hint: '<url>', requiresArgument: true },
     { command: 'energy', hint: '<level>', requiresArgument: true },
     { command: 'priority', hint: '<level>', requiresArgument: true },
+    { command: 'estimate', hint: '<duration>', requiresArgument: true },
+    { command: 'duration', hint: '<duration>', requiresArgument: true },
     { command: 'area', hint: '<name>', requiresArgument: true },
     { command: 'next', requiresArgument: false },
     { command: 'waiting', requiresArgument: false },
@@ -132,7 +134,7 @@ const SLASH_COMMANDS: Array<{
 const ENERGY_LEVEL_VALUES = ['low', 'medium', 'high'];
 const PRIORITY_VALUES: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 
-function getSlashCommandOptions(query: string, prioritiesEnabled: boolean): Option[] {
+function getSlashCommandOptions(query: string, prioritiesEnabled: boolean, timeEstimatesEnabled: boolean): Option[] {
     const separatorIndex = query.indexOf(':');
     const rawCommandQuery = (separatorIndex >= 0 ? query.slice(0, separatorIndex) : query).trim().toLowerCase();
     const rawValue = separatorIndex >= 0 ? query.slice(separatorIndex + 1).trim() : '';
@@ -166,6 +168,7 @@ function getSlashCommandOptions(query: string, prioritiesEnabled: boolean): Opti
         // The parser ignores /priority: while the feature is off, so suggesting
         // it would hand the user a token that stays in their title (#1107).
         .filter(({ command }) => command !== 'priority' || prioritiesEnabled)
+        .filter(({ command }) => (command !== 'estimate' && command !== 'duration') || timeEstimatesEnabled)
         .filter(({ command }) => (
             rawCommandQuery.length === 0
             || command.startsWith(rawCommandQuery)
@@ -289,12 +292,13 @@ export function TaskInput({
     const pendingSelectionRef = useRef<PendingSelectionRestore | null>(null);
     const undoRef = useRef<Array<{ value: string; selection: InputSelection }>>([]);
     const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
+    const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
 
     const options = useMemo<Option[]>(() => {
         if (!trigger) return [];
         const query = trigger.query.trim().toLowerCase();
         if (trigger.type === 'command') {
-            return getSlashCommandOptions(trigger.query, prioritiesEnabled);
+            return getSlashCommandOptions(trigger.query, prioritiesEnabled, timeEstimatesEnabled);
         }
         if (trigger.type === 'project') {
             const activeProjects = projects.filter((project) => project.status !== 'archived');
@@ -356,7 +360,7 @@ export function TaskInput({
             label: token,
             value: token,
         }));
-    }, [trigger, projects, contexts, contextHistory, areas, people, prioritiesEnabled]);
+    }, [trigger, projects, contexts, contextHistory, areas, people, prioritiesEnabled, timeEstimatesEnabled]);
 
     const closeTrigger = () => {
         setTrigger(null);

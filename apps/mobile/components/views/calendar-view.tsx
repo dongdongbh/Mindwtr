@@ -77,6 +77,7 @@ import {
   getCalendarNavigationSwipeDirection,
   getCalendarWeekColumnWidth,
   getCalendarWeekContentClampX,
+  getCalendarWeekAutoScrollKey,
   getCalendarWeekInitialScrollX,
   getCalendarWeekMaxScrollX,
 } from './calendar/calendar-view-mode';
@@ -531,14 +532,19 @@ export function CalendarView() {
       return;
     }
 
-    const weekStartTime = weekDays[0]?.getTime() ?? 0;
-    const selectedTime = selectedDate?.getTime() ?? 0;
-    const autoScrollKey = `${weekStartTime}:${selectedTime}:${calendarWeekVisibleDays}:${weekColumnWidth}`;
+    const autoScrollKey = getCalendarWeekAutoScrollKey({
+      availableWidth: weekAvailableColumnWidth,
+      columnWidth: weekColumnWidth,
+      selectedDate,
+      visibleDays: calendarWeekVisibleDays,
+      weekDays,
+    });
     if (lastWeekAutoScrollKeyRef.current === autoScrollKey) return;
     lastWeekAutoScrollKeyRef.current = autoScrollKey;
 
     const x = Math.min(
       getCalendarWeekInitialScrollX({
+        availableWidth: weekAvailableColumnWidth,
         columnWidth: weekColumnWidth,
         // The gutter stays pinned now, so the first day column already starts beside it.
         leadingInset: 0,
@@ -559,7 +565,7 @@ export function CalendarView() {
         animated: false,
       });
     });
-  }, [calendarWeekVisibleDays, screenWidth, selectedDate, viewMode, weekColumnWidth, weekDays]);
+  }, [calendarWeekVisibleDays, screenWidth, selectedDate, viewMode, weekAvailableColumnWidth, weekColumnWidth, weekDays]);
 
   // Widening the columns from the density slider shrinks nothing, but narrowing
   // the canvas (more visible days) leaves the old scroll offset beyond the last

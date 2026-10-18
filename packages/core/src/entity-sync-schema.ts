@@ -119,6 +119,9 @@ export const toAttachments = (value: unknown): Attachment[] | undefined => {
                 ? (item.localStatus as Attachment['localStatus'])
                 : undefined,
             pendingContentUpload: item.pendingContentUpload === true ? true : undefined,
+            staleContentHash: typeof item.staleContentHash === 'string' && /^[0-9a-f]{64}$/i.test(item.staleContentHash)
+                ? item.staleContentHash.toLowerCase()
+                : undefined,
         }));
     return cleaned.length > 0 ? cleaned : undefined;
 };

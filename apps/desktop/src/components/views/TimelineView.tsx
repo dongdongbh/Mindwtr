@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { DndContext, PointerSensor, closestCenter, pointerWithin, useSensor, useSensors, type CollisionDetection } from '@dnd-kit/core';
+import { SortableContext } from '@dnd-kit/sortable';
 import {
+    buildProjectTaskListModel,
+    compareAreasByOrder,
     compareProjectsByOrder,
     canEditTimelineTaskDates,
     canEditTimelineProjectDates,
@@ -18,6 +22,7 @@ import {
     projectMatchesAreaFilterSelection,
     safeFormatDate,
     safeParseDate,
+    resolveTaskSortByForFeatures,
     tFallback,
     useTaskStore,
     type Project,
@@ -43,6 +48,14 @@ import { ListEmptyState } from './list/ListEmptyState';
 import { CalendarOpenTaskModal } from './calendar/CalendarModals';
 import { resolveCalendarLocale } from './calendar-locale';
 import { beginRendererActivity, recordRendererActivity } from '../../lib/renderer-navigation-diagnostics';
+import { captureTimelineOrder, commitTimelineOrder, timelineOrderScope, type TimelineOrderSnapshot, type TimelineOrderTarget } from '../../lib/timeline-order';
+import { TimelineOrderRow } from './timeline/TimelineOrderRow';
+
+const timelineOrderCollision: CollisionDetection = (args) => {
+    const scope = args.active.data.current?.scope;
+    const droppableContainers = args.droppableContainers.filter((entry) => entry.data.current?.scope === scope);
+    return (args.pointerCoordinates ? pointerWithin : closestCenter)({ ...args, droppableContainers });
+};
 
 const TIMELINE_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:timeline:v1';
 
@@ -218,6 +231,9 @@ export function TimelineView() {
     const perf = usePerformanceMonitor('TimelineView');
     const activeTasks = useTaskStore((state) => state.tasks);
     const allTasks = useTaskStore((state) => state._allTasks);
+    const sections = useTaskStore((state) => state.sections);
+    const allSections = useTaskStore((state) => state._allSections);
+    const settings = useTaskStore((state) => state.settings);
     const weekStart = useTaskStore((state) => state.settings?.weekStart);
     const calendarSystem = useTaskStore((state) => state.settings?.calendarSystem);
     const dateFormat = useTaskStore((state) => state.settings?.dateFormat);
@@ -437,7 +453,15 @@ export function TimelineView() {
             if (project) projectGroups.push({ project, rows: [] });
         }
         projectGroups.sort((a, b) => {
-            if (a.project && b.project) return compareProjectsByOrder(a.project, b.project);
+            if (a.project && b.project) {
+                const aArea = a.project.areaId ? areaById.get(a.project.areaId) : undefined;
+                const bArea = b.project.areaId ? areaById.get(b.project.areaId) : undefined;
+                if (aArea?.id !== bArea?.id) {
+                    if (aArea && bArea) return compareAreasByOrder(aArea, bArea);
+                    return aArea ? -1 : bArea ? 1 : 0;
+                }
+                return compareProjectsByOrder(a.project, b.project);
+            }
             return a.project ? -1 : b.project ? 1 : 0;
         });
         const noProjectRows = byProject.get('');
@@ -445,12 +469,20 @@ export function TimelineView() {
 
         const flattened: TimelineRow[] = [];
         for (const group of projectGroups) {
-            // Earliest first, then oldest first — the order the work was planned in.
-            group.rows.sort((a, b) => {
-                if (a.kind !== 'task' || b.kind !== 'task') return 0;
-                if (a.lo !== b.lo) return a.lo - b.lo;
-                return (safeParseDate(a.task.createdAt)?.getTime() ?? 0) - (safeParseDate(b.task.createdAt)?.getTime() ?? 0);
-            });
+            if (group.project) {
+                const rowsById = new Map(group.rows.map((row) => [row.key, row]));
+                const model = buildProjectTaskListModel({
+                    project: group.project, tasks: group.rows.flatMap((row) => row.kind === 'task' ? [row.task] : []),
+                    visibleTasks: [], sections, allSections, statusFilter: 'all', criteria: {}, searchQuery: '',
+                    sortBy: resolveTaskSortByForFeatures(group.project.taskSortBy ?? 'default', settings),
+                    projectOrder: true, reorderMode: false, groupCompletedTasksLast: false, completedCollapsed: false, t,
+                });
+                group.rows = model.items.flatMap((item) => item.type === 'task' ? [rowsById.get(item.task.id)!] : []);
+            } else {
+                group.rows.sort((a, b) => a.kind === 'task' && b.kind === 'task'
+                    ? a.lo - b.lo || (safeParseDate(a.task.createdAt)?.getTime() ?? 0) - (safeParseDate(b.task.createdAt)?.getTime() ?? 0)
+                    : 0);
+            }
             // Project first, then its area — the same helper the bars use, so a
             // never-recolored project (placeholder grey) shows its area color.
             const groupColor = group.project ? getProjectAccentColor(group.project, areaById) : undefined;
@@ -501,7 +533,7 @@ export function TimelineView() {
             flattened.push(...group.rows);
         }
         return { rows: flattened, earlierOmitted, laterOmitted };
-    }, [areaById, datedTasks, projectById, projectSpans, range, t]);
+    }, [allSections, areaById, datedTasks, projectById, projectSpans, range, sections, settings, t]);
 
     const { rows, earlierOmitted, laterOmitted } = timelineRows;
     const omittedCount = earlierOmitted + laterOmitted;
@@ -519,6 +551,14 @@ export function TimelineView() {
         scrollRef,
         t,
     });
+    const orderSnapshotRef = React.useRef<TimelineOrderSnapshot | null>(null);
+    const orderSavingRef = React.useRef(false);
+    const keyboardOrderTargetRef = React.useRef<TimelineOrderTarget | null>(null);
+    const [keyboardOrderId, setKeyboardOrderId] = React.useState<string | null>(null);
+    const [keyboardOrderAnnouncement, setKeyboardOrderAnnouncement] = React.useState('');
+    const [activeOrderScope, setActiveOrderScope] = React.useState<string | null>(null);
+    const [orderPending, setOrderPending] = React.useState(false);
+    const orderSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
     const contentWidth = GUTTER_WIDTH + trackWidth + (fitted ? 0 : TRACK_TAIL);
     const todayIndex = range ? differenceInCalendarDays(today, range.from) : -1;
     const todayVisible = range ? todayIndex >= 0 && todayIndex < range.days : false;
@@ -717,7 +757,7 @@ export function TimelineView() {
         );
     };
 
-    const renderRow = (row: TimelineRow, index: number) => {
+    const renderRow = (row: TimelineRow, index: number, handle: React.ReactNode) => {
         if (row.kind === 'group') {
             const project = row.project;
             const target: TimelineDateEditTarget | null = project ? { kind: 'project', project } : null;
@@ -744,6 +784,8 @@ export function TimelineView() {
                     )}
                     style={{ height: ROW_HEIGHT }}
                 >
+                    <div className={gutterClassName} style={{ width: GUTTER_WIDTH }}>
+                    {handle}
                     {project ? (
                         // The project name is the row's click target, the way a task
                         // row's name is: the rail below is a 10px secondary one.
@@ -755,11 +797,10 @@ export function TimelineView() {
                             aria-label={groupActionLabel}
                             onClick={() => goToProject(project.id)}
                             className={cn(
-                                gutterClassName,
+                                'flex h-full min-w-0 flex-1 items-center gap-2 text-left',
                                 'transition-colors hover:bg-muted/70',
                                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                             )}
-                            style={{ width: GUTTER_WIDTH }}
                         >
                             {dot}
                             <span className="min-w-0 truncate">{row.label}</span>
@@ -767,13 +808,13 @@ export function TimelineView() {
                     ) : (
                         <div
                             data-testid="timeline-group"
-                            className={gutterClassName}
-                            style={{ width: GUTTER_WIDTH }}
+                            className="flex min-w-0 flex-1 items-center gap-2"
                         >
                             {dot}
                             <span className="min-w-0 truncate">{row.label}</span>
                         </div>
                     )}
+                    </div>
                     <div className="relative min-w-0 flex-1 bg-muted/60">
                         {displayedSpan && project && target && (
                             <div
@@ -834,6 +875,11 @@ export function TimelineView() {
             <div className="group/timeline-row flex border-b border-border/40" style={{ height: ROW_HEIGHT }}>
                 {/* The name column is the row's primary click target; the bar is a
                     secondary one, so a 14px dot never has to carry the interaction. */}
+                <div
+                    className="sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card pl-6 pr-3 group-hover/timeline-row:bg-muted"
+                    style={{ width: GUTTER_WIDTH }}
+                >
+                {handle}
                 <button
                     type="button"
                     data-testid="timeline-row-label"
@@ -842,17 +888,17 @@ export function TimelineView() {
                     aria-label={taskActionLabel}
                     onClick={() => setOpenTaskId(row.task.id)}
                     className={cn(
-                        'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-card pl-6 pr-3 text-left',
+                        'flex h-full min-w-0 flex-1 items-center gap-2 text-left',
                         'text-xs text-foreground transition-colors hover:bg-muted group-hover/timeline-row:bg-muted',
                         'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                     )}
-                    style={{ width: GUTTER_WIDTH }}
                 >
                     <span role="img" aria-label={label} title={label} className="shrink-0 text-muted-foreground">
                         <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 truncate">{row.task.title}</span>
                 </button>
+                </div>
                 <div className="relative min-w-0 flex-1 transition-colors group-hover/timeline-row:bg-muted/40">
                     <div
                         data-testid="timeline-bar"
@@ -882,6 +928,100 @@ export function TimelineView() {
         );
     };
 
+    const orderTargetForRow = (row: TimelineRow): TimelineOrderTarget | null => {
+        const project = row.kind === 'group' ? row.project
+            : row.task.projectId ? projectById.get(row.task.projectId) : undefined;
+        let target: TimelineOrderTarget | null = null;
+        if (project && !project.deletedAt && !project.purgedAt && project.status !== 'archived') {
+            if (row.kind === 'group') target = { kind: 'project', id: project.id, areaId: project.areaId };
+            else if (!isTaskFinished(row.task)
+                && resolveTaskSortByForFeatures(project.taskSortBy ?? 'default', settings) === 'default') {
+                target = { kind: 'task', id: row.task.id, projectId: project.id, sectionId: row.task.sectionId ?? null };
+            }
+        }
+        return target;
+    };
+    const saveOrder = (snapshot: TimelineOrderSnapshot, target: TimelineOrderTarget) => {
+        if (orderSavingRef.current) return;
+        orderSavingRef.current = true;
+        setOrderPending(true);
+        void commitTimelineOrder(snapshot, target).then((result) => {
+            if (result === 'conflict') useUiStore.getState().showToast(t('timeline.reorderConflict'), 'error');
+        }).catch(() => {
+            useUiStore.getState().showToast(t('timeline.reorderFailed'), 'error');
+        }).finally(() => {
+            orderSavingRef.current = false;
+            setOrderPending(false);
+        });
+    };
+    const orderIdForTarget = (target: TimelineOrderTarget) => target.kind === 'project'
+        ? `timeline:group:group:${target.id}` : `timeline:task:${target.id}`;
+    const onOrderKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, target: TimelineOrderTarget) => {
+        if (orderSavingRef.current || dateEditing.pending || dateEditing.preview) return;
+        const pickedUp = keyboardOrderTargetRef.current;
+        if (event.key === ' ' || event.key === 'Enter') {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.repeat) return;
+            if (!pickedUp) {
+                const snapshot = captureTimelineOrder(target);
+                if (!snapshot) return;
+                orderSnapshotRef.current = snapshot;
+                keyboardOrderTargetRef.current = target;
+                setKeyboardOrderId(orderIdForTarget(target));
+                setActiveOrderScope(timelineOrderScope(target));
+                setKeyboardOrderAnnouncement(event.currentTarget.getAttribute('aria-label') ?? '');
+            } else {
+                const snapshot = orderSnapshotRef.current;
+                orderSnapshotRef.current = null;
+                keyboardOrderTargetRef.current = null;
+                setKeyboardOrderId(null);
+                setActiveOrderScope(null);
+                if (snapshot) saveOrder(snapshot, pickedUp);
+            }
+        } else if (pickedUp && event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            orderSnapshotRef.current = null;
+            keyboardOrderTargetRef.current = null;
+            setKeyboardOrderId(null);
+            setActiveOrderScope(null);
+            setKeyboardOrderAnnouncement(t('common.cancel'));
+        } else if (pickedUp && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            event.preventDefault();
+            event.stopPropagation();
+            // Keyboard destinations come from logical rows, including unmounted ones.
+            const targets = rows.flatMap((row, index) => {
+                const candidate = orderTargetForRow(row);
+                return candidate && timelineOrderScope(candidate) === timelineOrderScope(pickedUp)
+                    ? [{ target: candidate, index, label: row.kind === 'group' ? row.label : row.task.title }] : [];
+            });
+            const current = targets.findIndex((entry) => entry.target.id === pickedUp.id);
+            const next = targets[current + (event.key === 'ArrowUp' ? -1 : 1)];
+            if (current < 0 || !next) return;
+            keyboardOrderTargetRef.current = next.target;
+            setKeyboardOrderId(orderIdForTarget(next.target));
+            setKeyboardOrderAnnouncement(next.label);
+            if (shouldVirtualize) rowVirtualizer.scrollToIndex(next.index, { align: 'center' });
+        }
+    };
+    const renderOrderedRow = (row: TimelineRow, index: number) => {
+        const id = `timeline:${row.kind}:${row.key}`;
+        return (
+            <TimelineOrderRow
+                id={id}
+                target={orderTargetForRow(row)}
+                activeScope={activeOrderScope}
+                pending={orderPending || dateEditing.pending || Boolean(dateEditing.preview)}
+                selected={keyboardOrderId === id}
+                onKeyDown={onOrderKeyDown}
+                label={`${t(row.kind === 'group' ? 'timeline.reorderProject' : 'timeline.reorderTask')}: ${row.kind === 'group' ? row.label : row.task.title}`}
+            >
+                {(handle) => renderRow(row, index, handle)}
+            </TimelineOrderRow>
+        );
+    };
+
     const zoomLabels: Record<TimelineZoom, string> = {
         day: tFallback(t, 'calendar.day', 'Day'),
         week: tFallback(t, 'calendar.week', 'Week'),
@@ -890,6 +1030,41 @@ export function TimelineView() {
 
     return (
         <ErrorBoundary>
+            <DndContext
+                sensors={orderSensors}
+                collisionDetection={timelineOrderCollision}
+                autoScroll={{ threshold: { x: 0, y: 0.15 } }}
+                accessibility={{
+                    screenReaderInstructions: { draggable: t('timeline.reorderInstructions') },
+                    announcements: {
+                        onDragStart: ({ active }) => active.data.current?.label,
+                        onDragOver: ({ over }) => over?.data.current?.label,
+                        onDragEnd: ({ over }) => over?.data.current?.label,
+                        onDragCancel: () => t('common.cancel'),
+                    },
+                }}
+                onDragStart={({ active }) => {
+                    if (orderSavingRef.current) return;
+                    keyboardOrderTargetRef.current = null;
+                    setKeyboardOrderId(null);
+                    const target = active.data.current?.target as TimelineOrderTarget | undefined;
+                    orderSnapshotRef.current = target ? captureTimelineOrder(target) : null;
+                    setActiveOrderScope(target ? timelineOrderScope(target) : null);
+                }}
+                onDragCancel={() => {
+                    orderSnapshotRef.current = null;
+                    setActiveOrderScope(null);
+                }}
+                onDragEnd={({ over }) => {
+                    const snapshot = orderSnapshotRef.current;
+                    orderSnapshotRef.current = null;
+                    setActiveOrderScope(null);
+                    const target = over?.data.current?.target as TimelineOrderTarget | undefined;
+                    if (snapshot && target) saveOrder(snapshot, target);
+                }}
+            >
+            <SortableContext items={rows.map((row) => `timeline:${row.kind}:${row.key}`)} strategy={() => null}>
+            <div className="sr-only" aria-live="assertive">{keyboardOrderAnnouncement}</div>
             <div className="flex h-full min-h-0 flex-col">
                 <div className="flex shrink-0 items-center justify-between pb-3">
                     <div className="flex items-baseline gap-3">
@@ -993,7 +1168,7 @@ export function TimelineView() {
                 </div>
 
                 {dateEditing.preview && (
-                    <div role="status" className="mb-2 text-xs text-muted-foreground">
+                    <div role="status" data-testid="timeline-date-preview" className="mb-2 text-xs text-muted-foreground">
                         {dateEditing.preview.dates
                             ? describeDates(t, dateEditing.preview.dates.start, dateEditing.preview.dates.due)
                             : t('timeline.dateEditFailed')}
@@ -1148,11 +1323,11 @@ export function TimelineView() {
                                                     className="absolute left-0 right-0"
                                                     style={{ top: virtualRow.start, height: virtualRow.size }}
                                                 >
-                                                    {renderRow(rows[virtualRow.index], virtualRow.index)}
+                                                    {renderOrderedRow(rows[virtualRow.index], virtualRow.index)}
                                                 </div>
                                             ))
                                             : rows.map((row, index) => (
-                                                <React.Fragment key={row.key}>{renderRow(row, index)}</React.Fragment>
+                                                <React.Fragment key={row.key}>{renderOrderedRow(row, index)}</React.Fragment>
                                             ))}
                                     </div>
                                 </div>
@@ -1173,6 +1348,8 @@ export function TimelineView() {
                     t,
                 }}
             />
+            </SortableContext>
+            </DndContext>
         </ErrorBoundary>
     );
 }

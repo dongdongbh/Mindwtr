@@ -11,7 +11,10 @@ import {
     areSyncPayloadsEqual,
     computeStableValueFingerprint,
     sanitizeAppDataForRemote,
+    sanitizeAppDataForRemotePass,
+    toStableSyncJsonPass,
 } from './sync-helpers';
+import type { CooperativePass } from './cooperative';
 import { generateDeterministicUUID } from './uuid';
 
 export type SyncDocumentSource = 'local' | 'remote';
@@ -245,13 +248,15 @@ const stripRemoteAttachmentDeviceState = (data: AppData): AppData => {
                     || Object.prototype.hasOwnProperty.call(attachment, 'localStatus')
                     || Object.prototype.hasOwnProperty.call(attachment, 'contentMtimeMs')
                     || Object.prototype.hasOwnProperty.call(attachment, 'contentSize')
-                    || Object.prototype.hasOwnProperty.call(attachment, 'pendingContentUpload');
+                    || Object.prototype.hasOwnProperty.call(attachment, 'pendingContentUpload')
+                    || Object.prototype.hasOwnProperty.call(attachment, 'staleContentHash');
                 if (!hasDeviceState) return attachment;
                 const {
                     localStatus: _localStatus,
                     contentMtimeMs: _contentMtimeMs,
                     contentSize: _contentSize,
                     pendingContentUpload: _pendingContentUpload,
+                    staleContentHash: _staleContentHash,
                     ...syncedAttachment
                 } = attachment;
                 attachmentsChanged = true;
@@ -305,6 +310,14 @@ export type RemoteSyncDocument = AppData & {
 
 export const toRemoteSyncDocument = (data: AppData): RemoteSyncDocument =>
     sanitizeAppDataForRemote(data) as RemoteSyncDocument;
+
+/**
+ * A snapshot's remote document as stable sync JSON, the form both {@link computeRemoteSyncDocumentFingerprint} and
+ * {@link areRemoteSyncDocumentsEqual} serialize, as a cooperative pass (cooperative.ts).
+ */
+export function* remoteSyncDocumentStableJsonPass(data: AppData): CooperativePass<string> {
+    return yield* toStableSyncJsonPass(yield* sanitizeAppDataForRemotePass(data));
+}
 
 export const areRemoteSyncDocumentsEqual = (
     left: RemoteSyncDocument,

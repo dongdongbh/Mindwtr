@@ -1,7 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import {
     taskDraftToChangedUpdatePatch,
     flushPendingSave,
+    saveTaskDraftOntoLatest,
+    useTaskStore,
     type Attachment,
     type StoreActionResult,
     type Task,
@@ -20,10 +22,30 @@ type UseTaskItemSubmitParams = {
     showToast: (message: string, tone?: 'info' | 'error' | 'success') => void;
     t: (key: string) => string;
     task: Task;
-    updateTask: (id: string, patch: Partial<Task>) => Promise<StoreActionResult>;
     beginAttachmentSave: () => boolean;
     cancelAttachmentSaveBeforeStoreUpdate: () => void;
     settlePersistedAttachmentSave: (attachments: Attachment[]) => void;
+};
+
+/**
+ * The editor save as one store command, merged field by field onto the latest row by core's saveTaskDraftOntoLatest:
+ * only the fields the draft changed since [base] are written, and a list another device changed too is merged (tags and
+ * contexts by token, the checklist by item id, attachments by mergeTaskDraftAttachments). A single value takes the
+ * draft's (last write wins). Answers the row it saved, read before any sync save can publish over it, as the base for
+ * the next save of this session.
+ */
+const saveDraftOnLatest = async (id: string, base: Task, patch: Partial<Task>) => {
+    let saved: Task | undefined;
+    const result = await saveTaskDraftOntoLatest(id, base, patch, {
+        write: async (taskId, updates): Promise<StoreActionResult> => {
+            const written = Object.keys(updates).length > 0
+                ? await useTaskStore.getState().updateTask(taskId, updates)
+                : { success: true, id: taskId };
+            saved = useTaskStore.getState()._tasksById.get(taskId);
+            return written;
+        },
+    });
+    return { result, saved };
 };
 
 type TaskItemSubmitOptions = {
@@ -45,11 +67,12 @@ export function useTaskItemSubmit({
     showToast,
     t,
     task,
-    updateTask,
     beginAttachmentSave,
     cancelAttachmentSaveBeforeStoreUpdate,
     settlePersistedAttachmentSave,
 }: UseTaskItemSubmitParams) {
+    // The row this edit session last saved: the next save's base, so the editor's own saves are not conflicts.
+    const savedRef = useRef<{ opened: Task; saved: Task } | null>(null);
     return useCallback(async (event?: React.FormEvent, options?: TaskItemSubmitOptions) => {
         event?.preventDefault();
         if (isImportingFiles) return { success: false };
@@ -69,13 +92,15 @@ export function useTaskItemSubmit({
             patch.timeSpentMinutes = options.timeSpentMinutesOverride;
         }
 
+        const base = savedRef.current?.opened === baselineTask ? savedRef.current.saved : baselineTask;
         const attachmentSaveRequiresDurability = beginAttachmentSave();
-        const result = await updateTask(task.id, patch);
+        const { result, saved } = await saveDraftOnLatest(task.id, base, patch);
         if (!result.success) {
             cancelAttachmentSaveBeforeStoreUpdate();
             showToast(result.error || t('task.updateFailed'), 'error');
             return result;
         }
+        if (saved) savedRef.current = { opened: baselineTask, saved };
         if (attachmentSaveRequiresDurability) {
             try {
                 await flushPendingSave();
@@ -84,7 +109,7 @@ export function useTaskItemSubmit({
                 showToast(message, 'error');
                 return { success: false, error: message };
             }
-            settlePersistedAttachmentSave(editAttachments ?? task.attachments ?? []);
+            settlePersistedAttachmentSave(saved?.attachments ?? editAttachments ?? task.attachments ?? []);
         }
         if (!options?.keepEditing) {
             setIsEditing(false);
@@ -107,6 +132,5 @@ export function useTaskItemSubmit({
         showToast,
         t,
         task,
-        updateTask,
     ]);
 }

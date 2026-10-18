@@ -49,7 +49,7 @@
     "focusOrder",
     "archivedAt"
    ],
-   "pendingProduction": []
+   "pendingProduction": ["reminderPolicy"]
   },
   "MindwtrProject": {
    "deployed": [

@@ -30,7 +30,7 @@ import { Worker } from 'node:worker_threads';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, connect, evidenced, fail, inEditor, mainList, Stopped, switchOn, tab, tagged, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, inEditor, Stopped, switchOn, tab, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
@@ -230,16 +230,7 @@ const toTabs = async () => {
     return fail('the tabs did not come back');
 };
 /** The main list scrolled until [find] picks a node fully in view: from the top, then down. */
-const reveal = async (find, description) => {
-    let nodes = await device.toTop();
-    const inView = (current) => {
-        const node = find(current);
-        const list = mainList(current);
-        return node && (!list || (box(node)[1] >= box(list)[1] && box(node)[3] <= box(list)[3] - 40)) ? node : null;
-    };
-    for (let step = 0; step < 20 && !inView(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
-    return inView(nodes) ?? fail(`no ${description} on screen`);
-};
+const reveal = (find, description) => device.revealNode(find, description);
 /** Settings from the More sheet. */
 const openSettings = async () => {
     let nodes = await toTabs();

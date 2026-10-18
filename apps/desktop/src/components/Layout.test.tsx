@@ -834,6 +834,56 @@ describe('Layout collapsed sidebar area filter', () => {
 });
 
 describe('Layout sync security warning', () => {
+    it('dismisses only the current destination across refresh and remount, without changing HTTP permission', async () => {
+        const backend = vi.spyOn(SyncService, 'getSyncBackend').mockResolvedValue('webdav');
+        const webdav = vi.spyOn(SyncService, 'getWebDavConfig').mockResolvedValue({
+            url: 'http://192.168.1.50/dav', username: '', hasPassword: false, allowInsecureHttp: true,
+        });
+        const setWebdav = vi.spyOn(SyncService, 'setWebDavConfig');
+        const setCloud = vi.spyOn(SyncService, 'setCloudConfig');
+        const settings = useTaskStore.getState().settings;
+        const first = renderLayout();
+        expect(await first.findByText(/WebDAV sync is using HTTP/)).toBeInTheDocument();
+        fireEvent.click(first.getByRole('button', { name: 'Dismiss for this sync destination' }));
+        expect(first.queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
+        first.unmount();
+
+        // Equivalent spelling remains acknowledged on the next mount.
+        webdav.mockResolvedValue({ url: 'http://192.168.1.50:80/dav/data.json', username: '', hasPassword: false, allowInsecureHttp: true });
+        const next = renderLayout();
+        await waitFor(() => expect(webdav).toHaveBeenCalledTimes(2));
+        expect(next.queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
+
+        webdav.mockResolvedValue({ url: 'http://192.168.1.50/other', username: '', hasPassword: false, allowInsecureHttp: true });
+        fireEvent.focus(window);
+        expect(await next.findByText(/WebDAV sync is using HTTP/)).toBeInTheDocument();
+        fireEvent.click(next.getByRole('button', { name: 'Dismiss for this sync destination' }));
+
+        // The same network address is a separate acknowledgment for self-hosted sync.
+        backend.mockResolvedValue('cloud');
+        vi.spyOn(SyncService, 'getCloudProvider').mockResolvedValue('selfhosted');
+        vi.spyOn(SyncService, 'getCloudConfig').mockResolvedValue({ url: 'http://192.168.1.50/other', token: '', allowInsecureHttp: true });
+        fireEvent.focus(window);
+        expect(await next.findByText(/Self-hosted sync is using HTTP/)).toBeInTheDocument();
+        expect(setWebdav).not.toHaveBeenCalled();
+        expect(setCloud).not.toHaveBeenCalled();
+        expect(useTaskStore.getState().settings).toBe(settings);
+        expect((await SyncService.getCloudConfig()).allowInsecureHttp).toBe(true);
+    });
+
+    it('keeps a dismissed warning hidden for this mount if local persistence fails', async () => {
+        vi.spyOn(SyncService, 'getSyncBackend').mockResolvedValue('webdav');
+        vi.spyOn(SyncService, 'getWebDavConfig').mockResolvedValue({
+            url: 'http://192.168.1.50/dav', username: '', hasPassword: false, allowInsecureHttp: true,
+        });
+        const layout = renderLayout();
+        expect(await layout.findByText(/WebDAV sync is using HTTP/)).toBeInTheDocument();
+        vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('unavailable'); });
+        fireEvent.click(layout.getByRole('button', { name: 'Dismiss for this sync destination' }));
+        await act(async () => { fireEvent.focus(window); });
+        expect(layout.queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
+    });
+
     it('clears the HTTP warning when sync is switched Off without a focus event', async () => {
         // Use the setup's in-memory storage boundary and the real service path,
         // including its cache, persistence and synchronous status subscribers.

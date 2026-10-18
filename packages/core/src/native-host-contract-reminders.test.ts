@@ -98,6 +98,35 @@ describe('native host contract: reminders', () => {
         vi.setSystemTime(new Date(NOW));
     };
 
+    it.each(['android', 'ios'] as const)('withdraws inherited pending alarms and delivered reminders on default Skip (%s)', async (platform) => {
+        freezeClock();
+        await seed({ taskReminderDefault: 'send' }, [
+            task({ id: 'inherit', reminderPolicy: 'inherit', dueDate: '2026-09-28T11:00:00.000Z', repeatReminderMinutes: 30 }),
+            task({ id: 'review', reminderPolicy: 'inherit', reviewAt: '2026-09-28T12:00:00.000Z' }),
+        ]);
+        const host = await openHost(platform);
+        const first = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        expect(first.schedule).toHaveLength(6);
+        await useTaskStore.getState().updateSettings({ taskReminderDefault: 'skip' });
+        const skipped = value(await host.planReminderAlarms({ storedAlarms: first.alarms, permissionGranted: true }));
+        expect(skipped.cancel).toHaveLength(5);
+        expect(skipped.cancel.every((entry) => entry.reason === 'withdrawn')).toBe(true);
+        expect(skipped.schedule).toEqual([]);
+        expect(Array.from(readReminderAlarmMap(skipped.alarms).keys())).toEqual(['task:review']);
+        await useTaskStore.getState().updateSettings({ taskReminderDefault: 'send' });
+        const sent = value(await host.planReminderAlarms({ storedAlarms: skipped.alarms, permissionGranted: true }));
+        expect(sent.schedule).toHaveLength(5);
+        expect(sent.schedule.filter((entry) => entry.key === 'task:inherit')).toHaveLength(1);
+        expect(value(await host.planReminderAlarms({ storedAlarms: sent.alarms, permissionGranted: true })).schedule).toEqual([]);
+        // A delivered base reminder that already left the alarm map is withdrawn by the same policy.
+        vi.setSystemTime(new Date('2026-09-28T11:00:01.000Z'));
+        const expired = value(await host.planReminderAlarms({ storedAlarms: sent.alarms, permissionGranted: true }));
+        await useTaskStore.getState().updateSettings({ taskReminderDefault: 'skip' });
+        const delivered = value(await host.planReminderAlarms({ storedAlarms: expired.alarms, storedState: expired.state, permissionGranted: true }));
+        expect(delivered.cancel).toContainEqual(expect.objectContaining({ key: 'task:inherit', reason: 'withdrawn' }));
+        expect(useTaskStore.getState().tasks.find((entry) => entry.id === 'inherit')?.repeatReminderMinutes).toBe(30);
+    });
+
     it('strict Snooze refuses a noncanonical UUID before creating a receipt', async () => {
         await seed(); const host = await openHost('ios'), input = snoozeRequest();
         expect(await host.commitReminderSnooze({ ...input, requestId: input.requestId.toUpperCase() })).toMatchObject(invalid);
@@ -672,6 +701,45 @@ describe('native host contract: reminders', () => {
         const digest = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true })).schedule.find((alarm) => alarm.key === 'digest:morning')!;
         expect(await host.snoozeReminder({ ...input, requestId: generateUUID(), details: digest.details })).toMatchObject(invalid);
         expect(await host.snoozeReminder({ ...input, requestId: 'x' })).toMatchObject(invalid);
+    });
+
+    it.each([
+        { platform: 'android', policy: 'skip' }, { platform: 'ios', policy: 'skip' },
+        { platform: 'android', policy: 'inherit' }, { platform: 'ios', policy: 'inherit' },
+    ] as const)('withdraws and refuses date Snoozes under $policy Skip on $platform, preserving review Snoozes', async ({ platform, policy }) => {
+        freezeClock();
+        await seed({ taskReminderDefault: 'send' }, [task({ id: 'snoozed', reminderPolicy: 'inherit', dueDate: '2026-09-28T11:00:00.000Z' })]);
+        const host = await openHost(platform);
+        const fired = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true })).schedule[0];
+        const snoozes = [];
+        for (const kind of [undefined, 'task-start', 'task-due', 'task-reminder', 'task-review']) {
+            const data = { ...(fired.details.data as Record<string, string>) };
+            if (kind) data.kind = kind;
+            else delete data.kind; // Older stored Snooze requests have no kind.
+            const alarm = value(await host.snoozeReminder({ requestId: generateUUID(), requestedAt: Date.now(), details: { ...fired.details, data } }));
+            const made = value(await host.planReminderSnooze({ storedState: null, alarm, permissionGranted: true }));
+            expect(made.schedule).toEqual([alarm]);
+            snoozes.push({ kind, alarm, made });
+        }
+        if (policy === 'skip') await useTaskStore.getState().updateTask('snoozed', { reminderPolicy: 'skip' });
+        else await useTaskStore.getState().updateSettings({ taskReminderDefault: 'skip' });
+        for (const { kind, alarm, made } of snoozes) {
+            const rebuilt = value(await host.planReminderAlarms({ storedAlarms: null, storedState: made.state, permissionGranted: true, remake: 'all' }));
+            const fresh = value(await host.planReminderSnooze({ storedState: null, alarm, permissionGranted: true }));
+            const replay = value(await host.planReminderSnooze({ storedState: made.stateAhead, alarm, permissionGranted: true }));
+            if (kind === 'task-review') {
+                expect(rebuilt.cancel).toEqual([]);
+                expect(rebuilt.schedule).toEqual([alarm]);
+                expect(fresh.schedule).toEqual([alarm]);
+                expect(replay.schedule).toEqual([alarm]);
+            } else {
+                expect(rebuilt.cancel).toEqual([{ key: alarm.key, id: alarm.id, reason: 'withdrawn' }]);
+                expect(rebuilt.schedule).toEqual([]);
+                expect(JSON.parse(rebuilt.state)[alarm.key]).toBeUndefined();
+                expect(fresh).toEqual({ schedule: [], stateAhead: null, state: null });
+                expect(replay).toEqual({ schedule: [], stateAhead: null, state: null });
+            }
+        }
     });
 
     it('keeps each Snooze it made: armed once across retries and restarts, made again after a reboot, withdrawn with its task', async () => {

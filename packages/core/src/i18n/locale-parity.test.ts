@@ -28,6 +28,7 @@ import {
     allowedEnglishMirrorKeysByLocale,
     englishResidueWords,
     hasTranslatableEnglishText,
+    hasMixedEnglishText,
     isAllowedEnglishMirrorKey,
     isAllowedEnglishResidueKey,
     missingSlashCommandTokens,
@@ -84,6 +85,12 @@ const pomodoroAlertSettingsKeys = [
 ] as const;
 
 describe('locale parity', () => {
+    it('declares the shared translations to the React Native iOS locale resolver', () => {
+        const config = JSON.parse(readFileSync(new URL('../../../../apps/mobile/app.json', import.meta.url), 'utf8'));
+        expect(config.expo.ios.infoPlist.CFBundleLocalizations.slice().sort())
+            .toEqual(SUPPORTED_LANGUAGES.map((code) => code === 'zh' ? 'zh-Hans' : code).sort());
+    });
+
     it('declares the shared translations to the native iOS locale resolver', () => {
         const plist = readFileSync(new URL('../../../../apps/ios-native/App/Info.plist', import.meta.url), 'utf8');
         const localizations = plist.match(/<key>CFBundleLocalizations<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1] ?? '';
@@ -254,7 +261,7 @@ describe('locale parity', () => {
 
     it.each(nonLatinOverrideLocales)('does not ship mixed English fragments in %s', (lang) => {
         const translations = translationsByLocale[lang];
-        const mixedEnglish = Object.keys(translations).filter((key) => hasTranslatableEnglishText(translations[key]));
+        const mixedEnglish = Object.keys(translations).filter((key) => hasMixedEnglishText(lang, key, translations[key], en[key]));
         expect(mixedEnglish).toEqual([]);
     });
 

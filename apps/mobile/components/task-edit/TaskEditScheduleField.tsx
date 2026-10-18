@@ -16,6 +16,7 @@ import {
     safeFormatDate,
     safeParseDate,
     tFallback,
+    useTaskStore,
     type RelativeStartOffsetUnit,
     type TaskDraftRecurrenceEdit,
 } from '@mindwtr/core';
@@ -72,6 +73,7 @@ export function TaskEditScheduleField({
     task,
 }: TaskEditScheduleFieldProps) {
     const [repeatReminderOptionsExpanded, setRepeatReminderOptionsExpanded] = React.useState(false);
+    const reminderSettings = useTaskStore((state) => state.settings);
     if (!draft) return null;
     const getStatusChipStyle = (active: boolean) => ([
         styles.statusChip,
@@ -172,31 +174,35 @@ export function TaskEditScheduleField({
     );
     const clearTimePart = (value?: string): string => getTaskDraftDateOnly(value, safeFormatDate);
     const projectedRecurrenceDateHint = getTaskEditorRecurrenceCalendarPreviewHint({ draft, task, t, formatDate: safeFormatDate });
-    const reminders = getTaskEditorReminders(draft, t);
+    const reminders = getTaskEditorReminders(draft, t, reminderSettings);
     const renderReminderHandoffControl = () => {
         if (fieldId !== 'dueDate' || !reminders.showSkip) return null;
-        const enabled = draft.suppressMindwtrReminders === true;
         return (
-            <TouchableOpacity
-                accessibilityRole="switch"
-                accessibilityState={{ checked: enabled }}
-                style={[
-                    styles.dateBtn,
-                    {
-                        marginTop: 8,
-                        backgroundColor: enabled ? tc.filterBg : tc.cardBg,
-                        borderColor: enabled ? tc.tint : tc.border,
-                    },
-                ]}
-                onPress={() => setDraftField('suppressMindwtrReminders', !draft.suppressMindwtrReminders)}
-            >
+            <View style={{ marginTop: 8 }}>
                 <Text style={[styles.modalLabel, { color: tc.text }]}>
-                    {tFallback(t, 'taskEdit.suppressMindwtrReminders', 'Skip reminders')}
+                    {reminders.policyLabel}
                 </Text>
+                <View style={[styles.statusContainer, { marginTop: 8 }]} accessibilityRole="radiogroup" accessibilityLabel={reminders.policyLabel}>
+                    {reminders.policyOptions.map((option) => (
+                        <TouchableOpacity
+                            key={option.value}
+                            accessibilityRole="radio"
+                            accessibilityLabel={option.label}
+                            accessibilityState={{ checked: option.selected }}
+                            style={getStatusChipStyle(option.selected)}
+                            onPress={() => setDraftField('reminderPolicy', option.value)}
+                        >
+                            <Text style={getStatusTextStyle(option.selected)}>{option.label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
                 <Text style={{ marginTop: 4, color: tc.secondaryText, fontSize: 12, lineHeight: 16 }}>
-                    {tFallback(t, 'taskEdit.suppressMindwtrRemindersHint', 'Skip start and due reminders for this task. It still appears in Focus and your lists.')}
+                    {reminders.hint}
                 </Text>
-            </TouchableOpacity>
+                {reminders.disabledHint && (
+                    <Text style={{ marginTop: 4, color: tc.secondaryText, fontSize: 12, lineHeight: 16 }}>{reminders.disabledHint}</Text>
+                )}
+            </View>
         );
     };
     const renderRepeatReminderControl = () => {

@@ -7,6 +7,7 @@ import {
     SomedaySectionUndoSaveError,
     undoSomedaySectionMove,
 } from './someday-section-move';
+import { holdSyncSave } from '../test/hold-sync-save';
 
 const flushMock = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@mindwtr/core', async (importOriginal) => ({
@@ -142,5 +143,20 @@ describe('desktop Someday section move persistence', () => {
         expect(useTaskStore.getState().tasks[0].viewSectionIds?.someday).toBeUndefined();
         expect(await undoSomedaySectionMove(move, pendingCount)).toBe(1);
         expect(flushMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('builds the move and its Undo on the rows a sync save published while each waited', async () => {
+        const batch = setTasks([task('one')]);
+        let finish = holdSyncSave(() => useTaskStore.setState({ tasks: [task('one', { viewSectionIds: { waiting: 'remote' } })] }));
+        const moving = saveSomedaySectionMove(['one'], 'books', ['one'], 'No section');
+        await finish();
+        const move = await moving;
+        expect(batch).toHaveBeenLastCalledWith([{ id: 'one', updates: { viewSectionIds: { someday: 'books', waiting: 'remote' } } }]);
+
+        finish = holdSyncSave(() => useTaskStore.setState({ tasks: [task('one', { viewSectionIds: { someday: 'books', waiting: 'later' } })] }));
+        const undoing = undoSomedaySectionMove(move);
+        await finish();
+        expect(await undoing).toBe(1);
+        expect(batch).toHaveBeenLastCalledWith([{ id: 'one', updates: { viewSectionIds: { waiting: 'later' } } }]);
     });
 });

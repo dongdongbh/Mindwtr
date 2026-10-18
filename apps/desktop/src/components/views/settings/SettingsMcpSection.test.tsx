@@ -15,7 +15,7 @@ vi.mock('../../../lib/app-log', () => ({ logInfo: mocks.log, logWarn: mocks.log 
 import { SettingsMcpSection } from './SettingsMcpSection';
 
 const off: McpServerStatus = {
-    enabled: false, running: false, allowWrite: false, port: 8722, url: null, token: null, error: null,
+    enabled: false, running: false, allowWrite: false, allowArchive: false, allowDelete: false, port: 8722, url: null, token: null, error: null,
 };
 const running: McpServerStatus = {
     ...off, enabled: true, running: true, url: 'http://127.0.0.1:8722/mcp', token: 'never-render-this-token',
@@ -55,10 +55,12 @@ describe('SettingsMcpSection', () => {
         expect(view.getByText(en['settings.mcpPrivacy'])).toBeInTheDocument();
         expect(mocks.set).not.toHaveBeenCalled();
         fireEvent.click(view.getByRole('switch'));
-        await waitFor(() => expect(mocks.set).toHaveBeenCalledWith({ enabled: true, allowWrite: false }));
+        await waitFor(() => expect(mocks.set).toHaveBeenCalledWith({ enabled: true, allowWrite: false, allowArchive: false, allowDelete: false, port: 8722 }));
         expect(view.getByRole('switch', { name: en['settings.mcpAllowWrite'] })).toHaveAttribute('aria-checked', 'false');
-        expect(view.getByRole('switch', { name: 'Allow changes' })).toBeInTheDocument();
-        expect(view.getByText('Allow connected AI clients to add, edit, complete, and delete tasks, and to add, edit, or delete projects. Off means read-only access.')).toBeInTheDocument();
+        expect(view.getByRole('switch', { name: 'Allow task and project edits' })).toBeInTheDocument();
+        expect(view.getByText(en['settings.mcpAllowWriteDesc'])).toBeInTheDocument();
+        expect(view.getByRole('button', { name: en['settings.advanced'] })).toHaveAttribute('aria-expanded', 'false');
+        expect(view.queryByRole('switch', { name: en['settings.mcpAllowDelete'] })).not.toBeInTheDocument();
     });
 
     it.each([false, true])('shows unavailable state without native reads when availability is %s', (isBrowser) => {
@@ -76,7 +78,7 @@ describe('SettingsMcpSection', () => {
         await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent(en['settings.mcpError.port_in_use']));
         expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeDisabled();
         fireEvent.click(view.getByRole('button', { name: en['common.retry'] }));
-        await waitFor(() => expect(mocks.set).toHaveBeenCalledWith({ enabled: true, allowWrite: false }));
+        await waitFor(() => expect(mocks.set).toHaveBeenCalledWith({ enabled: true, allowWrite: false, allowArchive: false, allowDelete: false, port: 8722 }));
         expect(view.queryByRole('alert')).not.toBeInTheDocument();
     });
 
@@ -94,7 +96,90 @@ describe('SettingsMcpSection', () => {
         expect(view.container).not.toHaveTextContent('fresh-token');
     });
 
-    it('starts the clipboard write during the click and supplies fresh native details later', async () => {
+    it('copies Codex TOML from fresh status with a custom port without exposing credentials', async () => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopyCodex'] })).toBeEnabled());
+        mocks.get.mockResolvedValue({ ...running, port: 19345, url: 'http://127.0.0.1:19345/mcp', token: 'fresh-codex-token' });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopyCodex'] }));
+        await waitFor(() => expect(mocks.copy).toHaveBeenCalledExactlyOnceWith(
+            '[mcp_servers.mindwtr]\nurl = "http://127.0.0.1:19345/mcp"\n\n[mcp_servers.mindwtr.http_headers]\nAuthorization = "Bearer fresh-codex-token"\n',
+        ));
+        expect(view.container).not.toHaveTextContent('fresh-codex-token');
+        expect(JSON.stringify(mocks.log.mock.calls)).not.toContain('fresh-codex-token');
+        expect(mocks.log.mock.calls[0][1].extra.releaseCheck).toBe('v1.3.7/mcp-codex-copy');
+    });
+
+    it('refuses Codex copy when fresh URL and port disagree', async () => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopyCodex'] })).toBeEnabled());
+        mocks.get.mockResolvedValue({ ...running, port: 19345 });
+        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopyCodex'] }));
+        await waitFor(() => expect(view.getByText(en['settings.mcpCopyFailed'])).toBeInTheDocument());
+        expect(mocks.copy).not.toHaveBeenCalled();
+    });
+
+    it.each(['enable', 'rotate', 'retry'])('preserves independent grants and custom port on %s', async (action) => {
+        const stored = {
+            ...running, enabled: action !== 'enable', running: action !== 'retry',
+            allowArchive: true, allowDelete: true, port: 19345, url: 'http://127.0.0.1:19345/mcp',
+            error: action === 'retry' ? 'port_in_use' as const : null,
+        };
+        mocks.get.mockResolvedValue(stored);
+        mocks.set.mockResolvedValue({ ...stored, enabled: true, running: true, error: null });
+        const view = openSection();
+        const target = action === 'enable'
+            ? view.getByRole('switch', { name: en['settings.mcpEnable'] })
+            : await view.findByRole('button', { name: en[action === 'rotate' ? 'settings.mcpRotate' : 'common.retry'] });
+        await waitFor(() => expect(target).toBeEnabled());
+        fireEvent.click(target);
+        await waitFor(() => expect(mocks.set).toHaveBeenCalledExactlyOnceWith({
+            enabled: true, allowWrite: false, allowArchive: true, allowDelete: true, port: 19345,
+            ...(action === 'rotate' ? { regenerateToken: true } : {}),
+        }));
+    });
+
+    it('changes each grant independently and saves the port only on explicit submit', async () => {
+        mocks.get.mockResolvedValue({ ...running, allowArchive: true, allowDelete: true, port: 19345, url: 'http://127.0.0.1:19345/mcp' });
+        mocks.set.mockImplementation(async (config) => ({ ...running, ...config, url: `http://127.0.0.1:${config.port}/mcp` }));
+        const view = openSection();
+        const advanced = await view.findByRole('button', { name: en['settings.advanced'] });
+        fireEvent.click(advanced);
+        fireEvent.click(view.getByRole('switch', { name: en['settings.mcpAllowArchive'] }));
+        await waitFor(() => expect(mocks.set).toHaveBeenLastCalledWith({
+            enabled: true, allowWrite: false, allowArchive: false, allowDelete: true, port: 19345,
+        }));
+        await waitFor(() => expect(view.getByRole('switch', { name: en['settings.mcpAllowDelete'] })).toBeEnabled());
+        fireEvent.click(view.getByRole('switch', { name: en['settings.mcpAllowDelete'] }));
+        await waitFor(() => expect(mocks.set).toHaveBeenLastCalledWith({
+            enabled: true, allowWrite: false, allowArchive: false, allowDelete: false, port: 19345,
+        }));
+        await waitFor(() => expect(view.getByRole('switch', { name: en['settings.mcpAllowWrite'] })).toBeEnabled());
+        fireEvent.click(view.getByRole('switch', { name: en['settings.mcpAllowWrite'] }));
+        await waitFor(() => expect(mocks.set).toHaveBeenLastCalledWith({
+            enabled: true, allowWrite: true, allowArchive: false, allowDelete: false, port: 19345,
+        }));
+        await waitFor(() => expect(view.getByLabelText(en['settings.mcpPort'])).toBeEnabled());
+        fireEvent.change(view.getByLabelText(en['settings.mcpPort']), { target: { value: '23456' } });
+        expect(mocks.set).toHaveBeenCalledTimes(3);
+        fireEvent.click(view.getByRole('button', { name: en['common.save'] }));
+        await waitFor(() => expect(mocks.set).toHaveBeenLastCalledWith({
+            enabled: true, allowWrite: true, allowArchive: false, allowDelete: false, port: 23456,
+        }));
+    });
+
+    it.each(['', '1023', '65536', '19345.5'])('rejects invalid port input %s without invoking native config', async (value) => {
+        mocks.get.mockResolvedValue(running);
+        const view = openSection();
+        fireEvent.click(await view.findByRole('button', { name: en['settings.advanced'] }));
+        fireEvent.change(view.getByLabelText(en['settings.mcpPort']), { target: { value } });
+        fireEvent.click(view.getByRole('button', { name: en['common.save'] }));
+        expect(view.getByRole('alert')).toHaveTextContent(en['settings.mcpError.invalid_port']);
+        expect(mocks.set).not.toHaveBeenCalled();
+    });
+
+    it.each(['json', 'codex'])('starts %s clipboard write during the click and supplies fresh native details later', async (format) => {
         mocks.get.mockResolvedValue(running);
         const view = openSection();
         await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeEnabled());
@@ -106,7 +191,7 @@ describe('SettingsMcpSection', () => {
         });
         mocks.write.mockImplementation(() => data.then(() => undefined));
         vi.stubGlobal('navigator', { clipboard: { write: mocks.write, writeText: mocks.copy } });
-        fireEvent.click(view.getByRole('button', { name: en['settings.mcpCopy'] }));
+        fireEvent.click(view.getByRole('button', { name: en[format === 'json' ? 'settings.mcpCopy' : 'settings.mcpCopyCodex'] }));
         expect(mocks.write).toHaveBeenCalledTimes(1);
         expect(view.queryByText(en['settings.mcpCopied'])).not.toBeInTheDocument();
         await act(async () => resolve({ ...running, token: 'fresh-deferred-token' }));
@@ -117,7 +202,8 @@ describe('SettingsMcpSection', () => {
             reader.onload = () => resolve(String(reader.result));
             reader.readAsText(blob);
         });
-        expect(JSON.parse(text).mcpServers.mindwtr.headers.Authorization).toBe('Bearer fresh-deferred-token');
+        if (format === 'json') expect(JSON.parse(text).mcpServers.mindwtr.headers.Authorization).toBe('Bearer fresh-deferred-token');
+        else expect(text).toContain('Authorization = "Bearer fresh-deferred-token"');
         expect(mocks.copy).not.toHaveBeenCalled();
         expect(view.getByText(en['settings.mcpCopied'])).toBeInTheDocument();
         expect(view.container).not.toHaveTextContent('fresh-deferred-token');
@@ -265,7 +351,7 @@ describe('SettingsMcpSection', () => {
         await waitFor(() => expect(view.getByRole('button', { name: en['settings.mcpRotate'] })).toBeEnabled());
         expect(view.getByText(en['settings.mcpRotateHint'])).toBeInTheDocument();
         fireEvent.click(view.getByRole('button', { name: en['settings.mcpRotate'] }));
-        expect(mocks.set).toHaveBeenCalledExactlyOnceWith({ enabled: true, allowWrite: false, regenerateToken: true });
+        expect(mocks.set).toHaveBeenCalledExactlyOnceWith({ enabled: true, allowWrite: false, allowArchive: false, allowDelete: false, port: 8722, regenerateToken: true });
         expect(view.getByRole('switch', { name: en['settings.mcpEnable'] })).toBeDisabled();
         expect(view.getByRole('button', { name: en['settings.mcpCopy'] })).toBeDisabled();
         await act(async () => resolve({ ...running, token: 'rotated-token' }));

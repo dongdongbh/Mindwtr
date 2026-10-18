@@ -28,6 +28,7 @@ import {
     getPersonOptionNames,
     normalizeTimeSpentMinutes,
     useTaskStore,
+    updateTaskFromLatest,
     areDraftAttachmentsDirty,
     isTaskDraftDirty,
     type TaskDraftSetter,
@@ -441,13 +442,19 @@ export const TaskItem = memo(function TaskItem({
     }, [effectiveReadOnly, isEditing, selectionMode, toggleTaskFocus]);
     const handleToggleChecklistItem = useCallback((index: number) => {
         if (effectiveReadOnly) return;
-        const checklist = task.checklist || [];
-        if (!checklist[index]) return;
-        const nextChecklist = checklist.map((item, i) =>
-            i === index ? { ...item, isCompleted: !item.isCompleted } : item
-        );
-        void updateTask(task.id, { checklist: nextChecklist });
-    }, [effectiveReadOnly, task, updateTask]);
+        const shown = task.checklist?.[index];
+        if (!shown?.id) return;
+        // Set the item by id on the latest row to the opposite of what the row showed (as mobile does), so an item a
+        // sync save added meanwhile is kept and a tick another device made is not undone by a flip.
+        const isCompleted = !shown.isCompleted;
+        void updateTaskFromLatest(task.id, (latest) => {
+            const checklist = latest.checklist || [];
+            if (!checklist.some((item) => item.id === shown.id)) return null;
+            return {
+                checklist: checklist.map((item) => (item.id === shown.id ? { ...item, isCompleted } : item)),
+            };
+        });
+    }, [effectiveReadOnly, task.checklist, task.id]);
     const recurrence = useTaskItemRecurrence({
         task,
         draft,
@@ -701,14 +708,12 @@ export const TaskItem = memo(function TaskItem({
         openCustomRecurrence,
         createAssignedToPerson,
         requestBackdatedComplete: canCompleteFromEditor ? requestEditorBackdatedComplete : undefined,
-        updateTask,
         resetTaskChecklist,
     }), [
         openCustomRecurrence,
         createAssignedToPerson,
         canCompleteFromEditor,
         requestEditorBackdatedComplete,
-        updateTask,
         resetTaskChecklist,
     ]);
 
@@ -805,7 +810,6 @@ export const TaskItem = memo(function TaskItem({
         showToast,
         t,
         task,
-        updateTask,
         beginAttachmentSave,
         cancelAttachmentSaveBeforeStoreUpdate,
         settlePersistedAttachmentSave,
@@ -1584,6 +1588,7 @@ export const TaskItem = memo(function TaskItem({
     }, [handleEditorCancel, isEditing, task.id]);
     const renderEditor = () => (
         <TaskItemEditor
+            isModalEditor={isModalEditor}
             t={t}
             draft={draft}
             setField={setField}

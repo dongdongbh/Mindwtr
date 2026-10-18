@@ -1129,6 +1129,15 @@ API_AVAILABLE(ios(10.0)) {
     expect(output).toContain('@"has_complete_action": (details[@"has_complete_action"] ?: @NO)');
     expect(output).toContain('@"has_complete_action": ([contentInfo.userInfo objectForKey:@"has_complete_action"] ?: @NO)');
     expect(output).not.toContain('@"has_complete_action": details[@"has_complete_action"],');
+    const dismissAction = output.slice(output.indexOf('UNNotificationAction* stopAction'), output.indexOf('UNNotificationCategory* customCategory'));
+    expect(dismissAction).toContain('actionWithIdentifier:@"DISMISS_ACTION"');
+    expect(dismissAction).toContain('options:UNNotificationActionOptionNone');
+    expect(dismissAction).not.toContain('UNNotificationActionOptionForeground');
+    // A previously prebuilt/complete-action-patched installation must gain the
+    // new Dismiss behavior too, and subsequent prebuilds must not change it.
+    const previouslyPatched = output.replace(dismissAction, dismissAction.replace('UNNotificationActionOptionNone', 'UNNotificationActionOptionForeground'));
+    expect(applyAlarmIosCompleteActionPatchToSource(previouslyPatched)).toBe(output);
+    expect(applyAlarmIosCompleteActionPatchToSource(output)).toBe(output);
   });
 
   it('declares the cold-start notification response overload in the maintained header', () => {

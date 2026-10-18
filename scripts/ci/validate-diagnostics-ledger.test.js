@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "../..");
@@ -10,16 +12,19 @@ const sourceExtension = /\.(?:[cm]?[jt]sx?|rs|swift|kt|kts|java)$/;
 
 async function collectSources(directory) {
   const sources = [];
-  const entries = (await readdir(directory, { withFileTypes: true }))
-    .sort((left, right) => left.name.localeCompare(right.name));
-  for (const entry of entries) {
-    const filename = path.join(directory, entry.name);
-    if (entry.isDirectory() && !skippedDirectories.has(entry.name)) {
-      sources.push(...await collectSources(filename));
-    } else if (entry.isFile() && sourceExtension.test(entry.name)
-      && !/\.(?:test|spec)\.[^.]+$/.test(entry.name)) {
-      const source = await readFile(filename, "utf8");
-      sources.push({ file: path.relative(root, filename), source });
+  // Ignore generated bundles: stale local assets must not satisfy source log coverage.
+  const filenames = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."],
+    { cwd: directory, encoding: "utf8" }).split("\0").filter(Boolean).sort();
+  for (const filename of filenames) {
+    if (filename.split("/").some((part) => skippedDirectories.has(part))) continue;
+    if (sourceExtension.test(filename) && !/\.(?:test|spec)\.[^.]+$/.test(filename)) {
+      const absolute = path.join(directory, filename);
+      try {
+        const source = await readFile(absolute, "utf8");
+        sources.push({ file: path.relative(root, absolute), source });
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
     }
   }
   return sources;
@@ -38,7 +43,7 @@ function collectCodeSlugs({ file, source }) {
   }
   // A conditional value (`releaseCheck: queued ? 'a' : 'b'`) emits either literal.
   for (const match of source.matchAll(
-    /\breleaseCheck\s*:\s*[^,{}?\r\n]+\?\s*(['"])([^'"\r\n]*)\1\s*:\s*(['"])([^'"\r\n]*)\3/g,
+    /\breleaseCheck\s*:\s*[^,{}?;]+\?\s*(['"])([^'"\r\n]*)\1\s*:\s*(['"])([^'"\r\n]*)\3/g,
   )) {
     sites.push({ file, slug: match[2] }, { file, slug: match[4] });
   }
@@ -129,6 +134,36 @@ const ledger = parseLedger(ledgerSource);
 const topVersion = ledgerSource.match(/^## (v\d+\.\d+\.\d+)\b/m)?.[1];
 
 describe("release diagnostics ledger", () => {
+  it("ignores generated assets while scanning tracked and new source files", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "diagnostics-sources-"));
+    try {
+      execFileSync("git", ["init", "--quiet"], { cwd: directory });
+      await writeFile(path.join(directory, ".gitignore"), "assets/\n");
+      await mkdir(path.join(directory, "assets"));
+      await writeFile(path.join(directory, "assets/core-host.js"), "releaseCheck: 'v1.3.7/stale'");
+      await writeFile(path.join(directory, "tracked.ts"), "releaseCheck: 'v1.3.7/tracked'");
+      await writeFile(path.join(directory, "deleted.ts"), "releaseCheck: 'v1.3.7/deleted'");
+      execFileSync("git", ["add", "tracked.ts", "deleted.ts"], { cwd: directory });
+      await rm(path.join(directory, "deleted.ts"));
+      await writeFile(path.join(directory, "new.ts"), "releaseCheck: 'v1.3.7/new'");
+      expect((await collectSources(directory)).flatMap(collectCodeSlugs).map(({ slug }) => slug))
+        .toEqual(["v1.3.7/new", "v1.3.7/tracked"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves conditional releaseCheck values across line breaks", () => {
+    const file = "packages/core/src/store-projects/project-to-section-actions.ts";
+    expect(collectCodeSlugs({ file, source: `
+      logInfo('converted', { context: { releaseCheck: command.source.before.isSequential
+        ? 'v1.3.7/sequential-project-to-section' : 'v1.3.4/project-to-section' } });
+    ` })).toEqual([
+      { file, slug: "v1.3.7/sequential-project-to-section" },
+      { file, slug: "v1.3.4/project-to-section" },
+    ]);
+  });
+
   it("resolves constant-valued releaseCheck sites in the same source file", () => {
     const file = "apps/example.ts";
     expect(collectCodeSlugs({ file, source: `

@@ -176,22 +176,16 @@ export const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: 'center',
   },
-  noteLabel: {
-    marginTop: 10,
-    fontSize: 12,
-    fontWeight: '600',
-  },
   noteInput: {
-    marginTop: 6,
+    marginTop: 8,
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
-    minHeight: 64,
-    // A long note scrolls inside the input instead of pushing the pickers
-    // below it out of the scroll area's reachable height.
-    maxHeight: 120,
+    minHeight: 44,
+    // Keep capture compact; longer descriptions scroll inside the input.
+    maxHeight: 96,
   },
   optionsRow: {
     marginTop: 10,

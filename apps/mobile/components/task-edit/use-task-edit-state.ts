@@ -6,9 +6,10 @@ import {
     collectFocusEligibilityTasks,
     getFocusStarBlockedText,
     generateUUID,
-    mergeTaskDraftAttachments,
+    saveTaskDraftOntoLatest,
     normalizeFocusTaskLimit,
     resolveTaskEditorFocusStar,
+    runStoreCommand,
     type Attachment,
     type AttachmentDraftSettlementInput,
     type MarkdownSelection,
@@ -58,6 +59,8 @@ type TaskEditActivitySession = {
     taskEditDraft: TaskEditDraft;
     taskId: string;
     titleDraft: string;
+    /** The task the draft was opened or last saved on: its save's merge base (absent in older snapshots). */
+    baseTask?: Task;
 };
 
 const isTaskEditActivityInputRecovery = (value: unknown): value is TaskEditActivityInputRecovery => {
@@ -90,7 +93,9 @@ const isTaskEditActivitySession = (value: unknown): value is TaskEditActivitySes
         && typeof editDraft.draft === 'object'
         && editDraft.draft !== null
         && (editDraft.checklist === undefined || Array.isArray(editDraft.checklist))
-        && (editDraft.attachments === undefined || Array.isArray(editDraft.attachments));
+        && (editDraft.attachments === undefined || Array.isArray(editDraft.attachments))
+        && (snapshot.baseTask === undefined || (!!snapshot.baseTask && typeof snapshot.baseTask === 'object'
+            && snapshot.baseTask.id === snapshot.taskId));
 };
 
 export type SetTaskEditDraftValue<T> = (
@@ -291,8 +296,10 @@ export function useTaskEditState({
         const snapshot = taskEditActivitySessionRef.current;
         if (!snapshot) return null;
         const activeInput = activityInputRef.current;
+        const baseTask = baseTaskRef.current;
         return {
             ...snapshot,
+            ...(baseTask?.id === snapshot.taskId ? { baseTask } : {}),
             activeInput: activeInput ? {
                 field: activeInput.field,
                 selection: { ...activeInput.selection },
@@ -303,7 +310,9 @@ export function useTaskEditState({
         if (!visible || !recoverableLiveTask || snapshot.taskId !== recoverableLiveTask.id) return;
         taskEditDraftRef.current = snapshot.taskEditDraft;
         setTaskEditDraftState(snapshot.taskEditDraft);
-        baseTaskRef.current = recoverableLiveTask;
+        // The draft's own base, not the live task: a sync that landed while the activity was recreated must read
+        // as another device's change, or the save would put the draft's copy back over it.
+        baseTaskRef.current = snapshot.baseTask?.id === recoverableLiveTask.id ? snapshot.baseTask : recoverableLiveTask;
         attachmentDraftSettledRef.current = false;
         isDirtyRef.current = snapshot.isDirty;
         titleDraftRef.current = snapshot.titleDraft;
@@ -436,23 +445,32 @@ export function useTaskEditState({
             title: titleDraftRef.current,
             description: descriptionDraftRef.current,
         });
-        // The draft's attachments go over the task as stored now, not the copy the editor
-        // opened: a cloudKey, new content or removal sync recorded meanwhile stays.
-        // The list Save writes: the file cleanup after Save settles against it.
+        // A save with a list field (tags, contexts, checklist, attachments) goes over the task as stored when
+        // the write is admitted, not the copy the editor opened: the patch is merged field by field onto the
+        // latest row (base: the task the editor opened or last saved on), so a tag, item, cloudKey or removal
+        // another device synced meanwhile stays. One store command merges and writes, so a sync save admitted
+        // first is merged too. The list Save writes: the file cleanup after Save settles against it.
         let savedAttachments = saveDraftState.attachments ?? currentTask.attachments;
-        const storedTask = updates?.attachments ? useTaskStore.getState()._tasksById?.get(currentTask.id) : undefined;
-        if (updates?.attachments && storedTask) {
-            const draftAttachments = updates.attachments;
-            const merged = mergeTaskDraftAttachments(storedTask.attachments ?? [], currentTask.attachments ?? [], draftAttachments);
-            updates = { ...updates, attachments: merged };
-            savedAttachments = merged;
-            if (JSON.stringify(merged) !== JSON.stringify(draftAttachments)) {
-                void logInfo('Editor attachment save kept a newer stored change', {
-                    scope: 'task-edit',
-                    extra: { releaseCheck: 'v1.3.4/editor-attachment-save-merge', outcome: 'merged' },
-                });
-            }
-        }
+        // Only a list save waits for admission; any other save reaches onSave in this tick, so the modal closes at once.
+        const hasListField = (patch: Partial<Task>) => (
+            'tags' in patch || 'contexts' in patch || 'checklist' in patch || 'attachments' in patch
+        );
+        const writeMerged = (patch: Partial<Task>) => (!hasListField(patch) ? writePatch(currentTask.id, patch)
+            : saveTaskDraftOntoLatest(currentTask.id, currentTask, patch, {
+                read: (taskId) => useTaskStore.getState()._tasksById?.get(taskId),
+                write: (taskId, merged) => {
+                    if (patch.attachments) {
+                        savedAttachments = merged.attachments ?? savedAttachments;
+                        if (JSON.stringify(merged.attachments) !== JSON.stringify(patch.attachments)) {
+                            void logInfo('Editor attachment save kept a newer stored change', {
+                                scope: 'task-edit',
+                                extra: { releaseCheck: 'v1.3.4/editor-attachment-save-merge', outcome: 'merged' },
+                            });
+                        }
+                    }
+                    return writePatch(taskId, merged);
+                },
+            }));
         if (mode === 'cancel') {
             if (!updates) return false;
             updates = {
@@ -514,7 +532,7 @@ export function useTaskEditState({
             saveAwaitingDurabilityRef.current = wasAwaitingDurability
                 || attachmentSaveRequiresDurability
                 || mode === 'cancel';
-            const saved = await Promise.resolve(writePatch(currentTask.id, updates));
+            const saved = await writeMerged(updates);
             if (!saved) {
                 saveAwaitingDurabilityRef.current = wasAwaitingDurability;
                 return false;

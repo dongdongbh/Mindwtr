@@ -808,7 +808,7 @@ describe('desktop sync-service runtime', () => {
         });
     });
 
-    it('clears the pending remote marker when local edits abort after remote write succeeds', async () => {
+    it('keeps the pending remote marker when local edits abort after remote write succeeds', async () => {
         const syncServiceModule = await syncServiceModulePromise;
         const pendingAt = '2026-01-01T00:00:00.000Z';
         invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -840,7 +840,6 @@ describe('desktop sync-service runtime', () => {
         performSyncCycleMock.mockImplementation(async (io: {
             writeLocal: (data: AppData) => Promise<void>;
             writeRemote: (data: AppData) => Promise<void>;
-            clearPendingRemoteWriteAfterLocalAbort?: (pendingAt: string) => Promise<void>;
         }) => {
             const pendingData: AppData = {
                 ...structuredClone(syncData),
@@ -858,26 +857,22 @@ describe('desktop sync-service runtime', () => {
                 lastDataChangeAt: 2,
             };
             getInMemoryAppDataSnapshotMock.mockReturnValue(editedAfterRemote);
-            try {
-                await io.writeLocal({
-                    ...pendingData,
-                    settings: {},
-                });
-            } catch (error) {
-                await io.clearPendingRemoteWriteAfterLocalAbort?.(pendingAt);
-                throw error;
-            }
+            await io.writeLocal({
+                ...pendingData,
+                settings: {},
+            });
             throw new Error('Expected final local write to abort');
         });
 
         const result = await syncServiceModule.SyncService.performSync();
         const saveDataCalls = invokeMock.mock.calls.filter(([command]) => command === 'save_data');
-        const clearedData = saveDataCalls[saveDataCalls.length - 1]?.[1]?.data as AppData | undefined;
+        const savedData = saveDataCalls[saveDataCalls.length - 1]?.[1]?.data as AppData | undefined;
 
+        // The refused final write saves nothing: the marker stays for the follow-up cycle, and the
+        // edit is the store's own to save.
         expect(result).toEqual({ success: true, skipped: 'requeued' });
-        expect(saveDataCalls).toHaveLength(2);
-        expect(clearedData?.settings.pendingRemoteWriteAt).toBeUndefined();
-        expect(clearedData?.tasks[0]?.title).toBe('Edited after remote write');
+        expect(saveDataCalls).toHaveLength(1);
+        expect(savedData?.settings.pendingRemoteWriteAt).toBe(pendingAt);
     });
 
     it('uses native Tauri commands for self-hosted Cloud data sync on desktop', async () => {

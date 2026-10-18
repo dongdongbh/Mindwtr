@@ -12,6 +12,7 @@ import {
 import { canonicalizeStringMapForComparison } from './sync-signatures';
 import { computeRelativeStartTime } from './task-relative-start';
 import { isTaskActionable } from './task-status';
+import { getTaskReminderPolicy } from './task-reminder-policy';
 import { logInfo } from './logger';
 import type {
     Attachment,
@@ -62,6 +63,7 @@ export type TaskDraft = {
     assignedTo: string;
     reviewAt: string;
     repeatReminderMinutes: number | undefined;
+    reminderPolicy: NonNullable<Task['reminderPolicy']>;
     suppressMindwtrReminders: boolean;
     /** Editor-session data, retained by spread and JSON recovery; never a Task field. */
     dateInputBaseline?: TaskDraftDateInputBaseline;
@@ -240,6 +242,10 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     suppressMindwtrReminders: {
         fromTask: (task) => task.suppressMindwtrReminders === true,
         isDirty: (value, task) => value !== (task.suppressMindwtrReminders === true),
+        onSet: (draft) => ({ ...draft, reminderPolicy: draft.suppressMindwtrReminders ? 'skip' : 'send' }),
+    },
+    reminderPolicy: {
+        fromTask: getTaskReminderPolicy,
     },
 };
 
@@ -269,7 +275,7 @@ export function setTaskDraftField<K extends TaskDraftField>(
     field: K,
     value: TaskDraft[K],
 ): TaskDraft {
-    if (draft[field] === value) return draft;
+    if (draft[field] === value && !(field === 'suppressMindwtrReminders' && draft.reminderPolicy === 'inherit')) return draft;
     const next = { ...draft, [field]: value };
     const spec = TASK_DRAFT_FIELDS[field] as FieldSpec<K>;
     return spec.onSet ? spec.onSet(next) : next;
@@ -406,7 +412,8 @@ export function taskDraftToUpdatePatch(
         assignedTo: draft.assignedTo.trim() || undefined,
         reviewAt: serializeDraftDate(draft, task, 'reviewAt'),
         repeatReminderMinutes: draft.repeatReminderMinutes || undefined,
-        suppressMindwtrReminders: draft.suppressMindwtrReminders ? true : undefined,
+        ...(task.reminderPolicy !== undefined || draft.reminderPolicy !== getTaskReminderPolicy(task)
+            ? { reminderPolicy: draft.reminderPolicy } : {}),
         ...attachmentsPatch,
     };
 }

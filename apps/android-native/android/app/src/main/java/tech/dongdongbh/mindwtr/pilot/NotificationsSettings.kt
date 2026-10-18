@@ -88,6 +88,7 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
 
     Card {
         Toggle(reminders.getJSONObject("enable"), false)
+        Pressable(reminders.getJSONObject("taskDefault")) { model.menu.keepDialog(JSONObject().put("kind", "settingsPicker").put("picker", "taskReminderDefault")) }
         Toggle(reminders.getJSONObject("startReminders"), true)
         Toggle(reminders.getJSONObject("dueReminders"), true)
         // RN's exact-alarm row while a notification feature is on: shown only while Android 12+ denies exact alarms, read again on

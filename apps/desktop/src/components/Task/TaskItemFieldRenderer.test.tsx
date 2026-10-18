@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { createTaskDraft, setTaskDraftField, taskDraftToUpdatePatch, useTaskStore, type Task, type TaskDraft } from '@mindwtr/core';
 
@@ -9,6 +9,7 @@ import {
     type TaskEditorOptionLists,
 } from './TaskItemFieldRenderer';
 import { LanguageProvider } from '../../contexts/language-context';
+import { holdSyncSave } from '../../test/hold-sync-save';
 
 const audioMocks = vi.hoisted(() => ({
     startAudioCapture: vi.fn(),
@@ -108,7 +109,7 @@ const t = (key: string) => {
         'taskEdit.remindersSummaryOn': 'Reminders on',
         'taskEdit.suppressMindwtrReminders': 'Skip reminders',
         'taskEdit.suppressMindwtrRemindersHint': 'Skip start and due reminders for this task.',
-        'taskEdit.suppressMindwtrRemindersViewValue': 'Mindwtr reminders off',
+        'taskEdit.suppressMindwtrRemindersViewValue': 'Start/due reminders: Skip',
         'taskEdit.checklist': 'Checklist',
         'taskEdit.tab.list': 'List',
         'attachments.title': 'Attachments',
@@ -224,7 +225,6 @@ const createProps = (overrides: FixtureOverrides = {}): Omit<RendererProps, 'fie
         actions: {
             openCustomRecurrence: vi.fn(),
             createAssignedToPerson: vi.fn(),
-            updateTask: vi.fn(),
             resetTaskChecklist: vi.fn(),
             ...overrides.actions,
         },
@@ -477,6 +477,23 @@ describe('TaskItemFieldRenderer description dictation', () => {
         });
     });
 
+    it('appends the kept recording to the attachments a sync save published while the write waited', async () => {
+        audioMocks.processAudioCapture.mockRejectedValue(new Error('Whisper model not found'));
+        const file = (id: string) => ({
+            id, kind: 'file' as const, title: id, uri: `/data/attachments/${id}.pdf`,
+            createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-18T00:00:00.000Z',
+        });
+        const stored: Task = { ...baseTask, rev: 1, attachments: [file('A')] };
+        act(() => useTaskStore.setState({ _allTasks: [stored], tasks: [stored] }));
+
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{ ...stored, rev: 3, attachments: [file('A'), file('B')] }] }));
+        const { capture } = await dictate({ task: stored });
+        await act(finish);
+
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get(stored.id)?.attachments?.map((item) => item.uri))
+            .toEqual(['/data/attachments/A.pdf', '/data/attachments/B.pdf', capture.path]));
+    });
+
     it('stays in the transcribing state until the kept attachment is written', async () => {
         audioMocks.processAudioCapture.mockRejectedValue(new Error('Whisper model not found'));
         let releaseWrite!: () => void;
@@ -708,16 +725,16 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
             />
         );
 
-        // Resting state: no Skip reminders checkbox, no repeat chips.
-        expect(queryByRole('checkbox')).toBeNull();
+        // Resting state: no policy selector or repeat chips.
+        expect(queryByRole('combobox', { name: 'Start/due reminders' })).toBeNull();
         expect(queryByRole('group', { name: 'Repeat reminder' })).toBeNull();
-        const summaryRow = getByRole('button', { name: 'Reminders on · Repeat reminder: Off' });
+        const summaryRow = getByRole('button', { name: 'Start/due reminders: Send · Repeat reminder: Off' });
         expect(summaryRow).toHaveAttribute('aria-expanded', 'false');
 
         fireEvent.click(summaryRow);
 
         expect(summaryRow).toHaveAttribute('aria-expanded', 'true');
-        expect(queryByRole('checkbox')).not.toBeNull();
+        expect(queryByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
         fireEvent.click(getByRole('button', { name: '10 min' }));
 
         expect(setField).toHaveBeenCalledWith('repeatReminderMinutes', 10);
@@ -731,7 +748,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
             />
         );
 
-        expect(getByRole('button', { name: 'Reminders on · Repeat reminder: Every 10 min' })).toHaveAttribute('aria-expanded', 'false');
+        expect(getByRole('button', { name: 'Start/due reminders: Send · Repeat reminder: Every 10 min' })).toHaveAttribute('aria-expanded', 'false');
     });
 
     it('leaves the summary at rest when a stored repeat interval is out of reach', () => {
@@ -741,12 +758,12 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
             <TaskItemFieldRenderer
                 fieldId="dueDate"
                 {...createProps({
-                    draft: { startTime: '2026-04-19T09:30', dueDate: '2026-04-19', repeatReminderMinutes: 10 },
+                    draft: { startTime: '2026-04-19T09:30', dueDate: '2026-04-19', repeatReminderMinutes: 10, reminderPolicy: 'inherit' },
                 })}
             />
         );
 
-        const summaryRow = getByRole('button', { name: 'Reminders on' });
+        const summaryRow = getByRole('button', { name: 'Start/due reminders: Use default (Send)' });
         expect(summaryRow.className).not.toContain('border-primary/60');
     });
 
@@ -754,13 +771,13 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         const { getByRole, queryByRole } = render(
             <TaskItemFieldRenderer
                 fieldId="dueDate"
-                {...createProps({ draft: { dueDate: '2026-04-19T11:45', suppressMindwtrReminders: true } })}
+                {...createProps({ draft: { dueDate: '2026-04-19T11:45', suppressMindwtrReminders: true, reminderPolicy: 'skip' } })}
             />
         );
 
-        expect(getByRole('button', { name: 'Mindwtr reminders off' })).toBeInTheDocument();
+        expect(getByRole('button', { name: 'Start/due reminders: Skip' })).toBeInTheDocument();
         // Repeat is meaningless while reminders are skipped, so it stays out of both states.
-        fireEvent.click(getByRole('button', { name: 'Mindwtr reminders off' }));
+        fireEvent.click(getByRole('button', { name: 'Start/due reminders: Skip' }));
         expect(queryByRole('group', { name: 'Repeat reminder' })).toBeNull();
     });
 
@@ -1872,42 +1889,62 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
     });
 });
 
-describe('TaskItemFieldRenderer skip-reminders toggle', () => {
+describe('TaskItemFieldRenderer reminder policy', () => {
     afterEach(cleanup);
 
     const timedTask: Task = { ...baseTask, dueDate: '2026-04-19T11:45' };
 
-    /** The checkbox now lives behind the collapsed reminder summary line. */
+    /** The selector lives behind the collapsed reminder summary line. */
     const openReminders = (getByRole: ReturnType<typeof render>['getByRole']) => {
-        fireEvent.click(getByRole('button', { name: /^(Reminders on|Mindwtr reminders off)/ }));
+        fireEvent.click(getByRole('button', { name: /^Start\/due reminders:/ }));
     };
 
-    it('reflects the persisted suppressMindwtrReminders state and toggles it (#885)', () => {
+    it('reflects the explicit legacy Send policy and lets it change to Skip', () => {
         const { getByRole } = render(
             <DraftFieldHarness fieldId="dueDate" initialDraft={{ dueDate: '2026-04-19T11:45' }} />
         );
 
         openReminders(getByRole);
-        const toggle = getByRole('checkbox') as HTMLInputElement;
-        // Off by default: the field is absent on a fresh task.
-        expect(toggle.checked).toBe(false);
+        const toggle = getByRole('combobox', { name: 'Start/due reminders' }) as HTMLSelectElement;
+        // A saved legacy task without a policy remains explicit Send.
+        expect(toggle.value).toBe('send');
 
-        fireEvent.click(toggle);
-        // Round-trip: the draft update re-renders the checkbox as checked.
-        expect((getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+        fireEvent.change(toggle, { target: { value: 'skip' } });
+        expect((getByRole('combobox', { name: 'Start/due reminders' }) as HTMLSelectElement).value).toBe('skip');
+    });
+
+    it('shows the current inherited effect and explains a disabled device master', () => {
+        const previous = useTaskStore.getState().settings;
+        useTaskStore.setState({ settings: { ...previous, taskReminderDefault: 'skip', notificationsEnabled: false } });
+        const setField = vi.fn();
+        const { getByRole, getByText, queryByRole } = render(
+            <TaskItemFieldRenderer fieldId="dueDate" {...createProps({
+                draft: { dueDate: '2026-04-19T11:45', reminderPolicy: 'inherit', repeatReminderMinutes: 15 }, setField,
+            })} />
+        );
+        openReminders(getByRole);
+        expect(getByRole('option', { name: 'Use default (Skip)' })).toBeInTheDocument();
+        expect(getByRole('combobox', { name: 'Start/due reminders' })).toHaveValue('inherit');
+        expect(getByText(/turned off in Notifications/)).toBeInTheDocument();
+        expect(getByText(/explicit time/)).toBeInTheDocument();
+        expect(queryByRole('group', { name: 'Repeat reminder' })).toBeNull();
+        fireEvent.change(getByRole('combobox', { name: 'Start/due reminders' }), { target: { value: 'send' } });
+        expect(setField).toHaveBeenCalledWith('reminderPolicy', 'send');
+        expect(setField).toHaveBeenCalledTimes(1);
+        useTaskStore.setState({ settings: previous });
     });
 
     it('stays hidden for a date-only due date until a suppressible time exists', () => {
         const { queryByRole, getByRole, rerender } = render(
             <TaskItemFieldRenderer fieldId="dueDate" {...createProps({ draft: { dueDate: '2026-04-19' } })} />
         );
-        expect(queryByRole('button', { name: /^Reminders on/ })).toBeNull();
+        expect(queryByRole('button', { name: /^Start\/due reminders:/ })).toBeNull();
 
         rerender(
             <TaskItemFieldRenderer fieldId="dueDate" {...createProps({ draft: { dueDate: '2026-04-19T11:45' } })} />
         );
         openReminders(getByRole);
-        expect(queryByRole('checkbox')).not.toBeNull();
+        expect(queryByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
     });
 
     it('appears for a timed start even when the task has no due date', () => {
@@ -1920,19 +1957,20 @@ describe('TaskItemFieldRenderer skip-reminders toggle', () => {
 
         // No due time, so the summary carries no repeat clause.
         openReminders(getByRole);
-        expect(getByRole('checkbox')).not.toBeNull();
+        expect(getByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
     });
 
-    it('serializes on -> true and off -> undefined in the saved patch (#835/#836)', () => {
+    it('serializes legacy controls as explicit reminder policies', () => {
         const on = setTaskDraftField(createTaskDraft(timedTask), 'suppressMindwtrReminders', true);
-        expect(taskDraftToUpdatePatch(on, timedTask)).toMatchObject({ suppressMindwtrReminders: true });
+        expect(taskDraftToUpdatePatch(on, timedTask)).toMatchObject({ reminderPolicy: 'skip' });
 
         const suppressed: Task = { ...timedTask, suppressMindwtrReminders: true };
         const off = setTaskDraftField(createTaskDraft(suppressed), 'suppressMindwtrReminders', false);
         const offPatch = taskDraftToUpdatePatch(off, suppressed);
         expect(offPatch).not.toBeNull();
         expect(offPatch?.suppressMindwtrReminders).toBeUndefined();
-        expect('suppressMindwtrReminders' in (offPatch ?? {})).toBe(true);
+        expect(offPatch?.reminderPolicy).toBe('send');
+        expect('suppressMindwtrReminders' in (offPatch ?? {})).toBe(false);
     });
 });
 

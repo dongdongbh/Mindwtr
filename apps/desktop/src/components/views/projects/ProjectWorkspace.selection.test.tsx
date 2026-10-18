@@ -1,7 +1,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { archiveSectionForProjectArchive, type Project, type Section, type Task } from '@mindwtr/core';
+import { archiveSectionForProjectArchive, useTaskStore, type Project, type Section, type Task } from '@mindwtr/core';
 
 import { useUiStore } from '../../../store/ui-store';
 import { DndContext } from '@dnd-kit/core';
@@ -9,6 +9,7 @@ import { LanguageProvider } from '../../../contexts/language-context';
 import { KeybindingProvider } from '../../../contexts/keybinding-context';
 import { selectToolbarOption } from '../../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../../test/list-end-gap';
+import { holdSyncSave } from '../../../test/hold-sync-save';
 import { ProjectWorkspace } from './ProjectWorkspace';
 
 vi.mock('../../TaskItem', () => ({
@@ -96,12 +97,20 @@ vi.mock('./ProjectDetailsHeader', () => ({
 }));
 
 vi.mock('./ProjectDetailsFields', () => ({
-    ProjectDetailsFields: ({ onToggleSequential, onStartDateChange, readOnly }: {
+    ProjectDetailsFields: ({ onToggleSequential, onStartDateChange, onTagDraftChange, onCommitTags, readOnly }: {
         onToggleSequential: () => void;
         onStartDateChange: (value: string) => void;
+        onTagDraftChange: (value: string) => void;
+        onCommitTags: () => void;
         readOnly?: boolean;
     }) => (
         <>
+            <button type="button" data-testid="project-tags-type" onClick={() => onTagDraftChange('#a, #mine')}>
+                Type tags
+            </button>
+            <button type="button" data-testid="project-tags-commit" onClick={onCommitTags}>
+                Commit tags
+            </button>
             <button
                 type="button"
                 data-testid="project-type-toggle"
@@ -401,6 +410,28 @@ describe('ProjectWorkspace Select mode', () => {
         // Clearing the field has to erase the stored date, not write an empty string.
         fireEvent.click(getByTestId('project-start-date-clear'));
         expect(updateProject).toHaveBeenLastCalledWith('project-1', { startDate: undefined });
+    });
+
+    it('merges the tag draft onto the tags a sync save published since the editor filled it', async () => {
+        const initialTaskState = useTaskStore.getState();
+        const tagged: Project = { ...project, tagIds: ['#a'], rev: 1 };
+        useTaskStore.setState({ _allProjects: [tagged] });
+        try {
+            const { getByRole, getByTestId } = renderWorkspace({
+                projects: [tagged],
+                updateProject: (id: string, updates: Partial<Project>) => useTaskStore.getState().updateProject(id, updates),
+            });
+            fireEvent.click(getByRole('button', { name: 'Details' }));
+            fireEvent.click(getByTestId('project-tags-type'));
+            // A sync save holds the gate while the tags are committed, then publishes another device's tag.
+            const finish = holdSyncSave(() => useTaskStore.setState({ _allProjects: [{ ...tagged, rev: 3, tagIds: ['#a', '#remote'] }] }));
+            fireEvent.click(getByTestId('project-tags-commit'));
+            await act(finish);
+
+            await waitFor(() => expect(useTaskStore.getState()._projectsById.get(project.id)?.tagIds).toEqual(['#a', '#remote', '#mine']));
+        } finally {
+            useTaskStore.setState(initialTaskState, true);
+        }
     });
 
     it('keeps project notes behind an independent disclosure without writing on open or close', () => {

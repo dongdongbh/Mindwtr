@@ -3,6 +3,7 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
     test: {
+        setupFiles: ['./vitest.setup.ts'],
         // Vitest 4 narrowed discovery defaults; retain the Vitest 3 boundary.
         exclude: [
             ...configDefaults.exclude,

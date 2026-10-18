@@ -13,6 +13,8 @@ const fixture = (platform = 'ios', failLog = false) => {
     const state = { TextEncoder, __mindwtrHostPlatform: platform, port: undefined as unknown as {
         iosPruneReceipts(raw: string): Promise<{ pruned: number }>;
     }, sqlite: {}, submit: (work: () => Promise<unknown>) => work(),
+    // host-entry's prune runs inside core's adapter lock; this seam has no adapter.
+    withHostConnection: (work: () => Promise<unknown>) => work(),
     pruneNativeRequestReceipts: async (...args: unknown[]) => { calls.push(args); return 7; },
     diagnosticsLog: { append: async (value: unknown) => { if (failLog) throw new Error('PRIVATE_ERROR'); logs.push(value); } } };
     vm.runInNewContext(source, state);
@@ -50,7 +52,7 @@ describe('private iOS receipt retention bridge seam', () => {
         const f = fixture('android');
         await expect(f.port.iosPruneReceipts('null')).rejects.toThrow('INVALID_INPUT');
         expect(f.calls).toEqual([]);
-        expect(entry).toContain('return submit(async () => ({ pruned: await pruneNativeRequestReceipts(sqlite) }));');
+        expect(entry).toContain('return submit(async () => ({ pruned: await withHostConnection(() => pruneNativeRequestReceipts(sqlite)) }));');
     });
     it('seals the private selector from generic native dispatch and forwards both start branches', () => {
         const swift = readFileSync(new URL('../../ios-native/Sources/MindwtrNativeCore/CoreHost.swift', import.meta.url), 'utf8');

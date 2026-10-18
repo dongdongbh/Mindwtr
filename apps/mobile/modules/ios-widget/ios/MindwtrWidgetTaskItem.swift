@@ -14,6 +14,14 @@ struct MindwtrWidgetTaskItem: Decodable {
     let completionToken: String?
     // Optional so cached payloads from older app versions still decode.
     let contexts: [String]?
+    let upcomingDate: String?
+    let upcomingLabel: String?
+
+    var isUpcomingPreview: Bool { upcomingDate != nil }
+
+    var displayDueLabel: String? {
+        MindwtrWidgetUpcomingProjection.label(date: upcomingDate, prefix: upcomingLabel) ?? dueLabel
+    }
 
     var contextsLabel: String? {
         let labels = (contexts ?? []).compactMap(Self.nonEmpty)
@@ -30,6 +38,72 @@ struct MindwtrWidgetTaskItem: Decodable {
             return nil
         }
         return trimmed
+    }
+}
+
+// Cached previews expire by local day even when the app has not republished.
+enum MindwtrWidgetUpcomingProjection {
+    static func isVisible(_ value: String?, at now: Date, calendar: Calendar = .current) -> Bool {
+        guard let value, let date = parsedDate(value, calendar: calendar),
+              let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)),
+              let windowEnd = calendar.date(byAdding: .day, value: 8, to: calendar.startOfDay(for: now))
+        else { return false }
+        return date >= tomorrow && date < windowEnd
+    }
+
+    static func timelineDates(now: Date, calendar: Calendar = .current) -> [Date] {
+        (1...7).compactMap { calendar.date(byAdding: .day, value: $0, to: calendar.startOfDay(for: now)) }
+    }
+
+    static func label(
+        date value: String?, prefix: String?, calendar: Calendar = .current, locale: Locale = .current
+    ) -> String? {
+        guard let value, let prefix, let date = parsedDate(value, calendar: calendar) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateStyle = .medium
+        formatter.timeStyle = value.contains("T") ? .short : .none
+        formatter.doesRelativeDateFormatting = false
+        return "\(prefix) \(formatter.string(from: date))"
+    }
+
+    private static func parsedDate(_ value: String, calendar: Calendar) -> Date? {
+        guard value.range(
+            of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\.[0-9]{1,9})?)?(?:Z|[+-](?:[01][0-9]|2[0-3]):?[0-5][0-9])?)?$"#,
+            options: .regularExpression
+        ) != nil else { return nil }
+        let parts = value.prefix(10).split(separator: "-").compactMap { Int($0) }
+        var localCalendar = Calendar(identifier: .gregorian)
+        localCalendar.timeZone = calendar.timeZone
+        let components = DateComponents(year: parts[0], month: parts[1], day: parts[2])
+        guard let localDate = localCalendar.date(from: components),
+              localCalendar.component(.year, from: localDate) == parts[0],
+              localCalendar.component(.month, from: localDate) == parts[1],
+              localCalendar.component(.day, from: localDate) == parts[2]
+        else { return nil }
+        if value.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"#, options: .regularExpression) != nil {
+            return localDate
+        }
+        if value.range(
+            of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,9})?)?$"#,
+            options: .regularExpression
+        ) != nil {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = calendar.timeZone
+            formatter.isLenient = false
+            formatter.dateFormat = value.contains(".") ? "yyyy-MM-dd'T'HH:mm:ss.SSSSSSSSS"
+                : (value.count == 16 ? "yyyy-MM-dd'T'HH:mm" : "yyyy-MM-dd'T'HH:mm:ss")
+            return formatter.date(from: value)
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 }
 

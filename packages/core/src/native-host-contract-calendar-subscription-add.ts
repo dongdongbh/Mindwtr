@@ -12,6 +12,7 @@ import { taskEditValuesEqual } from './json-value-equality';
 import { ensureDeviceId } from './store-helpers';
 import { timestampAtLeastAfter } from './store-settings';
 import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
+import { gateStoreCommands } from './store-write-gate';
 import type { PreparedAreaAuthority } from './store-types';
 import type { ExternalCalendarSubscription } from './ics';
 import { calendarSubscriptionModules } from './store-calendar-subscription-modules';
@@ -177,7 +178,8 @@ export function createCalendarSubscriptionAddMethods(deps: {
         return source ? { ok: true as const, value: { adapter, authority, source, storage, legacyRaw } }
             : fail('INVALID_INPUT', 'Saved calendar subscriptions are malformed or exceed the source bound');
     };
-    return {
+    // The bridge calls these outside the contract: each async method is a store command (store-write-gate.ts).
+    return gateStoreCommands({
         createCalendarSubscriptionFileAddRequest(input: unknown): NativeHostResult<CalendarSubscriptionAddRequest> {
             const invalid = () => fail('INVALID_INPUT', 'A bounded native calendar file selection is required');
             if (!isNativeJsonWithinBytes(input, CALENDAR_SUBSCRIPTION_REQUEST_BYTES)) return invalid();
@@ -247,5 +249,5 @@ export function createCalendarSubscriptionAddMethods(deps: {
             }
             return outcome;
         },
-    };
+    });
 }

@@ -185,6 +185,9 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
         persistAttachmentLocally: (attachment) => files.persistAttachmentLocally(attachment),
         ensureAttachmentAvailableDetailed: (attachment) => availability.ensureAttachmentAvailableDetailed(attachment),
         deleteManagedAttachmentFile: (attachment, options) => files.deleteManagedAttachmentFile(attachment, options),
+        // A file share's copies (prepareSharedFiles) and the capture screen's managed-copy check.
+        persistAttachmentLocallyDetailed: (attachment) => files.persistAttachmentLocallyDetailed(attachment),
+        canUploadAttachmentFrom: (uri) => files.canUploadAttachmentFrom(uri),
     };
     // Install the global provider only after every optional binding constructed
     // successfully. A refused local capability leaves the prior provider intact.

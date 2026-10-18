@@ -92,13 +92,52 @@ describe('ios-widgets-and-shortcuts', () => {
 
     expect(intentsSource).toContain('struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent');
     expect(intentsSource).toContain('struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider');
-    for (const listId of ['focus', 'inbox', 'next', 'waiting', 'someday']) {
+    for (const listId of ['focus', 'inbox', 'next', 'upcoming', 'waiting', 'someday']) {
       expect(intentsSource).toContain(`"${listId}"`);
     }
     expect(intentsSource).toContain('payload.savedFilters ?? []');
     expect(intentsSource).toContain('MindwtrTasksWidgetSnapshotStore.contains(');
     expect(intentsSource).toContain('guard try store.cancel(id: actionId) else {');
     expect(intentsSource).not.toContain('store.pendingActions().contains');
+  });
+
+  it('ships read-only Upcoming rows with local-day expiry and midnight timeline entries', () => {
+    const widgetsDir = path.resolve(__dirname, '..', 'widgets-ios');
+    const tasksSource = fs.readFileSync(path.join(widgetsDir, 'MindwtrTasksWidget.swift'), 'utf8');
+    const itemSource = fs.readFileSync(path.resolve(__dirname, '..', IOS_WIDGET_MODULE_FOLDER, 'MindwtrWidgetTaskItem.swift'), 'utf8');
+    expect(itemSource).toContain('let upcomingDate: String?');
+    expect(itemSource).toContain('let upcomingLabel: String?');
+    expect(tasksSource).toContain('upcomingOnly: resolvedId == "upcoming"');
+    expect(tasksSource).toContain('MindwtrWidgetUpcomingProjection.isVisible(item.upcomingDate, at: date)');
+    expect(tasksSource).toContain('MindwtrWidgetUpcomingProjection.timelineDates(now: now)');
+    expect(tasksSource).toContain('if !item.isUpcomingPreview {\n                MindwtrWidgetTaskAction(');
+    expect(tasksSource).toContain('Button(intent: MindwtrOpenWidgetTaskIntent(taskId: item.id))');
+    expect(tasksSource).toContain('nonEmpty(item.displayDueLabel)');
+    expect(tasksSource).toContain('!item.isUpcomingPreview && item.id == taskId');
+    expect(tasksSource).toContain('completionToken: isUpcomingPreview ? nil : completionToken');
+    expect(tasksSource).toContain('at: max(entry.date, Date())');
+  });
+
+  it('pairs the small Upcoming task foreground action with the app task launcher', () => {
+    const mobileRoot = path.resolve(__dirname, '..');
+    const app = fs.readFileSync(path.join(mobileRoot, APP_INTENTS_FOLDER, 'MindwtrSiriCaptureIntents.swift'), 'utf8');
+    const widget = fs.readFileSync(path.join(mobileRoot, 'widgets-ios', 'MindwtrTasksWidgetIntents.swift'), 'utf8');
+    for (const source of [app, widget]) {
+      const start = source.indexOf('struct MindwtrOpenWidgetTaskIntent: AppIntent');
+      const intent = source.slice(start, source.indexOf('\n}\n', start));
+      expect(start).toBeGreaterThan(0);
+      expect(intent).toContain('"Open Task"');
+      expect(intent).toContain('.foreground(.immediate)');
+      expect(intent).toContain('static var openAppWhenRun: Bool { true }');
+      expect(intent).toContain('var taskId: String');
+      expect(intent).not.toContain('OpenURLIntent(');
+    }
+    const start = app.indexOf('struct MindwtrOpenWidgetTaskIntent: AppIntent');
+    const action = app.slice(start, app.indexOf('\n}\n', start));
+    expect(action).toContain('taskId.utf16.count <= 1_024');
+    expect(action).toContain('CharacterSet.controlCharacters');
+    expect(action).toContain('MindwtrSiriCaptureLauncher.taskURL(taskId: taskId)');
+    expect(action).toContain('MindwtrSiriCaptureLauncher.open(url)');
   });
 
   it('selects one Tasks configuration at launch while preserving the installed widget kind', () => {

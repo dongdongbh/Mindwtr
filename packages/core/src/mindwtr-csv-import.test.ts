@@ -6,7 +6,10 @@ import {
     parseMindwtrCsvImportSource,
     type ParsedMindwtrCsvImportData,
 } from './mindwtr-csv-import';
+import { createImportDiagnostics, formatImportDiagnostic } from './import-diagnostics';
+import { formatI18nTemplate, getTranslator } from './i18n';
 import { mockAppData } from './sync-test-utils';
+import { withQuickJsArgumentLimit } from './quickjs-test-utils';
 import { generateDeterministicUUID } from './uuid';
 
 const quoteCell = (cell: string): string => `"${cell.replace(/"/gu, '""')}"`;
@@ -22,6 +25,58 @@ const FULL_HEADERS = [
 ];
 
 describe('mindwtr csv import', () => {
+    const translate = (key: string, params?: Record<string, number | string>) => formatI18nTemplate(getTranslator('en')(key), params ?? {});
+
+    it('counts blank CSV records in diagnostic locations while preserving import row identities', () => {
+        const result = parseMindwtrCsvImportSource({ fileName: 'export.csv', text: 'Title,Due Date\r\n\r\n"Example\ncontinued",invalid-date\r\n' });
+        expect(result.valid).toBe(true);
+        expect(result.parsedData?.tasks[0].sourceId).toBe('row-2');
+        const diagnostic = createImportDiagnostics(result.warnings, 'warning')[0];
+        expect(diagnostic.params).toEqual({ count: 1, locations: '0:3:2', omittedLocations: 0 });
+        expect(formatImportDiagnostic(diagnostic, translate)).toContain('row 3, column 2');
+    });
+
+    it('localizes bounded unknown-header and date locations without source contents or physical-line numbering', () => {
+        const result = parseMindwtrCsvImportSource({ fileName: 'private-file.csv', text: buildCsv(
+            ['Title', 'Due Date', ...Array.from({ length: 7 }, (_, index) => `private-header-${index}`)],
+            Array.from({ length: 7 }, (_, index) => [`private-title-${index}\ncontinued`, `private-date-${index}`, ...Array(7).fill('private-cell')]),
+        ) });
+        expect(result.valid).toBe(true);
+        expect(result.parsedData?.tasks).toHaveLength(7);
+        expect(result.parsedData?.tasks.every((task) => task.dueDate === undefined)).toBe(true);
+        const diagnostics = createImportDiagnostics(result.warnings, 'warning');
+        expect(diagnostics).toEqual([
+            { code: 'unknown-columns', severity: 'warning', params: { count: 7, locations: '0:1:3,0:1:4,0:1:5,0:1:6,0:1:7', omittedLocations: 2 } },
+            { code: 'unmapped-date', severity: 'warning', params: { count: 7, locations: '0:2:2,0:3:2,0:4:2,0:5:2,0:6:2', omittedLocations: 2 } },
+        ]);
+        const formatted = diagnostics.map((diagnostic) => formatImportDiagnostic(diagnostic, translate));
+        expect(formatted[0]).toBe('7 unknown column(s) were ignored. Locations (CSV records; header = row 1): row 1, column 3; row 1, column 4; row 1, column 5; row 1, column 6; row 1, column 7. 2 more location(s) not shown.');
+        expect(formatted[1]).toBe('7 date value(s) could not be mapped and were omitted. Locations (CSV records; header = row 1): row 2, column 2; row 3, column 2; row 4, column 2; row 5, column 2; row 6, column 2. 2 more location(s) not shown.');
+        expect(JSON.stringify([result.warnings, diagnostics, formatted])).not.toContain('private-');
+    });
+
+    it('imports one zipped CSV entry with more rows than a QuickJS call takes arguments', () => {
+        const rows = Array.from({ length: 70_000 }, (_, index) => [`Task ${index}`]);
+        const bytes = zipSync({ 'tasks.csv': strToU8(buildCsv(['Title'], rows)) });
+        const result = withQuickJsArgumentLimit(() => parseMindwtrCsvImportSource({ fileName: 'export.zip', bytes }));
+        expect(result.errors).toEqual([]);
+        expect(result.parsedData?.tasks).toHaveLength(70_000);
+    }, 30_000);
+
+    it('disambiguates ZIP CSV entries with numeric ordinals rather than source filenames', () => {
+        const result = parseMindwtrCsvImportSource({ fileName: 'private-archive.zip', bytes: zipSync({
+            'private-first.csv': strToU8('Title,Due Date,private-header\nprivate-first,private-date,private-cell'),
+            'private-ignored.txt': strToU8('private-text'),
+            'private-second.csv': strToU8('Title,Created At,private-header\nprivate-second,private-date,private-cell'),
+        }) });
+        const diagnostics = createImportDiagnostics(result.warnings, 'warning');
+        expect(diagnostics.find((item) => item.code === 'unknown-columns')?.params).toEqual({ count: 2, locations: '1:1:3,2:1:3', omittedLocations: 0 });
+        const dateDiagnostic = diagnostics.find((item) => item.code === 'unmapped-date')!;
+        expect(dateDiagnostic.params).toEqual({ count: 2, locations: '1:2:2,2:2:2', omittedLocations: 0 });
+        expect(formatImportDiagnostic(dateDiagnostic, translate)).toBe('2 date value(s) could not be mapped and were omitted. Locations (CSV records; header = row 1): CSV entry 1, row 2, column 2; CSV entry 2, row 2, column 2.');
+        expect(JSON.stringify([result.warnings, diagnostics])).not.toContain('private-');
+    });
+
     it('parses a full-featured row into the right task, project, section, and area fields', () => {
         const csv = buildCsv(FULL_HEADERS, [
             [
@@ -139,7 +194,7 @@ describe('mindwtr csv import', () => {
         const result = parseMindwtrCsvImportSource({ fileName: 'export.csv', text: csv });
 
         expect(result.parsedData?.tasks).toMatchObject([{ dueDate: undefined }]);
-        expect(result.warnings).toContain('1 date value could not be parsed and was skipped.');
+        expect(result.warnings).toContain('1 date value could not be parsed and was skipped. [csv-locations=0:2:2; omitted=0]');
     });
 
     it('rejects local datetimes with impossible calendar or clock components', () => {
@@ -151,7 +206,7 @@ describe('mindwtr csv import', () => {
         const result = parseMindwtrCsvImportSource({ fileName: 'export.csv', text: csv });
 
         expect(result.parsedData?.tasks).toMatchObject([{ startTime: undefined, dueDate: undefined }]);
-        expect(result.warnings).toContain('2 date values could not be parsed and were skipped.');
+        expect(result.warnings).toContain('2 date values could not be parsed and were skipped. [csv-locations=0:2:3,0:2:2; omitted=0]');
     });
 
     it('rejects an entity timestamp that would roll into another calendar date', () => {
@@ -160,7 +215,7 @@ describe('mindwtr csv import', () => {
         const result = parseMindwtrCsvImportSource({ fileName: 'export.csv', text: csv });
 
         expect(result.parsedData?.tasks).toMatchObject([{ createdAt: undefined }]);
-        expect(result.warnings).toContain('1 date value could not be parsed and was skipped.');
+        expect(result.warnings).toContain('1 date value could not be parsed and was skipped. [csv-locations=0:2:2; omitted=0]');
     });
 
     it('defaults empty Status to next with a Project and to inbox without one', () => {
@@ -212,7 +267,7 @@ describe('mindwtr csv import', () => {
 
         const result = parseMindwtrCsvImportSource({ fileName: 'export.csv', text: csv });
 
-        expect(result.warnings).toContain('1 unknown column was ignored.');
+        expect(result.warnings).toContain('1 unknown column was ignored. [csv-locations=0:1:2; omitted=0]');
     });
 
     it('parses a zipped export and skips unsupported archive entries', () => {
@@ -1161,7 +1216,7 @@ describe('mindwtr csv import', () => {
         const result = parseMindwtrCsvImportSource({ fileName: 'export.csv', text: csv });
 
         expect(result.parsedData?.tasks).toMatchObject([{ dueDate: undefined }]);
-        expect(result.warnings).toContain('1 date value could not be parsed and was skipped.');
+        expect(result.warnings).toContain('1 date value could not be parsed and was skipped. [csv-locations=0:2:2; omitted=0]');
     });
 
     it('warns when an ID value is duplicated within one import', () => {

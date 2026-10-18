@@ -22,6 +22,7 @@ import {
   type SpeechToTextSettings,
   type Task,
   useTaskStore,
+  runStoreCommand,
 } from '@mindwtr/core';
 import { loadAIKey } from '../lib/ai-config';
 import { logInfo } from '../lib/app-log';
@@ -352,7 +353,7 @@ export function useQuickCaptureAudio({
   }, [isSpeechSettingsLeaseCurrent, onWarn, resolveWhisperModelAsync, settings.ai?.speechToText, visible]);
 
   const applySpeechResult = useCallback(async (taskId: string, result: SpeechToTextResult): Promise<SpeechApplyResult> => {
-    const { tasks: currentTasks, projects: currentProjects, addProject: addProjectNow, updateTask: updateTaskNow, settings: currentSettings } = useTaskStore.getState();
+    const { tasks: currentTasks, projects: currentProjects, addProject: addProjectNow, settings: currentSettings } = useTaskStore.getState();
     const existing = currentTasks.find((task) => task.id === taskId);
     if (!existing) return 'skipped';
 
@@ -373,12 +374,17 @@ export function useQuickCaptureAudio({
       }
     }
 
-    if (Object.keys(updates).length) {
-      await updateTaskNow(taskId, updates);
-      return 'applied';
-    }
-
-    return 'empty';
+    if (!Object.keys(updates).length) return 'empty';
+    // Built again on the task as stored when the write is admitted: a sync save admitted first may publish newer tags.
+    await runStoreCommand(async () => {
+      const state = useTaskStore.getState();
+      const latest = state.tasks.find((task) => task.id === taskId);
+      if (!latest) return;
+      const rebuilt = buildTaskUpdatesFromSpeechResult(latest, result, state.settings).updates;
+      if (updates.projectId && !latest.projectId) rebuilt.projectId = updates.projectId;
+      if (Object.keys(rebuilt).length) await state.updateTask(taskId, rebuilt);
+    });
+    return 'applied';
   }, []);
 
   const discardEmptySpeechTask = useCallback(async (taskId: string, files: (File | null | undefined)[], reason = 'empty_transcript') => {

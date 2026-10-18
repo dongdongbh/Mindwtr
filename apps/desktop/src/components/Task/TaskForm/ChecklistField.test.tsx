@@ -1,16 +1,31 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { createEvent, fireEvent, render, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { useTaskStore, type Task } from '@mindwtr/core';
 import { ChecklistField, reorderChecklistItems } from './ChecklistField';
+import { useUiStore } from '../../../store/ui-store';
+import { holdSyncSave } from '../../../test/hold-sync-save';
 
 const initialTaskState = useTaskStore.getState();
+const initialUiState = useUiStore.getState();
 
 const initialChecklist: NonNullable<Task['checklist']> = [
     { id: '1', title: 'Item 1', isCompleted: false },
     { id: '2', title: 'Item 2', isCompleted: false },
     { id: '3', title: 'Item 3', isCompleted: false },
 ];
+
+const AT = new Date(Date.now() - 60_000).toISOString();
+const storedTask = (checklist: Task['checklist'], extra: Partial<Task> = {}): Task => ({
+    id: 'task-1', title: 'Task', status: 'next', tags: [], contexts: [], checklist, rev: 1, createdAt: AT, updatedAt: AT, ...extra,
+} as Task);
+const seedChecklist = (checklist: Task['checklist']) => useTaskStore.setState({ _allTasks: [storedTask(checklist)] });
+
+/** Reports each checklist the field writes to the store for task-1. */
+const onStoredChecklist = (report: (updates: Partial<Task>) => void) => useTaskStore.subscribe((state, previous) => {
+    const next = state._tasksById.get('task-1')?.checklist;
+    if (next !== previous._tasksById.get('task-1')?.checklist) report({ checklist: next });
+});
 
 function ChecklistHarness({
     initial = initialChecklist,
@@ -21,25 +36,27 @@ function ChecklistHarness({
     onUpdateTask?: (updates: Partial<Task>) => void;
     plainList?: boolean;
 }) {
-    const [checklist, setChecklist] = useState<Task['checklist']>(initial);
+    useState(() => seedChecklist(initial));
+    const checklist = useTaskStore((state) => state._tasksById.get('task-1')?.checklist);
+    useEffect(() => onStoredChecklist((updates) => onUpdateTask?.(updates)), []);
     return (
         <ChecklistField
             t={(key) => key}
             taskId="task-1"
             checklist={checklist}
             plainList={plainList}
-            updateTask={(_taskId, updates) => {
-                onUpdateTask?.(updates);
-                setChecklist(updates.checklist ?? []);
-            }}
-            resetTaskChecklist={() => setChecklist([])}
+            resetTaskChecklist={() => seedChecklist([])}
         />
     );
 }
 
 describe('ChecklistField', () => {
+    let unsubscribe: (() => void) | undefined;
     afterEach(() => {
+        unsubscribe?.();
+        unsubscribe = undefined;
         useTaskStore.setState(initialTaskState, true);
+        useUiStore.setState(initialUiState, true);
     });
 
     it('reorders checklist items without changing completion state', () => {
@@ -74,6 +91,20 @@ describe('ChecklistField', () => {
         });
     });
 
+    it('merges the field\'s change onto the list a sync save published since the field opened, keeping the synced item', async () => {
+        render(<ChecklistHarness initial={[{ id: 'c1', title: 'One', isCompleted: false }]} />);
+        const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [storedTask(
+            [{ id: 'c1', title: 'One', isCompleted: false }, { id: 'c2', title: 'Two', isCompleted: false }],
+            { rev: 3 },
+        )] }));
+        fireEvent.click(screen.getByRole('button', { name: 'taskEdit.checklist 1' }));
+        await act(finish);
+
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get('task-1')?.checklist?.map((item) => [item.id, item.isCompleted]))
+            .toEqual([['c1', true], ['c2', false]]));
+        expect(useUiStore.getState().toasts.map((toast) => toast.message)).not.toContainEqual(expect.stringMatching(/^STALE_REVISION/));
+    });
+
     it('edits a reference list without completion controls and preserves item metadata', () => {
         const updates: Partial<Task>[] = [];
         const resetTaskChecklist = vi.fn();
@@ -81,11 +112,12 @@ describe('ChecklistField', () => {
             { id: 'done', title: 'Completed source item', isCompleted: true },
             { id: 'pending', title: 'Pending source item', isCompleted: false },
         ];
+        seedChecklist(referenceItems);
+        unsubscribe = onStoredChecklist((update) => updates.push(update));
         const props = {
             t: (key: string) => key,
             taskId: 'task-1',
             checklist: referenceItems,
-            updateTask: (_taskId: string, update: Partial<Task>) => updates.push(update),
             resetTaskChecklist,
         };
         const { getAllByRole, getByRole, getByText, queryByRole, queryByText, rerender } = render(
@@ -428,7 +460,6 @@ describe('ChecklistField', () => {
             t: (key: string) => key,
             taskId: 'task-1',
             checklist: initialChecklist,
-            updateTask: () => {},
             resetTaskChecklist: () => {},
         };
         const { getAllByRole, rerender } = render(<ChecklistField {...props} />);
@@ -449,7 +480,6 @@ describe('ChecklistField', () => {
             t: (key: string) => key,
             taskId: 'task-1',
             checklist: initialChecklist,
-            updateTask: () => {},
             resetTaskChecklist: () => {},
         };
         const { getAllByRole, rerender } = render(<ChecklistField {...props} />);

@@ -3,6 +3,7 @@ import {
     buildTaskViewSectionUpdates,
     flushPendingSave,
     isTaskInActiveProject,
+    runStoreCommand,
     sortViewSectionDefinitions,
     useTaskStore,
     type Task,
@@ -46,6 +47,24 @@ export async function saveSomedaySectionMove(
     selectableIds: readonly string[],
     noSectionTitle: string,
 ): Promise<SomedaySectionMove> {
+    // The read, the plan and the write run as one command, so a sync save's newer rows are what the move builds on.
+    const move = await runStoreCommand(() => writeSomedaySectionMove(taskIds, destinationId, selectableIds, noSectionTitle));
+    if (move.changedCount) {
+        try {
+            await flushPendingSave();
+        } catch (error) {
+            throw new SomedaySectionMoveSaveError(move, error);
+        }
+    }
+    return move;
+}
+
+async function writeSomedaySectionMove(
+    taskIds: readonly string[],
+    destinationId: string | undefined,
+    selectableIds: readonly string[],
+    noSectionTitle: string,
+): Promise<SomedaySectionMove> {
     const state = useTaskStore.getState();
     const sections = sortViewSectionDefinitions(state.settings?.gtd?.viewSections?.someday);
     const destination = destinationId
@@ -76,14 +95,7 @@ export async function saveSomedaySectionMove(
         destinationTitle: destination?.title ?? noSectionTitle,
         previous,
     };
-    if (updates.length) {
-        assertSaved(await state.batchUpdateTasks(updates));
-        try {
-            await flushPendingSave();
-        } catch (error) {
-            throw new SomedaySectionMoveSaveError(move, error);
-        }
-    }
+    if (updates.length) assertSaved(await state.batchUpdateTasks(updates));
     return move;
 }
 
@@ -110,15 +122,15 @@ export async function undoSomedaySectionMove(move: SomedaySectionMove, pendingCo
         return pendingCount;
     }
     const previousIds = new Set(move.previous.map((assignment) => assignment.id));
-    const latestTasks: Task[] = state.tasks.filter((task) => previousIds.has(task.id));
-    const updates = buildTaskViewSectionUndoUpdates(
-        latestTasks,
-        'someday',
-        move.previous,
-        move.destinationId,
-    );
+    // Built on the rows as they are when the write is admitted, so a sync save's newer sections stay.
+    const updates = await runStoreCommand(async () => {
+        const latest = useTaskStore.getState();
+        const latestTasks: Task[] = latest.tasks.filter((task) => previousIds.has(task.id));
+        const built = buildTaskViewSectionUndoUpdates(latestTasks, 'someday', move.previous, move.destinationId);
+        if (built.length) assertSaved(await latest.batchUpdateTasks(built));
+        return built;
+    });
     if (updates.length) {
-        assertSaved(await state.batchUpdateTasks(updates));
         try {
             await flushPendingSave();
         } catch (error) {

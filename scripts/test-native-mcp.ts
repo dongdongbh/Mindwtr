@@ -47,8 +47,9 @@ try {
     }));
     await client.ping();
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 13);
+    assert.equal(tools.length, 14);
     assert.ok(tools.some((tool) => tool.name === 'mindwtr_list_tasks'));
+    assert.ok(tools.some((tool) => tool.name === 'mindwtr_archive_task'));
     for (const tool of tools) assert.equal(tool.inputSchema.type, 'object');
     for (const name of ['mindwtr_list_tasks', 'mindwtr_list_projects', 'mindwtr_list_areas']) {
         const result = await client.callTool({ name, arguments: {} });

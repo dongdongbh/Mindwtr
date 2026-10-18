@@ -53,6 +53,10 @@ describe('sync settings model', () => {
     it('names the cause of a failure, and keeps the detail of one it cannot classify (#1151)', () => {
         expect(getSyncFailureMessage(new Error('HTTP 401 Unauthorized'), t)).toBe('settings.syncFailureAuth');
         expect(getSyncFailureMessage(new Error('boom'), t)).toBe('settings.syncFailureGeneric\nboom');
+        // An oversized File Sync document: localized guidance only; its code stays in the log.
+        expect(getSyncFailureMessage(new Error("SAF_DOCUMENT_TOO_LARGE: the document exceeds this device's read limit"), t))
+            .toBe('settings.syncFailureGeneric');
+        expect(getSyncFailureMessage(new Error('SAF_DOCUMENT_INCOMPLETE: short read'), t)).toBe('settings.syncFailureConflict');
         expect(getSyncLastErrorText('SYNC_FILE_LOCK_UNAVAILABLE: busy', t)).toBe('settings.syncFileLockUnavailable');
         expect(getSyncLastErrorText('HTTP 503', t)).toBe('HTTP 503');
     });

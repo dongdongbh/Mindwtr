@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Task } from '@mindwtr/core';
+import { runSyncStoreSave, type Task } from '@mindwtr/core';
 
 const mocked = vi.hoisted(() => ({
   state: null as any,
@@ -210,6 +210,29 @@ describe('Someday section move durability and Undo', () => {
     expect(mocked.flush).toHaveBeenCalledTimes(3);
     expect(mocked.logInfo).toHaveBeenCalledTimes(2);
     expect(mocked.logInfo.mock.calls.at(-1)![1].extra.operation).toBe('undo');
+    renderer.unmount();
+  });
+
+  it('builds the move on the rows a sync save published while the move waited', async () => {
+    mocked.state.tasks = [makeTask('one')];
+    await render();
+    await open(['one']);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const save = runSyncStoreSave(async () => {
+      await held;
+      mocked.state.tasks = [makeTask('one', { rev: 3, viewSectionIds: { waiting: 'remote' } })];
+    });
+    await act(async () => {
+      const moved = current.move('books');
+      release();
+      await save;
+      await moved;
+    });
+
+    expect(mocked.state.batchUpdateTasks).toHaveBeenCalledWith([
+      { id: 'one', updates: { viewSectionIds: { someday: 'books', waiting: 'remote' } } },
+    ]);
     renderer.unmount();
   });
 

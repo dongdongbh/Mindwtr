@@ -77,6 +77,17 @@ describe('MCP task write-surface derivation (TASK_SYNC_FIELD_SCHEMA -> Zod tool 
     }
   });
 
+  test('reminder policy accepts only inheritance and explicit send/skip values', () => {
+    for (const reminderPolicy of ['inherit', 'send', 'skip']) {
+      expect((addTaskSchema.parse({ title: 'Policy', reminderPolicy }) as Record<string, unknown>).reminderPolicy === reminderPolicy).toBe(true);
+      expect((updateTaskSchema.parse({ id: 'task-1', reminderPolicy }) as Record<string, unknown>).reminderPolicy === reminderPolicy).toBe(true);
+    }
+    for (const reminderPolicy of ['sometimes', null, true, 1, {}, []]) {
+      expect(addTaskSchema.safeParse({ title: 'Policy', reminderPolicy }).success).toBe(false);
+      expect(updateTaskSchema.safeParse({ id: 'task-1', reminderPolicy }).success).toBe(false);
+    }
+  });
+
   test('cancellation timestamps round-trip and reject ambiguous or malformed values', () => {
     const cancelledAt = '2026-09-07T16:00:00.000Z';
     const created = addTaskSchema.parse({ title: 'Cancelled plan', cancelledAt }) as Record<string, unknown>;

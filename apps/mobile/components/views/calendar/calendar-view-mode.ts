@@ -103,12 +103,15 @@ export const getCalendarWeekColumnWidth = (
 };
 
 export const getCalendarWeekInitialScrollX = ({
+  availableWidth,
   columnWidth,
   leadingInset = 0,
   selectedDate,
   visibleDays,
   weekDays,
 }: {
+  /** The day columns' viewport. Deadline weeks widen columns past the density, so fewer days fit than it names. */
+  availableWidth?: number;
   columnWidth: number;
   leadingInset?: number;
   selectedDate: Date | null;
@@ -117,10 +120,30 @@ export const getCalendarWeekInitialScrollX = ({
 }): number => {
   const resolvedVisibleDays = coerceCalendarWeekVisibleDays(visibleDays);
   const dayIndex = getCalendarWeekInitialVisibleDayIndex(weekDays, selectedDate);
-  const maxStartIndex = Math.max(0, weekDays.length - resolvedVisibleDays);
-  const startIndex = Math.min(dayIndex, maxStartIndex);
-  return Math.max(0, leadingInset) + startIndex * Math.max(0, columnWidth);
+  const width = Math.max(0, columnWidth);
+  const maxStartX = availableWidth === undefined
+    ? Math.max(0, weekDays.length - resolvedVisibleDays) * width
+    : Math.max(0, weekDays.length * width - availableWidth);
+  return Math.max(0, leadingInset) + Math.min(dayIndex * width, maxStartX);
 };
+
+/**
+ * When the week scrolls itself to its first place: a new week, selected day, density or column width, and a new viewport,
+ * since a resize under deadline-wide columns moves the furthest start (the selected day could sit past the right edge).
+ */
+export const getCalendarWeekAutoScrollKey = ({
+  availableWidth,
+  columnWidth,
+  selectedDate,
+  visibleDays,
+  weekDays,
+}: {
+  availableWidth: number;
+  columnWidth: number;
+  selectedDate: Date | null;
+  visibleDays: number;
+  weekDays: Date[];
+}): string => `${weekDays[0]?.getTime() ?? 0}:${selectedDate?.getTime() ?? 0}:${visibleDays}:${columnWidth}:${availableWidth}`;
 
 /**
  * The furthest x the week canvas can scroll to: canvas width (pinned gutter +

@@ -1125,6 +1125,68 @@ describe('ingestPendingCaptures', () => {
         });
     });
 
+    it('preserves multiline notes literally alongside Android audio through durable ingestion', async () => {
+        oneFile(`${ANDROID_AUDIO_ID}.json`, {
+            kind: 'audio',
+            id: ANDROID_AUDIO_ID,
+            audioPath: `file:///data/Documents/quick-capture-audio/${ANDROID_AUDIO_ID}.wav`,
+            createdAt: '2026-09-06T10:00:00.000Z',
+            source: 'android-quick-capture',
+            title: 'Plan launch',
+            note: '- Tell @Todd\n- /due:next week stays a note',
+        });
+        const addTask = vi.fn(async () => ({ success: true, id: ANDROID_AUDIO_ID }));
+        const flushPendingSave = vi.fn(async () => undefined);
+        const transcribeAudio = vi.fn(async () => 'Buy milk /due:tomorrow');
+
+        expect(await ingestPendingCaptures({
+            addTask,
+            updateTask,
+            addProject,
+            projects: [],
+            areas: [],
+            tasks: [],
+            people: [],
+            settings: emptySettings,
+            flushPendingSave,
+            transcribeAudio,
+        })).toBe(1);
+
+        expect(transcribeAudio).toHaveBeenCalledWith(
+            `file:///data/Documents/quick-capture-audio/${ANDROID_AUDIO_ID}.wav`,
+            emptySettings,
+        );
+        expect(addTask).toHaveBeenCalledWith(
+            'Plan launch Buy milk',
+            expect.objectContaining({ status: 'inbox', dueDate: '2026-09-07', description: '- Tell @Todd\n- /due:next week stays a note' }),
+            { captureId: ANDROID_AUDIO_ID },
+        );
+        expect(flushPendingSave).toHaveBeenCalledOnce();
+        expect(fileSystemMocks.deleteAsync).toHaveBeenNthCalledWith(
+            1,
+            `file:///data/Documents/pending-captures/${ANDROID_AUDIO_ID}.json`,
+            { idempotent: true },
+        );
+        expect(fileSystemMocks.deleteAsync).toHaveBeenNthCalledWith(
+            2,
+            `file:///data/Documents/quick-capture-audio/${ANDROID_AUDIO_ID}.wav`,
+            { idempotent: true },
+        );
+        expect(flushPendingSave.mock.invocationCallOrder[0])
+            .toBeLessThan(fileSystemMocks.deleteAsync.mock.invocationCallOrder[0]);
+        expect(fileSystemMocks.deleteAsync.mock.invocationCallOrder[0])
+            .toBeLessThan(fileSystemMocks.deleteAsync.mock.invocationCallOrder[1]);
+        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(1, 'Android quick capture audio ready for transcription', {
+            scope: 'capture',
+            extra: { kind: 'audio', outcome: 'validated' },
+        });
+        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(2, 'Android quick capture audio ingested', {
+            scope: 'capture',
+            force: true,
+            extra: { kind: 'audio', outcome: 'created', releaseCheck: 'v1.3.7/quick-capture-description' },
+        });
+    });
+
     it('skips Android retranscription when its capture UUID already exists, including as a tombstone', async () => {
         oneFile(`${ANDROID_AUDIO_ID}.json`, {
             kind: 'audio',

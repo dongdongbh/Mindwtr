@@ -97,6 +97,14 @@ describe('resolveDueRepeatToFire', () => {
     };
     const opts = { includeDueDate: true };
 
+    it('uses the inherited default for due repeats and keeps explicit Send authoritative', () => {
+        const now = new Date('2026-06-17T09:20:05.000Z');
+        const task = { ...repeatTask, reminderPolicy: 'inherit' as const };
+        expect(resolveDueRepeatToFire(task, now, undefined, { ...opts, taskReminderDefault: 'skip' })).toBeNull();
+        expect(resolveDueRepeatToFire(task, now, undefined, { ...opts, taskReminderDefault: 'send' })).toMatchObject({ index: 2 });
+        expect(resolveDueRepeatToFire({ ...task, reminderPolicy: 'send' }, now, undefined, { ...opts, taskReminderDefault: 'skip' })).toMatchObject({ index: 2 });
+    });
+
     it('fires the occurrence just reached, within one poll window', () => {
         // due+20min occurrence (index 2), now is 5s past it -> within the 15s catch-up
         const now = new Date('2026-06-17T09:20:05.000Z');
@@ -503,6 +511,36 @@ describe('fired reminders are logged (#1146)', () => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
         vi.useRealTimers();
+    });
+
+    it('rechecks an inherited default change even when the data timestamp stays unchanged, without duplicate delivery', async () => {
+        vi.useFakeTimers();
+        const now = new Date('2026-07-29T09:00:00.000Z');
+        vi.setSystemTime(now);
+        useTaskStore.setState({ _allTasks: [{ ...baseTask, id: 'inherited-default-change', reminderPolicy: 'inherit', dueDate: now.toISOString(), repeatReminderMinutes: 10 }],
+            _allProjects: [], settings: { notificationsEnabled: true, taskReminderDefault: 'skip' }, lastDataChangeAt: 7 });
+        const NotificationSpy = vi.fn() as any;
+        NotificationSpy.permission = 'granted';
+        vi.stubGlobal('Notification', NotificationSpy);
+        await startDesktopNotifications();
+        expect(NotificationSpy).not.toHaveBeenCalled();
+        useTaskStore.setState({ settings: { notificationsEnabled: true, taskReminderDefault: 'send' } });
+        await vi.advanceTimersByTimeAsync(751);
+        expect(logMock.logInfo.mock.calls.filter(([message]) => message === 'Desktop reminder fired')).toHaveLength(1);
+        expect(logMock.logInfo).toHaveBeenCalledWith('Task reminder policy reevaluated', {
+            scope: 'notifications', extra: { releaseCheck: 'v1.3.7/task-reminder-policy', outcome: 'planned' },
+        });
+        await vi.advanceTimersByTimeAsync(2500);
+        useTaskStore.setState({ settings: { notificationsEnabled: true, taskReminderDefault: 'skip' } });
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(logMock.logInfo.mock.calls.filter(([message]) => message === 'Desktop reminder fired')).toHaveLength(1);
+        expect(logMock.logInfo.mock.calls.filter(([message]) => message === 'Task reminder policy reevaluated')).toHaveLength(2);
+        useTaskStore.setState({ settings: { notificationsEnabled: true, taskReminderDefault: 'send' } });
+        await vi.advanceTimersByTimeAsync(751);
+        expect(logMock.logInfo.mock.calls.filter(([message]) => message === 'Desktop reminder fired')).toHaveLength(2);
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(logMock.logInfo.mock.calls.filter(([message]) => message === 'Desktop reminder fired')).toHaveLength(2);
+        expect(logMock.logInfo.mock.calls.filter(([message]) => message === 'Task reminder policy reevaluated')).toHaveLength(3);
     });
 
     it('writes one Desktop reminder fired line without the task title or body', async () => {

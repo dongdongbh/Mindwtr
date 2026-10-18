@@ -21,6 +21,7 @@ import { assertNoPendingAttachmentUploads, sanitizeAppDataForRemote } from './sy
 import { SYNC_BACKUP_RESTORE_REV_BY } from './sync-revision';
 import { purgeExpiredTombstones } from './sync-tombstones';
 import type { AppData, Attachment } from './types';
+import { withQuickJsArgumentLimit } from './quickjs-test-utils';
 
 const RESTORED_CONTENT_HASH = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 const PRE_RESTORE_CONTENT_HASH = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -460,6 +461,15 @@ describe('backup transfer', () => {
         const restored = prepareRestoredBackupDataForSync(data, { restoredAt: '2026-04-01T00:00:10.000Z', previousData });
 
         expect(restored.settings.security).toEqual({ mobileAppLockEnabled: true });
+    });
+
+    it('restores 32768 saved-filter tombstones, more times than a QuickJS call takes arguments', () => {
+        const backup = buildAppData();
+        const at = '2026-09-01T00:00:00.000Z';
+        backup.settings = { savedFilters: Array.from({ length: 32_768 }, (_, index) => ({ id: `filter-${index}`, name: `Filter ${index}`,
+            view: 'focus' as const, criteria: {}, createdAt: at, updatedAt: at, deletedAt: at })) };
+        const restored = withQuickJsArgumentLimit(() => prepareRestoredBackupDataForSync(backup, { restoredAt: '2026-09-28T12:00:00.000Z' }));
+        expect(restored.settings.savedFilters).toHaveLength(32_768);
     });
 
     it('keeps restored synced settings authoritative across repeated merges', () => {

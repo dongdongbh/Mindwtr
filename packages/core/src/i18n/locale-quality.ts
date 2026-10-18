@@ -47,7 +47,54 @@ export const allowedEnglishMirrorTerms = [
     'Catppuccin',
     'Macchiato',
     'Dracula',
+    'MCP',
+    'Codex',
+    'OLED',
+    'Material 3',
+    'Android',
+    'DAVx5',
+    'Outlook',
+    'Mindwtr Cloud',
+    'VPN',
+    'Expo Go',
+    'llama.cpp',
+    'Ollama',
+    'LM Studio',
+    'GLM',
+    'vLLM',
+    'Whisper',
+    'GPT-5',
+    'Copilot',
+    'macOS',
+    'iOS',
+    'Apple Calendar',
+    'Linux',
+    'Evolution Data Server',
+    'iCloud Drive',
+    'Google Drive',
+    'OneDrive',
+    'Microsoft Store',
+    'Arch',
+    'AUR',
+    'Google Play',
+    'App Store',
+    'FOSS',
+    'LLM',
+    'Google',
+    'OAuth',
+    'MDM',
+    'GPU',
+    'Parakeet',
+    'ASR',
+    'PWA',
+    'Dataview',
+    'IMAP',
+    'Gmail',
+    'iCloud Mail',
+    'Fastmail',
 ] as const;
+
+const allowedEnglishTermsLongestFirst = [...allowedEnglishMirrorTerms].sort((a, b) => b.length - a.length);
 
 export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]> = {
     de: [
@@ -265,7 +312,7 @@ export function stripAllowedEnglishTerms(value: string): string {
         .replace(/<[A-Za-z][A-Za-z0-9_-]*>/g, '')
         .replace(/[+#@!][A-Za-z][A-Za-z0-9:_-]*/g, '');
 
-    for (const term of allowedEnglishMirrorTerms) {
+    for (const term of allowedEnglishTermsLongestFirst) {
         next = next.replace(new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'), '');
     }
     return next;
@@ -273,6 +320,46 @@ export function stripAllowedEnglishTerms(value: string): string {
 
 export function hasTranslatableEnglishText(value: string): boolean {
     return translatableEnglishPattern.test(stripAllowedEnglishTerms(value));
+}
+
+// These are literal parser input, API/file identifiers, or third-party labels in help
+// copy. Scope common English words to their own key so they stay detectable in prose.
+const technicalTermsByKey: Record<string, readonly string[]> = {
+    'quickAdd.help': ['/* focus', '%Person', '%"Full Name"'],
+    'quickAdd.bulkImportTextFile': ['.txt'],
+    'keybindings.helpSubtitle': ['Esc'],
+    'settings.webdavHint': ['data.json'],
+    'settings.invalidUrlHttp': ['http/https'],
+    'settings.backupMobile.mindwtrCsvAreasWillBeCreated': ['Area'],
+    'settings.backupMobile.mindwtrCsvSectionsWillBeCreated': ['Section'],
+    'settings.aiExtraBodyParamsHint': ['model', 'messages', 'response_format', '"thinking"', '"type"', '"disabled"'],
+    'settings.naturalLanguageDatesDesc': ['tomorrow', 'next week'],
+    'obsidian.taskNotesDetectedHint': ['status', 'tags', 'task', 'due', 'scheduled', 'contexts', 'projects', 'timeEstimate', 'recurrence', 'completedDate'],
+    'search.helpOperators': ['status:', 'context:', 'tag:', 'project:', 'due:<=7d'],
+    'settings.linuxUpdateHint': ['yay -S mindwtr', 'paru -S mindwtr'],
+    'settings.aboutMobile.googlePlayUpdateAvailableWithVersions': ['Play'],
+    'settings.calendarMobile.chooseLocalIcsFile': ['.ics'],
+    'settings.calendarMobile.localIcsFileAdded': ['.ics'],
+    'settings.calendarMobile.localIcsFilesAreReadOnly': ['.ics'],
+    'settings.syncMobile.oauthWithDropboxAppFolderAccessMindwtrSyncsAppsMindwtr': ['/Apps/Mindwtr/data.json', '/Apps/Mindwtr/attachments/*'],
+    'settings.syncMobile.pleaseEnterAValidSelfHostedUrlHttpHttps': ['http/https'],
+    'settings.syncMobile.pleaseEnterAValidWebdavUrlHttpHttps': ['http/https'],
+    'settings.localApiToken': ['Bearer'],
+    'settings.localApiTokenDesc': ['Authorization'],
+    'settings.networkProxyInvalid': ['http(s)'],
+    'settings.calendarChooseLocalFile': ['.ics'],
+    'settings.cloudRememberTokenHint': ['localStorage'],
+    'settings.obsidianDataviewMetadataHint': ['project::', 'context::', 'due::', 'scheduled::', 'priority::', 'estimate::'],
+    'settings.obsidianMissingMarker': ['.obsidian'],
+};
+
+export function hasMixedEnglishText(locale: string, key: string, value: string, english: string): boolean {
+    if (value === english && isAllowedEnglishMirrorKey(locale, key)) return false;
+    for (const term of technicalTermsByKey[key] ?? []) {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        value = value.replace(new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g'), '');
+    }
+    return hasTranslatableEnglishText(value);
 }
 
 // ---------------------------------------------------------------------------

@@ -44,6 +44,12 @@ class WidgetPayloadTest {
   """.trimIndent()
 
   @Test
+  fun quickCaptureDescriptionUsesThePublishedTranslation() {
+    val payload = WidgetPayload.parse("""{"quickCapture":{"descriptionPlaceholder":"Beschreibung"}}""")!!
+    assertEquals("Beschreibung", payload.quickCapture.descriptionPlaceholder)
+  }
+
+  @Test
   fun parsesItemsLabelsAndPalette() {
     val payload = WidgetPayload.parse(sample)
 
@@ -84,6 +90,7 @@ class WidgetPayloadTest {
     assertEquals(0xFF1F2937.toInt(), payload.palette!!.card)
     assertFalse(payload.usesSystemColors)
     assertEquals("Add task to inbox...", payload.quickCapture.placeholder)
+    assertEquals("Description (optional)", payload.quickCapture.descriptionPlaceholder)
   }
 
   @Test

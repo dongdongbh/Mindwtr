@@ -4,7 +4,14 @@ import { Directory } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
-import { pickAndParseSyncFolder, readSyncFile, writeSyncFile } from './storage-file';
+import {
+  FileSyncRetainedGenerationError,
+  pickAndParseSyncFolder,
+  readSyncFile,
+  readSyncFileVersioned,
+  writeSyncFile,
+} from './storage-file';
+import { writeSyncArtifactBytes } from './storage-file-encryption';
 
 const fileSystemMock = vi.hoisted(() => {
   let storedText = '';
@@ -31,12 +38,32 @@ const fileSystemMock = vi.hoisted(() => {
     copyAsync: vi.fn(),
     deleteAsync: vi.fn(),
     moveAsync: vi.fn(),
+    EncodingType: { UTF8: 'utf8', Base64: 'base64' },
     cacheDirectory: 'file://cache/',
     documentDirectory: 'file://document/',
   };
 });
 
 vi.mock('./file-system', () => fileSystemMock);
+
+// SafDocumentsCore.kt's listing and lookup through the expo SAF mock's folder, so a test that
+// fails expo's listing fails this one too.
+vi.mock('./saf-documents', () => ({
+  listSafChildren: vi.fn(async (dir: string) => {
+    const uris: string[] = await fileSystemMock.StorageAccessFramework.readDirectoryAsync(dir);
+    // A path-like provider's display name: the decoded tail of the document ID.
+    const nameOf = (uri: string) => {
+      const decoded = decodeURIComponent(uri);
+      return decoded.slice(Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf(':')) + 1);
+    };
+    return uris.map((uri) => ({ uri, name: nameOf(uri), mime: null, size: null, lastModified: null }));
+  }),
+  statSafDocument: vi.fn(async () => null),
+  readSafDocument: vi.fn(async () => ({
+    bytes: new TextEncoder().encode(await fileSystemMock.StorageAccessFramework.readAsStringAsync()),
+    lengthVerified: true,
+  })),
+}));
 
 vi.mock('expo-document-picker', () => ({
   getDocumentAsync: vi.fn(),
@@ -47,7 +74,7 @@ vi.mock('expo-sharing', () => ({
   shareAsync: vi.fn(),
 }));
 
-const expoFilesMock = vi.hoisted(() => new Map<string, string>());
+const expoFilesMock = vi.hoisted(() => new Map<string, string | Uint8Array>());
 const streamWriteState = vi.hoisted(() => ({ failNext: false }));
 
 vi.mock('expo-file-system', () => {
@@ -62,7 +89,7 @@ vi.mock('expo-file-system', () => {
     create() {
       expoFilesMock.set(this.uri, '');
     }
-    write(content: string) {
+    write(content: string | Uint8Array) {
       if (streamWriteState.failNext) {
         streamWriteState.failNext = false;
         throw new Error('Unable to open output stream for URI: ' + this.uri);
@@ -70,7 +97,7 @@ vi.mock('expo-file-system', () => {
       expoFilesMock.set(this.uri, content);
       // content:// writes land in the same store the SAF read mock serves, so
       // writeSyncFile's read-back verification sees what the stream wrote.
-      if (this.uri.startsWith('content://')) {
+      if (this.uri.startsWith('content://') && typeof content === 'string') {
         fileSystemMock.__setStoredText(content);
       }
     }
@@ -81,7 +108,7 @@ vi.mock('expo-file-system', () => {
       expoFilesMock.set(target.uri, expoFilesMock.get(this.uri) ?? '');
     }
     async text() {
-      return expoFilesMock.get(this.uri) ?? '';
+      return String(expoFilesMock.get(this.uri) ?? '');
     }
   }
   class Directory {
@@ -127,70 +154,48 @@ const appData = (settings: AppData['settings']): AppData => ({
 describe('storage-file sync writes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    streamWriteState.failNext = false;
     fileSystemMock.__setStoredText('');
     expoFilesMock.clear();
     fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockResolvedValue([]);
     fileSystemMock.readDirectoryAsync.mockResolvedValue([]);
   });
 
-  it('pads shorter SAF writes so stale bytes cannot corrupt data.json', async () => {
-    const previous = JSON.stringify(
-      appData({
-        syncPreferences: { appearance: true, language: true, gtd: true },
-        appearance: { showTaskAge: true },
-        weekStart: 'monday',
-        dateFormat: 'ymd',
-        timeFormat: '24h',
-      }),
-      null,
-      2
-    );
-    const nextData = appData({
-      syncPreferences: { language: true },
-      weekStart: 'monday',
-    });
-    const next = JSON.stringify(nextData, null, 2);
-    fileSystemMock.__setStoredText(previous);
-
-    await writeSyncFile(syncFileUri, nextData);
-
-    const written = fileSystemMock.StorageAccessFramework.writeAsStringAsync.mock.calls[0]?.[1] as string;
-    expect(fileSystemMock.__getUtf8ByteLength(written)).toBeGreaterThanOrEqual(
-      fileSystemMock.__getUtf8ByteLength(previous)
-    );
-    expect(written.startsWith(next)).toBe(true);
-    expect(written.slice(next.length)).toMatch(/^\s+$/);
-    expect(JSON.parse(fileSystemMock.__getStoredText())).toEqual(nextData);
-  }, 10_000);
+  it('refuses a write without a document version and writes nothing', async () => {
+    await expect(writeSyncFile(syncFileUri, appData({ weekStart: 'monday' })))
+      .rejects.toThrow('refusing an unconditional write');
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.createFileAsync).not.toHaveBeenCalled();
+    expect(expoFilesMock.size).toBe(0);
+  });
 
   // The RSAF shape from #1001: the provider never declares FLAG_SUPPORTS_WRITE,
   // so expo's legacy SAF write refuses every attempt and waiting cannot help —
-  // the raw output-stream write must carry the sync file instead.
+  // the raw output-stream write must carry the bytes instead.
   it('falls back to the output-stream write when the provider pre-check reports not writable', async () => {
-    const nextData = appData({ weekStart: 'monday' });
+    const bytes = new TextEncoder().encode('{"tasks":[],"projects":[]}');
     fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockRejectedValueOnce(
       new Error(
         "Call to function 'ExponentFileSystem.writeAsStringAsync' has been rejected.\n→ Caused by: java.io.IOException: Location 'content://com.chiller3.rsaf.documents/tree/Crypt/document/Crypt%2Fdata.json' isn't writable."
       )
     );
 
-    await writeSyncFile(syncFileUri, nextData);
+    await writeSyncArtifactBytes(syncFileUri, bytes);
 
     expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fileSystemMock.__getStoredText())).toEqual(nextData);
+    expect(expoFilesMock.get(syncFileUri)).toEqual(bytes);
   }, 10_000);
 
   it('retries the provider write once when the stream fallback also fails', async () => {
-    const nextData = appData({ weekStart: 'monday' });
+    const bytes = new TextEncoder().encode('{"tasks":[],"projects":[]}');
     fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockRejectedValueOnce(
       new Error("Location 'content://x/data.json' isn't writable.")
     );
     streamWriteState.failNext = true;
 
-    await writeSyncFile(syncFileUri, nextData);
+    await writeSyncArtifactBytes(syncFileUri, bytes);
 
     expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(fileSystemMock.__getStoredText())).toEqual(nextData);
   }, 10_000);
 
   it('fails closed when the encrypted-sibling discovery listing is unavailable', async () => {
@@ -200,6 +205,23 @@ describe('storage-file sync writes', () => {
 
     await expect(readSyncFile(syncFileUri)).rejects.toThrow('provider listing denied');
   }, 10_000);
+
+  it('refuses a folder where the write probe cannot create a file, and never rewrites data.json (B3)', async () => {
+    const treeUri = 'content://com.example.provider/tree/root%3AMindwtr';
+    const dataUri = `${treeUri}/document/root%3AMindwtr%2Fdata.json`;
+    const stored = JSON.stringify(appData({ weekStart: 'monday' }));
+    fileSystemMock.__setStoredText(stored);
+    fileSystemMock.StorageAccessFramework.requestDirectoryPermissionsAsync.mockResolvedValue({
+      granted: true,
+      directoryUri: treeUri,
+    });
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockResolvedValue([dataUri]);
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockRejectedValue(new Error('the provider refused a new document'));
+
+    await expect(pickAndParseSyncFolder()).rejects.toThrow('the provider refused a new document');
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.__getStoredText()).toBe(stored);
+  });
 
   it('completes Android folder setup when the test-file content write fails after creation', async () => {
     const treeUri = 'content://com.chiller3.rsaf.documents/tree/remote%3AStaleCheck';
@@ -218,13 +240,16 @@ describe('storage-file sync writes', () => {
 
     const result = await pickAndParseSyncFolder();
 
-    expect(result?.__fileUri).toBe(dataUri);
+    // An empty folder is picked as the folder itself; the first sync publishes data.json.
+    expect(result?.__fileUri).toBe(`${treeUri}/document/remote%3AStaleCheck`);
+    expect(dataUri).toContain('data.json');
   });
 });
 
 describe('iOS sync file bookmarks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    streamWriteState.failNext = false;
     fileSystemMock.__setStoredText('');
     expoFilesMock.clear();
     fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockResolvedValue([]);
@@ -276,17 +301,17 @@ describe('iOS sync file bookmarks', () => {
     expect(accepted?.__fileUri).toBe('file:///owncloud/Mindwtr/backup.json');
   });
 
-  it('writes the sync file through the bookmarked native path when available', async () => {
-    bookmarkMocks.supportsBookmarkedSyncFileIO.mockReturnValue(true);
-    bookmarkMocks.writeBookmarkedSyncFileText.mockResolvedValue(undefined);
+  it('stops instead of repairing from data.json.bak when iCloud has offloaded data.json (B5 guard)', async () => {
+    const dir = 'file:///icloud/Mindwtr';
+    expoFilesMock.set(`${dir}/.data.json.icloud`, '');
+    expoFilesMock.set(`${dir}/data.json.bak`, JSON.stringify(appData({ weekStart: 'sunday' })));
+    fileSystemMock.readDirectoryAsync.mockResolvedValue(['.data.json.icloud', 'data.json.bak']);
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri.endsWith('/data.json.bak') ? { exists: true, size: 40 } : { exists: false }
+    ));
 
-    const data = appData({});
-    await writeSyncFile('file:///gdrive/Mindwtr/backup.json', data, { bookmark: 'bm-token' });
-
-    expect(bookmarkMocks.writeBookmarkedSyncFileText).toHaveBeenCalledWith(
-      'bm-token',
-      JSON.stringify(data, null, 2)
-    );
+    await expect(readSyncFileVersioned(`${dir}/data.json`)).rejects.toBeInstanceOf(FileSyncRetainedGenerationError);
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
   });
 
   it('reads the sync file through the bookmarked native path when available', async () => {

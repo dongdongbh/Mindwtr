@@ -203,10 +203,22 @@ export const createAutoSyncController = (
     const schedulePeriodicSync = () => {
         clearPeriodicSync();
         if (!allowDeferredWork || !periodicSyncEnabled || disposed) return;
+        const scheduledAt = now();
+        trace('Auto sync periodic scheduled', { delayMs: String(periodicSyncIntervalMs) });
         periodicSyncTimer = setTimer(() => {
             periodicSyncTimer = null;
             if (disposed) return;
-            if (options.isRuntimeActive() && !options.shouldPauseWindowSync?.()) {
+            const runtimeActive = options.isRuntimeActive();
+            // Preserve the gate's short circuit: an inactive runtime never reads the editor.
+            const editorPause = runtimeActive ? (options.shouldPauseWindowSync?.() ?? false) : null;
+            trace('Auto sync periodic fired', {
+                delayMs: String(periodicSyncIntervalMs),
+                latenessMs: String(Math.max(0, now() - scheduledAt - periodicSyncIntervalMs)),
+                runtimeActive: String(runtimeActive),
+                editorPause: editorPause === null ? 'not-checked' : String(editorPause),
+                outcome: !runtimeActive ? 'inactive' : editorPause ? 'editor-paused' : 'requested',
+            });
+            if (runtimeActive && !editorPause) {
                 trace('Auto sync trigger', { source: 'periodic' });
                 void requestAutoSync(undefined, 'periodic').catch((error) => options.reportError('Sync failed', error));
             }
@@ -270,7 +282,10 @@ export const createAutoSyncController = (
 
     const autoSyncOrchestrator = createSyncOrchestrator<AutoSyncRequest, void>({
         runCycle: async (request, controls) => {
-            if (!options.isRuntimeActive()) return;
+            if (!options.isRuntimeActive()) {
+                trace('Auto sync run skipped', { source: request.source, reason: 'inactive' });
+                return;
+            }
             if (!request.bypassFailureCooldown && !shouldRunAutoSyncNow(request.source)) return;
 
             const effectiveMinIntervalMs = resolveEffectiveMinIntervalMs(request.minIntervalMs);
@@ -279,6 +294,7 @@ export const createAutoSyncController = (
                 if (allowDeferredWork && !syncThrottleTimer) {
                     const waitMs = Math.max(0, effectiveMinIntervalMs - (nowMs - lastAutoSyncAt));
                     trace('Auto sync throttled', {
+                        source: request.source,
                         waitMs: String(waitMs),
                         minIntervalMs: String(effectiveMinIntervalMs),
                     });
@@ -300,6 +316,7 @@ export const createAutoSyncController = (
                 ? null
                 : await options.syncEncryptionSuspension?.() ?? null;
             if (suspension) {
+                trace('Auto sync run skipped', { source: request.source, reason: 'encryption-suspended' });
                 trace(
                     suspension === 'remote-plaintext'
                         ? 'Auto sync suppressed while this device is encrypted and the remote is not'
@@ -309,16 +326,21 @@ export const createAutoSyncController = (
                 return;
             }
 
-            if (options.canSync && !(await options.canSync())) return;
+            if (options.canSync && !(await options.canSync())) {
+                trace('Auto sync run skipped', { source: request.source, reason: 'backend-unavailable' });
+                return;
+            }
 
             lastAutoSyncAt = nowMs;
             trace('Auto sync run start', {
+                source: request.source,
                 minIntervalMs: String(effectiveMinIntervalMs),
             });
             await options.flushPendingSave().catch((error) => options.reportError('Save failed', error));
 
             const result = await options.performSync();
             trace('Auto sync run complete', {
+                source: request.source,
                 success: String(result.success),
                 error: result.error ?? '',
             });
@@ -390,7 +412,10 @@ export const createAutoSyncController = (
         source: string,
         internalRetry = false,
     ): Promise<void> => {
-        if (!options.isRuntimeActive()) return;
+        if (!options.isRuntimeActive()) {
+            trace('Auto sync run skipped', { source, reason: 'inactive' });
+            return;
+        }
         if (!allowDeferredWork && autoSyncOrchestrator.getState().inFlight) return;
         if (options.isSuspended?.() && autoSyncOrchestrator.getState().inFlight) {
             requestedWhileSuspended = true;

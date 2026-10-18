@@ -4,6 +4,7 @@ import { getPomodoroLocalDayKey, loadTranslations, useTaskStore, type Task } fro
 import { LanguageProvider } from '../../contexts/language-context';
 import * as languageContext from '../../contexts/language-context';
 import { useUiStore } from '../../store/ui-store';
+import { usePomodoroStore } from '../../store/pomodoro-store';
 import { DESKTOP_POMODORO_SESSION_STORAGE_KEY, PomodoroPanel } from './PomodoroPanel';
 const nowIso = '2026-07-01T12:00:00.000Z';
 const task: Task = {
@@ -38,6 +39,7 @@ describe('PomodoroPanel desktop persistence', () => {
             error: null,
             highlightTaskId: null,
         });
+        usePomodoroStore.getState().hydratePomodoro({});
     });
 
     it('localizes both phases and switch directions with the shared Chinese labels (#1367)', async () => {
@@ -208,6 +210,67 @@ describe('PomodoroPanel desktop persistence', () => {
 
         expect(screen.getByLabelText('Timer task').textContent).toContain('Timer only');
     });
+
+    it.each(['done', 'archived', 'cancelled', 'reference', 'deleted'] as const)(
+        'unlinks a task becoming %s while the picker is open without changing the timer', (transition) => {
+            storeSession(task.id);
+            renderPanel();
+            fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+            fireEvent.click(screen.getByLabelText('Timer task'));
+            expect(screen.getByRole('option', { name: task.title })).toBeInTheDocument();
+            const before = usePomodoroStore.getState().snapshot;
+
+            const nextTasks: Task[] = transition === 'deleted' ? [] : [{
+                ...task,
+                status: transition === 'cancelled' ? 'archived' : transition,
+                ...(transition === 'cancelled' ? { cancelledAt: nowIso } : {}),
+            }];
+            act(() => useTaskStore.setState({ tasks: nextTasks, _allTasks: nextTasks }));
+
+            expect(screen.getByRole('button', { name: 'Timer task' }).textContent).toContain('Timer only');
+            expect(screen.getByRole('option', { name: 'Timer only' })).toHaveAttribute('aria-selected', 'true');
+            expect(screen.queryByRole('option', { name: task.title })).toBeNull();
+            expect(screen.queryByLabelText('Mark task done')).toBeNull();
+            expect(usePomodoroStore.getState().snapshot).toEqual({ ...before, selectedTaskId: undefined });
+        }
+    );
+
+    it('uses current live titles and eligibility for unselected picker candidates', () => {
+        const otherTask: Task = { ...task, id: 'task-2', title: 'Keep working' };
+        useTaskStore.setState({ tasks: [task, otherTask], _allTasks: [task, otherTask] });
+        render(<LanguageProvider><PomodoroPanel tasks={[task, otherTask]} /></LanguageProvider>);
+        fireEvent.click(screen.getByLabelText('Timer task'));
+
+        const nextTasks: Task[] = [{ ...task, status: 'done' }, { ...otherTask, title: 'Updated title' }];
+        act(() => useTaskStore.setState({ tasks: nextTasks, _allTasks: nextTasks }));
+
+        expect(screen.queryByRole('option', { name: task.title })).toBeNull();
+        expect(screen.queryByRole('option', { name: otherTask.title })).toBeNull();
+        fireEvent.click(screen.getByRole('option', { name: 'Updated title' }));
+        expect(screen.getByLabelText('Timer task').textContent).toContain('Updated title');
+    });
+
+    it('keeps the link until its own Mark done changes the live task', async () => {
+        let finish!: () => void;
+        const updateTask = vi.fn(() => new Promise<{ success: true }>((resolve) => {
+            finish = () => {
+                const completed: Task = { ...task, status: 'done' };
+                useTaskStore.setState({ tasks: [completed], _allTasks: [completed] });
+                resolve({ success: true });
+            };
+        }));
+        useTaskStore.setState({ updateTask });
+        storeSession(task.id);
+        renderPanel();
+
+        fireEvent.click(screen.getByLabelText('Mark task done'));
+        expect(usePomodoroStore.getState().snapshot.selectedTaskId).toBe(task.id);
+        await act(async () => finish());
+
+        expect(screen.getByLabelText('Timer task').textContent).toContain('Timer only');
+        fireEvent.click(screen.getByLabelText('Timer task'));
+        expect(screen.queryByRole('option', { name: task.title })).toBeNull();
+    });
     // Mark done dropped the store result, so a rejected write left the task
     // untouched with nothing on screen and the user pressed the button again.
     it('reports a failed Mark done instead of silently doing nothing', async () => {
@@ -228,5 +291,7 @@ describe('PomodoroPanel desktop persistence', () => {
 
         expect(updateTask).toHaveBeenCalledWith('task-1', { status: 'done', isFocusedToday: false });
         expect(useUiStore.getState().toasts.map((toast) => toast.message)).toContain('Disk full');
+        expect(usePomodoroStore.getState().snapshot.selectedTaskId).toBe(task.id);
+        expect(screen.getByLabelText('Timer task').textContent).toContain(task.title);
     });
 });

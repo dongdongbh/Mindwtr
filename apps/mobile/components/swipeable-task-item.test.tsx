@@ -1,10 +1,11 @@
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import renderer from 'react-test-renderer';
-import { AccessibilityInfo, Alert, AppState, Text } from 'react-native';
+import { AccessibilityInfo, Alert, AppState, Platform, Text } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 
 import { configureDateFormatting, getDateFormattingConfig, getTaskAgeLabel, safeFormatDate } from '@mindwtr/core';
+import type { AppSettings, TaskEditorFieldId } from '@mindwtr/core';
 import { SwipeableTaskItem, readTaskRowRenderCount, type TaskRowActions } from './swipeable-task-item';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
 import { TaskEditModal } from './task-edit-modal';
@@ -27,7 +28,7 @@ const { addTask, updateTask, restoreTask, undoTaskCompletion, showToast, getTask
     _allProjects: [] as any[],
     _sectionsById: new Map<string, any>(),
     areas: [] as any[],
-    settings: { features: {}, appearance: {} },
+    settings: { features: {}, appearance: {} } as AppSettings,
     getDerivedState: () => ({ focusedCount: 0 }),
     getFocusedCount: () => 0,
     getFocusStarAction: (task: any) => (
@@ -259,6 +260,31 @@ describe('SwipeableTaskItem', () => {
     restoreTask.mockResolvedValue({ success: true });
     undoTaskCompletion.mockResolvedValue(undefined);
     getTaskStaleness.mockReturnValue('stale');
+  });
+
+  it.each(['android', 'ios'] as const)('honors the Status layout toggle for labeled and icon rows on %s (#1405)', (platform) => {
+    const originalOS = Platform.OS;
+    Platform.OS = platform;
+    const colors = { taskItemBg: '#111111', border: '#222222', text: '#ffffff', secondaryText: '#999999' } as any;
+    const task = { id: 'status-layout', title: 'Task', status: 'next' as const, tags: [], contexts: [],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+    let tree!: renderer.ReactTestRenderer;
+    try {
+      for (const statusBadgeAsIcon of [false, true]) {
+        for (const hidden of [undefined, [], ['status']] as (TaskEditorFieldId[] | undefined)[]) {
+          storeState.settings.gtd = { taskEditor: hidden ? { hidden: [...hidden] } : undefined };
+          renderer.act(() => {
+            tree = renderer.create(<SwipeableTaskItem task={task} isDark={false} tc={colors} statusBadgeAsIcon={statusBadgeAsIcon} />);
+          });
+          const buttons = tree.root.findAll((node) => node.props.accessibilityRole === 'button'
+            && node.props.accessibilityLabel === 'Change status. Current status: Next');
+          expect(buttons.length > 0).toBe(!hidden?.includes('status'));
+          renderer.act(() => { tree.unmount(); });
+        }
+      }
+    } finally {
+      Platform.OS = originalOS;
+    }
   });
 
   it.each([

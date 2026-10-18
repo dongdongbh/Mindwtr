@@ -1,6 +1,7 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runStoreCommand, runSyncStoreSave } from '@mindwtr/core';
 
 import { useSwipeableChecklist } from './useSwipeableChecklist';
 
@@ -157,6 +158,47 @@ describe('useSwipeableChecklist addChecklistItem', () => {
         expect(updateTask).toHaveBeenCalledWith('task-1', {
             checklist: [{ id: 'item-1', title: 'Passport', isCompleted: true }],
         });
+    });
+
+    it('ticks the item by id on the list a sync save published while the tick waited behind it', async () => {
+        const one = { id: 'item-1', title: 'Bread', isCompleted: false };
+        const task = {
+            id: 'task-1',
+            title: 'Groceries',
+            status: 'next',
+            checklist: [one],
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+        } as any;
+        storeState._allTasks = [task];
+        // updateTask as the store runs it: a command behind the write gate (store-write-gate.ts).
+        updateTask.mockImplementation((id: string, updates: any) => runStoreCommand(async () => {
+            storeState._allTasks = storeState._allTasks.map((item) => (item.id === id ? { ...item, ...updates } : item));
+            return { success: true };
+        }));
+        const { hook } = renderChecklistHook(task);
+        renderer.act(() => {
+            hook().toggleChecklistItem(0);
+        });
+
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        // Another device put an item in front of it: the sync save holds the gate, then publishes [new, item-1].
+        const save = runSyncStoreSave(async () => {
+            await held;
+            storeState._allTasks = [{ ...task, rev: 3, checklist: [{ id: 'item-0', title: 'Milk', isCompleted: false }, one] }];
+        });
+        renderer.act(() => {
+            vi.runAllTimers();
+        });
+        release();
+        await save;
+        await runStoreCommand(async () => undefined);
+
+        expect(storeState._allTasks[0].checklist).toEqual([
+            { id: 'item-0', title: 'Milk', isCompleted: false },
+            { id: 'item-1', title: 'Bread', isCompleted: true },
+        ]);
     });
 
     it('flushes an item added just before unmount', () => {

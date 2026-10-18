@@ -22,6 +22,7 @@ import {
     generateUUID,
     isMarkdownEditorAssistEnabled,
     parsePastedChecklistItems,
+    updateTaskFromDraft,
     useTaskStore,
     type MarkdownSelection,
     type MarkdownToolbarResult,
@@ -40,7 +41,6 @@ type ChecklistFieldProps = {
     taskId: string;
     checklist: Task['checklist'];
     plainList?: boolean;
-    updateTask: (taskId: string, updates: Partial<Task>) => void;
     resetTaskChecklist: (taskId: string) => void;
 };
 
@@ -151,13 +151,13 @@ export function ChecklistField({
     taskId,
     checklist,
     plainList = false,
-    updateTask,
     resetTaskChecklist,
 }: ChecklistFieldProps) {
     const markdownEditorAssist = useTaskStore((state) => isMarkdownEditorAssistEnabled(state.settings));
     const [checklistDraft, setChecklistDraft] = useState<Task['checklist']>(checklist || []);
     const checklistDraftRef = useRef<Task['checklist']>(checklist || []);
-    const persistedChecklistRef = useRef<Task['checklist']>(checklist || []);
+    // The stored list as the row holds it (absent stays absent).
+    const persistedChecklistRef = useRef<Task['checklist']>(checklist);
     const checklistDirtyRef = useRef(false);
     const checklistInputRefs = useRef<Array<HTMLInputElement | null>>([]);
     const checklistSelectionRefs = useRef<Array<MarkdownSelection>>([]);
@@ -177,11 +177,11 @@ export function ChecklistField({
         const taskChanged = lastTaskIdRef.current !== taskId;
         lastTaskIdRef.current = taskId;
         if (!taskChanged && checklistDirtyRef.current) return;
+        persistedChecklistRef.current = checklist;
         const incoming = checklist || [];
         if (!taskChanged && areChecklistsEqual(incoming, checklistDraftRef.current)) return;
         setChecklistDraft(incoming);
         checklistDraftRef.current = incoming;
-        persistedChecklistRef.current = incoming;
         checklistDirtyRef.current = false;
     }, [taskId, checklist]);
 
@@ -192,9 +192,12 @@ export function ChecklistField({
     }, []);
 
     const commitChecklistUpdate = useCallback((nextChecklist: Task['checklist']) => {
+        // Merged onto the latest row against the list this field last saved or adopted (core's
+        // updateTaskFromDraft, by item id): an item another device added or changed since stays.
+        const base = persistedChecklistRef.current;
         persistedChecklistRef.current = nextChecklist;
-        updateTask(taskId, { checklist: nextChecklist });
-    }, [taskId, updateTask]);
+        void updateTaskFromDraft(taskId, { checklist: base } as Task, { checklist: nextChecklist });
+    }, [taskId]);
 
     const commitChecklistDraft = useCallback((next?: Task['checklist']) => {
         const payload = next ?? checklistDraftRef.current;

@@ -536,7 +536,10 @@ describe('TaskList', () => {
     act(() => tree.unmount());
   });
 
-  it('shows a References pile below the project list, including tag-matched references (#1000)', async () => {
+  it.each([
+    ['default', ['ref-1', 'ref-2']],
+    ['title', ['ref-2', 'ref-1']],
+  ] as const)('shows project and tag-matched references in %s order (#1401)', async (sortBy, expectedIds) => {
     const active = makeTask('task-1', 'Write intro');
     const ownReference = makeTask('ref-1', 'Style guide', { status: 'reference' });
     const tagReference = makeTask('ref-2', 'Shared bibliography', { status: 'reference', projectId: 'project-2', tags: ['#research'] });
@@ -549,7 +552,7 @@ describe('TaskList', () => {
       await act(async () => {
         tree = create(
           <TaskList
-            project={{ id: project.id }}
+            project={{ id: project.id, sortBy }}
             showHeader={false}
             statusFilter="all"
             taskSource={[active, ownReference]}
@@ -563,7 +566,7 @@ describe('TaskList', () => {
       expect(sectionIndex).toBeGreaterThan(-1);
       expect(data[sectionIndex].count).toBe(2);
       const referenceIds = data.filter((item) => item.type === 'task' && item.task?.status === 'reference').map((item) => item.task!.id);
-      expect(referenceIds).toEqual(['ref-1', 'ref-2']);
+      expect(referenceIds).toEqual(expectedIds);
       // The main list stays reference-free: the active row sits above the pile.
       expect(data.findIndex((item) => item.type === 'task' && item.task?.id === 'task-1')).toBeLessThan(sectionIndex);
 
@@ -1240,12 +1243,29 @@ describe('TaskList', () => {
     expect(row.props.rowContext).toEqual(expect.objectContaining({
       focusTaskLimit: 3,
       showTaskAge: false,
+      showStatusBadge: true,
       timeEstimatesEnabled: true,
     }));
 
     act(() => {
       tree.unmount();
     });
+  });
+
+  it('refreshes shared row status visibility when the editor layout changes (#1405)', async () => {
+    const task = makeTask('status-layout', 'Task');
+    const renderList = () => <TaskList showHeader={false} statusFilter="next" taskSource={[task]} title="Next" />;
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(renderList()); });
+    const showStatusBadge = () => tree.root.findByType('SwipeableTaskItem' as unknown as React.ElementType).props.rowContext.showStatusBadge;
+    expect(showStatusBadge()).toBe(true);
+    storeState.settings = { ...storeState.settings, gtd: { taskEditor: { hidden: ['status'] } } };
+    await act(async () => { tree.update(renderList()); });
+    expect(showStatusBadge()).toBe(false);
+    storeState.settings = { ...storeState.settings, gtd: { taskEditor: { hidden: [] } } };
+    await act(async () => { tree.update(renderList()); });
+    expect(showStatusBadge()).toBe(true);
+    act(() => { tree.unmount(); });
   });
 
   it('reads focusedCount from the memoized store selector, not a fresh scan of the rendered task list (#766)', async () => {

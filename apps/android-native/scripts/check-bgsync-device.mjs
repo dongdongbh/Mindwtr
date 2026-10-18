@@ -32,7 +32,7 @@ import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, inboxCount, inEditor, mainList, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { check, connect, evidenced, fail, inboxCount, inEditor, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 import { hostDevice, serveWebdav, webdavDocument } from './sync-harness.mjs';
 
@@ -181,16 +181,7 @@ const toTabs = async () => {
     }
     return fail('the tabs did not come back');
 };
-const reveal = async (find, description) => {
-    let nodes = await device.toTop();
-    const inView = (current) => {
-        const node = find(current);
-        const list = mainList(current);
-        return node && (!list || (box(node)[1] >= box(list)[1] && box(node)[3] <= box(list)[3] - 40)) ? node : null;
-    };
-    for (let step = 0; step < 14 && !inView(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
-    return inView(nodes) ?? fail(`no ${description} on screen`);
-};
+const reveal = (find, description) => device.revealNode(find, description);
 const openSync = async () => {
     const nodes = await screen();
     if (onSync(nodes)) return nodes;
@@ -219,7 +210,8 @@ const insecureOn = async () => {
     const node = await reveal((current) => withDescription(current, label), 'Allow insecure HTTP');
     if (!switchOn(await screen(), label)) await tapExpecting(node, (current) => switchOn(current, label), 'insecure HTTP on');
 };
-const saved = () => count(allLogs(), '"operation":"saveSyncBackend"', '"outcome":"saved"');
+/** Save's answers logged after [since] (a logStamp): a count across the whole log can shrink as the ring drops old lines. */
+const saved = (since) => count(linesAfter(allLogs(), since).join('\n'), '"operation":"saveSyncBackend"', '"outcome":"saved"');
 /** Settings › Advanced › AI with its assistant card open (core's rows read "<title>. <description>"). */
 const openAICard = async () => {
     let nodes = await toTabs();
@@ -275,8 +267,9 @@ try {
     await insecureOn();
     await fill('sync-username', USER);
     await fill('sync-password', PASSWORD);
-    const savedBefore = saved();
-    await tapTag('sync-save', () => saved() > savedBefore, 'Save', 90_000);
+    const since = logStamp(allLogs());
+    // A Save runs a verification sync and then a normal sync; on the test phone's ~5,600-task library that measured ~95 s (10-13).
+    await tapTag('sync-save', () => saved(since) > 0, 'Save', 240_000);
     await until('the phone\'s data in the WebDAV folder', () => webdavDocument(dav, FOLDER) !== null, 30_000);
     await until('core\'s schedule decision', () => allLogs().includes('Native Android background sync schedule=on'), 30_000, 1_000);
     let queued = await until('the scheduled job in WorkManager', () => (unfinished(SYNC_WORK).length > 0 ? unfinished(SYNC_WORK) : null), 20_000);

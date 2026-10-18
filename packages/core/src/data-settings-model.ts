@@ -9,12 +9,61 @@
 import { isDiagnosticsLoggingEnabled } from './diagnostics-log';
 import { getDocsGuideUrl } from './docs-guidance';
 import { createSyncSettingsTranslator } from './sync-settings-model';
+import type { ImportPickerSourceId } from './import-runner';
 import type { AppSettings } from './types';
 
 type Translate = (key: string) => string;
 
 /** RN's result toast durations (use-sync-settings-backup-actions.ts), by the operation core's backup reply names. */
 export const DATA_TRANSFER_TOAST_MS = { replace: 5000, merge: 5600, todoist: 5600, ticktick: 6200, dgt: 6200, omnifocus: 6200, csv: 6200 } as const;
+
+/**
+ * RN's document picker types per importer (mobile lib/data-transfer.ts IMPORT_PICKER_DESCRIPTORS, moved byte-identical): the
+ * system picker offers these files. Native Android reads them from the Data model.
+ */
+export const IMPORT_PICKER_MIME_TYPES: Readonly<Record<ImportPickerSourceId, readonly string[]>> = {
+    todoist: [
+        'text/csv',
+        'text/comma-separated-values',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/octet-stream',
+    ],
+    ticktick: [
+        'text/csv',
+        'text/comma-separated-values',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/octet-stream',
+    ],
+    dgt: [
+        'application/json',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/octet-stream',
+    ],
+    omnifocus: [
+        'text/csv',
+        'text/comma-separated-values',
+        'application/json',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/octet-stream',
+    ],
+    'mindwtr-csv': [
+        'text/csv',
+        'text/comma-separated-values',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/octet-stream',
+    ],
+};
+
+/** An Import fold row: RN's order, its busy action (`import:<key>`), core's backup document mode, and its picker types. */
+export type DataImportRow = {
+    key: ImportPickerSourceId; mode: 'todoist' | 'ticktick' | 'dgt' | 'omnifocus' | 'csv';
+    label: string; description: string; mimeTypes: readonly string[];
+};
 
 export type DataSettingsEdit = { type: 'debugLogging'; value: boolean } | { type: 'analyticsOptOut'; value: boolean };
 
@@ -36,9 +85,14 @@ export type DataSettingsModel = {
         mergeLabel: string; mergeDescription: string; mergeFailed: string; snapshotsLabel: string; restoreLabel: string;
         /** RN's toast titles when Restore backup or a snapshot restore fails. */
         restoreFailed: string;
+        /**
+         * RN's Getting Started row, last in the fold, and its three toasts. `language` is the app language the seed is frozen in
+         * at the tap (RN passes useLanguage()).
+         */
+        gettingStarted: { label: string; description: string; language: string; ready: string; notCreated: string; failed: string; open: string };
     };
-    /** RN's second folded card: the import guide link, then one row per importer. */
-    importData: { title: string; description: string; guide: { title: string; description: string; url: string } };
+    /** RN's second folded card: the import guide link, then one row per importer; `failed` titles an import's failure toast. */
+    importData: { title: string; description: string; guide: { title: string; description: string; url: string }; failed: string; rows: DataImportRow[] };
     diagnostics: {
         title: string;
         /**
@@ -99,11 +153,28 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate, anal
             snapshotsLabel: t('settings.recoverySnapshots'),
             restoreLabel: t('settings.recoverySnapshotsRestore'),
             restoreFailed: t('settings.backupMobile.restoreFailed'),
+            gettingStarted: {
+                label: t('settings.gettingStartedContentAction'),
+                description: t('settings.gettingStartedContentDesc'),
+                language,
+                ready: t('onboarding.toastReady'),
+                notCreated: t('onboarding.toastNotCreated'),
+                failed: t('onboarding.toastFailed'),
+                open: t('common.open'),
+            },
         },
         importData: {
             title: t('settings.importData'),
             description: t('settings.importDataDesc'),
             guide: { title: t('settings.importSetupGuideTitle'), description: t('settings.importSetupGuideDesc'), url: getDocsGuideUrl('import/', language) },
+            failed: t('settings.backupMobile.importFailed'),
+            rows: [
+                { key: 'todoist', mode: 'todoist', label: tr('settings.syncMobile.importFromTodoist'), description: tr('settings.syncMobile.importTodoistCsvOrZipExportsIntoMindwtrProjects') },
+                { key: 'ticktick', mode: 'ticktick', label: tr('settings.syncMobile.importFromTicktick'), description: tr('settings.syncMobile.importTicktickCsvOrZipBackupsIntoMindwtrAreas') },
+                { key: 'dgt', mode: 'dgt', label: tr('settings.syncMobile.importFromDgtGtd'), description: tr('settings.syncMobile.importDgtGtdJsonOrZipExportsIntoMindwtrAreas') },
+                { key: 'omnifocus', mode: 'omnifocus', label: tr('settings.syncMobile.importFromOmnifocus'), description: tr('settings.syncMobile.importOmnifocusCsvJsonOrZipExportsIntoMindwtrProjects') },
+                { key: 'mindwtr-csv', mode: 'csv', label: tr('settings.syncMobile.importFromMindwtrCsv'), description: tr('settings.syncMobile.importMindwtrCsvFileIntoMindwtrAreasProjectsAndTasks') },
+            ].map((row) => ({ ...row, mimeTypes: IMPORT_PICKER_MIME_TYPES[row.key as ImportPickerSourceId] })) as DataImportRow[],
         },
         diagnostics: {
             title: t('settings.diagnostics'),

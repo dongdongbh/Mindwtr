@@ -2,6 +2,7 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SyncConfigurationSection } from './SyncConfigurationSection';
+import { dismissCleartextSyncWarning, getCleartextSyncDestination } from '../../../../lib/cleartext-sync-warning';
 
 const baseProps: Parameters<typeof SyncConfigurationSection>[0] = {
     t: {
@@ -39,6 +40,8 @@ const baseProps: Parameters<typeof SyncConfigurationSection>[0] = {
         webdavTestAccessibility: 'Test WebDAV connection',
         allowInsecureHttp: 'Allow insecure connections',
         allowInsecureHttpHint: 'Only use this on trusted networks.',
+        cleartextSyncWarningWebdav: 'WebDAV sync is using HTTP. Data is unencrypted; use it only on a trusted network.',
+        cleartextSyncWarningCloud: 'Self-hosted sync is using HTTP. Data is unencrypted; use it only on a trusted network.',
         cloudUrl: 'Cloud URL',
         cloudHint: 'Cloud hint',
         cloudToken: 'Cloud token',
@@ -128,6 +131,20 @@ const baseProps: Parameters<typeof SyncConfigurationSection>[0] = {
 } as any;
 
 describe('SyncConfigurationSection', () => {
+    it('keeps the HTTP indication in settings after the banner is acknowledged', () => {
+        dismissCleartextSyncWarning(getCleartextSyncDestination('webdav', 'http://sync.example.com/dav')!);
+        const webdav = render(<SyncConfigurationSection {...baseProps} syncBackend="webdav" webdavUrl="http://sync.example.com/dav" />);
+        expect(webdav.getByText(/WebDAV sync is using HTTP/)).toBeInTheDocument();
+        webdav.rerender(<SyncConfigurationSection {...baseProps} syncBackend="webdav" webdavUrl="https://sync.example.com/dav" webdavAllowInsecureHttp />);
+        expect(webdav.queryByText(/WebDAV sync is using HTTP/)).not.toBeInTheDocument();
+        webdav.unmount();
+
+        const cloud = render(<SyncConfigurationSection {...baseProps} syncBackend="cloud" cloudProvider="selfhosted" cloudUrl="http://sync.example.com" />);
+        expect(cloud.getByText(/Self-hosted sync is using HTTP/)).toBeInTheDocument();
+        cloud.rerender(<SyncConfigurationSection {...baseProps} syncBackend="cloud" cloudProvider="selfhosted" cloudUrl="http://localhost:3000" />);
+        expect(cloud.queryByText(/Self-hosted sync is using HTTP/)).not.toBeInTheDocument();
+    });
+
     it('offers a folder test and explains document-portal paths', () => {
         const onTestSyncPath = vi.fn();
         const { getByRole, getByText, queryByText, rerender } = render(

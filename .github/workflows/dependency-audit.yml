@@ -156,12 +156,20 @@ jobs:
           # - RUSTSEC-2023-0086: lexical-core 0.7 soundness advisory, pinned by
           #   nom 5 under the imap crate (email capture). No compatible fix on
           #   nom 5; drop once imap releases a stable on nom >=7.
+          # - RUSTSEC-2026-0370 / RUSTSEC-2026-0371 / RUSTSEC-2026-0372:
+          #   zvariant, zbus_names and zvariant_derive unmaintained
+          #   (informational, no patched version): merged into zbus 6. Pulled
+          #   in by zbus 3 (keyring/secret-service) and zbus 5 (ashpd, oo7,
+          #   notify-rust); drop once those move to zbus >=6.
           if ! cargo audit --deny warnings \
             --ignore RUSTSEC-2026-0235 \
             --ignore RUSTSEC-2026-0097 \
             --ignore RUSTSEC-2026-0194 \
             --ignore RUSTSEC-2026-0195 \
             --ignore RUSTSEC-2023-0086 \
+            --ignore RUSTSEC-2026-0370 \
+            --ignore RUSTSEC-2026-0371 \
+            --ignore RUSTSEC-2026-0372 \
             --file apps/desktop/src-tauri/Cargo.lock; then
             echo "cargo audit reported vulnerabilities or warnings, or failed." >&2
             exit 1

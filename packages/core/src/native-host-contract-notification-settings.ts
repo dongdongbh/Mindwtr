@@ -38,7 +38,7 @@ const validResult = (value: unknown, request: NotificationSettingRequest): value
     && exact(value, ['type', 'value', 'changed']) && value.changed === true
     && value.type === request.edit.type && value.value === request.edit.value;
 
-/** Device-local prepared scalar writes; permission and effects remain the native caller's responsibility. */
+/** Prepared scalar writes; permission and effects remain the native caller's responsibility. */
 export function createNotificationSettingsMethods(deps: { readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>; model: (settings: AppSettings) => NotificationSettingsModel }) {
     const authorizations = new Map<string, { payload: string; adapter: ReturnType<typeof getStorageAdapter>;

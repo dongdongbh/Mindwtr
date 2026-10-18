@@ -1,15 +1,30 @@
 import type { AppData } from './types';
+import { mapPass, type CooperativePass } from './cooperative';
 
-export const cloneAppData = (data: AppData): AppData => {
+const cloneValue = <T>(value: T): T => {
     if (typeof globalThis.structuredClone === 'function') {
         try {
-            return globalThis.structuredClone(data);
+            return globalThis.structuredClone(value);
         } catch {
             // Fall back for environments or values unsupported by structuredClone.
         }
     }
-    return JSON.parse(JSON.stringify(data)) as AppData;
+    return JSON.parse(JSON.stringify(value)) as T;
 };
+
+export const cloneAppData = (data: AppData): AppData => cloneValue(data);
+
+/**
+ * A deep copy of [data] as a cooperative pass (cooperative.ts): each record of its collections copied on its own, a few at
+ * a time. The copies hold the same values; a record two collections shared becomes two copies.
+ */
+export function* cloneAppDataPass(data: AppData): CooperativePass<AppData> {
+    const copy: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data)) {
+        copy[key] = Array.isArray(value) ? yield* mapPass(value, (item) => cloneValue(item)) : cloneValue(value);
+    }
+    return copy as unknown as AppData;
+}
 
 export const getErrorStatus = (error: unknown): number | null => {
     if (!error || typeof error !== 'object') return null;

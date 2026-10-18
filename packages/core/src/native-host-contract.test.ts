@@ -542,7 +542,14 @@ describe('native host contract', () => {
         };
 
         const expectMobileParity = (value: ReturnType<typeof detail>, scenario: string) => {
-            const mobile = projectParity.mobileSnapshot[scenario];
+            // #1401 corrects the Reference pile's title order without rewriting
+            // the historical mobile capture used by the other parity scenarios.
+            const mobile = projectParity.mobileSnapshot[scenario].map((item) => {
+                if (scenario !== 'live-sorted-title') return item;
+                if (item.id === 'live-ref') return { ...item, id: 'loose-ref-tag' };
+                if (item.id === 'loose-ref-tag') return { ...item, id: 'live-ref' };
+                return item;
+            });
             expect(value.total).toBe(mobile.length);
             expect(value.items.map((item) => (item.type === 'section'
                 ? { type: 'section', id: item.id, count: item.count, muted: item.muted }
@@ -2133,6 +2140,28 @@ describe('native host contract', () => {
                 } as { base: Partial<TaskDraft>; patch: Partial<TaskDraft> };
             };
 
+            it('keeps inherited policy through native Send then Use default and legacy Skip then Use default', async () => {
+                const host = await activateEditor([editTask({ reminderPolicy: 'inherit', suppressMindwtrReminders: true })], { taskReminderDefault: 'skip' });
+                const original = openDraft(host);
+                const sent = edited(host, original, { type: 'fields', patch: { reminderPolicy: 'send' } }).draft;
+                const inherited = edited(host, sent, { type: 'fields', patch: { reminderPolicy: 'inherit' } }).draft;
+                expect(inherited.suppressMindwtrReminders).toBe(true);
+                expect(changes(original, inherited).patch).toEqual({});
+                const renamed = edited(host, inherited, { type: 'fields', patch: { title: 'Renamed' } }).draft;
+                expect(await host.saveTaskDraft({ id: 'edit', ...changes(original, renamed), requestId: newRequestId() }))
+                    .toMatchObject({ ok: true, value: { draft: { reminderPolicy: 'inherit' } } });
+                expect(storedTask().reminderPolicy).toBe('inherit');
+
+                const legacyHost = await activateEditor([editTask({ suppressMindwtrReminders: true })], { taskReminderDefault: 'skip' });
+                const legacy = openDraft(legacyHost);
+                const usingDefault = edited(legacyHost, legacy, { type: 'fields', patch: { reminderPolicy: 'inherit' } }).draft;
+                const diff = changes(legacy, usingDefault);
+                expect(diff.patch).toEqual({ reminderPolicy: 'inherit' });
+                expect(await legacyHost.saveTaskDraft({ id: 'edit', ...diff, requestId: newRequestId() }))
+                    .toMatchObject({ ok: true, value: { draft: { reminderPolicy: 'inherit', suppressMindwtrReminders: true } } });
+                expect(storedTask().reminderPolicy).toBe('inherit');
+            });
+
             it('serves the model for an unsaved draft, as the editor shows it while editing', async () => {
                 freezeClock();
                 const host = await activateEditor([editTask({ projectId: 'p-work', dueDate: '2026-09-25' })], {
@@ -2211,6 +2240,13 @@ describe('native host contract', () => {
                     expect(recoveredView.value.rows).toEqual(savedView.value.rows);
                     const { dateInputBaseline: _baseline, ...legacyDraft } = draft;
                     expect(host.editTaskDraft({ id: 'edit', draft: legacyDraft })).toMatchObject({ ok: true });
+                    const { reminderPolicy: _policy, ...preUpgradeDraft } = legacyDraft;
+                    expect(host.editTaskDraft({ id: 'edit', draft: preUpgradeDraft as TaskDraft }))
+                        .toMatchObject({ ok: true, value: { draft: { reminderPolicy: 'send' } } });
+                    expect(host.editTaskDraft({ id: 'edit', draft: { ...preUpgradeDraft, suppressMindwtrReminders: true } as TaskDraft }))
+                        .toMatchObject({ ok: true, value: { draft: { reminderPolicy: 'skip' } } });
+                    expect(host.editTaskDraft({ id: 'edit', draft: { ...draft, reminderPolicy: 'invalid' } as unknown as TaskDraft }))
+                        .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
                     expect(host.editTaskDraft({ id: 'edit', draft: { ...draft, dateInputBaseline: { taskId: 'edit' } } as TaskDraft }))
                         .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
                     expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'fields', patch: { dateInputBaseline: draft.dateInputBaseline } } }))

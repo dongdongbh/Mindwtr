@@ -41,12 +41,26 @@ import {
     type QuickCaptureOptions,
 } from './quick-capture-model';
 import { isSandboxMode } from './sandbox';
+import { logError, logInfo, logWarn } from './logger';
+import type { NativeAttachmentsHost } from './native-host-contract-attachments';
+import { requestRowId } from './native-request-receipts';
+import { buildShareIntentFileCaptureParams, SHARE_INTENT_MAX_FILES } from './share-capture-files';
+import type { Attachment } from './types';
 import { useTaskStore } from './store';
 
 type EntryPointDeps = {
     readiness: () => NativeHostResult<null>;
     t: () => TranslateFn;
+    requestIdPattern: RegExp;
+    /** The host's attachment IO (createNativeHostContract's `attachments`): a file share's copies. */
+    attachments: () => NativeAttachmentsHost | null;
 };
+
+/**
+ * A shared file as the host staged it when the share arrived (the share's read grant ends with it): the staged copy's
+ * absolute path (null: it could not be read), and the provider's display name, MIME type and size (null when unknown).
+ */
+export type NativeSharedFile = { path: string | null; name: string | null; mimeType: string | null; size: number | null };
 
 /** A link's whole URL and the app's own scheme; a text share's EXTRA_TEXT, EXTRA_TITLE and EXTRA_SUBJECT; an assistant note's name and text extras. */
 export type NativeEntryPointInput =
@@ -191,6 +205,8 @@ export function createEntryPointMethods(deps: EntryPointDeps) {
             case 'quickCapture':
                 return opened({ captureModal: { params: { origin: 'system' } } });
             case 'path':
+                // The detailed capture shortcut's link (#1333) is the capture-quick tab route, as the capture feature's.
+                if (route.path.startsWith('/capture-quick')) return opened({ route: '/inbox', capture: emptyPopup() });
                 break;
         }
         // Any other link is Expo Router's route by its path (host and path): a list, or the global search with its query.
@@ -263,6 +279,76 @@ export function createEntryPointMethods(deps: EntryPointDeps) {
                 return opened({ route: '/inbox', ...capture });
             }
             return fail('INVALID_INPUT', 'An entry point is a link, a share or a note');
+        },
+
+        /**
+         * A file share (SEND of any type but text/plain, SEND_MULTIPLE), as React Native's root layout opens it
+         * (share-capture-files.ts): the host staged each file (at most React Native's six) when the share arrived; core
+         * copies each into the managed attachments folder and opens the capture screen with them, the subject (else the
+         * text, else the first file's name) as its title. Skipped files (too large, a blocked type, a failed copy, and one
+         * the host could not stage, when others were attached) are counted in one notice; with none attached, the text
+         * opens as a text share would, else the share could not be read (also on a host without attachment storage). Each copy's ID derives from the request UUID (the entry's), so a replay after a restart names the same
+         * copies. The host deletes the staged files once the entry opened.
+         */
+        async prepareSharedFiles(input: { requestId: string; files: NativeSharedFile[]; text: string | null; subject: string | null }): Promise<NativeHostResult<NativeEntryPoint>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const isFile = (file: unknown): file is NativeSharedFile => isObjectRecord(file) && isOptionalString(file.path)
+                && isOptionalString(file.name) && isOptionalString(file.mimeType) && (file.size === null || (typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0));
+            if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
+                || !Array.isArray(input.files) || input.files.length > SHARE_INTENT_MAX_FILES || !input.files.every(isFile)
+                || !isOptionalString(input.text) || !isOptionalString(input.subject)
+                || longerThan(input.text, TEXT_LIMIT * 5) || longerThan(input.subject, TEXT_LIMIT)) {
+                return fail('INVALID_INPUT', `A request UUID, at most ${SHARE_INTENT_MAX_FILES} staged files, and the share's text and subject (text or null) are required`);
+            }
+            const host = deps.attachments();
+            const persist = host?.persistAttachmentLocallyDetailed;
+            // React Native's root layout takes no share in sandbox mode.
+            if (isSandboxMode()) return opened({});
+            // A host without attachment storage cannot read a file share: React Native's notice, so the entry leaves the queue.
+            if (!host || !persist) return opened({ notice: shareUnreadable() });
+            const id = input.requestId.toLowerCase();
+            let index = 0;
+            const copies = new Map<string, Attachment>();
+            const result = await buildShareIntentFileCaptureParams({
+                files: input.files.map((file) => ({ path: file.path, fileName: file.name, mimeType: file.mimeType, size: file.size })),
+                shareSubject: input.subject,
+                shareText: input.text,
+            }, {
+                newId: () => requestRowId(id, `share-file:${index++}`),
+                persistAttachmentLocallyDetailed: async (attachment) => {
+                    const outcome = await persist.call(host, attachment);
+                    copies.set(outcome.attachment.uri, outcome.attachment);
+                    return outcome;
+                },
+                deleteFile: async (uri) => {
+                    const copy = copies.get(uri);
+                    if (copy) await host.deleteManagedAttachmentFile(copy);
+                },
+                logWarn: (message, context) => logWarn(message, { scope: context.scope, context: context.extra }),
+                // The error's name only: a provider's message can carry the file's name.
+                logError: (error, context) => logError(`Shared file copy failed: ${error instanceof Error ? error.name : 'unknown'}`, { scope: context.scope, context: context.extra }),
+            });
+            // A file the host could not stage (no path) is no candidate of React Native's rule. React Native reports it on its
+            // share error channel ("Share unavailable") and opens the others: here it is counted with the skipped files when
+            // others were attached, and the share could not be read when none was.
+            const unreadable = input.files.filter((file) => !file.path?.trim()).length;
+            const skipped = result.candidateCount - result.attachedCount + (result.attachedCount > 0 ? unreadable : 0);
+            try {
+                logInfo('Native file share prepared', { scope: 'share-intent', context: {
+                    releaseCheck: 'v1.3.7/native-share-files', candidates: result.candidateCount, attached: result.attachedCount, skipped, unreadable,
+                } });
+            } catch { /* Diagnostics never fail the share. */ }
+            const webUrl = input.text ? readAndroidTextShare({ text: input.text })?.webUrl ?? null : null;
+            const draft = result.params ? null : buildShareCaptureDraft({ shareSubject: input.subject, shareText: input.text, shareWebUrl: webUrl });
+            const params = result.params ?? (draft && captureModalParams(draft.title, draft.description !== undefined ? { description: draft.description } : {}));
+            const skippedNotice = skipped > 0
+                ? { tone: 'warning' as const, title: tFallback(deps.t(), 'common.notice', 'Notice'),
+                    message: tFallback(deps.t(), 'share.filesSkipped', '{{count}} shared file(s) could not be attached (too large, blocked file type, or unreadable).').replace('{{count}}', String(skipped)) }
+                : null;
+            if (params && fitsCaptureModal(params)) return opened({ route: '/inbox', captureModal: { params }, notice: skippedNotice });
+            // Nothing readable at all; when files were only skipped, their notice already says why nothing arrived.
+            return opened({ notice: unreadable === 0 && skippedNotice ? skippedNotice : shareUnreadable() });
         },
 
         /**

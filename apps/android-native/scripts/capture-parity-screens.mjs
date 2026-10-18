@@ -10,6 +10,8 @@
 // database, and shoots Inbox, Focus, Projects, the task editor (Form tab) for one
 // task opened from Focus, global search for "kitchen", Process Inbox's first step, the
 // capture popup (empty, with text and core's preview, and with the contexts picker open),
+// (PARITY_ONLY=d1b shoots only pass D1b's: Settings › Data with the Backup fold's end (Getting Started), the Import fold open,
+// and in light mode the Todoist question and the invalid-import warning.)
 // (PARITY_ONLY=r2 shoots only pass R2's screens, with the weekly review on in the fixture: Settings › Notifications from its
 // top and its end, and its day picker.)
 // RN's capture screen for each entry kind (a capture link with the keyboard up and down, a share, an assistant note, and a
@@ -54,6 +56,7 @@ const coreSrc = resolve(import.meta.dirname, '../../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 const out = resolve(harness, 'parity', new Date().toISOString().replace(/[:.]/g, '-'));
 const R2_ONLY = process.env.PARITY_ONLY === 'r2';
+const D1B_ONLY = process.env.PARITY_ONLY === 'd1b';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -410,7 +413,7 @@ const shootMenu = async (prefix, suffix, rn) => {
     }
 };
 /**
- * Settings from the More sheet's Settings tile (both apps), then General, GTD and Sync (their menu rows, core's labels): each
+ * Settings from the More sheet's Settings tile (both apps, shot as settings-menu), then General, GTD and Sync (their menu rows, core's labels): each
  * shot with its first switch or RN's "Sync is off" box on screen, and closed with Back; Back again leaves Settings.
  */
 const SETTINGS_SCREENS = [
@@ -424,6 +427,7 @@ const shootSettings = async (prefix, suffix, rn) => {
     await tap(rn ? menu.find((node) => node['content-desc'] === 'Menu') : tab(menu, 'Menu'));
     const sheet = await waitFor('the Settings tile', (current) => Boolean(withDescription(current, en['nav.settings'])), 15_000);
     await tap(withDescription(sheet, en['nav.settings']));
+    await shoot(`${prefix}-settings-menu-${suffix}`, (current) => Boolean(withDescription(current, SETTINGS_SCREENS[0].row)));
     for (const screen of SETTINGS_SCREENS) {
         const rows = await waitFor(`the ${screen.name} row`, (current) => Boolean(withDescription(current, screen.row)), 30_000);
         await tap(withDescription(rows, screen.row));
@@ -445,12 +449,13 @@ const shootSettings = async (prefix, suffix, rn) => {
  * that cannot be reached is reported, never fatal to the other shots. Ends on the Settings menu.
  */
 const DATA_DIR = '/sdcard/Download/mindwtr-parity-d1';
-const DATA_FILES = { valid: 'd1-parity-backup.json', invalid: 'd1-parity-invalid.json' };
+const DATA_FILES = { valid: 'd1-parity-backup.json', invalid: 'd1-parity-invalid.json', todoist: 'd1b-parity-todoist.csv' };
 const pushDataFiles = () => {
     const at = new Date().toISOString();
     const task = (title) => ({ id: `parity-${title}`, title, status: 'next', tags: [], contexts: [], createdAt: at, updatedAt: at, rev: 1 });
     writeFileSync(resolve(out, `fixture/${DATA_FILES.valid}`), JSON.stringify({ tasks: [task('Backup task one'), task('Backup task two')], projects: [], sections: [], areas: [], people: [], settings: {} }, null, 2));
     writeFileSync(resolve(out, `fixture/${DATA_FILES.invalid}`), 'not a Mindwtr backup');
+    writeFileSync(resolve(out, `fixture/${DATA_FILES.todoist}`), 'TYPE,CONTENT,PRIORITY,INDENT,DATE,DESCRIPTION\nsection,Planning,,,,\ntask,Plan launch,1,1,,Write the brief\ntask,Follow up,4,2,,\n');
     sh(`mkdir -p ${DATA_DIR}`);
     for (const name of Object.values(DATA_FILES)) adbRaw('push', resolve(out, `fixture/${name}`), `${DATA_DIR}/${name}`);
 };
@@ -798,6 +803,55 @@ const shootPillsFontScale = async (prefix, rn, activity, scale = '2.0') => {
     sh(`settings put system font_scale ${originalFontScale === 'null' ? '1.0' : originalFontScale}`);
     await stopApp();
 };
+/**
+ * Pass D1b: Settings › Data with the Backup fold open at its end (RN's Getting Started row), the Import fold open (the guide
+ * link and the five importers), and in light mode the Todoist question for a pushed Todoist CSV and the warning for that file on
+ * the DGT row (both cancelled or dismissed, so nothing is written). Back to the tabs at the end.
+ */
+const shootD1b = async (prefix, suffix, rn) => {
+    if (rn) openLink('inbox');
+    const menu = await waitFor('the Menu tab', (current) => Boolean(rn ? current.find((node) => node['content-desc'] === 'Menu') : tab(current, 'Menu')), 60_000);
+    await tap(rn ? menu.find((node) => node['content-desc'] === 'Menu') : tab(menu, 'Menu'));
+    const sheet = await waitFor('the Settings tile', (current) => Boolean(withDescription(current, en['nav.settings'])), 15_000);
+    await tap(withDescription(sheet, en['nav.settings']));
+    try {
+        const rows = await waitFor('the Data row', (current) => Boolean(withDescription(current, `${en['settings.data']}. ${en['settings.menuDesc.data']}`)), 30_000);
+        await tap(withDescription(rows, `${en['settings.data']}. ${en['settings.menuDesc.data']}`));
+        await shoot(`${prefix}-settings-data-${suffix}`, (current) => Boolean(dataRow(current, en['settings.backup'])));
+        await tap(dataRow(await screen(), en['settings.backup']) ?? fail('no Backup fold'));
+        let nodes = await waitFor('the Backup fold open', (current) => Boolean(dataRow(current, en['settings.exportBackup'])), 15_000);
+        for (let step = 0; step < 4 && !dataRow(nodes, en['settings.gettingStartedContentAction']); step += 1) nodes = await device.swipe(nodes, 'down');
+        await shoot(`${prefix}-settings-data-backup-end-${suffix}`, (current) => Boolean(dataRow(current, en['settings.gettingStartedContentAction'])));
+        nodes = await screen();
+        for (let step = 0; step < 4 && !dataRow(nodes, en['settings.importData']); step += 1) nodes = await device.swipe(nodes, 'down');
+        await tap(dataRow(nodes, en['settings.importData']) ?? fail('no Import fold'));
+        nodes = await waitFor('the Import fold open', (current) => Boolean(dataRow(current, en['settings.syncMobile.importFromTodoist'])), 15_000);
+        for (let step = 0; step < 4 && !dataRow(nodes, en['settings.syncMobile.importFromMindwtrCsv']); step += 1) nodes = await device.swipe(nodes, 'down');
+        await shoot(`${prefix}-settings-data-import-${suffix}`, (current) => Boolean(dataRow(current, en['settings.syncMobile.importFromTodoist'])));
+        if (suffix === 'light') {
+            await tap(dataRow(await screen(), en['settings.syncMobile.importFromTodoist']) ?? fail('no Todoist row'));
+            await pickParityFile(DATA_FILES.todoist);
+            await shoot(`${prefix}-settings-data-todoist-question-${suffix}`, (current) => current.some((node) => /^cancel$/i.test(node.text || node['content-desc'] || '')));
+            const cancel = (await screen()).find((node) => /^cancel$/i.test(node.text || node['content-desc'] || ''));
+            if (cancel) await tap(cancel);
+            await sleep(1500);
+            await tap(dataRow(await screen(), en['settings.syncMobile.importFromDgtGtd']) ?? fail('no DGT row'));
+            await pickParityFile(DATA_FILES.todoist);
+            await shoot(`${prefix}-settings-data-import-invalid-${suffix}`, (current) => hasText(current, en['settings.backupMobile.importFailed']));
+            await sleep(5000);
+        }
+    } catch (error) {
+        console.log(`warn - ${prefix} D1b Data shots: ${error.message}`);
+    }
+    for (let step = 0; step < 6; step += 1) {
+        const current = await screen();
+        if (rn ? current.some((node) => node['content-desc'] === 'Menu') && !withDescription(current, en['nav.settings']) && !dataRow(current, en['settings.backup'])
+            : Boolean(tab(current, 'Inbox')) && !dataRow(current, en['settings.backup'])) break;
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(900);
+    }
+};
 const SCREENS = [
     { name: 'inbox', link: 'inbox', tab: 'Inbox', text: T.call },
     { name: 'focus', link: 'focus', tab: 'Focus', text: T.outline },
@@ -842,6 +896,7 @@ try {
             device.launch(RN_ACTIVITY);
         }
         if (R2_ONLY) { await shootR2('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
+        if (D1B_ONLY) { await shootD1b('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         for (const screen of SCREENS) {
             openLink(screen.link);
             await shoot(`rn-${screen.name}-${mode === 'yes' ? 'dark' : 'light'}`, (nodes) => hasText(nodes, screen.text));
@@ -883,6 +938,7 @@ try {
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         if (mode === 'yes') await setNight('yes');
         if (R2_ONLY) { await shootR2('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
+        if (D1B_ONLY) { await shootD1b('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         for (const screen of SCREENS) {
             const nodes = await waitFor('the native tabs', (current) => Boolean(tab(current, screen.tab)), 60_000);
             if (!tabSelected(nodes, screen.tab)) await tap(tab(nodes, screen.tab));

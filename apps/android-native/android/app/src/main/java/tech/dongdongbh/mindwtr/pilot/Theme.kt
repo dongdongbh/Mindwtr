@@ -338,8 +338,14 @@ fun TextStyle.compact(density: Density): TextStyle {
     return copy(fontSize = size, lineHeight = line, lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None))
 }
 
-/** RN's type: the platform sans (Fonts.sans is 'normal' on Android), at RN's size, weight, and line height. */
+/**
+ * RN's type: the platform sans (Fonts.sans is 'normal' on Android), at RN's size, weight, and line height. RN's line height
+ * is the whole line box, first and last lines too; Compose trims the extra above the first line and below the last by
+ * default, which made every settings row about 5 dp shorter than RN's (label 21 and description 18 lost ~2.5 dp each).
+ */
 fun rnText(size: Int, weight: Int, lineHeight: Int? = null, letterSpacing: Float = 0f) = TextStyle(
     fontFamily = FontFamily.Default, fontSize = size.sp, fontWeight = FontWeight(weight),
     lineHeight = lineHeight?.sp ?: TextUnit.Unspecified, letterSpacing = letterSpacing.sp,
+    // RN's CustomLineHeightSpan: the full line height on every line, the extra split in proportion to ascent and descent.
+    lineHeightStyle = if (lineHeight == null) null else LineHeightStyle(LineHeightStyle.Alignment.Proportional, LineHeightStyle.Trim.None),
 )

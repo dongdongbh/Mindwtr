@@ -15,6 +15,7 @@ import {
   planAttachmentOpen,
   Project,
   resolveAttachmentAvailability,
+  runStoreCommand,
   softDeleteAttachment,
   type AttachmentResolution,
   useTaskStore,
@@ -76,12 +77,14 @@ export function useProjectAttachments({
     has: (attachment, expected): attachment is Attachment => hasAttachmentDownloadIdentity(attachment, expected),
   }), []);
 
+  // One store command reads the row, builds the whole attachment list and writes it: a sync save admitted first
+  // publishes newer rows (a sibling another device added), and a list built before it would drop them.
   const updateProjectAttachmentIfCurrent = useCallback((
     projectId: string,
     attachmentId: string,
     identity: string,
     patch: Partial<Attachment>,
-  ): Attachment | null => {
+  ): Promise<Attachment | null> => runStoreCommand(async () => {
     const current = currentProjectAttachmentForIdentity(projectId, attachmentId, identity);
     if (!current) return null;
     const nextAttachment = { ...current.attachment, ...patch };
@@ -89,15 +92,33 @@ export function useProjectAttachments({
       logAttachmentWriteSkipped();
       return nextAttachment;
     }
-    const nextAttachments = patchAttachment(current.project.attachments || [], attachmentId, patch);
-    updateProject(projectId, { attachments: nextAttachments });
+    const stored = useTaskStore.getState()._allProjects.find((item) => item.id === projectId);
+    const base = stored ?? current.project;
+    const nextAttachments = patchAttachment(base.attachments || [], attachmentId, patch);
+    const written = updateProject(projectId, { attachments: nextAttachments });
     const selected = selectedProjectRef.current;
     const selectedAttachment = selected?.attachments?.find((item) => item.id === attachmentId);
     if (selected?.id === projectId && hasAttachmentDownloadIdentity(selectedAttachment, identity)) {
-      setSelectedProject({ ...current.project, attachments: nextAttachments });
+      setSelectedProject({ ...base, attachments: nextAttachments });
     }
+    await written;
     return nextAttachment;
-  }, [currentProjectAttachmentForIdentity, setSelectedProject, updateProject]);
+  }), [currentProjectAttachmentForIdentity, setSelectedProject, updateProject]);
+
+  // Same rule for the add and remove buttons: [build] gets the list as stored when the write is admitted.
+  const writeProjectAttachments = useCallback((
+    projectId: string,
+    build: (attachments: Attachment[]) => Attachment[],
+  ): Promise<void> => runStoreCommand(async () => {
+    const stored = useTaskStore.getState()._allProjects.find((item) => item.id === projectId);
+    const selected = selectedProjectRef.current;
+    const base = stored ?? (selected?.id === projectId ? selected : null);
+    if (!base || base.status === 'archived') return;
+    const next = build(base.attachments || []);
+    const written = updateProject(projectId, { attachments: next });
+    if (selectedProjectRef.current?.id === projectId) setSelectedProject({ ...base, attachments: next });
+    await written;
+  }), [setSelectedProject, updateProject]);
 
   const resolveProjectAttachment = useCallback((
     projectId: string,
@@ -208,10 +229,8 @@ export function useProjectAttachments({
     }
     const current = getMutableSelectedProject(projectAtStart.id);
     if (!current) return;
-    const next = [...(current.attachments || []), outcome.attachment];
-    updateProject(current.id, { attachments: next });
-    setSelectedProject({ ...current, attachments: next });
-  }, [getMutableSelectedProject, setSelectedProject, showSandboxUnavailable, t, updateProject]);
+    await writeProjectAttachments(current.id, (attachments) => [...attachments, outcome.attachment]);
+  }, [getMutableSelectedProject, showSandboxUnavailable, t, writeProjectAttachments]);
 
   const confirmAddProjectLink = useCallback(() => {
     if (isSandboxMode()) {
@@ -226,20 +245,17 @@ export function useProjectAttachments({
       return;
     }
     if (batch.kind === 'nothing') return;
-    const next = [...(current.attachments || []), ...batch.added];
-    updateProject(current.id, { attachments: next });
-    setSelectedProject({ ...current, attachments: next });
+    void writeProjectAttachments(current.id, (attachments) => [...attachments, ...batch.added]);
     setLinkModalVisible(false);
     setLinkInput('');
-  }, [getMutableSelectedProject, linkInput, setSelectedProject, showSandboxUnavailable, t, updateProject]);
+  }, [getMutableSelectedProject, linkInput, showSandboxUnavailable, t, writeProjectAttachments]);
 
   const removeProjectAttachment = useCallback((id: string) => {
     const current = getMutableSelectedProject();
     if (!current) return;
-    const next = softDeleteAttachment(current.attachments || [], id, new Date().toISOString());
-    updateProject(current.id, { attachments: next });
-    setSelectedProject({ ...current, attachments: next });
-  }, [getMutableSelectedProject, setSelectedProject, updateProject]);
+    const now = new Date().toISOString();
+    void writeProjectAttachments(current.id, (attachments) => softDeleteAttachment(attachments, id, now));
+  }, [getMutableSelectedProject, writeProjectAttachments]);
 
   const resetProjectAttachmentUi = useCallback(() => {
     setImagePreviewAttachment(null);

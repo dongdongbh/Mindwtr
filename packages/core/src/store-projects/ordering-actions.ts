@@ -4,7 +4,7 @@ import { sameSectionDeleteJson, sameSectionSqliteRow, sameTaskSqliteRow } from '
 import { sameProjectSqliteRow } from './project-actions';
 import type { PreparedProjectSectionOrder, PreparedProjectTaskOrder, PreparedTaskEditResult } from '../store-types';
 import { planProjectTaskOrderMove, projectTaskOrderToken, type ProjectReorderFlatItem } from '../project-task-reorder';
-import { compareTasksByProjectOrder, sortTasksByBoardOrder } from '../task-utils';
+import { compareProjectsByOrder, compareTasksByProjectOrder, sortTasksByBoardOrder } from '../task-utils';
 import { mutateTasks } from '../store-tasks';
 import { logInfo } from '../logger';
 import type { OrderingActions, Project, ProjectActionContext, Section, Task, TaskStatus } from './shared';
@@ -355,7 +355,7 @@ export const createOrderingActions = ({
                 );
                 const areaProjects = state._allProjects.filter(isInArea);
                 const currentIds = areaProjects
-                    .sort((a, b) => (Number.isFinite(a.order) ? a.order : 0) - (Number.isFinite(b.order) ? b.order : 0))
+                    .sort(compareProjectsByOrder)
                     .map((project) => project.id);
                 const validOrderedIds = uniqueValidIds(orderedIds, new Set(currentIds));
                 if (validOrderedIds.length === 0) return [];

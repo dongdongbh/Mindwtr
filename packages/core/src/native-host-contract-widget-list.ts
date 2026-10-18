@@ -1,5 +1,5 @@
 /**
- * The native host contract for the widget list screen (route `/widget-list/<id>`, a Tasks widget's header for Next Actions or a
+ * The native host contract for the widget list screen (route `/widget-list/<id>`, a Tasks widget's header for Next, Upcoming or a
  * saved filter), as React Native's app/(drawer)/widget-list/[id].tsx draws it from resolveWidgetListDestination: the list's
  * title, every task of the widget's own core projection (uncapped, already filtered and ordered, with no in-app area or filter
  * applied again), windowed by NATIVE_HOST_MAX_WINDOW, and RN's empty line. A route ID that is not a list, or a saved filter that
@@ -47,7 +47,7 @@ type WidgetListDeps = {
 
 export function createWidgetListMethods(deps: WidgetListDeps) {
     return {
-        /** The widget list screen for a route ID (`next`, `filter:<id>`, `project:<id>`), as mobile shows `/widget-list/<id>`. */
+        /** The widget list screen for `next`, `upcoming`, `filter:<id>`, `project:<id>`, `context:<token>` or `tag:<token>`. */
         getWidgetListView(input: { id: string; offset?: number; limit?: number; revision?: string }): NativeHostResult<NativeWidgetListView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

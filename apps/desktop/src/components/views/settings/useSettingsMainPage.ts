@@ -177,47 +177,43 @@ export function useSettingsMainPage({
     const onDensityChange = useCallback((mode: MainPageProps['densityMode']) => {
         updateSettings({
             appearance: {
-                ...(settings?.appearance ?? {}),
                 density: mode,
             },
         })
             .then(showSaved)
             .catch((error) => reportError('Failed to update density', error));
-    }, [settings?.appearance, showSaved, updateSettings]);
+    }, [showSaved, updateSettings]);
 
     const onTextSizeChange = useCallback((mode: MainPageProps['textSizeMode']) => {
         updateSettings({
             appearance: {
-                ...(settings?.appearance ?? {}),
                 textSize: mode,
             },
         })
             .then(showSaved)
             .catch((error) => reportError('Failed to update text size', error));
-    }, [settings?.appearance, showSaved, updateSettings]);
+    }, [showSaved, updateSettings]);
 
     const onFontFamilyChange = useCallback((value: string) => {
         const next = coerceDesktopFontFamily(value);
         updateSettings({
             appearance: {
-                ...(settings?.appearance ?? {}),
                 fontFamily: next || undefined,
             },
         })
             .then(showSaved)
             .catch((error) => reportError('Failed to update font', error));
-    }, [settings?.appearance, showSaved, updateSettings]);
+    }, [showSaved, updateSettings]);
 
     const onShowTaskAgeChange = useCallback((enabled: boolean) => {
         updateSettings({
             appearance: {
-                ...(settings?.appearance ?? {}),
                 showTaskAge: enabled,
             },
         })
             .then(showSaved)
             .catch((error) => reportError('Failed to update task age display', error));
-    }, [settings?.appearance, showSaved, updateSettings]);
+    }, [showSaved, updateSettings]);
 
     const onLanguageChange = useCallback((language: Language) => {
         setLanguage(language);

@@ -104,7 +104,7 @@
     "verify": "bun run typecheck && bun run lint:all && bun run test && bun run native:test && bun run governance && bun run schema:check",
     "governance": "bash scripts/ci/governance.sh",
     "test:perf": "bun run --filter @mindwtr/core test:perf && MINDWTR_PERF_TEST=1 bun --cwd apps/desktop test src/components/views/ListView.performance.test.tsx src/components/views/TimelineView.performance.test.tsx && MINDWTR_PERF_TEST=1 bun --cwd apps/mobile test tests/large-store-performance.test.tsx",
-    "test:governance": "python3 scripts/ci/google-play-edit.test.py && python3 scripts/ci/android-play-release-plan.test.py && bun test scripts/ci scripts/migration scripts/*.test.ts apps/android-native/scripts/run-device-batch.test.mjs",
+    "test:governance": "python3 scripts/ci/google-play-edit.test.py && python3 scripts/ci/android-play-release-plan.test.py && bun test scripts/ci scripts/migration scripts/*.test.ts apps/android-native/scripts/run-device-batch.test.mjs apps/android-native/scripts/check-variant-identity.test.mjs apps/android-native/scripts/merge-tap-matching.test.mjs",
     "lint:core": "bun run --filter @mindwtr/core lint",
     "lint:cloud": "bun run --filter mindwtr-cloud lint",
     "lint:node": "bun run lint:core && bun run lint:cloud",

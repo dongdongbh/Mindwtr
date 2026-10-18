@@ -69,6 +69,7 @@ export function ProjectToSectionDialog({ source, projects, onCancel, onSuccess, 
             <h3 id={titleId} className="text-lg font-semibold">{label}</h3>
         </DialogHeader>
         <DialogBody className="space-y-4 px-5 pb-5">
+            {sourceForSummary.isSequential && <p className="text-sm">{tFallback(t, 'projects.convertBlocked.destination-section-sequence', 'Choose a destination set to Sequential → Within sections. The new section keeps its task sequence; other sections keep progressing independently.')}</p>}
             {!prepared ? <>
                 <label className="block text-sm font-medium">
                     {tFallback(t, 'projects.convertDestination', 'Destination project')}

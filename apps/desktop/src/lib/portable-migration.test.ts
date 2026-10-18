@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Attachment, Task } from '@mindwtr/core';
+import { runStoreCommand, runSyncStoreSave, type Attachment, type Task } from '@mindwtr/core';
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const updateTaskMock = vi.hoisted(() => vi.fn());
@@ -122,6 +122,31 @@ describe('migratePortableAttachments', () => {
         const stranded = (storeState._allTasks[1] as Task).attachments?.[0] as Attachment;
         expect(stranded.uri).toBe(`${LEGACY_DIR}/att-2.pdf`);
         expect(stranded.uri.split('/').pop()).toBe(`${stranded.id}.pdf`);
+    });
+
+    it('rewrites the attachment list a sync save published while the rewrite waited', async () => {
+        storeState._allTasks = [taskWith('task-1', [fileAttachment('att-1', LEGACY_DIR)])];
+        invokeMock.mockResolvedValue(migrationResult(['att-1.pdf']));
+        // updateTask as the store runs it: a command behind the write gate.
+        updateTaskMock.mockImplementation((taskId: string, patch: Partial<Task>) => runStoreCommand(async () => {
+            storeState._allTasks = storeState._allTasks.map((task) => ((task as Task).id === taskId ? { ...(task as Task), ...patch } : task));
+        }));
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        // Another device's attachment, published by a sync save that holds the gate when the migration writes.
+        const save = runSyncStoreSave(async () => {
+            await held;
+            storeState._allTasks = [taskWith('task-1', [fileAttachment('att-1', LEGACY_DIR), fileAttachment('att-sib', MANAGED_DIR)])];
+        });
+        const migrated = migratePortableAttachments();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        release();
+        await save;
+        await migrated;
+
+        expect(((storeState._allTasks[0] as Task).attachments ?? []).map((item) => item.uri)).toEqual([
+            `${MANAGED_DIR}/att-1.pdf`, `${MANAGED_DIR}/att-sib.pdf`,
+        ]);
     });
 
     it('does nothing when the install is not portable', async () => {

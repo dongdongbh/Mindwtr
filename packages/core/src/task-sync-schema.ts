@@ -10,6 +10,7 @@
 import schemaFixture from './task-sync-schema.fixture.json';
 import type { Task } from './types';
 import { normalizeTaskStatus } from './task-status';
+import { normalizeTaskReminderPolicy } from './task-reminder-policy';
 import {
     fromBool,
     fromJson,
@@ -201,6 +202,7 @@ const taskColumnValues = (task: Task): Record<string, unknown> => {
         timeEstimate: task.timeEstimate ?? null,
         timeSpentMinutes: task.timeSpentMinutes ?? null,
         suppressMindwtrReminders: toBool(task.suppressMindwtrReminders),
+        reminderPolicy: normalizeTaskReminderPolicy(task.reminderPolicy) ?? null,
         reviewAt: task.reviewAt ?? null,
         completedAt: task.completedAt ?? null,
         cancelledAt: task.cancelledAt ?? null,
@@ -264,6 +266,7 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
             ? undefined
             : Number(row.timeSpentMinutes),
         suppressMindwtrReminders: fromBool(row.suppressMindwtrReminders),
+        reminderPolicy: normalizeTaskReminderPolicy(row.reminderPolicy),
         reviewAt: fromOptional(row.reviewAt as string | null),
         // Canonical only when the status is done/archived, else absent — the
         // same rule normalizeTaskForLoad applies on every load/merge

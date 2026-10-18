@@ -1,6 +1,6 @@
 import { isUpNoteHref, showExternalLinkFailure } from '../../../lib/external-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isSandboxMode, useTaskStore, type Attachment, type Project } from '@mindwtr/core';
+import { isSandboxMode, updateProjectFromLatest, useTaskStore, type Attachment, type Project } from '@mindwtr/core';
 import { importPickedFileAttachment, pickFolderLinkAttachment } from '../../../lib/attachment-import';
 import { openAttachmentTarget } from '../../../lib/open-attachment-target';
 import { isTauriRuntime } from '../../../lib/runtime';
@@ -10,14 +10,18 @@ type UseProjectAttachmentActionsParams = {
     t: (key: string) => string;
     selectedProject: Project | undefined;
     readOnly?: boolean;
-    updateProject: (projectId: string, updates: Partial<Project>) => void;
 };
+
+// Attachment writes are built on the project row as it is when the write is admitted, so an attachment a sync save
+// brought meanwhile is kept. An archived project is never written.
+export const appendProjectAttachments = (projectId: string, added: Attachment[]) => updateProjectFromLatest(projectId, (latest) => (
+    latest.status === 'archived' ? null : { attachments: [...(latest.attachments || []), ...added] }
+));
 
 export function useProjectAttachmentActions({
     t,
     selectedProject,
     readOnly = false,
-    updateProject,
 }: UseProjectAttachmentActionsParams) {
     const sandboxMode = isSandboxMode();
     const selectedProjectRef = useRef(selectedProject);
@@ -97,11 +101,11 @@ export function useProjectAttachmentActions({
             }
             const current = getMutableProject(projectAtStart.id);
             if (!current) return;
-            updateProject(current.id, { attachments: [...(current.attachments || []), result.attachment] });
+            void appendProjectAttachments(current.id, [result.attachment]);
         } finally {
             setIsProjectAttachmentBusy(false);
         }
-    }, [getMutableProject, isProjectAttachmentBusy, sandboxMode, t, updateProject]);
+    }, [getMutableProject, isProjectAttachmentBusy, sandboxMode, t]);
 
     const addProjectLinkAttachment = useCallback(() => {
         if (sandboxMode) {
@@ -127,21 +131,26 @@ export function useProjectAttachmentActions({
             if (!attachment) return;
             const current = getMutableProject(projectAtStart.id);
             if (!current) return;
-            updateProject(current.id, { attachments: [...(current.attachments || []), attachment] });
+            void appendProjectAttachments(current.id, [attachment]);
         } finally {
             setIsProjectAttachmentBusy(false);
         }
-    }, [getMutableProject, isProjectAttachmentBusy, sandboxMode, t, updateProject]);
+    }, [getMutableProject, isProjectAttachmentBusy, sandboxMode, t]);
 
     const removeProjectAttachment = useCallback((id: string) => {
         const current = getMutableProject();
         if (!current) return;
         const now = new Date().toISOString();
-        const next = (current.attachments || []).map((attachment) =>
-            attachment.id === id ? { ...attachment, deletedAt: now, updatedAt: now } : attachment
-        );
-        updateProject(current.id, { attachments: next });
-    }, [getMutableProject, updateProject]);
+        void updateProjectFromLatest(current.id, (latest) => {
+            const attachments = latest.attachments || [];
+            if (latest.status === 'archived' || !attachments.some((attachment) => attachment.id === id)) return null;
+            return {
+                attachments: attachments.map((attachment) =>
+                    attachment.id === id ? { ...attachment, deletedAt: now, updatedAt: now } : attachment
+                ),
+            };
+        });
+    }, [getMutableProject]);
 
     return {
         attachmentError,

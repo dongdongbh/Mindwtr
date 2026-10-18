@@ -229,7 +229,7 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
     const generated: Record<string, unknown> = { cancelledAt: iso, taskMode: 'task', relativeStartOffset: { amount: -2, unit: 'day' },
       showFutureRecurrence: true, pushCount: 2, checklist: [{ id: 'check-1', title: 'Step', isCompleted: false }],
       textDirection: 'rtl', location: 'Office', areaId: 'area-1', isFocusedToday: true,
-      timeSpentMinutes: 30, suppressMindwtrReminders: true, repeatReminderMinutes: 15, reviewAt: '2026-01-02',
+      timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, reviewAt: '2026-01-02',
       order: 2, boardOrder: 3, focusOrder: 4 };
     const { service, calls } = fixture(() => jsonResponse({ task: task() }));
     const createFields = Object.fromEntries(TASK_CREATE_FIELD_NAMES.map((name) => [name, generated[name]]));

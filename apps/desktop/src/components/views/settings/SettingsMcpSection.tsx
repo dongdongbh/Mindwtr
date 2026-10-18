@@ -4,6 +4,7 @@ import {
     getMcpConnectionDetails,
     getMcpServerStatus,
     isMcpServerAvailable,
+    MCP_SERVER_PORT,
     setMcpServerConfig,
     type McpServerConfig,
     type McpServerStatus,
@@ -19,6 +20,9 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
     const { t } = useLanguage();
     const available = isTauri && isMcpServerAvailable();
     const [open, setOpen] = useState(false);
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [portDraft, setPortDraft] = useState<string | null>(null);
+    const [portInvalid, setPortInvalid] = useState(false);
     const [status, setStatus] = useState<McpServerStatus | null>(null);
     const [busy, setBusy] = useState(false);
     const [failed, setFailed] = useState(false);
@@ -67,7 +71,7 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
         return () => { cancelled = true; clearTimeout(timer); };
     }, [available, status?.enabled, status?.error, busy]);
 
-    const runAction = async (config?: McpServerConfig, copy = false) => {
+    const runAction = async (config?: McpServerConfig, copy?: 'json' | 'codex') => {
         if (!available || inFlight.current) return;
         inFlight.current = true;
         revision.current += 1;
@@ -80,16 +84,21 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
             if (!copy && !config?.regenerateToken) return;
             void (outcome === 'copied' || outcome === 'rotated' ? logInfo : logWarn)('MCP connection action completed', {
                 scope: 'mcp', extra: {
-                    releaseCheck: 'v1.3.5/mcp-connection-actions', operation: copy ? 'copy' : 'rotate', outcome,
+                    releaseCheck: copy === 'codex' ? 'v1.3.7/mcp-codex-copy' : 'v1.3.5/mcp-connection-actions', operation: copy ? 'copy' : 'rotate', outcome,
                     backend: copy ? (useClipboardItem ? 'clipboard-item' : 'write-text') : 'native',
                 },
             }).catch(() => {});
         };
         try {
-            const request = config ? setMcpServerConfig(config) : getMcpServerStatus();
+            const request = config ? setMcpServerConfig({
+                allowArchive: status?.allowArchive ?? false,
+                allowDelete: status?.allowDelete ?? false,
+                port: status?.port ?? MCP_SERVER_PORT,
+                ...config,
+            }) : getMcpServerStatus();
             if (useClipboardItem) {
                 const data = request.then((next) => {
-                    const details = mounted.current && !next.error && getMcpConnectionDetails(next);
+                    const details = mounted.current && getMcpConnectionDetails(next, copy);
                     if (!details) throw new Error('MCP connection details unavailable.');
                     return new Blob([details], { type: 'text/plain' });
                 });
@@ -105,8 +114,12 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
             const next = await request;
             if (!mounted.current) return;
             setStatus(next);
+            if (config?.port !== undefined && !next.error) {
+                setPortDraft(null);
+                setPortInvalid(false);
+            }
             if (copy) {
-                const details = !next.error && getMcpConnectionDetails(next);
+                const details = getMcpConnectionDetails(next, copy);
                 if (!details) {
                     setFeedback('settings.mcpCopyFailed');
                     reportOutcome('invalid-status');
@@ -176,12 +189,48 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
                         <p className="text-xs text-muted-foreground">{t('settings.mcpCopyHint')}</p>
                         <div className="flex flex-wrap gap-2">
                             <button type="button" className={actionClass} disabled={busy || !status.running || !status.token}
-                                onClick={() => void runAction(undefined, true)}>{t('settings.mcpCopy')}</button>
+                                onClick={() => void runAction(undefined, 'json')}>{t('settings.mcpCopy')}</button>
+                            <button type="button" className={actionClass} disabled={busy || !status.running || !status.token}
+                                onClick={() => void runAction(undefined, 'codex')}>{t('settings.mcpCopyCodex')}</button>
                             <button type="button" className={actionClass} disabled={busy}
                                 onClick={() => void runAction({ enabled: true, allowWrite: status.allowWrite, regenerateToken: true })}>{t('settings.mcpRotate')}</button>
                         </div>
                         <p className="text-xs text-muted-foreground">{t('settings.mcpRotateHint')}</p>
                     </>}
+                    {status && <SettingsDisclosureCard sectionKey="mcpAdvanced" settingsKey={null}
+                        title={t('settings.advanced')} open={advancedOpen} onToggle={() => setAdvancedOpen((value) => !value)}>
+                        <div className="p-4 space-y-4">
+                            <SettingRow settingsKey={null} title={t('settings.mcpAllowArchive')} description={t('settings.mcpAllowArchiveDesc')}>
+                                <Switch aria-label={t('settings.mcpAllowArchive')} checked={status.allowArchive} disabled={busy}
+                                    onCheckedChange={(allowArchive) => void runAction({ enabled: status.enabled, allowWrite: status.allowWrite, allowArchive })} />
+                            </SettingRow>
+                            <SettingRow settingsKey={null} title={t('settings.mcpAllowDelete')} description={t('settings.mcpAllowDeleteDesc')}>
+                                <Switch aria-label={t('settings.mcpAllowDelete')} checked={status.allowDelete} disabled={busy}
+                                    onCheckedChange={(allowDelete) => void runAction({ enabled: status.enabled, allowWrite: status.allowWrite, allowDelete })} />
+                            </SettingRow>
+                            <form noValidate onSubmit={(event) => {
+                                event.preventDefault();
+                                const value = portDraft ?? String(status.port);
+                                const port = Number(value);
+                                if (!/^\d+$/.test(value) || !Number.isInteger(port) || port < 1024 || port > 65535) {
+                                    setPortInvalid(true);
+                                    return;
+                                }
+                                void runAction({ enabled: status.enabled, allowWrite: status.allowWrite, port });
+                            }} className="space-y-2">
+                                <label htmlFor="mcp-port" className="text-sm font-medium">{t('settings.mcpPort')}</label>
+                                <p id="mcp-port-hint" className="text-xs text-muted-foreground">{t('settings.mcpPortDesc')}</p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <input id="mcp-port" type="number" min={1024} max={65535} step={1}
+                                        aria-describedby="mcp-port-hint" aria-invalid={portInvalid} disabled={busy}
+                                        value={portDraft ?? status.port} onChange={(event) => { setPortDraft(event.target.value); setPortInvalid(false); }}
+                                        className="w-28 bg-background border border-border rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                                    <button type="submit" className={actionClass} disabled={busy || portDraft === null || portDraft === String(status.port)}>{t('common.save')}</button>
+                                </div>
+                                {portInvalid && <p className="text-sm text-destructive" role="alert">{t('settings.mcpError.invalid_port')}</p>}
+                            </form>
+                        </div>
+                    </SettingsDisclosureCard>}
                     {feedback && <p className="text-xs" role="status">{t(feedback)}</p>}
                 </>}
             </div>

@@ -163,6 +163,29 @@ describe('mobile reminder alarms', () => {
         expect(result.diagnostics).toMatchObject({ dateOnlyDueDateCount: 1, dateOnlyStartTimeCount: 1 });
     });
 
+    it('withdraws scheduled and shifted inherited alarms on Skip, then arms Send once without losing repeats or reviews', async () => {
+        const tasks = [task('a', { reminderPolicy: 'inherit', dueDate: '2026-09-28T11:00:00.000Z', repeatReminderMinutes: 30 }),
+            task('review', { reminderPolicy: 'inherit', reviewAt: '2026-09-28T12:00:00.000Z' })];
+        const first = plan({ tasks, settings: { taskReminderDefault: 'send' } });
+        const alarms = new Map(first.oneShot.map((request, index): [string, ReminderAlarmEntry] => [request.key, { id: index + 1, signature: request.signature }]));
+        const skipped = plan({ tasks, alarms, settings: { taskReminderDefault: 'skip' } });
+        expect(skipped.cancel).toEqual(['task:a', 'task:a:r1', 'task:a:r2', 'task:a:r3', 'task:a:r4']);
+        expect(Object.values(skipped.reasons)).toEqual(Array(5).fill('withdrawn'));
+        expect(skipped.keep).toEqual(['task:review']);
+        const { port, calls } = recordingPort([], { next: 20 });
+        await cancelUnrequestedReminderAlarms(skipped, alarms, port);
+        expect(calls.filter(([kind]) => kind === 'removeFiredNotification')).toHaveLength(5);
+        const sent = plan({ tasks, alarms, settings: { taskReminderDefault: 'send' } });
+        expect(sent.schedule).toEqual(['task:a', 'task:a:r1', 'task:a:r2', 'task:a:r3', 'task:a:r4']);
+        await scheduleReminderAlarms(sent, alarms, port);
+        expect(plan({ tasks, alarms, settings: { taskReminderDefault: 'send' } }).schedule).toEqual([]);
+        expect(tasks[0].repeatReminderMinutes).toBe(30);
+        // An already due alarm shifted by the OS is withdrawn too, rather than carried forward.
+        const shifted = new Map([['task:a', { id: 1, signature: first.oneShot[0].signature, fireAtMs: Date.parse('2026-09-28T11:01:00.000Z') }]]);
+        expect(plan({ tasks, alarms: shifted, now: new Date('2026-09-28T11:00:30.000Z'), settings: { taskReminderDefault: 'skip' } }))
+            .toMatchObject({ shifted: [], cancel: ['task:a'], reasons: { 'task:a': 'withdrawn' } });
+    });
+
     it('cancels every held alarm without notification permission, and when no reminder feature is on', () => {
         const alarms = new Map<string, ReminderAlarmEntry>([['digest:morning', { id: 1, signature: 's' }], ['task:a', { id: 2 }]]);
         const tasks = [task('a', { dueDate: '2026-09-28T11:00:00.000Z' })];
@@ -356,6 +379,8 @@ describe('mobile reminder alarms', () => {
         expect(shouldRescheduleReminderAlarms({ ...base }, base)).toBe(false);
         expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, lastSyncAt: 'b' } as NotificationSettings }, base)).toBe(false);
         expect(shouldRescheduleReminderAlarms({ ...base, tasks: [] }, base)).toBe(true);
+        expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, taskReminderDefault: 'skip' } }, base)).toBe(true);
+        expect(shouldRescheduleReminderAlarms(base, { ...base, settings: { ...settings, taskReminderDefault: 'skip' } })).toBe(true);
         expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, language: 'de' } as NotificationSettings }, base)).toBe(true);
         expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, weeklyReviewTime: '09:00' } }, base)).toBe(true);
     });
@@ -379,6 +404,17 @@ describe('mobile reminder alarms', () => {
         expect(isPomodoroNativeAlarm({ data: '{"kind":"pomodoro"}' })).toBe(true);
         expect(isPomodoroNativeAlarm({ data: 'alarmKey==>x;;kind==>pomodoro' })).toBe(true);
         expect(isPomodoroNativeAlarm({ data: { kind: 'task-reminder' } })).toBe(false);
+    });
+
+    it('withdraws legacy native start/due carryforward for effective Skip while leaving reviews and Pomodoro alone', () => {
+        const row = (id: number, kind: string, alarmKey = 'task:live') => ({ id, scheduleType: 'once',
+            year: 2099, month: 1, day: 1, hour: 9, minute: 0, second: 0, data: { kind, alarmKey } });
+        const rows = [row(1, 'task-start'), row(2, 'task-due'), row(3, 'task-reminder', 'task:live:r1'),
+            row(4, 'task-review'), row(5, 'pomodoro')];
+        const input = { rows, trackedIds: new Set<number>(), tasks: [task('live', { reminderPolicy: 'inherit' })], projects: [], now: NOW };
+        expect(findStaleNativeReminderAlarms({ ...input, settings: { taskReminderDefault: 'skip' } }))
+            .toEqual([1, 2, 3].map((id) => ({ id, reason: 'withdrawn' })));
+        expect(findStaleNativeReminderAlarms({ ...input, settings: { taskReminderDefault: 'send' } })).toEqual([]);
     });
 
     it('lists the Android rows the alarm map lost and nothing still wants, sparing a live snooze', () => {

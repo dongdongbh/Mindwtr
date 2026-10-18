@@ -22,8 +22,10 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import { REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
 import type { TaskDraft } from './task-draft';
 import { computeRelativeStartTime } from './task-relative-start';
+import { getTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
 import type {
     AppSettings,
+    NotificationSettings,
     RecurrenceByDay,
     RecurrenceRule,
     RecurrenceStrategy,
@@ -258,6 +260,11 @@ export type TaskEditorReminders = {
     showSkip: boolean;
     /** "Repeat reminder" shows under a timed due, unless reminders are skipped. */
     showRepeat: boolean;
+    policyLabel: string;
+    policyValueLabel: string;
+    policyOptions: Array<{ value: NonNullable<Task['reminderPolicy']>; label: string; selected: boolean }>;
+    hint: string;
+    disabledHint: string | null;
     repeatLabel: string;
     /** The current interval, as the collapsed control shows it. */
     repeatValueLabel: string;
@@ -266,17 +273,32 @@ export type TaskEditorReminders = {
 };
 
 export function getTaskEditorReminders(
-    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'>,
+    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'> & Partial<Pick<TaskDraft, 'reminderPolicy'>>,
     t: Translate,
+    settings: Pick<NotificationSettings, 'taskReminderDefault' | 'notificationsEnabled'> = {},
 ): TaskEditorReminders {
     const current = draft.repeatReminderMinutes ?? 0;
     const off = tFallback(t, 'taskEdit.repeatReminderOff', 'Off');
     const count = (key: string, fallback: string, minutes: number) => (
         minutes === 0 ? off : tFallback(t, key, fallback).replace('{count}', String(minutes))
     );
+    const policy = getTaskReminderPolicy(draft);
+    const send = tFallback(t, 'taskEdit.reminderPolicySend', 'Send');
+    const skip = tFallback(t, 'taskEdit.reminderPolicySkip', 'Skip');
+    const policyOptions: TaskEditorReminders['policyOptions'] = [
+        { value: 'inherit', label: tFallback(t, 'taskEdit.reminderPolicyInherit', 'Use default ({value})').replace('{value}', settings.taskReminderDefault === 'skip' ? skip : send), selected: policy === 'inherit' },
+        { value: 'send', label: send, selected: policy === 'send' },
+        { value: 'skip', label: skip, selected: policy === 'skip' },
+    ];
     return {
         showSkip: hasTimeComponent(draft.startTime) || hasTimeComponent(draft.dueDate),
-        showRepeat: hasTimeComponent(draft.dueDate) && draft.suppressMindwtrReminders !== true,
+        showRepeat: hasTimeComponent(draft.dueDate) && shouldSendTaskReminders(draft, settings),
+        policyLabel: tFallback(t, 'taskEdit.reminders', 'Start/due reminders'),
+        policyValueLabel: policyOptions.find((option) => option.selected)!.label,
+        policyOptions,
+        hint: tFallback(t, 'taskEdit.reminderPolicyHint', 'Start and due reminders need an explicit time. Focus and review reminders are unchanged.'),
+        disabledHint: settings.notificationsEnabled === false
+            ? tFallback(t, 'taskEdit.remindersDisabledHint', 'Task reminders are turned off in Notifications settings on this device.') : null,
         repeatLabel: tFallback(t, 'taskEdit.repeatReminderLabel', 'Repeat reminder'),
         repeatValueLabel: count('taskEdit.repeatReminderEveryMinutes', 'Every {count} min', current),
         repeatOptions: [0, ...REPEAT_REMINDER_INTERVAL_OPTIONS].map((minutes) => ({

@@ -626,7 +626,7 @@ export interface TaskStore {
         isResultStillRelevant?: () => boolean;
     }) => Promise<void>;
     /** Add the shared Getting Started project/tasks when missing, localized to the given app language. */
-    seedGettingStarted: (options?: { language?: string }) => Promise<StoreActionResult>;
+    seedGettingStarted: (options?: { language?: string; awaitSave?: boolean }) => Promise<StoreActionResult>;
     /** Add a new task */
     addTask: (
         title: string,

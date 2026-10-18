@@ -21,7 +21,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { isSandboxMode, shallow, useTaskStore, resolveFeatureFlags, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
+import { isSandboxMode, shallow, useTaskStore, resolveFeatureFlags, safeFormatDate, tFallback, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
 import type { StoreActionResult, TaskStatus } from '@mindwtr/core';
 import { showUndoToast } from '../lib/undo-registry';
 import { undoTaskCompletion } from '../lib/undo-task-completion';
@@ -39,6 +39,7 @@ import { stageCalendarDropLanding } from '../lib/calendar-view-params';
 import { SandboxBanner } from './sandbox/SandboxBanner';
 import { getWorkspaceCache } from '../lib/workspace-cache';
 import { TASK_STATUS_ICONS } from '../lib/task-status-icons';
+import { dismissCleartextSyncWarning, getCleartextSyncDestination, isCleartextSyncDismissed } from '../lib/cleartext-sync-warning';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -150,7 +151,8 @@ export function Layout({
     const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
     const [isManualSyncing, setIsManualSyncing] = useState(false);
     const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
-    const [cleartextSyncWarning, setCleartextSyncWarning] = useState<string | null>(null);
+    const [cleartextSyncWarning, setCleartextSyncWarning] = useState<{ destination: string; message: string } | null>(null);
+    const dismissedCleartextDestinations = useRef(new Set<string>());
     const searchShortcutHint = useMemo(() => (
         typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘K' : 'Ctrl+K'
     ), []);
@@ -687,16 +689,7 @@ export function Layout({
         };
     }, []);
 
-    // Loopback HTTP never leaves the machine, so the cleartext banner would nag
-    // about a setup the app itself auto-allows (base-options
-    // isAllowedInsecureUrl admits exactly https and loopback http). LAN HTTP
-    // keeps the banner: that traffic really does cross a network.
-    const isCleartextNetworkUrl = useCallback((rawUrl: string): boolean => {
-        const url = rawUrl.trim().toLowerCase();
-        return url.startsWith('http://') && !isAllowedInsecureUrl(url);
-    }, []);
-
-    // Pure derivation from an already-known configuration snapshot: no lock,
+    // Derive from an already-known configuration snapshot: no lock,
     // no native call. Drives both the synchronous first-frame seed and the
     // refresh after a configuration commit (PERF-02) — the 30s poll this
     // replaced re-read the locked, persisted configuration on a timer with no
@@ -706,26 +699,31 @@ export function Layout({
         configuration: ReturnType<typeof SyncService.getLastKnownSyncSelection>['configuration'],
     ) => {
         if (!configuration) return;
-        if (configuration.backend === 'webdav' && isCleartextNetworkUrl(configuration.webdav.url)) {
-            setCleartextSyncWarning(tFallback(t,
-                'settings.cleartextSyncWarningWebdav',
-                'WebDAV sync is using HTTP. Data is unencrypted; use it only on a trusted network.'
-            ));
+        const destination = configuration.backend === 'webdav'
+            ? getCleartextSyncDestination('webdav', configuration.webdav.url)
+            : configuration.backend === 'cloud' && configuration.cloudProvider === 'selfhosted'
+                ? getCleartextSyncDestination('cloud', configuration.cloud.url)
+                : null;
+        if (!destination || dismissedCleartextDestinations.current.has(destination) || isCleartextSyncDismissed(destination)) {
+            setCleartextSyncWarning(null);
             return;
         }
-        if (
-            configuration.backend === 'cloud'
-            && configuration.cloudProvider === 'selfhosted'
-            && isCleartextNetworkUrl(configuration.cloud.url)
-        ) {
-            setCleartextSyncWarning(tFallback(t,
+        if (configuration.backend === 'webdav') {
+            setCleartextSyncWarning({ destination, message: tFallback(t,
+                'settings.cleartextSyncWarningWebdav',
+                'WebDAV sync is using HTTP. Data is unencrypted; use it only on a trusted network.'
+            ) });
+            return;
+        }
+        if (configuration.backend === 'cloud') {
+            setCleartextSyncWarning({ destination, message: tFallback(t,
                 'settings.cleartextSyncWarningCloud',
                 'Self-hosted sync is using HTTP. Data is unencrypted; use it only on a trusted network.'
-            ));
+            ) });
             return;
         }
         setCleartextSyncWarning(null);
-    }, [isCleartextNetworkUrl, t]);
+    }, [t]);
 
     useEffect(() => {
         if (sandboxMode) return;
@@ -1161,7 +1159,18 @@ export function Layout({
                             className="mb-4 flex items-start gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground"
                         >
                             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                            <span>{cleartextSyncWarning}</span>
+                            <span className="flex-1">{cleartextSyncWarning.message}</span>
+                            <button
+                                type="button"
+                                className="shrink-0 underline underline-offset-2 hover:text-muted-foreground"
+                                onClick={() => {
+                                    dismissedCleartextDestinations.current.add(cleartextSyncWarning.destination);
+                                    dismissCleartextSyncWarning(cleartextSyncWarning.destination);
+                                    setCleartextSyncWarning(null);
+                                }}
+                            >
+                                {tFallback(t, 'settings.cleartextSyncDismiss', 'Dismiss for this sync destination')}
+                            </button>
                         </div>
                     )}
                     {children}

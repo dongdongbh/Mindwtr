@@ -356,7 +356,7 @@ afterEach(() => {
 
 describe('ProjectDetailModal archive retention guard', () => {
     it('shows a disabled conversion action with the source reason', () => {
-        const source = { ...project('active'), isSequential: true };
+        const source = { ...project('active'), dueDate: '2026-11-01' };
         storeActions._allProjects = [source];
         let tree!: ReturnType<typeof create>;
         act(() => { tree = create(<ProjectDetailModal {...createProjectDetailModalProps({
@@ -367,7 +367,21 @@ describe('ProjectDetailModal archive retention guard', () => {
         act(() => tree.root.findByProps({ testID: 'project-actions-menu-button' }).props.onPress());
         const action = tree.root.findByProps({ testID: 'project-convert-to-section-button' });
         expect(action.props.disabled).toBe(true);
-        expect(action.props.description).toBeTruthy();
+        expect(action.props.description).toBe('source-dates');
+    });
+    it('allows a sequential source to open destination selection', () => {
+        const source = { ...project('active'), isSequential: true };
+        storeActions._allProjects = [source];
+        let tree!: ReturnType<typeof create>;
+        act(() => { tree = create(<ProjectDetailModal {...createProjectDetailModalProps({
+            project: source,
+            onBeforeConvertToSection: vi.fn(async () => true),
+            onConvertedToSection: vi.fn(),
+        })} />); });
+        act(() => tree.root.findByProps({ testID: 'project-actions-menu-button' }).props.onPress());
+        const action = tree.root.findByProps({ testID: 'project-convert-to-section-button' });
+        expect(action.props.disabled).toBe(false);
+        expect(action.props.description).toBeUndefined();
     });
     it('holds the edit lock while a project draft is open and releases it on close', () => {
         const props = createProjectDetailModalProps();

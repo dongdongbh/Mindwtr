@@ -771,6 +771,17 @@ describe('cloud server utils', () => {
         }).ok).toBe(false);
     });
 
+    test('validates task reminder policies for creation and patch transport', () => {
+        for (const mode of ['create', 'patch'] as const) {
+            for (const reminderPolicy of ['inherit', 'send', 'skip', null]) {
+                expect(validateEntityProps('task', mode, { reminderPolicy }).ok).toBe(true);
+            }
+            for (const reminderPolicy of ['sometimes', '', true, 1, {}, []]) {
+                expect(validateEntityProps('task', mode, { reminderPolicy }).ok).toBe(false);
+            }
+        }
+    });
+
     test('rejects reserved task creation props', () => {
         expect(validateEntityProps('task', 'create', {
             status: 'next',
@@ -3128,6 +3139,31 @@ describe('cloud server api', () => {
         }
     });
 
+    test('REST task reminder inheritance uses the synced default and preserves legacy explicit writes', async () => {
+        const headers = { ...authHeaders, 'content-type': 'application/json' };
+        const seed = await fetch(`${baseUrl}/v1/data`, { method: 'PUT', headers,
+            body: JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], settings: { taskReminderDefault: 'skip' } }),
+        });
+        expect(seed.status).toBe(200);
+        const create = async (props: Partial<Task>) => {
+            const response = await fetch(`${baseUrl}/v1/tasks`, { method: 'POST', headers, body: JSON.stringify({ title: 'Reminder policy', props }) });
+            expect(response.status).toBe(201);
+            return (await response.json()).task as Task;
+        };
+        const inherited = await create({});
+        expect(inherited).toMatchObject({ reminderPolicy: 'inherit', suppressMindwtrReminders: true });
+        expect(await create({ suppressMindwtrReminders: false })).toMatchObject({ reminderPolicy: 'send', suppressMindwtrReminders: false });
+        expect(await create({ suppressMindwtrReminders: true })).toMatchObject({ reminderPolicy: 'skip', suppressMindwtrReminders: true });
+        const patch = async (updates: Partial<Task>) => {
+            const response = await fetch(`${baseUrl}/v1/tasks/${inherited.id}`, { method: 'PATCH', headers, body: JSON.stringify(updates) });
+            expect(response.status).toBe(200);
+            return (await response.json()).task as Task;
+        };
+        expect(await patch({ title: 'Unrelated' })).toMatchObject({ reminderPolicy: 'inherit', suppressMindwtrReminders: true });
+        expect(await patch({ suppressMindwtrReminders: false })).toMatchObject({ reminderPolicy: 'send', suppressMindwtrReminders: false });
+        expect(await patch({ reminderPolicy: 'inherit' })).toMatchObject({ reminderPolicy: 'inherit', suppressMindwtrReminders: true });
+    });
+
     test('supports task CRUD and soft delete flow', async () => {
         const createResponse = await fetch(`${baseUrl}/v1/tasks`, {
             method: 'POST',
@@ -3143,6 +3179,7 @@ describe('cloud server api', () => {
         expect(taskId).toBeTruthy();
         expect(createdJson.task.rev).toBe(1);
         expect(createdJson.task.revBy).toBe('cloud');
+        expect(createdJson.task.reminderPolicy).toBe('inherit');
 
         const patchResponse = await fetch(`${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`, {
             method: 'PATCH',
@@ -3156,6 +3193,7 @@ describe('cloud server api', () => {
         const patchJson = await patchResponse.json();
         expect(patchJson.task.rev).toBe(2);
         expect(patchJson.task.revBy).toBe('cloud');
+        expect(patchJson.task.reminderPolicy).toBe('inherit');
 
         const getResponse = await fetch(`${baseUrl}/v1/tasks/${encodeURIComponent(taskId)}`, {
             headers: authHeaders,

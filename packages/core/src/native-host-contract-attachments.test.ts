@@ -8,6 +8,7 @@ import type { NativeAttachmentOwner, NativeAttachmentsHost } from './native-host
 import { requestRowId, taskRevisionOf } from './native-request-receipts';
 import { loadScreenFixture, normalize, openScreenHost, openSqliteHost, value } from './screen-parity.replay';
 import { flushPendingSave, useTaskStore } from './store';
+import { runSyncStoreSave } from './store-write-gate';
 import type { Attachment, Project, Task } from './types';
 
 type Ports = {
@@ -328,6 +329,28 @@ describe('native host contract: attachments, crash safety', () => {
         expect(replay.result).toEqual({ ok: true, value: { status: 'available', message: null, update: null } });
         expect(replay.wrote).toBe(false);
         expect(stored()).toMatchObject({ rev: 2 });
+    });
+
+    it('lets a sync save run while a download waits on the network, then applies the bytes to the store the save left', async () => {
+        let release!: () => void;
+        const network = new Promise<void>((resolve) => { release = resolve; });
+        let started!: () => void;
+        const downloadStarted = new Promise<void>((resolve) => { started = resolve; });
+        const host: NativeAttachmentsHost = { ...fakeHost({ ports: {}, log: [] }), ensureAttachmentAvailableDetailed: async (attachment) => {
+            started();
+            await network;
+            return { status: 'available', attachment: { ...attachment, uri: 'file:///data/files/attachments/r1.pdf', localStatus: 'available' } };
+        } };
+        env = await openSqliteHost({ projects: [seedProject([remote('r1')])] }, undefined, { attachments: host });
+        const download = env.host.downloadAttachment({ owner: projectOwner, attachmentId: 'r1' });
+        await downloadStarted;
+        // A sync save publishes a newer title while the request is stalled; it must not wait for the download.
+        await runSyncStoreSave(async () => {
+            useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((project) => (project.id === 'p1' ? { ...project, title: 'Synced' } : project)) }));
+        });
+        release();
+        expect(ok(await download)).toEqual({ status: 'available', message: null, update: null });
+        expect(stored()).toMatchObject({ title: 'Synced', attachments: [expect.objectContaining({ id: 'r1', uri: 'file:///data/files/attachments/r1.pdf', localStatus: 'available' })] });
     });
 
     it('keeps a task draft\'s commands target-state: a retry with the draft it answered changes nothing and copies nothing', async () => {

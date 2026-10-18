@@ -14,7 +14,7 @@ export type ProjectToSectionBlockReason =
     | 'source-attachments' | 'source-dates' | 'source-tags' | 'source-focus'
     | 'source-sort' | 'source-view-sections' | 'source-lifecycle'
     | 'same-project' | 'missing-destination' | 'destination-inactive'
-    | 'destination-sequential' | 'invalid-title';
+    | 'destination-sequential' | 'destination-section-sequence' | 'invalid-title';
 
 export type ProjectToSectionPreview = {
     ok: true;
@@ -67,7 +67,6 @@ export const getProjectToSectionEligibility = (state: ConversionState, sourcePro
     if (!source) return { ok: false, reason: 'missing-source' };
     if (source.deletedAt || source.purgedAt || source.status !== 'active')
         return { ok: false, reason: 'source-inactive' };
-    if (source.isSequential) return { ok: false, reason: 'source-sequential' };
     if (state._allSections.some((section) => section.projectId === source.id && !section.deletedAt))
         return { ok: false, reason: 'source-sections' };
     if (source.attachments?.some((attachment) => !attachment.deletedAt))
@@ -80,7 +79,7 @@ export const getProjectToSectionEligibility = (state: ConversionState, sourcePro
         return { ok: false, reason: 'source-sort' };
     if (source.viewSectionIds && Object.values(source.viewSectionIds).some(Boolean))
         return { ok: false, reason: 'source-view-sections' };
-    if (source.archivedAt || source.cancelledAt || source.sequentialScope === 'section')
+    if (source.archivedAt || source.cancelledAt)
         return { ok: false, reason: 'source-lifecycle' };
     if (state._allTasks.some((task) => task.projectId === source.id && !task.deletedAt && !task.purgedAt
         && (task.projectArchivedAt || task.statusBeforeProjectArchive !== undefined
@@ -90,12 +89,15 @@ export const getProjectToSectionEligibility = (state: ConversionState, sourcePro
     return { ok: true };
 };
 
-const destinationBlock = (destination: Project | undefined): Blocked | null => {
+const destinationBlock = (source: Project, destination: Project | undefined): Blocked | null => {
     if (!destination) return { ok: false, reason: 'missing-destination' };
     if (destination.deletedAt || destination.purgedAt || destination.status !== 'active'
         || destination.archivedAt || destination.cancelledAt)
         return { ok: false, reason: 'destination-inactive' };
-    if (destination.isSequential) return { ok: false, reason: 'destination-sequential' };
+    if (source.isSequential) {
+        if (!destination.isSequential || destination.sequentialScope !== 'section')
+            return { ok: false, reason: 'destination-section-sequence' };
+    } else if (destination.isSequential) return { ok: false, reason: 'destination-sequential' };
     return null;
 };
 
@@ -106,7 +108,7 @@ export const previewProjectToSection = (state: ConversionState, sourceProjectId:
     if (sourceProjectId === destinationProjectId) return { ok: false, reason: 'same-project' };
     const source = oneProject(state._allProjects, sourceProjectId)!;
     const destination = oneProject(state._allProjects, destinationProjectId);
-    const blocked = destinationBlock(destination);
+    const blocked = destinationBlock(source, destination);
     if (blocked) return blocked;
     const tasks = state._allTasks.filter((task) => task.projectId === source.id && !task.deletedAt && !task.purgedAt);
     return { ok: true, sourceTitle: source.title, destinationTitle: destination!.title,
@@ -141,7 +143,7 @@ export const createProjectToSectionPreviewer = (state: ConversionState, sourcePr
     return (destinationProjectId) => {
         if (sourceProjectId === destinationProjectId) return { ok: false, reason: 'same-project' };
         const destination = projects.get(destinationProjectId) ?? undefined;
-        const blocked = destinationBlock(destination);
+        const blocked = destinationBlock(source, destination);
         if (blocked) return blocked;
         return { ok: true, sourceTitle: source.title, destinationTitle: destination!.title,
             defaultTitle: source.title, taskCount, completedCount, archivedCount, colorWillBeLost: true };

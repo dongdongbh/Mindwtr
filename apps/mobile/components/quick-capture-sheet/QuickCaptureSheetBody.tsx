@@ -22,7 +22,7 @@ const QUICK_CAPTURE_DATE_PRESETS = ['today', 'tomorrow', 'next_week'] as const;
 // a scroll container it pushes the title input off the top of the screen with no way back
 // (#887 on iOS, #1120 on Android). Android dismisses the keyboard before expanding, but it
 // comes straight back when the user taps the title to keep typing, and the measured lift
-// then leaves the tall sheet no room. Only the More panel scrolls: the title input must
+// then leaves the tall sheet no room. Description and metadata scroll: the title input must
 // stay OUTSIDE this container, because UIKit auto-scrolls a focused TextInput inside a
 // UIScrollView above the keyboard, which double-counts against KeyboardAvoidingView and
 // flings the title off the top on every refocus (the regression the first #887 fix shipped).
@@ -85,7 +85,7 @@ interface QuickCaptureSheetBodyProps {
   onToggleRecording: () => void;
   onValueChange: (value: string) => void;
   optionsExpanded: boolean;
-  /** Passive parse read-out; rendered under the title input, above the chips. */
+  /** Passive parse read-out; rendered above the metadata chips. */
   preview?: React.ReactNode;
   prioritiesEnabled: boolean;
   timeEstimatesEnabled: boolean;
@@ -349,6 +349,21 @@ export function QuickCaptureSheetBody({
               </TouchableOpacity>
             </View>
 
+            <SheetScrollArea>
+            <CompactTextInput
+              style={[styles.noteInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
+              placeholder={t('taskEdit.descriptionPlaceholder')}
+              placeholderTextColor={tc.secondaryText}
+              value={noteValue}
+              onChangeText={onNoteChange}
+              editable={!saving}
+              accessibilityState={{ busy: saving, disabled: saving }}
+              accessibilityLabel={t('taskEdit.descriptionLabel')}
+              multiline
+              submitBehavior="newline"
+              textAlignVertical="top"
+            />
+
             {preview ? <View style={styles.previewRow}>{preview}</View> : null}
 
             {recordingReady && (
@@ -436,28 +451,8 @@ export function QuickCaptureSheetBody({
               </TouchableOpacity>
             </View>
 
-            <SheetScrollArea>
             {optionsExpanded && (
               <>
-                {/* Longer notes without typing /note: (#1118). First in the panel
-                    because it is the most-reached expanded field; the same
-                    description the task editor and the full capture screen edit. */}
-                <CompactText
-                  style={[styles.noteLabel, { color: tc.secondaryText }]}
-                  numberOfLines={1}
-                >
-                  {t('taskEdit.descriptionLabel')}
-                </CompactText>
-                <CompactTextInput
-                  style={[styles.noteInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                  placeholder={t('taskEdit.descriptionPlaceholder')}
-                  placeholderTextColor={tc.secondaryText}
-                  value={noteValue}
-                  onChangeText={onNoteChange}
-                  accessibilityLabel={t('taskEdit.descriptionLabel')}
-                  multiline
-                  textAlignVertical="top"
-                />
                 <View style={styles.optionsRow}>
                   {renderFocusChip(styles.optionChip)}
                   {showDueTime && (

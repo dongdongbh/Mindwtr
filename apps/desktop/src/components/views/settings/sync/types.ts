@@ -109,6 +109,8 @@ export type SettingsSyncLabels = {
     webdavTestAccessibility: string;
     allowInsecureHttp: string;
     allowInsecureHttpHint: string;
+    cleartextSyncWarningWebdav: string;
+    cleartextSyncWarningCloud: string;
     invalidUrlHttp: string;
     cloudUrl: string;
     cloudHint: string;

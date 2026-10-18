@@ -173,6 +173,12 @@ final class MindwtrWidgetActionStoreTests: XCTestCase {
             at: now
         ), "waiting")
         XCTAssertEqual(MindwtrWidgetActionProjection.resolvedListId(
+            requestedListId: "upcoming",
+            identitiesByList: lists,
+            pendingActions: [],
+            at: now
+        ), "upcoming")
+        XCTAssertEqual(MindwtrWidgetActionProjection.resolvedListId(
             requestedListId: "focus",
             identitiesByList: ["focus": [], "next": []],
             pendingActions: [],
@@ -225,6 +231,7 @@ final class MindwtrWidgetActionStoreTests: XCTestCase {
                 "focus":{"title":"Focus"},
                 "inbox":{"title":"Inbox"},
                 "next":{"title":"Next Actions"},
+                "upcoming":{"title":"Upcoming"},
                 "waiting":{"title":"Waiting For"},
                 "someday":{"title":"Someday/Maybe"},
                 "filter:cached":{"title":"Cached filter"}
@@ -235,6 +242,7 @@ final class MindwtrWidgetActionStoreTests: XCTestCase {
             "focus": "mindwtr:///focus",
             "inbox": "mindwtr:///inbox",
             "next": "mindwtr:///widget-list/next",
+            "upcoming": "mindwtr:///widget-list/upcoming",
             "waiting": "mindwtr:///waiting",
             "someday": "mindwtr:///someday",
             "filter:cached": "mindwtr:///widget-list/filter%3Acached",

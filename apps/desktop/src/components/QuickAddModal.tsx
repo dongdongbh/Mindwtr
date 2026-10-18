@@ -37,6 +37,7 @@ import {
     type Project,
     type QuickAddResult,
     type Task,
+    updateTaskFromLatest,
 } from '@mindwtr/core';
 import { mkdir, remove, writeFile } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
@@ -790,13 +791,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             // instead of deleting it, or the note is lost for good (#1245).
             const keepCaptureAsAttachment = async () => {
                 if (saveAudioAttachments) return;
-                const { tasks: currentTasks, updateTask: updateTaskNow } = useTaskStore.getState();
-                const existing = currentTasks.find((task) => task.id === taskId);
-                if (!existing) return;
-                if (existing.attachments?.some((item) => item.id === audioAttachment.id)) return;
-                await updateTaskNow(taskId, {
-                    attachments: [...(existing.attachments ?? []), audioAttachment],
-                });
+                // Appended to the task as stored when the write is admitted, after any sync save ahead of it.
+                await updateTaskFromLatest(taskId, (existing) => (existing.attachments?.some((item) => item.id === audioAttachment.id)
+                    ? null
+                    : { attachments: [...(existing.attachments ?? []), audioAttachment] }));
             };
 
             const keepCaptureAfterFailure = (message: string, error?: unknown) => {

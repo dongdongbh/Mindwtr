@@ -28,6 +28,7 @@ import { buildProjectOrderMap,
     formatQuickAddHelp,
     resolveFeatureFlags,
     resolveTaskGroupByForFeatures,
+    runStoreCommand,
     selectDeferredProjects,
     sortViewSectionDefinitions,
     shallow,
@@ -776,15 +777,17 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             });
     }, [showToast, t, updateProject]);
     const handleApplySomedayProjectMove = useCallback(async (sectionId: string | undefined) => {
-        const project = useTaskStore.getState().projects.find((candidate) => candidate.id === somedayMoveProjectId);
-        if (!project) throw new Error('Someday project no longer exists');
-        const update = buildProjectViewSectionUpdate(project, 'someday', sectionId);
-        if (update) {
+        // Built on the project as it is when the write is admitted, so a sync save's newer sections stay.
+        await runStoreCommand(async () => {
+            const project = useTaskStore.getState().projects.find((candidate) => candidate.id === somedayMoveProjectId);
+            if (!project) throw new Error('Someday project no longer exists');
+            const update = buildProjectViewSectionUpdate(project, 'someday', sectionId);
+            if (!update) return;
             const result = await updateProject(project.id, update);
             if (result && typeof result === 'object' && 'success' in result && result.success === false) {
                 throw new Error(result.error || 'Could not move the project to the section');
             }
-        }
+        });
         setSomedayMoveProjectId(null);
     }, [somedayMoveProjectId, updateProject]);
     const renderSectionProject = useCallback((project: Project) => (

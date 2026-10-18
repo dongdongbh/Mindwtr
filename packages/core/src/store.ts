@@ -21,11 +21,13 @@ import {
 import { markCoreStartupPhase } from './startup-profiler';
 import { createProjectActions } from './store-projects';
 import { createSettingsActions } from './store-settings';
+export { getStorageTimeoutMs, lastStoreLoadWasRecovery, setStorageTimeoutMs } from './store-settings';
 import { createTaskActions } from './store-tasks';
 import { createArchiveRetentionActions, resetArchiveRetentionSyncForTests } from './store-archive-retention';
 import { sleep } from './async-utils';
 import { instrumentStoreSubscribe } from './store-notify-profiler';
 import { runAfterStoreWriteLock } from './data-transfer-transaction';
+import { markStoreCommand, runStoreCommand } from './store-write-gate';
 
 export { applyTaskUpdates } from './store-helpers';
 
@@ -90,6 +92,19 @@ const hasOwnField = (value: object, field: PropertyKey): boolean => Object.proto
 const getSaveRetryDelayMs = (attempt: number): number => {
     const cappedAttempt = Math.max(0, attempt - 1);
     return Math.min(MAX_SAVE_RETRY_DELAY_MS, INITIAL_SAVE_RETRY_DELAY_MS * (2 ** cappedAttempt));
+};
+let saveRetrySleepForTests: ((ms: number) => Promise<void>) | null = null;
+/** Tests only: replace the wait between save retries (the schedule above is unchanged); null restores the default. */
+export const setSaveRetrySleepForTests = (wait: ((ms: number) => Promise<void>) | null): void => {
+    saveRetrySleepForTests = wait;
+};
+/**
+ * The wait before a save retry. A test run sets `globalThis.__mindwtrSkipSaveRetryWait` (packages/core/vitest.setup.ts,
+ * which must not import the store, so test files' module mocks still apply) to skip it.
+ */
+const waitBeforeSaveRetry = (ms: number): Promise<void> => {
+    if (saveRetrySleepForTests) return saveRetrySleepForTests(ms);
+    return (globalThis as { __mindwtrSkipSaveRetryWait?: unknown }).__mindwtrSkipSaveRetryWait === true ? Promise.resolve() : sleep(ms);
 };
 const isPersistentStoreError = (error: string | null | undefined): boolean => (
     typeof error === 'string' && error.startsWith(SAVE_QUEUE_OVERFLOW_ERROR_PREFIX)
@@ -574,7 +589,7 @@ export const flushPendingSave = async (): Promise<void> => {
             if (hasQueuedSaves) continue;
             const hasRetriableSaveQueued = pendingSaves.some((item) => item.version === targetVersion);
             if (hasRetriableSaveQueued) {
-                await sleep(getSaveRetryDelayMs(attempts + 1));
+                await waitBeforeSaveRetry(getSaveRetryDelayMs(attempts + 1));
                 continue;
             }
             const message = toSaveErrorMessage(saveError);
@@ -625,72 +640,54 @@ const retryPendingPersistence = (): Promise<void> => {
     return retry;
 };
 
-const STORE_WRITE_ACTION_KEYS = [
-    'seedGettingStarted',
-    'addTask',
-    'addTasks',
-    'updateTask',
-    'deleteTask',
-    'restoreTask',
-    'restoreTasks',
-    'purgeTask',
-    'purgeTasks',
-    'purgeDeletedTasks',
-    'duplicateTask',
-    'promoteTaskToProject',
-    'convertChecklistToProject',
-    'undoChecklistToProject',
-    'resetTaskChecklist',
-    'moveTask',
-    'batchUpdateTasks',
-    'batchMoveTasks',
-    'batchDeleteTasks',
-    'reorderFocusedTasks',
-    'addProject',
-    'updateProject',
-    'deleteProject',
-    'restoreProject',
-    'purgeProject',
-    'purgeDeletedProjects',
-    'duplicateProject',
-    'toggleProjectFocus',
-    'convertProjectToSection',
-    'undoProjectToSection',
-    'addSection',
-    'updateSection',
-    'deleteSection',
-    'reorderSections',
-    'addArea',
-    'updateArea',
-    'deleteArea',
-    'restoreArea',
-    'reorderAreas',
-    'reorderProjects',
-    'reorderProjectTasks',
-    'reorderBoardTasks',
-    'addPerson',
-    'updatePerson',
-    'renamePerson',
-    'deletePerson',
-    'restorePerson',
-    'deleteTag',
-    'renameTag',
-    'deleteContext',
-    'renameContext',
-    'updateSettings',
-    'setArchiveRetentionDays',
-    'runArchiveRetention',
-    'persistSnapshot',
-] as const satisfies readonly (keyof TaskStore)[];
+/**
+ * Store functions that are not commands: reads and view state. Every other function on the store writes
+ * data and runs as a store command inside the sync write gate (store-write-gate.ts), so no command lands
+ * between a sync save's freshness check and its store publish; all but the load also wait behind a data
+ * transfer's write lock.
+ * A new action is a command by default; adding one here needs it to be a read (store-write-gate.test.ts).
+ */
+export const STORE_NON_COMMAND_KEYS: ReadonlySet<string> = new Set([
+    'getDerivedState', 'getFocusStarAction', 'getFocusedCount', 'queryTasks',
+    'lockEditing', 'unlockEditing', 'setError', 'setHighlightTask',
+]);
+
+type FetchDataOptions = Parameters<TaskStore['fetchData']>[0];
+/** The store's data references. Equal references mean the same data: the store replaces its lists and never edits them. */
+export const storeDataOf = (state: TaskStore) => [state._allTasks, state._allProjects, state._allSections, state._allAreas,
+    state._allPeople, state.settings, state.lastDataChangeAt] as const;
+export const sameStoreData = (left: readonly unknown[], right: readonly unknown[]): boolean =>
+    left.length === right.length && left.every((value, index) => value === right[index]);
+
+/**
+ * A preloaded snapshot is current only for the store its caller saw. A load waits for a sync save that holds
+ * the gate, and that save publishes newer committed data; so the snapshot stays relevant only while the store
+ * still holds the data the load was called against.
+ */
+const preloadedLoadOptions = (options: FetchDataOptions): FetchDataOptions => {
+    if (!options?.preloadedData) return options;
+    const calledAgainst = storeDataOf(useTaskStore.getState());
+    const stillRelevant = options.isResultStillRelevant;
+    return { ...options, isResultStillRelevant: () => sameStoreData(storeDataOf(useTaskStore.getState()), calledAgainst)
+        && (stillRelevant?.() ?? true) };
+};
 
 const wrapStoreWriteActions = (actions: TaskStore): TaskStore => {
-    const wrapped = { ...actions };
-    for (const key of STORE_WRITE_ACTION_KEYS) {
-        const action = actions[key] as (...args: unknown[]) => Promise<unknown>;
-        (wrapped as unknown as Record<string, unknown>)[key] = (...args: unknown[]) =>
-            runAfterStoreWriteLock(() => action(...args));
+    const wrapped = { ...actions } as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(actions)) {
+        if (typeof value !== 'function' || STORE_NON_COMMAND_KEYS.has(key)) continue;
+        const action = value as (...args: unknown[]) => Promise<unknown>;
+        // A load publishes what it read and may save its migrations: inside the gate, so no sync save
+        // publishes between its read and its publish. It skips the data transfer's write lock, because a
+        // transfer refreshes the store through it while holding that lock.
+        wrapped[key] = markStoreCommand(key === 'fetchData'
+            ? (options?: unknown) => {
+                const admitted = preloadedLoadOptions(options as FetchDataOptions);
+                return runStoreCommand(() => action(admitted));
+            }
+            : (...args: unknown[]) => runAfterStoreWriteLock(() => runStoreCommand(() => action(...args))));
     }
-    return wrapped;
+    return wrapped as unknown as TaskStore;
 };
 
 export const useTaskStore = createWithEqualityFn<TaskStore>()(subscribeWithSelector((rawSet, get, api) => {

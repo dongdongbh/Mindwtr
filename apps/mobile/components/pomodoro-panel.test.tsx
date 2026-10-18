@@ -3,11 +3,13 @@ import { FlatList, Pressable, Text } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Task } from '@mindwtr/core';
 
 import { PomodoroPanel } from './pomodoro-panel';
 import { mobilePomodoroController } from '../lib/pomodoro-controller';
 
-const { storeState } = vi.hoisted(() => ({
+const { storeState, storeListeners } = vi.hoisted(() => ({
+  storeListeners: new Set<() => void>(),
   storeState: {
     tasks: [] as any[],
     updateTask: vi.fn(),
@@ -22,8 +24,10 @@ const { storeState } = vi.hoisted(() => ({
 
 vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
-  const useTaskStore = Object.assign((selector?: (state: typeof storeState) => unknown) => (
-    selector ? selector(storeState) : storeState
+  const { useSyncExternalStore } = await vi.importActual<typeof import('react')>('react');
+  const useTaskStore = Object.assign((selector?: (state: typeof storeState) => unknown) => useSyncExternalStore(
+    (listener) => { storeListeners.add(listener); return () => { storeListeners.delete(listener); }; },
+    () => selector ? selector(storeState) : storeState,
   ), {
     getState: () => storeState,
   });
@@ -191,6 +195,101 @@ describe('PomodoroPanel', () => {
   const mockStorage = (values: Record<string, string | null>) => {
     vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => values[key] ?? null);
   };
+
+  const linkedTask: Task = {
+    id: 'task-1', title: 'Current task', status: 'next', tags: [], contexts: [],
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  const renderLinkedPanel = async (onMarkDone = vi.fn()) => {
+    storeState.settings = { notificationsEnabled: false, gtd: { pomodoro: { linkTask: true } } };
+    storeState.tasks = [linkedTask];
+    mockStorage({ '@mindwtr_pomodoro_state': JSON.stringify({
+      durations: { focusMinutes: 25, breakMinutes: 5 },
+      timerState: { phase: 'focus', remainingSeconds: 1500, isRunning: false, completedFocusSessions: 4 },
+      selectedTaskId: linkedTask.id,
+      sessionHistory: { totalCompletedFocusSessions: 4, completedFocusSessionsByTaskId: { [linkedTask.id]: 2 } },
+    }) });
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<PomodoroPanel tasks={[linkedTask]} onMarkDone={onMarkDone} />);
+    });
+    return tree;
+  };
+
+  const updateLiveTasks = (tasks: Task[]) => {
+    storeState.tasks = tasks;
+    storeListeners.forEach((listener) => listener());
+  };
+
+  it.each(['done', 'archived', 'cancelled', 'reference', 'deleted'] as const)(
+    'unlinks a task becoming %s while the picker is open and preserves the timer', async (transition) => {
+      const tree = await renderLinkedPanel();
+      act(() => { mobilePomodoroController.toggle({}); });
+      const picker = tree.root.findAllByType(Pressable)
+        .find((node) => node.props.accessibilityLabel === 'Timer task');
+      act(() => picker?.props.onPress());
+      expect(tree.root.findByType(FlatList).props.data).toEqual([linkedTask]);
+      const before = mobilePomodoroController.getSnapshot();
+
+      act(() => updateLiveTasks(transition === 'deleted' ? [] : [{
+        ...linkedTask,
+        status: transition === 'cancelled' ? 'archived' : transition,
+        ...(transition === 'cancelled' ? { cancelledAt: linkedTask.updatedAt } : {}),
+      }]));
+
+      expect(tree.root.findByType(FlatList).props.data).toEqual([]);
+      expect(tree.root.findAllByType(Text).some((node) => flattenText(node.props.children) === linkedTask.title)).toBe(false);
+      expect(tree.root.findAllByType(Pressable).some((node) => node.props.accessibilityLabel === 'Mark task done')).toBe(false);
+      const after = mobilePomodoroController.getSnapshot();
+      expect(after.selectedTaskId).toBeUndefined();
+      expect(after.timerState).toEqual(before.timerState);
+      expect(after.phaseEndsAt).toBe(before.phaseEndsAt);
+      expect(after.sessionHistory).toEqual(before.sessionHistory);
+      act(() => tree.unmount());
+    }
+  );
+
+  it('resolves open picker titles from the live store', async () => {
+    const tree = await renderLinkedPanel();
+    const picker = tree.root.findAllByType(Pressable)
+      .find((node) => node.props.accessibilityLabel === 'Timer task');
+    act(() => picker?.props.onPress());
+    const renamed = { ...linkedTask, title: 'Renamed live task' };
+
+    act(() => updateLiveTasks([renamed]));
+
+    expect(tree.root.findByType(FlatList).props.data).toEqual([renamed]);
+    expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBe(linkedTask.id);
+    act(() => tree.unmount());
+  });
+
+  it('preserves the link until Mark done changes live state and forwards auto-start options', async () => {
+    const onMarkDone = vi.fn();
+    const tree = await renderLinkedPanel(onMarkDone);
+    const clearEvent = vi.spyOn(mobilePomodoroController, 'clearLastEvent');
+    const selectTask = vi.spyOn(mobilePomodoroController, 'setSelectedTaskId');
+    try {
+      act(() => {
+        storeState.settings.gtd.pomodoro = { linkTask: true, autoStartBreaks: true, autoStartFocus: true };
+        storeListeners.forEach((listener) => listener());
+      });
+      const markDone = tree.root.findAllByType(Pressable)
+        .find((node) => node.props.accessibilityLabel === 'Mark task done');
+      act(() => markDone?.props.onPress());
+      expect(onMarkDone).toHaveBeenCalledWith(linkedTask.id);
+      expect(clearEvent).toHaveBeenCalledWith({ autoStartBreaks: true, autoStartFocus: true });
+      // The parent owns write errors; a pending or rejected write leaves live state untouched.
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBe(linkedTask.id);
+      act(() => updateLiveTasks([{ ...linkedTask, status: 'done' }]));
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
+      expect(selectTask).toHaveBeenCalledWith(undefined, { autoStartBreaks: true, autoStartFocus: true });
+    } finally {
+      act(() => tree.unmount());
+      clearEvent.mockRestore();
+      selectTask.mockRestore();
+    }
+  });
 
   it('starts expanded so an update never hides a timer someone was using (#946)', async () => {
     mockStorage({});

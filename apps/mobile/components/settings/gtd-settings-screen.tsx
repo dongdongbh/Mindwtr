@@ -11,6 +11,7 @@ import { dispatchMobileOnboardingEvent } from '@/lib/mobile-onboarding-events';
 import { logSettingsError } from '@/lib/settings-utils';
 import { useToast } from '@/contexts/toast-context';
 import {
+    updateSettingsFromLatest,
     DEFAULT_TASK_EDITOR_SECTION_OPEN,
     buildGtdSettingsModel,
     buildGtdSettingsUpdate,
@@ -125,10 +126,11 @@ export function GtdSettingsScreen({
 
     // Re-picking the stored value writes nothing, as the native host's contract:
     // a repeat write saves the whole document again for no change.
+    // The group is rebuilt from the latest stored settings, so a key another device changed stays.
     const writeSetting = (edit: GtdSettingsEdit, afterWrite?: () => void) => {
-        const update = buildGtdSettingsUpdate(settings, edit);
-        if (!update || isGtdSettingStored(settings, edit)) return;
-        updateSettings(update).then(afterWrite).catch(logSettingsError);
+        updateSettingsFromLatest((latest) => (
+            isGtdSettingStored(latest, edit) ? null : buildGtdSettingsUpdate(latest, edit)
+        ), { write: updateSettings, read: () => useTaskStore.getState().settings }).then((wrote) => { if (wrote) afterWrite?.(); }).catch(logSettingsError);
     };
 
     const showPomodoroAutoStartNotice = () => {

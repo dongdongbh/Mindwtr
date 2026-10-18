@@ -13,6 +13,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "tech.dongdongbh.mindwtr",
       "infoPlist": {
+        "CFBundleLocalizations": [
+          "en", "vi", "zh-Hans", "zh-Hant", "es", "hu", "uk", "hi", "ar", "de", "ru", "ja",
+          "fr", "pt", "pl", "cs", "ko", "it", "tr", "nl", "fa", "sv", "da"
+        ],
         "NSMicrophoneUsageDescription": "Mindwtr uses the microphone to capture voice notes.",
         "ITSAppUsesNonExemptEncryption": false,
         "LSSupportsOpeningDocumentsInPlace": true,

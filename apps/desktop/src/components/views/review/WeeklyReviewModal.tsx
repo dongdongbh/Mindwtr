@@ -12,6 +12,7 @@ import {
     getWeeklyReviewBuckets,
     isSandboxMode,
     isTaskInActiveProject,
+    isTaskFinished,
     parseProjectNextActionInput,
     parseStoredReviewStepSession,
     resolveFeatureFlags,
@@ -46,6 +47,8 @@ import { getWorkspaceCache } from '../../../lib/workspace-cache';
 import { ShareCardDialog } from '../../ShareCardDialog';
 import { runAfterTaskEditExit } from '../../Task/task-edit-session';
 import { filterVisibleReviewCalendarEvents } from '../calendar/use-calendar-external-events';
+import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
+import { reportError } from '../../../lib/report-error';
 
 type ReviewStep = 'inbox' | 'stale' | 'calendar' | 'waiting' | 'contexts' | 'projects' | 'someday' | 'completed';
 type ReviewStepDefinition = {
@@ -100,6 +103,10 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const [showScheduledSomeday, setShowScheduledSomeday] = useState(false);
     const [shareCardOpen, setShareCardOpen] = useState(false);
     const [projectTaskPrompt, setProjectTaskPrompt] = useState<{ projectId: string; projectTitle: string } | null>(null);
+    const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
+    const [keepProjectsStep, setKeepProjectsStep] = useState(false);
+    const completingProjectRef = useRef(false);
+    const { requestConfirmation, confirmModal } = useConfirmDialog();
     const { tasks, projects, areas, settings, addProject, updateProject, updateTask, deleteTask, batchUpdateTasks } = useTaskStore(
         (state) => ({
             tasks: state.tasks,
@@ -128,6 +135,37 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     }, []);
     const addTask = useTaskStore((state) => state.addTask);
     const showToast = useUiStore((state) => state.showToast);
+    const completeProject = async (projectId: string) => {
+        if (completingProjectRef.current) return;
+        const state = useTaskStore.getState();
+        const project = state._allProjects.find((item) => item.id === projectId && !item.deletedAt && item.status === 'active');
+        if (!project) return;
+        completingProjectRef.current = true;
+        setCompletingProjectId(projectId);
+        try {
+            const sectionIds = new Set(state._allSections.filter((section) => section.projectId === projectId).map((section) => section.id));
+            const hasUnfinishedTasks = state._allTasks.some((task) => (
+                (task.projectId === projectId || (!task.projectId && task.sectionId && sectionIds.has(task.sectionId)))
+                && !task.deletedAt && !isTaskFinished(task) && task.status !== 'reference'
+            ));
+            if (hasUnfinishedTasks && !await requestConfirmation({
+                title: project.title,
+                description: t('projects.completeConfirm'),
+                confirmLabel: t('projects.nextActionPromptComplete'),
+                cancelLabel: t('common.cancel'),
+            })) return;
+            const current = useTaskStore.getState();
+            if (!current._allProjects.some((item) => item.id === projectId && !item.deletedAt && item.status === 'active')) return;
+            setKeepProjectsStep(true);
+            const result = await current.updateProject(projectId, { status: 'archived' });
+            if (result && !result.success) throw new Error(result.error || 'Failed to complete project');
+        } catch (error) {
+            reportError('Failed to complete project during weekly review', error, { userMessage: t('projects.archiveFailed') });
+        } finally {
+            completingProjectRef.current = false;
+            setCompletingProjectId(null);
+        }
+    };
     const setEditingTaskId = useUiStore((state) => state.setEditingTaskId);
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
@@ -243,12 +281,12 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             list.push({ id: 'contexts', title: t('review.contexts'), description: t('review.contextsStepDesc'), icon: MapPin, hasWork: stepHasWork.get('contexts') ?? false });
         }
         list.push(
-            { id: 'projects', title: t('review.projectsStep'), description: t('review.projectsStepDesc'), icon: Layers, hasWork: stepHasWork.get('projects') ?? false },
+            { id: 'projects', title: t('review.projectsStep'), description: t('review.projectsStepDesc'), icon: Layers, hasWork: keepProjectsStep || (stepHasWork.get('projects') ?? false) },
             { id: 'someday', title: t('review.somedayStep'), description: t('review.somedayStepDesc'), icon: Archive, hasWork: stepHasWork.get('someday') ?? false },
             { id: 'completed', title: t('review.allDone'), description: t('review.allDoneDesc'), icon: Check, hasWork: true },
         );
         return list;
-    }, [includeContextStep, staleTaskEntries.length, stepHasWork, t]);
+    }, [includeContextStep, keepProjectsStep, staleTaskEntries.length, stepHasWork, t]);
     const {
         displayedStep,
         currentStepIndex: safeStepIndex,
@@ -914,18 +952,26 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                             {projectEntries.map(({ project, tasks: projectTasks, nextActionState }) => {
                                 return (
                                     <div key={project.id} className="border border-border rounded-lg p-4">
-                                        <div className="flex items-center justify-between gap-3 mb-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                                             <div className="flex items-center gap-2">
                                                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || DEFAULT_AREA_COLOR }} />
                                                 <h3 className="font-semibold">{project.title}</h3>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex flex-wrap items-center gap-2">
                                                 <button
                                                     type="button"
                                                     onClick={() => setProjectTaskPrompt({ projectId: project.id, projectTitle: project.title })}
                                                     className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
                                                 >
                                                     {t('projects.addTask')}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={completingProjectId !== null}
+                                                    onClick={() => void completeProject(project.id)}
+                                                    className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {t('projects.nextActionPromptComplete')}
                                                 </button>
                                                 <div
                                                     className={cn(
@@ -1177,6 +1223,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                 onConfirm={confirmProjectTaskPrompt}
             />
         </Dialog>
+        {confirmModal}
         {shareCardOpen && (
             <ShareCardDialog
                 onClose={() => setShareCardOpen(false)}

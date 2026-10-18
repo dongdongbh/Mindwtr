@@ -8,6 +8,7 @@ import {
   getSomedaySectionMoveSelection,
   getSomedaySectionTaskText,
   planSomedaySectionTaskAdd,
+  runStoreCommand,
   selectSomedayTasks,
   shallow,
   tFallback,
@@ -214,10 +215,12 @@ export function SomedayView() {
   };
   const moveProjectToSection = (project: Project, sectionId: string | undefined) => {
     setMovingProject(null);
-    const latest = useTaskStore.getState().projects.find((candidate) => candidate.id === project.id) ?? project;
-    const update = buildProjectViewSectionUpdate(latest, 'someday', sectionId);
-    if (!update) return;
-    void settleStoreAction(() => updateProject(project.id, update)).then((outcome) => {
+    // Built on the project as it is when the write is admitted, so a sync save's newer sections stay.
+    void settleStoreAction(() => runStoreCommand(async () => {
+      const latest = useTaskStore.getState().projects.find((candidate) => candidate.id === project.id) ?? project;
+      const update = buildProjectViewSectionUpdate(latest, 'someday', sectionId);
+      return update ? updateProject(project.id, update) : { success: true };
+    })).then((outcome) => {
       if (outcome.ok) return;
       showToast({
         title: tFallback(t, 'common.error', 'Error'),

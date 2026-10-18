@@ -95,6 +95,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -152,6 +153,19 @@ private fun JSONObject.extentMinutes(): Int = (getJSONArray("hourLabels").length
 internal fun HoldFor(millis: Long, content: @Composable () -> Unit) {
     val base = LocalViewConfiguration.current
     val config = remember(base, millis) { object : ViewConfiguration by base { override val longPressTimeoutMillis: Long = millis } }
+    CompositionLocalProvider(LocalViewConfiguration provides config, content = content)
+}
+
+/**
+ * RN's Pressable without hitSlop (the day's and the week's all-day rows have none): each row takes touches only inside its own
+ * bounds, as in RN. Compose widens a target under 48 dp (the day's all-day rows are 19 dp) and reports that widened box, less
+ * the next row's, as the row's accessibility bounds, so every stacked row's node sat about 14 dp above the row it names
+ * (TalkBack's box, and a tap at the node's centre missed).
+ */
+@Composable
+private fun ExactTargets(content: @Composable () -> Unit) {
+    val base = LocalViewConfiguration.current
+    val config = remember(base) { object : ViewConfiguration by base { override val minimumTouchTargetSize: DpSize = DpSize.Zero } }
     CompositionLocalProvider(LocalViewConfiguration provides config, content = content)
 }
 
@@ -575,9 +589,9 @@ private fun WeekView(model: InboxViewModel, view: JSONObject, content: JSONObjec
             })
             // RN's first place: the selected day (else today) at the left, as far as the week allows.
             val start = days.indexOfFirst { it.getBoolean("selected") }.takeIf { it >= 0 } ?: days.indexOfFirst { it.getBoolean("isToday") }.coerceAtLeast(0)
-            LaunchedEffect(days.firstOrNull()?.getString("key"), visible, columnPx) {
-                across.settleTo((minOf(start, (days.size - visible).coerceAtLeast(0)) * columnPx).roundToInt())
-            }
+            val availablePx = with(density) { (maxWidth - GUTTER).toPx() }
+            val keys = weekScrollKeys(days.firstOrNull()?.getString("key"), visible, start, days.size, columnPx, availablePx)
+            LaunchedEffect(*keys.toTypedArray()) { across.settleTo(keys.last() as Int) }
             val pin = Modifier.offset { IntOffset(across.value, 0) }.zIndex(5f).background(c.bg)
             Row(Modifier.fillMaxHeight().horizontalScroll(across, flingBehavior = snap)) {
                 Column(Modifier.width(GUTTER + column * days.size).fillMaxHeight()) {
@@ -623,7 +637,7 @@ private fun WeekAllDay(model: InboxViewModel, items: List<JSONObject>, width: Dp
     val theme = LocalTheme.current
     val c = theme.colors
     Column(Modifier.width(width).fillMaxHeight().leftBorder(c.border, 1.dp)
-        .padding(horizontal = if (compact) 2.dp else 5.dp, vertical = if (compact) 4.dp else 5.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        .padding(horizontal = if (compact) 2.dp else 5.dp, vertical = if (compact) 4.dp else 5.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) { ExactTargets {
         for (item in items) {
             val tones = item.getJSONObject("tones")
             val fill = if (tones.menuText("fill") == "secondary") theme.wash(c.secondaryText, 0.14f, 0.28f) else c.inputBg
@@ -638,8 +652,22 @@ private fun WeekAllDay(model: InboxViewModel, items: List<JSONObject>, width: Dp
                     .clickable(enabled = pressable && idle) { calendar.openItem(item) }
                     .padding(start = if (compact) 4.dp else 8.dp, end = if (compact) 2.dp else 5.dp, top = 2.dp, bottom = 2.dp))
         }
-    }
+    } }
 }
+
+/**
+ * RN's getCalendarWeekInitialScrollX: day [start] at the left, as far as the week allows. Deadline weeks widen the columns past
+ * the density, so the bound is the week's overflow of the viewport, not the density's day count (which opened on Tuesday).
+ */
+internal fun weekStartScroll(start: Int, dayCount: Int, columnPx: Float, availablePx: Float): Int =
+    minOf(start * columnPx, (dayCount * columnPx - availablePx).coerceAtLeast(0f)).roundToInt()
+
+/**
+ * When the week scrolls itself to its first place (RN's getCalendarWeekAutoScrollKey): a new week, density, or start offset. The
+ * offset carries the selected day (Today in the same week) and the viewport (a resize under deadline-wide columns).
+ */
+internal fun weekScrollKeys(firstDay: String?, visible: Int, start: Int, dayCount: Int, columnPx: Float, availablePx: Float): List<Any?> =
+    listOf(firstDay, visible, weekStartScroll(start, dayCount, columnPx, availablePx))
 
 /** A scroll to [target] once the content is laid out (its extent known). */
 private suspend fun androidx.compose.foundation.ScrollState.settleTo(target: Int) {
@@ -841,7 +869,7 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
             val shape = RoundedCornerShape(12.dp)
             Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(12.dp)) {
                 Text(text.getString("allDay").uppercase(), style = rnText(12, 800), color = c.secondaryText, modifier = Modifier.padding(bottom = 8.dp))
-                Column(Modifier.heightIn(max = 132.dp).verticalScroll(rememberScrollState())) {
+                Column(Modifier.heightIn(max = 132.dp).verticalScroll(rememberScrollState())) { ExactTargets {
                     for (item in allDay) {
                         val pressable = item.getBoolean("pressable")
                         val spoken = item.spoken()
@@ -851,7 +879,7 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
                                 .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (pressable && idle) onClick { calendar.openItem(item); true } else disabled() }
                                 .clickable(enabled = pressable && idle) { calendar.openItem(item) }.padding(vertical = 2.dp))
                     }
-                }
+                } }
             }
         }
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(down).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),

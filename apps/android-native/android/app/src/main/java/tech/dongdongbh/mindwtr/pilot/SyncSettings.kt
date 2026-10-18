@@ -402,13 +402,13 @@ private fun BackendChip(sync: SyncSettingsModel, option: JSONObject) {
 
 /** RN's SettingsGuideLink: the title in the tint with lucide's external-link; it opens the guide in the browser. */
 @Composable
-internal fun GuideLink(guide: JSONObject, tag: String) {
+internal fun GuideLink(guide: JSONObject, tag: String, bottom: Int = 12) {
     val c = LocalTheme.current.colors
     val context = LocalContext.current
     val title = guide.getString("title")
     val spoken = "$title. ${guide.getString("description")}"
     val open = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, guide.getString("url").toUri())) } }
-    Row(Modifier.padding(bottom = 12.dp).heightIn(min = 32.dp)
+    Row(Modifier.padding(bottom = bottom.dp).heightIn(min = 32.dp)
         .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; testTag = tag; onClick { open(); true } }
         .clickable { open() }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = rnText(13, 700), color = c.tint)

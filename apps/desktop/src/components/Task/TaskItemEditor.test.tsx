@@ -149,6 +149,32 @@ const baseProps: Parameters<typeof TaskItemEditor>[0] = {
 };
 
 describe('TaskItemEditor', () => {
+    it.each([false, true])('keeps configured fields once and in reading order (modal: %s)', (isModalEditor) => {
+        const { getByText, getAllByText, getByRole } = render(
+            <TaskItemEditor
+                {...baseProps}
+                isModalEditor={isModalEditor}
+                basicFieldsBeforeOrganizers={['status']}
+                basicFieldsAfterOrganizers={['description']}
+                detailsFields={['checklist', 'attachments']}
+                sectionOpenDefaults={{ basic: true, scheduling: true, organization: true, details: true }}
+            />
+        );
+
+        for (const field of ['status', 'description', 'checklist', 'attachments', 'recurrence', 'contexts']) {
+            expect(getAllByText(`field:${field}`)).toHaveLength(1);
+        }
+        const metadata = getByText('field:status');
+        const content = getByText('field:checklist');
+        const first = isModalEditor ? content : metadata;
+        const second = isModalEditor ? metadata : content;
+        expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+        fireEvent.click(getByRole('button', { name: /^Details/i }));
+        expect(getByRole('button', { name: /^Details/i })).toHaveAttribute('aria-expanded', 'false');
+        expect(getByText('field:description')).toBeVisible();
+    });
+
     it('assigns a Someday section without changing project or project-section membership', () => {
         const setField = vi.fn();
         const somedayTask: Task = {

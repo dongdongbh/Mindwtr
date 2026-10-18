@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AIProviderId, AIReasoningEffort, AiSettings, AppData, AudioCaptureMode, AudioFieldStrategy } from '@mindwtr/core';
 import {
+    updateSettingsFromLatest,
     canDiscoverAIModels,
     DEFAULT_ANTHROPIC_THINKING_BUDGET,
     DEFAULT_GEMINI_THINKING_BUDGET,
@@ -135,22 +136,23 @@ export function useAiSettings({ isTauri, settings, updateSettings, showSaved, en
             ? PARAKEET_MODELS.find((model) => model.id === speechModel)?.sizeBytes ?? null
             : null;
 
+    // Built on the AI settings as stored when the write is admitted, so a key another device synced stays.
     const updateAISettings = useCallback((next: AiSettingsUpdate) => {
-        updateSettings({ ai: { ...(settings?.ai ?? {}), ...next } })
+        updateSettingsFromLatest((latest) => ({ ai: { ...(latest.ai ?? {}), ...next } }), { write: updateSettings })
             .then(showSaved)
             .catch((error) => reportSettingsFailure('Failed to update AI settings', error, saveFailedMessage));
-    }, [saveFailedMessage, settings?.ai, showSaved, updateSettings]);
+    }, [saveFailedMessage, showSaved, updateSettings]);
 
     const updateSpeechSettings = useCallback((next: SpeechSettingsUpdate) => {
-        updateSettings({
+        updateSettingsFromLatest((latest) => ({
             ai: {
-                ...(settings?.ai ?? {}),
-                speechToText: { ...(settings?.ai?.speechToText ?? {}), ...next },
+                ...(latest.ai ?? {}),
+                speechToText: { ...(latest.ai?.speechToText ?? {}), ...next },
             },
-        })
+        }), { write: updateSettings })
             .then(showSaved)
             .catch((error) => reportSettingsFailure('Failed to update speech settings', error, saveFailedMessage));
-    }, [saveFailedMessage, settings?.ai, showSaved, updateSettings]);
+    }, [saveFailedMessage, showSaved, updateSettings]);
 
     const handleAIProviderChange = useCallback((provider: AIProviderId) => {
         updateAISettings({

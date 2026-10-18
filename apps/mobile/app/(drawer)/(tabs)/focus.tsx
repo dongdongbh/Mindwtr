@@ -29,6 +29,7 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 
 import {
+  updateSettingsFromLatest,
   buildFocusAdvancedFilterChips,
   buildFocusNextItems,
   buildFocusPools,
@@ -421,7 +422,12 @@ export default function FocusScreen() {
     });
     if (!plan) return;
     unbindSavedFilter();
-    void updateSettings(plan.settingsUpdate).catch(() => undefined);
+    // The gtd group is rebuilt from the latest stored settings, so a key another device changed stays.
+    void updateSettingsFromLatest((latest) => planFocusGroupChange(nextGroupBy, {
+      effectiveGroupBy: effectiveFocusGroupBy,
+      hasActiveSavedFilter: Boolean(activeSavedFilter),
+      settings: latest,
+    })?.settingsUpdate, { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(() => undefined);
   }, [activeSavedFilter, effectiveFocusGroupBy, settings, unbindSavedFilter, updateSettings]);
   const showTaskUpdateError = useCallback((message?: string) => {
     showToast({
@@ -627,7 +633,10 @@ export default function FocusScreen() {
       nowIso: new Date().toISOString(),
     });
     if (!plan) return;
-    updateSettings({ savedFilters: plan.savedFilters }).then(() => {
+    // Saved filters are edited on the latest stored list, so one another device deleted stays deleted.
+    updateSettingsFromLatest((latest) => ({
+      savedFilters: [...(latest.savedFilters ?? []), plan.filter],
+    }), { write: updateSettings, read: () => useTaskStore.getState().settings }).then(() => {
       // Binds the new filter as the active one; its criteria are the ones just
       // saved, so re-applying them is a no-op beyond marking it selected.
       applySavedFocusFilter(plan.filter);
@@ -637,8 +646,8 @@ export default function FocusScreen() {
   // A deleted saved filter drops out of savedFocusFilters, and the selections
   // hook clears its own binding from there.
   const deleteSavedFilter = useCallback((filter: SavedFilter) => {
-    updateSettings(planFocusFilterDelete(settings?.savedFilters, filter.id)).catch(() => undefined);
-  }, [settings?.savedFilters, updateSettings]);
+    updateSettingsFromLatest((latest) => planFocusFilterDelete(latest.savedFilters, filter.id), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(() => undefined);
+  }, [updateSettings]);
   const confirmDeleteSavedFilter = useCallback((filter: SavedFilter) => {
     Alert.alert(
       resolveText('savedFilters.deleteTitle', 'Delete saved filter?'),
@@ -655,15 +664,14 @@ export default function FocusScreen() {
     );
   }, [deleteSavedFilter, resolveText]);
   const removeAdvancedSavedFilterCriterion = useCallback((chipId: string) => {
-    const plan = planFocusFilterCriterionRemoval({
+    const nowIso = new Date().toISOString();
+    updateSettingsFromLatest((latest) => planFocusFilterCriterionRemoval({
       activeSavedFilter,
       criterionId: chipId,
-      savedFilters: settings?.savedFilters,
-      nowIso: new Date().toISOString(),
-    });
-    if (!plan) return;
-    updateSettings({ savedFilters: plan.savedFilters }).catch(() => undefined);
-  }, [activeSavedFilter, settings?.savedFilters, updateSettings]);
+      savedFilters: latest.savedFilters,
+      nowIso,
+    }), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(() => undefined);
+  }, [activeSavedFilter, updateSettings]);
   const confirmRemoveAdvancedSavedFilterCriterion = useCallback((chipId: string, label: string) => {
     Alert.alert(
       resolveText('common.delete', 'Delete'),

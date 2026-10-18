@@ -6,6 +6,7 @@ import * as preparedAvailability from './native-host-contract-project-availabili
 import { openSqliteHost, value } from './screen-parity.replay';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, resetForTests, useTaskStore } from './store';
 import type { NativeAttachmentsHost } from './native-host-contract-attachments';
+import { runSyncStoreSave } from './store-write-gate';
 import type { Attachment, Project, Task } from './types';
 
 const at = '2026-10-07T12:00:00.000Z';
@@ -68,6 +69,22 @@ describe('selected relocated Project availability durable authority', () => {
             expect(after.tasks).toEqual(before.tasks); expect(after.settings).toEqual(before.settings);
             await env.restart();
             expect(await allRows(env)).toEqual(after);
+        } finally { await env.close(); }
+    });
+
+    it('lets a sync save run while the download waits on the network', async () => {
+        let release!: () => void;
+        const ensure = vi.fn((item: Attachment) => new Promise<{ status: 'available'; attachment: Attachment }>((resolve) => {
+            release = () => resolve({ status: 'available', attachment: { ...item, localStatus: 'available' } });
+        }));
+        const { env } = await open(ensure);
+        try {
+            const pending = env.host.downloadRelocatedProjectAttachment(request(env), target);
+            await vi.waitFor(() => expect(ensure).toHaveBeenCalledOnce());
+            // The save must not wait for the stalled request.
+            await expect(runSyncStoreSave(async () => 'saved')).resolves.toBe('saved');
+            release();
+            expect(await pending).toMatchObject({ ok: true, value: { status: 'available' } });
         } finally { await env.close(); }
     });
 

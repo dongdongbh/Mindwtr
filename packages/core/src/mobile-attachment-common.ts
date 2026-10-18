@@ -11,7 +11,7 @@
 // generation-bound installer; once that installer starts, the scratch file is never deleted
 // here, since a conflict can name it as the only preserved copy of a generation.
 import type { Attachment } from './types';
-import { applyAttachmentContentStat, bumpAttachmentContentRevision, checkAttachmentContentChange } from './attachment-change-detection';
+import { applyAttachmentContentStat, bumpAttachmentContentRevision, checkAttachmentContentChange, isStaleCopyOfRemoteWinner, logUninstalledRemoteWinner } from './attachment-change-detection';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
 import { isAttachmentPresenceRepairCandidate, repairMissingRemoteAttachments } from './attachment-presence-repair';
 import {
@@ -745,6 +745,12 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
       return true;
     }
     if (!check.hash) return false;
+    if (isStaleCopyOfRemoteWinner(attachment, check.hash)) {
+      // Exactly the old file of a remote version the merge chose but did not download: never this device's own edit (it would
+      // outrank the winner and upload the old bytes over it). The post-merge remote-winner check installs the winner.
+      logUninstalledRemoteWinner(attachment);
+      return false;
+    }
     applyAttachmentContentStat(attachment, check.stat, check.hash);
     attachment.contentRev = bumpAttachmentContentRevision(attachment);
     attachment.pendingContentUpload = true;
@@ -848,6 +854,8 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     attachment: Attachment,
     localPath: string,
   ): Promise<boolean> => {
+    // Called right after an install: the disk no longer holds an older marked copy, whether or not a stat is recorded below.
+    attachment.staleContentHash = undefined;
     const expectedRemoteHash = attachment.fileHash?.trim().toLowerCase();
     if (!isSha256Hex(expectedRemoteHash)) return false;
     const stat = await files.statAttachmentFile(localPath);

@@ -4,7 +4,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, ExternalLink } from 'lucide-react';
 import { buildPersonSearchQuery, DEFAULT_AREA_COLOR, formatI18nTemplate, getPersonNameKey, getPersonTaskCounts, sortViewSectionDefinitions, translateWithFallback, useTaskStore, type Area, type Person, type ViewSectionDefinition,
-    baseTextCollator, buildSomedaySectionsSettingsUpdate, isManageAreaNameTaken, isSafePersonReferenceLink, orderSomedaySections, removeSomedaySection, renameSomedaySection,
+    baseTextCollator, buildSomedaySectionsSettingsUpdate, isManageAreaNameTaken, isSafePersonReferenceLink, orderSomedaySections, removeSomedaySection, renameSomedaySection, updateSettingsFromLatest,
 } from '@mindwtr/core';
 import { AreaColorPicker } from '../projects/AreaColorPicker';
 import { reportError } from '../../../lib/report-error';
@@ -431,7 +431,6 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
     const updatePerson = useTaskStore((s) => s.updatePerson);
     const renamePerson = useTaskStore((s) => s.renamePerson);
     const deletePerson = useTaskStore((s) => s.deletePerson);
-    const updateSettings = useTaskStore((s) => s.updateSettings);
     const getDerivedState = useTaskStore((s) => s.getDerivedState);
 
     const { allContexts, allTags } = getDerivedState();
@@ -459,15 +458,14 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
 
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-    // One edit against the list stored at write time (a delete waits for its confirmation):
+    // One edit against the list stored when the write is admitted (a delete waits for its confirmation):
     // core's edits change only the edited sections and keep every other stored entry.
     const persistSomedaySections = useCallback((edit: (stored: ViewSectionDefinition[] | undefined) => ViewSectionDefinition[] | null) => {
-        const current = useTaskStore.getState().settings;
-        const next = edit(current?.gtd?.viewSections?.someday);
-        if (!next) return;
-        void updateSettings(buildSomedaySectionsSettingsUpdate(current, next))
-            .catch((error) => reportError('Failed to update Someday sections from Settings', error));
-    }, [updateSettings]);
+        void updateSettingsFromLatest((current) => {
+            const next = edit(current?.gtd?.viewSections?.someday);
+            return next ? buildSomedaySectionsSettingsUpdate(current, next) : null;
+        }).catch((error) => reportError('Failed to update Someday sections from Settings', error));
+    }, []);
 
     const handleViewSectionDragEnd = useCallback((event: DragEndEvent) => {
         const { active, over } = event;

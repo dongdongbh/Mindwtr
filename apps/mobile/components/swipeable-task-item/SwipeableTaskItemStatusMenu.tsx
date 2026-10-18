@@ -1,6 +1,6 @@
 import React from 'react';
-import * as Clipboard from 'expo-clipboard';
 import { useToast } from '../../contexts/toast-context';
+import { copyTaskReference } from '../../lib/task-reference-clipboard';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { TaskStatus, tFallback } from '@mindwtr/core';
 import type { ThemeColors } from '../../hooks/use-theme-colors';
@@ -37,15 +37,6 @@ export function SwipeableTaskItemStatusMenu({
 }: SwipeableTaskItemStatusMenuProps) {
     const statusColors = useStatusColors();
     const { showToast } = useToast();
-    const copyReference = async (kind: 'link' | 'id') => {
-        try {
-            await Clipboard.setStringAsync(kind === 'link'
-                ? `mindwtr://open?task=${encodeURIComponent(taskId)}` : taskId);
-            showToast({ message: tFallback(t, 'list.taskCopied', 'Task copied to clipboard'), tone: 'success' });
-        } catch {
-            showToast({ message: tFallback(t, 'list.taskCopyFailed', 'Could not copy task'), tone: 'error' });
-        }
-    };
     const moveToDestinationLabel = tFallback(t, 'task.moveToProjectOrArea', 'Move to project or area…');
     const moveToSectionLabel = tFallback(t, 'viewSections.moveToSection', 'Move to section…');
     return (
@@ -103,7 +94,7 @@ export function SwipeableTaskItemStatusMenu({
                                     key={`copy-${kind}`}
                                     style={[styles.menuMoveItem, { borderColor: tc.border }]}
                                     onPress={() => {
-                                        void copyReference(kind);
+                                        void copyTaskReference(taskId, kind, t, showToast);
                                         onClose();
                                     }}
                                     accessibilityRole="button"

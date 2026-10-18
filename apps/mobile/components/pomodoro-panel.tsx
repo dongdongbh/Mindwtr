@@ -7,6 +7,7 @@ import {
   formatPomodoroClock,
   getPomodoroFocusSessionsCompletedToday,
   getPomodoroPresetOptions,
+  isTaskActionable,
   type PomodoroAutoStartOptions,
   tFallback,
   useTaskStore,
@@ -32,6 +33,10 @@ export function PomodoroPanel({
   const customDurations = useTaskStore((state) => state.settings.gtd?.pomodoro?.customDurations);
   const linkTaskEnabled = useTaskStore((state) => state.settings.gtd?.pomodoro?.linkTask === true);
   const liveTasks = useTaskStore((state) => state.tasks);
+  const actionableTasksById = useMemo(
+    () => new Map(liveTasks.filter(isTaskActionable).map((task) => [task.id, task])),
+    [liveTasks]
+  );
   const autoStartBreaks = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartBreaks === true);
   const autoStartFocus = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartFocus === true);
   const autoStartOptions = useMemo<PomodoroAutoStartOptions>(
@@ -58,14 +63,15 @@ export function PomodoroPanel({
       return;
     }
     if (!selectedTaskId) return;
-    if (liveTasks.some((task) => task.id === selectedTaskId)) return;
-    mobilePomodoroController.setSelectedTaskId(undefined);
-  }, [linkTaskEnabled, liveTasks, selectedTaskId]);
+    if (actionableTasksById.has(selectedTaskId)) return;
+    mobilePomodoroController.setSelectedTaskId(undefined, autoStartOptions);
+  }, [actionableTasksById, autoStartOptions, linkTaskEnabled, selectedTaskId]);
 
-  const selectedTask = useMemo(
-    () => (linkTaskEnabled && selectedTaskId ? liveTasks.find((task) => task.id === selectedTaskId) : undefined),
-    [linkTaskEnabled, liveTasks, selectedTaskId]
-  );
+  const selectedTask = linkTaskEnabled && selectedTaskId ? actionableTasksById.get(selectedTaskId) : undefined;
+  const pickerTasks = useMemo(() => tasks.flatMap((task) => {
+    const liveTask = actionableTasksById.get(task.id);
+    return liveTask ? [liveTask] : [];
+  }), [actionableTasksById, tasks]);
   const presetOptions = useMemo(() => getPomodoroPresetOptions(customDurations), [customDurations]);
 
   const cardTitle = tFallback(t, 'pomodoro.mobileTitle', 'Pomodoro Timer');
@@ -131,7 +137,7 @@ export function PomodoroPanel({
   const handleMarkDone = () => {
     if (!selectedTask) return;
     onMarkDone(selectedTask.id);
-    mobilePomodoroController.clearLastEvent();
+    mobilePomodoroController.clearLastEvent(autoStartOptions);
   };
 
   const collapseLabel = tFallback(t, 'pomodoro.collapse', 'Collapse timer');
@@ -329,7 +335,7 @@ export function PomodoroPanel({
                 accessibilityRole="button"
                 accessibilityState={{ selected: !selectedTaskId }}
                 onPress={() => {
-                  mobilePomodoroController.setSelectedTaskId(undefined);
+                  mobilePomodoroController.setSelectedTaskId(undefined, autoStartOptions);
                   setIsTaskPickerOpen(false);
                 }}
                 style={[
@@ -345,7 +351,7 @@ export function PomodoroPanel({
                 </Text>
               </Pressable>
               <FlatList
-                data={tasks}
+                data={pickerTasks}
                 renderItem={({ item: task }) => {
                   const selected = task.id === selectedTaskId;
                   return (
@@ -353,7 +359,7 @@ export function PomodoroPanel({
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                       onPress={() => {
-                        mobilePomodoroController.setSelectedTaskId(task.id);
+                        mobilePomodoroController.setSelectedTaskId(task.id, autoStartOptions);
                         setIsTaskPickerOpen(false);
                       }}
                       style={[

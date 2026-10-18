@@ -406,6 +406,29 @@ describe('mobile attachment files: File Sync folders', () => {
     });
     expect(saf.makeDirectory).not.toHaveBeenCalled();
   });
+
+  // Document IDs are opaque provider values (B7): a provider may name `attachments` with ID 9.
+  it('finds a SAF attachments folder and its files by display name when document IDs are opaque', async () => {
+    const root = 'content://op/tree/root/document/root';
+    const saf = {
+      readDirectory: vi.fn(async (uri: string) => (uri === root || uri === 'content://op/tree/root'
+        ? ['content://op/tree/root/document/7', 'content://op/tree/root/document/9']
+        : ['content://op/tree/root/document/12'])),
+      listChildren: vi.fn(async (uri: string) => (uri === root || uri === 'content://op/tree/root'
+        ? [{ uri: 'content://op/tree/root/document/7', name: 'data.json' }, { uri: 'content://op/tree/root/document/9', name: 'attachments' }]
+        : [{ uri: 'content://op/tree/root/document/12', name: 'att-1.txt' }])),
+      makeDirectory: vi.fn(async () => 'content://created'),
+    };
+    const { files } = setup({ saf });
+
+    await expect(files.resolveFileSyncDir('content://op/tree/root/document/7')).resolves.toMatchObject({
+      type: 'saf',
+      attachmentsDirUri: 'content://op/tree/root/document/9',
+    });
+    expect(saf.makeDirectory).not.toHaveBeenCalled();
+    const inventory = await files.inspectSafDirectoryEntriesByName('content://op/tree/root/document/9');
+    expect(inventory).toEqual({ status: 'available', entries: new Map([['att-1.txt', 'content://op/tree/root/document/12']]) });
+  });
 });
 
 describe('mobile attachment files: pending work and the presence stamp (#1119)', () => {

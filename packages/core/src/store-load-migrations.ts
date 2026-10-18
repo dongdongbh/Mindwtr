@@ -18,6 +18,7 @@ import { isProjectCancelled } from './project-status';
 import { getAutoArchiveDays, shouldAutoArchiveCompletedTask } from './task-utils';
 import { isTaskActionable, isTaskFinished } from './task-status';
 import { generateUUID as uuidv4 } from './uuid';
+import { runToEnd, type CooperativePass } from './cooperative';
 import type { AppData, Area, Project, Task, TaskEditorFieldId } from './types';
 
 // Bumped whenever a schema-shaped repair (project status/order, legacy area
@@ -801,7 +802,11 @@ const LOAD_MIGRATIONS: LoadMigration[] = [
     purgeExpiredTombstonesMigration,
 ];
 
-export const runLoadMigrations = (data: AppData, ctx: LoadContext): { data: AppData; applied: string[] } => {
+export const runLoadMigrations = (data: AppData, ctx: LoadContext): { data: AppData; applied: string[] } =>
+    runToEnd(runLoadMigrationsPass(data, ctx));
+
+/** runLoadMigrations as a cooperative pass: it may give the thread back between two migrations (D9b W6). */
+export function* runLoadMigrationsPass(data: AppData, ctx: LoadContext): CooperativePass<{ data: AppData; applied: string[] }> {
     let current = data;
     const applied: string[] = [];
     let schemaBackfillFailed = false;
@@ -833,6 +838,7 @@ export const runLoadMigrations = (data: AppData, ctx: LoadContext): { data: AppD
     for (const migration of LOAD_MIGRATIONS) {
         if (migration.shouldRun && !migration.shouldRun(ctx)) continue;
         apply(migration);
+        yield;
     }
 
     // Last, and only when every gated step landed: this write closes
@@ -842,4 +848,4 @@ export const runLoadMigrations = (data: AppData, ctx: LoadContext): { data: AppD
         apply(bumpMigrationsVersionMigration);
     }
     return { data: current, applied };
-};
+}

@@ -50,10 +50,10 @@ const request = (value: boolean, expected: unknown, requestId = '12345678-1234-1
     ({ requestId, edit: { type: 'notificationsEnabled', value }, expected });
 
 describe('actual private iOS prepared Notification Settings bridge', () => {
-    it('projects all ten raw witnesses and validates a bounded frozen envelope without writing', async () => {
+    it('projects all eleven raw witnesses and validates a bounded frozen envelope without writing', async () => {
         const f = fixture(); await f.boot();
         const options = await f.call('notificationSettingOptions', {});
-        expect(options.ok).toBe(true); expect(Object.keys(options.value.expected)).toHaveLength(10);
+        expect(options.ok).toBe(true); expect(Object.keys(options.value.expected)).toHaveLength(11);
         const selected = request(true, options.value.expected.notificationsEnabled);
         const prepared = await f.call('notificationSettingPrepare', selected);
         expect(prepared).toEqual({ ok: true, value: { kind: 'prepared', prepared: { version: 1, request: selected } } });

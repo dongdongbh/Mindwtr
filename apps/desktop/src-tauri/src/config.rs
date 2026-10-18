@@ -3380,6 +3380,9 @@ mod tests {
             link_folder_bookmarks: Some("{\"a1\":\"Ym9va21hcms=\"}".to_string()),
             mcp_enabled: Some("true".to_string()),
             mcp_allow_write: Some("false".to_string()),
+            mcp_allow_archive: Some("true".to_string()),
+            mcp_allow_delete: Some("false".to_string()),
+            mcp_port: Some("9123".to_string()),
             mcp_token: Some("managed-mcp-token-value".to_string()),
         }
     }

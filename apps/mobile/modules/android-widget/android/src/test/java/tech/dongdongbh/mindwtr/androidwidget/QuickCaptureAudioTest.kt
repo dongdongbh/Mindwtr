@@ -66,7 +66,8 @@ class QuickCaptureAudioTest {
     val filesDir = tempFilesDir()
     val draft = stageDraft(filesDir)
 
-    val queued = PendingCaptureWriter.publishAudio(filesDir, draft, "  Call Alex  ")
+    val note = "  @home #literal\nKeep this note  "
+    val queued = PendingCaptureWriter.publishAudio(filesDir, draft, "  Call Alex  ", note)
 
     val finalAudio = File(File(filesDir, PendingCaptureWriter.AUDIO_DIRECTORY), "${draft.id}.wav")
     assertTrue(finalAudio.isFile)
@@ -81,6 +82,7 @@ class QuickCaptureAudioTest {
     assertEquals("android-quick-capture", json.getString("source"))
     assertEquals("1970-01-01T00:00:00.000Z", json.getString("createdAt"))
     assertEquals("Call Alex", json.getString("title"))
+    assertEquals(note, json.getString("note"))
   }
 
   @Test
@@ -89,9 +91,10 @@ class QuickCaptureAudioTest {
     val draft = stageDraft(filesDir)
     val queueDirectory = File(filesDir, PendingCaptureWriter.DIRECTORY).apply { mkdirs() }
     val blockingTempDirectory = File(queueDirectory, "${draft.id}.tmp").apply { mkdirs() }
+    val note = "  Note retained across\npublication failure  "
 
     try {
-      PendingCaptureWriter.publishAudio(filesDir, draft, "Prefix")
+      PendingCaptureWriter.publishAudio(filesDir, draft, "Prefix", note)
       fail("Expected JSON publication to fail")
     } catch (_: IOException) {
       // Expected: the WAV is already durable and remains retryable.
@@ -103,9 +106,10 @@ class QuickCaptureAudioTest {
     assertFalse(File(queueDirectory, "${draft.id}.json").exists())
 
     assertTrue(blockingTempDirectory.delete())
-    val queued = PendingCaptureWriter.publishAudio(filesDir = filesDir, draft = draft, rawTitle = "Prefix")
+    val queued = PendingCaptureWriter.publishAudio(filesDir = filesDir, draft = draft, rawTitle = "Prefix", note = note)
     assertTrue(queued.isFile)
     assertEquals(expoFileUri(finalAudio), JSONObject(queued.readText()).getString("audioPath"))
+    assertEquals(note, JSONObject(queued.readText()).getString("note"))
   }
 
   @Test

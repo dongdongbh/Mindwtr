@@ -68,7 +68,7 @@ const storeState: MockStoreState = {
 vi.mock('@mindwtr/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindwtr/core')>()),
   shallow: Object.is,
-  useTaskStore: () => storeState,
+  useTaskStore: Object.assign(() => storeState, { getState: () => storeState }),
 }));
 
 vi.mock('@/hooks/use-theme-tokens', () => ({
@@ -373,6 +373,23 @@ describe('GtdSettingsScreen task editor layout', () => {
         focusTaskLimit: 1,
       }),
     }));
+  });
+
+  // The page still shows the settings it rendered; the write rebuilds the group from the latest stored ones.
+  it('keeps a GTD key another device changed after the page rendered', () => {
+    storeState.settings = { gtd: { focusTaskLimit: 3, autoArchiveDays: 7 } };
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd" />);
+    });
+    storeState.settings = { gtd: { focusTaskLimit: 3, autoArchiveDays: 30 } };
+    const oneButton = tree.root.findAllByType(TouchableOpacity).find((candidate) => (
+      candidate.findAllByType(Text).some((textNode) => textNode.props.children === 1)
+    ));
+    renderer.act(() => {
+      oneButton?.props.onPress();
+    });
+    expect(updateSettings).toHaveBeenCalledWith({ gtd: { focusTaskLimit: 1, autoArchiveDays: 30 } });
   });
 
   it('writes nothing when a choice re-picks the stored value', async () => {

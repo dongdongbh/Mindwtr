@@ -28,11 +28,11 @@ object PendingCaptureWriter {
 
   /** Returns the queued file, or null when the trimmed title is empty. */
   @Throws(IOException::class)
-  fun write(filesDir: File, rawTitle: String, now: Date = Date()): File? {
+  fun write(filesDir: File, rawTitle: String, now: Date = Date(), note: String = ""): File? {
     val title = rawTitle.trim().take(MAX_TITLE_LENGTH).trim()
     if (title.isEmpty()) return null
 
-    return writeCapture(filesDir, title, SOURCE, now)
+    return writeCapture(filesDir, title, SOURCE, now, note)
   }
 
   /**
@@ -49,13 +49,14 @@ object PendingCaptureWriter {
     return writeCapture(filesDir, title, CAPTURE_INTENT_SOURCE, now)
   }
 
-  private fun writeCapture(filesDir: File, title: String, source: String, now: Date): File {
+  private fun writeCapture(filesDir: File, title: String, source: String, now: Date, note: String = ""): File {
     val id = UUID.randomUUID().toString()
     val json = JSONObject()
       .put("id", id)
       .put("title", title)
       .put("createdAt", isoTimestamp(now))
       .put("source", source)
+      .apply { if (note.isNotBlank()) put("note", note) }
       .toString()
     return publish(filesDir, id, json)
   }
@@ -103,7 +104,7 @@ object PendingCaptureWriter {
    * failure; an existing distinct WAV or JSON is never overwritten.
    */
   @Throws(IOException::class)
-  fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String): File {
+  fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String, note: String = ""): File {
     val paths = ownedAudioPaths(filesDir, draft) ?: throw IOException("Invalid audio capture path")
     val staged = paths.first
     val target = paths.second
@@ -130,7 +131,10 @@ object PendingCaptureWriter {
       .put("audioPath", absoluteFileUri(target))
       .put("source", SOURCE)
       .put("createdAt", isoTimestamp(draft.createdAt))
-      .apply { if (title.isNotEmpty()) put("title", title) }
+      .apply {
+        if (title.isNotEmpty()) put("title", title)
+        if (note.isNotBlank()) put("note", note)
+      }
       .toString()
     return publish(filesDir, draft.id, json)
   }

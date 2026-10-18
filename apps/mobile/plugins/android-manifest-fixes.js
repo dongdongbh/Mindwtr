@@ -4,6 +4,10 @@ const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins'
 
 const MLKIT_ACTIVITY = 'com.google.mlkit.vision.codescanner.internal.GmsBarcodeScanningDelegateActivity';
 const MAIN_ACTIVITY = '.MainActivity';
+// expo-dev-launcher and expo-dev-menu depend on androidx.compose.ui:ui-tooling with `implementation`,
+// so its exported preview launcher (a debug tool that starts any composable by name) reached release
+// APKs (v1.3.6). The app has no Compose previews to run.
+const COMPOSE_PREVIEW_ACTIVITY = 'androidx.compose.ui.tooling.PreviewActivity';
 // Fully qualified: these classes live in the local context-automation Expo
 // module (apps/mobile/modules/context-automation), not the app's own package,
 // so the manifest-relative `.ClassName` shorthand no longer resolves.
@@ -139,6 +143,16 @@ const DATA_EXTRACTION_RULES_XML = `<?xml version="1.0" encoding="utf-8"?>
 </data-extraction-rules>
 `;
 
+const removeComposePreviewActivity = (application) => {
+  const activities = ensureArray(application, 'activity');
+  const existing = activities.find((activity) => activity?.$?.['android:name'] === COMPOSE_PREVIEW_ACTIVITY);
+  if (existing) {
+    existing.$ = { 'android:name': COMPOSE_PREVIEW_ACTIVITY, 'tools:node': 'remove' };
+    return;
+  }
+  activities.push({ $: { 'android:name': COMPOSE_PREVIEW_ACTIVITY, 'tools:node': 'remove' } });
+};
+
 const ensureBackupRules = (application) => {
   application.$['android:fullBackupContent'] = BACKUP_RULES_RESOURCE;
   application.$['android:dataExtractionRules'] = DATA_EXTRACTION_RULES_RESOURCE;
@@ -259,6 +273,7 @@ module.exports = function withAndroidManifestFixes(config) {
 
     ensureContextAutomationReceiver(application);
     ensureContextAutomationHeadlessService(application);
+    removeComposePreviewActivity(application);
 
     if (!didUpdateMlkit && application.activity.length > 0) {
       application.activity.push({
@@ -325,6 +340,7 @@ module.exports.__testables = {
     ensureBackupRules,
     ensureContextAutomationHeadlessService,
     ensureContextAutomationReceiver,
+    removeComposePreviewActivity,
     removeContextIntentFilters,
     setProfileable,
 };

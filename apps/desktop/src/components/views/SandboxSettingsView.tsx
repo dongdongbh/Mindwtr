@@ -6,6 +6,7 @@ import {
     normalizeDateFormatSetting,
     normalizeTimeFormatSetting,
     normalizeWeekStartPreference,
+    updateSettingsFromLatest,
     useTaskStore,
     type AppSettings,
     type TaskEditorPresentation,
@@ -23,11 +24,12 @@ export function SandboxSettingsView() {
     const updateSettings = useTaskStore((state) => state.updateSettings);
     const [error, setError] = useState<string | null>(null);
 
-    const save = async (updates: Partial<AppSettings>, setting: string) => {
+    // A built update reads the settings as stored when its write is admitted, so a newer key stays (as on mobile).
+    const save = async (updates: Partial<AppSettings> | ((latest: AppSettings) => Partial<AppSettings>), setting: string) => {
         if (!isSandboxMode()) return;
         setError(null);
         try {
-            await updateSettings(updates);
+            await updateSettingsFromLatest((latest) => (typeof updates === 'function' ? updates(latest) : updates), { write: updateSettings });
             await flushPendingSave();
             void logInfo('Sandbox setting applied', {
                 scope: 'sandbox',
@@ -96,15 +98,15 @@ export function SandboxSettingsView() {
                                 aria-label={t('settings.taskEditorPresentation')}
                                 className={selectClassName}
                                 value={settings.gtd?.taskEditor?.presentation === 'modal' ? 'modal' : 'inline'}
-                                onChange={(event) => void save({
-                                    gtd: {
-                                        ...(settings.gtd ?? {}),
-                                        taskEditor: {
-                                            ...(settings.gtd?.taskEditor ?? {}),
-                                            presentation: event.target.value as TaskEditorPresentation,
+                                onChange={(event) => {
+                                    const presentation = event.target.value as TaskEditorPresentation;
+                                    void save((latest) => ({
+                                        gtd: {
+                                            ...(latest.gtd ?? {}),
+                                            taskEditor: { ...(latest.gtd?.taskEditor ?? {}), presentation },
                                         },
-                                    },
-                                }, 'editor-opening')}
+                                    }), 'editor-opening');
+                                }}
                             >
                                 <option value="inline">{t('settings.taskEditorPresentationInline')}</option>
                                 <option value="modal">{t('settings.taskEditorPresentationModal')}</option>

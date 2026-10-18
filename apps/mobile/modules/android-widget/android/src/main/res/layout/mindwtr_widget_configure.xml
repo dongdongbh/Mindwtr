@@ -17,19 +17,20 @@
         android:textSize="18sp"
         android:textStyle="bold" />
 
-    <ScrollView
+    <EditText
+        android:id="@+id/mindwtr_widget_configure_search"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:inputType="text"
+        android:singleLine="true" />
+
+    <ListView
+        android:id="@+id/mindwtr_widget_configure_lists"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
         android:layout_weight="1"
-        android:maxHeight="420dp">
-
-        <RadioGroup
-            android:id="@+id/mindwtr_widget_configure_lists"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
-    </ScrollView>
+        android:layout_marginTop="8dp"
+        android:divider="@null" />
 
     <LinearLayout
         android:id="@+id/mindwtr_widget_configure_buttons"

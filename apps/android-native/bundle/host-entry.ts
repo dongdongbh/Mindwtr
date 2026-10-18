@@ -32,6 +32,7 @@ import {
     buildFeedbackDiagnosticsSnapshot,
     buildImmediateNotificationDetails,
     buildShortcutsSnapshot,
+    buildNativeBackupDocumentFailure,
     buildNativeBackupDocumentResult,
     buildNativeBackupSnapshotRestoreConfirmation,
     commitNativeBackupDocument,
@@ -70,6 +71,9 @@ import {
     diagnosticsEntryFromLogPayload,
     getGeneralSettingsDeviceWrites,
     getPersistenceStatus,
+    runSerializedSyncDocumentWriteOperation,
+    setStorageTimeoutMs,
+    getStorageTimeoutMs,
     getNextFutureStartRevealAt,
     compareAppVersions,
     fetchAppStoreInfo,
@@ -179,6 +183,17 @@ type NativeBridge = {
     widgetAppState?(): string;
     /** Android only (BackgroundSync.kt): the background sync job kept scheduled (true) or cancelled (false), as core decides. */
     bgSyncSchedule?(on: boolean): string | null;
+    /**
+     * Android only (DataChannel.kt, pass D1c): Settings › Data's files by handle, about 1 MiB per call. A read answers "D" and a
+     * chunk, or "E" at the end; a close answers `{ bytes, sha256 }`. A failure is one of DataChannel's fixed codes.
+     */
+    dataRead?(handle: string): string;
+    dataWrite?(handle: string, chunk: string): string | null;
+    dataClose?(handle: string): string;
+    /** Android debug builds only (pass D1c's device checks): a debug property's value, "" when unset. */
+    debugProp?(name: string): string;
+    /** Android debug builds only (pass D1c step 0): logs QuickJS's memory at a named checkpoint. */
+    memProbe?(label: string): string | null;
 };
 
 declare const globalThis: Record<string, unknown> & { MindwtrHost?: unknown; fetch: typeof fetch };
@@ -195,6 +210,81 @@ const checked = <T,>(value: T): T => {
     if (typeof value === 'string' && value.startsWith(NATIVE_ERROR)) throw new Error(value.slice(NATIVE_ERROR.length));
     return value;
 };
+
+// Settings › Data's file channel (Android, pass D1c design §3.1). A data reply is tagged "D", so a chunk that starts with the
+// error marker is still data; the pieces are joined once.
+const channelRead = (handle: string): string => {
+    const bridge = native();
+    const parts: string[] = [];
+    for (;;) {
+        const reply = checked(bridge.dataRead!(handle));
+        if (reply === 'E') return parts.join('');
+        if (reply[0] !== 'D') throw new Error('DATA_IO');
+        parts.push(reply.slice(1));
+    }
+};
+const channelClose = (handle: string): { bytes: number; sha256: string } => JSON.parse(checked(native().dataClose!(handle))) as { bytes: number; sha256: string };
+/** UTF-16 units per write: at most 1.5 MiB of UTF-8. */
+const CHANNEL_UNITS = 512 * 1024;
+/** [text] in pieces that never split a surrogate pair, so each piece crosses the bridge as whole characters. */
+const channelPieces = function* (text: string): Generator<string> {
+    for (let start = 0; start < text.length;) {
+        let end = Math.min(text.length, start + CHANNEL_UNITS);
+        const last = text.charCodeAt(end - 1);
+        if (end < text.length && last >= 0xd800 && last <= 0xdbff) end -= 1;
+        yield text.slice(start, end);
+        start = end;
+    }
+};
+const channelWrite = (handle: string, text: string): void => {
+    const bridge = native();
+    for (const piece of channelPieces(text)) checked(bridge.dataWrite!(handle, piece));
+};
+/** Base64 [text] in pieces of whole 4-character groups, so each piece decodes alone (a TaskNotes ZIP). */
+const base64Pieces = function* (text: string): Generator<string> {
+    for (let start = 0; start < text.length; start += 4 * 256 * 1024) yield text.slice(start, start + 4 * 256 * 1024);
+};
+const channelWriteBase64 = (handle: string, text: string): void => {
+    const bridge = native();
+    for (const piece of base64Pieces(text)) checked(bridge.dataWrite!(handle, piece));
+};
+
+/**
+ * Debug builds only (check-data-device's deadline rows, pass D1c code review): a debug property, "" in a release (no bridge
+ * function). The delays below wait on timers, across engine turns, so the host's deadlines and core's storage timeout run
+ * while they wait, as they would for a slow phone.
+ */
+const debugProp = (name: string): string => {
+    const read = (globalThis.__mindwtrNative as NativeBridge | undefined)?.debugProp;
+    return read ? String(checked(read(name)) ?? '') : '';
+};
+const debugControl = (name: string): boolean => debugProp('d1c_control') === name || debugProp('d1c_control') === 'pre-d1c' && name === 'no-storage-budget';
+const pause = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+/** Full reads of the tasks table so far (debug `sql_read_delay_skip` lets that many pass undelayed). */
+let fullReads = 0;
+/** [text] through write [handle] as RN's export or snapshot file, once paused (debug `channel_write_delay_ms`) after its first piece. */
+const channelWriteFile = async (handle: string, text: string, base64: boolean): Promise<void> => {
+    const delay = Number(debugProp('channel_write_delay_ms'));
+    if (!(delay > 0)) { if (base64) channelWriteBase64(handle, text); else channelWrite(handle, text); return; }
+    const bridge = native();
+    let first = true;
+    for (const piece of base64 ? base64Pieces(text) : channelPieces(text)) {
+        checked(bridge.dataWrite!(handle, piece));
+        if (first) { first = false; await pause(delay); }
+    }
+};
+/**
+ * Android (pass D1c design §3.4): the storage read budget Kotlin hands its boot (BackupBudget), so each load that follows a
+ * library change (a commit's, an activation's) gets a timeout sized to the library it reads. iOS sends none: core's 15 s.
+ */
+let storageBudget: { baseMs: number; msPerMiB: number } | null = null;
+const sizeStorageTimeout = async (adapter: { libraryBytes(): Promise<number> }): Promise<void> => {
+    if (!storageBudget || debugControl('no-storage-budget')) return;
+    setStorageTimeoutMs(storageBudget.baseMs + Math.ceil(await adapter.libraryBytes() / (1024 * 1024)) * storageBudget.msPerMiB);
+};
+/** A channel failure's code, or null for any other error. */
+const channelCode = (error: unknown): string | null =>
+    error instanceof Error && /^DATA_[A-Z0-9]+$/u.test(error.message) ? error.message : null;
 
 /**
  * Boot steps as trace sections for startup profiling (Perfetto): each call closes the step before it and opens `name`
@@ -216,8 +306,15 @@ if ((globalThis.__mindwtrNative as NativeBridge | undefined)?.trace) {
 
 const sqlite: SqliteClient = {
     run: async (sql, params) => { checked(native().sqlRun(sql, JSON.stringify(params ?? []))); },
-    all: async <T,>(sql: string, params?: unknown[]): Promise<T[]> =>
-        JSON.parse(checked(native().sqlAll(sql, JSON.stringify(params ?? [])))) as T[],
+    all: async <T,>(sql: string, params?: unknown[]): Promise<T[]> => {
+        // Debug builds only: a full library read's first page waits `sql_read_delay_ms`, past the first `sql_read_delay_skip`.
+        if (sql.startsWith('SELECT rowid as _rowid, * FROM tasks WHERE rowid > ?') && params?.[0] === 0) {
+            fullReads += 1;
+            const delay = Number(debugProp('sql_read_delay_ms'));
+            if (delay > 0 && fullReads > (Number(debugProp('sql_read_delay_skip')) || 0)) await pause(delay);
+        }
+        return JSON.parse(checked(native().sqlAll(sql, JSON.stringify(params ?? [])))) as T[];
+    },
     get: async <T,>(sql: string, params?: unknown[]): Promise<T | undefined> =>
         (JSON.parse(checked(native().sqlAll(sql, JSON.stringify(params ?? [])))) as T[])[0],
     exec: async (sql) => {
@@ -313,14 +410,12 @@ type LoadedData = Awaited<ReturnType<SqliteAdapter['getData']>>;
 const ENTITY_TABLES = ['tasks', 'projects', 'sections', 'areas', 'people'] as const;
 type EntityTable = typeof ENTITY_TABLES[number];
 // Core's receipt adapter: a write's request receipt commits in the same transaction as its data.
+// It caches no document: a cached read would keep a whole library alive past the store's own reload (pass D1c, cut i).
+// Its check of each read runs in the read's own lock hold (afterReadNow), so a write queued during the read never makes the
+// counts look incomplete.
 class ValidatedSqliteAdapter extends NativeReceiptSqliteAdapter {
-    latestData: LoadedData | null = null;
-
-    override async getData(options?: { rawTasks?: true }): Promise<LoadedData> {
-        const data = await super.getData(options);
-        await this.validate((table) => data[table].length, data.settings);
-        if (!options?.rawTasks) this.latestData = data;
-        return data;
+    protected override afterReadNow(loaded: (table: EntityTable) => number, settings: LoadedData['settings']): Promise<void> {
+        return this.validate(loaded, settings);
     }
 
     /**
@@ -330,11 +425,11 @@ class ValidatedSqliteAdapter extends NativeReceiptSqliteAdapter {
      * connection's commit, a full validated read instead.
      */
     async verifyActivation(store: Record<EntityTable, readonly { id: string }[]>): Promise<void> {
+        // Both reads are validated inside their own hold (afterReadNow).
         const light = await this.readRowBaseline();
         let ids: Record<EntityTable, readonly string[]>;
         if (light) {
             ids = light.ids;
-            await this.validate((table) => light.ids[table].length, light.settings);
         } else {
             const data = await this.getData();
             ids = Object.fromEntries(ENTITY_TABLES.map((table) => [table, data[table].map((row) => row.id)])) as Record<EntityTable, string[]>;
@@ -656,7 +751,9 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
 type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
     | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'savedSearchDelete'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
-    | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand;
+    | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | DataCommand;
+/** Settings › Data's own write (DataTransfer.kt's DATA_COMMANDS): Getting Started's seed, journaled with its frozen language. */
+type DataCommand = 'gettingStarted';
 /** Settings › Sync's screen commands: never journaled (core's NATIVE_UNJOURNALED_COMMANDS), sent by CoreHost.syncCommand. */
 type SyncScreenCommand = 'openSyncSettings' | 'closeSyncSettings' | 'selectSyncBackend' | 'saveSyncBackend' | 'syncNow' | 'testSyncConnection'
     | 'pickSyncFolder' | 'connectDropbox' | 'disconnectDropbox' | 'runSyncEncryptionAction';
@@ -702,15 +799,13 @@ type LegacyState = { jsonAhead: boolean; reconciled: boolean; backupVersion: str
  * edits could discard them. The next boot plans again, finds the import already
  * saved, writes nothing to SQLite, and retries only the RN state change.
  */
-const importLegacyJson = async (adapter: ValidatedSqliteAdapter, state: LegacyState, backup: string): Promise<void> => {
-    const loaded = adapter.latestData;
-    if (!loaded) throw new Error('Native storage load was not validated');
+const importLegacyJson = async (adapter: ValidatedSqliteAdapter, loaded: LoadedData, state: LegacyState, backup: string): Promise<void> => {
     const plan = planLegacyJsonImport({
         jsonAhead: state.jsonAhead,
         reconciled: state.reconciled,
         backupVersion: state.backupVersion,
         backupJson: state.backupPresent ? backup : null,
-    }, loaded, await sqliteHasAnyData(sqlite));
+    }, loaded, await adapter.withConnection(() => sqliteHasAnyData(sqlite)));
     if (plan.merged && legacyImportMismatch(plan.merged, loaded)) {
         await adapter.saveData(plan.merged);
         const mismatch = legacyImportMismatch(plan.merged, await adapter.getData());
@@ -1009,23 +1104,6 @@ const logEntryPoint = (input: { kind?: unknown }, result: Reply): Reply => {
  * Board from native-host-contract-calendar.ts and native-host-contract-board.ts; Settings from native-host-contract-settings.ts):
  * each passes Kotlin's input to the contract method unchanged. The composer's open and edit write nothing, so they are reads.
  */
-/** An export's file, refused when its bytes exceed the host's `maxBytes` (none: no host limit). Its text is never counted twice. */
-const boundedExport = (result: Reply, input: unknown): Reply => {
-    const maxBytes = (input as { maxBytes?: unknown } | null)?.maxBytes;
-    if (!result.ok || typeof maxBytes !== 'number') return result;
-    const { content, encoding } = result.value as { content: string; encoding: string };
-    let bytes = encoding === 'base64' ? Math.floor(content.length * 3 / 4) : 0;
-    if (encoding === 'utf8') {
-        for (let index = 0; index < content.length && bytes <= maxBytes; index += 1) {
-            const code = content.charCodeAt(index);
-            if (code < 0x80) bytes += 1;
-            else if (code < 0x800) bytes += 2;
-            else if (code >= 0xd800 && code <= 0xdbff) { bytes += 4; index += 1; }
-            else bytes += 3;
-        }
-    }
-    return bytes > maxBytes ? { ok: false, error: { code: 'INVALID_INPUT', message: 'Export exceeds the transfer limit' } } : result;
-};
 const MENU_READS: Record<string, (input: never) => Reply> = {
     more: () => contract.getMoreMenu(),
     projects: (input) => contract.getFilteredProjects(input),
@@ -1102,10 +1180,10 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     // Settings › Notifications, and the persistent capture notification to post again at start and on every resume.
     notificationsSettings: () => contract.getNotificationsSettings(),
     persistentCaptureNotification: () => contract.getPersistentCaptureNotification(),
-    // `maxBytes` (Android's measured transfer limit): a larger file is refused here, before its text crosses into Kotlin.
-    dataBackup: (input) => boundedExport(contract.getDataBackup(), input),
-    dataCsvExport: (input) => boundedExport(contract.getDataBackup('csv'), input),
-    dataTaskNotesExport: (input) => boundedExport(contract.getDataBackup('tasknotes'), input),
+    // iOS's exports; Android writes its file through the data channel (dataExportFile).
+    dataBackup: () => contract.getDataBackup(),
+    dataCsvExport: () => contract.getDataBackup('csv'),
+    dataTaskNotesExport: () => contract.getDataBackup('tasknotes'),
     // Settings › Sync's view (native-host-contract-settings-sync.ts) for the form's typed URL and token.
     syncSettings: (input) => contract.getSyncSettings(input),
     // Settings › Calendar's view for this visit with the name and URL fields as typed, and its close (none writes).
@@ -1168,6 +1246,9 @@ const ATTACHMENT_REQUESTS: Record<string, (input: never) => Promise<Reply>> = {
     downloadAttachment: (input) => contract.downloadAttachment(input),
     openAttachment: (input) => contract.openAttachment(input),
     settleTaskDraftAttachments: (input) => contract.settleTaskDraftAttachments(input),
+    // A file share's entry (EntryPoints.kt): its staged files copied into the attachments folder, and where it opens. Writes no
+    // command (the capture screen's Save does), so it is never journaled; a replay names the same copies.
+    prepareSharedFiles: (input) => contract.prepareSharedFiles(input),
 };
 const LOCAL_ATTACHMENT_REQUESTS = new Set(['draftAddFile', 'draftRemove', 'openAttachment', 'settleTaskDraftAttachments']);
 /**
@@ -1260,6 +1341,7 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     somedayDelete: (input) => contract.deleteSomedaySection(input),
     // Settings › Data's Debug logging switch.
     dataSetting: (input) => contract.setDataSetting(input),
+    gettingStarted: (input) => contract.seedGettingStarted(input),
     // Settings › Notifications' controls (a synced setting, or the persistent capture switch on the device).
     notificationsSetting: (input) => contract.setNotificationsSetting(input),
     // Settings › Sync: a sync option (journaled), and the screen's commands (never journaled: CoreHost.syncCommand).
@@ -1292,11 +1374,13 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
 };
 
 let bootAdapter: ValidatedSqliteAdapter | null = null;
+/** Host receipt maintenance on the booted adapter's connection, inside its lock; a write voids earlier read tokens. */
+const withHostConnection = <T,>(work: () => Promise<T>): Promise<T> => (bootAdapter ? bootAdapter.withConnection(work, { write: true }) : work());
 /** A current, settled Settings-only read for device-key reconciliation; null never authorizes a mirror. */
 const savedSettingsIfSettled = async (settingsReference: unknown): Promise<Record<string, unknown> | null> => {
     const before = getPersistenceStatus();
     if (!bootAdapter || before.failed || before.queued || before.inFlight || before.immediate || before.retrying) return null;
-    const row = await sqlite.get<{ data: string }>('SELECT data FROM settings WHERE id = 1');
+    const row = await bootAdapter.withConnection(() => sqlite.get<{ data: string }>('SELECT data FROM settings WHERE id = 1'));
     let saved: unknown = {};
     if (row) {
         try { saved = JSON.parse(row.data); }
@@ -1323,7 +1407,12 @@ const activateAndVerify = async (adapter: ValidatedSqliteAdapter, recoveryLoad =
     traceStep('');
     return inbox;
 };
-const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, journaled = false): string => submit(async () => {
+const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, journaled = false, budgetJSON = ''): string => submit(async () => {
+    if (budgetJSON && !debugControl('no-storage-budget')) {
+        const budget = JSON.parse(budgetJSON) as { baseMs: number; msPerMiB: number; storageTimeoutMs: number };
+        storageBudget = { baseMs: budget.baseMs, msPerMiB: budget.msPerMiB };
+        setStorageTimeoutMs(budget.storageTimeoutMs);
+    }
     // A host that journals every write replays it after process death, so each write must carry its replay tokens.
     setNativeReplayTokens(journaled ? 'required' : 'optional');
     const adapter = new ValidatedSqliteAdapter(sqlite, { rejectConcurrentWrites: true });
@@ -1332,14 +1421,17 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     // Before the journal's replay (Kotlin, after boot): a landed request answers from its receipt. A host without
     // a journal keeps its receipts in memory, as before.
     traceStep('js:receipts');
-    if (journaled) await loadNativeRequestReceipts(sqlite);
-    else await loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] });
+    if (journaled) await adapter.withConnection(() => loadNativeRequestReceipts(sqlite), { write: true });
+    else await adapter.withConnection(() => loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'archivedTaskRestore', 'archivedTasksRestore', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'referenceTasksMove', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument'] }), { write: true });
     // The legacy import plans from a validated full read. Any other boot needs only the schema here: the activation's own read
     // is validated before anything saves.
     traceStep('js:schema');
-    if (legacyState) await adapter.getData(); else await adapter.ensureSchema();
+    // The legacy import's validated read lives only in this branch: it goes before activation reads the library again.
+    let loaded: LoadedData | null = legacyState ? await adapter.getData() : null;
+    if (!legacyState) await adapter.ensureSchema();
     traceStep('');
-    if (legacyState) await importLegacyJson(adapter, JSON.parse(legacyState) as LegacyState, legacyBackup);
+    if (loaded) await importLegacyJson(adapter, loaded, JSON.parse(legacyState) as LegacyState, legacyBackup);
+    loaded = null;
     const result = await activateAndVerify(adapter, recoveryLoad);
     bootAdapter = adapter;
     return result;
@@ -1368,6 +1460,16 @@ const backupAdapter = (newWork = false) => {
 const backupJson = (json: string): unknown => {
     try { return JSON.parse(json) as unknown; }
     catch { throw new Error('INVALID_INPUT: Invalid backup document input'); }
+};
+/** RN's preview of a picked file whose text [read] gives; it writes nothing. */
+const inspectBackup = (read: () => string, metadataJSON: string, format: string) => {
+    backupAdapter(true);
+    const pending = getPersistenceStatus();
+    if (pending.queued || pending.inFlight || pending.immediate || pending.retrying || pending.failed) {
+        throw new Error('NOT_READY: Backup inspection is unavailable while saving is pending');
+    }
+    if (format !== 'json' && format !== 'json-restore' && format !== 'csv' && format !== 'todoist' && format !== 'ticktick' && format !== 'dgt' && format !== 'omnifocus') throw new Error('INVALID_INPUT: Invalid backup document input');
+    return inspectNativeBackupDocument(read(), backupJson(metadataJSON) as Parameters<typeof inspectNativeBackupDocument>[1], backupTranslate, format);
 };
 const backupTranslate = (key: string, values?: Record<string, number | string>): string => {
     const template = unwrap(contract.getStrings({ keys: [key] })).strings[key];
@@ -1789,21 +1891,23 @@ globalThis.MindwtrHost = {
      * `legacyState` is "" for the dev database; else LegacyRnStoreGuard's reading of RN's AsyncStorage.
      * `writeJournal` is "journaled" from a host that journals every write (Kotlin's WriteJournal); iOS sends nothing.
      */
-    boot(legacyState: string, legacyBackup: string, writeJournal = ''): string {
-        return boot(legacyState, legacyBackup, false, writeJournal === 'journaled');
+    boot(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''): string {
+        return boot(legacyState, legacyBackup, false, writeJournal === 'journaled', budgetJSON);
     },
     /**
      * Journal recovery: no dynamic load maintenance (a task becoming due, the cleanup interval) before the exact replay, so a
      * journaled backup commit meets the document it was prepared against. iOS sends two arguments; Android's journaling host
      * adds "journaled", as for boot. The host calls resumeActivation after the replay settled.
      */
-    bootRecovery(legacyState: string, legacyBackup: string, writeJournal = ''): string {
-        return boot(legacyState, legacyBackup, true, writeJournal === 'journaled');
+    bootRecovery(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''): string {
+        return boot(legacyState, legacyBackup, true, writeJournal === 'journaled', budgetJSON);
     },
     /** The native host calls this after durable journal cleanup, before exposing the UI. */
     resumeActivation(): string {
         return submit(async () => {
             if (!bootAdapter) throw new Error('Native recovery adapter unavailable');
+            // The replays may have restored a much larger library: its load gets that library's budget.
+            if (!debugControl('no-activation-storage')) await sizeStorageTimeout(bootAdapter);
             return activateAndVerify(bootAdapter);
         });
     },
@@ -4040,6 +4144,62 @@ globalThis.MindwtrHost = {
     captureSnapshot(): string {
         return submit(async () => ({ snapshot: unwrap(await contract.createQuickCaptureSnapshot()) }));
     },
+    /**
+     * Android (pass D1c): core's capture recovery snapshot written through write [handle], never returned as text:
+     * `{ snapshot: { fileName, bytes, sha256 } | null }`.
+     */
+    captureSnapshotFile(handle: string): string {
+        return submit(async () => {
+            const snapshot = unwrap(await contract.createQuickCaptureSnapshot());
+            if (!snapshot) return { snapshot: null };
+            try {
+                await channelWriteFile(handle, snapshot.contents, false);
+                return { snapshot: { fileName: snapshot.fileName, ...channelClose(handle) } };
+            } catch (error) {
+                if (channelCode(error)) throw new Error('SAVE_FAILED: The recovery snapshot could not be written');
+                throw error;
+            }
+        });
+    },
+    /**
+     * Android (pass D1c design §3.5): RN's export file for [format] written through write [handle] (a TaskNotes ZIP as its
+     * bytes), `{ fileName, bytes }`. The library's size is checked inside the document lane, and the snapshot is taken in the
+     * same turn as a last check that persistence is settled and the store is unchanged since that size was read: the bytes
+     * measured are the library serialized. A library over [maxBytes] is refused before anything is serialized.
+     */
+    dataExportFile(format: string, handle: string, maxBytes: number): string {
+        return submit(async () => runSerializedSyncDocumentWriteOperation(async () => {
+            if (format !== 'json' && format !== 'csv' && format !== 'tasknotes') throw new Error('INVALID_INPUT: Unsupported export format');
+            const settled = () => {
+                const pending = getPersistenceStatus();
+                return !(pending.queued || pending.inFlight || pending.immediate || pending.retrying || pending.failed);
+            };
+            if (!settled()) throw new Error('NOT_READY: Backup export is unavailable while saving is pending');
+            const stamp = useTaskStore.getState().lastDataChangeAt;
+            if (await backupAdapter().libraryBytes() > Number(maxBytes)) throw new Error('TOO_LARGE: The library exceeds the transfer limit');
+            if (!settled() || useTaskStore.getState().lastDataChangeAt !== stamp) throw new Error('NOT_READY: The library changed while the export was checked');
+            const file = unwrap(contract.getDataBackup(format));
+            try {
+                await channelWriteFile(handle, file.content, file.encoding === 'base64');
+                return { fileName: file.fileName, bytes: channelClose(handle).bytes };
+            } catch (error) {
+                if (channelCode(error)) throw new Error('SAVE_FAILED: The export file could not be written');
+                throw error;
+            }
+        }));
+    },
+    /**
+     * Debug builds (pass D1c design §7, check-data-device D0): the text behind read [readHandle], joined and written back
+     * through write [writeHandle] with the same splitting as every Data file; Kotlin compares the two files.
+     */
+    dataChannelRoundTrip(readHandle: string, writeHandle: string): string {
+        return submit(async () => {
+            const text = channelRead(readHandle);
+            channelClose(readHandle);
+            channelWrite(writeHandle, text);
+            return channelClose(writeHandle);
+        });
+    },
     /** `json` is `{ text, options, captureIds, snapshotFileName }`: one task per line, in one write. */
     captureLines(json: string): string {
         return submit(async () => taskResult('quickCaptureLines', await contract.submitQuickCaptureLines(JSON.parse(json))));
@@ -4151,27 +4311,127 @@ globalThis.MindwtrHost = {
         });
     },
     backupDocumentInspect(text: string, metadataJSON: string, format = 'json'): string {
-        return submit(async () => {
-            backupAdapter(true);
-            const pending = getPersistenceStatus();
-            if (pending.queued || pending.inFlight || pending.immediate || pending.retrying || pending.failed) {
-                throw new Error('NOT_READY: Backup inspection is unavailable while saving is pending');
+        return submit(async () => inspectBackup(() => text, metadataJSON, format));
+    },
+    /**
+     * Android (pass D1c): the inspection of the staged copy behind read [handle]; a file that is not strict UTF-8 is RN's
+     * invalid file, as before.
+     */
+    backupDocumentInspectFile(handle: string, metadataJSON: string, format = 'json'): string {
+        return submit(async () => inspectBackup(() => {
+            try {
+                const text = channelRead(handle);
+                channelClose(handle);
+                return text;
+            } catch (error) {
+                if (channelCode(error) === 'DATA_UTF8') return '';
+                if (channelCode(error)) throw new Error('SAVE_FAILED: The selected file could not be read');
+                throw error;
             }
-            if (format !== 'json' && format !== 'json-restore' && format !== 'csv' && format !== 'todoist' && format !== 'ticktick' && format !== 'dgt' && format !== 'omnifocus') throw new Error('INVALID_INPUT: Invalid backup document input');
-            return inspectNativeBackupDocument(text, backupJson(metadataJSON) as Parameters<typeof inspectNativeBackupDocument>[1], backupTranslate, format);
+        }, metadataJSON, format));
+    },
+    /**
+     * Android (pass D1c): prepare from the staged copy behind [sourceHandle], writing the recovery snapshot through
+     * [recoveryHandle] ("" for a snapshot restore) and the plan through [planHandle]; answers each file's `{ bytes, sha256 }`.
+     * The admitted source size is the channel's count of the bytes core parsed.
+     */
+    backupDocumentPrepareFile(sourceHandle: string, inputJSON: string, recoveryHandle: string, planHandle: string): string {
+        return submit(async () => {
+            const input = backupJson(inputJSON) as Parameters<typeof prepareNativeBackupDocument>[1];
+            let text: string;
+            let sourceBytes: number;
+            try {
+                text = channelRead(sourceHandle);
+                sourceBytes = channelClose(sourceHandle).bytes;
+            } catch (error) {
+                if (channelCode(error) === 'DATA_UTF8') throw new Error('INVALID_INPUT: Backup file is not valid UTF-8');
+                if (channelCode(error)) throw new Error('SAVE_FAILED: The selected file could not be read');
+                throw error;
+            }
+            native().memProbe?.('prepare:read');
+            if (input && typeof input === 'object' && input.admission && input.admission.sourceBytes !== sourceBytes) {
+                throw new Error('INVALID_INPUT: Invalid backup document input');
+            }
+            const written = (write: () => void) => {
+                try { write(); } catch (error) {
+                    if (channelCode(error) === 'DATA_CAP') throw new Error('TOO_LARGE: The prepared backup exceeds the transfer limit');
+                    if (channelCode(error)) throw new Error('SAVE_FAILED: The prepared backup could not be written');
+                    throw error;
+                }
+            };
+            // Core takes the text from here (its sink form): nothing else keeps it.
+            const owned = { ...input, text };
+            text = '';
+            const result = await prepareNativeBackupDocument(backupAdapter(true), owned, {
+                recovery: (recovery) => written(() => {
+                    if (!recoveryHandle) throw new Error('INVALID_INPUT: Invalid backup document input');
+                    channelWrite(recoveryHandle, recovery);
+                }),
+                plan: (part) => written(() => channelWrite(planHandle, part)),
+            });
+            native().memProbe?.('prepare:done');
+            let plan: { bytes: number; sha256: string } | undefined;
+            let recovery: { bytes: number; sha256: string } | null = null;
+            written(() => {
+                plan = channelClose(planHandle);
+                if (result.recovery) recovery = channelClose(recoveryHandle);
+            });
+            return { plan: plan!, recovery };
         });
     },
     backupDocumentPrepare(inputJSON: string): string {
         return submit(async () => prepareNativeBackupDocument(backupAdapter(true), backupJson(inputJSON) as Parameters<typeof prepareNativeBackupDocument>[1]));
     },
-    backupDocumentCommit(referenceJSON: string, planJSON: string, snapshotName: string): string {
-        return submit(async () => commitNativeBackupDocument(backupAdapter(), backupJson(referenceJSON) as Parameters<typeof commitNativeBackupDocument>[1], planJSON, snapshotName));
+    /**
+     * [planJSON] is the plan's text from iOS, and on Android (pass D1c) a read handle over the checked plan file: core takes its
+     * text once. A plan that cannot be read keeps the journal entry (SAVE_FAILED: a later start retries, or answers from the
+     * receipt); one whose bytes changed after the check is refused like any mismatched operation file.
+     */
+    backupDocumentCommit(referenceJSON: string, planJSON: string, snapshotName: string, budgetMs?: number): string {
+        return submit(async () => {
+            // Android: the commit's reload (inside core's commit) reads the result within the budget frozen in its manifest;
+            // afterwards the timeout fits the library the commit left, whatever it did.
+            // Debug controls (check-data-device): `no-commit-storage` skips the frozen budget; `no-activation-storage` puts the
+            // earlier timeout back afterwards, as the code before review 3 did.
+            const before = getStorageTimeoutMs();
+            if (typeof budgetMs === 'number' && budgetMs > 0 && !debugControl('no-commit-storage') && !debugControl('no-storage-budget')) setStorageTimeoutMs(budgetMs);
+            const source = globalThis.__mindwtrHostPlatform === 'android' ? { take: () => {
+                try {
+                    const text = channelRead(planJSON);
+                    channelClose(planJSON);
+                    native().memProbe?.('commit:read');
+                    return text;
+                } catch (error) {
+                    if (channelCode(error) === 'DATA_MISMATCH') throw new Error('INVALID_INPUT: Backup operation files do not match');
+                    if (channelCode(error)) throw new Error('SAVE_FAILED: Backup plan could not be read');
+                    throw error;
+                }
+            } } : planJSON;
+            try {
+                return await commitNativeBackupDocument(backupAdapter(), backupJson(referenceJSON) as Parameters<typeof commitNativeBackupDocument>[1], source, snapshotName);
+            } finally {
+                native().memProbe?.('commit:done');
+                if (debugControl('no-activation-storage')) setStorageTimeoutMs(before);
+                else if (typeof budgetMs === 'number' && budgetMs > 0) await sizeStorageTimeout(backupAdapter()).catch(() => undefined);
+            }
+        });
     },
     backupDocumentOutcome(referenceJSON: string, planJSON: string, snapshotName: string): string {
         return submit(async () => readNativeBackupDocumentOutcome(backupAdapter(), backupJson(referenceJSON) as Parameters<typeof readNativeBackupDocumentOutcome>[1], planJSON, snapshotName));
     },
     backupDocumentResultModel(replyJSON: string): string {
         return submit(async () => buildNativeBackupDocumentResult(backupJson(replyJSON) as Parameters<typeof buildNativeBackupDocumentResult>[0], backupTranslate));
+    },
+    /**
+     * RN's failure toast (`{ title, message }`) for a Data operation that did not land: [operation] is core's backup document mode,
+     * [error] the failure's `CODE: message` (or `TOO_LARGE` for the host's own size refusal), [limitMb] the host's transfer limit.
+     */
+    backupDocumentFailureModel(operation: string, error: string, limitMb: number): string {
+        return submit(async () => buildNativeBackupDocumentFailure(String(operation), String(error), backupTranslate, Number(limitMb) || 0));
+    },
+    /** `{ bytes }`: the library's bytes as SQLite counts them (pages × page size): Settings › Data's transfer admission and Undo's. */
+    backupLibraryBytes(): string {
+        return submit(async () => ({ bytes: await backupAdapter().libraryBytes() }));
     },
     /** RN's question before a snapshot restore: `mode` "undo" (the default; a result's Undo) or "restore" (a Recovery snapshots row). */
     backupSnapshotRestoreModel(snapshotName: string, mode = 'undo'): string {
@@ -4346,7 +4606,7 @@ globalThis.MindwtrHost = {
     },
     /** After the journal's boot replay: drops request receipts older than 30 days. */
     pruneReceipts(): string {
-        return submit(async () => ({ pruned: await pruneNativeRequestReceipts(sqlite) }));
+        return submit(async () => ({ pruned: await withHostConnection(() => pruneNativeRequestReceipts(sqlite)) }));
     },
     /** Private iOS startup: unfinished response ownership outranks receipt expiry. */
     iosPruneReceipts(rawRetentionJSON: string): string {
@@ -4359,9 +4619,9 @@ globalThis.MindwtrHost = {
             if (retained !== null && (!Array.isArray(retained) || retained.length > 128
                 || retained.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id))
                 || new Set(retained).size !== retained.length)) throw invalid();
-            const pruned = await pruneNativeRequestReceipts(sqlite, new Date(), retained === null
+            const pruned = await withHostConnection(() => pruneNativeRequestReceipts(sqlite, new Date(), retained === null
                 ? { retainedCommands: ['reminderComplete', 'reminderSnooze'] }
-                : { retainedRequestIds: retained as string[] });
+                : { retainedRequestIds: retained as string[] }));
             try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                 message: 'Native iOS reminder receipt retention applied',
                 context: { releaseCheck: 'v1.3.5/ios-reminder-receipt-retention', outcome: retained === null ? 'conservative' : 'snapshot' },

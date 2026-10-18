@@ -3,6 +3,7 @@ import {
     flushPendingSave,
     planSomedaySectionCreate,
     sortViewSectionDefinitions,
+    updateSettingsFromLatest,
     useTaskStore,
 } from '@mindwtr/core';
 
@@ -45,12 +46,17 @@ async function ensureCatalogueSaved(): Promise<void> {
  * and so a grouping choice made while persistence is pending still wins.
  */
 export async function createSomedaySection(title: string): Promise<string | null> {
-    const taskState = useTaskStore.getState();
-    const settings = taskState.settings;
-    const stored = settings?.gtd?.viewSections?.someday;
-    // Core's plan keeps every stored entry as it is, in stored order, and appends the new one.
-    const plan = planSomedaySectionCreate(stored, title, makeSomedaySectionId);
-    if (plan.kind === 'blank') return null;
+    // Core's plan keeps every stored entry as it is, in stored order, and appends the new one. It is made on
+    // the settings as stored when the write is admitted, so a section another device synced since stays.
+    let plan = null as ReturnType<typeof planSomedaySectionCreate> | null;
+    let wasFirstCreation = false;
+    await updateSettingsFromLatest((settings) => {
+        const stored = settings?.gtd?.viewSections?.someday;
+        plan = planSomedaySectionCreate(stored, title, makeSomedaySectionId);
+        wasFirstCreation = sortViewSectionDefinitions(stored).length === 0;
+        return plan.kind === 'create' ? buildSomedaySectionsSettingsUpdate(settings, plan.sections) : null;
+    });
+    if (!plan || plan.kind === 'blank') return null;
     if (plan.kind === 'existing') {
         await ensureCatalogueSaved();
         enableGroupingAfterFirstSectionSave(false);
@@ -58,8 +64,6 @@ export async function createSomedaySection(title: string): Promise<string | null
     }
 
     const { id } = plan;
-    await taskState.updateSettings(buildSomedaySectionsSettingsUpdate(settings, plan.sections));
-    const wasFirstCreation = sortViewSectionDefinitions(stored).length === 0;
     if (wasFirstCreation) pendingFirstSectionId = id;
     await ensureCatalogueSaved();
     enableGroupingAfterFirstSectionSave(wasFirstCreation);

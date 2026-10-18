@@ -838,7 +838,7 @@ export function buildTaskEditorModel(input: TaskEditorModelInput): TaskEditorMod
                 ),
                 monthlyCustom: getTaskEditorMonthlyCustom(draft.recurrenceRRule, anchorDate),
             },
-            reminders: getTaskEditorReminders(draft, t),
+            reminders: getTaskEditorReminders(draft, t, input.settings),
             timeEstimate: getTaskEditorTimeEstimate(draft.timeEstimate, t),
             timeSpent: { enabled: isTaskEditorTimeSpentEnabled(input.settings) },
         },

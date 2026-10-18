@@ -11,6 +11,7 @@ import {
     countActiveRecords,
     createBackupFileName,
     flushPendingSave,
+    IMPORT_PICKER_MIME_TYPES,
     isSandboxMode,
     prepareRestoredBackupDataForSync,
     runDataTransferTransactionWithoutSnapshot,
@@ -229,63 +230,11 @@ export const inspectBackupDocument = async (
     });
 };
 
-// Core owns parser dispatch; only mobile document-picker metadata stays here.
-type ImportPickerDescriptor = {
-    mimeTypes: string[];
-};
-
-const IMPORT_PICKER_DESCRIPTORS: Record<ImportPickerSourceId, ImportPickerDescriptor> = {
-    todoist: {
-        mimeTypes: [
-            'text/csv',
-            'text/comma-separated-values',
-            'application/zip',
-            'application/x-zip-compressed',
-            'application/octet-stream',
-        ],
-    },
-    ticktick: {
-        mimeTypes: [
-            'text/csv',
-            'text/comma-separated-values',
-            'application/zip',
-            'application/x-zip-compressed',
-            'application/octet-stream',
-        ],
-    },
-    dgt: {
-        mimeTypes: [
-            'application/json',
-            'application/zip',
-            'application/x-zip-compressed',
-            'application/octet-stream',
-        ],
-    },
-    omnifocus: {
-        mimeTypes: [
-            'text/csv',
-            'text/comma-separated-values',
-            'application/json',
-            'application/zip',
-            'application/x-zip-compressed',
-            'application/octet-stream',
-        ],
-    },
-    'mindwtr-csv': {
-        mimeTypes: [
-            'text/csv',
-            'text/comma-separated-values',
-            'application/zip',
-            'application/x-zip-compressed',
-            'application/octet-stream',
-        ],
-    },
-};
-
+// Core owns parser dispatch and each importer's picker types (IMPORT_PICKER_MIME_TYPES).
 const pickImportDocument = (source: ImportPickerSourceId): Promise<TransferDocument | null> =>
     isSandboxMode()
         ? Promise.reject(new Error('Unavailable in sandbox'))
-        : pickDocument(IMPORT_PICKER_DESCRIPTORS[source].mimeTypes);
+        : pickDocument([...IMPORT_PICKER_MIME_TYPES[source]]);
 
 const resolveDocumentSize = async (document: TransferDocument, kind: 'backup' | 'import'): Promise<number> => {
     try {

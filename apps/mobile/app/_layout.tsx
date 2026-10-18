@@ -66,6 +66,7 @@ import { useRootLayoutWatch } from '@/hooks/root-layout/use-root-layout-watch';
 import { useRootLayoutNotificationOpenHandler } from '@/hooks/root-layout/use-root-layout-notification-open-handler';
 import { useRootLayoutStartup } from '@/hooks/root-layout/use-root-layout-startup';
 import { useRootLayoutArchiveRetention } from '@/hooks/root-layout/use-root-layout-archive-retention';
+import { useRootLayoutAppBadge } from '@/hooks/root-layout/use-root-layout-app-badge';
 import { resolveMobileAnalyticsVersion } from '@/lib/analytics-heartbeat';
 import { getInstallerPackageName } from '@/lib/play-store-updates';
 import { useRootLayoutSyncEffects } from '@/hooks/root-layout/use-root-layout-sync-effects';
@@ -454,6 +455,7 @@ function RootLayoutContentInner() {
     storageInitError: null,
   });
   useRootLayoutArchiveRetention(canonicalDataReady, sandboxMode);
+  useRootLayoutAppBadge({ canonicalDataReady, disabled: sandboxMode });
   const isShellReady = themeReady && languageReady;
   const isFirstPaintReady = isShellReady && dataReady;
   const startupReadiness = useMemo(() => ({ canonicalDataReady, pathname }), [canonicalDataReady, pathname]);

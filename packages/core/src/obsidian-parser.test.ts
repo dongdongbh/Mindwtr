@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { withQuickJsArgumentLimit } from './quickjs-test-utils';
 
 import {
     appendObsidianRequiredInlineTag,
@@ -9,6 +10,7 @@ import {
     buildObsidianFileTaskId,
     buildObsidianTaskId,
     normalizeObsidianRelativePath,
+    parseObsidianDataviewData,
     parseObsidianTasksFromMarkdown,
     type ParseObsidianTasksOptions,
 } from './obsidian-parser';
@@ -64,6 +66,12 @@ describe('parseObsidianTasksFromMarkdown', () => {
 
         expect(result.tasks[0]?.dataviewData).toBeUndefined();
         expect(result.tasks[0]?.text).toContain('[project:: [[Project Alpha]]]');
+    });
+
+    it('reads 65536 Dataview projects, contexts and tags each, more than a QuickJS call takes arguments', () => {
+        const items = (prefix: string) => Array.from({ length: 65_536 }, (_, index) => `${prefix}${index}`).join(', ');
+        const data = withQuickJsArgumentLimit(() => parseObsidianDataviewData(`[project:: ${items('p')}] [context:: ${items('c')}] [tags:: ${items('t')}]`));
+        expect([data?.projects.length, data?.contexts.length, data?.tags.length]).toEqual([65_536, 65_536, 65_536]);
     });
 
     it('imports conservative Dataview metadata when enabled without changing task text', () => {

@@ -27,6 +27,7 @@ struct SettingsScreen: View {
     @FocusState private var syncField: SyncField?
     @State private var notificationPicker: String?
     @State private var notificationDayDraft = 0
+    @State private var notificationDefaultDraft = "send"
     @State private var notificationTimeDraft = Date()
     @State private var calendarAreaPicker: Data?
     @State private var calendarPushDeletePresented = false
@@ -1571,6 +1572,9 @@ struct SettingsScreen: View {
                     VStack(spacing: 0) {
                         notificationToggle(task.object("master"))
                         palette.border.frame(height: 0.5)
+                        notificationPickerRow(task.object("default"), type: "taskReminderDefault",
+                            summary: task.object("default").text("valueLabel") + " · " + task.object("default").text("description"))
+                        palette.border.frame(height: 0.5)
                         notificationToggle(task.object("start"))
                         palette.border.frame(height: 0.5)
                         notificationToggle(task.object("due"))
@@ -1643,7 +1647,8 @@ struct SettingsScreen: View {
 
     private func openNotificationPicker(_ type: String, row: CoreObject) {
         guard model.notificationSettingEnabled, !row.flag("disabled") else { return }
-        if type == "weeklyReviewDay" { notificationDayDraft = row.number("value") }
+        if type == "taskReminderDefault" { notificationDefaultDraft = row.text("value") }
+        else if type == "weeklyReviewDay" { notificationDayDraft = row.number("value") }
         else {
             let time = row.text("value").split(separator: ":").compactMap { Int($0) }
             guard time.count == 2, let date = Calendar.current.date(bySettingHour: time[0], minute: time[1], second: 0, of: Date()) else { return }
@@ -1655,28 +1660,33 @@ struct SettingsScreen: View {
     private var notificationPickerSheet: some View {
         let type = notificationPicker ?? ""
         let weekly = model.notificationSettings.object("weekly")
-        let row = type == "weeklyReviewDay" ? weekly.object("day") : type == "weeklyReviewTime" ? weekly.object("time")
+        let row = type == "taskReminderDefault" ? model.notificationSettings.object("task").object("default")
+            : type == "weeklyReviewDay" ? weekly.object("day") : type == "weeklyReviewTime" ? weekly.object("time")
             : model.notificationSettings.object("digest").object(type == "dailyDigestMorningTime" ? "morning" : "evening").object("time")
         return VStack(spacing: 12) {
             Text(row.text("label")).rnFont(20, .bold).foregroundStyle(palette.text)
                 .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 20)
             ScrollView {
-                if type == "weeklyReviewDay" {
+                if type == "weeklyReviewDay" || type == "taskReminderDefault" {
                     VStack(spacing: 8) {
                         ForEach(Array((row["options"] as? [CoreObject] ?? []).enumerated()), id: \.offset) { _, option in
-                            Button { notificationDayDraft = option.number("value") } label: {
+                            let selected = type == "taskReminderDefault" ? notificationDefaultDraft == option.text("value") : notificationDayDraft == option.number("value")
+                            Button {
+                                if type == "taskReminderDefault" { notificationDefaultDraft = option.text("value") }
+                                else { notificationDayDraft = option.number("value") }
+                            } label: {
                                 HStack(spacing: 12) {
                                     Text(option.text("label")).rnFont(16).foregroundStyle(palette.text)
                                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                                    if notificationDayDraft == option.number("value") {
+                                    if selected {
                                         Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true)
                                     }
                                 }.padding(14).frame(minHeight: 48).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-                            .accessibilityAddTraits(notificationDayDraft == option.number("value") ? .isSelected : [])
-                            .accessibilityIdentifier("notifications-day-" + String(option.number("value")))
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                            .accessibilityIdentifier(type == "taskReminderDefault" ? "notifications-default-" + option.text("value") : "notifications-day-" + String(option.number("value")))
                         }
                     }.padding(.horizontal, 16)
                 } else {
@@ -1703,7 +1713,8 @@ struct SettingsScreen: View {
     private func finishNotificationPicker() {
         guard model.notificationSettingEnabled, let type = notificationPicker else { return }
         let edit: CoreObject
-        if type == "weeklyReviewDay" { edit = ["type": type, "value": notificationDayDraft] }
+        if type == "taskReminderDefault" { edit = ["type": type, "value": notificationDefaultDraft] }
+        else if type == "weeklyReviewDay" { edit = ["type": type, "value": notificationDayDraft] }
         else {
             let time = Calendar.current.dateComponents([.hour, .minute], from: notificationTimeDraft)
             guard let hour = time.hour, let minute = time.minute else { return }

@@ -23,11 +23,12 @@ class QuickCaptureAudioSessionTest {
     lateinit var deliver: (QuickCaptureAudioRecorder.Outcome) -> Unit
     val session = QuickCaptureAudioSession(
       startRecorder = { callback -> deliver = callback; recorder },
-      publishAudio = { _, _, _ -> error("Too-short audio must not publish") },
+      publishAudio = { _, _, _, _ -> error("Too-short audio must not publish") },
       discardAudio = {},
     )
     val oldHost = session.attach {}
     session.updateTitle("Typed prefix")
+    session.updateNote("  Literal @home\n#not-a-tag  ")
     session.beginRecording()
 
     session.onHostStopped()
@@ -41,6 +42,7 @@ class QuickCaptureAudioSessionTest {
     assertEquals(QuickCaptureAudioSession.State.IDLE, recreated!!.state)
     assertEquals(QuickCaptureAudioSession.Status.ERROR, recreated!!.status)
     assertEquals("Typed prefix", recreated!!.title)
+    assertEquals("  Literal @home\n#not-a-tag  ", recreated!!.note)
     assertTrue(recreated!!.canSaveText)
   }
 
@@ -51,7 +53,7 @@ class QuickCaptureAudioSessionTest {
     val publications = ArrayList<Publication>()
     val session = QuickCaptureAudioSession(
       startRecorder = { callback -> deliver = callback; recorder },
-      publishAudio = { draft, title, complete -> publications.add(Publication(draft, title, complete)) },
+      publishAudio = { draft, title, note, complete -> publications.add(Publication(draft, title, note, complete)) },
       discardAudio = {},
     )
     val oldHost = session.attach {}
@@ -62,6 +64,7 @@ class QuickCaptureAudioSessionTest {
       dataBytes = 6_400,
     )
     session.updateTitle("Typed prefix")
+    session.updateNote("  Literal @home\n#not-a-tag  ")
     session.beginRecording()
     session.onHostStopped()
     deliver(QuickCaptureAudioRecorder.Outcome.Ready(draft))
@@ -77,11 +80,13 @@ class QuickCaptureAudioSessionTest {
     assertEquals(QuickCaptureAudioSession.State.READY, recreated!!.state)
     assertEquals(QuickCaptureAudioSession.Status.ERROR, recreated!!.status)
     assertEquals("Typed prefix", recreated!!.title)
+    assertEquals("  Literal @home\n#not-a-tag  ", recreated!!.note)
     assertEquals(setOf(draft.id), session.activeIds)
     session.saveAudio()
     assertEquals(2, publications.size)
     assertSame(publications[0].draft, publications[1].draft)
     assertEquals("Typed prefix", publications[1].title)
+    assertEquals("  Literal @home\n#not-a-tag  ", publications[1].note)
 
     publications[1].complete(true)
     assertEquals(QuickCaptureAudioSession.State.SAVED, session.snapshot.state)
@@ -96,7 +101,7 @@ class QuickCaptureAudioSessionTest {
     val publications = ArrayList<Publication>()
     val session = QuickCaptureAudioSession(
       startRecorder = { callback -> deliver = callback; recorder },
-      publishAudio = { draft, title, complete -> publications.add(Publication(draft, title, complete)) },
+      publishAudio = { draft, title, note, complete -> publications.add(Publication(draft, title, note, complete)) },
       discardAudio = {},
     )
     val draft = QuickCaptureAudioDraft(
@@ -106,6 +111,7 @@ class QuickCaptureAudioSessionTest {
       dataBytes = 6_400,
     )
     session.updateTitle("Home prefix")
+    session.updateNote("Home\nnote")
     session.beginRecording()
 
     session.onHostStopped()
@@ -117,6 +123,7 @@ class QuickCaptureAudioSessionTest {
     assertEquals(1, publications.size)
     assertSame(draft, publications.single().draft)
     assertEquals("Home prefix", publications.single().title)
+    assertEquals("Home\nnote", publications.single().note)
   }
 
   @Test
@@ -128,7 +135,7 @@ class QuickCaptureAudioSessionTest {
         recorderStarts += 1
         recorder
       },
-      publishAudio = { _, _, _ -> error("Unused") },
+      publishAudio = { _, _, _, _ -> error("Unused") },
       discardAudio = {},
     )
     val firstOwner = QuickCaptureAudioSessionStore.acquire { session }
@@ -165,7 +172,7 @@ class QuickCaptureAudioSessionTest {
         recorderStarts += 1
         recorder
       },
-      publishAudio = { _, _, _ -> error("Unused") },
+      publishAudio = { _, _, _, _ -> error("Unused") },
       discardAudio = {},
     )
     val oldHost = session.attach {}
@@ -205,7 +212,7 @@ class QuickCaptureAudioSessionTest {
     lateinit var created: QuickCaptureAudioSession
     created = QuickCaptureAudioSession(
       startRecorder = { callback -> deliver = callback; recorder },
-      publishAudio = { draft, title, complete -> publications.add(Publication(draft, title, complete)) },
+      publishAudio = { draft, title, note, complete -> publications.add(Publication(draft, title, note, complete)) },
       discardAudio = {},
       onTerminal = { QuickCaptureAudioSessionStore.release(created) },
     )
@@ -217,6 +224,7 @@ class QuickCaptureAudioSessionTest {
       dataBytes = 6_400,
     )
     firstOwner.updateTitle("Retained Home prefix")
+    firstOwner.updateNote("Retained\nnote")
     firstOwner.beginRecording()
     firstOwner.onHostStopped()
     firstOwner.onOwnerCleared()
@@ -229,16 +237,18 @@ class QuickCaptureAudioSessionTest {
     secondOwner.attach { restored = it }
     assertEquals(QuickCaptureAudioSession.State.READY, restored!!.state)
     assertEquals("Retained Home prefix", restored!!.title)
+    assertEquals("Retained\nnote", restored!!.note)
     secondOwner.saveAudio()
     assertEquals(2, publications.size)
     assertSame(draft, publications[1].draft)
     assertEquals("Retained Home prefix", publications[1].title)
+    assertEquals("Retained\nnote", publications[1].note)
 
     publications[1].complete(true)
     val replacement = QuickCaptureAudioSessionStore.acquire {
       QuickCaptureAudioSession(
         startRecorder = { error("Unused") },
-        publishAudio = { _, _, _ -> error("Unused") },
+        publishAudio = { _, _, _, _ -> error("Unused") },
         discardAudio = {},
       )
     }
@@ -250,7 +260,7 @@ class QuickCaptureAudioSessionTest {
     lateinit var first: QuickCaptureAudioSession
     first = QuickCaptureAudioSession(
       startRecorder = { error("Unused") },
-      publishAudio = { _, _, _ -> error("Unused") },
+      publishAudio = { _, _, _, _ -> error("Unused") },
       discardAudio = {},
       onTerminal = { QuickCaptureAudioSessionStore.release(first) },
     )
@@ -263,7 +273,7 @@ class QuickCaptureAudioSessionTest {
     val nextOwner = QuickCaptureAudioSessionStore.acquire {
       QuickCaptureAudioSession(
         startRecorder = { error("Unused") },
-        publishAudio = { _, _, _ -> error("Unused") },
+        publishAudio = { _, _, _, _ -> error("Unused") },
         discardAudio = {},
       )
     }
@@ -272,9 +282,32 @@ class QuickCaptureAudioSessionTest {
     assertEquals(QuickCaptureAudioSession.State.IDLE, nextOwner.snapshot.state)
   }
 
+  @Test
+  fun cancelAudioKeepsANoteEvenWithoutATypedTitle() {
+    lateinit var deliver: (QuickCaptureAudioRecorder.Outcome) -> Unit
+    val recorder = FakeRecordingControl("01234567-89ab-cdef-0123-456789abcdef")
+    val session = QuickCaptureAudioSession(
+      startRecorder = { callback -> deliver = callback; recorder },
+      publishAudio = { _, _, _, _ -> error("Cancelled audio must not publish") },
+      discardAudio = {},
+    )
+    session.updateNote("A note without a title\nshould remain editable")
+    session.beginRecording()
+
+    assertFalse(session.cancelAudioOrClose())
+    deliver(QuickCaptureAudioRecorder.Outcome.Cancelled)
+
+    assertEquals(QuickCaptureAudioSession.State.IDLE, session.snapshot.state)
+    assertEquals("A note without a title\nshould remain editable", session.snapshot.note)
+    assertFalse(session.snapshot.canSaveText)
+    session.updateTitle("Add title")
+    assertTrue(session.snapshot.canSaveText)
+  }
+
   private data class Publication(
     val draft: QuickCaptureAudioDraft,
     val title: String,
+    val note: String,
     val complete: (Boolean) -> Unit,
   )
 

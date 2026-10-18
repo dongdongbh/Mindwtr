@@ -157,6 +157,7 @@ interface TaskEditModalProps {
     visible: boolean;
     task: Task | null;
     onClose: () => void;
+    onDismiss?: () => void;
     /** Return the store write's result (e.g. `updateTask(...)`) so a failed save can be reported. */
     onSave: (taskId: string, updates: Partial<Task>) => unknown;
     defaultTab?: 'task' | 'view';
@@ -173,6 +174,7 @@ function TaskEditModalInner({
     visible,
     task,
     onClose,
+    onDismiss,
     onSave,
     defaultTab,
     onProjectNavigate,
@@ -245,6 +247,11 @@ function TaskEditModalInner({
             sequentialWithinSectionProjectIds: derived.sequentialWithinSectionProjectIds,
         };
     }, shallow);
+    const referenceTaskId = useMemo(
+        () => task && !isProjectedRecurringTask(task)
+            && allTasks.some((savedTask) => savedTask.id === task.id) ? task.id : undefined,
+        [allTasks, task],
+    );
     const contextHistory = useMemo(
         () => getRetainedTaskContexts(allTasks),
         [allTasks],
@@ -1133,6 +1140,7 @@ function TaskEditModalInner({
             allowSwipeDismissal
             onShow={() => setIsModalShown(true)}
             onRequestClose={readOnly ? onClose : handleAttemptClose}
+            onDismiss={onDismiss}
         >
             <KeyboardAccessoryHost backgroundColor={tc.bg}>
                 <AdaptiveModalSurface
@@ -1149,6 +1157,7 @@ function TaskEditModalInner({
                         onClose={() => setProjectConversionOpen(false)} />}
                     <SandboxWorkspaceCue />
                     <TaskEditHeader
+                        taskId={referenceTaskId}
                         onDone={readOnly ? onClose : handleDone}
                         onClose={readOnly ? onClose : handleAttemptClose}
                         onShare={handleShare}
@@ -1462,6 +1471,7 @@ function TaskEditModalInner({
 
 const areTaskEditModalPropsEqual = (prev: TaskEditModalProps, next: TaskEditModalProps): boolean => (
     prev.visible === next.visible && prev.task === next.task && prev.onClose === next.onClose && prev.onSave === next.onSave
+    && prev.onDismiss === next.onDismiss
     && prev.readOnly === next.readOnly
     && prev.defaultTab === next.defaultTab
     && prev.automaticDefaultTab === next.automaticDefaultTab

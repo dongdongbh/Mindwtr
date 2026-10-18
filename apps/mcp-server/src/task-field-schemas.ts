@@ -37,6 +37,7 @@ const TASK_FIELD_ZOD_SCHEMAS: Partial<Record<keyof Task, z.ZodTypeAny>> = {
   isFocusedToday: z.boolean().describe("Marked as today's focus list"),
   timeSpentMinutes: z.number().int().nonnegative().describe('Total minutes worked on the task'),
   suppressMindwtrReminders: z.boolean().describe('Skip Mindwtr start/due reminders for this task'),
+  reminderPolicy: z.enum(['inherit', 'send', 'skip']).describe('Inherit the global task reminder default, explicitly send, or skip start/due reminders'),
   repeatReminderMinutes: z.number().int().nonnegative().describe(
     'Repeat the due-time reminder every N minutes (presets 5|10|15|30|60); 0/absent = off'
   ),
@@ -72,7 +73,8 @@ export const buildTaskCreateFieldsShape = (): Record<string, z.ZodTypeAny> => {
 export const buildTaskUpdateFieldsShape = (): Record<string, z.ZodTypeAny> => {
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const name of TASK_PATCH_FIELD_NAMES) {
-    shape[name] = BOOLEAN_FIELD_NAMES.has(name)
+    // Inheritance is explicit; null must not silently discard a reminder choice.
+    shape[name] = BOOLEAN_FIELD_NAMES.has(name) || name === 'reminderPolicy'
       ? fieldSchemaFor(name).optional()
       : fieldSchemaFor(name).nullable().optional();
   }

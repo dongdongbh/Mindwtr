@@ -2338,6 +2338,45 @@ describe('FocusScreen', () => {
     expect(storeState.updateSettings.mock.calls[0]?.[0]?.savedFilters[1]).not.toHaveProperty('deletedAt');
   });
 
+  // The screen still shows a filter another device deleted; the delete edits the latest stored list by id.
+  it('keeps a saved filter another device deleted when deleting another one', async () => {
+    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    storeState.updateSettings.mockResolvedValue(undefined);
+    const desk = {
+      id: 'filter-desk',
+      name: 'Desk',
+      view: 'focus',
+      criteria: { contexts: ['@desk'] },
+      createdAt: '2026-04-01T00:00:00.000Z',
+      updatedAt: '2026-04-01T00:00:00.000Z',
+    };
+    const phone = { ...desk, id: 'filter-phone', name: 'Phone', criteria: { contexts: ['@phone'] } };
+    storeState.settings = { appearance: {}, features: {}, savedFilters: [desk, phone] } as any;
+    storeState.tasks = [makeTask('desk-task', { title: 'Desk task', contexts: ['@desk'] })];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+    const phoneDeleted = { ...phone, deletedAt: '2026-04-02T00:00:00.000Z', updatedAt: '2026-04-02T00:00:00.000Z' };
+    storeState.settings = { appearance: {}, features: {}, savedFilters: [desk, phoneDeleted] } as any;
+
+    act(() => {
+      findButtonByText(tree, 'Desk').props.onLongPress();
+    });
+    const deleteButton = alertSpy.mock.calls[0]?.[2]?.find((button) => button.style === 'destructive');
+    await act(async () => {
+      deleteButton?.onPress?.();
+    });
+
+    expect(storeState.updateSettings).toHaveBeenCalledWith({
+      savedFilters: [
+        expect.objectContaining({ id: 'filter-desk', deletedAt: expect.any(String) }),
+        phoneDeleted,
+      ],
+    });
+  });
+
   it('offers the same saved-filter deletion confirmation as an accessibility action', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     storeState.updateSettings.mockResolvedValue(undefined);

@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Beaker } from 'lucide-react-native';
 
 import {
+    updateSettingsFromLatest,
     getDocsGuideUrl,
     useTaskStore,
 } from '@mindwtr/core';
@@ -198,7 +199,9 @@ function SyncSettingsView({
     }, [updateSettings]);
 
     const updateSyncPreferences = (partial: Partial<Record<SyncPreferenceKey, boolean>>) => {
-        updateSettings(buildSyncPreferencesUpdate(settings.syncPreferences, partial)).catch(logSettingsError);
+        // Built from the latest stored preferences, so one another device changed stays.
+        updateSettingsFromLatest((latest) => buildSyncPreferencesUpdate(latest.syncPreferences, partial), { write: updateSettings, read: () => useTaskStore.getState().settings })
+            .catch(logSettingsError);
     };
 
     const handleClearPendingRemoteDeletes = useCallback(() => {
@@ -212,17 +215,17 @@ function SyncSettingsView({
                     text: tr('filters.clear'),
                     style: 'destructive',
                     onPress: () => {
-                        updateSettings({
+                        updateSettingsFromLatest((latest) => ({
                             attachments: {
-                                ...(settings.attachments ?? {}),
+                                ...(latest.attachments ?? {}),
                                 pendingRemoteDeletes: undefined,
                             },
-                        }).catch(logSettingsError);
+                        }), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(logSettingsError);
                     },
                 },
             ],
         );
-    }, [tr, pendingRemoteDeleteCount, settings.attachments, t, updateSettings]);
+    }, [tr, pendingRemoteDeleteCount, t, updateSettings]);
 
     const toggleAnalyticsHeartbeatOptOut = useCallback((optedOut: boolean) => {
         if (!analyticsHeartbeatAvailable) return;

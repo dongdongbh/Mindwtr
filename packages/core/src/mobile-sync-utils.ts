@@ -50,7 +50,10 @@ const IOS_ABSOLUTE_PATH_PATTERN = /^\/(private\/)?var\/mobile\//i;
 const AUTH_ERROR_PATTERN = /\b401\b|unauthori[sz]ed|forbidden|\b403\b|reauth|re-auth|app password|credentials?/i;
 const RATE_LIMIT_ERROR_PATTERN = /\b429\b|rate limit|too many requests|retry after/i;
 const MISCONFIGURED_SYNC_PATTERN = /not configured|missing .*config|save .*settings first|finish setup/i;
-const CONFLICT_ERROR_PATTERN = /\bconflict\b|stale remote state|precondition failed/i;
+const SAF_UNAVAILABLE_ERROR_PATTERN = /SAF_DOCUMENTS?_UNAVAILABLE/;
+// A File Sync document read that could not be proven whole (short, still downloading, sizes
+// that disagree): retry once the provider settles, as for a conflict.
+const CONFLICT_ERROR_PATTERN = /\bconflict\b|stale remote state|precondition failed|SAF_DOCUMENT_INCOMPLETE/i;
 const ENCRYPTION_STATE_ERROR_PATTERN = /SyncEncryptionStateUnavailableError/i;
 // #1056. Checked BEFORE the auth pattern: "wrong passphrase" contains "passphrase", and
 // several of these messages would otherwise be swallowed by AUTH_ERROR_PATTERN's
@@ -79,7 +82,9 @@ export const classifySyncFailure = (errorOrMessage: unknown): SyncFailureKind =>
   if (isCoreLikelyOfflineSyncError(message)) return 'offline';
   if (RATE_LIMIT_ERROR_PATTERN.test(message)) return 'rateLimited';
   if (AUTH_ERROR_PATTERN.test(message)) return 'auth';
-  if (READONLY_ERROR_PATTERN.test(message) || IOS_TEMP_INBOX_PATTERN.test(message) || /cannot access the selected sync file/i.test(message)) {
+  if (READONLY_ERROR_PATTERN.test(message) || IOS_TEMP_INBOX_PATTERN.test(message) || /cannot access the selected sync file/i.test(message)
+    // Android File Sync's folder calls (SafDocumentsCore): the provider could not list or describe the folder.
+    || SAF_UNAVAILABLE_ERROR_PATTERN.test(message)) {
     return 'permission';
   }
   if (MISCONFIGURED_SYNC_PATTERN.test(message)) return 'misconfigured';

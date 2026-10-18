@@ -38,7 +38,7 @@ const fields = (value: Record<string, unknown>, names: readonly string[]) =>
     Object.keys(value).every((name) => names.includes(name));
 const attachmentKeys = ['id', 'kind', 'title', 'uri', 'mimeType', 'size', 'createdAt', 'updatedAt',
     'deletedAt', 'cloudKey', 'fileHash', 'contentRev', 'contentMtimeMs', 'contentSize',
-    'pendingContentUpload', 'localStatus'];
+    'pendingContentUpload', 'staleContentHash', 'localStatus'];
 const attachments = (value: unknown) => Array.isArray(value) && value.every((item) => record(item)
     && fields(item, attachmentKeys) && id(item.id) && ['file', 'link'].includes(String(item.kind))
     && text(item.title) && text(item.uri) && stamp(item.createdAt) && stamp(item.updatedAt)
@@ -46,6 +46,7 @@ const attachments = (value: unknown) => Array.isArray(value) && value.every((ite
     && ['size', 'contentRev', 'contentMtimeMs', 'contentSize'].every((field) => item[field] === undefined
         || typeof item[field] === 'number' && Number.isFinite(item[field]))
     && (item.pendingContentUpload === undefined || typeof item.pendingContentUpload === 'boolean')
+    && (item.staleContentHash === undefined || typeof item.staleContentHash === 'string')
     && (item.localStatus === undefined || ['available', 'missing', 'uploading', 'downloading'].includes(String(item.localStatus))));
 const taskKeys = TASK_SYNC_FIELD_SCHEMA.map((field) => field.name);
 const projectKeys = PROJECT_SYNC_FIELD_SCHEMA.map((field) => field.name);

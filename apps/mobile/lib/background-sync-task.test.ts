@@ -107,6 +107,8 @@ vi.mock('react-native', () => reactNativeMock);
 
 const captureDrainMock = vi.hoisted(() => ({ drainPendingCapturesInBackground: vi.fn() }));
 vi.mock('./pending-capture-drain', () => captureDrainMock);
+const reminderMock = vi.hoisted(() => vi.fn());
+vi.mock('./notification-service-local', () => ({ reconcileLocalMobileNotificationsInBackground: reminderMock }));
 
 const loadModule = async () => import('./background-sync-task');
 
@@ -133,6 +135,7 @@ describe('mobile background sync task', () => {
     syncServiceMock.performMobileSync.mockResolvedValue({ success: true });
     storageAdapterMock.quiesceMobileStorage.mockResolvedValue(undefined);
     captureDrainMock.drainPendingCapturesInBackground.mockResolvedValue(0);
+    reminderMock.mockResolvedValue(undefined);
     asyncStorageMock.store.clear();
     asyncStorageMock.getItem.mockClear();
     asyncStorageMock.setItem.mockClear();
@@ -754,6 +757,29 @@ describe('mobile background sync task', () => {
 
       expect(captureDrainMock.drainPendingCapturesInBackground).toHaveBeenCalledWith('scheduled');
       expect(order).toEqual(['drain', 'sync']);
+      expect(reminderMock).toHaveBeenCalledWith('sync');
+    });
+
+    it('awaits reminders from a successful background sync without foreground timers', async () => {
+      configureSync();
+      reactNativeMock.AppState.currentState = 'background';
+      const reconciled = createDeferred<void>();
+      reminderMock.mockReturnValueOnce(reconciled.promise);
+      await loadModule();
+      let done = false;
+      const run = taskManagerMock.state.executor?.().then(() => { done = true; });
+      await vi.waitFor(() => expect(reminderMock).toHaveBeenCalledWith('sync'));
+      expect(done).toBe(false);
+      reconciled.resolve();
+      await run;
+    });
+
+    it('does not reconcile after a failed sync', async () => {
+      configureSync();
+      syncServiceMock.performMobileSync.mockResolvedValueOnce({ success: false });
+      await loadModule();
+      await taskManagerMock.state.executor?.();
+      expect(reminderMock).not.toHaveBeenCalled();
     });
 
     it('syncs right after a Save from the capture dialog, even during a failure cooldown', async () => {

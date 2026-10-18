@@ -337,15 +337,16 @@ export const parseObsidianDataviewData = (text: string): ObsidianDataviewData | 
         const key = normalizeDataviewKey(field.key);
         if (!key) continue;
         if (key === 'project' || key === 'projects') {
-            projects.push(...splitDataviewListValue(field.value));
+            // One push per item: QuickJS (native Android) refuses a call with more than 65535 arguments.
+            for (const item of splitDataviewListValue(field.value)) projects.push(item);
             continue;
         }
         if (key === 'context' || key === 'contexts') {
-            contexts.push(...splitDataviewListValue(field.value).map((item) => normalizeDataviewToken(item, '@')));
+            for (const item of splitDataviewListValue(field.value)) contexts.push(normalizeDataviewToken(item, '@'));
             continue;
         }
         if (key === 'tag' || key === 'tags') {
-            tags.push(...splitDataviewListValue(field.value).map((item) => normalizeDataviewToken(item, '#')));
+            for (const item of splitDataviewListValue(field.value)) tags.push(normalizeDataviewToken(item, '#'));
             continue;
         }
         if ((key === 'due' || key === 'deadline') && !dueDate) {

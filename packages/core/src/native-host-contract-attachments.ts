@@ -84,7 +84,9 @@ import { fail, isObjectRecord, isText } from './native-host-contract-menu-views'
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { createNativeRequestReceipts, requestRowId, runStoreWrite, settleWrite, taskRevisionOf } from './native-request-receipts';
 import { useTaskStore } from './store';
+import { runOutsideStoreGate } from './store-write-gate';
 import type { Attachment, Project, Task } from './types';
+import type { PersistAttachmentOutcome } from './mobile-attachment-files';
 import { taskEditValuesEqual } from './json-value-equality';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 
@@ -99,6 +101,13 @@ export type NativeAttachmentsHost = {
      * another file. Call `keep` after every await, immediately before the delete; true keeps it.
      */
     deleteManagedAttachmentFile(attachment: Attachment, options?: { keep?: () => boolean }): Promise<unknown>;
+    /**
+     * A file share's IO (prepareSharedFiles, the capture screen); a host without them takes no shared files.
+     * createMobileAttachmentFiles(...).persistAttachmentLocallyDetailed: copies a staged shared file into files/attachments/.
+     */
+    persistAttachmentLocallyDetailed?(attachment: Attachment): Promise<PersistAttachmentOutcome>;
+    /** createMobileAttachmentFiles(...).canUploadAttachmentFrom: whether a uri is a managed copy (flat, no traversal). */
+    canUploadAttachmentFrom?(uri: string): boolean;
 };
 
 /** Whose attachments: the task editor's draft list, or a project's stored list. */
@@ -162,7 +171,7 @@ const TEXT_LIMIT = 100_000;
 const ID_LIMIT = 500;
 const STAMP = (value: unknown) => isText(value, 100) && Boolean(value);
 const ATTACHMENT_KEYS = new Set(['id', 'kind', 'title', 'uri', 'mimeType', 'size', 'createdAt', 'updatedAt',
-    'deletedAt', 'cloudKey', 'fileHash', 'contentRev', 'contentMtimeMs', 'contentSize', 'pendingContentUpload', 'localStatus']);
+    'deletedAt', 'cloudKey', 'fileHash', 'contentRev', 'contentMtimeMs', 'contentSize', 'pendingContentUpload', 'staleContentHash', 'localStatus']);
 const LOCAL_STATUSES = new Set(['available', 'missing', 'uploading', 'downloading']);
 
 const isAttachment = (value: unknown): value is Attachment => isObjectRecord(value)
@@ -173,6 +182,7 @@ const isAttachment = (value: unknown): value is Attachment => isObjectRecord(val
     && ['size', 'contentRev', 'contentMtimeMs', 'contentSize'].every((key) => value[key] === undefined
         || (typeof value[key] === 'number' && Number.isFinite(value[key])))
     && (value.pendingContentUpload === undefined || typeof value.pendingContentUpload === 'boolean')
+    && (value.staleContentHash === undefined || typeof value.staleContentHash === 'string')
     && (value.localStatus === undefined || LOCAL_STATUSES.has(String(value.localStatus)));
 
 /** A bounded list of attachment records, as the store keeps them; null when it is not one. */
@@ -260,7 +270,9 @@ const readPicked = (value: unknown): NativePickedAttachment | null => (
 );
 
 const availabilityOf = (host: NativeAttachmentsHost): AttachmentAvailabilityPort => ({
-    ensureAttachmentAvailableDetailed: (attachment) => host.ensureAttachmentAvailableDetailed(attachment),
+    // The download waits on the network outside the write gate; resolveAttachmentAvailability reads the store
+    // again and checks the attachment's identity before it applies the result.
+    ensureAttachmentAvailableDetailed: (attachment) => runOutsideStoreGate(() => host.ensureAttachmentAvailableDetailed(attachment)),
     getAttachmentDownloadIdentity,
     hasAttachmentDownloadIdentity,
     getAttachmentAvailabilityPatch,

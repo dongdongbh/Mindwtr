@@ -6,6 +6,7 @@ const SQLITE_NEUTRAL_FALSE_FIELDS = new Set([
     'showFutureRecurrence',
     'isFocusedToday',
     'suppressMindwtrReminders',
+    'reminderPolicy',
     'isSequential',
     'isFocused',
     'isCollapsed',

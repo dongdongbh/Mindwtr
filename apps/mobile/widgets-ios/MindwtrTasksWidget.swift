@@ -149,7 +149,7 @@ struct MindwtrTasksWidgetPayload: Decodable {
             at: date
         )
         return unfilteredSelection(for: resolvedId)
-            .filteringHiddenActions(pendingActions, at: date)
+            .filteringHiddenActions(pendingActions, at: date, upcomingOnly: resolvedId == "upcoming")
     }
 
     func title(forList listId: String) -> String? {
@@ -222,15 +222,18 @@ struct MindwtrTasksWidgetPayload: Decodable {
 
     private func filteringHiddenActions(
         _ pendingActions: [MindwtrWidgetPendingAction],
-        at date: Date
+        at date: Date,
+        upcomingOnly: Bool
     ) -> MindwtrTasksWidgetPayload {
-        let visibleItems = items.filter {
-            !MindwtrWidgetActionProjection.isHidden($0.actionIdentity, by: pendingActions, at: date)
-        }
-        let visibleSections = sections?.compactMap { section -> MindwtrWidgetSection? in
-            let items = section.items.filter {
-                !MindwtrWidgetActionProjection.isHidden($0.actionIdentity, by: pendingActions, at: date)
+        func isVisible(_ item: MindwtrWidgetTaskItem) -> Bool {
+            if upcomingOnly || item.isUpcomingPreview {
+                return MindwtrWidgetUpcomingProjection.isVisible(item.upcomingDate, at: date)
             }
+            return !MindwtrWidgetActionProjection.isHidden(item.actionIdentity, by: pendingActions, at: date)
+        }
+        let visibleItems = items.filter(isVisible)
+        let visibleSections = sections?.compactMap { section -> MindwtrWidgetSection? in
+            let items = section.items.filter(isVisible)
             guard !items.isEmpty else { return nil }
             return MindwtrWidgetSection(
                 key: section.key,
@@ -279,7 +282,7 @@ struct MindwtrTasksWidgetPayload: Decodable {
 
 private extension MindwtrWidgetTaskItem {
     var actionIdentity: MindwtrWidgetActionIdentity {
-        MindwtrWidgetActionIdentity(taskId: id, completionToken: completionToken)
+        MindwtrWidgetActionIdentity(taskId: id, completionToken: isUpcomingPreview ? nil : completionToken)
     }
 }
 
@@ -294,11 +297,12 @@ struct MindwtrTasksWidgetEntry: TimelineEntry {
     let date: Date
     let payload: MindwtrTasksWidgetPayload
     let pendingActions: [MindwtrWidgetPendingAction]
+    let listId: String
 }
 
 struct MindwtrTasksWidgetProvider: TimelineProvider {
     func placeholder(in _: Context) -> MindwtrTasksWidgetEntry {
-        MindwtrTasksWidgetEntry(date: Date(), payload: .fallback, pendingActions: [])
+        MindwtrTasksWidgetEntry(date: Date(), payload: .fallback, pendingActions: [], listId: "focus")
     }
 
     func getSnapshot(in context: Context, completion: @escaping (MindwtrTasksWidgetEntry) -> Void) {
@@ -328,7 +332,8 @@ enum MindwtrTasksWidgetSnapshotStore {
                 pendingActions: pendingActions,
                 at: date
             ),
-            pendingActions: pendingActions
+            pendingActions: pendingActions,
+            listId: listId
         )
     }
 
@@ -339,10 +344,14 @@ enum MindwtrTasksWidgetSnapshotStore {
     ) -> [MindwtrTasksWidgetEntry] {
         let payload = loadPayload(for: family)
         let pendingActions = (try? MindwtrWidgetActionStore.appGroupStore().pendingActions()) ?? []
-        return MindwtrWidgetActionProjection.timelineDates(
+        var dates = MindwtrWidgetActionProjection.timelineDates(
             pendingActions: pendingActions,
             now: now
-        ).map { date in
+        )
+        if listId == "upcoming" {
+            dates.append(contentsOf: MindwtrWidgetUpcomingProjection.timelineDates(now: now))
+        }
+        return Set(dates).sorted().map { date in
             MindwtrTasksWidgetEntry(
                 date: date,
                 payload: payload.selectingList(
@@ -350,7 +359,8 @@ enum MindwtrTasksWidgetSnapshotStore {
                     pendingActions: pendingActions,
                     at: date
                 ),
-                pendingActions: pendingActions
+                pendingActions: pendingActions,
+                listId: listId
             )
         }
     }
@@ -401,7 +411,7 @@ enum MindwtrTasksWidgetSnapshotStore {
         }
         return currentPayloads().contains { payload in
             payload.allTaskItems.contains { item in
-                item.id == taskId && item.completionToken == completionToken
+                !item.isUpcomingPreview && item.id == taskId && item.completionToken == completionToken
             }
         }
     }
@@ -517,7 +527,9 @@ private struct MindwtrTasksWidgetView: View {
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     var body: some View {
-        let payload = entry.payload
+        let payload = entry.listId == "upcoming"
+            ? entry.payload.selectingList("upcoming", pendingActions: entry.pendingActions, at: max(entry.date, Date()))
+            : entry.payload
         let palette = resolvePalette(payload)
         let metrics = MindwtrWidgetMetrics.resolve(for: widgetFamily).scaled(by: typeScale)
         let columnCount = widgetFamily == .systemExtraLarge ? 2 : 1
@@ -740,16 +752,24 @@ private struct MindwtrWidgetTaskRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 7) {
-            MindwtrWidgetTaskAction(
-                item: item,
-                pendingAction: pendingAction,
-                completeLabel: payload.resolvedCompleteLabel,
-                undoLabel: payload.resolvedUndoLabel,
-                color: item.priorityColor ?? palette.mutedText,
-                size: metrics.actionSize
-            )
+            if !item.isUpcomingPreview {
+                MindwtrWidgetTaskAction(
+                    item: item,
+                    pendingAction: pendingAction,
+                    completeLabel: payload.resolvedCompleteLabel,
+                    undoLabel: payload.resolvedUndoLabel,
+                    color: item.priorityColor ?? palette.mutedText,
+                    size: metrics.actionSize
+                )
+            }
 
-            if linksTaskDirectly {
+            if item.isUpcomingPreview, !linksTaskDirectly,
+               #available(iOSApplicationExtension 17.0, iOS 17.0, *) {
+                Button(intent: MindwtrOpenWidgetTaskIntent(taskId: item.id)) {
+                    rowText
+                }
+                .buttonStyle(.plain)
+            } else if linksTaskDirectly {
                 Link(destination: safeMindwtrURL(item.openUri ?? payload.focusUri)) {
                     rowText
                 }
@@ -790,7 +810,7 @@ private struct MindwtrWidgetTaskRow: View {
 
                 Spacer(minLength: 2)
 
-                if let dueLabel = nonEmpty(item.dueLabel) {
+                if let dueLabel = nonEmpty(item.displayDueLabel) {
                     Text(dueLabel)
                         .foregroundColor(dueColor)
                         .lineLimit(1)

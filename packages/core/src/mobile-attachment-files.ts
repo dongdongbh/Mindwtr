@@ -70,7 +70,31 @@ export type MobileAttachmentSafPort = {
   createFile?(parentUri: string, name: string, mimeType: string): Promise<string>;
   /** Replaces a document's bytes. */
   writeBytes?(uri: string, bytes: Uint8Array): Promise<void>;
+  /** A folder's documents with their display names. Document IDs are opaque provider values, so
+   *  a host that can list names lets core match files by name, not by the URI's tail. */
+  listChildren?(uri: string): Promise<{ uri: string; name: string | null }[]>;
+  /** A document's display name, or null when the provider says it is gone. */
+  stat?(uri: string): Promise<{ name: string | null } | null>;
 };
+
+/** A SAF folder's documents by display name (from `listChildren` when the host has it, else the
+ *  name in each URI's tail). Provider errors propagate. */
+export const listSafEntriesByName = async (saf: MobileAttachmentSafPort, dirUri: string): Promise<Map<string, string>> => {
+  const entries = saf.listChildren
+    ? await saf.listChildren(dirUri)
+    : (await saf.readDirectory(dirUri)).map((uri) => ({ uri, name: null }));
+  const byName = new Map<string, string>();
+  for (const entry of entries) {
+    const name = entry.name || getSafLeafName(entry.uri);
+    if (name && !byName.has(name)) byName.set(name, entry.uri);
+  }
+  return byName;
+};
+
+/** A SAF document's display name (its URI's tail where the host cannot say). */
+export const getSafDocumentName = async (saf: MobileAttachmentSafPort, uri: string): Promise<string> => (
+  (saf.stat ? (await saf.stat(uri))?.name : null) || getSafLeafName(uri)
+);
 
 /** The device's file IO for attachments (React Native: expo-file-system). URIs pass through
  *  verbatim, scheme included (`file://`, Android `content://`). */
@@ -145,10 +169,6 @@ export const getSafLeafName = (value: string): string => {
   const lastSeparator = Math.max(stripped.lastIndexOf('/'), stripped.lastIndexOf(':'));
   return lastSeparator >= 0 ? stripped.slice(lastSeparator + 1) : stripped;
 };
-
-const hasSafLeafName = (value: string, expected: string): boolean => (
-  getSafLeafName(value) === expected
-);
 
 /** The whole buffer when `bytes` covers it, else a copy (unlike http-utils' `toArrayBuffer`,
  *  which always copies). */
@@ -556,10 +576,9 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
     const readableCandidates: string[] = [];
     for (const candidate of directoryCandidates) {
       try {
-        const entries = await saf.readDirectory(candidate);
+        const entries = await listSafEntriesByName(saf, candidate);
         readableCandidates.push(candidate);
-        const matchEntry = entries.find((entry: string) => hasSafLeafName(entry, ATTACHMENTS_DIR_NAME));
-        attachmentsDirUri = matchEntry ?? null;
+        attachmentsDirUri = entries.get(ATTACHMENTS_DIR_NAME) ?? null;
         if (attachmentsDirUri) break;
       } catch (error) {
         if (candidate === directoryCandidates[directoryCandidates.length - 1]) {
@@ -616,13 +635,7 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
     const saf = fs.saf();
     if (!saf) return entriesByName;
     try {
-      const entries = await saf.readDirectory(dirUri);
-      for (const entry of entries) {
-        const name = getSafLeafName(entry);
-        if (name && !entriesByName.has(name)) {
-          entriesByName.set(name, entry);
-        }
-      }
+      for (const [name, uri] of await listSafEntriesByName(saf, dirUri)) entriesByName.set(name, uri);
     } catch (error) {
       logAttachmentWarn('Failed to read SAF directory', error);
     }
@@ -637,13 +650,7 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
     const saf = fs.saf();
     if (!saf) return { status: 'unreadable' };
     try {
-      const entries = await saf.readDirectory(dirUri);
-      const entriesByName = new Map<string, string>();
-      for (const entry of entries) {
-        const name = getSafLeafName(entry);
-        if (name && !entriesByName.has(name)) entriesByName.set(name, entry);
-      }
-      return { status: 'available', entries: entriesByName };
+      return { status: 'available', entries: await listSafEntriesByName(saf, dirUri) };
     } catch (error) {
       logAttachmentWarn('Failed to read SAF directory', error);
       return { status: 'unreadable' };

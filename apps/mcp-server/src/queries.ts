@@ -83,6 +83,7 @@ export type TaskGeneratedCreateFields = Pick<CoreTask,
   | 'isFocusedToday'
   | 'timeSpentMinutes'
   | 'suppressMindwtrReminders'
+  | 'reminderPolicy'
   | 'repeatReminderMinutes'
   | 'reviewAt'
   | 'cancelledAt'

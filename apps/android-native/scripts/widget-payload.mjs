@@ -8,6 +8,11 @@ import { resolve } from 'node:path';
 
 const coreSrc = resolve(import.meta.dirname, '../../../packages/core/src');
 export const WIDGET_PREFS = 'shared_prefs/mindwtr_widget.xml';
+export const WIDGET_LIST_PREFS = 'shared_prefs/mindwtr_widget_lists.xml';
+
+/** Independently persisted per-widget choices, not inferred from the snapshot under test. */
+export const widgetSelections = (xml) => [...new Set([...xml.matchAll(/<string name="\d+">([^<]*)<\/string>/g)]
+    .map((match) => unescapeXml(match[1])))];
 export const PUBLISHED = 'Native Android widget payload published';
 export const REFRESHED = 'Native Android widgets refreshed';
 
@@ -35,7 +40,7 @@ export const isRnPayloadPrefsWrite = (before, after) => {
 /** Lines of [logText] that hold every one of [needles]. */
 export const count = (logText, ...needles) => logText.split('\n').filter((line) => needles.every((needle) => line.includes(needle))).length;
 
-/** The last publication's logged context (`{ items, language, scheme, locale, lists }`) in logcat text [logText]; null for none. */
+/** The last publication's logged context (`{ items, language, scheme, locale, count }`) in logcat text [logText]; null for none. */
 export const publicationContext = (logText) => {
     // Core's logger puts the context in as a JSON string: drop its escapes.
     const line = logText.replace(/\\/g, '').split('\n').filter((text) => text.includes(PUBLISHED)).pop();
@@ -48,8 +53,9 @@ export const publicationContext = (logText) => {
  * widget service would hand setPayload for that data, [language] and the logged [context]'s inputs. [out] is a scratch file
  * (core's own log lines go to the console). Activating the copy may write to it: pass a copy no other check reads.
  */
-export const corePublication = ({ db, language, context, zone, out }) => {
-    const inputs = { systemColorScheme: context.scheme, systemLocale: context.locale, listSelections: context.lists };
+export const corePublication = ({ db, language, context, zone, out, listSelections }) => {
+    if (!Array.isArray(listSelections)) throw new Error('Independent persisted widget selections are required');
+    const inputs = { systemColorScheme: context.scheme, systemLocale: context.locale, listSelections };
     execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, buildAndroidWidgetPublication, createNativeHostContract, getFocusWidgetFilter, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -74,12 +80,22 @@ export const corePublication = ({ db, language, context, zone, out }) => {
 
 /** Equal payloads, or the first differing field (a path) with both values. */
 export const firstDifference = (actual, expected, path = '') => {
-    if (JSON.stringify(actual) === JSON.stringify(expected)) return null;
-    if (actual && expected && typeof actual === 'object' && typeof expected === 'object') {
+    if (Object.is(actual, expected)) return null;
+    if (Array.isArray(actual) && Array.isArray(expected)) {
+        if (actual.length !== expected.length) return `${path}.length: app ${actual.length} vs core ${expected.length}`;
+        for (let index = 0; index < actual.length; index++) {
+            const found = firstDifference(actual[index], expected[index], `${path}[${index}]`);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (actual && expected && typeof actual === 'object' && typeof expected === 'object'
+        && !Array.isArray(actual) && !Array.isArray(expected)) {
         for (const name of new Set([...Object.keys(actual), ...Object.keys(expected)])) {
             const found = firstDifference(actual[name], expected[name], `${path}.${name}`);
             if (found) return found;
         }
+        return null;
     }
     return `${path || '(root)'}: app ${JSON.stringify(actual)?.slice(0, 200)} vs core ${JSON.stringify(expected)?.slice(0, 200)}`;
 };

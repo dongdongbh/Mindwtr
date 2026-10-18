@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => {
     updateTask,
     storeState: {
       tasks: [] as Task[],
+      // Bulk organize reads the stored rows by id when its write is admitted.
+      get _tasksById() { return new Map(this.tasks.map((task) => [task.id, task])); },
       projects: [] as Project[],
       areas: [] as Area[],
       settings: {
