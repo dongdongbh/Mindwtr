@@ -1979,7 +1979,7 @@ describe('description clipboard images', () => {
         const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
         fireEvent.change(textarea, { target: { value: 'Before' } });
         const image = new File(['image'], 'screenshot.png', { type: 'image/png' });
-        fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: image.type, getAsFile: () => new File([image], image.name, { type: image.type }) }], files: [image], getData: () => '' } });
+        fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: image.type, getAsFile: () => image }], files: [image], getData: () => '' } });
         expect(addDroppedFileAttachments).toHaveBeenCalledTimes(1);
         expect(addDroppedFileAttachments).toHaveBeenCalledWith([expect.objectContaining({ name: 'screenshot.png' })]);
         fireEvent.change(textarea, { target: { value: 'Before typing' } });
