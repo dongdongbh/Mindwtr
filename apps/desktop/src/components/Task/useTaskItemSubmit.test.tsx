@@ -156,13 +156,3 @@ describe('useTaskItemSubmit attachment durability', () => {
         expect(updateTask).toHaveBeenCalledWith(task.id, { title: 'Edited title' });
     });
 });
-
-
-it('blocks every save path while file import is pending', async () => {
-    const updateTask = vi.fn(async () => ({ success: true }));
-    const setIsEditing = vi.fn();
-    const { result } = renderHook(() => useTaskItemSubmit({ baselineTask: task, task, draft: { ...createTaskDraft(task), title: 'Edited' }, editAttachments: [], isImportingFiles: true, editingTaskId: task.id, setEditingTaskId: vi.fn(), setIsEditing, showToast: vi.fn(), t: (key) => key, updateTask, beginAttachmentSave: vi.fn(), cancelAttachmentSaveBeforeStoreUpdate: vi.fn(), settlePersistedAttachmentSave: vi.fn() }));
-    await expect(result.current(undefined, { keepEditing: true })).resolves.toEqual({ success: false });
-    expect(updateTask).not.toHaveBeenCalled();
-    expect(setIsEditing).not.toHaveBeenCalled();
-});

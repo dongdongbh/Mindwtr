@@ -20,7 +20,6 @@ const baseProps = {
     t,
     taskTitle: 'Task',
     taskId: 'task-1',
-    attachments: [],
     showDescriptionPreview: false,
     editDescription: '',
     isRtl: false,

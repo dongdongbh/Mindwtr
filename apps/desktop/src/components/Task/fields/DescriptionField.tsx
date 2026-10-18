@@ -1,6 +1,6 @@
 import { type ClipboardEvent, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { AlignLeft, Eye, Loader2, Maximize2, Mic, Pencil, Square } from 'lucide-react';
-import { tFallback, type Attachment, type MarkdownSelection, type MarkdownToolbarActionId, type MarkdownToolbarResult } from '@mindwtr/core';
+import { tFallback, type MarkdownSelection, type MarkdownToolbarActionId, type MarkdownToolbarResult } from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
 import { ExpandedMarkdownEditor } from '../../ExpandedMarkdownEditor';
@@ -16,7 +16,6 @@ type DescriptionFieldProps = {
     t: (key: string) => string;
     taskTitle?: string;
     taskId: string;
-    attachments: Attachment[];
     showDescriptionPreview: boolean;
     editDescription: string;
     isRtl: boolean;
@@ -53,7 +52,6 @@ export function DescriptionField({
     t,
     taskTitle,
     taskId,
-    attachments,
     showDescriptionPreview,
     editDescription,
     isRtl,
@@ -152,12 +150,12 @@ export function DescriptionField({
                     onClick={handlePreviewClick}
                     onKeyDown={handlePreviewKeyDown}
                     className={cn(
-                        'group-data-[popup=true]/task-editor:min-h-48 w-full cursor-text text-left text-sm leading-6 bg-muted/30 border border-border rounded px-3 py-2 transition-[border-color,box-shadow] hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40',
+                        'w-full cursor-text text-left text-sm leading-6 bg-muted/30 border border-border rounded px-3 py-2 transition-[border-color,box-shadow] hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40',
                         isRtl && 'text-right'
                     )}
                     dir={resolvedDirection}
                 >
-                    <RichMarkdown markdown={editDescription || ''} attachments={attachments} />
+                    <RichMarkdown markdown={editDescription || ''} />
                 </div>
             ) : (
                 <div className="relative flex flex-col gap-2">
@@ -230,7 +228,6 @@ export function DescriptionField({
                 onEditorKeyDown={onKeyDown}
                 onEditorPaste={onPaste}
                 currentTaskId={taskId}
-                attachments={attachments}
             />
         </div>
     );

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import type { Attachment, Task } from '@mindwtr/core';
 import { LanguageProvider } from '../../contexts/language-context';
 import { TaskAttachmentOverlays } from './TaskAttachmentOverlays';
@@ -803,23 +803,4 @@ describe('UpNote Add Link compatibility', () => {
         expect(copy).toHaveBeenCalledWith(uri);
         vi.mocked(openAttachmentTarget).mockReset().mockResolvedValue(undefined);
     });
-});
-
-
-it('discards an image import that finishes after cancelling the draft', async () => {
-    invokeMock.mockRejectedValue(new Error('get_managed_data_dir not supported'));
-    let finishWrite!: () => void;
-    writeFileMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finishWrite = resolve; }));
-    const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
-    let importing!: Promise<Attachment[] | null>;
-    await act(async () => { importing = result.current.addDroppedFileAttachments([new File(['png'], 'image.png', { type: 'image/png' })]); });
-    await waitFor(() => expect(finishWrite).toBeTypeOf('function'));
-    expect(result.current.isImportingFiles).toBe(true);
-    act(() => result.current.resetAttachmentState([]));
-    let imported!: Attachment[] | null;
-    await act(async () => { finishWrite(); imported = await importing; });
-    expect(imported).toBeNull();
-    expect(result.current.editAttachments).toEqual([]);
-    expect(result.current.isImportingFiles).toBe(false);
-    expect(removeMock).toHaveBeenCalledWith(expect.stringMatching(/attachments\/.+\.png$/));
 });

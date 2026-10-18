@@ -918,7 +918,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                     dir={resolvedDirection}
                                     onMouseDown={(event) => event.stopPropagation()}
                                 >
-                                    <RichMarkdown markdown={task.description} attachments={task.attachments} />
+                                    <RichMarkdown markdown={task.description} />
                                 </div>
                             )}
                             {visibleAttachments.length > 0 && (

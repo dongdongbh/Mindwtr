@@ -92,8 +92,6 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     // this guard raised: leaking a managed copy is recoverable; deleting the only
     // bytes referenced by either snapshot is not.
     const attachmentSaveAwaitingDurabilityRef = useRef(false);
-    const importGenerationRef = useRef(0);
-    const [pendingFileImports, setPendingFileImports] = useState(0);
     const [attachmentError, setAttachmentError] = useState<string | null>(null);
     const [audioAttachment, setAudioAttachment] = useState<Attachment | null>(null);
     const [audioSource, setAudioSource] = useState<string | null>(null);
@@ -468,36 +466,26 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
 
     // Attachments stay in editor-local state until the task is saved, same
     // as addFileAttachment above; removing a chip before saving is the undo.
-    const addDroppedFileAttachments = useCallback(async (files: File[]): Promise<Attachment[] | null> => {
-        if (sandboxMode || !isTauriRuntime()) {
-            setAttachmentError(t(sandboxMode ? 'sandbox.unavailable' : 'attachments.fileNotSupported'));
-            return [];
+    const addDroppedFileAttachments = useCallback(async (files: File[]) => {
+        if (sandboxMode) {
+            setAttachmentError(t('sandbox.unavailable'));
+            return;
         }
-        const generation = importGenerationRef.current;
-        const imported: Attachment[] = [];
-        setPendingFileImports((count) => count + 1);
+        if (!isTauriRuntime()) {
+            setAttachmentError(t('attachments.fileNotSupported'));
+            return;
+        }
         setAttachmentError(null);
         let firstErrorKey: string | null = null;
-        try {
-            for (const file of files) {
-                const result = await importDroppedFileAttachment(file);
-                if (generation !== importGenerationRef.current) {
-                    if ('attachment' in result) await deleteOrphanedAttachmentFiles([result.attachment]);
-                    return null;
-                }
-                if ('errorKey' in result) {
-                    firstErrorKey ??= result.errorKey;
-                    continue;
-                }
-                imported.push(result.attachment);
-                editAttachmentsRef.current = [...editAttachmentsRef.current, result.attachment];
-                setEditAttachments(editAttachmentsRef.current);
+        for (const file of files) {
+            const result = await importDroppedFileAttachment(file);
+            if ('errorKey' in result) {
+                firstErrorKey ??= result.errorKey;
+                continue;
             }
-            if (firstErrorKey) setAttachmentError(t(firstErrorKey));
-            return imported;
-        } finally {
-            setPendingFileImports((count) => count - 1);
+            setEditAttachments((prev) => [...prev, result.attachment]);
         }
+        if (firstErrorKey) setAttachmentError(t(firstErrorKey));
     }, [sandboxMode, t]);
 
     const addLinkAttachment = useCallback(() => {
@@ -680,13 +668,11 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, [settleAttachmentFiles]);
 
     useEffect(() => () => {
-        importGenerationRef.current += 1;
         if (attachmentSaveAwaitingDurabilityRef.current) return;
         settleAttachmentFiles(baselineAttachmentsRef.current, true);
     }, [settleAttachmentFiles]);
 
     const resetAttachmentState = useCallback((attachments: Attachment[] | undefined) => {
-        importGenerationRef.current += 1;
         const nextList = attachments || [];
         if (!attachmentSaveAwaitingDurabilityRef.current) {
             settleAttachmentFiles(nextList, true);
@@ -701,7 +687,6 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
 
     return {
         editAttachments,
-        isImportingFiles: pendingFileImports > 0,
         setEditAttachments,
         attachmentError,
         setAttachmentError,

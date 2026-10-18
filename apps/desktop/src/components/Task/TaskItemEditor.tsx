@@ -82,7 +82,6 @@ interface TaskItemEditorProps {
     onConvertToSection?: () => void;
     onCancel: () => void;
     onSubmit: (e: FormEvent) => void;
-    isImportingFiles?: boolean;
     onFilesDropped?: (files: File[]) => void;
 }
 
@@ -143,7 +142,6 @@ export function TaskItemEditor({
     onConvertToSection,
     onCancel,
     onSubmit,
-    isImportingFiles = false,
     onFilesDropped,
 }: TaskItemEditorProps) {
     // Draft values and setField bindings, under the names the form below was
@@ -300,11 +298,7 @@ export function TaskItemEditor({
 
     return (
         <form
-            data-popup={isModalEditor || undefined}
-            onSubmit={(event) => {
-                if (isImportingFiles) { event.preventDefault(); return; }
-                onSubmit(event);
-            }}
+            onSubmit={onSubmit}
             onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                     event.preventDefault();
@@ -319,7 +313,7 @@ export function TaskItemEditor({
                     if (typeof form.requestSubmit === 'function') {
                         form.requestSubmit();
                     } else {
-                        if (!isImportingFiles) onSubmit(event as unknown as FormEvent);
+                        onSubmit(event as unknown as FormEvent);
                     }
                 }
             }}
@@ -329,7 +323,7 @@ export function TaskItemEditor({
             onDragLeave={handleFormDragLeave}
             onDrop={handleFormDrop}
             className={cn(
-                'group/task-editor flex flex-col gap-3',
+                'flex flex-col gap-3',
                 isModalEditor ? 'max-h-[calc(90vh-3rem)]' : 'max-h-[80vh]',
                 isFileDragOver && 'ring-2 ring-primary/50',
             )}
@@ -377,7 +371,7 @@ export function TaskItemEditor({
                         ariaLabel={t('taskEdit.titleLabel')}
                         className={cn(
                             'w-full rounded-sm bg-transparent border-b border-primary/60 px-1 pb-1.5 pt-0 font-semibold text-foreground placeholder:text-muted-foreground transition-colors focus:border-primary focus:ring-0 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1 focus-visible:ring-offset-card outline-none motion-reduce:transition-none',
-                            isModalEditor ? 'text-2xl leading-9 border-transparent hover:border-border' : 'text-lg leading-7',
+                            isModalEditor ? 'text-2xl leading-9' : 'text-lg leading-7',
                         )}
                         containerClassName="flex-1 min-w-0"
                         dir={titleDirection}
@@ -605,7 +599,6 @@ export function TaskItemEditor({
                 <div className="flex flex-wrap gap-2 ml-auto">
                     <button
                         type="submit"
-                        disabled={isImportingFiles}
                         className={cn(
                             'bg-primary text-primary-foreground hover:bg-primary/90',
                             isModalEditor ? 'min-h-10 rounded-md px-4 py-2 text-sm' : 'rounded px-3 py-1.5 text-xs',

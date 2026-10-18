@@ -13,7 +13,6 @@ type UseTaskItemSubmitParams = {
     baselineTask: Task;
     draft: TaskDraft;
     editAttachments: Attachment[] | undefined;
-    isImportingFiles?: boolean;
     editingTaskId: string | null;
     setEditingTaskId: (id: string | null) => void;
     setIsEditing: (value: boolean) => void;
@@ -38,7 +37,6 @@ export function useTaskItemSubmit({
     baselineTask,
     draft,
     editAttachments,
-    isImportingFiles = false,
     editingTaskId,
     setEditingTaskId,
     setIsEditing,
@@ -52,7 +50,6 @@ export function useTaskItemSubmit({
 }: UseTaskItemSubmitParams) {
     return useCallback(async (event?: React.FormEvent, options?: TaskItemSubmitOptions) => {
         event?.preventDefault();
-        if (isImportingFiles) return { success: false };
         const patch = taskDraftToChangedUpdatePatch(draft, baselineTask, {
             statusOverride: options?.statusOverride,
             attachments: editAttachments,
@@ -97,7 +94,6 @@ export function useTaskItemSubmit({
         baselineTask,
         draft,
         editAttachments,
-        isImportingFiles,
         editingTaskId,
         beginAttachmentSave,
         cancelAttachmentSaveBeforeStoreUpdate,
