@@ -14,6 +14,9 @@
 //       folder is edited, HOME, then the app comes back (its resume sync, in a process that has synced and saved before). With taps on, the phone taps the Focus and Inbox tabs in turn every
 //       ~0.6 s from launch: each tap starts a core read, so the trace shows how long a screen command waits while sync runs.
 //       Traces go to <out dir>/<label>-<n>.perfetto-trace, the summary to <out dir>/<label>.json.
+//       MERGE_BENCH_ATTACHMENTS=<n> (D9b §1, a series with active attachment transfers): each sample also adds <n> new
+//       attachments of MERGE_BENCH_ATTACHMENT_KB KiB (default 512) to the folder's document and their files to its
+//       attachments folder, so the measured cycle downloads them while the taps run.
 //   node measure-merge-device.mjs analyze <trace>...
 //       Per trace: the sync's engine-thread sections (sync:*, io:*, sql:*), the engine's uninterrupted blocks during sync,
 //       the engine thread's states, and each screen command's wait (core:wait on its own thread) with its queue time and the
@@ -90,6 +93,27 @@ if (command === 'rkstorage') {
     adb('reverse', `tcp:${PORT}`, `tcp:${PORT}`);
     const documentPath = `${FOLDER}/data.json`;
     let etagVersion = 0;
+    const attachmentsPerRound = Number(process.env.MERGE_BENCH_ATTACHMENTS ?? 0);
+    const attachmentBytes = Number(process.env.MERGE_BENCH_ATTACHMENT_KB ?? 512) * 1024;
+    if (attachmentsPerRound > 0) dav.state.files.set(`${FOLDER}/attachments`, { dir: true });
+    /** [count] new attachments, each on its own task, with their files in the folder (a download each for the phone). */
+    const addRemoteAttachments = (doc, round, now) => {
+        const owners = doc.tasks.filter((task) => !task.deletedAt).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, attachmentsPerRound);
+        owners.forEach((task, i) => {
+            const id = `bench-attachment-${round}-${i}`;
+            const body = Buffer.alloc(attachmentBytes, `${id} `);
+            const cloudKey = `attachments/${id}.bin`;
+            dav.state.files.set(`${FOLDER}/${cloudKey}`, { body, etag: `"${id}"` });
+            task.attachments = [...(task.attachments ?? []), {
+                id, kind: 'file', title: `${id}.bin`, uri: '', mimeType: 'application/octet-stream', size: body.length, cloudKey,
+                fileHash: createHash('sha256').update(body).digest('hex'), createdAt: now, updatedAt: now,
+            }];
+            task.updatedAt = now;
+            task.rev = (task.rev ?? 0) + 1;
+            task.revBy = 'merge-bench-remote';
+        });
+        return owners.length;
+    };
     /** The folder's document with [count] tasks edited as another device would: a new title, a newer rev and updatedAt. */
     const editRemote = (round) => {
         const file = dav.state.files.get(documentPath);
@@ -110,9 +134,10 @@ if (command === 'rkstorage') {
             task.rev = (task.rev ?? 0) + 1;
             task.revBy = 'merge-bench-remote';
         }
+        const attachments = round > 0 && attachmentsPerRound > 0 ? addRemoteAttachments(doc, round, now) : 0;
         const body = Buffer.from(JSON.stringify(doc, null, 2));
         dav.state.files.set(documentPath, { body, etag: `"bench-${++etagVersion}-${createHash('sha1').update(body).digest('hex').slice(0, 12)}"` });
-        return { tasks: doc.tasks.length, edited: live.length, bytes: body.length };
+        return { tasks: doc.tasks.length, edited: live.length, attachments, bytes: body.length };
     };
     const phoneTime = () => sh('date +%s.%3N');
     /** Core's last line of a sync cycle after [since] (mobile-sync-service.ts: complete, or error). */

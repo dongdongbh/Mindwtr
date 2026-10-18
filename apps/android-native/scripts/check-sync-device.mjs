@@ -13,6 +13,10 @@
 //   (3) convergence with the second device: it joins the same folder and adds a task with an emoji title; Sync now on the
 //       phone brings it in exactly; the phone swipes it on and adds one, its automatic sync (a data change) uploads both,
 //       and the second device reads them back with the emoji title intact;
+//   (3b) killed mid-sync (D9b §7): the phone's automatic sync waits on its document write; a capture lands meanwhile and
+//       the process dies after core's reply, before the journal deletes the entry (debug.mindwtr.native.journal_stop). The
+//       relaunched app's journal re-sends it; it is stored once, and the next syncs bring both captures to the folder and the
+//       second device exactly once;
 //   (4) the WebDAV server down (503): the phone's automatic sync after a capture fails, the status line shows the
 //       failure, the Menu tab's dot turns to attention, the capture stays on the phone and nothing reaches the server;
 //   (5) a failed remote write: every PUT of the sync document fails; the phone's sync fails and keeps its retry, and once
@@ -74,6 +78,8 @@ const titles = {
     failed: `93${run}3`,
     cloudHost: `Cloud ✓ 雲 😀 ${run}`,
     offline: `93${run}4`,
+    midSync: `93${run}5`,
+    killed: `93${run}6`,
 };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
@@ -247,7 +253,11 @@ const badge = () => [...logs().matchAll(/Native Android sync state badge=(\w+) c
 let dav = null;
 let cloud = null;
 let second = null;
+const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
+/** Live tasks titled [title] in the phone's database (the map above hides duplicates). */
+const storedCount = (title) => sqlite(pullFile(`files/${DB}`, 'db'), `SELECT COUNT(*) AS n FROM tasks WHERE deletedAt IS NULL AND title = '${title}'`)[0].n;
 const cleanup = cleanupOnExit([
+    () => setProp('journal_stop', ''),
     () => execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' }),
     () => execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${CLOUD_PORT}`], { stdio: 'ignore' }),
     () => { void dav?.close(); },
@@ -347,6 +357,68 @@ try {
     const secondNow = await second.titles();
     check(secondNow.includes(titles.phone) && !secondNow.includes(titles.host), `(3) the second device has the phone's capture, and the emoji task left its Inbox (${movedTo})`);
     check(webdavDocument(dav, FOLDER).tasks.find((task) => task.title === titles.host)?.title === titles.host, '(3) the emoji title round-tripped byte for byte');
+
+    // (3b) Killed mid-sync, a journaled capture answered and not yet dropped from the journal.
+    let release = () => {};
+    dav.state.holdWrites = new Promise((done) => { release = done; });
+    const heldBefore = dav.state.heldAt.length;
+    await capture(titles.midSync);
+    await until('the phone\'s automatic sync to wait on its document write', () => dav.state.heldAt.length > heldBefore, 300_000, 500);
+    const heldSince = dav.state.heldAt[heldBefore];
+    check(true, '(3b) the phone\'s automatic sync waits on its document write');
+    await toInbox();
+    const popup = await device.openCapture();
+    await device.focusAtEnd(tagged(popup, 'capture-title') ?? fail('no capture field'));
+    requireAppFront();
+    sh(`input text '${titles.killed}'`);
+    await waitFor(`"${titles.killed}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === titles.killed, 15_000);
+    const killedPid = pid();
+    setProp('journal_stop', 'after:captureSubmit');
+    try {
+        await tap(button(await screen(), en['common.save']) ?? fail('no Save'));
+        await until('the process to stop after core\'s reply', () => pid() !== killedPid, 30_000, 100);
+    } finally {
+        setProp('journal_stop', '');
+    }
+    // The held write fails on the phone's 30 s request timeout (core http-utils DEFAULT_TIMEOUT_MS): within it, the sync still waited.
+    const heldMs = Date.now() - heldSince;
+    check(device.logs(killedPid, TAG).includes('Native Android journal stop at=after op=captureSubmit') && heldMs < 30_000,
+        `(3b) the process died mid-sync (${Math.round(heldMs / 1000)} s into the held write), after core's reply to the capture and before the journal dropped it`);
+    await sleep(1500);
+    if (!pid() || pid() === killedPid) {
+        await waitFor('the home screen or the app', () => front().includes(`${home}/`) || front().includes(`${PKG}/`), 15_000);
+        device.launch(ACTIVITY);
+    }
+    let replayLine = '';
+    await waitFor('the boot\'s journal replay', () => {
+        replayLine = (pid() && logs().split('\n').find((line) => line.includes('Native Android journal replay'))) || '';
+        return Boolean(replayLine);
+    }, 60_000);
+    // CoreHost counts a re-sent entry that core answered as dropped (CoreHost.kt replay), as check-journal-device reads it.
+    check(/sent=1 dropped=1 left=0 owed=none/.test(replayLine), `(3b) the relaunched app's journal re-sent the capture (${replayLine.trim().slice(-80)})`);
+    check(storedCount(titles.killed) === 1 && storedCount(titles.midSync) === 1, '(3b) the phone stores each capture once');
+    release();
+    dav.state.holdWrites = null;
+    // A home-screen widget may have restarted the process in the background: bring the app to the front.
+    if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);
+    await waitFor('the Inbox', onInbox, 60_000);
+    // The dead process's sync fence stays until its heartbeat is overdue; the automatic retries then take it over.
+    await until('the next syncs to bring both captures to the folder', () => {
+        const live = (webdavDocument(dav, FOLDER)?.tasks ?? []).filter((task) => !task.deletedAt);
+        return [titles.midSync, titles.killed].every((title) => live.filter((task) => task.title === title).length === 1);
+    }, 600_000, 3_000);
+    check(true, '(3b) the next syncs wrote both captures to the folder, once each');
+    // The phone's cycle may still hold the sync location (its second save, then the fence release): retry while it does.
+    for (const deadline = Date.now() + 180_000; ;) {
+        const answer = JSON.stringify(await second.syncNow('webdav', { ...webdavFields, password: null }));
+        if (!answer.includes('holding this sync location')) break;
+        if (Date.now() > deadline) fail('the second device stayed fenced out of the folder for 3 minutes');
+        await sleep(5_000);
+    }
+    const secondAfterKill = await second.titles();
+    check([titles.midSync, titles.killed].every((title) => secondAfterKill.filter((shownTitle) => shownTitle === title).length === 1),
+        '(3b) the second device has both captures, once each');
+    check(storedCount(titles.killed) === 1, '(3b) after the syncs the phone still stores the killed capture once');
 
     // (4) The server down: an automatic sync fails on the status line and changes no data.
     const [badgeBefore] = badge();
