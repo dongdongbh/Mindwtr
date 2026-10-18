@@ -576,8 +576,8 @@ export function TaskItemEditor({
                 )}
                 <div className="flex flex-wrap gap-2 ml-auto">
                     <button
-                        type="submit"
                         disabled={isImportingFiles}
+                        type="submit"
                         className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded hover:bg-primary/90"
                     >
                         {t('common.save')}
