@@ -16,7 +16,10 @@
  * - the background job (S4a): core's background runner (mobile-background-sync.ts: its deadline, failure cooldown, capture
  *   run and quiesce), which CoreWork's jobs call after the app's start order; core decides whether the job is scheduled.
  *
- * Not on this host yet, and refused the way core refuses an unbound port: Dropbox (S4) and File Sync's folder (S5). The fence
+ * - File Sync (S5): core's mobile-file-sync.ts on the host's SAF channel (HostDocuments.kt: RN's SafDocumentsCore) and folder
+ *   lock (HostSyncLock.kt: RN's SyncFileLockCore), as RN's lib/file-sync-host.ts and lib/sync-file-lock.ts bind them.
+ *
+ * Not on this host yet, and refused the way core refuses an unbound port: Dropbox (S4). The fence
  * owner stays `mindwtr-mobile` and the device keys keep RN's names, so an upgraded RN user's configuration and deviceId carry over.
  * iOS construction is explicit and foreground-only; the entry admits Off, WebDAV and self-hosted settings. Both admission
  * and actual self-hosted cycles refuse unfinished encryption transitions. This factory does not alter stored provider choices.
@@ -37,6 +40,8 @@ import {
     classifySyncFailure,
     coerceSupportedBackend,
     createAutoSyncController,
+    createMobileFileSync,
+    createMobileFileSyncLeases,
     createMobileBackgroundSyncRunner,
     createMobileSyncService,
     createMobileSyncTriggers,
@@ -61,8 +66,16 @@ import {
     sanitizeLogMessage,
     shouldScheduleMobileBackgroundSync,
     useTaskStore,
+    FileSyncRetainedGenerationError,
+    FileSyncUnverifiedReadError,
+    SyncFileLockBusyError,
+    SyncFileLockIdentityLostError,
+    SyncFileLockUnavailableError,
     type AppData,
     type SqliteAdapter,
+    type MobileFileSyncFullHost,
+    type MobileFileSyncLease,
+    type MobileFileSyncSafPort,
     type AutoSyncController,
     type DiagnosticsLogEntry,
     type MobileBackgroundSyncTrigger,
@@ -170,6 +183,31 @@ const unavailable = (what: string) => async (): Promise<never> => {
     throw new Error(`${what} is not available on this build yet`);
 };
 
+/** host-polyfills.js's SAF channel (HostDocuments.kt): a call's value, and a read's bytes. */
+export type HostDocumentCall = (request: Record<string, unknown>, bytes?: Uint8Array) => Promise<{ value: unknown; bytes: Uint8Array | null }>;
+/** host-polyfills.js's folder lock channel (HostSyncLock.kt). */
+export type HostSyncLockCall = (request: Record<string, unknown>) => Promise<unknown>;
+
+const refusePath = (): never => {
+    throw new Error('File Sync paths (file://) are not available on this host: pick a folder in Settings › Sync');
+};
+
+/** Core's File Sync SAF port on the host's SAF channel; every provider failure rejects with HostDocuments' coded text. */
+export const createHostSafPort = (call: HostDocumentCall): MobileFileSyncSafPort => ({
+    listChildren: async (uri) => (await call({ op: 'listChildren', uri })).value as Awaited<ReturnType<MobileFileSyncSafPort['listChildren']>>,
+    stat: async (uri) => (await call({ op: 'stat', uri })).value as Awaited<ReturnType<MobileFileSyncSafPort['stat']>>,
+    readBytes: async (uri) => {
+        const read = await call({ op: 'read', uri });
+        return { bytes: read.bytes ?? new Uint8Array(0), lengthVerified: (read.value as { lengthVerified?: unknown } | null)?.lengthVerified === true };
+    },
+    writeBytes: async (uri, bytes) => { await call({ op: 'write', uri }, bytes); },
+    writeText: async (uri, text) => { await call({ op: 'write', uri }, new TextEncoder().encode(text)); },
+    createFile: async (uri, name, mimeType) => (await call({ op: 'createFile', uri, name, mimeType })).value as string,
+    delete: async (uri) => { await call({ op: 'delete', uri }); },
+    makeDirectory: async (uri, name) => (await call({ op: 'makeDirectory', uri, name })).value as string,
+    rename: async (uri, name) => (await call({ op: 'rename', uri, name })).value as { uri: string; name: string },
+});
+
 /** Missing provider is RN's legacy self-hosted default; explicit unbound providers stay closed. */
 export const isNativeIosSelfHostedProvider = (value: string | null | undefined): boolean => {
     const provider = value?.trim() || null;
@@ -218,9 +256,54 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     const crypto = createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: HostCryptoCall }).__mindwtrCryptoCall);
 
+    // File Sync (S5): core's document reads and writes (mobile-file-sync.ts) on the host's SAF channel, as RN's
+    // lib/file-sync-host.ts binds them to expo, and the folder lock (RN's SyncFileLockCore) as RN's lib/sync-file-lock.ts binds
+    // it. Android folders are SAF trees only: a `file://` path is refused, and there are no iOS bookmarks here.
+    const documentCall = (globalThis as { __mindwtrDocumentCall?: HostDocumentCall }).__mindwtrDocumentCall;
+    const syncLockCall = (globalThis as { __mindwtrSyncLockCall?: HostSyncLockCall }).__mindwtrSyncLockCall;
+    const safPort = documentCall ? createHostSafPort(documentCall) : null;
+    const fileSyncHost: MobileFileSyncFullHost = {
+        os: () => platform,
+        saf: safPort,
+        path: {
+            exists: () => false,
+            info: refusePath,
+            list: refusePath,
+            readBytes: refusePath,
+            readText: refusePath,
+            writeBytes: refusePath,
+            createExclusive: refusePath,
+            writeCreated: refusePath,
+            delete: refusePath,
+            rename: refusePath,
+        },
+        bookmarks: { supported: () => false, readText: async () => null },
+        log: {
+            info: (message, context) => { void logLine('info', message, context); },
+            warn: (message, context) => { void logLine('warn', message, context); },
+            error: (error, context) => { void logError(error, { scope: context?.scope ?? 'sync', extra: context?.extra }); },
+        },
+        encryption: {
+            localState: encryptionState.syncEncryptionLocalState,
+            flush: () => encryptionState.flushSyncEncryptionLocalState(),
+            logEvent: (event, extra) => encryptionState.logSyncEncryptionEvent(event, extra),
+        },
+        crypto,
+    };
+    const fileSync = createMobileFileSync(fileSyncHost);
+    const leases = createMobileFileSyncLeases({
+        platform: () => platform,
+        nativeModule: () => (syncLockCall ? {
+            // Only a picked folder is locked: a `file://` path is refused before the lock opens anything.
+            acquireAsync: async (uri: string) => (uri.startsWith('content://') ? await syncLockCall({ op: 'acquire', uri }) as string : refusePath()),
+            revalidateAsync: async (token: string) => { await syncLockCall({ op: 'revalidate', token }); },
+            releaseAsync: async (token: string) => { await syncLockCall({ op: 'release', token }); },
+        } : null),
+    });
+
     // Core's encryption transitions (enable, change, disable, unlock), as RN's lib/sync-encryption-service.ts binds them. They
-    // run on core's serialized sync queue, so a transition and a cycle never interleave. Dropbox and File Sync come later.
-    const transitions = createSyncEncryptionService<never>({
+    // run on core's serialized sync queue, so a transition and a cycle never interleave. Dropbox comes later.
+    const transitions = createSyncEncryptionService<MobileFileSyncLease>({
         maxEncryptedArtifactBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         storage,
         state: encryptionState,
@@ -237,7 +320,43 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         webDavRequestOptions: (allowInsecureHttp) => getMobileWebDavRequestOptions(allowInsecureHttp),
         getDropboxClientId: async () => '',
         runDropboxAuthorized: unavailable('Dropbox'),
+        // RN's lib/sync-encryption-service.ts fileSync: the same lease; a SAF folder has no path publications to recover.
+        ...(safPort ? {
+            fileSync: {
+                acquireLease: (syncPath: string) => leases.acquire(syncPath),
+                openRemotePort: (syncPath: string) => fileSync.createFileSyncEncryptionRemotePort(syncPath),
+                revalidateLease: (lease: MobileFileSyncLease) => leases.revalidate(lease),
+                releaseLease: (lease: MobileFileSyncLease) => leases.release(lease),
+                isLeaseIdentityLostError: (error: unknown) => error instanceof SyncFileLockIdentityLostError,
+            },
+        } : {}),
     });
+
+    // The diagnostics line a File Sync cycle ends with (performSync): the first refusal one of the cycle's File Sync ports saw,
+    // the folder's provider and the retained copies the guard counted. Null while the cycle touched no File Sync port.
+    let fileCycle: { outcome: string | null; provider: string; retained: number } | null = null;
+    const takeFileCycle = () => {
+        const ended = fileCycle;
+        fileCycle = null;
+        return ended;
+    };
+    const noteFileSync = async <T>(uri: string, run: () => Promise<T>): Promise<T> => {
+        fileCycle ??= { outcome: null, provider: /^content:\/\/([^/]+)/.exec(uri)?.[1] ?? 'none', retained: 0 };
+        try {
+            return await run();
+        } catch (error) {
+            if (fileCycle && !fileCycle.outcome) {
+                if (error instanceof FileSyncRetainedGenerationError) fileCycle.retained = error.retained;
+                fileCycle.outcome = error instanceof SyncFileLockBusyError ? 'lock-busy'
+                    : error instanceof SyncFileLockUnavailableError ? 'lock-unavailable'
+                    : error instanceof FileSyncRetainedGenerationError ? 'retained-refused'
+                    : error instanceof FileSyncUnverifiedReadError ? 'unverified-read'
+                    : String(error).includes('SAF_DOCUMENT_INCOMPLETE') ? 'incomplete-read'
+                    : 'failed';
+            }
+            throw error;
+        }
+    };
 
     const networkListeners = new Set<(state: MobileSyncNetworkState) => void>();
 
@@ -252,6 +371,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         },
         crypto,
         retireLocalAttachment: bindings.retireLocalAttachment,
+        saf: safPort,
         maxWebdavBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         maxCloudBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         encryption: {
@@ -261,7 +381,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     }, channels) : null;
 
     const syncFetch = createDeadlineFetch((input, init) => fetch(input, init));
-    const service = createMobileSyncService<never>({
+    const service = createMobileSyncService<MobileFileSyncLease>({
         // iOS cleanup authority lasts for one admitted foreground invocation.
         allowQueuedFollowUp: platform !== 'ios',
         storage,
@@ -348,7 +468,17 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             getValidAccessTokenForTokens: unavailable('Dropbox'),
             forceRefreshAccessTokenForTokens: unavailable('Dropbox'),
         },
-        fileSync: {
+        // RN's lib/sync-service.ts fileSync, on core's File Sync and the host's lock (refused where the host has no SAF channel).
+        fileSync: safPort ? {
+            readVersioned: (path, options) => noteFileSync(path, () => fileSync.readSyncFileVersioned(path, options)),
+            write: (path, data, options) => noteFileSync(path, () => fileSync.writeSyncFile(path, data, options)),
+            resolveUri: (uri, options) => fileSync.resolveSyncFileUri(uri, options),
+            isBookmarksAvailable: () => false,
+            resolveBookmark: async () => null,
+            acquireLease: (path) => noteFileSync(path, () => leases.acquire(path)),
+            revalidateLease: (lease) => noteFileSync('', () => leases.revalidate(lease)),
+            releaseLease: (lease) => leases.release(lease),
+        } : {
             readVersioned: unavailable('File sync'),
             write: unavailable('File sync'),
             resolveUri: unavailable('File sync'),
@@ -456,6 +586,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
         if (fatalCleanupError) throw fatalCleanupError;
         if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
+        takeFileCycle();
+        let succeeded = false;
         try {
             const before = platform === 'ios' && options.manual && !options.activationProbe
                 ? useTaskStore.getState().settings : null;
@@ -468,11 +600,20 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                     iosAutomaticController?.notifyExternalSyncSuccess();
                 }
             }
+            succeeded = answer.success;
             return answer;
         } catch (error) {
             if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
             throw error;
         } finally {
+            const ended = takeFileCycle();
+            if (ended) {
+                const encrypted = (await encryptionState.getSyncEncryptionStatus().catch(() => null))?.state === 'enabled';
+                await logLine('info', 'Native Android File Sync cycle', { scope: 'sync', extra: {
+                    releaseCheck: 'v1.3.7/native-file-sync', outcome: ended.outcome ?? (succeeded ? 'synced' : 'failed'),
+                    provider: ended.provider, encrypted: encrypted ? 'yes' : 'no', retained: ended.retained,
+                } });
+            }
             if (!fatalCleanupError) {
                 cycles += 1;
                 if (platform === 'ios') await refreshConfigured();

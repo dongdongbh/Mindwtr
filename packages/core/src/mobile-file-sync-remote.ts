@@ -71,6 +71,8 @@ export type MobileFileSyncSafPort = {
     createFile(dirUri: string, name: string, mimeType: string): Promise<string>;
     /** Deletes a document; one already gone is no error. */
     delete(uri: string): Promise<void>;
+    /** Creates a subfolder and answers its URI (the attachment pass's `attachments` folder); absent where File Sync never makes one. */
+    makeDirectory?(parentUri: string, name: string): Promise<string>;
     /** Renames a document (only where the provider supports it) and answers the new URI and the name it reports. */
     rename(uri: string, displayName: string): Promise<{ uri: string; name: string }>;
 };

@@ -1854,6 +1854,9 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     assert.match(hostEntry, /scheduleBackgroundSync: \(on\) => \{ const bridge = native\(\); if \(bridge\.bgSyncSchedule\) checked\(bridge\.bgSyncSchedule\(on\)\); \},/);
     const tested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-sync.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(tested.status, 0, `bundle/host-sync.test.ts: ${tested.stderr.slice(-1500)}`);
+    // S5: File Sync on the host's SAF and lock channels, its encryption transitions and its diagnostics line (bun).
+    const fileSyncTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-file-sync.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(fileSyncTested.status, 0, `bundle/host-file-sync.test.ts: ${fileSyncTested.stderr.slice(-1500)}`);
     // C3: the external calendars' device binding and each screen's feed (bundle/host-calendar.test.ts, bun).
     const calendarTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-calendar.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(calendarTested.status, 0, `bundle/host-calendar.test.ts: ${calendarTested.stderr.slice(-1500)}`);

@@ -72,6 +72,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'priorRemoteTasksSig', 'priorRemoteProjectsSig', 'priorRemoteSectionsSig', 'priorRemoteAreasSig', 'priorRemotePeopleSig', 'priorRemoteSettingsSig',
     // native-large-transfer: Settings › Data's operation sizes and memory peaks in whole MiB, and its seconds (pass D1c).
     'sourceMiB', 'libraryMiB', 'seconds', 'nativePeakMiB', 'javaPeakMiB',
+    // native-file-sync reuses releaseCheck, outcome and provider (the folder's URI authority) below; encrypted is yes/no.
+    'encrypted', 'retained',
     // native-share-files reuses skipped below; counts only.
     'candidates', 'attached', 'unreadable',
     // webdav-weak-etag-adopt: per-pass counts only; no URL, cloud key or id.

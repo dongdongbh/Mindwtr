@@ -195,3 +195,73 @@ describe('selected existing native attachment preparation adapter', () => {
         expect(calls).toEqual(['getInfo']); expect(network).not.toHaveBeenCalled(); expect(memory.read(uri)).toBeUndefined();
     });
 });
+
+describe('native File Sync attachment pass', () => {
+    it('writes a new attachment generation into the picked SAF folder through the host SAF port', async () => {
+        const TREE = 'content://com.android.externalstorage.documents/tree/primary%3AMindwtr';
+        const FOLDER = `${TREE}/document/primary%3AMindwtr`;
+        const memory = createMemoryFileSystem();
+        const bytes = new TextEncoder().encode('fixture');
+        const digest = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
+        const children = new Map<string, { uri: string; name: string }[]>([[FOLDER, []]]);
+        const saf: NonNullable<NativeAttachmentBindings['saf']> = {
+            listChildren: async (uri) => (children.get(uri) ?? []).map((entry) => ({ ...entry, size: null })),
+            stat: async (uri) => [...children.values()].flat().find((entry) => entry.uri === uri)
+                ? { uri, name: [...children.values()].flat().find((entry) => entry.uri === uri)!.name, size: null } : null,
+            readBytes: async () => { throw new Error('Unexpected sync-file read'); },
+            writeBytes: async (uri, value) => { memory.put(uri, value); },
+            writeText: async () => { throw new Error('Unexpected text write'); },
+            createFile: async (parent, name) => {
+                const uri = `${parent}%2F${name}`;
+                children.get(parent)!.push({ uri, name });
+                return uri;
+            },
+            makeDirectory: async (parent, name) => {
+                const uri = `${parent}%2F${name}`;
+                children.get(parent)!.push({ uri, name });
+                children.set(uri, []);
+                return uri;
+            },
+            delete: async () => { throw new Error('Unexpected delete'); },
+            rename: async () => { throw new Error('Unexpected rename'); },
+        };
+        const channels: NativeFileChannels = {
+            directories: { document: DOCUMENTS, cache: CACHE },
+            files: async (request, body) => {
+                const uri = String(request.uri ?? '');
+                switch (String(request.op)) {
+                    case 'getInfo': return memory.fs.getInfo(uri);
+                    case 'makeDirectory': return memory.fs.makeDirectory(uri);
+                    case 'copy': return memory.fs.copy(uri, String(request.to));
+                    case 'delete': return memory.fs.delete(uri);
+                    case 'readBytes': return memory.fs.readBytes(uri);
+                    case 'sha256': return digest(body!);
+                    case 'sha256File': return digest(memory.read(uri)!);
+                    default: throw new Error(`Unexpected fixture file operation ${String(request.op)}`);
+                }
+            },
+            installer: async () => { throw new Error('Unexpected installer operation'); },
+            deleteNow: () => { throw new Error('Unexpected raw delete'); },
+        };
+        const local = createNativeLocalAttachmentConfiguration();
+        const warnings: string[] = [];
+        const native = createNativeAttachments({ ...local, saf,
+            encryption: { getSyncEncryptionMaterial: async () => null, logSyncEncryptionEvent: () => {} },
+            log: { info: () => {}, warn: (message, context) => { warnings.push(`${message} ${JSON.stringify(context ?? {})}`); }, sanitize: (message) => message },
+            storage: { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined } }, channels);
+        const uri = `${MANAGED}fixture.pdf`;
+        memory.put(uri, bytes);
+        const data: AppData = { tasks: [{ id: 'task-1', title: 'Fixture', status: 'inbox', tags: [], contexts: [],
+            createdAt: DATE, updatedAt: DATE, attachments: [{ ...attachment(uri), localStatus: 'available' }] }],
+        projects: [], sections: [], areas: [], settings: {} };
+
+        const result = await native.syncPort.syncFile(data, FOLDER, new AbortController().signal, { activationProbe: false });
+
+        expect(warnings).toEqual([]);
+        const cloudKey = (result as AppData).tasks[0].attachments![0].cloudKey!;
+        expect(cloudKey).toStartWith('attachments/');
+        const written = children.get(`${FOLDER}%2Fattachments`)!;
+        expect(written.map((entry) => entry.name)).toEqual([cloudKey.split('/').pop()!]);
+        expect(memory.read(written[0].uri)).toEqual(bytes);
+    });
+});

@@ -9,7 +9,7 @@
  * - core's native installer port to RN's installer Kotlin (`__mindwtrInstallerCall`, HostInstaller.kt);
  * - the device keys, the keystore, the log, sync encryption's state and cipher, through host-sync.ts's bindings.
  *
- * Not on this host yet, and refused the way an unbound port is: File Sync's folder and its immutable publication (S5), Dropbox
+ * Not on this host yet, and refused the way an unbound port is: a `file://` File Sync folder and its immutable publication, Dropbox
  * (S4), the streamed upload (a WebDAV or cloud upload sends its bytes in one PUT, as RN does where expo has no upload task).
  */
 // Load this leaf directly across deferred store imports and the iOS core alias.
@@ -39,6 +39,7 @@ import {
     setSha256HexProvider,
     type MobileAttachmentFileInfo,
     type MobileAttachmentFileSystemPort,
+    type MobileFileSyncSafPort,
     type MobileSyncAttachmentsPort,
     type MobileSyncEncryptionPort,
     type MobileSyncLogPort,
@@ -64,6 +65,8 @@ export type NativeAttachmentBindings = {
     maxWebdavBufferedUploadBytes?: number;
     maxCloudBufferedUploadBytes?: number;
     retireLocalAttachment?: MobileAttachmentCleanupHost['retireLocalAttachment'];
+    /** File Sync's SAF channel (HostDocuments.kt, host-sync.ts createHostSafPort); absent: no File Sync attachments. */
+    saf?: MobileFileSyncSafPort | null;
 };
 
 declare const globalThis: Record<string, unknown>;
@@ -113,7 +116,11 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
         writeBytes: async (uri, bytes) => { await call({ op: 'writeBytes', uri }, bytes); },
         copy: async (from, to) => { await call({ op: 'copy', uri: from, to }); },
         move: async (from, to) => { await call({ op: 'move', uri: from, to }); },
-        delete: async (uri) => { await call({ op: 'delete', uri }); },
+        // A File Sync folder's document (a `content://` tree document) goes through the SAF channel; app files through HostFiles.
+        delete: async (uri) => {
+            if (uri.startsWith('content://') && bindings.saf) await bindings.saf.delete(uri);
+            else await call({ op: 'delete', uri });
+        },
         // A managed copy's delete (core's deleteManagedAttachmentFile): the files thread first finishes every call made before it
         // (`barrier`), then this engine turn asks keep() over the store as it is now and deletes at once, so a sync or command
         // that restored the attachment meanwhile (they run on this thread too) keeps its bytes (review finding 1).
@@ -125,8 +132,23 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
             await call({ op: 'syncParent', uri }).catch(() => undefined);
             return true;
         },
-        // Storage Access Framework folders come with File Sync (S5).
-        saf: () => null,
+        // File Sync's SAF folder (S5), as RN's attachment-sync-utils.ts binds expo's SAF calls: display names from the
+        // provider (listChildren, stat), and a write with no writability pre-check.
+        saf: () => {
+            const saf = bindings.saf;
+            if (!saf) return null;
+            return {
+                readDirectory: async (uri) => (await saf.listChildren(uri)).map((entry) => entry.uri),
+                listChildren: (uri) => saf.listChildren(uri),
+                stat: (uri) => saf.stat(uri),
+                makeDirectory: async (parentUri, name) => {
+                    if (!saf.makeDirectory) throw new Error('SAF folders cannot be created on this host');
+                    return saf.makeDirectory(parentUri, name);
+                },
+                createFile: (parentUri, name, mimeType) => saf.createFile(parentUri, name, mimeType),
+                writeBytes: (uri, bytes) => saf.writeBytes(uri, bytes),
+            };
+        },
         // A file's SHA-256 streamed by the host, so an upload snapshot or a content check never reads the file into the engine.
         sha256: async (uri) => await call({ op: 'sha256File', uri }) as string,
     };
@@ -140,7 +162,8 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
         dropboxAuth: bindings.dropboxAuth ?? { getValidAccessToken: unavailable('Dropbox'), forceRefreshAccessToken: unavailable('Dropbox') },
     });
 
-    // RN's installer Kotlin (HostInstaller.kt): install and hash. File Sync's immutable publication comes with S5.
+    // RN's installer Kotlin (HostInstaller.kt): install and hash. The immutable publication serves only a `file://` sync folder,
+    // which this host refuses (File Sync here is a picked SAF folder), so it stays unbound.
     const fileSync = unavailable('File sync');
     const nativeInstaller: NativeAttachmentFileInstaller = {
         installAsync: (stagedPath, targetPath, expected, expectedDownloadSha256) =>
@@ -220,9 +243,9 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
     const syncPort: MobileSyncAttachmentsPort = {
         syncWebdav: (data, config, signal, options) => backends.syncWebdavAttachments(data, config, getBaseSyncUrl(config.url), signal, options),
         syncCloud: (data, config, options) => backends.syncCloudAttachments(data, config, getCloudBaseUrl(config.url), options),
-        // Dropbox (S4) and File Sync (S5) are not offered on this host, so a cycle never reaches these.
+        // Dropbox (S4) is not offered on this host, so a cycle never reaches it.
         syncDropbox: async () => null,
-        syncFile: async () => null,
+        syncFile: (data, syncPath, signal, options) => backends.syncFileAttachments(data, syncPath, signal, options),
         cleanupTempFiles: () => files.cleanupAttachmentTempFiles(),
         hasCompletedPresenceReconciliation: () => files.hasCompletedAttachmentPresenceReconciliation(),
         hasPendingWork: (data, options) => files.hasPendingAttachmentSyncWork(data, options),
