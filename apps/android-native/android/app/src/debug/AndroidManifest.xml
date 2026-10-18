@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug builds only (scripts/check-widgets-device.mjs, check-share-files-device.mjs): what the shell needs to reach without touching the phone's home screen. -->
+<!-- Debug builds only (scripts/check-widgets-device.mjs, check-share-files-device.mjs, check-file-sync-device.mjs): what the shell needs to reach without touching the phone's home screen. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <!-- RN's quick capture dialog is not exported; this alias lets the check start it as the widget and the tile do. -->
@@ -22,6 +22,19 @@
             android:name="tech.dongdongbh.mindwtr.pilot.ShareTestSender"
             android:exported="true"
             android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+        <!-- File Sync's folder lock from the shell (scripts/check-file-sync-device.mjs): taken in the app's process, and by a
+             second holder in its own process. -->
+        <activity
+            android:name="tech.dongdongbh.mindwtr.pilot.SyncLockProbe"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+        <activity
+            android:name="tech.dongdongbh.mindwtr.pilot.SyncLockHolder"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:process=":lockholder"
             android:theme="@android:style/Theme.NoDisplay" />
     </application>
 </manifest>

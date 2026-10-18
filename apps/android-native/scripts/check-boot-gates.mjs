@@ -3857,8 +3857,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         'tech.dongdongbh.mindwtr.quicksettings.CaptureTileService'], 'only RN\'s exported components');
     const debugManifest = readFileSync(resolve(app, 'android/app/src/debug/AndroidManifest.xml'), 'utf8');
     assert.deepEqual(exportedNames(debugManifest), ['${applicationId}.DebugQuickCapture', 'tech.dongdongbh.mindwtr.pilot.ShareTestProvider',
-        'tech.dongdongbh.mindwtr.pilot.ShareTestSender', 'tech.dongdongbh.mindwtr.pilot.WidgetHostActivity'],
-        'the debug build adds only the checks\' entries: the widget host and quick capture alias, and the file share provider and sender');
+        'tech.dongdongbh.mindwtr.pilot.ShareTestSender', 'tech.dongdongbh.mindwtr.pilot.SyncLockHolder', 'tech.dongdongbh.mindwtr.pilot.SyncLockProbe',
+        'tech.dongdongbh.mindwtr.pilot.WidgetHostActivity'],
+        'the debug build adds only the checks\' entries: the widget host and quick capture alias, the file share provider and sender, and the File Sync lock probes');
     assert(!existsSync(resolve(app, 'android/app/src/release')) && !existsSync(resolve(app, 'android/app/src/upgradetest')), 'no other build type adds an entry');
     assert.doesNotMatch(overlay, /android:process=/);
     for (const info of ['mindwtr_tasks_widget_info', 'mindwtr_compact_widget_info', 'mindwtr_quick_capture_widget_info', 'mindwtr_legacy_tasks_widget_info']) {

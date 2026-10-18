@@ -18,7 +18,7 @@
 // widget's quick capture), the Menu tab (the More sheet, Waiting, Someday, History's Done, Contexts, Trash with one trashed
 // task, and Review), the Weekly Review's first step, the Calendar's week and month, the Board, and Settings'
 // General, GTD (their switches drawn as RN's for the props it sets), Sync (off, then WebDAV chosen with the encryption card's
-// Enable flow open, never saved), AI (each card unfolded) and Calendar (pass C3: the cards and form, then the subscription
+// Enable flow open, never saved; then File chosen with no folder picked, pass S5), AI (each card unfolded) and Calendar (pass C3: the cards and form, then the subscription
 // list; the fixture's one ICS subscription is served on this computer through `adb reverse`, and its events show in the
 // Calendar's week and month, the Weekly Review's calendar step and the Daily Review), in light
 // and dark mode; and in light mode the attachments (a task's file and link in the editor, the Add link sheet, the project's).
@@ -432,7 +432,10 @@ const shootSettings = async (prefix, suffix, rn) => {
         const rows = await waitFor(`the ${screen.name} row`, (current) => Boolean(withDescription(current, screen.row)), 30_000);
         await tap(withDescription(rows, screen.row));
         await shoot(`${prefix}-settings-${screen.name}-${suffix}`, (current) => hasText(current, screen.text));
-        if (screen.name === 'sync') await shootEncryption(prefix, suffix);
+        if (screen.name === 'sync') {
+            await shootEncryption(prefix, suffix);
+            await shootFilePanel(prefix, suffix);
+        }
         requireAppFront();
         sh('input keyevent KEYCODE_BACK');
         await sleep(1000);
@@ -545,6 +548,24 @@ const shootEncryption = async (prefix, suffix) => {
         await shoot(`${prefix}-settings-encryption-${suffix}`, (current) => hasText(current, en['settings.syncEncryptionWarningLost']));
     } catch (error) {
         console.log(`warn - ${prefix} encryption card: ${error.message}`);
+    }
+};
+/**
+ * Pass S5: the File Sync panel, File chosen and no folder picked yet (the how-to box, Sync folder with Select Folder, Sync now).
+ * Nothing is picked or stored. Reported, never fatal to other shots.
+ */
+const shootFilePanel = async (prefix, suffix) => {
+    const labelled = (nodes, label) => nodes.find((node) => node.text === label || node['content-desc'] === label);
+    try {
+        let nodes = await screen();
+        for (let step = 0; step < 20 && !labelled(nodes, en['settings.syncBackendFile']); step += 1) nodes = await device.swipe(nodes, 'up');
+        await tap(labelled(nodes, en['settings.syncBackendFile']) ?? fail('no File chip'));
+        await sleep(1500);
+        nodes = await screen();
+        for (let step = 0; step < 10 && !labelled(nodes, en['settings.selectFolder']); step += 1) nodes = await device.swipe(nodes, 'down');
+        await shoot(`${prefix}-settings-sync-file-${suffix}`, (current) => Boolean(labelled(current, en['settings.selectFolder'])));
+    } catch (error) {
+        console.log(`warn - ${prefix} File Sync panel: ${error.message}`);
     }
 };
 /**
