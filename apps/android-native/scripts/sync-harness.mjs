@@ -27,15 +27,17 @@ export const serveWebdav = ({ port, username, password, open = false }) => new P
     const files = new Map();
     let version = 0;
     // `requests`: every request as it arrived; `authorized`: only those that carried the folder's user and password.
-    // `delayMs`: every answer waits that long (a slow server).
-    const state = { files, requests: [], authorized: [], failWrites: 0, down: false, delayMs: 0, weakEtags: false };
+    // `delayMs`: every answer waits that long (a slow server). `holdWrites`: while it is a promise, a write of a sync document
+    // waits for it and then fails with 503 (the write never landed); `heldAt` holds when each held write arrived (ms).
+    const state = { files, requests: [], authorized: [], failWrites: 0, down: false, delayMs: 0, weakEtags: false, holdWrites: null, heldAt: [] };
     const authorized = (req) => open || req.headers.authorization === `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
     const server = createServer((req, res) => {
         const chunks = [];
         req.on('data', (chunk) => chunks.push(chunk));
         req.on('end', () => setTimeout(() => {
             const body = Buffer.concat(chunks);
-            const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+            // A folder is stored and logged without its trailing slash; PROPFIND lists it with one, as real servers do.
+            const path = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/(.)\/+$/, '$1');
             state.requests.push(`${req.method} ${path}`);
             const answer = (status, headers = {}, data = '') => {
                 res.writeHead(status, headers);
@@ -55,6 +57,11 @@ export const serveWebdav = ({ port, username, password, open = false }) => new P
                     if (!file || file.dir) return answer(404);
                     return answer(200, { ETag: file.etag, 'Content-Type': 'application/octet-stream', 'Content-Length': String(file.body.length) }, file.body);
                 case 'PUT': {
+                    if (state.holdWrites && path.endsWith('/data.json')) {
+                        state.heldAt.push(Date.now());
+                        void state.holdWrites.then(() => answer(503, { 'Content-Type': 'text/plain' }, 'held'));
+                        return undefined;
+                    }
                     if (preconditionFails()) return answer(412);
                     if (state.failWrites > 0 && path.endsWith('/data.json')) {
                         state.failWrites -= 1;
@@ -78,7 +85,7 @@ export const serveWebdav = ({ port, username, password, open = false }) => new P
                     const entries = [...files].filter(([name]) => name === path || (name.startsWith(prefix) && !name.slice(prefix.length).includes('/')));
                     if (entries.length === 0 && path !== '/') return answer(404);
                     const xml = `<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:">${entries.map(([name, entry]) => (
-                        `<d:response><d:href>${encodeURI(name)}</d:href><d:propstat><d:prop>${entry.dir ? '<d:resourcetype><d:collection/></d:resourcetype>'
+                        `<d:response><d:href>${encodeURI(name)}${entry.dir ? '/' : ''}</d:href><d:propstat><d:prop>${entry.dir ? '<d:resourcetype><d:collection/></d:resourcetype>'
                             : `<d:resourcetype/><d:getetag>${entry.etag}</d:getetag><d:getcontentlength>${entry.body.length}</d:getcontentlength>`}</d:prop>`
                         + '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>'
                     )).join('')}</d:multistatus>`;
@@ -131,15 +138,26 @@ export const startCloud = async ({ repo, port, token, dataDir }) => {
  * connection), RnKeyValue (a Map), SecretStore (a Map), HostIo's fetch (node:http, OkHttp's redirect rules, whole bodies
  * only), and CoreHost's pumps: [call] waits on its own operation as callAsync does; an idle pump runs timers and settles
  * answers between calls, as CoreHost's does.
+ *
+ * A restart: a second hostDevice on the first one's `database` file, `keyValue`, `secrets` and `filesRoot`, after the first
+ * one's [kill] (process death: nothing pumps it again, no bridge call is answered, and its open transaction rolls back).
+ * [trace] receives CoreHost's trace sections (core's perf-trace.ts: a name opens one, '' closes it). [onSql](sql, phase, json)
+ * sees each statement with its bound parameters' JSON before it runs ('before') and after it succeeded ('after'), and may
+ * answer 'fail' (the statement fails as SQLite would) or 'kill' (the process dies there). [nativeSubscribers] adds the widget
+ * and alarm bridges (HostWidgets.kt, HostReminders.kt; their calls are recorded in [published]), so the boot starts the widget
+ * publisher and remindersStart the reminder subscriber, as on the phone.
  */
-export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, automaticSync = true }) => {
+export const hostDevice = async ({
+    bundle, name, log = () => {}, filesRoot, automaticSync = true, trace, onSql,
+    database: databasePath = ':memory:', keyValue = new Map(), secrets = new Map(), nativeSubscribers = false,
+}) => {
     const { DatabaseSync } = await import('node:sqlite');
-    const database = new DatabaseSync(':memory:');
-    const keyValue = new Map();
-    const secrets = new Map();
+    const database = new DatabaseSync(databasePath);
+    let dead = false;
     const answers = [];
     const events = [];
     const lines = [];
+    const published = [];
     let taken = '';
     let ids = 0;
     const controllers = new Map();
@@ -147,13 +165,32 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
     const guarded = (work) => (...args) => {
         try { return work(...args); } catch (error) { return `!MindwtrNativeError:${error.message}`; }
     };
+    // [onSql] runs before each statement (phase 'before') and after it succeeded ('after').
+    const fault = (sql, phase, json) => {
+        if (dead) throw new Error('the process is dead');
+        const answer = onSql?.(sql, phase, json);
+        if (answer === 'kill') { device.kill(); throw new Error('the process is dead'); }
+        if (answer === 'fail') throw new Error(`injected fault at: ${sql.slice(0, 60)}`);
+    };
+    const statement = (sql, run, json = '') => { fault(sql, 'before', json); const result = run(); fault(sql, 'after', json); return result; };
     const bridge = {
-        sqlRun: guarded((sql, json) => { database.prepare(sql).all(...params(json)); return null; }),
-        sqlAll: guarded((sql, json) => JSON.stringify(database.prepare(sql).all(...params(json)))),
-        sqlExec: guarded((sql) => { database.exec(sql); return null; }),
+        sqlRun: guarded((sql, json) => statement(sql, () => { database.prepare(sql).all(...params(json)); return null; }, json)),
+        sqlAll: guarded((sql, json) => statement(sql, () => JSON.stringify(database.prepare(sql).all(...params(json))), json)),
+        sqlExec: guarded((sql) => statement(sql, () => { database.exec(sql); return null; })),
         nowMs: () => performance.now(),
         randomBytes: (n) => JSON.stringify([...randomBytes(n)]),
         log: (line) => { lines.push(String(line)); log(`${name}: ${line}`); },
+        ...(trace ? { trace: (section) => { trace(section); return null; } } : {}),
+        ...(nativeSubscribers ? {
+            widgetInputs: () => JSON.stringify({ systemColorScheme: 'light', systemLocale: 'en-US', listSelections: [] }),
+            widgetPublish: (payload) => { published.push(['widget', payload.length]); return null; },
+            widgetAppState: () => 'active',
+            alarmApply: (plan) => { published.push(['alarms', plan.length]); return null; },
+            notificationsAllowed: () => true,
+            rnAlarmCleanup: () => 0,
+            reminderReceiverCounts: () => JSON.stringify({ dropped: 0, notQueued: 0 }),
+            reminderLedger: () => JSON.stringify({ fired: [], shown: [] }),
+        } : {}),
         collationKey: (text) => text,
         rnStateCommit: () => null,
         logFile: () => '',
@@ -245,6 +282,14 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
         fileCall: (json) => files.answer(json, files.call),
         installerCall: (json) => files.answer(json, files.install),
         fileDeleteNow: (uri) => { rmSync(files.path(uri), { recursive: true, force: true }); return null; },
+        // HostFiles.kt's list, readText and delete on 'files/…' and 'cache/…' paths: the pending-captures queue and snapshots.
+        fileList: guarded((path) => {
+            const dir = files.relative(path);
+            if (!existsSync(dir) || !statSync(dir).isDirectory()) return 'null';
+            return JSON.stringify(readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name));
+        }),
+        fileRead: guarded((path) => readFileSync(files.relative(path), 'utf8')),
+        fileDelete: guarded((path) => { rmSync(files.relative(path), { force: true }); return null; }),
         fileAbort: () => null,
         ioNext: () => {
             const next = answers.shift();
@@ -264,6 +309,15 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
             return path;
         },
         missing: () => Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' }),
+        relative: (path) => {
+            const [top, ...rest] = path.split('/');
+            const base = top === 'files' ? files.dir : top === 'cache' ? files.cache : null;
+            if (!base) throw new Error(`Not an app file: ${path}`);
+            const file = resolve(base, rest.join('/'));
+            // HostFiles.kt's resolve: the folder itself is not an app file either.
+            if (!file.startsWith(`${base}/`)) throw new Error(`Not an app file: ${path}`);
+            return file;
+        },
         call: (request, bytes) => {
             if (request.op === 'sha256') return { value: createHash('sha256').update(bytes ?? Buffer.alloc(0)).digest('hex') };
             if (request.op === 'barrier' || request.op === 'syncParent') return { value: null };
@@ -306,6 +360,7 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
         answer: (json, run) => {
             const id = String(++ids);
             setTimeout(() => {
+                if (dead) return;
                 const request = JSON.parse(json);
                 const bytes = request.base64 === undefined ? undefined : Buffer.from(request.base64, 'base64');
                 delete request.base64;
@@ -322,15 +377,23 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
     };
     mkdirSync(files.dir, { recursive: true });
     mkdirSync(files.cache, { recursive: true });
+    // A dead process answers nothing: every bridge call after [kill] fails before it touches the shared store, files or server.
+    for (const [method, work] of Object.entries(bridge)) {
+        if (typeof work === 'function') bridge[method] = (...args) => { if (dead) throw new Error('the process is dead'); return work(...args); };
+    }
     const context = vm.createContext({ console: {}, Intl: undefined, __mindwtrNative: bridge });
     vm.runInContext(readFileSync(bundle, 'utf8'), context);
     const host = context.MindwtrHost;
     // CoreHost's idle pump, and callAsync's wait on one operation.
-    const pump = setInterval(() => { try { context.__pumpTimers(); } catch (error) { log(`${name}: pump ${error}`); } }, 10);
+    // [freeze] stops the timer pumps (a sync waiting on a slice or an answer stays there); calls still run their own microtasks.
+    let pumping = true;
+    const pump = setInterval(() => { if (!pumping || dead) return; try { context.__pumpTimers(); } catch (error) { log(`${name}: pump ${error}`); } }, 10);
     const call = async (method, ...args) => {
+        if (dead) throw new Error(`${name}: killed`);
         const id = host[method](...args);
         for (const deadline = Date.now() + 10 * 60_000; Date.now() < deadline; await sleep(5)) {
-            context.__pumpTimers();
+            if (dead) throw new Error(`${name}: killed`);
+            if (pumping) context.__pumpTimers();
             const answer = host.poll(id);
             if (answer) {
                 const reply = JSON.parse(answer);
@@ -341,16 +404,32 @@ export const hostDevice = async ({ bundle, name, log = () => {}, filesRoot, auto
         throw new Error(`${name}: ${method} timed out`);
     };
     const device = {
-        name, keyValue, secrets, events, lines, files,
+        name, keyValue, secrets, events, lines, files, published,
         /** Live task rows straight from this device's database: id, title, status, rev. */
         tasks: () => database.prepare("SELECT id, title, status, rev FROM tasks WHERE COALESCE(deletedAt, '') = '' ORDER BY id").all().map((row) => ({ ...row })),
         /** The bundle's MindwtrHost method names (check-boot-gates.mjs: Android's table). */
         methods: Object.keys(host),
         call,
-        stop: () => { clearInterval(pump); database.close(); },
-        /** Boots on an empty database, reports the network online, and starts sync as ProcessCoreHost does (unless [automaticSync] is off). */
-        async boot() {
-            await call('boot', '', '', '');
+        stop: () => { clearInterval(pump); if (!dead) database.close(); },
+        freeze: () => { pumping = false; },
+        thaw: () => { pumping = true; },
+        /** One idle-pump turn while frozen: the due timers (a sync's next slice) and the answers that arrived. */
+        pumpOnce: () => context.__pumpTimers(),
+        inTransaction: () => database.isTransaction,
+        query: (sql, ...values) => database.prepare(sql).all(...values).map((row) => ({ ...row })),
+        /** Process death: the engine never runs again and SQLite rolls back what it had not committed. */
+        kill: () => {
+            if (dead) return;
+            dead = true;
+            clearInterval(pump);
+            database.close();
+        },
+        /**
+         * Boots ([writeJournal] 'journaled' for a journaling host, as Kotlin's), reports the network online, and starts sync as
+         * ProcessCoreHost does (unless [automaticSync] is off).
+         */
+        async boot(writeJournal = '') {
+            await call('boot', '', '', writeJournal);
             await call('language', 'en', 'en-US');
             await call('syncNetwork', JSON.stringify({ isConnected: true, isInternetReachable: true }));
             return automaticSync ? call('syncStart', 'active') : null;
