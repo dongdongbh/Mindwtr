@@ -25,4 +25,3 @@ export function getImageExtension(file: File): string {
     if (nameMatch?.[1]) return nameMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : nameMatch[1].toLowerCase();
     return 'png';
 }
-
