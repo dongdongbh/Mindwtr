@@ -81,6 +81,7 @@ interface TaskItemEditorProps {
     onConvertToSection?: () => void;
     onCancel: () => void;
     onSubmit: (e: FormEvent) => void;
+    isImportingFiles?: boolean;
     onFilesDropped?: (files: File[]) => void;
 }
 
@@ -140,6 +141,7 @@ export function TaskItemEditor({
     onConvertToSection,
     onCancel,
     onSubmit,
+    isImportingFiles = false,
     onFilesDropped,
 }: TaskItemEditorProps) {
     // Draft values and setField bindings, under the names the form below was
@@ -281,7 +283,10 @@ export function TaskItemEditor({
 
     return (
         <form
-            onSubmit={onSubmit}
+            onSubmit={(event) => {
+                if (isImportingFiles) { event.preventDefault(); return; }
+                onSubmit(event);
+            }}
             onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                     event.preventDefault();
@@ -296,7 +301,7 @@ export function TaskItemEditor({
                     if (typeof form.requestSubmit === 'function') {
                         form.requestSubmit();
                     } else {
-                        onSubmit(event as unknown as FormEvent);
+                        if (!isImportingFiles) onSubmit(event as unknown as FormEvent);
                     }
                 }
             }}
@@ -572,6 +577,7 @@ export function TaskItemEditor({
                 <div className="flex flex-wrap gap-2 ml-auto">
                     <button
                         type="submit"
+                        disabled={isImportingFiles}
                         className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded hover:bg-primary/90"
                     >
                         {t('common.save')}

@@ -1,7 +1,10 @@
 import { Component, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { isSafeMarkdownExternalHref, normalizeMarkdownInternalLinks, tFallback } from '@mindwtr/core';
+import { isSafeMarkdownExternalHref, normalizeMarkdownInternalLinks, tFallback, type Attachment } from '@mindwtr/core';
+import { AttachmentImage } from './Task/AttachmentImage';
+import { isImageAttachment } from './Task/task-item-attachment-utils';
+import { isLocalAttachmentPath } from '../lib/attachment-paths';
 import { Copy } from 'lucide-react';
 
 import { useLanguage } from '../contexts/language-context';
@@ -120,16 +123,26 @@ class MarkdownFallbackBoundary extends Component<{ markdown: string; children: R
     }
 }
 
-export function RichMarkdown({ markdown }: { markdown: string }) {
+export function RichMarkdown({ markdown, attachments }: { markdown: string; attachments?: Attachment[] }) {
     const linkContext = useInternalMarkdownLinkContext();
 
     return (
         <MarkdownFallbackBoundary markdown={markdown || ''}>
         <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkPreserveBlankLines]}
-            disallowedElements={['img']}
             urlTransform={transformMarkdownUrl}
             components={{
+                img: ({ src, alt }) => {
+                    const id = /^mindwtr:\/\/attachment\/([a-zA-Z0-9-]+)$/.exec(src || '')?.[1];
+                    const attachment = id && attachments?.find((item) => item.id === id);
+                    // Only task-owned files render; remote image URLs stay blocked to avoid tracking.
+                    if (!attachment || attachment.deletedAt || attachment.kind !== 'file'
+                        || !isImageAttachment(attachment)
+                        || /[\t\r\n]/.test(attachment.uri)
+                        || /^[/\\]{2}/.test(attachment.uri.trim())
+                        || (attachment.uri && !isLocalAttachmentPath(attachment.uri))) return <span>{alt}</span>;
+                    return <AttachmentImage attachment={attachment} alt={alt || attachment.title || ''} className="my-2 max-h-80 max-w-full rounded-md object-contain" />;
+                },
                 h1: ({ className, ...props }: any) => (
                     <h1 className={cn('mt-2 mb-1 text-lg font-semibold leading-snug text-foreground first:mt-0', className)} {...props} />
                 ),

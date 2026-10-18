@@ -211,6 +211,7 @@ const createProps = (overrides: FixtureOverrides = {}): Omit<RendererProps, 'fie
             attachmentError: null,
             visibleEditAttachments: [],
             addFileAttachment: vi.fn(),
+            addDroppedFileAttachments: vi.fn(async () => []),
             addLinkAttachment: vi.fn(),
             addFolderLinkAttachment: vi.fn(),
             addObsidianNoteAttachment: vi.fn(),
@@ -235,8 +236,10 @@ function DraftFieldHarness({
     fieldId,
     initialDraft = {},
     options = {},
+    attachments,
 }: {
     fieldId: RendererProps['fieldId'];
+    attachments?: FixtureOverrides['attachments'];
     initialDraft?: Partial<TaskDraft>;
     options?: Partial<TaskEditorOptionLists>;
 }) {
@@ -245,7 +248,7 @@ function DraftFieldHarness({
     return (
         <TaskItemFieldRenderer
             fieldId={fieldId}
-            {...createProps({ options })}
+            {...createProps({ options, attachments })}
             draft={draft}
             setField={(field, value) => setDraft((current) => setTaskDraftField(current, field, value))}
         />
@@ -1965,4 +1968,69 @@ describe('TaskItemFieldRenderer quick-add token hints (#918)', () => {
             expect(queryByTitle(/^Quick add:/)).not.toBeInTheDocument();
         },
     );
+});
+
+
+describe('description clipboard images', () => {
+    it('keeps typing during import and undo restores the latest text', async () => {
+        let complete!: (value: import('@mindwtr/core').Attachment[]) => void;
+        const addDroppedFileAttachments = vi.fn(() => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { complete = resolve; }));
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        fireEvent.change(textarea, { target: { value: 'Before' } });
+        const image = new File(['image'], 'screenshot.png', { type: 'image/png' });
+        fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: image.type, getAsFile: () => new File([image], image.name, { type: image.type }) }], files: [image], getData: () => '' } });
+        expect(addDroppedFileAttachments).toHaveBeenCalledTimes(1);
+        expect(addDroppedFileAttachments).toHaveBeenCalledWith([expect.objectContaining({ name: 'screenshot.png' })]);
+        fireEvent.change(textarea, { target: { value: 'Before typing' } });
+        textarea.setSelectionRange(0, 6);
+        await act(async () => complete([{ id: 'image-1', kind: 'file', title: 'screenshot.png', uri: '/data/image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
+        expect(textarea.value).toBe('Before typing![Image](mindwtr://attachment/image-1)');
+        fireEvent.keyDown(textarea, { key: 'z', ctrlKey: true });
+        expect(textarea.value).toBe('Before typing');
+    });
+
+    it('does not change the description when image import fails', async () => {
+        const addDroppedFileAttachments = vi.fn(async () => []);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Keep this' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        const image = new File(['image'], 'image.png', { type: 'image/png' });
+        await act(async () => fireEvent.paste(textarea, { clipboardData: { items: [], files: [image], getData: () => '' } }));
+        expect(textarea.value).toBe('Keep this');
+    });
+});
+
+
+it('keeps a pending image reference when the textarea is replaced by preview', async () => {
+    let complete!: (value: import('@mindwtr/core').Attachment[]) => void;
+    const addDroppedFileAttachments = vi.fn(() => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { complete = resolve; }));
+    function PreviewPasteHarness() {
+        const [draft, setDraft] = useState(createTaskDraft(baseTask));
+        const [preview, setPreview] = useState(false);
+        return <TaskItemFieldRenderer fieldId="description" {...createProps({ attachments: { addDroppedFileAttachments }, showDescriptionPreview: preview, descriptionPreview: { toggle: () => setPreview((value) => !value) } })} draft={draft} setField={(field, value) => setDraft((current) => setTaskDraftField(current, field, value))} />;
+    }
+    const { getByRole, queryByRole } = render(<PreviewPasteHarness />);
+    const textarea = getByRole('textbox', { name: 'Description' });
+    const image = new File(['png'], 'image.png', { type: 'image/png' });
+    fireEvent.paste(textarea, { clipboardData: { items: [], files: [image], getData: () => 'Caption' } });
+    fireEvent.click(getByRole('button', { name: /^Preview$/ }));
+    expect(queryByRole('textbox', { name: 'Description' })).toBeNull();
+    await act(async () => complete([{ id: 'image-1', kind: 'file', title: 'image.png', uri: '/data/image.png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
+    fireEvent.click(getByRole('button', { name: /^Edit$/ }));
+    expect(getByRole('textbox', { name: 'Description' })).toHaveValue('Caption\n\n![Image](mindwtr://attachment/image-1)');
+});
+
+
+it.each([null, []])('ignores late clipboard captions after reopening (%j)', async (imported) => {
+    let complete!: (value: import('@mindwtr/core').Attachment[] | null) => void;
+    const addDroppedFileAttachments = vi.fn(() => new Promise<import('@mindwtr/core').Attachment[] | null>((resolve) => { complete = resolve; }));
+    const setField = vi.fn();
+    const oldEditor = render(<TaskItemFieldRenderer fieldId="description" {...createProps({ draft: { description: 'Old draft' }, setField, attachments: { addDroppedFileAttachments } })} />);
+    const image = new File(['png'], 'image.png', { type: 'image/png' });
+    fireEvent.paste(oldEditor.getByRole('textbox', { name: 'Description' }), { clipboardData: { items: [], files: [image], getData: () => 'Discarded caption' } });
+    oldEditor.unmount();
+    const reopened = render(<TaskItemFieldRenderer fieldId="description" {...createProps({ draft: { description: 'New draft' }, setField })} />);
+    await act(async () => complete(imported));
+    expect(setField).not.toHaveBeenCalled();
+    expect(reopened.getByRole('textbox', { name: 'Description' })).toHaveValue('New draft');
 });
