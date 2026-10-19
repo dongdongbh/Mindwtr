@@ -164,6 +164,7 @@ export const svOverrides: Record<string, string> = {
         'nav.calendar': 'Kalender',
         'nav.review': 'Genomgång',
         'nav.agenda': 'Fokus',
+        'nav.resizeSubmenu': 'Ändra storlek på navigering och undermeny',
         'nav.settings': 'Inställningar',
         'nav.done': 'Klart',
         'nav.archived': 'Arkiverat',

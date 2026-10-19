@@ -165,6 +165,7 @@ export const esOverrides: Record<string, string> = {
 'nav.calendar': "Calendario",
 'nav.review': "Revisión",
 'nav.agenda': "Enfoque",
+'nav.resizeSubmenu': 'Cambiar el tamaño de la navegación y el submenú',
 'nav.settings': "Ajustes",
 'nav.done': "Hecho",
 'nav.archived': "Archivado",

@@ -245,6 +245,7 @@ export const zhHans: Record<string, string> = {
         'nav.calendar': '日历',
         'nav.review': '回顾',
         'nav.agenda': '日程',
+        'nav.resizeSubmenu': '调整导航和子菜单的高度',
         'nav.settings': '设置',
         'nav.done': '已完成',
         'nav.archived': '归档',

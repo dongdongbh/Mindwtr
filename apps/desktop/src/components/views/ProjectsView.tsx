@@ -1,4 +1,7 @@
+import { createPortal } from 'react-dom';
+import { ViewSidebarContext } from '../../contexts/view-sidebar-context';
 import {
+    useContext,
     useState,
     useMemo,
     useEffect,
@@ -204,6 +207,7 @@ export function ProjectsView() {
         DEFAULT_PROJECTS_VIEW_STATE,
         sanitizeProjectsViewState
     );
+    const projectSidebarSlot = useContext(ViewSidebarContext);
     const projectsSidebarCollapsed = persistedViewState.projectsSidebarCollapsed;
     const showDeferredProjects = persistedViewState.showDeferredProjects;
     const showArchivedProjects = persistedViewState.showArchivedProjects;
@@ -253,7 +257,7 @@ export function ProjectsView() {
     }, [setPersistedViewState]);
     const fallbackProjectsWidth = typeof window === 'undefined' ? PROJECTS_VIEW_DEFAULT_MAX_WIDTH : window.innerWidth;
     const isCompactProjectsLayout = (availableProjectsWidth ?? fallbackProjectsWidth) < 760;
-    const projectsSidebarVisible = isCompactProjectsLayout
+    const projectsSidebarVisible = projectSidebarSlot ? true : isCompactProjectsLayout
         ? compactSidebarOpen
         : !projectsSidebarCollapsed;
     const projectsSidebarEffectivelyCollapsed = !projectsSidebarVisible;
@@ -759,9 +763,64 @@ export function ProjectsView() {
         }
     }, [areaById, selectedArea, selectedProject, selectedProjectId, setSelectedProjectId]);
 
+    const projectSidebar = (
+        <ProjectsSidebar
+            embedded={Boolean(projectSidebarSlot)}
+            t={t}
+            areaFilterLabel={areaFilterLabel ?? undefined}
+            selectedTag={selectedTag}
+            noAreaId={NO_AREA}
+            allTagsId={ALL_TAGS}
+            noTagsId={NO_TAGS}
+            tagOptions={tagOptions}
+            isCreating={isCreating}
+            isCreatingProject={isCreatingProject}
+            newProjectTitle={newProjectTitle}
+            newProjectAreaId={newProjectAreaId}
+            areaOptions={sortedAreas}
+            onStartCreate={() => setIsCreating(true)}
+            onCancelCreate={() => {
+                setIsCreating(false);
+                setNewProjectAreaId(selectedAreaValue !== ALL_AREAS && selectedAreaValue !== NO_AREA ? selectedAreaValue : '');
+            }}
+            onCreateProject={handleCreateProject}
+            onChangeNewProjectTitle={setNewProjectTitle}
+            onChangeNewProjectAreaId={setNewProjectAreaId}
+            onSelectTag={setSelectedTag}
+            groupedActiveProjects={groupedActiveProjects}
+            groupedDeferredProjects={groupedDeferredProjects}
+            groupedArchivedProjects={groupedArchivedProjects}
+            areaById={areaById}
+            collapsedAreas={collapsedAreas}
+            onToggleAreaCollapse={toggleAreaCollapse}
+            showDeferredProjects={showDeferredProjects}
+            onToggleDeferredProjects={() => setShowDeferredProjects((prev) => !prev)}
+            showArchivedProjects={showArchivedProjects}
+            onToggleArchivedProjects={() => setShowArchivedProjects((prev) => !prev)}
+            selectedProjectId={selectedProjectId}
+            onSelectProject={setSelectedProjectId}
+            onActivateProject={() => {
+                if (isCompactProjectsLayout) setCompactSidebarOpen(false);
+            }}
+            navigationVisible={projectsSidebarVisible}
+            onRequestNavigationVisible={isCompactProjectsLayout
+                ? () => setCompactSidebarOpen(true)
+                : undefined}
+            getProjectColor={getProjectColorForTask}
+            projectTaskSummaryById={projectTaskSummaryById}
+            projects={projects}
+            focusedProjectCount={focusedProjectCount}
+            toggleProjectFocus={toggleProjectFocus}
+            onDuplicateProject={handleDuplicateProject}
+            draggingSection={activeDrag?.type === 'project' ? activeDrag.section : null}
+            collapseLabel={collapseProjectsSidebarLabel}
+            onToggleCollapsed={projectSidebarSlot ? undefined : toggleProjectsSidebarCollapsed}
+        />
+    );
+
     return (
         <ErrorBoundary>
-            <div className="h-full px-4 pt-3">
+            <div className={projectSidebarSlot ? "h-full px-5 pt-6 lg:px-8" : "h-full px-4 pt-3"}>
                 <DndContext
                     sensors={dndSensors}
                     collisionDetection={projectsViewCollisionDetection}
@@ -770,12 +829,13 @@ export function ProjectsView() {
                     onDragCancel={handleDndDragCancel}
                     onDragEnd={handleDndDragEnd}
                 >
+                {projectSidebarSlot && createPortal(projectSidebar, projectSidebarSlot)}
                 <div
                     ref={projectsLayoutRef}
                     className="relative mx-auto flex h-full w-full min-w-0 gap-5 xl:gap-6"
                     style={{ maxWidth: `${projectsLayoutMaxWidth}px` }}
                 >
-                    {(isCompactProjectsLayout || projectsSidebarVisible) && (
+                    {!projectSidebarSlot && (isCompactProjectsLayout || projectsSidebarVisible) && (
                         <div
                             className={`relative min-h-0 flex-none ${
                                 isCompactProjectsLayout
@@ -787,57 +847,7 @@ export function ProjectsView() {
                             style={{ width: `${sidebarWidth}px` }}
                         >
                             <div id="projects-sidebar-panel" className="h-full min-w-0">
-                                <ProjectsSidebar
-                                    t={t}
-                                    areaFilterLabel={areaFilterLabel ?? undefined}
-                                    selectedTag={selectedTag}
-                                    noAreaId={NO_AREA}
-                                    allTagsId={ALL_TAGS}
-                                    noTagsId={NO_TAGS}
-                                    tagOptions={tagOptions}
-                                    isCreating={isCreating}
-                                    isCreatingProject={isCreatingProject}
-                                    newProjectTitle={newProjectTitle}
-                                    newProjectAreaId={newProjectAreaId}
-                                    areaOptions={sortedAreas}
-                                    onStartCreate={() => setIsCreating(true)}
-                                    onCancelCreate={() => {
-                                        setIsCreating(false);
-                                        setNewProjectAreaId(selectedAreaValue !== ALL_AREAS && selectedAreaValue !== NO_AREA ? selectedAreaValue : '');
-                                    }}
-                                    onCreateProject={handleCreateProject}
-                                    onChangeNewProjectTitle={setNewProjectTitle}
-                                    onChangeNewProjectAreaId={setNewProjectAreaId}
-                                    onSelectTag={setSelectedTag}
-                                    groupedActiveProjects={groupedActiveProjects}
-                                    groupedDeferredProjects={groupedDeferredProjects}
-                                    groupedArchivedProjects={groupedArchivedProjects}
-                                    areaById={areaById}
-                                    collapsedAreas={collapsedAreas}
-                                    onToggleAreaCollapse={toggleAreaCollapse}
-                                    showDeferredProjects={showDeferredProjects}
-                                    onToggleDeferredProjects={() => setShowDeferredProjects((prev) => !prev)}
-                                    showArchivedProjects={showArchivedProjects}
-                                    onToggleArchivedProjects={() => setShowArchivedProjects((prev) => !prev)}
-                                    selectedProjectId={selectedProjectId}
-                                    onSelectProject={setSelectedProjectId}
-                                    onActivateProject={() => {
-                                        if (isCompactProjectsLayout) setCompactSidebarOpen(false);
-                                    }}
-                                    navigationVisible={projectsSidebarVisible}
-                                    onRequestNavigationVisible={isCompactProjectsLayout
-                                        ? () => setCompactSidebarOpen(true)
-                                        : undefined}
-                                    getProjectColor={getProjectColorForTask}
-                                    projectTaskSummaryById={projectTaskSummaryById}
-                                    projects={projects}
-                                    focusedProjectCount={focusedProjectCount}
-                                    toggleProjectFocus={toggleProjectFocus}
-                                    onDuplicateProject={handleDuplicateProject}
-                                    draggingSection={activeDrag?.type === 'project' ? activeDrag.section : null}
-                                    collapseLabel={collapseProjectsSidebarLabel}
-                                    onToggleCollapsed={toggleProjectsSidebarCollapsed}
-                                />
+                                {projectSidebar}
                             </div>
                             {!isCompactProjectsLayout && <div
                                 role="separator"

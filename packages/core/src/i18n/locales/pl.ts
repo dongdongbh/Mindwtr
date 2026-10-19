@@ -114,6 +114,7 @@ export const plOverrides: Record<string, string> = {
         'nav.calendar': 'Kalendarz',
         'nav.review': 'Przegląd',
         'nav.agenda': 'Skupienie',
+        'nav.resizeSubmenu': 'Zmień wysokość nawigacji i podmenu',
         'nav.settings': 'Ustawienia',
         'nav.done': 'Zrobione',
         'nav.archived': 'Zarchiwizowane',
