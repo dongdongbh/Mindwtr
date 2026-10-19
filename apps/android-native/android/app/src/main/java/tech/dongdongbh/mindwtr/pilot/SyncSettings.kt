@@ -557,7 +557,7 @@ private fun FormPanel(model: InboxViewModel, view: JSONObject, panel: JSONObject
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
         SyncAction(panel.getJSONObject("test"), "sync-test") { sync.test() }
     }
-    LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = false)
+    LastSyncCard(sync, panel.getJSONObject("lastSync"))
 }
 
 /** RN's File Sync panel: the how-to box, then the folder and Sync now, with the last sync card inside the card. */
@@ -592,7 +592,10 @@ private fun FilePanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObje
                     .clickable(enabled = select.getBoolean("enabled"), onClick = pickFolder))
         }
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
-        Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) { LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = true) }
+        // RN's file panel puts the whole status card (its margin and padding) inside a setting row's info column.
+        Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) {
+            Column(Modifier.padding(end = 16.dp)) { LastSyncCard(sync, panel.getJSONObject("lastSync")) }
+        }
     }
 }
 
@@ -612,7 +615,7 @@ private fun DropboxPanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONO
         SyncAction(panel.getJSONObject("test"), "sync-test") { sync.test() }
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
     }
-    LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = false)
+    LastSyncCard(sync, panel.getJSONObject("lastSync"))
 }
 
 /** RN's iCloud panel (iOS only; drawn for completeness of core's view). */
@@ -621,12 +624,12 @@ private fun CloudKitPanel(sync: SyncSettingsModel, view: JSONObject, panel: JSON
     val help = panel.getJSONObject("help")
     HelpBox(help.getString("title"), listOf(help.getString("text"), help.getString("status")))
     Card { SyncAction(panel.getJSONObject("syncNow"), "sync-now", divider = false) { sync.syncNow(view) } }
-    LastSyncCard(sync, panel.getJSONObject("lastSync"), inside = false)
+    LastSyncCard(sync, panel.getJSONObject("lastSync"))
 }
 
 /** RN's SyncLastStatusCard: the last sync, its counts and conflicts, the error in the danger color, and the folded history. */
 @Composable
-private fun LastSyncCard(sync: SyncSettingsModel, card: JSONObject, inside: Boolean) {
+private fun LastSyncCard(sync: SyncSettingsModel, card: JSONObject) {
     val c = LocalTheme.current.colors
     val body: @Composable ColumnScope.() -> Unit = {
         Text(card.getString("title"), style = rnText(16, 500, 21), color = c.text)
@@ -649,8 +652,7 @@ private fun LastSyncCard(sync: SyncSettingsModel, card: JSONObject, inside: Bool
             }
         }
     }
-    if (inside) Column(content = body)
-    else Card(top = 12) { Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(16.dp), content = body) }
+    Card(top = 12) { Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(16.dp), content = body) }
 }
 
 /** The encryption card (RN's SyncEncryptionCard): core's rows in order; a field's text goes back to core as typed. */
