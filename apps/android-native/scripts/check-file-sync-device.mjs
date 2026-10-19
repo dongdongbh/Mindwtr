@@ -13,7 +13,12 @@
 //       scratch file remain;
 //   (2) both ways with this computer: a task with an emoji title written into data.json here (adb push) reaches the phone on
 //       Sync now; a capture on the phone reaches data.json on the next Sync now, the emoji title intact;
+//   (2b) attachments both ways: a file this computer put under the folder's attachments/ (at its File Sync key, named on a
+//       task in data.json) is fetched by the editor's Download, bytes intact; every file attachment the phone published is in the
+//       folder at its key, its bytes the fileHash the phone computed;
 //   (3) the app stopped and started again: Sync now syncs the same folder with no new pick;
+//   (3b) process death during a pick: Select Folder, the app's process killed while the system picker is in front (no
+//       force-stop, so the screen's saved state stays), Use this folder: the recreated Sync screen stores the same folder, once;
 //   (4) the folder lock against a second holder (debug SyncLockProbe and SyncLockHolder, another process of the app):
 //       (a) the holder first: the app's Sync now is refused as busy, writes nothing, and logs `lock-busy`; released, the next
 //       Sync now syncs; (b) the app's production lock code first: the holder is refused before and after each of 5
@@ -24,10 +29,11 @@
 //       capture, log `encrypted=yes` and leave one data.json.enc.bak and no scratch file; Disable makes the folder plaintext again;
 //   (6) the folder's grant revoked (as in Android's settings): after a restart, Sync now shows RN's lock text, logs
 //       `lock-unavailable`, and the folder is unchanged;
-//   (7) Sync set Off; this run's folder removed.
+//   (7) Sync set Off; this run's folder grant released (debug probe) and its folder removed.
 // It starts only when the app's stored sync backend is Off (or never set) and sync encryption is not on: the end puts both back
-// through the Sync screen, pass or fail (Disable while the folder is still there, then Off), and removes this run's folder only
-// once the app no longer points at it. It refuses, with how to fix it, a
+// through the Sync screen, pass, fail or signal (the check's file removed in the editor and Disable while the folder is still
+// there, then Off), and removes this run's folder only once the app no longer points at it. It refuses, with how to fix it, a
+// library already holding a live file attachment whose bytes are nowhere on the phone (core's activation would refuse), a
 // stored File Sync folder that no longer exists, and any other stored backend (it cannot put a WebDAV or cloud one back).
 // It installs with `install -r` (development data stays), touches only the development package and its own folder in Download/, never
 // launches over another app. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
@@ -36,8 +42,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, inboxCount, inEditor, linesAfter, logStamp, Stopped, tab, tabSelected, tagged, withDescription, button } from './device.mjs';
-import { cleanupOnExit } from './check-net-device.mjs';
+import { box, check, connect, evidenced, fail, inboxCount, inEditor, inList, linesAfter, logStamp, Stopped, tab, tabSelected, tagged, withDescription, button } from './device.mjs';
 
 const [serial, ...rest] = process.argv.slice(2);
 const CLEAR_LEFTOVER = rest.includes('--clear-encryption-leftover');
@@ -75,7 +80,7 @@ const { en } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'
 
 // This run's names: digits only for what the phone types (the keyboard guard allows only an English layout).
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
-const titles = { host: `File ✓ Grüße 😀 ${run}`, phone: `95${run}1` };
+const titles = { host: `File ✓ Grüße 😀 ${run}`, phone: `95${run}1`, attached: `96${run}1` };
 const PASSPHRASE = `${run}${run}`;
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
@@ -102,6 +107,16 @@ const sqlite = (file, sql) => {
     return out ? JSON.parse(out) : [];
 };
 const phoneTasks = () => Object.fromEntries(sqlite(pullFile(`files/${DB}`, 'db'), 'SELECT title, status FROM tasks WHERE deletedAt IS NULL').map((row) => [row.title, row.status]));
+/** The stored attachments of the live task titled [title] (removed ones included). */
+const storedAttachments = (title) => {
+    const row = sqlite(pullFile(`files/${DB}`, 'db'), `SELECT attachments FROM tasks WHERE title = '${title}' AND deletedAt IS NULL`)[0];
+    return row?.attachments ? JSON.parse(row.attachments) : [];
+};
+/** The SHA-256 of an app-private file:// copy (toybox), or null when it is not there. */
+const phoneSha = (uri) => {
+    const path = uri.replace(/^file:\/\/\/data\/(user\/0|data)\/[^/]+\//, '');
+    return /^[0-9a-f]{64}/.exec(sh(`run-as ${PKG} sha256sum ${path} 2>/dev/null || true`))?.[0] ?? null;
+};
 const rkStorage = () => Object.fromEntries(sqlite(pullFile('databases/RKStorage', 'rk'), 'SELECT key, value FROM catalystLocalStorage').map((row) => [row.key, row.value]));
 /** The test folder's file names (hidden ones too). */
 const folderNames = () => sh(`ls -a ${PHONE_DIR}`).split(/\s+/).filter((name) => name && name !== '.' && name !== '..').sort();
@@ -115,7 +130,10 @@ const persistedGrant = (fragment) => {
     const start = lines.findIndex((line) => new RegExp(`UID ${uid}\\b`).test(line));
     if (start < 0) return false;
     const end = lines.findIndex((line, index) => index > start && /^\s*\* UID /.test(line));
-    return lines.slice(start, end < 0 ? undefined : end).some((line) => line.includes(fragment));
+    // Only a persisted grant counts: the picker's answer also leaves a transient one, listed until Android drops it.
+    const block = lines.slice(start, end < 0 ? undefined : end);
+    const entry = block.findIndex((line) => line.includes('UriPermission{') && line.includes(`${fragment} `));
+    return entry >= 0 && /\bpersisted=0x[1-9a-f]/.test(block.slice(entry + 1, entry + 4).join(' '));
 };
 
 // ---- UI (core's English) ----
@@ -135,6 +153,13 @@ const toTabs = async () => {
     for (let step = 0; step < 8; step += 1) {
         const nodes = await screen();
         if (tab(nodes, en['tab.menu']) && !tagged(nodes, 'menu-screen') && !sheetOpen(nodes) && !inEditor(nodes) && !tagged(nodes, 'quick-capture')) return nodes;
+        // An editor left with changes asks first (a failed step's draft): Back would only close the question.
+        const discard = button(nodes, en['common.discard']);
+        if (discard) {
+            await tap(discard);
+            await sleep(1000);
+            continue;
+        }
         await hideKeyboard();
         requireAppFront();
         sh('input keyevent KEYCODE_BACK');
@@ -281,6 +306,39 @@ const tapThenFind = async (find, after, description, timeoutMs = 30_000) => {
 const cardShows = (text, timeoutMs) => until(`"${text.slice(0, 50)}" on the card`, async () => {
     try { await reveal((current) => withText(current, text), text.slice(0, 40)); return true; } catch { return false; }
 }, timeoutMs, 1_000);
+/** The editor of the task titled [title], scrolled to its attachments (the Details section opened when folded). */
+const openAttachmentsOf = async (title) => {
+    await toInbox();
+    let nodes = await device.reveal(title);
+    nodes = await tapExpecting(inList(nodes, title) ?? fail(`no task row ${title}`), inEditor, 'the editor');
+    for (let step = 0; step < 14 && !tagged(nodes, 'attachment-add-file'); step += 1) {
+        const next = await device.swipe(nodes, 'down');
+        if (device.signature(next) === device.signature(nodes)) break;
+        nodes = next;
+    }
+    if (!tagged(nodes, 'attachment-add-file')) {
+        await tap(withDescription(nodes, en['taskEdit.details']) ?? fail('no Details section'));
+        await sleep(800);
+    }
+};
+/** Live file attachments with a cloud key and no local copy: core's activation refuses every new folder while one exists. */
+const remoteOnlyAttachments = () => ['tasks', 'projects'].flatMap((table) => sqlite(pullFile(`files/${DB}`, 'db'),
+    `SELECT id, attachments FROM ${table} WHERE deletedAt IS NULL AND attachments IS NOT NULL`)
+    .flatMap((row) => JSON.parse(row.attachments).filter((a) => a.kind === 'file' && !a.deletedAt && a.cloudKey && (!a.uri || a.localStatus === 'missing'))
+        .map((a) => `${a.id} on ${table.slice(0, -1)} ${row.id}`)));
+/** The end: (2b)'s file removed in the editor (Remove, Save) while this run's folder still holds its bytes. */
+const removeHostFile = async () => {
+    // Not on the phone yet (a step before the sync failed): nothing to remove.
+    if (!storedAttachments(titles.attached).some((a) => a.id === hostFile.id && !a.deletedAt)) { hostFilePending = false; return; }
+    await openAttachmentsOf(titles.attached);
+    const title = await reveal((current) => withDescription(current, hostFile.title), hostFile.title);
+    const [, top, , bottom] = box(title);
+    const remove = (await screen()).find((node) => node['content-desc'] === en['attachments.remove'] && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
+    await tapExpecting(remove ?? fail('no Remove beside the file'), (current) => !withDescription(current, hostFile.title), 'the file removed from the draft');
+    await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), (current) => !inEditor(current), 'the editor saved');
+    await until('the removal stored', () => storedAttachments(titles.attached).find((a) => a.id === hostFile.id)?.deletedAt, 15_000, 1_000);
+    hostFilePending = false;
+};
 /** data.json.enc decrypted on this computer by core's own code (Bun runs core's TypeScript): its task titles. */
 const decryptedTitles = () => {
     const file = resolve(work, 'data.json.enc');
@@ -338,6 +396,10 @@ const requireRestorableBackend = (keys) => {
         + 'Choose Off in the dev app\'s Settings › Sync, then run again');
 };
 let touched = false;
+/** (2b)'s file from this computer, named on a task. The end removes it in the editor, downloaded or not: a check leaves no
+ * attachment behind, and one whose bytes are only in a removed folder blocks every later activation (core's, as RN's). */
+let hostFile = null;
+let hostFilePending = false;
 /** This run turned sync encryption on at its folder (Enable, or the leftover mode's pick) and has not turned it off yet. */
 let encrypted = false;
 /** Disable at this run's folder (the key is on the phone, so no passphrase): the folder is plaintext again. */
@@ -369,26 +431,38 @@ const restoreBackend = async () => {
         }
         if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);
         await waitFor('the app', (nodes) => nodes.length > 0 && front().includes(`${PKG}/`), 30_000);
+        if (hostFilePending) await removeHostFile();
         if (encrypted) await disableHere('Disable (the end puts encryption back off)');
         if (rkStorage()['@mindwtr_sync_backend'] !== 'off') {
             await openSync();
             await tapTag('sync-backend-off', (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off');
             await until('Off stored', () => rkStorage()['@mindwtr_sync_backend'] === 'off', 30_000, 1_000);
         }
+        // The app keeps a picked folder's grant after Off (as RN does): the debug probe releases this run's, so grants for
+        // removed test folders do not pile up.
+        if (persistedGrant(`Download%2F${FOLDER}`)) await probe(false, 'revoke', `--es uri '${TREE}'`);
         sh(`rm -rf ${PHONE_DIR}`);
-        console.log(`info - sync encryption is off, the stored sync backend is Off again and ${PHONE_DIR} is removed`);
+        console.log(`info - sync encryption is off, the stored sync backend is Off again, its grant released and ${PHONE_DIR} removed`);
         await toTabs().catch(() => undefined);
     } catch (error) {
-        console.error(`LEFT: the dev app may still point at ${PHONE_DIR}${encrypted ? ' with sync encryption on' : ''}; the folder is kept. `
+        console.error(`LEFT: the dev app may still point at ${PHONE_DIR}${encrypted ? ' with sync encryption on' : ''}`
+            + `${hostFilePending ? `, and task ${titles.attached} still holds the check's file ${hostFile.title}` : ''}; the folder is kept. `
             + `Disable encryption and choose Off in Settings › Sync (${error.message})`);
         process.exitCode = 1;
     }
 };
-// A signal ends the run without the Sync screen: the folder stays, so the app never points at a removed one.
-const cleanup = cleanupOnExit([
-    () => setProp('sync_tree', ''),
-    () => sh(`rm -f ${UI_FILE}`),
-]);
+const cleanup = () => {
+    for (const step of [() => setProp('sync_tree', ''), () => sh(`rm -f ${UI_FILE}`)]) {
+        try { step(); } catch { /* the phone is gone */ }
+    }
+};
+/** The end, once, pass, fail or signal: the check's file removed, encryption and sync Off through the Sync screen, then the folder. */
+let ending = null;
+const end = () => (ending ??= restoreBackend().finally(cleanup));
+// A signal (the batch's hour limit, Ctrl-C) runs the same end through the UI; restoreBackend keeps the folder when it cannot finish.
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.once(signal, () => { void end().finally(() => process.exit(code)); });
+}
 
 try {
     console.log(`device: ${sh('getprop ro.product.model')} / Android ${sh('getprop ro.build.version.release')} (API ${sh('getprop ro.build.version.sdk')})`);
@@ -398,6 +472,11 @@ try {
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
     await restart();
     requireRestorableBackend(rkStorage());
+    const remoteOnly = remoteOnlyAttachments();
+    if (remoteOnly.length) {
+        throw new Refused(`the library holds ${remoteOnly.length} live file attachments with a cloud key and no local copy (${remoteOnly.slice(0, 5).join('; ')}); `
+            + 'core\'s activation (as RN\'s) refuses every new folder while one exists. Download or remove them in the dev app, then run again');
+    }
     touched = true;
     sh(`mkdir -p ${PHONE_DIR}`);
 
@@ -438,7 +517,19 @@ try {
     const document = folderDocument();
     const at = new Date().toISOString();
     document.tasks.push({ id: randomUUID(), title: titles.host, status: 'inbox', tags: [], contexts: [], createdAt: at, updatedAt: at, rev: 1, revBy: 'file-sync-check' });
+    // (2b)'s file: its bytes at their File Sync key under attachments/ first, then the task that names it.
+    const fileBytes = Buffer.from(`File Sync attachment ${run} ✓\n`);
+    const fileSha = createHash('sha256').update(fileBytes).digest('hex');
+    const fileId = randomUUID();
+    hostFile = { id: fileId, kind: 'file', title: `s5-${run}.txt`, uri: '', mimeType: 'text/plain', size: fileBytes.length,
+        createdAt: at, updatedAt: at, cloudKey: `attachments/${fileId}.${fileSha}.txt`, fileHash: fileSha };
+    document.tasks.push({ id: randomUUID(), title: titles.attached, status: 'inbox', tags: [], contexts: [], attachments: [hostFile],
+        createdAt: at, updatedAt: at, rev: 1, revBy: 'file-sync-check' });
     mkdirSync(work, { recursive: true });
+    writeFileSync(resolve(work, 'attachment.txt'), fileBytes);
+    sh(`mkdir -p ${PHONE_DIR}/attachments`);
+    execFileSync(adbBin, ['-s', serial, 'push', resolve(work, 'attachment.txt'), `${PHONE_DIR}/${hostFile.cloudKey}`], { stdio: 'ignore' });
+    hostFilePending = true;
     writeFileSync(resolve(work, 'data.json'), JSON.stringify(document, null, 2));
     execFileSync(adbBin, ['-s', serial, 'push', resolve(work, 'data.json'), `${PHONE_DIR}/data.json`], { stdio: 'ignore' });
     await syncNow('(2) Sync now after this computer wrote the folder');
@@ -450,11 +541,56 @@ try {
     check(back.tasks.some((task) => task.title === titles.phone && !task.deletedAt), '(2) the phone\'s capture reached data.json');
     check(back.tasks.some((task) => task.title === titles.host), '(2) the emoji title round-tripped byte for byte');
 
+    // (2b) Attachments both ways. The phone's: each file attachment the first sync published is in the folder at its key.
+    // Only File Sync's own keys (attachments/<id>.<sha256>.<ext>): a key another backend gave stays until core re-uploads it.
+    // Only live owners: core's attachment pass skips a deleted task's or project's files (collectAttachmentsById), and their
+    // tombstones keep the key an earlier folder gave (run 9: 25 such, none in this folder).
+    const fileKeys = [...back.tasks, ...(back.projects ?? [])].filter((owner) => !owner.deletedAt).flatMap((owner) => owner.attachments ?? [])
+        .filter((attachment) => attachment.kind === 'file' && !attachment.deletedAt && attachment.cloudKey && attachment.id !== fileId);
+    const published = fileKeys.filter((attachment) => /^attachments\/[^/]+\.[a-f0-9]{64}(\.[a-z0-9]{1,8})?$/.test(attachment.cloudKey));
+    console.log(`info - (2b) ${fileKeys.length - published.length} file attachments keep another backend's key`);
+    check(published.length > 0, `(2b) the phone published ${published.length} file attachments under File Sync keys (the dev library needs at least one)`);
+    const bad = published.filter((attachment) => !folderNames().includes('attachments')
+        || createHash('sha256').update(folderBytes(attachment.cloudKey)).digest('hex') !== attachment.fileHash);
+    check(bad.length === 0, `(2b) each one's bytes are in the folder at its key, their SHA-256 its fileHash (${bad.map((a) => a.cloudKey).join(', ') || 'all'})`);
+    // This computer's: the editor lists the file with Download, which fetches it from the folder.
+    check(storedAttachments(titles.attached).some((attachment) => attachment.id === fileId && !attachment.uri), '(2b) this computer\'s file reached the phone as a remote copy');
+    await openAttachmentsOf(titles.attached);
+    await tap(await reveal((current) => withText(current, en['attachments.download']), 'Download', false));
+    // A task's Download answers into the editor's draft (host-entry.ts attachmentUpdate); Save stores it.
+    await waitFor('the row downloaded', (current) => !withText(current, en['attachments.download']) && !withText(current, en['common.loading'])
+        && !withText(current, en['attachments.missing']), 120_000);
+    await hideKeyboard();
+    await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), (current) => !inEditor(current), 'the editor saved');
+    await until('the download stored', () => {
+        const file = storedAttachments(titles.attached).find((attachment) => attachment.id === hostFile.id);
+        return Boolean(file?.uri) && phoneSha(file.uri) === fileSha;
+    }, 60_000, 2_000);
+    check(true, '(2b) Download fetched this computer\'s file from the folder; Save stored it, the phone\'s copy with its SHA-256');
+    await toTabs();
+
     // (3) A restart keeps the folder.
     await restart();
     since = stamp();
     await syncNow('(3) Sync now after a restart');
     check(!front().includes('documentsui') && rkStorage()['@mindwtr_sync_path'] === syncPath, '(3) the same folder synced with no new pick');
+
+    // (3b) Process death during a pick: the picker's answer reaches the recreated Sync screen, which stores the folder once.
+    await openSync();
+    setProp('sync_tree', START);
+    since = stamp();
+    await tapTag('sync-select-folder', otherAppFront, '(3b) the folder picker', 15_000);
+    const pickerPid = pid() || fail('no app process behind the picker');
+    sh(`run-as ${PKG} kill -9 ${pickerPid}`);
+    await until('the app process to end', () => pid() !== pickerPid, 10_000, 500);
+    check(otherAppFront(), '(3b) the app\'s process died while the folder picker was in front');
+    await useTestFolder();
+    await until('the recreated screen\'s Select Folder answer', () => commands('pickSyncFolder', since) > 0, 240_000, 1_000);
+    setProp('sync_tree', '');
+    await sleep(5_000);
+    check(commands('pickSyncFolder', since) === 1, `(3b) the recreated Sync screen answered Select Folder once (${commands('pickSyncFolder', since)})`);
+    check(rkStorage()['@mindwtr_sync_path'] === syncPath && persistedGrant(`Download%2F${FOLDER}`), '(3b) it stored the same folder, its grant kept');
+    check(cycles(since).some((line) => line.outcome === 'synced'), '(3b) the pick synced the folder');
 
     // (4) The folder lock against a second holder.
     const lockInode = inode('.mindwtr.lock');
@@ -571,8 +707,7 @@ try {
         process.exitCode = error instanceof Stopped ? 3 : 1;
     }
 } finally {
-    await restoreBackend();
-    cleanup();
+    await end();
     await sleep(500);
     process.exit(process.exitCode ?? 0);
 }

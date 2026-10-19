@@ -2,7 +2,7 @@
 // upgradetest build, then by a newer RN recovery build.
 //
 //   node apps/android-native/scripts/build-upgrade-harness.mjs
-//   node apps/android-native/scripts/check-upgrade-device.mjs <adb-serial> [--only=1,4,2,4b,2b,3,3b,5,5b,6,7,8,9,10] [--keep]
+//   node apps/android-native/scripts/check-upgrade-device.mjs <adb-serial> [--only=1,4,2,4b,2b,3,3b,5,5b,6,7,8,9,10,11] [--keep]
 //
 // Scenarios, each from a fresh RN v1.3.2 install:
 //   1   happy upgrade: the native app shows the RN data, imports the capture RN
@@ -48,6 +48,10 @@
 //       and Pomodoro record byte for byte, cancels RN's alarm with RN's others (R1), makes no Pomodoro alarm and shows no card;
 //       the persistent capture notification is shown. Then RN 154 over the
 //       native app holds no native alarm of any kind.
+//   11  an RN user's File Sync folder (pass S5): RN v1.3.2 picks Download/mts5u<run> in its own Sync screen (File, Select
+//       Folder, the system folder picker) and syncs into it. The native app shows RN's folder on its Sync screen, and its Sync
+//       now writes into data.json (a capture RN left queued, which the native boot imports) with no new pick: RN's grant is
+//       still held, and files/file-sync-root-authorities/ still holds RN's one authority lock file, under the same name.
 // In 1, 2 and 5b the native app also publishes RN's home-screen widget payload (shared_prefs/mindwtr_widget.xml,
 // pass W1): that one other file may change, and only as RN's format with its one `payload` key, the value equal to
 // core's publication on a copy of the database the app left (host-side core with bun, widget-payload.mjs).
@@ -71,7 +75,7 @@ import { bootFailure, box, button, check, connect, draftText, evidenced, fail, f
 import { serveWebdav, webdavDocument } from './sync-harness.mjs';
 import { PUBLISHED, REFRESHED, WIDGET_PREFS, WIDGET_LIST_PREFS, widgetSelections, corePublication, count, firstDifference, isRnPayloadPrefsWrite, publicationContext, widgetPrefs } from './widget-payload.mjs';
 
-const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '7', '8', '9', '10'];
+const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '7', '8', '9', '10', '11'];
 const USAGE = `usage: node check-upgrade-device.mjs <adb-serial> [--only=${SCENARIOS.join(',')}] [--keep]`;
 const args = process.argv.slice(2);
 const serials = args.filter((arg) => !arg.startsWith('--'));
@@ -209,14 +213,17 @@ const pickFolder = async (path) => {
     if (allow) tapNode(allow);
     for (let wait = 0; wait < 30 && !front().includes(`${PKG}/`); wait += 1) await sleep(500);
 };
-/** Whether the app holds a persisted URI grant naming [fragment] (`dumpsys activity permissions`, the app's UID block). */
+/** Whether the app holds a persisted URI grant for the tree ending in [fragment] (`dumpsys activity permissions`, the app's UID block). */
 const persistedGrant = (fragment) => {
     const uid = /uid:(\d+)/.exec(sh(`pm list packages -U ${PKG}`))?.[1] ?? fail(`no UID for ${PKG}`);
     const lines = sh('dumpsys activity permissions').split('\n');
     const start = lines.findIndex((line) => new RegExp(`UID ${uid}\\b`).test(line));
     if (start < 0) return false;
     const end = lines.findIndex((line, index) => index > start && /^\s*\* UID /.test(line));
-    return lines.slice(start, end < 0 ? undefined : end).some((line) => line.includes(fragment));
+    // Only a persisted grant counts: the picker's answer also leaves a transient one, listed until Android drops it.
+    const block = lines.slice(start, end < 0 ? undefined : end);
+    const entry = block.findIndex((line) => line.includes('UriPermission{') && line.includes(`${fragment} `));
+    return entry >= 0 && /\bpersisted=0x[1-9a-f]/.test(block.slice(entry + 1, entry + 4).join(' '));
 };
 
 // RN's own capture queue: one JSON file per item, imported through RN's store at launch.
@@ -1151,6 +1158,93 @@ const scenarioSync = async () => {
     }
 };
 
+// ---- 11: an RN user's File Sync folder ----
+const RN_FILE = 'File'; // v1.3.2's settings.syncBackendFile
+const RN_SELECT_FOLDER = 'Select Folder'; // v1.3.2's settings.selectFolder
+/** The folder lock's authority files (RN's SyncFileLockModule: files/file-sync-root-authorities/<sha256>.lock). */
+const authorityLocks = () => runAs('ls files/file-sync-root-authorities 2>/dev/null || true').split(/\s+/).filter((name) => name.endsWith('.lock')).sort();
+const scenarioFileSync = async () => {
+    console.log('\n# 11 RN File Sync folder');
+    fresh();
+    const dir = `mts5u${run}`.slice(0, 16);
+    const folder = `/sdcard/Download/${dir}`;
+    const folderNames = () => sh(`ls -a ${folder}`).split(/\s+/).filter((name) => name && name !== '.' && name !== '..');
+    sh(`mkdir -p ${folder}`);
+    try {
+        // RN's own Sync screen: File, Select Folder, the system picker in this run's folder.
+        device.launch(RN_ACTIVITY);
+        let first = [];
+        for (const deadline = Date.now() + 20_000; Date.now() < deadline && !first.some((node) => node.text === RN_SKIP_ONBOARDING); await sleep(1_000)) {
+            first = await screen();
+        }
+        const skip = first.find((node) => node.text === RN_SKIP_ONBOARDING);
+        if (skip) await tap(skip);
+        await sleep(2_000);
+        openLink('mindwtr-upgradetest://settings?settingsScreen=sync');
+        let nodes = await waitFor('RN Settings > Sync', (current) => current.some((node) => node.text === RN_FILE), 60_000);
+        await tap(nodes.find((node) => node.text === RN_FILE));
+        // Select Folder sits below the panel's how-to box.
+        nodes = await waitFor('RN\'s File panel', (current) => current.some((node) => node.text === 'Folder / File Sync'), 20_000);
+        for (let step = 0; step < 8 && !nodes.some((node) => node.text === RN_SELECT_FOLDER && box(node)[3] < 2000); step += 1) {
+            requireAppFront();
+            sh('input swipe 540 1600 540 900 900');
+            await sleep(700);
+            nodes = await screen();
+        }
+        await tap(nodes.find((node) => node.text === RN_SELECT_FOLDER) ?? fail('no Select Folder in RN\'s File panel'));
+        await pickFolder(['Download', dir]);
+        await until('RN\'s first sync into the picked folder', () => folderNames().includes('data.json') && folderNames().includes('.mindwtr.lock'), 60_000);
+        await sleep(2_000);
+        await stopApp();
+        const rnKeys = asyncStorage('11-rn-rkstorage');
+        const path = rnKeys.get('@mindwtr_sync_path') ?? '';
+        check(rnKeys.get('@mindwtr_sync_backend') === 'file' && path.includes(`/tree/primary%3ADownload%2F${dir}/`),
+            `(11) RN stored its File Sync backend and the picked folder in RKStorage (${path})`);
+        check(persistedGrant(`Download%2F${dir}`), '(11) RN holds the picked folder as a persisted grant');
+        const locks = authorityLocks();
+        check(locks.length === 1, `(11) RN's folder lock made one authority lock file (${locks.join(', ')})`);
+
+        // The native app over it: RN's folder on its Sync screen, and a Sync now that writes into it with no new pick.
+        const queued = { id: randomUUID(), title: `97${run}`, createdAt: new Date().toISOString(), source: 'android-quick-capture' };
+        queue([queued]);
+        install(APKS.native153, true);
+        device.launch(NATIVE_ACTIVITY);
+        nodes = await nativeScreen();
+        check(!unavailable(nodes), `(11) native boot succeeded ${unavailable(nodes) ?? ''}`);
+        await tap(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'));
+        nodes = await waitFor('the More sheet', (current) => Boolean(tagged(current, 'more-sheet')), 10_000);
+        await tap(withDescription(nodes, en['nav.settings']) ?? fail('no Settings tile'));
+        nodes = await waitFor('native Settings', (current) => Boolean(tagged(current, 'settings-main')), 20_000);
+        let row = nodes.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.sync']}. `));
+        for (let step = 0; step < 6 && !row; step += 1) {
+            nodes = await device.swipe(nodes, 'down');
+            row = nodes.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.sync']}. `));
+        }
+        await tap(row ?? fail('no Sync row in native Settings'));
+        nodes = await waitFor('native Settings > Sync with RN\'s folder', (current) => Boolean(tagged(current, 'sync-select-folder')), 30_000);
+        // Compose reports a selected button chip as checked.
+        check(tagged(nodes, 'sync-backend-file')?.checked === 'true', '(11) the native Sync screen shows RN\'s backend (File chosen)');
+        // Core's folder label (getSyncFolderLabel, as RN shows it): the stored path's decoded leaf.
+        const label = decodeURIComponent(path).split('/').pop();
+        let now = nodes;
+        for (let step = 0; step < 6 && !(tagged(now, 'sync-now') && now.some((node) => node.text === label)); step += 1) now = await device.swipe(now, 'down');
+        check(now.some((node) => node.text === label), `(11) it shows RN's stored folder path (${label})`);
+        await tap(tagged(now, 'sync-now') ?? fail('no Sync now'));
+        await until('the native capture in RN\'s data.json', () => {
+            const document = JSON.parse(sh(`cat ${folder}/data.json`));
+            return document.tasks.some((task) => task.id === queued.id && task.title === queued.title && !task.deletedAt);
+        }, 120_000);
+        check(front().includes(`${PKG}/`), '(11) the native Sync now wrote its capture into RN\'s data.json with no new pick');
+        check(!folderNames().some((name) => /\.mindwtr-et-|mindwtr-write-test|\.tmp$/.test(name)), `(11) no scratch file is left (${folderNames().join(', ')})`);
+        await stopApp();
+        check(persistedGrant(`Download%2F${dir}`), '(11) the native app still holds RN\'s folder grant');
+        const after = authorityLocks();
+        check(isDeepStrictEqual(after, locks), `(11) the native lock used RN's authority lock file, same name (${after.join(', ')})`);
+    } finally {
+        sh(`rm -rf ${folder}`);
+    }
+};
+
 // ---- 7: RN's reminder alarms at the upgrade ----
 const RN_RECEIVER = 'com.emekalites.react.alarm.notification.AlarmReceiver';
 const NATIVE_FIRE = 'tech.dongdongbh.mindwtr.reminder.FIRE';
@@ -1396,6 +1490,7 @@ try {
     if (want('8')) await scenarioPendingCheckoff();
     if (want('9')) await scenarioPomodoro();
     if (want('10')) await scenarioRecoverySnapshots();
+    if (want('11')) await scenarioFileSync();
     console.log(`\nUpgrade device check passed${blocked4 ? '; scenario 4 BLOCKED (see above)' : ''}`);
 } catch (error) {
     evidenced(error);

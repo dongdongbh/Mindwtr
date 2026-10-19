@@ -12,6 +12,7 @@
 // capture popup (empty, with text and core's preview, and with the contexts picker open),
 // (PARITY_ONLY=d1b shoots only pass D1b's: Settings › Data with the Backup fold's end (Getting Started), the Import fold open,
 // and in light mode the Todoist question and the invalid-import warning.)
+// (PARITY_ONLY=s5 shoots only pass S5's: Settings › Sync with File chosen, at its top and at the folder card.)
 // (PARITY_ONLY=r2 shoots only pass R2's screens, with the weekly review on in the fixture: Settings › Notifications from its
 // top and its end, and its day picker.)
 // RN's capture screen for each entry kind (a capture link with the keyboard up and down, a share, an assistant note, and a
@@ -57,6 +58,7 @@ const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 const out = resolve(harness, 'parity', new Date().toISOString().replace(/[:.]/g, '-'));
 const R2_ONLY = process.env.PARITY_ONLY === 'r2';
 const D1B_ONLY = process.env.PARITY_ONLY === 'd1b';
+const S5_ONLY = process.env.PARITY_ONLY === 's5';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -561,9 +563,23 @@ const shootFilePanel = async (prefix, suffix) => {
         for (let step = 0; step < 20 && !labelled(nodes, en['settings.syncBackendFile']); step += 1) nodes = await device.swipe(nodes, 'up');
         await tap(labelled(nodes, en['settings.syncBackendFile']) ?? fail('no File chip'));
         await sleep(1500);
+        // Two places both apps reach alike: the top (the chips and the how-to box), then the folder card, brought up with short
+        // slow drags (a swipe flings RN's ScrollView past it) until Select Folder sits in the screen's upper half.
+        for (let step = 0; step < 20; step += 1) {
+            const next = await device.swipe(await screen(), 'up');
+            if (device.signature(next) === device.signature(nodes)) break;
+            nodes = next;
+        }
+        await shoot(`${prefix}-settings-sync-file-${suffix}`, (current) => Boolean(labelled(current, en['settings.syncBackendFile'])));
+        const placed = (current) => { const node = labelled(current, en['settings.selectFolder']); return node && box(node)[1] > 250 && box(node)[3] < 1200; };
         nodes = await screen();
-        for (let step = 0; step < 10 && !labelled(nodes, en['settings.selectFolder']); step += 1) nodes = await device.swipe(nodes, 'down');
-        await shoot(`${prefix}-settings-sync-file-${suffix}`, (current) => Boolean(labelled(current, en['settings.selectFolder'])));
+        for (let step = 0; step < 12 && !placed(nodes); step += 1) {
+            requireAppFront();
+            sh('input swipe 540 1500 540 1000 900');
+            await sleep(800);
+            nodes = await screen();
+        }
+        await shoot(`${prefix}-settings-sync-file-folder-${suffix}`, placed);
     } catch (error) {
         console.log(`warn - ${prefix} File Sync panel: ${error.message}`);
     }
@@ -760,6 +776,27 @@ const shootR2 = async (prefix, suffix, rn) => {
         await sleep(900);
     }
 };
+/** Pass S5 only: Settings › Sync from the Menu sheet, the File panel's two shots, then Back to the tabs. */
+const shootS5 = async (prefix, suffix, rn) => {
+    if (rn) openLink('focus');
+    const menu = await waitFor('the Menu tab', (current) => Boolean(rn ? current.find((node) => node['content-desc'] === 'Menu') : tab(current, 'Menu')), 60_000);
+    await tap(rn ? menu.find((node) => node['content-desc'] === 'Menu') : tab(menu, 'Menu'));
+    const sheet = await waitFor('the Settings tile', (current) => Boolean(withDescription(current, en['nav.settings'])), 15_000);
+    await tap(withDescription(sheet, en['nav.settings']));
+    const sync = SETTINGS_SCREENS.find((screen) => screen.name === 'sync');
+    const rows = await waitFor('the Sync row', (current) => Boolean(withDescription(current, sync.row)), 30_000);
+    await tap(withDescription(rows, sync.row));
+    await waitFor('Settings › Sync', (current) => hasText(current, en['settings.syncBackendFile']) || Boolean(withDescription(current, en['settings.syncBackendFile'])), 30_000);
+    await shootFilePanel(prefix, suffix);
+    for (let step = 0; step < 4; step += 1) {
+        const current = await screen();
+        if (rn ? current.some((node) => node['content-desc'] === 'Menu') && !withDescription(current, sync.row) && !hasText(current, en['settings.selectFolder'])
+            : Boolean(tab(current, 'Inbox')) && !withDescription(current, sync.row) && !hasText(current, en['settings.selectFolder'])) break;
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(900);
+    }
+};
 const c3FixesOnly = process.env.PARITY_ONLY === 'c3-fixes';
 const originalFontScale = sh('settings get system font_scale');
 /** Opens the Calendar (RN: its link; native: the Menu sheet's tile). */
@@ -917,6 +954,7 @@ try {
             device.launch(RN_ACTIVITY);
         }
         if (R2_ONLY) { await shootR2('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
+        if (S5_ONLY) { await shootS5('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (D1B_ONLY) { await shootD1b('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         for (const screen of SCREENS) {
             openLink(screen.link);
@@ -959,6 +997,7 @@ try {
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         if (mode === 'yes') await setNight('yes');
         if (R2_ONLY) { await shootR2('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
+        if (S5_ONLY) { await shootS5('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (D1B_ONLY) { await shootD1b('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         for (const screen of SCREENS) {
             const nodes = await waitFor('the native tabs', (current) => Boolean(tab(current, screen.tab)), 60_000);
