@@ -17,16 +17,19 @@
 //       MERGE_BENCH_ATTACHMENTS=<n> (D9b §1, a series with active attachment transfers): each sample also adds <n> new
 //       attachments of MERGE_BENCH_ATTACHMENT_KB KiB (default 512) to the folder's document and their files to its
 //       attachments folder, so the measured cycle downloads them while the taps run.
-//   node measure-merge-device.mjs analyze <trace>...
+//   node measure-merge-device.mjs analyze [--budget=<ms> [--repeat]] <trace>...
 //       Per trace: the sync's engine-thread sections (sync:*, io:*, sql:*), the engine's uninterrupted blocks during sync,
 //       the engine thread's states, and each screen command's wait (core:wait on its own thread) with its queue time and the
-//       tap before it. With --budget=<ms> it exits 1 unless the p90 tap-to-answer of the taps whose wait began inside the
-//       sync's span is at most <ms> (D9's target is 300); no such tap also fails. A tap (its DOWN and UP input events, by
+//       tap before it. With --budget=<ms> it judges the series (merge-budget.mjs): the engine's longest block during sync must
+//       be at most 450 ms median and 550 ms p90, and the p90 tap-to-answer of the taps whose wait began inside the sync's span
+//       at most <ms> (D9's target is 300). Both pass: exit 0. Both fail: exit 1. They disagree: exit 3; run the series again
+//       and analyze it with --repeat, where a second disagreement fails as noisy. Fewer than 20 good samples, or no tap in the
+//       sync span, fails (exit 1). A tap (its DOWN and UP input events, by
 //       eventTimeNano) is answered by its own tab's read on the read thread (merge-tap-matching.mjs): one sample per tap, a
 //       delayed answer kept with its own tap. The start taps are not measured: two on a cold start, one on a resume
 //       (merge-tap-matching.mjs measuredTaps). A trace whose app did not see all nine taps is an error (the tab order would be
-//       wrong). A series whose share of unanswered taps in the sync's span is above 5% fails the budget too: their answers, if
-//       any, went unmeasured.
+//       wrong). A series whose share of unanswered taps in the sync's span is above 5% fails the budget too (exit 1): their
+//       answers, if any, went unmeasured.
 //
 // Every phone command runs inside the coordinator's lock: flock -o -w 14400 /home/dd/scratch/s23.lock node ...
 // Only the benchmark package (its own application id): the dev app's data is never touched.
@@ -38,6 +41,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { serveWebdav } from './sync-harness.mjs';
 import { assignTapAnswers, measuredTaps, TAPS_PER_SAMPLE } from './merge-tap-matching.mjs';
+import { budgetVerdict } from './merge-budget.mjs';
 
 const ADB = process.env.ADB ?? '/opt/android-sdk/platform-tools/adb';
 const TP = process.env.TRACE_PROCESSOR ?? '/home/dd/.cache/mindwtr-performance-tmp/mindwtr-perfetto/trace_processor';
@@ -265,8 +269,13 @@ duration_ms: 16000
     const engine = `(SELECT utid FROM thread JOIN process USING (upid) WHERE thread.name = 'mindwtr-core' AND process.name GLOB '${PKG_GLOB}' ORDER BY thread.start_ts DESC LIMIT 1)`;
     const budgetArg = args.find((a) => a.startsWith('--budget='));
     const budgetMs = budgetArg ? Number(budgetArg.slice('--budget='.length)) : null;
+    const repeat = args.includes('--repeat');
+    if (budgetArg && !(Number.isFinite(budgetMs) && budgetMs > 0)) {
+        console.error(`usage: --budget=<ms> takes a positive number, not ${JSON.stringify(budgetArg.slice('--budget='.length))}`);
+        process.exit(2);
+    }
     const results = [];
-    for (const trace of args.filter((a) => a !== budgetArg)) {
+    for (const trace of args.filter((a) => a !== budgetArg && a !== '--repeat')) {
         // The sync's span on the engine: its first and last sync:* section.
         const [span] = query(trace, `
 SELECT MIN(s.ts) AS start, MAX(s.ts + s.dur) AS end FROM slice s JOIN thread_track tt ON s.track_id = tt.id
@@ -362,6 +371,7 @@ SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',
     const ok = results.filter((r) => !r.error);
     const summary = {
         traces: results.length,
+        samples: ok.length,
         syncSpanMs: stats(ok.map((r) => r.syncSpanMs)),
         longestBlockMs: stats(ok.map((r) => r.longestBlocks[0]?.ms ?? 0)),
         engineRunningMs: stats(ok.map((r) => r.states.filter((x) => x.state === 'Running').reduce((a, x) => a + x.ms, 0))),
@@ -384,13 +394,10 @@ SELECT round((ts - ${span.start}) / 1e6, 1) AS atSyncMs, replace(replace(msg, ',
         callsDuringSync: { n: waits.filter((w) => w.syncWorkMs > 10).length, waitMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.waitMs)), syncWorkMs: stats(waits.filter((w) => w.syncWorkMs > 10).map((w) => w.syncWorkMs)) },
     };
     console.log(JSON.stringify({ summary, results }, null, 2));
-    if (budgetMs !== null && !(summary.tapsInSyncSpan.p90 <= budgetMs)) {
-        console.error(`budget failed: tap in sync span p90 ${summary.tapsInSyncSpan.p90 ?? 'none'} ms > ${budgetMs} ms (n ${summary.tapsInSyncSpan.n})`);
-        process.exitCode = 1;
-    }
-    if (budgetMs !== null && !(summary.taps.unansweredShare <= 0.05)) {
-        console.error(`budget failed: ${summary.taps.unanswered} of ${summary.taps.inSpan} taps in the sync span have no read of their own tab, unmeasured (share ${summary.taps.unansweredShare} > 0.05)`);
-        process.exitCode = 1;
+    if (budgetMs !== null) {
+        const { verdict, reasons } = budgetVerdict(summary, { tapP90Ms: budgetMs, repeat });
+        console.error(`budget ${verdict}: ${reasons.join('; ')}`);
+        process.exitCode = { pass: 0, fail: 1, repeat: 3 }[verdict];
     }
 } else {
     console.error('usage: rkstorage | run | analyze (see the header)');
