@@ -6942,6 +6942,9 @@ final class FoundationUITests: XCTestCase {
             if keyboard.exists && keyboard.frame.intersects(frame) {
                 frame.size.height = max(0, keyboard.frame.minY - frame.minY)
             }
+            if scroll.identifier == "process-inbox-scroll" {
+                frame.size.height = max(0, frame.height - 20)
+            }
             return frame
         }
         func fullyVisible(_ item: XCUIElement) -> Bool {

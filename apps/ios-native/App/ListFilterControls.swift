@@ -231,7 +231,7 @@ struct ListFilterControls: View {
         return Button { apply(item.object("edit")) } label: {
             HStack(spacing: 12) {
                 Text(label).rnFont(14).strikethrough(excluded).frame(maxWidth: .infinity, alignment: .leading)
-                if selected { Image(systemName: "checkmark").font(.system(size: 16)) }
+                if selected { Image(systemName: "checkmark").font(.system(size: 16)).accessibilityHidden(true) }
                 if excluded { Text(localized("filters.excluded")).rnFont(12, .semibold) }
             }
             .foregroundStyle(excluded ? palette.danger : selected ? palette.tint : palette.text)
