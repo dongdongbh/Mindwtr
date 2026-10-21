@@ -12,13 +12,12 @@ import org.junit.Test
  */
 class RoutedDeviceStoreTest {
     private val prefs = linkedMapOf<String, String>()
-    private val rk = linkedMapOf<String, String>()
+    private val rkStorage = Transactions()
+    private val rk = rkStorage.values
     private val store = routedDeviceStore({ prefs }, { changes ->
         changes.forEach { (key, value) -> if (value == null) prefs.remove(key) else prefs[key] = value }
         true
-    }, { keys -> keys.associateWith { rk[it] } }, { changes ->
-        changes.forEach { (key, value) -> if (value == null) rk.remove(key) else rk[key] = value }
-    })
+    }, rkStorage)
     private fun writes(vararg pairs: Pair<String, String?>) = JSONArray().apply {
         pairs.forEach { (key, value) -> put(JSONObject().put("key", key).put("value", value ?: JSONObject.NULL)) }
     }
@@ -43,5 +42,27 @@ class RoutedDeviceStoreTest {
         store.store(writes("mindwtr:appSearchIndexingEnabled" to "true"), 3, replay = true)
         assertEquals("true", rk["mindwtr:appSearchIndexingEnabled"])
         assertEquals(3L, store.highestSequence())
+    }
+
+    /**
+     * RKStorage, one entry in [committed] per transaction. A switch-off must be one transaction holding the removal and its journal
+     * sequence (review O2d R-P2-2). With two (values and sequences first, removals after) a death between them left the switch's
+     * sequence stored without its removal, and the replay then skipped the removal: system search stayed on.
+     */
+    private class Transactions : RkStore {
+        val committed = mutableListOf<Map<String, String?>>()
+        val values = linkedMapOf<String, String>()
+        override fun multiGet(keys: List<String>) = keys.associateWith { values[it] }
+        override fun multiSet(entries: List<Pair<String, String>>) { committed += entries.toMap(); entries.forEach { (k, v) -> values[k] = v } }
+        override fun multiRemove(keys: List<String>) { committed += keys.associateWith { null }; keys.forEach(values::remove) }
+        override fun apply(changes: Map<String, String?>) { committed += changes; changes.forEach { (k, v) -> if (v == null) values.remove(k) else values[k] = v } }
+    }
+
+    @Test fun aSwitchOffIsOneRkStorageTransaction() {
+        rk["mindwtr:appSearchIndexingEnabled"] = "true"
+        store.store(writes("mindwtr:appSearchWipeOwed" to "true", "mindwtr:appSearchIndexingEnabled" to null), 12, replay = false)
+        assertEquals(1, rkStorage.committed.size)
+        assertEquals(mapOf("mindwtr:appSearchWipeOwed" to "true", "mindwtr:appSearchWipeOwed@journal" to "12",
+            "mindwtr:appSearchIndexingEnabled" to null, "mindwtr:appSearchIndexingEnabled@journal" to "12"), rkStorage.committed.single())
     }
 }

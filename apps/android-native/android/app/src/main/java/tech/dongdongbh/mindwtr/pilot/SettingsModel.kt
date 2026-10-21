@@ -63,12 +63,13 @@ fun isRkDeviceKey(key: String) = key.removeSuffix(DeviceWrites.SEQUENCE) in RK_D
  * RN's device keys with their journal sequences (DeviceWrites): [RK_DEVICE_KEYS] in RN's RKStorage (pass O2d: an upgraded RN user
  * keeps the system search switch, and an RN recovery build reads it), every other key in [prefsAll]'s preferences.
  */
-fun routedDeviceStore(prefsAll: () -> Map<String, *>, prefsCommit: (Map<String, String?>) -> Boolean,
-    rkGet: (List<String>) -> Map<String, String?>, rkCommit: (Map<String, String?>) -> Unit) = DeviceWrites(
-    { prefsAll().filterKeys { !isRkDeviceKey(it) } + rkGet(RK_DEVICE_KEYS.flatMap { listOf(it, it + DeviceWrites.SEQUENCE) }).filterValues { it != null } },
+fun routedDeviceStore(prefsAll: () -> Map<String, *>, prefsCommit: (Map<String, String?>) -> Boolean, rkStorage: RkStore) = DeviceWrites(
+    { prefsAll().filterKeys { !isRkDeviceKey(it) } + rkStorage.multiGet(RK_DEVICE_KEYS.flatMap { listOf(it, it + DeviceWrites.SEQUENCE) }).filterValues { it != null } },
     { changes ->
         val rk = changes.filterKeys(::isRkDeviceKey)
-        if (rk.isNotEmpty()) rkCommit(rk)
+        // One RKStorage transaction: a value and its journal sequence land together, as DeviceWrites needs (a death between two
+        // would let a replay skip the switch's removal, review O2d R-P2-2).
+        if (rk.isNotEmpty()) rkStorage.apply(rk)
         changes.filterKeys { !isRkDeviceKey(it) }.let { rest -> rest.isEmpty() || prefsCommit(rest) }
     })
 
@@ -80,9 +81,15 @@ fun deviceStore(app: Context, keyValue: RnKeyValue): DeviceWrites {
     val prefs = app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
     return routedDeviceStore({ prefs.all }, { changes ->
         prefs.edit().apply { changes.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
-    // One RKStorage transaction: a value and its journal sequence land together, as DeviceWrites needs (a death between two
-    // would let a replay skip the switch's removal).
-    }, keyValue::multiGet, keyValue::apply)
+    }, keyValue)
+}
+
+/** [routedDeviceStore]'s RKStorage (RnKeyValue in the app, a fake in the JVM test); each write is one transaction. */
+interface RkStore {
+    fun multiGet(keys: List<String>): Map<String, String?>
+    fun multiSet(entries: List<Pair<String, String>>)
+    fun multiRemove(keys: List<String>)
+    fun apply(changes: Map<String, String?>)
 }
 
 /** Core windows Manage's lists and the Someday sections by NATIVE_HOST_MAX_WINDOW. */
