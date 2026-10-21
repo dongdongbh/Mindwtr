@@ -63,6 +63,8 @@ class CoreHost(
     private val backups: BackupOperations? = null,
     /** The device calendars core's external calendars read (bundle/host-calendar.ts); null: this host reads none. */
     private val calendars: HostCalendars? = null,
+    /** Android system search (bundle/host-app-search.ts); null: this host indexes nothing. */
+    private val appSearch: HostAppSearch? = null,
 ) {
     /**
      * Reminder alarms on the platform (pilot/Reminders.kt): core's plan applied in core's order, the notification permission as RN
@@ -503,6 +505,12 @@ class CoreHost(
         // The device calendars (host-calendar.ts): each call only starts here; HostIo runs it on its calendar thread and the pump
         // settles it, as a fetch. A permission prompt answers when the user does, holding no thread meanwhile.
         calendars?.let { device -> bridge.setProperty("calendarCall", guarded { args -> io.calendar(args[0] as String, device::call) }) }
+        // Android system search (host-app-search.ts): a call only starts here (on HostIo's calendar thread, as a device calendar
+        // call) and AppSearch answers through the pump; `appSearchInfo` is whether it runs here and the build's link scheme.
+        appSearch?.let { search ->
+            bridge.setProperty("appSearchInfo", guarded { _ -> search.info() })
+            bridge.setProperty("appSearchCall", guarded { args -> io.calendar(args[0] as String, search::call) })
+        }
         // Reminder alarms (host-reminders.ts): core's plan applied, the notification permission, RN's old alarms cancelled once.
         reminders?.let { alarms ->
             bridge.setProperty("alarmApply", guarded { args -> alarms.apply(args[0] as String); null })
@@ -727,6 +735,12 @@ class CoreHost(
      * feature is on and notifications are not allowed, where RN asks for the permission at start.
      */
     fun remindersStart(): JSONObject = callAsync("remindersStart")
+
+    /** Android system search's start (core's syncWithPreference): a full reindex and live indexing when the switch is on. */
+    fun appSearchStart(): JSONObject = callAsync("appSearchStart")
+
+    /** Debug device check: the ids in the system search index (`{ ids }`), never titles. */
+    fun appSearchIds(): JSONObject = callAsync("appSearchIds")
 
     /**
      * Core's reminder plan applied now: [mode] "cycle", "rebuild" to remake every alarm (a reboot dropped them, exact alarms were just

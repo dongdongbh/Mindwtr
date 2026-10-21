@@ -227,6 +227,12 @@ dependencies {
     implementation("androidx.fragment:fragment:1.8.9")
     // CoreWork (D7): work after the app closes, on the WorkManager RN ships (expo-background-task's version).
     implementation("androidx.work:work-runtime:2.9.1")
+    // Android system search (pass O2d): RN's AppSearch module's own dependencies and versions (apps/mobile/modules/app-search/
+    // android/build.gradle). Apache-2, FOSS-safe; PlatformStorage is the framework-backed AppSearch, no Play services. Guava, as
+    // RN depends on it, for the ListenableFuture its API returns.
+    implementation("androidx.appsearch:appsearch:1.2.0-alpha01")
+    implementation("androidx.appsearch:appsearch-platform-storage:1.2.0-alpha01")
+    implementation("com.google.guava:guava:33.3.1-android")
     // RN's home-screen widgets, quick capture dialog and capture intent (apps/mobile/modules/android-widget, widget/build.gradle.kts).
     implementation(project(":widget"))
     // Sync encryption's Argon2id (D3, HostCrypto.kt): BouncyCastle's, under its MIT-style licence; AES-GCM is the platform's.

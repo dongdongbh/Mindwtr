@@ -850,6 +850,9 @@
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarCall === 'function') {
         global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');
     }
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.appSearchCall === 'function') {
+        global.__mindwtrAppSearchCall = fileChannel('appSearchCall');
+    }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarPushCall === 'function') {
         global.__mindwtrCalendarPushCall = fileChannel('calendarPushCall', 'calendarPushAbort');
     }

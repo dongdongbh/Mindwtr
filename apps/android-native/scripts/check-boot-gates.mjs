@@ -1853,6 +1853,10 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     // D1c cut i: the storage adapter keeps no read document after a boot (bundle/host-backup-memory.test.ts, bun).
     const memoryTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-backup-memory.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(memoryTested.status, 0, `bundle/host-backup-memory.test.ts: ${memoryTested.stderr.slice(-1500)}`);
+    // O2d: Android system search on the host: one full reindex per start, never in the sandbox, General's switch in RKStorage
+    // (bundle/host-app-search.test.ts, bun).
+    const appSearchTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-app-search.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(appSearchTested.status, 0, `bundle/host-app-search.test.ts: ${appSearchTested.stderr.slice(-1500)}`);
     // D1c: host-entry's side of Settings › Data's file channel, each JS fix with its red run (bundle/host-data-channel.test.ts, bun).
     const channelTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-data-channel.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(channelTested.status, 0, `bundle/host-data-channel.test.ts: ${channelTested.stderr.slice(-1500)}`);

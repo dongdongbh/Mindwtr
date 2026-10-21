@@ -16,6 +16,8 @@ export const ANDROID_HOST_METHODS = [
     'aboutRequest',
     'aiRequest',
     'appLock',
+    'appSearchIds',
+    'appSearchStart',
     'areaFilter',
     'attachmentRequest',
     'backgroundSync',

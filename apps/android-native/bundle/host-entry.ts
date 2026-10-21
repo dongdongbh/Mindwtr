@@ -136,6 +136,7 @@ import {
     webdavPutJson,
 } from '@mindwtr/core';
 import { createNativeAbout } from './host-about';
+import { createNativeAppSearch, type AppSearchCall } from './host-app-search';
 import { createNativeAI } from './host-ai';
 import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundle/host-calendar';
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
@@ -221,6 +222,8 @@ type NativeBridge = {
     dataRead?(handle: string): string;
     dataWrite?(handle: string, chunk: string): string | null;
     dataClose?(handle: string): string;
+    /** Android only (HostAppSearch.kt, pass O2d): `{ supported, scheme }` for system search. */
+    appSearchInfo?(): string;
     /** Android debug builds only (pass D1c's device checks): a debug property's value, "" when unset. */
     debugProp?(name: string): string;
     /** Android debug builds only (pass D1c step 0): logs QuickJS's memory at a named checkpoint. */
@@ -601,6 +604,10 @@ const widgets = typeof (globalThis.__mindwtrNative as { widgetPublish?: unknown 
 const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwtrSecrets as HostSecrets, isFossBuild) : null;
 /** Settings › About, the heartbeat and the store review prompt (host-about.ts), on the host Kotlin describes in `__mindwtrAppInfo`. */
 const nativeAbout = nativeSync ? createNativeAbout(globalThis.__mindwtrAppInfo, keyValue, generateUUID, collectFeedbackDiagnostics) : null;
+
+/** Android system search (host-app-search.ts, pass O2d): core's AppSearch service on RN's index and RN's device keys. */
+const nativeAppSearch = nativeSync && typeof native().appSearchInfo === 'function'
+    ? createNativeAppSearch(native().appSearchInfo!(), globalThis.__mindwtrAppSearchCall as AppSearchCall | undefined, keyValue) : null;
 
 const localAttachments = nativeSync ? null : createNativeLocalAttachmentsForHost();
 const attachmentsHost = nativeSync?.attachmentsHost ?? localAttachments?.contractHost;
@@ -1188,7 +1195,9 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     focusControls: (input) => contract.getFocusControlsList(input),
     // Settings (native-host-contract-settings.ts): the menu, General, GTD, Manage and its lists, and Manage's Someday sections.
     settingsMenu: (input) => contract.getSettingsMenu(input),
-    generalSettings: (input) => contract.getGeneralSettings(input),
+    // General's system search row: shown only where the index runs (Android 12 and later, outside the sandbox), as RN's.
+    generalSettings: (input) => contract.getGeneralSettings(nativeAppSearch
+        ? { ...(input as Parameters<typeof contract.getGeneralSettings>[0]), appSearch: nativeAppSearch.device() } : input),
     gtdSettings: (input) => contract.getGtdSettings(input),
     manageSettings: (input) => contract.getManageSettings(input),
     manageList: (input) => contract.getManageSettingsList(input),
@@ -1363,7 +1372,12 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     mindSweepAdd: (input) => contract.addMindSweepItem(input),
     savedSearchDelete: (input) => contract.deleteSavedSearch(input),
     // Settings: General's and GTD's controls, Manage's editor Save and Delete, and Manage's Someday section rename, reorder and delete.
-    generalSetting: (input) => contract.setGeneralSetting(input),
+    // System search's switch: its device writes go to RN's RKStorage here, and the index follows (host-app-search.ts).
+    generalSetting: async (input) => {
+        const result = await contract.setGeneralSetting(input);
+        if (!result.ok || !nativeAppSearch) return result;
+        return { ...result, value: { ...result.value, deviceWrites: await nativeAppSearch.applyEdit(result.value.deviceWrites) } };
+    },
     gtdSetting: (input) => contract.setGtdSetting(input),
     manageEditor: (input) => contract.saveManageEditor(input),
     manageDelete: (input) => contract.deleteManageItem(input),
@@ -5338,6 +5352,14 @@ globalThis.MindwtrHost = {
      */
     remindersStart(): string {
         return submit(async () => requireReminders().start());
+    },
+    /** Android system search's start (ProcessCoreHost.startAppSearch): live indexing when the switch is on, or an owed wipe. */
+    appSearchStart(): string {
+        return submit(async () => { await nativeAppSearch?.start(); return { started: Boolean(nativeAppSearch) }; });
+    },
+    /** Debug device check (check-app-search-device): the ids in the index, never titles. */
+    appSearchIds(): string {
+        return submit(async () => ({ ids: nativeAppSearch ? await nativeAppSearch.ids() : [] }));
     },
     /**
      * One plan applied now: `mode` "rebuild" remakes every alarm (a reboot dropped them, exact alarms were just allowed), "fired" makes
