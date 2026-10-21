@@ -138,8 +138,8 @@ describe('AppSearch indexing (core, shared by React Native and native Android)',
         // The reindex's late upsert is wiped again, owed first; that wipe failing leaves it owed for the next start.
         expect(env.ports.markWipeOwed).toHaveBeenCalledTimes(1);
         expect(env.ports.markWipeOwed.mock.invocationCallOrder[0]).toBeLessThan(env.ports.wipe.mock.invocationCallOrder[2]);
-        expect(env.ports.clearWipeOwed).toHaveBeenCalledTimes(1);
-        expect(env.ports.clearWipeOwed.mock.invocationCallOrder[0]).toBeLessThan(env.ports.markWipeOwed.mock.invocationCallOrder[0]);
+        // The toggle-off's wipe landed during the rebuild, so it cleared nothing; the last wipe failed: still owed.
+        expect(env.ports.clearWipeOwed).not.toHaveBeenCalled();
     });
 
     it('a toggle-off during the reindex that turning it on started leaves the wipe owed until the last wipe lands', async () => {
@@ -148,6 +148,29 @@ describe('AppSearch indexing (core, shared by React Native and native Android)',
         expect(env.indexing.isArmed()).toBe(false);
         expect(env.ports.markWipeOwed).toHaveBeenCalledTimes(1);
         expect(env.ports.clearWipeOwed.mock.invocationCallOrder.every((order) => order < env.ports.markWipeOwed.mock.invocationCallOrder[0])).toBe(true);
+    });
+
+    // O2c review notes: a port that rejects anyway (the contract says they never do) cannot stop the wipe, and a toggle-off's
+    // wipe that lands while a rebuild runs leaves the owed wipe owed (the rebuild's upsert lands after it).
+    it('still wipes when marking the owed wipe fails', async () => {
+        env.ports.readEnabled.mockResolvedValue(false);
+        env.ports.markWipeOwed.mockRejectedValueOnce(new Error('disk'));
+        await env.indexing.enable();
+        expect(env.ports.wipe).toHaveBeenCalledTimes(2);
+        expect(env.ports.clearWipeOwed).toHaveBeenCalledTimes(1);
+    });
+
+    it('a toggle-off wipe that lands during a rebuild leaves the wipe owed', async () => {
+        let resolveUpsert!: () => void;
+        env.ports.upsert.mockImplementationOnce(() => new Promise<undefined>((resolve) => { resolveUpsert = () => resolve(undefined); }));
+        const rebuilding = env.indexing.runFullReindex();
+        await flush();
+        await env.indexing.wipe();
+        expect(env.ports.clearWipeOwed).not.toHaveBeenCalled();
+        resolveUpsert();
+        await rebuilding;
+        await env.indexing.wipe();
+        expect(env.ports.clearWipeOwed).toHaveBeenCalledTimes(1);
     });
 
     it('a full reindex wipes, then upserts every active item; wipe disarms; disarm stops later updates', async () => {

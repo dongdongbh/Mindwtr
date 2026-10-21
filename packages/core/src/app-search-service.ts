@@ -25,6 +25,7 @@ const REINDEX_DEBOUNCE_MS = 2_000;
 
 type IndexedState = { tasks: Task[]; projects: Project[]; areas: Area[] };
 
+/** Each app's side. The device-key ports never reject (a key that cannot be stored only loses a retry at the next start). */
 export type AppSearchIndexingPorts = {
     /** Android 12 (API 31) or later; below that nothing runs. */
     isSupported(): boolean;
@@ -127,16 +128,22 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
      * period of not observing it, at the cost of one full rewrite rather than a
      * cleverer drift-detection pass).
      */
+    // Rebuilds still running: a toggle-off's wipe that lands meanwhile leaves its owed wipe owed, since this rebuild's upsert
+    // lands after that wipe (enable() then wipes again, owed first).
+    let rebuilding = 0;
     const runFullReindex = async (): Promise<void> => {
         if (!ports.isSupported()) return;
         const state = ports.store.getState();
         const docs = buildFullAppSearchIndex({ tasks: state.tasks, projects: state.projects, areas: state.areas, scheme: ports.scheme });
+        rebuilding += 1;
         try {
             // An owed wipe stays owed: a toggle-off can land while this runs, and this upsert lands after its wipe.
             await ports.wipe();
             await ports.upsert(docs);
         } catch (error) {
             ports.logWarn('AppSearch full reindex failed; local data is unaffected', { error: errorText(error) });
+        } finally {
+            rebuilding -= 1;
         }
     };
 
@@ -154,8 +161,9 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
             arm();
             return;
         }
+        // A mark that fails anyway never stops the wipe; only its retry at the next start is lost.
+        await ports.markWipeOwed().catch(() => undefined);
         try {
-            await ports.markWipeOwed();
             await ports.wipe();
             await ports.clearWipeOwed();
         } catch (error) {
@@ -169,7 +177,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         if (!ports.isSupported()) return;
         try {
             await ports.wipe();
-            await ports.clearWipeOwed();
+            if (rebuilding === 0) await ports.clearWipeOwed();
         } catch (error) {
             ports.logWarn('AppSearch wipe failed', { error: errorText(error) });
         }
