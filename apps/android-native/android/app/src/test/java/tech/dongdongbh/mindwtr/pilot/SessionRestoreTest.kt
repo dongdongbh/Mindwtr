@@ -7,8 +7,8 @@ import org.junit.Test
 /** RN's last-screen restore (pass O2b): each screen names RN's route as RN's router records it (RN's session-restore.ts). */
 class SessionRestoreTest {
     private fun route(screen: Screen = Screen.Focus, quick: String = "projects", menu: MenuScreen? = null, tab: String = "done",
-        project: String? = null, saved: String? = null, search: Boolean = false) =
-        lastRouteOf(screen, quick, menu, tab, project, saved, search)?.let { it.pathname to it.params.toString() }
+        project: String? = null, saved: String? = null, search: Boolean = false, sheet: Boolean = false) =
+        lastRouteOf(screen, quick, menu, tab, project, saved, search, sheet)?.let { it.pathname to it.params.toString() }
 
     @Test fun theTabsAreRnsTabRoutes() {
         assertEquals("/focus" to "{}", route())
@@ -17,6 +17,12 @@ class SessionRestoreTest {
         assertEquals("/review-tab" to "{}", route(Screen.Projects, "review"))
         assertEquals("/contexts-tab" to "{}", route(Screen.Projects, "contexts"))
         assertEquals("/calendar-tab" to "{}", route(Screen.Projects, "calendar"))
+    }
+
+    // RN's Menu tab is this app's More sheet over the tabs.
+    @Test fun theMoreSheetIsRnsMenuTab() {
+        assertEquals("/menu" to "{}", route(Screen.Inbox, sheet = true))
+        assertEquals("/someday" to "{}", route(menu = MenuScreen.Someday, sheet = true))
     }
 
     // 921c7c103 and f1b1d6255: the open project and History's tab come back.

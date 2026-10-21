@@ -19,6 +19,7 @@ fun lastRouteOf(
     openProjectId: String?,
     savedSearchId: String?,
     searchOpen: Boolean,
+    sheetOpen: Boolean = false,
 ): LastRoute? {
     if (searchOpen) return null
     val project = { JSONObject().apply { openProjectId?.let { put("projectId", it) } } }
@@ -35,7 +36,8 @@ fun lastRouteOf(
         MenuScreen.Board -> LastRoute("/board")
         MenuScreen.SavedSearch -> savedSearchId?.let { LastRoute("/saved-search/$it") }
         MenuScreen.Settings, MenuScreen.Weekly, MenuScreen.Daily, MenuScreen.MindSweep, MenuScreen.WidgetList -> null
-        null -> when (screen) {
+        // RN's Menu tab: this app's More sheet over the tabs.
+        null -> if (sheetOpen) LastRoute("/menu") else when (screen) {
             Screen.Focus -> LastRoute("/focus")
             Screen.Inbox -> LastRoute("/inbox")
             Screen.Projects -> when (quickView) {

@@ -260,6 +260,8 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
     fun openRestored(pathname: String, params: JSONObject): Unit = with(shell) {
         when {
             pathname == "/inbox" -> { menu.toTabs(); show(Screen.Inbox) }
+            // RN's Menu tab: the More sheet over Focus (RN's home tab).
+            pathname == "/menu" -> { menu.toTabs(); show(Screen.Focus); menu.toggleSheet() }
             pathname == "/history" -> menu.openRoute(if (params.optString("tab") == "archived") "/archived" else "/done")
             pathname.startsWith("/saved-search/") -> menu.openSavedSearch(pathname.removePrefix("/saved-search/"))
             else -> go(pathname, params)

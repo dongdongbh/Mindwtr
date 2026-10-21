@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.window.SplashScreenView
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -142,11 +143,15 @@ class MainActivity : FragmentActivity() {
             }
         })
         model.attach()
-        // First content drawn (InboxList's ReportDrawnWhen): the boot's leftover work, the bytecode cache, may run now.
+        // First content drawn (the root's ReportDrawnWhen, whatever the first screen; InboxList's too): the boot's leftover work,
+        // the bytecode cache, may run now.
         fullyDrawnReporter.addOnReportDrawnListener(model::contentShown)
         // A link, share or assistant note that launched the app (a recreated screen already has it: EntryRouter keeps it).
         if (savedInstanceState == null) model.entries.receive(intent)
         setContent {
+            // Time to first content (scripts/measure-startup-device.mjs): the first screen's data is drawn, whatever that screen is
+            // (Focus on a fresh start, as RN's; a restored last screen).
+            ReportDrawnWhen { model.firstContentReady() }
             // Core resolves RN's theme during the boot; until it ends, RN's default follows the system.
             // RN's app lock gate (AppLock.kt) replaces the screens while locked.
             MindwtrTheme(if (model.loading) null else ThemeChoice.current) { AppLockGate(model) { with(model) {

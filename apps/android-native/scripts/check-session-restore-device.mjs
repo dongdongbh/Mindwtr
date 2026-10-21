@@ -6,7 +6,8 @@
 // app's own start (device.mjs launch startTab ''): (a) a start with no recent last screen opens Focus, as RN does; (b) Someday,
 // left with Home and then force-stopped (no saved state survives), comes back on the next start, and Back from it returns to
 // the tabs instead of leaving the app; (c) History comes back on its Archived tab; (d) a project opened from a link comes back
-// open; (e) Settings (a screen RN never records) leaves the tab under it to come back. (a) dates the stored screens 26 minutes
+// open; (e) Settings (a screen RN never records) leaves the tab under it to come back; (f) a process death with saved state
+// keeps the open search (no restore); (g) a cold start by a link opens the link, not the recent last screen. (a) dates the stored screens 26 minutes
 // back with debug.mindwtr.native.session_age_ms, so the phone's clock is never changed. The last
 // screen lives in RN's RKStorage key `mindwtr:session:lastRoute`, as RN keeps it. It touches only the development package,
 // never launches over another app, restores rotation and its debug properties on exit, and leaves the app on its Inbox tab.
@@ -92,6 +93,8 @@ const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
     for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    // The other checks' start (device.mjs launch sets it again on each launch; a check that launches its own way finds it too).
+    try { setProp('start_tab', 'inbox'); } catch { /* device gone */ }
     // Leave the app on its Inbox tab (the start the other checks expect), started as they start it.
     try {
         if (front().includes(`${PKG}/`)) {
@@ -166,6 +169,31 @@ try {
     await leaveAndKill();
     nodes = await start((current) => onTabs(current) && tabSelected(current, en['tab.inbox']), 'the Inbox under Settings');
     check(true, '(e) a death in Settings brings back the tab under it (the Inbox), as RN keeps the previous snapshot');
+    // (f) A process the system killed (its task still in recents, saved state kept) comes back from its own saved state, never
+    // a restore: the open search is still open (review O2b P2-1).
+    await toTabs();
+    nodes = await screen();
+    nodes = await tapExpecting(withDescription(nodes, en['search.title']) ?? fail('no Search button in the header'),
+        (current) => Boolean(tagged(current, 'global-search')), 'the search screen');
+    requireAppFront();
+    sh('input keyevent KEYCODE_HOME');
+    await sleep(1500);
+    sh(`am kill ${PKG}`);
+    await sleep(1500);
+    device.launch(ACTIVITY, { startTab: '' });
+    await waitFor('the search again', (current) => Boolean(tagged(current, 'global-search')), 60_000);
+    check(true, '(f) after a process death with saved state, the open search is still open (no restore over it)');
+    await toTabs();
+
+    // (g) A link wins over a recent last screen: Someday is stored, then a cold start by a link opens the link's screen.
+    await openTile(en['someday.title'], en['someday.title']);
+    await leaveAndKill();
+    sh(`am start -W -a android.intent.action.VIEW -d 'mindwtr-native-dev:///waiting' ${PKG}`);
+    await waitFor('Waiting from the link', inScreen(en['waiting.title']), 60_000);
+    requireAppFront();
+    sh('input keyevent KEYCODE_BACK');
+    nodes = await waitFor('the tabs after Back', onTabs, 15_000);
+    check(tabSelected(nodes, en['tab.next']), '(g) a cold start by a link opens the link\'s screen over a recent Someday, and Back returns to Focus');
     console.log('Session restore device check passed');
 } catch (error) {
     evidenced(error);

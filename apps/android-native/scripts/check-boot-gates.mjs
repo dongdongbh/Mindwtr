@@ -1216,9 +1216,11 @@ assert.equal(coreHost.match(/getprop/g).length, 1);
 assert.match(coreHost, /private fun debugFault\(name: String\): String = debugProperty\(name\)/);
 assert.match(coreHost, /fun debugProperty\(name: String\): String \{\s*if \(!BuildConfig\.DEBUG\) return ""/);
 // The only other debug properties: the capture check's clipboard, put there for the field's real Paste, and the projects
-// check's held user action (delay_action_ms, perform's worker thread; release builds read nothing), and the splash check's slow
-// boot (boot_delay_ms, on the startup thread).
-assert.equal([activity, model, owner, editorUi, focusUi, projectsUi, labelsKt, captureUi].join('\n').match(/debugProperty\(/g).length, 3);
+// check's held user action (delay_action_ms, perform's worker thread; release builds read nothing), the splash check's slow
+// boot (boot_delay_ms, on the startup thread), and the session restore's harness start and age (start_tab, session_age_ms, O2b).
+assert.equal([activity, model, owner, editorUi, focusUi, projectsUi, labelsKt, captureUi].join('\n').match(/debugProperty\(/g).length, 5);
+assert.match(model, /private val harnessStart = debugProperty\("start_tab"\)/);
+assert.match(model, /if \(BuildConfig\.DEBUG\) debugProperty\("session_age_ms"\)\.toLongOrNull\(\) \?: 0L else 0L/);
 assert.match(model, /debugProperty\("boot_delay_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+val runtime = ProcessCoreHost\.get\(/);
 assert.match(captureUi, /withContext\(Dispatchers\.IO\) \{ debugProperty\("clipboard"\) \}\.takeIf \{ it\.isNotEmpty\(\) \}\?\.let \{ clipboard\.setText\(/);
 // The command path's fault hook, and the same hook for a journal replay (a replay can meet a failed save too).

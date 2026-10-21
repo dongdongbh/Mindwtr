@@ -338,16 +338,25 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     override fun onCleared() {
         ProcessCoreHost.unlistenSync(syncListener)
         entries.close()
+        routeWrites.shutdown()
         super.onCleared()
     }
 
-    /** A start with no saved screen: a cold start, not a recreated or restored activity. */
-    private val freshStart = saved.get<String>("screen") == null && saved.get<String>("menuScreen") == null
+    /**
+     * A cold start: no saved state at all (the "started" mark, set below, comes back with any saved state, also when the user
+     * never left the default tab), so a process the system killed comes back from its own saved state, never a restore.
+     */
+    private val freshStart = saved.get<Boolean>("started") != true
     /** The last screen was read and opened (or there was none): from now on every screen change is stored. */
     private var routeReady = false
     private var keptRoute: String? = null
+    /** Stores run one at a time, in order (two quick changes never land reversed). */
+    private val routeWrites = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "mindwtr-last-route") }
+    /** Debug builds: `debug.mindwtr.native.session_age_ms`, read once (a device check ages the stored screens out). */
+    private val routeAgeMs by lazy { if (BuildConfig.DEBUG) debugProperty("session_age_ms").toLongOrNull() ?: 0L else 0L }
 
     init {
+        saved["started"] = true
         ProcessCoreHost.listenSync(syncListener)
         saved["projectRequestId"] = projectRequestId
         val at = depth()
@@ -372,7 +381,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 applyDeviceChoices(runtime, prefs)
                 // RN's app lock, before any screen shows data (an owed save does not block it).
                 lock.boot(runtime)
-                ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture) }; return@Thread }
+                ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture); keepRoutes() }; return@Thread }
                 // RN's last screen (#842): only on a start with no screen of its own (no saved state) and no entry to open.
                 val lastRoute = if (freshStart && harnessStart.isEmpty() && entries.head == null) runCatching { runtime.sessionRestoreRead().optJSONObject("route") }
                     .onFailure { Log.w(CoreHost.TAG, "Last screen not read ${failureForLog(it)}") }.getOrNull() else null
@@ -410,10 +419,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     if (reopenCapture != null) resumeCapture(reopenCapture) else captureStore.delete()
                     // An owed create left on disk goes first; then the open sheet and screen are read.
                     menu.start(sheet)
-                    lastRoute?.let { entries.openRestored(it.getString("pathname"), it.optJSONObject("params") ?: JSONObject()) }
-                    routeReady = true
-                    keepLastRoute(force = true)
-                    viewModelScope.launch { snapshotFlow { routeKey() }.collect { keepLastRoute() } }
+                    // An entry that arrived while the boot ran (a link on a warm process) wins over the last screen, as RN's does.
+                    if (entries.head == null) lastRoute?.let { entries.openRestored(it.getString("pathname"), it.optJSONObject("params") ?: JSONObject()) }
+                    keepRoutes()
                     captureModal.resume()
                     // A restore, merge or import result a death after its commit left unshown, and an export cut short.
                     menu.settings.transfer.leftover()
@@ -472,8 +480,16 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * it that far back, so a device check ages it out without touching the phone's clock.
      */
     private fun currentRoute() = lastRouteOf(screen, menu.quickView, menu.screen, menu.historyTab, openProjectId,
-        menu.own("savedSearch").optString("id").ifEmpty { null }, search != null)
+        menu.own("savedSearch").optString("id").ifEmpty { null }, search != null, menu.sheet)
     private fun routeKey() = currentRoute()?.let { it.pathname + it.params }
+
+    /** From now on the screen on show is stored: at once, then on each change. */
+    private fun keepRoutes() {
+        if (routeReady) return
+        routeReady = true
+        keepLastRoute(force = true)
+        viewModelScope.launch { snapshotFlow { routeKey() }.collect { keepLastRoute() } }
+    }
 
     private fun keepLastRoute(force: Boolean = false) {
         if (!routeReady) return
@@ -482,11 +498,22 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         if (!force && key == keptRoute) return
         keptRoute = key
         val runtime = host ?: return
-        val ageMs = if (BuildConfig.DEBUG) debugProperty("session_age_ms").toLongOrNull() ?: 0L else 0L
-        Thread({
+        val ageMs = routeAgeMs
+        routeWrites.execute {
             runCatching { runtime.sessionRestoreWrite(route.pathname, route.params.toString(), ageMs) }
                 .onFailure { Log.w(CoreHost.TAG, "Last screen not stored ${failureForLog(it)}") }
-        }, "mindwtr-last-route").start()
+        }
+    }
+
+    /**
+     * First content of the screen on show is drawn (MainActivity's ReportDrawnWhen; RN hides its splash once its first screen has
+     * data): the Inbox's rows, Focus's, the Projects tab's or quick view's, or a Menu screen's first page.
+     */
+    fun firstContentReady(): Boolean = host != null && !loading && when {
+        menu.screen != null -> !menu.firstPagePending
+        screen == Screen.Focus -> focus != null
+        screen == Screen.Projects -> if (menu.quickView == "projects") projects != null else !menu.firstPagePending
+        else -> !menu.firstPagePending
     }
 
     /** The editor opens over this list, so Save and Cancel return to it. */
