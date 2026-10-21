@@ -30492,7 +30492,15 @@ extension FoundationUITests {
         func count(_ predicate: (String) -> Bool) -> Int { identifiers.filter(predicate).count }
         let matches = app.buttons.matching(identifier: tokenIdentifier), token = matches.firstMatch
         let exists = token.exists, picker = app.scrollViews[prefix + "-filter-picker-scroll"]
-        let keyboard = app.keyboards.firstMatch, primary = app.buttons[prefix + "-process-primary"]
+        let keyboard = app.keyboards.firstMatch
+        let primaryMatches = app.buttons.matching(identifier: prefix + "-process-primary")
+        let primary = primaryMatches.firstMatch, primaryExists = primary.exists
+        let childTypes = exists ? token.children(matching: .any).allElementsBoundByIndex.map { $0.elementType } : []
+        let rowPickerMatches = picker.exists ? picker.buttons.matching(identifier: tokenIdentifier).count : 0
+        let rowAlertOwners = app.alerts.containing(.button, identifier: tokenIdentifier).count
+        let rowSheetOwners = app.sheets.containing(.button, identifier: tokenIdentifier).count
+        let primaryAlertOwners = app.alerts.containing(.button, identifier: prefix + "-process-primary").count
+        let primarySheetOwners = app.sheets.containing(.button, identifier: prefix + "-process-primary").count
         let state = "role=\(role), phase=\(phase), axElements=\(all.count), "
             + "taskTitles=\(count { $0.hasPrefix("task-title-") }), taskStatuses=\(count { $0.hasPrefix("task-status-") }), "
             + "header=\(count { [prefix + "-title", "area-open", "search-open"].contains($0) }), "
@@ -30502,6 +30510,12 @@ extension FoundationUITests {
             + "hittable=\(exists && token.isHittable), valueEmpty=\(exists && (token.value as? String ?? "").isEmpty), "
             + "valueExcluded=\(exists && (token.value as? String) == "Excluded"), "
             + "row=\(exists ? token.frame : .zero), picker=\(picker.exists ? picker.frame : .zero), app=\(app.frame), "
+            + "rowChildren=\(childTypes.count), rowChildButtons=\(childTypes.filter { $0 == .button }.count), "
+            + "rowChildImages=\(childTypes.filter { $0 == .image }.count), rowChildTexts=\(childTypes.filter { $0 == .staticText }.count), "
+            + "rowChildOther=\(childTypes.filter { $0 != .button && $0 != .image && $0 != .staticText }.count), "
+            + "rowPickerMatches=\(rowPickerMatches), rowAlertOwners=\(rowAlertOwners), rowSheetOwners=\(rowSheetOwners), "
+            + "primaryMatches=\(primaryMatches.count), primaryEnabled=\(primaryExists && primary.isEnabled), primaryHittable=\(primaryExists && primary.isHittable), "
+            + "primaryAlertOwners=\(primaryAlertOwners), primarySheetOwners=\(primarySheetOwners), "
             + "primaryFrame=\(primary.exists ? primary.frame : .zero), keyboard=\(keyboard.exists), keyboardFrame=\(keyboard.exists ? keyboard.frame : .zero), "
             + "alertContainers=\(app.alerts.count), sheetContainers=\(app.sheets.count), sampleSeconds=\(ProcessInfo.processInfo.systemUptime - sampleStarted)"
         XCTAssertLessThanOrEqual(state.utf8.count, 2048)
