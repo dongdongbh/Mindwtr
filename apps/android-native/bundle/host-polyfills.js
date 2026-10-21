@@ -851,7 +851,8 @@
         global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');
     }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.appSearchCall === 'function') {
-        global.__mindwtrAppSearchCall = fileChannel('appSearchCall');
+        // No abort: an AppSearch call ends on its own (its late answer settles nothing); 'appSearchAbort' does not exist and is skipped.
+        global.__mindwtrAppSearchCall = fileChannel('appSearchCall', 'appSearchAbort');
     }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarPushCall === 'function') {
         global.__mindwtrCalendarPushCall = fileChannel('calendarPushCall', 'calendarPushAbort');

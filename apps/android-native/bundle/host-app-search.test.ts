@@ -32,21 +32,31 @@ describe('native Android system search', () => {
         const { calls, appSearch } = setup(undefined, { 'mindwtr:appSearchIndexingEnabled': 'true' });
         await appSearch!.start();
         await appSearch!.start();
+        await flush();
         expect(calls.map((item) => item.op)).toEqual(['wipe', 'upsert']);
         expect(calls[1].docs).toEqual([expect.objectContaining({ id: 'task:t1', deepLink: 'mindwtr-native-dev://open?task=t1' })]);
         expect(appSearch!.device()).toEqual({ supported: true, enabled: true });
     });
 
-    it('stores the switch in RKStorage (owed wipe first), keeps it from Kotlin, and follows it', async () => {
+    // Kotlin's DeviceWrites stores General's switch in RKStorage (with its journal order) before the reply comes back; then the
+    // index follows the stored switch. The bundle never writes the keys itself, so a replayed old entry cannot win.
+    it('follows the stored switch after General\'s edit: off wipes, on reindexes', async () => {
         resetForTests();
-        const { kvLog, calls, appSearch } = setup(undefined, { 'mindwtr:appSearchIndexingEnabled': 'true' });
-        const rest = await appSearch!.applyEdit([{ key: 'mindwtr:appSearchWipeOwed', value: 'true' }, { key: 'mindwtr:appSearchIndexingEnabled', value: null },
-            { key: '@mindwtr_theme', value: 'dark' }]);
+        useTaskStore.setState({ _allTasks: [task('t1')] } as never);
+        const { keys, kvLog, calls, appSearch } = setup(undefined, { 'mindwtr:appSearchIndexingEnabled': 'true' });
         await flush();
-        expect(kvLog).toEqual(['set mindwtr:appSearchWipeOwed=true', 'remove mindwtr:appSearchIndexingEnabled', 'remove mindwtr:appSearchWipeOwed']);
-        expect(rest).toEqual([{ key: '@mindwtr_theme', value: 'dark' }]);
+        expect(appSearch!.device().enabled).toBe(true);
+        keys.delete('mindwtr:appSearchIndexingEnabled');
+        keys.set('mindwtr:appSearchWipeOwed', 'true');
+        await appSearch!.apply();
+        await flush();
         expect(calls.map((item) => item.op)).toEqual(['wipe']);
+        expect(kvLog).toEqual(['remove mindwtr:appSearchWipeOwed']);
         expect(appSearch!.device().enabled).toBe(false);
+        keys.set('mindwtr:appSearchIndexingEnabled', 'true');
+        await appSearch!.apply();
+        await flush();
+        expect(calls.map((item) => item.op)).toEqual(['wipe', 'wipe', 'upsert']);
     });
 
     it('is absent without Kotlin\'s bridge, and hides the row below Android 12', async () => {

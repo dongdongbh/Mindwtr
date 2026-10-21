@@ -6,8 +6,9 @@
 // Installs the debug APK with `install -r` (existing development data stays). The launcher's results are Samsung's and not
 // checked; the index is read through the app's own debug query (debug.mindwtr.native.appsearch_dump: each resume logs the
 // index's ids, never titles). (a) Settings › General's "Expose to system search" turned on indexes exactly core's active items
-// (core's buildFullAppSearchIndex over a copy of the app's database); (b) a task this run captured is in the index, and Mark
-// Done takes it out within the 2 s debounce; (c) the switch turned off empties the index. It ends with the switch off and the
+// (core's buildFullAppSearchIndex over a copy of the app's database); (b) a task this run captured is in the index, and after a
+// force-stop and a new start (the start's live indexing) Mark Done takes it out within the 2 s debounce; (c) the switch turned
+// off empties the index. It ends with the switch off and the
 // index empty, and touches only the development package's own index (the RN app's is its own package's).
 // Leave the device on its home screen before running. Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
 import { execFileSync } from 'node:child_process';
@@ -170,7 +171,13 @@ try {
     check(JSON.stringify(ids) === JSON.stringify(expected), `(a) turned on, the index holds exactly core's ${expected.length} active items`);
     check(ids.includes(`task:${id}`), '(b) the task this run captured is in the index');
 
-    // (b) Done takes it out (the 2 s debounce, then core's removal).
+    // (b) A new process (force-stop, then the launcher): the start arms live indexing (appSearchStart), and Done takes the task
+    // out (the 2 s debounce, then core's removal).
+    await device.stopApp();
+    device.launch(ACTIVITY);
+    requireAppFront();
+    await waitFor('the Inbox again', onInbox, 60_000);
+    await sleep(4000);
     await markDone();
     await sleep(3500);
     ids = await indexIds();

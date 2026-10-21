@@ -8,7 +8,6 @@ import {
     nameNotifyListener,
     useTaskStore,
     type AppSearchDoc,
-    type SettingsDeviceWrite,
 } from '@mindwtr/core';
 
 /** RN's AsyncStorage in place (host-entry.ts keyValue, over RnKeyValue.kt): a write is on disk when it resolves. */
@@ -21,12 +20,11 @@ type KeyValue = {
 /** HostAppSearch.call through the polyfill's channel: `{ op, ... }`, answering once AppSearch did. */
 export type AppSearchCall = (request: { op: 'upsert'; docs: AppSearchDoc[] } | { op: 'remove'; ids: string[] } | { op: 'wipe' } | { op: 'ids' }) => Promise<unknown>;
 
-const APP_SEARCH_KEYS = new Set([MOBILE_APP_SEARCH_STORAGE_KEY, MOBILE_APP_SEARCH_WIPE_OWED_STORAGE_KEY]);
-
 /**
  * Android system search (RN's #1017, pass O2d): core's AppSearch service (app-search-service.ts) on this host. The switch and
- * the owed wipe stay RN's device keys in RN's RKStorage (so an upgraded RN user keeps both, and RN's index is this one);
- * HostAppSearch.kt runs RN's index. Nothing runs below Android 12 or in the sandbox. Null without Kotlin's bridge (iOS, gates).
+ * the owed wipe stay RN's device keys in RN's RKStorage (so an upgraded RN user keeps both, and RN's index is this one): General's
+ * edit stores them through Kotlin's DeviceWrites, the service marks and clears the owed wipe here. HostAppSearch.kt runs RN's
+ * index. Nothing runs below Android 12 or in the sandbox. Null without Kotlin's bridge (iOS, gates).
  */
 export const createNativeAppSearch = (info: unknown, call: AppSearchCall | undefined, keyValue: KeyValue) => {
     const parsed = typeof info === 'string' ? (() => { try { return JSON.parse(info) as unknown; } catch { return null; } })() : null;
@@ -50,19 +48,23 @@ export const createNativeAppSearch = (info: unknown, call: AppSearchCall | undef
         nameListener: (name, listener) => nameNotifyListener(name, listener as never) as typeof listener,
         scheme,
     });
-    /** General's switch as core's getGeneralSettings reads it; read again at the start and after each edit. */
+    /** General's switch as core's getGeneralSettings reads it: read at once, again at the start and after each edit. */
     let device = { supported, enabled: false };
     const readSwitch = async () => {
         device = { supported, enabled: (await keyValue.get(MOBILE_APP_SEARCH_STORAGE_KEY).catch(() => null)) === 'true' };
     };
+    void readSwitch();
+    let logged = false;
     return {
         /** General's `appSearch` input: the row shows only where the index runs. */
         device: () => (isSandboxMode() ? { supported: false, enabled: false } : device),
-        /** At the start (after the validated load and the journal replay): live indexing, or a wipe a switch-off owes. */
+        /** At a screen's start (after the validated load and the journal replay): live indexing, or a wipe a switch-off owes. */
         start: async () => {
             if (isSandboxMode()) return;
             await readSwitch();
             await indexing.syncWithPreference();
+            if (logged) return;
+            logged = true;
             try {
                 // A tester's proof the start ran: indexing, off, or no index on this Android (below 12).
                 logInfo('Native Android system search started', { scope: 'app-search', context: {
@@ -70,19 +72,13 @@ export const createNativeAppSearch = (info: unknown, call: AppSearchCall | undef
             } catch { /* logging never changes the start */ }
         },
         /**
-         * General's switch (setGeneralSetting's reply): its device writes (owed wipe first, then the switch) go to RKStorage here,
-         * never to Kotlin's device store, and the index follows: on, a full reindex then live indexing; off, a wipe.
+         * After General's switch was stored (Kotlin's DeviceWrites keeps RN's two keys in RKStorage, each with its journal order, so
+         * a replayed older edit never overwrites a newer one): the index follows the stored switch. On, a full reindex then live
+         * indexing; off, a wipe. Returns once the switch is read; the index work runs on.
          */
-        applyEdit: async (writes: readonly SettingsDeviceWrite[]): Promise<SettingsDeviceWrite[]> => {
-            const own = writes.filter((write) => APP_SEARCH_KEYS.has(write.key));
-            if (own.length === 0) return [...writes];
-            for (const write of own) {
-                if (write.value === null) await keyValue.remove(write.key);
-                else await keyValue.set(write.key, write.value);
-            }
+        apply: async () => {
             await readSwitch();
             void (device.enabled ? indexing.enable() : indexing.wipe());
-            return writes.filter((write) => !APP_SEARCH_KEYS.has(write.key));
         },
         /** Debug device check: the ids in the index. */
         ids: () => call({ op: 'ids' }),

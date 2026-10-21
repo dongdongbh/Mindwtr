@@ -121,7 +121,7 @@ internal object ProcessCoreHost {
         val installer = HostInstaller(app.filesDir, app.cacheDir)
         val keyValue = RnKeyValue(app.getDatabasePath("RKStorage"))
         val runtime = CoreHost(legacy?.database ?: File(app.filesDir, "mindwtr-native-dev.db"), legacy?.let { app.dataDir }, HostIo(app),
-            File(app.filesDir, "journal"), deviceStore(app), File(app.filesDir, DiagnosticsLogFile.RELATIVE_PATH),
+            File(app.filesDir, "journal"), deviceStore(app, keyValue), File(app.filesDir, DiagnosticsLogFile.RELATIVE_PATH),
             keyValue, HostFiles(app.filesDir, app.cacheDir, content = AndroidContentSource(app)), installer,
             ReminderAlarms(app, keyValue, checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) }),
             HostWidgets(app) { appState },
@@ -324,7 +324,8 @@ internal object ProcessCoreHost {
             } else {
                 startSyncWithScreen(app, runtime)
                 startReminders(runtime)
-                startAppSearch(runtime)
+                // A screen's process only: a CoreWork job's headless process never rebuilds the index (RN starts it at its layout).
+                if (screenShown) startAppSearch(runtime)
             }
         },
         refreshWidgets = { refreshWidgets(runtime) },

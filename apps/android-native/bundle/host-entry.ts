@@ -1372,12 +1372,7 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     mindSweepAdd: (input) => contract.addMindSweepItem(input),
     savedSearchDelete: (input) => contract.deleteSavedSearch(input),
     // Settings: General's and GTD's controls, Manage's editor Save and Delete, and Manage's Someday section rename, reorder and delete.
-    // System search's switch: its device writes go to RN's RKStorage here, and the index follows (host-app-search.ts).
-    generalSetting: async (input) => {
-        const result = await contract.setGeneralSetting(input);
-        if (!result.ok || !nativeAppSearch) return result;
-        return { ...result, value: { ...result.value, deviceWrites: await nativeAppSearch.applyEdit(result.value.deviceWrites) } };
-    },
+    generalSetting: (input) => contract.setGeneralSetting(input),
     gtdSetting: (input) => contract.setGtdSetting(input),
     manageEditor: (input) => contract.saveManageEditor(input),
     manageDelete: (input) => contract.deleteManageItem(input),
@@ -5353,9 +5348,16 @@ globalThis.MindwtrHost = {
     remindersStart(): string {
         return submit(async () => requireReminders().start());
     },
-    /** Android system search's start (ProcessCoreHost.startAppSearch): live indexing when the switch is on, or an owed wipe. */
+    /**
+     * Android system search's start (ProcessCoreHost.startAppSearch, a screen's start only): live indexing when the switch is on,
+     * or an owed wipe. Answers at once; the rebuild runs on, so no host call stays open past its deadline.
+     */
     appSearchStart(): string {
-        return submit(async () => { await nativeAppSearch?.start(); return { started: Boolean(nativeAppSearch) }; });
+        return submit(async () => { void nativeAppSearch?.start(); return { started: Boolean(nativeAppSearch) }; });
+    },
+    /** After General's system search switch was stored (SettingsModel.applied): the index follows it. */
+    appSearchApply(): string {
+        return submit(async () => { await nativeAppSearch?.apply(); return { applied: Boolean(nativeAppSearch) }; });
     },
     /** Debug device check (check-app-search-device): the ids in the index, never titles. */
     appSearchIds(): string {

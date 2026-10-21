@@ -20,6 +20,7 @@ import tech.dongdongbh.mindwtr.androidwidget.CaptureIntentConfigStore
 import tech.dongdongbh.mindwtr.pilot.InboxViewModel.Part
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import tech.dongdongbh.mindwtr.pilot.core.DeviceWrites
+import tech.dongdongbh.mindwtr.pilot.core.RnKeyValue
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -52,11 +53,38 @@ fun deviceStore(prefs: SharedPreferences) = DeviceWrites({ prefs.all }, { change
     prefs.edit().apply { changes.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
 })
 
+/** System search's switch and a switch-off's owed wipe (core's general-settings-model.ts): RN's keys, kept in RN's RKStorage. */
+val RK_DEVICE_KEYS = setOf("mindwtr:appSearchIndexingEnabled", "mindwtr:appSearchWipeOwed")
+
+/** True for a key [routedDeviceStore] keeps in RKStorage: one of [RK_DEVICE_KEYS], or its journal sequence. */
+fun isRkDeviceKey(key: String) = key.removeSuffix(DeviceWrites.SEQUENCE) in RK_DEVICE_KEYS
+
+/**
+ * RN's device keys with their journal sequences (DeviceWrites): [RK_DEVICE_KEYS] in RN's RKStorage (pass O2d: an upgraded RN user
+ * keeps the system search switch, and an RN recovery build reads it), every other key in [prefsAll]'s preferences.
+ */
+fun routedDeviceStore(prefsAll: () -> Map<String, *>, prefsCommit: (Map<String, String?>) -> Boolean,
+    rkGet: (List<String>) -> Map<String, String?>, rkCommit: (Map<String, String?>) -> Unit) = DeviceWrites(
+    { prefsAll().filterKeys { !isRkDeviceKey(it) } + rkGet(RK_DEVICE_KEYS.flatMap { listOf(it, it + DeviceWrites.SEQUENCE) }).filterValues { it != null } },
+    { changes ->
+        val rk = changes.filterKeys(::isRkDeviceKey)
+        if (rk.isNotEmpty()) rkCommit(rk)
+        changes.filterKeys { !isRkDeviceKey(it) }.let { rest -> rest.isEmpty() || prefsCommit(rest) }
+    })
+
 /**
  * CoreHost's store for a reply's deviceWrites (a General or GTD setting's device-local part): the first send and the journal's
  * replay both store them before the write's journal entry goes, so a process death after core's reply loses none.
  */
-fun deviceStore(app: Context) = deviceStore(app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE))
+fun deviceStore(app: Context, keyValue: RnKeyValue): DeviceWrites {
+    val prefs = app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
+    return routedDeviceStore({ prefs.all }, { changes ->
+        prefs.edit().apply { changes.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
+    }, keyValue::multiGet, { changes ->
+        changes.filterValues { it != null }.map { (key, value) -> key to value!! }.takeIf { it.isNotEmpty() }?.let(keyValue::multiSet)
+        changes.filterValues { it == null }.keys.toList().takeIf { it.isNotEmpty() }?.let(keyValue::multiRemove)
+    })
+}
 
 /** Core windows Manage's lists and the Someday sections by NATIVE_HOST_MAX_WINDOW. */
 private const val WINDOW = 100
@@ -472,6 +500,9 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
             Labels.load(runtime.strings(LABEL_KEYS))
         }
         if (THEME_KEY in keys) runCatching { ThemeChoice.load(runtime.theme(prefs.getString(THEME_KEY, null).orEmpty())) }
+        // System search's switch, now in RKStorage: the index follows it (core's enable or wipe).
+        if ("mindwtr:appSearchIndexingEnabled" in keys) runCatching { runtime.appSearchApply() }
+            .onFailure { Log.w(CoreHost.TAG, "Native Android system search apply failed ${failureForLog(it)}") }
     }
 
     /**

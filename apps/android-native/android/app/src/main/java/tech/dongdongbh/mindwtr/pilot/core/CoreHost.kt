@@ -739,6 +739,9 @@ class CoreHost(
     /** Android system search's start (core's syncWithPreference): a full reindex and live indexing when the switch is on. */
     fun appSearchStart(): JSONObject = callAsync("appSearchStart")
 
+    /** After General's system search switch was stored: the index follows it (core's enable or wipe). */
+    fun appSearchApply(): JSONObject = callAsync("appSearchApply")
+
     /** Debug device check: the ids in the system search index (`{ ids }`), never titles. */
     fun appSearchIds(): JSONObject = callAsync("appSearchIds")
 
