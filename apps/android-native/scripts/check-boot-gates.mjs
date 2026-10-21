@@ -888,9 +888,9 @@ assert.equal(code(editorUi).match(/toggle = true/g).length, 2, 'only the quick t
 assert.match(editorUi, /if \(status == "waiting" && !active\) openWaitingPrompt\(\) else editFields\(mapOf\("status" to status\)\)/);
 assert.match(model, /keepEditor\(current\.assignWaiting\(person\)\)\s+editFields\(mapOf\("status" to "waiting", "assignedTo" to person\)\)/);
 // One host per process: the Activity and ViewModel never close it, and only the owner constructs it.
-// The ViewModel's only onCleared stops its sync event listener (ProcessCoreHost keeps the listeners) and the entry router's
-// file-share staging thread (EntryRouter.close); it closes no host.
-const listenerOnly = /\n    override fun onCleared\(\) \{\n        ProcessCoreHost\.unlistenSync\(syncListener\)\n        entries\.close\(\)\n        super\.onCleared\(\)\n    \}\n/;
+// The ViewModel's only onCleared stops its sync event listener (ProcessCoreHost keeps the listeners), the entry router's
+// file-share staging thread (EntryRouter.close) and the last screen's store thread (pass O2b); it closes no host.
+const listenerOnly = /\n    override fun onCleared\(\) \{\n        ProcessCoreHost\.unlistenSync\(syncListener\)\n        entries\.close\(\)\n        routeWrites\.shutdown\(\)\n        super\.onCleared\(\)\n    \}\n/;
 assert.match(model, listenerOnly);
 for (const file of [activity, model.replace(listenerOnly, '\n'), editorUi, focusUi, projectsUi, labelsKt, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, captureModalModel, menuModel, ...Object.values(menuScreens)]) {
     assert.doesNotMatch(file, /close\(|onDestroy|onCleared|CoreHost\(/);
@@ -999,7 +999,8 @@ assert.match(model, /pending\.menuPage\?\.let\(menu::restorePage\)/, 'a new scre
 assert.match(model, /pending\.editor\?\.let\(::keepEditor\)/);
 // ...and a failure on Focus reopens Focus with its rows, since reads wait for the retry.
 assert.match(model, /focus = pending\.focus\s+projects = pending\.projects\s+keepProject\(pending\.project\?\.projectId\)\s+project = pending\.project\s+show\(pending\.screen\)/);
-assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\) \}/g).length, 2);
+// Both also start storing the last screen (pass O2b review P3-3).
+assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\); keepRoutes\(\) \}/g).length, 2);
 assert.match(model, /runtime\.completeTask\(id, taskRevision\)\s+acknowledged\(action\)/);
 assert.match(model, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{[\s\S]{0,300}?throw failure\s+\}\s+acknowledged\(action\)\s+(?:\/\/[^\n]*\s+)*if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+ui \{ closeEditor\(settle = false\) \}/);
 // The new contract commands: each is a perform(action) with its exact retry, acknowledged only after core's reply.
@@ -3305,7 +3306,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /if \(failure != null && lifecycle\.head == entry\.id\) failed\(entry, "Staging failed"\) else pump\(\)/);
     assert.match(entryKt, /shell\.coreHost\(\)\?\.logLine\("Native file share staging failed releaseCheck=v1\.3\.7\/native-share-files", context\)/);
     assert.match(entryKt, /override fun authority\(uri: String\): String\? = Uri\.parse\(uri\)\.authority/);
-    assert.match(model, /entries\.close\(\)\s+super\.onCleared\(\)/);
+    assert.match(model, /entries\.close\(\)\s+routeWrites\.shutdown\(\)\s+super\.onCleared\(\)/);
     // Closing stops staging and drops every main-thread job of the router (a retry, a staging's completion): EntryThreads, JVM-tested.
     assert.match(entryKt, /fun close\(\) \{\s+threads\.close\(\)\s+\}/);
     assert.match(entryKt, /EntryThreads\(\{ delayMs, job -> main\.postDelayed\(\{ job\(\) \}, delayMs\) \}, \{ main\.removeCallbacksAndMessages\(null\) \}\)/);
@@ -3963,6 +3964,7 @@ export { formatListItemCount } from ${JSON.stringify(resolve(app, '../../package
 export { getBulkMoveStatusOptions } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-list-bulk-actions.ts'))};
 export { formatI18nTemplate } from ${JSON.stringify(resolve(app, '../../packages/core/src/i18n/index.ts'))};
 export { sortRecoverySnapshotNames } from ${JSON.stringify(resolve(app, '../../packages/core/src/recovery-snapshot-names.ts'))};
+export { buildLastRouteSnapshot, LAST_ROUTE_STORAGE_KEY, parseRestorableLastRoute } from ${JSON.stringify(resolve(app, '../../packages/core/src/session-restore.ts'))};
 // These service stand-ins test bridge dispatch/admission, not import or receipt policy.
 // Actual shared policy and SQLite receipts have their own core and Swift/JSC suites.
 export function inspectNativeBackupDocument(text, metadata, t, format = 'json') {

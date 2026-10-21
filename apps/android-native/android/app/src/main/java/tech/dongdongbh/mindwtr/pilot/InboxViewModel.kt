@@ -390,7 +390,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     read(runtime, at, screen)
                 } catch (failure: Throwable) {
                     // A save that failed while this screen opened blocks reads; show its retry.
-                    ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture) }; return@Thread }
+                    ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture); keepRoutes() }; return@Thread }
                     throw failure
                 }
                 // RN's More sheet, for the quick-access tab the tab bar draws from its first frame (cosmetic: a failure shows Projects).
@@ -419,10 +419,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     if (reopenCapture != null) resumeCapture(reopenCapture) else captureStore.delete()
                     // An owed create left on disk goes first; then the open sheet and screen are read.
                     menu.start(sheet)
+                    captureModal.resume()
                     // An entry that arrived while the boot ran (a link on a warm process) wins over the last screen, as RN's does.
                     if (entries.head == null) lastRoute?.let { entries.openRestored(it.getString("pathname"), it.optJSONObject("params") ?: JSONObject()) }
                     keepRoutes()
-                    captureModal.resume()
                     // A restore, merge or import result a death after its commit left unshown, and an export cut short.
                     menu.settings.transfer.leftover()
                     search?.let { current ->
