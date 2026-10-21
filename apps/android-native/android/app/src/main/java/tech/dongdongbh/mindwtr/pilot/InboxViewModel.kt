@@ -499,9 +499,13 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         keptRoute = key
         val runtime = host ?: return
         val ageMs = routeAgeMs
-        routeWrites.execute {
-            runCatching { runtime.sessionRestoreWrite(route.pathname, route.params.toString(), ageMs) }
-                .onFailure { Log.w(CoreHost.TAG, "Last screen not stored ${failureForLog(it)}") }
+        // A screen cleared before its boot ended (Back on the splash) stores nothing.
+        if (routeWrites.isShutdown) return
+        runCatching {
+            routeWrites.execute {
+                runCatching { runtime.sessionRestoreWrite(route.pathname, route.params.toString(), ageMs) }
+                    .onFailure { Log.w(CoreHost.TAG, "Last screen not stored ${failureForLog(it)}") }
+            }
         }
     }
 
@@ -509,7 +513,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * First content of the screen on show is drawn (MainActivity's ReportDrawnWhen; RN hides its splash once its first screen has
      * data): the Inbox's rows, Focus's, the Projects tab's or quick view's, or a Menu screen's first page.
      */
-    fun firstContentReady(): Boolean = host != null && !loading && when {
+    // `loading` first: a snapshot state, so Compose checks this again when the boot ends (`host` is a plain field).
+    fun firstContentReady(): Boolean = !loading && host != null && when {
         menu.screen != null -> !menu.firstPagePending
         screen == Screen.Focus -> focus != null
         screen == Screen.Projects -> if (menu.quickView == "projects") projects != null else !menu.firstPagePending

@@ -161,14 +161,16 @@ try {
     check(true, `(d) the open project comes back open (${project.title})`);
     await toTabs();
 
-    // (e) Settings is never recorded: the tab under it (the Inbox, not the Focus start) comes back.
-    nodes = await screen();
-    await tap(tab(nodes, en['tab.inbox']));
-    await waitFor('the Inbox tab', (current) => tabSelected(current, en['tab.inbox']), 15_000);
+    // (e) Settings is never recorded: what was on show before it comes back. Settings opens from the More sheet, which is RN's
+    // Menu tab, so the start shows Focus with the More sheet open.
     await openTile(en['settings.title'], en['settings.title']);
     await leaveAndKill();
-    nodes = await start((current) => onTabs(current) && tabSelected(current, en['tab.inbox']), 'the Inbox under Settings');
-    check(true, '(e) a death in Settings brings back the tab under it (the Inbox), as RN keeps the previous snapshot');
+    nodes = await start((current) => sheetOpen(current) && tabSelected(current, en['tab.next']), 'Focus with the More sheet');
+    check(true, '(e) a death in Settings brings back what was under it (RN\'s Menu tab: the More sheet over Focus)');
+    requireAppFront();
+    sh('input keyevent KEYCODE_BACK');
+    await waitFor('the sheet to close', onTabs, 15_000);
+
     // (f) A process the system killed (its task still in recents, saved state kept) comes back from its own saved state, never
     // a restore: the open search is still open (review O2b P2-1).
     await toTabs();
@@ -185,15 +187,18 @@ try {
     check(true, '(f) after a process death with saved state, the open search is still open (no restore over it)');
     await toTabs();
 
-    // (g) A link wins over a recent last screen: Someday is stored, then a cold start by a link opens the link's screen.
-    await openTile(en['someday.title'], en['someday.title']);
+    // (g) A link wins over a recent last screen: the Inbox tab is stored, then a cold start by a link opens the link's screen,
+    // and Back returns to Focus (the start's tab), never to the stored Inbox.
+    nodes = await screen();
+    await tap(tab(nodes, en['tab.inbox']));
+    await waitFor('the Inbox tab', (current) => tabSelected(current, en['tab.inbox']), 15_000);
     await leaveAndKill();
     sh(`am start -W -a android.intent.action.VIEW -d 'mindwtr-native-dev:///waiting' ${PKG}`);
     await waitFor('Waiting from the link', inScreen(en['waiting.title']), 60_000);
     requireAppFront();
     sh('input keyevent KEYCODE_BACK');
     nodes = await waitFor('the tabs after Back', onTabs, 15_000);
-    check(tabSelected(nodes, en['tab.next']), '(g) a cold start by a link opens the link\'s screen over a recent Someday, and Back returns to Focus');
+    check(tabSelected(nodes, en['tab.next']), '(g) a cold start by a link opens the link\'s screen, not the recent Inbox, and Back returns to Focus');
     console.log('Session restore device check passed');
 } catch (error) {
     evidenced(error);
