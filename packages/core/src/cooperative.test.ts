@@ -108,7 +108,7 @@ describe('slice stats (D9b native-sync-slices diagnostics)', () => {
         return { clock, restore: () => now.mockRestore() };
     };
 
-    it('does not count an idle wait between passes as a slice', async () => {
+    it('does not time an idle wait between passes, which costs only one early yield', async () => {
         const { clock, restore } = fakeClock();
         try {
             const slicer = createSlicer(async () => undefined, 8);
@@ -116,6 +116,8 @@ describe('slice stats (D9b native-sync-slices diagnostics)', () => {
             await runSliced('test', busy(3, 1, clock), slicer);
             expect(slicer.stats().longestMs).toBeLessThan(5_000);
             expect(slicer.stats().longestMs).toBeLessThanOrEqual(3);
+            // The wait made the first due() true: the pass gave the engine back once, after its first step.
+            expect(slicer.stats().slices).toBe(1);
         } finally { restore(); }
     });
 

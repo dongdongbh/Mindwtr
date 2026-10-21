@@ -211,7 +211,7 @@ const startDevice = async (w: World) => {
     const { log, lines } = createRecordingLog();
     const fs = mortal(world.memory.fs);
     const files = createMobileAttachmentFiles({
-        fs, storage: world.storage, getSecureConfigValue: async () => null, log,
+        fs, storage: mortal(world.storage), getSecureConfigValue: async () => null, log,
         fetch: vi.fn() as unknown as typeof fetch,
         dropboxAuth: { getValidAccessToken: async () => 'token', forceRefreshAccessToken: async () => 'token' },
         core: { isSandboxMode: () => false },
@@ -436,7 +436,7 @@ describe('design D9b W7: the process dies inside a download install (crash point
         const w = await createWorld(cell);
         const install = w.installer.installAttachmentFileGeneration.getMockImplementation()!;
         // The process dies inside the first install: after the staged file is written, before it is moved onto the target.
-        // From then on nothing of that process reaches the database, the files or the remote.
+        // From then on nothing of that process reaches the database, the files, the key-value store or the remote.
         w.installer.installAttachmentFileGeneration.mockImplementationOnce(async () => {
             w.world.dead = true;
             throw new Error('the process died');
