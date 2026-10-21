@@ -92,6 +92,9 @@ import {
     isSupportedLanguage,
     isDiagnosticsLoggingEnabled,
     isSandboxMode,
+    buildLastRouteSnapshot,
+    LAST_ROUTE_STORAGE_KEY,
+    parseRestorableLastRoute,
     isEntityOpenUrl,
     parseEntityOpenUrl,
     resolveEntityOpenTarget,
@@ -5166,6 +5169,23 @@ globalThis.MindwtrHost = {
                 throw error;
             }
             return { held: holdNativeBackupUndoAttachments(text, snapshotName) };
+        });
+    },
+    /**
+     * RN's last screen (#842, pass O2b): at a cold start, the route core reopens (`{ route }`, null when none is recent or the
+     * stored one is transient or malformed); never in the sandbox, whose screens never reach the personal keys.
+     */
+    sessionRestoreRead(): string {
+        return submit(async () => ({ route: isSandboxMode() ? null : parseRestorableLastRoute(await keyValue.get(LAST_ROUTE_STORAGE_KEY), Date.now()) }));
+    },
+    /** Stores the screen on show as RN's persistLastRoute does (`{ stored }`); [ageMs] dates it back (debug device checks). */
+    sessionRestoreWrite(pathname: string, paramsJSON: string, ageMs = 0): string {
+        return submit(async () => {
+            if (isSandboxMode()) return { stored: false };
+            const params = JSON.parse(paramsJSON || '{}') as Record<string, unknown>;
+            const text = buildLastRouteSnapshot(pathname, params, null, Date.now() - Math.max(0, Number(ageMs) || 0));
+            if (text !== null) await keyValue.set(LAST_ROUTE_STORAGE_KEY, text);
+            return { stored: text !== null };
         });
     },
     backupDocumentResultModel(replyJSON: string): string {

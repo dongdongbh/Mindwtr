@@ -81,6 +81,8 @@ export const ANDROID_HOST_METHODS = [
     'saveDraft',
     'saveSearch',
     'search',
+    'sessionRestoreRead',
+    'sessionRestoreWrite',
     'setAreaFilter',
     'strings',
     'syncAppState',

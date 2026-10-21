@@ -254,6 +254,19 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
     }
 
     /**
+     * RN's last screen, as core read it at a cold start (SessionRestore.kt): History on its tab, a saved search by its id, the
+     * Inbox tab; any other route as an entry opens it ([go]), its params as core's reply (the open project).
+     */
+    fun openRestored(pathname: String, params: JSONObject): Unit = with(shell) {
+        when {
+            pathname == "/inbox" -> { menu.toTabs(); show(Screen.Inbox) }
+            pathname == "/history" -> menu.openRoute(if (params.optString("tab") == "archived") "/archived" else "/done")
+            pathname.startsWith("/saved-search/") -> menu.openSavedSearch(pathname.removePrefix("/saved-search/"))
+            else -> go(pathname, params)
+        }
+    }
+
+    /**
      * Opens RN's route [route] as this app has it: a tab, a Menu screen (a list, or a tile's screen), the Projects screen
      * with core's project, Focus with core's task in the editor (outlined on its row, as RN's setHighlightTask), or the global
      * search with core's query. A route this app has no screen for opens the Inbox.

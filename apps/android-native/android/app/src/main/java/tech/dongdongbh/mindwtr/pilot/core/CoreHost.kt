@@ -846,6 +846,12 @@ class CoreHost(
     /** Core's result toast for a commit's reply. */
     fun backupResultModel(replyJson: String): JSONObject = callAsync("backupDocumentResultModel", replyJson)
 
+    /** RN's last screen at a cold start: `{ route: { pathname, params? } | null }` (core's parseRestorableLastRoute). */
+    fun sessionRestoreRead(): JSONObject = callAsync("sessionRestoreRead")
+
+    /** Stores the screen on show as RN's last screen (core's buildLastRouteSnapshot); [ageMs] dates it back (debug checks). */
+    fun sessionRestoreWrite(pathname: String, paramsJson: String, ageMs: Long): JSONObject = callAsync("sessionRestoreWrite", pathname, paramsJson, ageMs)
+
     /** Before a leftover result offers Undo: core holds the attachment files of recovery snapshot [snapshot] again (`{ held }`). */
     fun backupUndoHold(snapshot: File): JSONObject {
         val handle = data.openRead(snapshot, false)

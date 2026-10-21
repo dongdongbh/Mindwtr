@@ -312,12 +312,18 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? '/home/d
     const requireAppFront = () => {
         if (!front().includes(`${pkg}/`)) throw new Stopped(`${pkg} is not in front: ${front().trim()}`);
     };
-    const launch = (activity) => {
+    /**
+     * Launches [activity] as the launcher does. The app starts on Focus and reopens a recent last screen, as RN does (pass O2b);
+     * the checks were written for an Inbox start, so a debug build is told to start there with no restore
+     * (`debug.mindwtr.native.start_tab`). [startTab] '' gives the app's own start (check-session-restore-device).
+     */
+    const launch = (activity, { startTab = 'inbox' } = {}) => {
         requireEnglishKeyboard();
         const current = front();
         if (!current.includes(`${pkg}/`) && !current.includes(`${home}/`)) {
             throw new Stopped(`another app is in front; not launching over it: ${current.trim()}`);
         }
+        sh(`setprop debug.mindwtr.native.start_tab '${startTab}'`);
         sh(`am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n ${activity}`);
     };
     /**
