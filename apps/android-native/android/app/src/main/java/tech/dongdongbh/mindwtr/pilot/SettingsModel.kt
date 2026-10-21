@@ -80,10 +80,9 @@ fun deviceStore(app: Context, keyValue: RnKeyValue): DeviceWrites {
     val prefs = app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
     return routedDeviceStore({ prefs.all }, { changes ->
         prefs.edit().apply { changes.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
-    }, keyValue::multiGet, { changes ->
-        changes.filterValues { it != null }.map { (key, value) -> key to value!! }.takeIf { it.isNotEmpty() }?.let(keyValue::multiSet)
-        changes.filterValues { it == null }.keys.toList().takeIf { it.isNotEmpty() }?.let(keyValue::multiRemove)
-    })
+    // One RKStorage transaction: a value and its journal sequence land together, as DeviceWrites needs (a death between two
+    // would let a replay skip the switch's removal).
+    }, keyValue::multiGet, keyValue::apply)
 }
 
 /** Core windows Manage's lists and the Someday sections by NATIVE_HOST_MAX_WINDOW. */

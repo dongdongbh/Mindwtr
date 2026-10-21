@@ -1224,6 +1224,8 @@ assert.equal([activity, model, owner, editorUi, focusUi, projectsUi, labelsKt, c
 assert.match(model, /private val harnessStart = debugProperty\("start_tab"\)/);
 assert.match(model, /if \(BuildConfig\.DEBUG\) debugProperty\("session_age_ms"\)\.toLongOrNull\(\) \?: 0L else 0L/);
 assert.match(owner, /if \(BuildConfig\.DEBUG && runtime != null && debugProperty\("appsearch_dump"\) == "1"\)/);
+// System search's switch and its journal sequence land in one RKStorage transaction (O2d review R-P2-2).
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt'), 'utf8'), /\}, keyValue::multiGet, keyValue::apply\)/);
 assert.match(model, /debugProperty\("boot_delay_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+val runtime = ProcessCoreHost\.get\(/);
 assert.match(captureUi, /withContext\(Dispatchers\.IO\) \{ debugProperty\("clipboard"\) \}\.takeIf \{ it\.isNotEmpty\(\) \}\?\.let \{ clipboard\.setText\(/);
 // The command path's fault hook, and the same hook for a journal replay (a replay can meet a failed save too).

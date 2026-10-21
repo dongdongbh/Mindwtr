@@ -50,6 +50,14 @@ class RnKeyValue(private val file: File) {
         for (key in keys) connection.prepare(DELETE).use { it.bindText(1, key); it.step() }
     }
 
+    /** [changes] (a null value removes the key) in one transaction: every change is on disk, or none (a value with its sequence). */
+    fun apply(changes: Map<String, String?>) = write { connection ->
+        for ((key, value) in changes) {
+            if (value == null) connection.prepare(DELETE).use { it.bindText(1, key); it.step() }
+            else connection.prepare(UPSERT).use { it.bindText(1, key); it.bindText(2, value); it.step() }
+        }
+    }
+
     private fun write(work: (SQLiteConnection) -> Unit) = open { connection ->
         connection.exec("BEGIN IMMEDIATE")
         try {
