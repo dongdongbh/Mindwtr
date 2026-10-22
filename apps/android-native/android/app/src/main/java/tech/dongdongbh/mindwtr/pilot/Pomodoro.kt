@@ -63,6 +63,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.InboxViewModel.Part
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import java.util.Locale
 import java.util.UUID
 
 /*
@@ -238,7 +239,9 @@ internal fun pomodoroClock(totalSeconds: Long): String {
     val hours = safe / 3600
     val minutes = (safe % 3600) / 60
     val seconds = safe % 60
-    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%02d:%02d".format(safe / 60, seconds)
+    // ASCII digits in every language, as core's padStart.
+    return if (hours > 0) String.format(Locale.ROOT, "%d:%02d:%02d", hours, minutes, seconds)
+    else String.format(Locale.ROOT, "%02d:%02d", safe / 60, seconds)
 }
 
 /** Core's remaining seconds from the phase's end (pomodoro-session.ts getRemainingSecondsFromPhaseEnd): rounded up, 0 once ended. */
