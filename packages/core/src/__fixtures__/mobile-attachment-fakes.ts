@@ -38,7 +38,7 @@ export const createMemoryFileSystem = (options: { saf?: MobileAttachmentSafPort;
       enter('getInfo', uri);
       const file = files.get(uri);
       if (file) return { exists: true, size: file.bytes.byteLength, modificationTime: file.mtimeMs / 1000 };
-      return { exists: directories.has(uri) };
+      return directories.has(uri) ? { exists: true, isDirectory: true } : { exists: false };
     },
     makeDirectory: async (uri) => {
       enter('makeDirectory', uri);
@@ -46,8 +46,10 @@ export const createMemoryFileSystem = (options: { saf?: MobileAttachmentSafPort;
     },
     readDirectory: async (uri) => {
       enter('readDirectory', uri);
-      return [...files.keys()]
-        .filter((key) => key.startsWith(uri) && !key.slice(uri.length).includes('/'))
+      // Files and subfolders directly in the folder, as expo's readDirectoryAsync lists them.
+      const subfolders = [...directories].map((dir) => dir.replace(/\/$/, ''))
+        .filter((dir) => dir.startsWith(uri) && dir.length > uri.length && !dir.slice(uri.length).includes('/'));
+      return [...[...files.keys()].filter((key) => key.startsWith(uri) && !key.slice(uri.length).includes('/')), ...subfolders]
         .map((key) => key.slice(uri.length));
     },
     readBytes: async (uri) => {

@@ -416,7 +416,7 @@ describe('mobile attachment files: File Sync folders', () => {
         : ['content://op/tree/root/document/12'])),
       listChildren: vi.fn(async (uri: string) => (uri === root || uri === 'content://op/tree/root'
         ? [{ uri: 'content://op/tree/root/document/7', name: 'data.json' }, { uri: 'content://op/tree/root/document/9', name: 'attachments' }]
-        : [{ uri: 'content://op/tree/root/document/12', name: 'att-1.txt' }])),
+        : [{ uri: 'content://op/tree/root/document/12', name: 'att-1.txt', size: 3 }])),
       makeDirectory: vi.fn(async () => 'content://created'),
     };
     const { files } = setup({ saf });
@@ -427,7 +427,13 @@ describe('mobile attachment files: File Sync folders', () => {
     });
     expect(saf.makeDirectory).not.toHaveBeenCalled();
     const inventory = await files.inspectSafDirectoryEntriesByName('content://op/tree/root/document/9');
-    expect(inventory).toEqual({ status: 'available', entries: new Map([['att-1.txt', 'content://op/tree/root/document/12']]) });
+    expect(inventory).toEqual({
+      status: 'available',
+      entries: new Map([['att-1.txt', 'content://op/tree/root/document/12']]),
+      // The listing's own size, kept so the File pass judges a plaintext entry without reading it.
+      sizes: new Map([['att-1.txt', 3]]),
+      directories: new Set(),
+    });
   });
 });
 

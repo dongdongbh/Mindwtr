@@ -1650,6 +1650,94 @@ describe('File Sync attachment pass', () => {
 
       expect(attachmentOf(result)?.cloudKey).toBeDefined();
     });
+
+    // The check stays cheap (a SAF header read costs ~26 ms on a phone): a referenced entry whose size is its record's plaintext
+    // size is plaintext (sealing always adds a fixed overhead); the first and last entries in Enable's own order are always judged.
+    const plain = (index: number) => new TextEncoder().encode(`referenced attachment ${index}`);
+    const referenced = (index: number, fields: Partial<Attachment> = {}): Attachment => fileAttachment({
+      id: `r${index}`, title: `r${index}.txt`, uri: '', localStatus: 'missing', cloudKey: `attachments/r${index}.txt`, size: plain(index).length, ...fields,
+    });
+    const withRecords = (...records: Attachment[]): AppData => {
+      const data = withAttachment(fileAttachment());
+      data.tasks[0].attachments!.push(...records);
+      return data;
+    };
+    const headReads = (memory: ReturnType<typeof setup>['memory']) => memory.calls.filter((call) => call.startsWith(`readBytesRange ${SYNC_DIR}`));
+
+    it('judges a plaintext folder of referenced entries by size alone, with no header read', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      for (let index = 0; index < 5; index += 1) memory.put(`${SYNC_DIR}r${index}.txt`, plain(index));
+
+      const result = await backends.syncFileAttachments(withRecords(...[0, 1, 2, 3, 4].map((index) => referenced(index))), 'file:///sdcard/Mindwtr/data.json');
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+      expect(headReads(memory)).toEqual([]);
+    });
+
+    it('refuses an entry an interrupted enable sealed under its known name', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, await encryptSyncArtifact(plain(0), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r1.txt`, plain(1));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(0), referenced(1)), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+    });
+
+    it('reads and judges a referenced entry whose record has no size', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, await encryptSyncArtifact(plain(1), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r2.txt`, plain(2));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(0), referenced(1, { size: undefined }), referenced(2)), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(headReads(memory)).toEqual([`readBytesRange ${SYNC_DIR}r1.txt`]);
+    });
+
+    it('picks the first entry in code-unit order, the order Enable seals in, not localeCompare', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}a.txt`, plain(0));
+      memory.put(`${SYNC_DIR}B.txt`, await encryptSyncArtifact(plain(1), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}c.txt`, plain(2));
+      const records = [referenced(0, { id: 'a', title: 'a.txt', cloudKey: 'attachments/a.txt' }), referenced(2, { id: 'c', title: 'c.txt', cloudKey: 'attachments/c.txt' })];
+
+      await expect(backends.syncFileAttachments(withRecords(...records), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+    });
+
+    // Desktop's Enable (sync.rs collect_sync_folder_attachments) also seals files in a subfolder of attachments/ that is not a
+    // recovery folder, in path order: one that sorts first is where a cut-off desktop Enable starts.
+    it('judges the first file of a subfolder that sorts before every other entry', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, plain(1));
+      await memory.fs.makeDirectory(`${SYNC_DIR}Archive`);
+      memory.put(`${SYNC_DIR}Archive/x.txt`, await encryptSyncArtifact(plain(9), material, defaultSyncCryptoPrimitives));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(0), referenced(1)), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(headReads(memory)).toEqual([`readBytesRange ${SYNC_DIR}Archive/x.txt`]);
+    });
+
+    // An interrupted Enable seals attachments/ one entry at a time in name order (mobile-file-sync-remote.ts nonDocumentEntries),
+    // so it always seals the first entry before any other: ciphertext only between plaintext ends is not a cut-off Enable.
+    it('does not refuse an unreferenced sealed entry between plaintext first and last entries', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, await encryptSyncArtifact(plain(1), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r2.txt`, plain(2));
+
+      const result = await backends.syncFileAttachments(withRecords(referenced(0), referenced(2)), 'file:///sdcard/Mindwtr/data.json');
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+      expect(headReads(memory)).toEqual([]);
+    });
   });
 
   describe('in a Storage Access Framework folder', () => {
@@ -1701,6 +1789,72 @@ describe('File Sync attachment pass', () => {
         message: 'Failed to copy attachment att-1 to sync folder',
         extra: { error: 'SAF attachment writes are unavailable' },
       }));
+    });
+
+    it('takes sizes from the one listing: a plaintext folder is judged with no header read, an entry with no listed size is read', async () => {
+      const plain = (name: string) => new TextEncoder().encode(`referenced ${name}`);
+      const unsized = new Set<string>();
+      let put: (uri: string, bytes: Uint8Array) => void = () => undefined;
+      const saf = createSaf((uri, bytes) => put(uri, bytes), true);
+      const { backends, memory } = setup({ saf });
+      put = memory.put;
+      saf.listChildren = vi.fn(async (uri: string) => (await saf.readDirectory(uri)).map((child) => {
+        const name = decodeURIComponent(child.slice(child.lastIndexOf('%2F') + 3));
+        return { uri: child, name, size: unsized.has(name) ? null : memory.read(child)?.length ?? null };
+      }));
+      memory.put(LOCAL_URI, LOCAL);
+      const records: Attachment[] = [];
+      for (const name of ['r0.txt', 'r1.txt', 'r2.txt']) {
+        memory.put(await saf.createFile!(ATTACHMENTS, name, 'application/octet-stream'), plain(name));
+        records.push(fileAttachment({ id: name, title: name, uri: '', localStatus: 'missing', cloudKey: `attachments/${name}`, size: plain(name).length }));
+      }
+      const data = withAttachment(fileAttachment({ size: LOCAL.length }));
+      data.tasks[0].attachments!.push(...records);
+      const reads = () => memory.calls.filter((call) => call.startsWith(`readBytesRange ${ATTACHMENTS}`));
+
+      const synced = await backends.syncFileAttachments(data, TREE);
+      expect(attachmentOf(synced)?.cloudKey).toBeDefined();
+      expect(reads()).toEqual([]);
+
+      memory.put(`${ATTACHMENTS}%2Fr1.txt`, await encryptSyncArtifact(plain('r1.txt'), material, defaultSyncCryptoPrimitives));
+      unsized.add('r1.txt');
+      // The next pass uploads a new attachment beside the folder's three referenced entries and its first upload.
+      const next = synced as AppData;
+      memory.put(`${MANAGED}att-2.txt`, LOCAL);
+      next.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', title: 'att-2.txt', uri: `${MANAGED}att-2.txt` }));
+      await expect(backends.syncFileAttachments(next, TREE)).rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(reads()).toEqual([`readBytesRange ${ATTACHMENTS}%2Fr1.txt`]);
+    });
+
+    it('enters a first-sorting subfolder the listing marks as a folder, as desktop\'s Enable does', async () => {
+      const ARCHIVE = `${ATTACHMENTS}%2FArchive`;
+      const SEALED = `${ARCHIVE}%2Fx.txt`;
+      const R0 = `${ATTACHMENTS}%2Fr0.txt`;
+      const rows: Record<string, { uri: string; name: string; size: number | null; mime: string | null }[]> = {
+        [FOLDER]: [{ uri: ATTACHMENTS, name: 'attachments', size: null, mime: 'vnd.android.document/directory' }],
+        [ATTACHMENTS]: [
+          { uri: ARCHIVE, name: 'Archive', size: null, mime: 'vnd.android.document/directory' },
+          { uri: R0, name: 'r0.txt', size: 3, mime: 'text/plain' },
+        ],
+        [ARCHIVE]: [{ uri: SEALED, name: 'x.txt', size: null, mime: 'text/plain' }],
+      };
+      const saf: MobileAttachmentSafPort = {
+        readDirectory: async (uri) => (rows[uri] ?? []).map((row) => row.uri),
+        listChildren: async (uri) => rows[uri] ?? [],
+        makeDirectory: async () => ATTACHMENTS,
+        createFile: vi.fn(async () => { throw new Error('no create expected'); }),
+        writeBytes: vi.fn(async () => undefined),
+      };
+      const { backends, memory } = setup({ saf });
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(R0, new Uint8Array([1, 2, 3]));
+      memory.put(SEALED, await encryptSyncArtifact(new TextEncoder().encode('desktop sealed this'), material, defaultSyncCryptoPrimitives));
+      const data = withAttachment(fileAttachment());
+      data.tasks[0].attachments!.push(fileAttachment({ id: 'r0', title: 'r0.txt', uri: '', localStatus: 'missing', cloudKey: 'attachments/r0.txt', size: 3 }));
+
+      await expect(backends.syncFileAttachments(data, TREE)).rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      expect(saf.createFile).not.toHaveBeenCalled();
+      expect(memory.calls.filter((call) => call.startsWith('readBytesRange'))).toEqual([`readBytesRange ${SEALED}`]);
     });
 
     it('a device with encryption off uploads nothing beside an attachment an interrupted enable sealed', async () => {

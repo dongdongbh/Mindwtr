@@ -157,6 +157,14 @@ export type SyncEncryptionLocalStatePort = {
 
 export const SYNC_ENCRYPTION_PARTLY_ENCRYPTED = 'SYNC_ENCRYPTION_PARTLY_ENCRYPTED';
 
+/**
+ * The order an encryption transition walks a File Sync folder's artifacts in: plain code-unit order, the same on every engine
+ * (localeCompare differs between Hermes and QuickJS) and, for ASCII names, the byte order desktop's Rust transition sorts by.
+ * File Sync's keyless upload check (mobile-attachment-backends.ts assertFolderHoldsNoCiphertext) relies on it: a cut-off Enable
+ * has always sealed the first entry.
+ */
+export const compareSyncTransitionEntryNames = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+
 /** The sync location holds encrypted files beside plaintext ones (an encryption change was cut off) while this device has
  *  no key: it never writes there, so plaintext never lands beside ciphertext. */
 export class SyncEncryptionPartlyEncryptedError extends Error {

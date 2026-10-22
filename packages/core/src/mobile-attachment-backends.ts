@@ -43,7 +43,7 @@ import { isAbortError, isHostResponseTooLargeError, refuseWriteRedirect } from '
 import { withRetry } from './retry-utils';
 import { encryptedSyncArtifactByteLength, inspectSyncArtifact, type SyncKeyMaterial } from './sync-crypto';
 import { isSyncRemoteMutationFenceError } from './sync-remote-fence';
-import { isSyncEncryptionPartlyEncryptedError, SyncEncryptionPartlyEncryptedError } from './sync-encryption';
+import { compareSyncTransitionEntryNames, isSyncEncryptionPartlyEncryptedError, SyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { getErrorStatus, isWebdavRateLimitedError } from './sync-runtime-utils';
 import {
   isWebdavRemoteWriteConflictError,
@@ -1756,32 +1756,103 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     // Memoized across the whole pass: every attachment that needs a SAF lookup this round shares
     // one directory listing rather than re-reading it per attachment.
     let safEntriesByName: Map<string, string> | null = null;
+    /** The sizes the same listing gave, by name (null where the provider listed none), and its folders. */
+    let safEntrySizes = new Map<string, number | null>();
+    let safEntryDirectories = new Set<string>();
     const refreshSafEntriesByName = async (): Promise<Map<string, string>> => {
       const inventory = await files.inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
       if (inventory.status === 'unreadable') {
         throw new Error('SAF attachment inventory is unreadable');
       }
       safEntriesByName = inventory.entries;
+      safEntrySizes = inventory.sizes;
+      safEntryDirectories = inventory.directories;
       return inventory.entries;
     };
     const getSafEntriesByName = async (): Promise<Map<string, string>> => (
       safEntriesByName ?? refreshSafEntriesByName()
     );
     // No key here, yet an encryption enable cut off on another device left sealed attachments in the folder beside a plaintext
-    // data.json (it seals attachments first, the document last). Before this pass writes its first plaintext generation, every
-    // attachment the folder holds is checked for ciphertext: a File transition seals in the provider's listing order, so no
-    // sample of names stands for the rest. The refusal ends the cycle, which marks the location partly encrypted.
-    // ponytail: one header read per attachment, only on a keyless pass that uploads; a stored per-location proof if it costs.
+    // data.json (it seals attachments first, the document last). Before this pass writes its first plaintext generation, the
+    // folder is checked for ciphertext; the refusal ends the cycle, which marks the location partly encrypted. An Enable seals
+    // every entry of attachments/ in place, one at a time in compareSyncTransitionEntryNames order (core's transition,
+    // mobile-file-sync-remote.ts nonDocumentEntries; desktop's sync.rs collect_sync_folder_attachments sorts by bytes, the same
+    // order for ASCII names), so a cut-off Enable has always sealed its first entry. Judged:
+    // - the first and the last entry, as core's Enable lists them;
+    // - the first file as desktop's Enable lists them: no transition scratch, and a non-recovery subfolder that sorts first is
+    //   entered (desktop seals the files inside it);
+    // - every entry a record names, by size first: sealing adds a fixed overhead, so an entry listed at its record's plaintext
+    //   size is plaintext with no read.
+    // Any other judged entry costs one 64-byte header read (a SAF read is ~26 ms on a phone). Sizes and folders come from the
+    // SAF listing the pass already made, or a path folder's stat (a byte read can start an iCloud download).
+    type ListedEntry = { uri: string; size: () => Promise<number | null>; directory: () => Promise<boolean> };
+    const statPathEntry = (uri: string) => fs.getInfo(uri).catch((): { exists?: boolean; isDirectory?: boolean; size?: number } => ({}));
+    const listFolder = async (dirUri: string, top: boolean): Promise<Map<string, ListedEntry>> => {
+      const listed = new Map<string, ListedEntry>();
+      if (syncDir.type === 'saf') {
+        const inventory = top ? null : await files.inspectSafDirectoryEntriesByName(dirUri);
+        if (inventory?.status === 'unreadable') return listed;
+        const entries = top ? await getSafEntriesByName() : inventory!.status === 'available' ? inventory!.entries : new Map<string, string>();
+        const sizes = top ? safEntrySizes : inventory?.status === 'available' ? inventory.sizes : new Map<string, number | null>();
+        const folders = top ? safEntryDirectories : inventory?.status === 'available' ? inventory.directories : new Set<string>();
+        for (const [name, uri] of entries) {
+          listed.set(name, { uri, size: async () => sizes.get(name) ?? null, directory: async () => folders.has(name) });
+        }
+      } else {
+        const base = dirUri.endsWith('/') ? dirUri : `${dirUri}/`;
+        for (const name of await fs.readDirectory(base)) {
+          const uri = `${base}${name}`;
+          listed.set(name, {
+            uri,
+            size: async () => { const info = await statPathEntry(uri); return info.exists && typeof info.size === 'number' ? info.size : null; },
+            directory: async () => (await statPathEntry(uri)).isDirectory === true,
+          });
+        }
+      }
+      return listed;
+    };
+    const isRecoveryFolderName = (name: string) => (
+      name.startsWith('.mindwtr-encryption-stage-') || name.startsWith('.mindwtr-encryption-quarantine-')
+    );
+    const isTransitionScratch = (name: string) => name.includes('.mindwtr-et-') || name.endsWith('.enctransition');
+    const sortedNames = (listed: Map<string, ListedEntry>) => [...listed.keys()].sort(compareSyncTransitionEntryNames);
     let folderProvenPlaintext = false;
     const assertFolderHoldsNoCiphertext = async (): Promise<void> => {
       if (options.material || folderProvenPlaintext) return;
-      const entries: string[] = syncDir.type === 'saf'
-        ? [...(await getSafEntriesByName()).values()]
-        : (await fs.readDirectory(syncDir.attachmentsDirUri)).map((name) => `${syncDir.attachmentsDirUri}${name}`);
-      for (const uri of entries) {
+      const top = await listFolder(syncDir.attachmentsDirUri, true);
+      const plaintextSizes = new Map<string, number | null>();
+      for (const item of [...appData.tasks, ...appData.projects]) {
+        for (const attachment of item.attachments ?? []) {
+          if (attachment.kind !== 'file' || !attachment.cloudKey) continue;
+          plaintextSizes.set(remoteFilenameFor(attachment.cloudKey, attachment), typeof attachment.size === 'number' ? attachment.size : null);
+        }
+      }
+      const coreOrder = sortedNames(top).filter((name) => !isRecoveryFolderName(name));
+      const judged = new Map<string, ListedEntry>();
+      for (const name of [coreOrder[0], coreOrder[coreOrder.length - 1], ...coreOrder.filter((each) => plaintextSizes.has(each))]) {
+        if (name !== undefined) judged.set(name, top.get(name)!);
+      }
+      // Desktop's first file: descend into a first-sorting subfolder (bounded: a folder tree has finite depth).
+      let folder = top;
+      let prefix = '';
+      for (let depth = 0; depth < 8; depth += 1) {
+        const first = sortedNames(folder).find((name) => !isTransitionScratch(name) && !isRecoveryFolderName(name));
+        if (first === undefined) break;
+        const entry = folder.get(first)!;
+        if (!(await entry.directory())) {
+          judged.set(`${prefix}${first}`, entry);
+          break;
+        }
+        folder = await listFolder(entry.uri, false);
+        prefix = `${prefix}${first}/`;
+      }
+      for (const [name, entry] of judged) {
         assertAttachmentSyncNotAborted(signal);
-        // A subfolder (a desktop transition's recovery folder) or an entry gone since the listing has no header to read.
-        const head = await fs.readBytesRange(uri, 0, 64).catch(() => null);
+        const plaintextSize = plaintextSizes.get(name);
+        if (typeof plaintextSize === 'number' && await entry.size() === plaintextSize) continue;
+        // A subfolder has no header (desktop's first file inside one is judged above); nor has an entry gone since the listing.
+        if (await entry.directory()) continue;
+        const head = await fs.readBytesRange(entry.uri, 0, 64).catch(() => null);
         if (!head || inspectSyncArtifact(head).kind === 'plaintext') continue;
         files.logAttachmentWarn('File Sync attachment upload refused: the folder holds encrypted attachments', undefined, {
           releaseCheck: 'v1.3.8/file-partly-encrypted-upload',

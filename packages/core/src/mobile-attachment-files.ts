@@ -57,7 +57,7 @@ const ATTACHMENT_TEMP_FILE_PREFIX = '.mindwtr-attachment-write-';
 
 /** What the host's file system reports for a path. `exists` stays undefined when the platform
  *  cannot tell; `modificationTime` is in seconds, as expo-file-system reports it. */
-export type MobileAttachmentFileInfo = { exists?: boolean; size?: number; modificationTime?: number };
+export type MobileAttachmentFileInfo = { exists?: boolean; isDirectory?: boolean; size?: number; modificationTime?: number };
 
 /** Android Storage Access Framework folders (`content://` trees). */
 export type MobileAttachmentSafPort = {
@@ -72,24 +72,36 @@ export type MobileAttachmentSafPort = {
   writeBytes?(uri: string, bytes: Uint8Array): Promise<void>;
   /** A folder's documents with their display names. Document IDs are opaque provider values, so
    *  a host that can list names lets core match files by name, not by the URI's tail. */
-  listChildren?(uri: string): Promise<{ uri: string; name: string | null }[]>;
+  listChildren?(uri: string): Promise<{ uri: string; name: string | null; size?: number | null; mime?: string | null }[]>;
   /** A document's display name, or null when the provider says it is gone. */
   stat?(uri: string): Promise<{ name: string | null } | null>;
 };
 
-/** A SAF folder's documents by display name (from `listChildren` when the host has it, else the
- *  name in each URI's tail). Provider errors propagate. */
-export const listSafEntriesByName = async (saf: MobileAttachmentSafPort, dirUri: string): Promise<Map<string, string>> => {
+/** A SAF folder's documents by display name, with the size the provider listed (null when it listed none) and whether the row
+ *  is a folder, from `listChildren` when the host has it, else the name in each URI's tail. Provider errors propagate. */
+const listSafEntries = async (saf: MobileAttachmentSafPort, dirUri: string): Promise<Map<string, { uri: string; size: number | null; directory: boolean }>> => {
   const entries = saf.listChildren
     ? await saf.listChildren(dirUri)
-    : (await saf.readDirectory(dirUri)).map((uri) => ({ uri, name: null }));
-  const byName = new Map<string, string>();
+    : (await saf.readDirectory(dirUri)).map((uri) => ({ uri, name: null, size: null, mime: null }));
+  const byName = new Map<string, { uri: string; size: number | null; directory: boolean }>();
   for (const entry of entries) {
     const name = entry.name || getSafLeafName(entry.uri);
-    if (name && !byName.has(name)) byName.set(name, entry.uri);
+    if (name && !byName.has(name)) {
+      byName.set(name, {
+        uri: entry.uri,
+        size: typeof entry.size === 'number' ? entry.size : null,
+        // DocumentsContract.Document.MIME_TYPE_DIR.
+        directory: entry.mime === 'vnd.android.document/directory',
+      });
+    }
   }
   return byName;
 };
+
+/** A SAF folder's documents by display name (see listSafEntries). Provider errors propagate. */
+export const listSafEntriesByName = async (saf: MobileAttachmentSafPort, dirUri: string): Promise<Map<string, string>> => (
+  new Map([...(await listSafEntries(saf, dirUri))].map(([name, entry]) => [name, entry.uri]))
+);
 
 /** A SAF document's display name (its URI's tail where the host cannot say). */
 export const getSafDocumentName = async (saf: MobileAttachmentSafPort, uri: string): Promise<string> => (
@@ -134,7 +146,7 @@ export type AttachmentSyncDir =
   | { type: 'saf'; dirUri: string; attachmentsDirUri: string };
 
 export type AttachmentSafDirectoryEntries =
-  | { status: 'available'; entries: Map<string, string> }
+  | { status: 'available'; entries: Map<string, string>; sizes: Map<string, number | null>; directories: Set<string> }
   | { status: 'unreadable' };
 
 export type PersistAttachmentOutcome = {
@@ -650,7 +662,13 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
     const saf = fs.saf();
     if (!saf) return { status: 'unreadable' };
     try {
-      return { status: 'available', entries: await listSafEntriesByName(saf, dirUri) };
+      const listed = await listSafEntries(saf, dirUri);
+      return {
+        status: 'available',
+        entries: new Map([...listed].map(([name, entry]) => [name, entry.uri])),
+        sizes: new Map([...listed].map(([name, entry]) => [name, entry.size])),
+        directories: new Set([...listed].filter(([, entry]) => entry.directory).map(([name]) => name)),
+      };
     } catch (error) {
       logAttachmentWarn('Failed to read SAF directory', error);
       return { status: 'unreadable' };

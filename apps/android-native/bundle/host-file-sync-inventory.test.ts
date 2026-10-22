@@ -539,6 +539,21 @@ describe('native Android File Sync: RN fix history through the native binding', 
             expect(folder.names('attachments')).toEqual(['peer.txt']);
         });
 
+        it('a keyless upload beside 260 plaintext entries judges them by their listed sizes, with no header read (129)', async () => {
+            const { folder, app } = install();
+            const records: Attachment[] = [];
+            for (let index = 0; index < 260; index += 1) {
+                const bytes = text(`entry ${index}`);
+                folder.put(`attachments/e${String(index).padStart(3, '0')}.txt`, bytes);
+                // Old generations no record names any more sit among them; the first and last entries stay referenced.
+                if (index % 5 !== 2) records.push(fileAttachment(`e${String(index).padStart(3, '0')}`, { uri: '', localStatus: 'missing', cloudKey: `attachments/e${String(index).padStart(3, '0')}.txt`, size: bytes.length }));
+            }
+            app.memory.put(`${MANAGED}a1.txt`, text('new attachment'));
+            const result = await pass(folder, app).run(withAttachments(fileAttachment('a1'), ...records));
+            expect(result.tasks[0].attachments![0].cloudKey).toBeDefined();
+            expect(app.calls.filter((call) => call === 'readBytesRange content')).toEqual([]);
+        });
+
         it('a plaintext device meeting an encrypted attachment in the folder fails its on-demand fetch closed and installs nothing (129)', async () => {
             const { folder, app } = install();
             const material = await core.deriveSyncKeyMaterial(PASS, new Uint8Array(16).fill(3), { mKib: 8, t: 1, p: 1 }, createHostSyncCrypto(cryptoCall));

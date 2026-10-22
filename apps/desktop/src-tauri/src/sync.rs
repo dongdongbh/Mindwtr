@@ -8607,6 +8607,49 @@ mod tests {
         }
     }
 
+    // Mobile's keyless upload check (packages/core mobile-attachment-backends.ts assertFolderHoldsNoCiphertext) relies on this
+    // order: a cut-off Enable has sealed the first entry, and core's compareSyncTransitionEntryNames (code-unit order) picks the
+    // same first entry for ASCII names. A first-sorting subfolder's files come first, which the check enters too.
+    #[test]
+    fn sync_folder_attachments_seal_in_byte_order_for_mixed_case_and_punctuation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let attachments = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME);
+        fs::create_dir_all(attachments.join("Archive")).expect("subfolder");
+        let names = [
+            "b.txt", "B.txt", "a-1.txt", "a.1.txt", "A.txt", "10.txt", "9.txt", "_x.txt", "Z-z.txt",
+        ];
+        for name in names {
+            fs::write(attachments.join(name), name).expect("attachment");
+        }
+        fs::write(attachments.join("Archive").join("x.txt"), b"x").expect("nested attachment");
+
+        let found = collect_sync_folder_attachments(dir.path()).expect("collect attachments");
+        let relative: Vec<String> = found
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&attachments)
+                    .expect("inside attachments")
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            relative,
+            [
+                "10.txt",
+                "9.txt",
+                "A.txt",
+                "Archive/x.txt",
+                "B.txt",
+                "Z-z.txt",
+                "_x.txt",
+                "a-1.txt",
+                "a.1.txt",
+                "b.txt"
+            ]
+        );
+    }
+
     #[test]
     fn desktop_transitions_recover_mobile_flat_generations_in_place() {
         let dir = tempfile::tempdir().expect("temp dir");
