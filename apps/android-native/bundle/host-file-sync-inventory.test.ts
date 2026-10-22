@@ -325,7 +325,11 @@ const host = (stored: Record<string, string>, data: AppData = { tasks: [task('t1
             setSecret: async (key, value) => { secrets.set(key, value); },
             deleteSecret: async (key) => { secrets.delete(key); },
         },
-        localData: () => ({ getData: async () => structuredClone(local.current), saveData: async (next) => { local.current = structuredClone(next); } }),
+        localData: () => ({
+            getData: async () => structuredClone(local.current), saveData: async (next) => { local.current = structuredClone(next); },
+            // An Android cycle is sliced (core sync-run.ts): its save needs the read's token; the fake keeps no rows to slice.
+            readTokenOf: () => 'fake-read-token', prepareSaveRows: function* () { /* no rows to prepare */ },
+        }),
         networkState: () => ({ isConnected: true, isInternetReachable: true }),
         appendLog: async (entry) => { entries.push(entry); return null; },
         translate: (key) => key,
