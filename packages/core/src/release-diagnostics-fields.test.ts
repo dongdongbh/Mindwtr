@@ -88,6 +88,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'axis', 'collapsedCount',
     // ios-search-publication reuses releaseCheck, operation, outcome, enabled, and count below.
     // ios-search-snapshot reuses releaseCheck and count below.
+    // pomodoro-alarm-rearm reuses releaseCheck and outcome below.
     // widget-context-selection reuses releaseCheck and count below; lists counts the built context/tag/filter lists.
     'lists',
     // widget-upcoming reuses releaseCheck, platform, and count below.

@@ -108,6 +108,7 @@ type NativeEmitterSubscription = {
 // Which alarms to hold, their signatures, caps, retries and delays are core's
 // (mobile-reminder-alarms.ts); this file binds them to the alarm library.
 const POMODORO_ALERT_DELIVERY_RELEASE_CHECK = 'v1.3.0/pomodoro-alert-delivery';
+const POMODORO_ALARM_REARM_RELEASE_CHECK = 'v1.3.8/pomodoro-alarm-rearm';
 const DAILY_DIGEST_INDEPENDENT_RELEASE_CHECK = 'v1.3.1/daily-digest-independent';
 const REMINDER_CANCEL_RELEASE_CHECK = 'v1.3.4/reminder-withdrawn-clears-tray';
 const DENIED_RESUME_CLEANUP_RELEASE_CHECK = 'v1.3.4/denied-resume-cleanup';
@@ -1232,9 +1233,23 @@ export async function scheduleLocalPomodoroCompletionNotification(
     if (isPomodoroScheduleSuperseded(order, fireAtMs)) return;
     const previousEntry = loaded.entry;
     const phase = data?.phase ?? '';
+    let rearmed = false;
     if (isPomodoroAlarmUnchanged(previousEntry, fireAtMs, phase)) {
-      logNotificationInfo('Pomodoro alarm already matches requested phase');
-      return;
+      // The record alone does not prove the alarm exists: the native Android app cancels RN's alarms and drops the
+      // library's alarm table but keeps this record, so an RN build installed over it would otherwise never arm again.
+      // A library that cannot be read keeps the record's word. Only a deadline outside the immediate window: iOS can deliver
+      // up to a second early and then drops the request, which must not read as missing and show the alert twice.
+      const missing = previousEntry?.id !== undefined && !isPomodoroAlarmImmediate(fireAtMs, Date.now())
+        && (await loadNativePomodoroAlarmIds(api))?.has(previousEntry.id) === false;
+      if (!missing) {
+        logNotificationInfo('Pomodoro alarm already matches requested phase');
+        return;
+      }
+      logNotificationInfo('Pomodoro alarm missing from the alarm library; arming it again', {
+        outcome: 'rearmed',
+        releaseCheck: POMODORO_ALARM_REARM_RELEASE_CHECK,
+      });
+      rearmed = true;
     }
 
     if (isPomodoroAlarmImmediate(fireAtMs, Date.now())) {
@@ -1247,7 +1262,7 @@ export async function scheduleLocalPomodoroCompletionNotification(
         notifiedImmediately: true,
       });
       if (!saved) return;
-      if (previousEntry?.id !== undefined && previousEntry.id !== 0) {
+      if (!rearmed && previousEntry?.id !== undefined && previousEntry.id !== 0) {
         if (isPomodoroAlarmDue(previousEntry, requestedAtMs)) {
           logPreservedDuePomodoroAlarm('phase-replaced');
         } else {
@@ -1285,7 +1300,8 @@ export async function scheduleLocalPomodoroCompletionNotification(
       });
       // Skip when the ids match: the iOS module keys requests by creation second,
       // so deleting the shared id would remove the replacement alarm (#888).
-      if (previousEntry?.id !== undefined && previousEntry.id !== scheduledId) {
+      // A re-armed record's old id names no Pomodoro alarm (the library may have given it to a task reminder since).
+      if (!rearmed && previousEntry?.id !== undefined && previousEntry.id !== scheduledId) {
         if (isPomodoroAlarmDue(previousEntry, requestedAtMs)) {
           logPreservedDuePomodoroAlarm('phase-replaced');
         } else {
