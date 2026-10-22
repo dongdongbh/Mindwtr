@@ -261,6 +261,12 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     // it. Android folders are SAF trees only: a `file://` path is refused, and there are no iOS bookmarks here.
     const documentCall = (globalThis as { __mindwtrDocumentCall?: HostDocumentCall }).__mindwtrDocumentCall;
     const syncLockCall = (globalThis as { __mindwtrSyncLockCall?: HostSyncLockCall }).__mindwtrSyncLockCall;
+    // A lease granted to an acquire that a host cancel abandoned, released by the lock channel (host-polyfills.js).
+    (globalThis as { __mindwtrLockReleasedLate?: (released: boolean) => void }).__mindwtrLockReleasedLate = (released) => {
+        void logLine(released ? 'info' : 'warn', 'Native Android File Sync lease released after a cancelled acquire', {
+            scope: 'sync', extra: { releaseCheck: 'v1.3.7/native-file-sync-late-release', outcome: released ? 'released' : 'failed' },
+        });
+    };
     const safPort = documentCall ? createHostSafPort(documentCall) : null;
     const fileSyncHost: MobileFileSyncFullHost = {
         os: () => platform,

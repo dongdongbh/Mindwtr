@@ -848,13 +848,45 @@
         global.__mindwtrFileCall = fileChannel('fileCall');
         global.__mindwtrInstallerCall = fileChannel('installerCall');
     }
-    // File Sync's SAF folder and folder lock (HostDocuments.kt, HostSyncLock.kt, pass S5), on the same files thread. A
-    // document read answers `{ value, bytes }` (its lengthVerified and its bytes), so its channel keeps both.
+    // File Sync's SAF folder (HostDocuments.kt, pass S5). A document read answers `{ value, bytes }` (its lengthVerified and its
+    // bytes), so its channel keeps both.
     if (global.__mindwtrNative && typeof global.__mindwtrNative.documentCall === 'function') {
         global.__mindwtrDocumentCall = fileChannel('documentCall', 'fileAbort', true);
     }
+    // File Sync's folder lock (HostSyncLock.kt). A host cancel must never strand a lease, or every later cycle stays busy until
+    // the process ends (RN's Expo lock calls are never cancelled). So a release is never refused or cancelled: it only closes
+    // handles and answers at once. An acquire or a revalidate asks the provider, so it is refused and cancelled as a file
+    // call is; an acquire the cancel abandoned keeps listening, and a lease the lock still granted is released at once.
     if (global.__mindwtrNative && typeof global.__mindwtrNative.syncLockCall === 'function') {
-        global.__mindwtrSyncLockCall = fileChannel('syncLockCall');
+        var lockCall = function (request, settle, cancel) {
+            return startIo(hostCall(native().syncLockCall(JSON.stringify(request))), settle, cancel);
+        };
+        var releaseLate = function (answer) {
+            if (answer.error === undefined && typeof answer.value === 'string' && answer.value) {
+                lockCall({ op: 'release', token: answer.value }, function (released) {
+                    // host-sync.ts logs it (v1.3.7/native-file-sync-late-release).
+                    if (typeof global.__mindwtrLockReleasedLate === 'function') {
+                        try { global.__mindwtrLockReleasedLate(released.error === undefined); } catch (_error) { /* a log only */ }
+                    }
+                });
+            }
+        };
+        global.__mindwtrSyncLockCall = function (request) {
+            return new Promise(function (resolve, reject) {
+                var release = request.op === 'release';
+                if (!release) refuseIfCancelled();
+                var id;
+                var cancel = release ? undefined : function (reason) {
+                    try { native().fileAbort(id); } catch (_error) { /* its late answer still comes */ }
+                    ioPending.set(id, { settle: request.op === 'acquire' ? releaseLate : function () {} });
+                    reject(reason);
+                };
+                id = lockCall(request, function (answer) {
+                    if (answer.error !== undefined) reject(new Error(answer.error));
+                    else resolve(answer.value);
+                }, cancel);
+            });
+        };
     }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarCall === 'function') {
         global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');

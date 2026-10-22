@@ -1050,7 +1050,7 @@ const bridgeCallbacks = coreHost.match(/bridge\.setProperty\([^\n]*/g);
 assert.equal(bridgeCallbacks.length, 51, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5): each guarded');
 // O2d: system search's calls run on HostIo's calendar thread, as the calendar's do.
 assert(bridgeCallbacks.includes('bridge.setProperty("appSearchCall", guarded { args -> io.calendar(args[0] as String, search::call) })'));
-// S5: File Sync's SAF documents and folder lock only start on the engine thread; HostIo's files thread runs them in order.
+// S5: File Sync's SAF documents and folder lock only start on the engine thread; HostIo runs them (a content:// call on a thread of its own).
 assert(bridgeCallbacks.includes('bridge.setProperty("documentCall", guarded { args -> io.file(args[0] as String, folder::call) }) }'));
 assert(bridgeCallbacks.includes('bridge.setProperty("syncLockCall", guarded { args -> io.file(args[0] as String, lock::call) }) }'));
 // C3: the device calendar call only starts on the engine thread; HostIo's calendar thread runs it (a prompt answers later).

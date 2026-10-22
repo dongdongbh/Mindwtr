@@ -498,8 +498,9 @@ class CoreHost(
         bridge.setProperty("fileCall", guarded { args -> io.file(args[0] as String, files::call) })
         // RN's attachment installer (HostInstaller): install and hash, on the same thread, after the file calls before them.
         bridge.setProperty("installerCall", guarded { args -> io.file(args[0] as String, installer::call) })
-        // File Sync (pass S5): the SAF folder's documents and the folder lock, on the same files thread and in order with the
-        // attachment file calls, cancelled the same way (fileAbort) when an operation passes its deadline.
+        // File Sync (pass S5): the SAF folder's documents and the folder lock. A call naming a `content://` uri (every document
+        // call, the lock's acquire) runs on a daemon thread of its own; the lock's revalidate and release and the pick slot run
+        // on the files thread. fileAbort ends a call not yet started; a lock release is never cancelled (host-polyfills.js).
         documents?.let { folder -> bridge.setProperty("documentCall", guarded { args -> io.file(args[0] as String, folder::call) }) }
         syncLock?.let { lock -> bridge.setProperty("syncLockCall", guarded { args -> io.file(args[0] as String, lock::call) }) }
         // A managed attachment's delete, at once on this thread: core asked who owns the file in this same turn (host-attachments.ts).

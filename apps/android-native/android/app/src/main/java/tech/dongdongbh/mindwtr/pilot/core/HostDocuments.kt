@@ -14,8 +14,9 @@ import tech.dongdongbh.mindwtr.syncfiletransitioncas.renameTransitionDocument
 /**
  * File Sync's folder on the Storage Access Framework (core's MobileFileSyncSafPort, bundle/host-sync.ts): React Native's
  * SafDocumentsCore.kt and transition rename, compiled as they are, plus the document create and delete expo's SAF API made.
- * [call] takes `{ op, uri, name?, mimeType? }` and a write's bytes; HostIo runs it on its files thread, in order with the
- * attachment file calls. A provider failure is an error, never an empty folder or a missing document.
+ * [call] takes `{ op, uri, name?, mimeType? }` and a write's bytes. A call naming a `content://` uri runs on a daemon thread
+ * of its own (HostIo, FileJobs.readsPickedDocument), so a stalled provider holds only that call; `takePick` runs on the files
+ * thread. A provider failure is an error, never an empty folder or a missing document.
  */
 class HostDocuments internal constructor(
     private val provider: SafDocumentProvider,
