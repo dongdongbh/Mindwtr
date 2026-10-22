@@ -139,8 +139,11 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
             val others = sections.count { it.total > 0 && it.key != "focus" } + (if (reviewCount > 0) 1 else 0)
             val othersOpen = sections.any { it.total > 0 && it.key != "focus" && focusView.isOpen(it.key) } ||
                 (reviewCount > 0 && focusView.isOpen("reviewProjects"))
+            // RN's header: the Pomodoro card (while the feature is on) above the date row, 6 dp below the top.
+            val pomodoro = pomodoro.panel.pomodoroShown() != null
+            if (view != null && pomodoro) item(key = "pomodoro") { Box(Modifier.padding(top = 6.dp)) { PomodoroCard(model) } }
             if (view != null) item(key = "date") {
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(top = if (pomodoro) 0.dp else 6.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(view.dateLabel.uppercase(), style = rnText(12, 600, letterSpacing = 0.6f), color = c.secondaryText,
                         modifier = Modifier.weight(1f))
                     view.controls?.let { FocusHeaderButtons(model, it) }

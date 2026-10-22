@@ -134,6 +134,8 @@ object Lucide {
     val LayoutList = lucide("LayoutList", "M4 3h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
         "M4 14h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1z", "M14 4h7", "M14 9h7", "M14 15h7", "M14 20h7")
     val ChevronUp = lucide("ChevronUp", "m18 15-6-6-6 6")
+    /** The Pomodoro card's fold button: ChevronDown at lucide's own stroke 2 (the other ChevronDown is RN's 2.2). */
+    val ChevronDownPlain = lucide("ChevronDown", "m6 9 6 6 6-6")
     /** RN's SettingsGuideLink icon (lucide external-link, stroke 2.2). */
     val ExternalLink = lucide("ExternalLink", "M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", stroke = 2.2f)
     /** RN's START_LATER_ICON. */
