@@ -413,7 +413,7 @@ export function parseInlineMarkdown(text: string): InlineToken[] {
             // A bare www. address links as GFM does (as the opened description's renderer does),
             // only at the start of a word (#1425).
             const isBareWww = /^www\./i.test(href);
-            const midWord = isBareWww && match.index > 0 && /[\w.\/@-]/.test(source[match.index - 1]);
+            const midWord = isBareWww && match.index > 0 && /[\w./@-]/.test(source[match.index - 1]);
             const safeHref = midWord ? null : sanitizeLinkHref(isBareWww ? `http://${href}` : href);
             if (safeHref) {
                 tokens.push({ type: 'link', text: href, href: safeHref });
