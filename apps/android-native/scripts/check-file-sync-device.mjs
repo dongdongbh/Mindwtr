@@ -370,6 +370,11 @@ const storedFolder = (path) => {
 class Refused extends Error {}
 class LeftoverCleared extends Error {}
 /** Before the run: the stored backend must be one the end can put back (Off). */
+/** The app's stored sync encryption (RN's key): on, or an unfinished transition. */
+const storedEncryptionOn = (keys) => {
+    const state = (() => { try { return JSON.parse(keys['@mindwtr_sync_encryption_state_v1'] ?? 'null'); } catch { return null; } })();
+    return Boolean(state) && (state.state !== 'off' || Boolean(state.incompleteTransition));
+};
 const requireRestorableBackend = (keys) => {
     const backend = keys['@mindwtr_sync_backend'] ?? 'off';
     const encryption = (() => { try { return JSON.parse(keys['@mindwtr_sync_encryption_state_v1'] ?? 'null'); } catch { return null; } })();
@@ -432,7 +437,15 @@ const restoreBackend = async () => {
         if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);
         await waitFor('the app', (nodes) => nodes.length > 0 && front().includes(`${PKG}/`), 30_000);
         if (hostFilePending) await removeHostFile();
-        if (encrypted) await disableHere('Disable (the end puts encryption back off)');
+        // The stored state decides, not this run's flag: an Enable that failed before it changed anything offers no Disable.
+        if (storedEncryptionOn(rkStorage())) {
+            try {
+                await disableHere('Disable (the end puts encryption back off)');
+            } catch (error) {
+                console.error(`info - the end's Disable failed (${error.message}); trying Off anyway`);
+            }
+        }
+        encrypted = storedEncryptionOn(rkStorage());
         if (rkStorage()['@mindwtr_sync_backend'] !== 'off') {
             await openSync();
             await tapTag('sync-backend-off', (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off');
@@ -682,7 +695,8 @@ try {
     const shown = toastsOf('syncNow', since);
     console.log(`info - (6) toasts: ${shown.join(' / ') || 'none'}`);
     check(folderSha('data.json') === untouched && !folderNames().some((name) => /\.mindwtr-et-/.test(name)), '(6) the folder is unchanged');
-    check(logs().includes(lockText) || shown.some((toast) => toast.includes('error')), `(6) the app answered with RN's lock refusal ("${lockText}")`);
+    const errorLine = await reveal((current) => tagged(current, 'sync-error'), 'the last sync error');
+    check(errorLine.text === lockText, `(6) Settings › Sync shows RN's lock refusal as the last sync error ("${errorLine.text}")`);
 
     // (7) Off.
     await openSync();
