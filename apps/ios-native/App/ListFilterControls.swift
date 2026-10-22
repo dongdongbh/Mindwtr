@@ -239,6 +239,7 @@ struct ListFilterControls: View {
             .overlay(alignment: .bottom) { palette.border.frame(height: 0.5) }
         }
         .buttonStyle(.plain).disabled(!pickerEnabled)
+        .accessibilityElement(children: .ignore).accessibilityLabel(label)
         .accessibilityAddTraits(selected ? .isSelected : []).accessibilityValue(excluded ? localized("filters.excluded") : "")
         .accessibilityIdentifier(prefix + "-filter-" + (token ? "token-" + label : "project-" + item.text("id")))
     }
