@@ -779,6 +779,50 @@ describe('TaskItemDisplay', () => {
         openSpy.mockRestore();
     });
 
+    it('opens a bare www. address in the collapsed description preview, as the opened description does (#1425)', () => {
+        const onToggleView = vi.fn();
+        const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+        const { getByRole, getByText, container } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{ ...baseTask, description: 'www.google.com before the call' }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView,
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(getByRole('link', { name: 'www.google.com' }));
+        expect(openSpy).toHaveBeenCalledWith('http://www.google.com', '_blank', 'noopener,noreferrer');
+        expect(onToggleView).not.toHaveBeenCalled();
+
+        // Plain preview text stays inert, as before; the title still toggles.
+        fireEvent.click(getByText(/before the call/));
+        expect(onToggleView).not.toHaveBeenCalled();
+        fireEvent.click(container.querySelector('[data-task-view-toggle]')!);
+        expect(onToggleView).toHaveBeenCalledTimes(1);
+
+        openSpy.mockRestore();
+    });
+
     it('shows the completion date and time for completed tasks when compact details are off', () => {
         const completedTask: Task = {
             ...baseTask,

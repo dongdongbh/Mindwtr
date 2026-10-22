@@ -48,6 +48,25 @@ describe('parseInlineMarkdown', () => {
         ]);
     });
 
+    it('autolinks a bare www. address as GFM does, so the collapsed preview matches the opened description (#1425)', () => {
+        expect(parseInlineMarkdown('See www.google.com.')).toEqual([
+            { type: 'text', text: 'See ' },
+            { type: 'link', text: 'www.google.com', href: 'http://www.google.com' },
+            { type: 'text', text: '.' },
+        ]);
+        expect(parseInlineMarkdown('www.example.com/a?b=1')).toEqual([
+            { type: 'link', text: 'www.example.com/a?b=1', href: 'http://www.example.com/a?b=1' },
+        ]);
+    });
+
+    it('leaves www. inside a word or a bare "www." as text', () => {
+        for (const text of ['foo.www.example.com', 'type www. then the site']) {
+            const tokens = parseInlineMarkdown(text);
+            expect(tokens.every((token) => token.type === 'text')).toBe(true);
+            expect(tokens.map((token) => token.text).join('')).toBe(text);
+        }
+    });
+
     it('keeps explicit markdown link labels and hrefs', () => {
         expect(parseInlineMarkdown('See [docs](https://example.com/docs).')).toEqual([
             { type: 'text', text: 'See ' },

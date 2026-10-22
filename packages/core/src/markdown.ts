@@ -11,7 +11,7 @@ import { isSafeMarkdownExternalHref } from './markdown-links';
 const CODE_BLOCK_RE = /```[\s\S]*?```/g;
 const INLINE_CODE_RE = /`([^`]+)`/g;
 const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
-const INLINE_TOKEN_RE = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|((?:https?:\/\/|mailto:|tel:|mid:)[^\s<>\]]+))/gi;
+const INLINE_TOKEN_RE = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|((?:https?:\/\/|mailto:|tel:|mid:)[^\s<>\]]+|www\.[a-z0-9][^\s<>\]]*))/gi;
 const INTERNAL_LINK_RE = /\[\[(task|project):([^\]|]+)\|([^\]]+)\]\]/g;
 const INTERNAL_LINK_TOKEN_RE = /^\[\[(task|project):([^\]|]+)\|([^\]]+)\]\]$/;
 const MARKDOWN_LIST_ITEM_RE = /^(\s*)(?:(?:[-+*])\s+(?:\[(?: |x|X)\]\s*)?|\d+[.)]\s+)(?:\S|$)/;
@@ -410,7 +410,11 @@ export function parseInlineMarkdown(text: string): InlineToken[] {
             }
         } else if (rawHref) {
             const { href, trailing } = splitRawLinkToken(rawHref);
-            const safeHref = sanitizeLinkHref(href);
+            // A bare www. address links as GFM does (as the opened description's renderer does),
+            // only at the start of a word (#1425).
+            const isBareWww = /^www\./i.test(href);
+            const midWord = isBareWww && match.index > 0 && /[\w.\/@-]/.test(source[match.index - 1]);
+            const safeHref = midWord ? null : sanitizeLinkHref(isBareWww ? `http://${href}` : href);
             if (safeHref) {
                 tokens.push({ type: 'link', text: href, href: safeHref });
                 if (trailing) tokens.push({ type: 'text', text: trailing });
