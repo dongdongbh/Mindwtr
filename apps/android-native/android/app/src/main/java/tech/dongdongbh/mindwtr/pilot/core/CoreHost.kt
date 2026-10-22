@@ -760,6 +760,19 @@ class CoreHost(
      */
     fun remindersCycle(mode: String, key: String = ""): JSONObject = callAsync("remindersCycle", mode, key)
 
+    /**
+     * The native Pomodoro's alarm plan (core's pomodoroAlarmPlan, PomodoroAlarms.kt): [raw] is the stored record (null for none),
+     * [pending] and [delivered] core's inventories as JSON arrays.
+     */
+    fun pomodoroAlarmPlan(granted: Boolean, raw: String?, scope: String, pending: String, delivered: String): JSONObject =
+        callAsync("pomodoroAlarmPlan", granted, raw, scope, pending, delivered)
+
+    /** A plan's effects are applied and its record stored: core logs the tester's line (`v1.3.8/native-pomodoro-alarm`). */
+    fun pomodoroAlarmSaved(outcome: String): JSONObject = callAsync("pomodoroAlarmSaved", outcome)
+
+    /** RN's Pomodoro alert owed at the upgrade (core's pomodoroLegacyAlert): [raw] RN's record, [upgradedAtMs] when this app replaced RN. */
+    fun pomodoroLegacyAlert(raw: String?, upgradedAtMs: Long): JSONObject = callAsync("pomodoroLegacyAlert", raw, upgradedAtMs)
+
     /** A reminder's Done (core's completeReminderTask), journaled under [requestId]: a retry or a replay writes nothing twice. */
     fun reminderDone(requestId: String, taskId: String): JSONObject = callAsync("reminderDone", requestId, taskId)
 

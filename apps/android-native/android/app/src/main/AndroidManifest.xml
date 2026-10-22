@@ -132,6 +132,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- The native Pomodoro's completion alarms (PomodoroAlarms.kt): only this app's AlarmManager sends them. -->
+        <receiver
+            android:name=".PomodoroAlarmReceiver"
+            android:exported="false" />
+
         <!-- Reminder alarms (Reminders.kt), as RN's alarm library declares its receivers (plugins/patch-alarm-notification-gradle.js).
              An alarm and a notification's Done, Snooze and Dismiss come only from this app's own PendingIntents, so neither
              receiver is exported (RN's AlarmReceiver is not either). -->

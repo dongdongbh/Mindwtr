@@ -4815,9 +4815,12 @@ globalThis.MindwtrHost = {
             const nowMs = Date.now();
             const intent = buildNativePomodoroAlarmIntent({ raw: session, settings, nowMs,
                 t: (key) => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key });
-            return planNativePomodoroAlarmEffects({ intent, granted, raw, scope, nowMs,
+            const plan = planNativePomodoroAlarmEffects({ intent, granted, raw, scope, nowMs,
                 pending: pomodoroJSON(pendingJSON, 4 * 1024 * 1024), delivered: pomodoroJSON(deliveredJSON, 4 * 1024 * 1024),
                 android: { deliveryLedger: true, lateLimitMs: NATIVE_POMODORO_LATE_LIMIT_MS } });
+            // Android posts on the reminder channel, which it creates under core's name when no reminder made it first.
+            return plan.schedule ? { ...plan, schedule: { ...plan.schedule,
+                details: { ...plan.schedule.details, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME } } } : plan;
         });
     },
     /** Kotlin applied a plan's effects and stored its published record: the tester's line (diagnostics-ledger.md). */
@@ -4839,8 +4842,9 @@ globalThis.MindwtrHost = {
             pomodoroAdapter();
             if ((raw !== null && typeof raw !== 'string') || !Number.isSafeInteger(upgradedAtMs) || upgradedAtMs <= 0)
                 throw new Error('INVALID_INPUT: Invalid RN Pomodoro record');
-            return buildNativePomodoroLegacyAlert({ raw, settings: useTaskStore.getState().settings, nowMs: Date.now(), upgradedAtMs,
+            const alert = buildNativePomodoroLegacyAlert({ raw, settings: useTaskStore.getState().settings, nowMs: Date.now(), upgradedAtMs,
                 t: (key) => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key });
+            return alert.kind === 'show' ? { ...alert, details: { ...alert.details, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME } } : alert;
         });
     },
     pomodoroSessionRead(): string {

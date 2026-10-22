@@ -9104,6 +9104,8 @@ console.log('Entry points: RN\'s alias, links on the build\'s scheme, text share
     // Alarms and the buttons come only from this app's PendingIntents; the reschedule receiver takes only actions the system sends.
     assert.match(manifest, /<receiver\s+android:name="\.ReminderAlarmReceiver"\s+android:exported="false" \/>/);
     assert.match(manifest, /<receiver\s+android:name="\.ReminderActionReceiver"\s+android:exported="false" \/>/);
+    // R2b: the Pomodoro's completion alarms come only from this app's AlarmManager (PomodoroAlarms.kt).
+    assert.match(manifest, /<receiver\s+android:name="\.PomodoroAlarmReceiver"\s+android:exported="false" \/>/);
     const reschedule = manifest.match(/<receiver\s+android:name="\.ReminderRescheduleReceiver"[\s\S]*?<\/receiver>/)[0];
     assert.deepEqual([...reschedule.matchAll(/<action android:name="([^"]+)"/g)].map((m) => m[1]), ['android.intent.action.BOOT_COMPLETED',
         'android.intent.action.TIME_SET', 'android.intent.action.TIMEZONE_CHANGED', 'android.intent.action.MY_PACKAGE_REPLACED',

@@ -46,6 +46,24 @@ internal object CoreNotifications {
         return NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
+    /** The id every Pomodoro alert posts under, beside its tag (core's alarm identity), so each alert is its own notification. */
+    private const val POMODORO_SLOT_ID = 2
+
+    /**
+     * A Pomodoro completion alert (core's buildPomodoroAlarmDetails with the channel's name) under its tag [identifier], stamped with
+     * its phase's end (`data.endsAtMs`, dd's choice 2026-10-22): one shown late reads "2 h ago" in the tray, never as a phase that
+     * just ended. RN's library patch (alarm-pomodoro-when) stamps RN's the same way.
+     */
+    fun postPomodoro(context: Context, identifier: String, details: JSONObject) {
+        val builder = builder(context, POMODORO_SLOT_ID, details, details.optString("channelName")) ?: return
+        details.optJSONObject("data")?.optString("endsAtMs")?.toLongOrNull()?.let { builder.setWhen(it).setShowWhen(true) }
+        context.getSystemService(NotificationManager::class.java).notify(identifier, POMODORO_SLOT_ID, builder.build())
+    }
+
+    /** A delivered Pomodoro alert leaves the tray (core's plan cancelled it). */
+    fun cancelPomodoro(context: Context, identifier: String) =
+        context.getSystemService(NotificationManager::class.java).cancel(identifier, POMODORO_SLOT_ID)
+
     /**
      * A fired reminder alarm (core's NativeReminderAlarm with the channel's name) under the alarm's id, as RN's AlarmReceiver posts
      * it: with buttons, Complete (a task reminder only), Snooze and Dismiss, with RN's labels and icons. Done and Snooze each carry a

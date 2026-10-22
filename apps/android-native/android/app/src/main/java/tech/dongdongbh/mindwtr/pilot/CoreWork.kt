@@ -165,7 +165,12 @@ class CoreWork(context: Context, params: WorkerParameters) : Worker(context, par
                     override fun recover() = ProcessCoreHost.recover(host)
                     override fun drain() = ProcessCoreHost.recovered(app, host)
                     override fun contextAutomation(json: String) = host.contextAutomation(json)
-                    override fun reminders(mode: String, key: String) = host.remindersCycle(mode, key)
+                    override fun reminders(mode: String, key: String) = host.remindersCycle(mode, key).also {
+                        // A reboot, a clock change or an update: the Pomodoro's alerts are planned again with no phase settled first, as
+                        // RN's boot receiver re-arms its stored alarm (at most a day late, stamped with its end; design R2b §4b).
+                        if (mode == "rebuild") runCatching { PomodoroAlarms(app).plan(host) }
+                            .onFailure { Log.w(CoreHost.TAG, "Native Android Pomodoro alarms not planned after a reschedule", it) }
+                    }
                     override fun reminderDone(requestId: String, taskId: String) = host.reminderDone(requestId, taskId)
                     override fun reminderSnooze(json: String) = host.reminderSnooze(json)
                     override fun backgroundSync(trigger: String): JSONObject {
