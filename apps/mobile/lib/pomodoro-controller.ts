@@ -4,6 +4,7 @@ import {
   createPomodoroState,
   DEFAULT_POMODORO_DURATIONS,
   resetPomodoroState,
+  flushPendingSave,
   runStoreCommand,
   sanitizePomodoroSessionHistory,
   type PomodoroAutoStartOptions,
@@ -41,6 +42,8 @@ type Storage = Pick<typeof AsyncStorage, 'getItem' | 'setItem'>;
 type TaskStoreAccess = () => {
   tasks: Task[];
   updateTask: (id: string, updates: Partial<Task>) => Promise<unknown>;
+  /** Resolves once the store's saves are on disk (core's flushPendingSave); without it a write counts as stored at once. */
+  flush?: () => Promise<void>;
 };
 
 /**
@@ -96,7 +99,16 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
   const storage = options.storage ?? AsyncStorage;
   const getTaskStore = options.getTaskStore ?? (() => {
     const state = useTaskStore.getState();
-    return { tasks: state.tasks, updateTask: state.updateTask };
+    return {
+      tasks: state.tasks,
+      updateTask: state.updateTask,
+      // After its retries the store drops a failed save, and the next flush finds nothing to write: a failure still
+      // recorded means the time is not on disk.
+      flush: async () => {
+        await flushPendingSave();
+        if (useTaskStore.getState().persistenceFailure !== null) throw new Error('The task store has an unsaved change');
+      },
+    };
   });
   const now = options.now ?? Date.now;
   let state: MobilePomodoroControllerState = {
@@ -141,16 +153,29 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
       // The from check and the write run as one command, so a time a sync save brought is never overwritten.
       const outcome = await runStoreCommand(async () => {
         const task = getTaskStore().tasks.find((candidate) => candidate.id === credit.taskId);
-        if (!task || task.timeSpentMinutes !== credit.from) return 'already-applied';
+        if (!task) return 'already-applied';
+        // Already at `to`: written by this run (its save may have failed) or before a restart; only its save is awaited.
+        if (task.timeSpentMinutes === credit.to && credit.to !== credit.from) return 'written';
+        if (task.timeSpentMinutes !== credit.from) return 'already-applied';
         const result = await getTaskStore().updateTask(credit.taskId, { timeSpentMinutes: credit.to }).catch(() => ({ success: false }));
         return (result as { success?: boolean } | undefined)?.success === false ? null : 'applied';
       });
       if (!outcome) break;
+      // updateTask answers from memory and saves later: the credit leaves the session only once its time is on disk, so a
+      // stop before the save lands credits it again at the next start (the task is still at `from` there).
+      if (outcome !== 'already-applied' && !await (getTaskStore().flush?.() ?? Promise.resolve()).then(() => true, () => false)) {
+        void logWarn('Pomodoro credit kept owed: the task save did not finish', {
+          scope: 'pomodoro',
+          extra: { releaseCheck: 'v1.3.8/pomodoro-credit-durable', outcome: 'owed' },
+        });
+        break;
+      }
       settled += 1;
       if (loadedCredits.has(credit)) {
         void logInfo('Pomodoro credit replayed after a restart', {
           scope: 'pomodoro',
-          extra: { releaseCheck: 'v1.3.5/pomodoro-credit-once', outcome },
+          // A credit found at `to` after a restart had been given before it.
+          extra: { releaseCheck: 'v1.3.5/pomodoro-credit-once', outcome: outcome === 'written' ? 'already-applied' : outcome },
         });
       }
     }

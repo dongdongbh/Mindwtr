@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_POMODORO_DURATIONS, getPomodoroLocalDayKey, runStoreCommand, runSyncStoreSave, type Task } from '@mindwtr/core';
+import { DEFAULT_POMODORO_DURATIONS, getPomodoroLocalDayKey, runStoreCommand, runSyncStoreSave, useTaskStore, type Task } from '@mindwtr/core';
 import { logInfo } from './app-log';
 
 vi.mock('./app-log', () => ({ logInfo: vi.fn(async () => undefined), logWarn: vi.fn(async () => undefined) }));
@@ -441,6 +441,96 @@ describe('Pomodoro task credit', () => {
     await second.ensureHydrated();
     await settle(second);
     expect(tasks[0].timeSpentMinutes).toBe(30);
+  });
+
+  it('credits once when the app stopped while the task save was still in flight', async () => {
+    // The real store answers updateTask from memory and saves later: the credit counts only once the save is on disk.
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    const memory = makeTasks();
+    const first = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks: memory,
+        updateTask: async (_id, updates) => { Object.assign(memory[0], updates); return { success: true }; },
+        // The app stops before the save lands.
+        flush: () => new Promise<void>(() => undefined),
+      }),
+    });
+    await first.ensureHydrated();
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    expect(memory[0].timeSpentMinutes).toBe(30);
+
+    const restarted = makeTasks();
+    const second = open(device, restarted);
+    await second.ensureHydrated();
+    await settle(second);
+    expect(restarted[0].timeSpentMinutes).toBe(30);
+  });
+
+  it('keeps a credit owed when the task save failed', async () => {
+    const tasks = makeTasks();
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    const first = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks,
+        updateTask: async (_id, updates) => { Object.assign(tasks[0], updates); return { success: true }; },
+        flush: async () => { throw new Error('disk full'); },
+      }),
+    });
+    await first.ensureHydrated();
+    await settle(first);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
+  });
+
+  it('keeps a credit owed when the real store gave up on its save, though its flush resolves', async () => {
+    // The default store port: core's flushPendingSave finds nothing queued (the failed save was dropped), but the failure
+    // is still recorded, so the time is not on disk.
+    const tasks = makeTasks();
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    const before = useTaskStore.getState();
+    useTaskStore.setState({
+      tasks,
+      _allTasks: tasks,
+      // The task changes in memory; its save then fails for good, so the store records the failure and drops the save.
+      updateTask: async (_id: string, updates: Partial<Task>) => {
+        Object.assign(tasks[0], updates);
+        useTaskStore.setState({ persistenceFailure: { message: 'disk full', at: NOW } } as never);
+        return { success: true };
+      },
+    } as never);
+    try {
+      const controller = createMobilePomodoroController({
+        storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      });
+      await controller.ensureHydrated();
+      await settle(controller);
+      expect(tasks[0].timeSpentMinutes).toBe(30);
+      expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
+    } finally {
+      useTaskStore.setState({ tasks: before.tasks, _allTasks: before._allTasks, updateTask: before.updateTask, persistenceFailure: null } as never);
+    }
+  });
+
+  it('keeps a credit owed through later session writes while the task save keeps failing', async () => {
+    const tasks = makeTasks();
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    let flushes = 0;
+    const controller = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks,
+        updateTask: async (_id, updates) => { Object.assign(tasks[0], updates); return { success: true }; },
+        flush: async () => { flushes += 1; throw new Error('disk full'); },
+      }),
+    });
+    await controller.ensureHydrated();
+    await settle(controller);
+    // A later change writes the session again: the time is already in memory, so only its save is retried.
+    controller.setSelectedTaskId(undefined);
+    await settle(controller);
+    expect(flushes).toBe(2);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
   });
 
   it('checks a credit against the time a sync save published while the credit waited', async () => {
