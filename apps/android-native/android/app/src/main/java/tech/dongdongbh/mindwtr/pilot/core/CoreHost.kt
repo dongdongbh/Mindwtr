@@ -770,6 +770,21 @@ class CoreHost(
     /** A plan's effects are applied and its record stored: core logs the tester's line (`v1.3.8/native-pomodoro-alarm`). */
     fun pomodoroAlarmSaved(outcome: String): JSONObject = callAsync("pomodoroAlarmSaved", outcome)
 
+    /** The native Pomodoro card (core's buildNativePomodoroPanel, the session iOS built); [presentation] is `{ collapsed, lastEvent }`. */
+    fun pomodoroPanelRead(presentation: String): JSONObject = callAsync("pomodoroPanelRead", presentation)
+
+    /** A window of the Pomodoro picker's tasks (core's getPomodoroTaskWindow, RN's card list). */
+    fun pomodoroTasks(json: String): JSONObject = callAsync("pomodoroTasks", json)
+
+    /** Core's plan for a Pomodoro action ([request]: core's NativePomodoroRequest): `{ kind: "noop" }` or `{ kind: "prepared", planJSON }`. */
+    fun pomodoroTransitionPrepare(request: String): JSONObject = callAsync("pomodoroTransitionPrepare", request)
+
+    /**
+     * The prepared plan, saved with its receipt in one transaction (the task credit too), journaled: a replay sends the same plan,
+     * which its receipt answers once it landed, and which a moved session refuses (STALE_REVISION, nothing owed).
+     */
+    fun pomodoroTransitionCommit(planJSON: String): JSONObject = callAsync("pomodoroTransitionCommit", planJSON, false)
+
     /** RN's Pomodoro alert owed at the upgrade (core's pomodoroLegacyAlert): [raw] RN's record, [upgradedAtMs] when this app replaced RN. */
     fun pomodoroLegacyAlert(raw: String?, upgradedAtMs: Long): JSONObject = callAsync("pomodoroLegacyAlert", raw, upgradedAtMs)
 

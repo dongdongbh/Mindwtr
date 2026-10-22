@@ -264,6 +264,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     val attachments = AttachmentsModel(this)
     /** The open project's Details (ProjectDetails.kt): its pickers and core's prepared commits. */
     val projectDetails = ProjectDetailsModel(this)
+    /** The Focus screen's Pomodoro card (Pomodoro.kt, pass R2b): core's durable session, its transitions and its alarms. */
+    val pomodoro = PomodoroModel(this)
     /** A link, share or assistant note waiting to open (EntryPoints.kt). */
     // A file share's files are staged in the cache, where core's file port reads them (HostFiles), as RN's share module copies them.
     val entries = EntryRouter(this, File(app.noBackupFilesDir, "entries"), SharedFileStager(File(app.cacheDir, "shared-entries"), ContentSharedFileSource(app)))
@@ -319,6 +321,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         // RN stores the last screen again on leaving, so its time is the moment the app was left.
         if (state == "background") keepLastRoute(force = true)
         ProcessCoreHost.appState(state)
+        // A return settles a phase that ended while away, then plans the alerts (never the other way: design R2b §3b K5).
+        if (state == "active") pomodoro.refresh(planAlarms = true)
         // RN's Calendar reloads its external calendars on a return to the app (shouldRefreshExternalCalendarOnAppStateChange).
         if (state == "active" && resumes > 1 && menu.list == "calendar") menu.calendarFeed("calendar")
     }
@@ -1034,7 +1038,12 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     private fun showFocus(view: FocusView?) {
         focus = view
         view?.let(menu.focusControls::adopt)
+        // RN's card reads with every Focus read.
+        pomodoro.refresh()
     }
+
+    /** The Focus read's revision, for the Pomodoro picker's task windows (core pages the Focus lists at one revision). */
+    internal fun focusRevision(): String = focus?.revision.orEmpty()
 
     private fun FocusView?.depth(): Map<String, Int> = this?.sections?.associate { it.key to it.rows.size }.orEmpty()
 
@@ -1942,7 +1951,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     private val shownAt = HashMap<Part, Long>()
 
     /** One list a read can show: Menu is the open Menu list (the Inbox tab's too), More the More sheet, MenuDialog a dialog's choices, ProjectDetails the open project's Details values. */
-    internal enum class Part { Focus, Projects, Project, ProjectDetails, Areas, Editor, TaskView, Search, Menu, More, MenuDialog }
+    internal enum class Part { Focus, Projects, Project, ProjectDetails, Areas, Editor, TaskView, Search, Menu, More, MenuDialog, Pomodoro }
 
     /** A new read's number, for a read the Menu tab starts through perform (as the lists' More takes one). */
     internal fun issue(): Long = ++issued

@@ -843,7 +843,7 @@ assert.doesNotMatch(code(model.slice(model.indexOf('fun add()'), model.indexOf('
 // Freshness is per list (Inbox, Focus, Projects, the open project, the area filter): a faster single-list read never
 // makes a full read after an area change drop its other lists, and an older read never overwrites a newer one.
 assert.match(model, /internal fun fresh\(mine: Long, part: Part\) = \(mine > commandAt && mine > \(shownAt\[part\] \?: 0L\)\)\.also \{ if \(it\) shownAt\[part\] = mine \}/);
-assert.match(model, /internal enum class Part \{ Focus, Projects, Project, ProjectDetails, Areas, Editor, TaskView, Search, Menu, More, MenuDialog \}/);
+assert.match(model, /internal enum class Part \{ Focus, Projects, Project, ProjectDetails, Areas, Editor, TaskView, Search, Menu, More, MenuDialog, Pomodoro \}/);
 {
     const show = code(model.slice(model.indexOf('private fun showLists('), model.indexOf('internal fun readSucceeded(')));
     for (const part of ['Focus', 'Projects', 'Project', 'Areas']) assert.match(show, new RegExp(`if \\(fresh\\(mine, Part\\.${part}\\)\\)`), `a full read applies ${part} on its own`);
@@ -1277,7 +1277,12 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(host, /\n    backupDocumentCommit\(referenceJSON: string, planJSON: string, snapshotName: string, budgetMs\?: number\): string \{/);
     // D1c: the checked plan goes as a read handle whose close checks the same hash again.
     assert.match(coreHost, /val \(plan, sha256\) = checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\)(?:\s*\/\/[^\n]*)?\s+return arrayOf\(args\[0\], data\.openRead\(plan, expectedSha256 = sha256\), args\[1\], deadline\(method, args\.toList\(\)\)\)/);
-    assert.deepEqual(methods.filter((m) => m.body.includes('taskResult(') && !iosPreparedCommits.includes(m.name)).map((m) => m.name).sort(), writes.filter((name) => name !== backupCommit), 'the journal\'s write list is host-entry\'s task commands');
+    // R2b: the native Pomodoro's commit, receipted itself (native-request-receipts.ts savePomodoroTransitionWithReceipt) as the
+    // backup commit is: the journal holds core's prepared plan and replayOnly=false, so a replay re-sends the exact plan.
+    const pomodoroCommit = 'pomodoroTransitionCommit';
+    assert.deepEqual(shapes[pomodoroCommit], ['text', 'bool'], 'the Pomodoro commit journals its plan');
+    assert.match(host, /\n    pomodoroTransitionCommit\(planJSON: string, replayOnly: boolean\): string \{/);
+    assert.deepEqual(methods.filter((m) => m.body.includes('taskResult(') && !iosPreparedCommits.includes(m.name)).map((m) => m.name).sort(), writes.filter((name) => name !== backupCommit && name !== pomodoroCommit), 'the journal\'s write list is host-entry\'s task commands');
     const table = (name) => hostEntry.slice(hostEntry.indexOf(`const ${name}`), hostEntry.indexOf('\n};', hostEntry.indexOf(`const ${name}`)));
     const called = (text) => [...text.matchAll(/contract\.(\w+)\(/g)].map((m) => m[1]);
     assert.deepEqual(called(hostEntry).filter((name) => unwiredWrites.includes(name)), [], 'no host method calls an unwired core write');

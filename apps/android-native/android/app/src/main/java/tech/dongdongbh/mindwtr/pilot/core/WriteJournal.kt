@@ -45,6 +45,8 @@ class WriteJournal(
             // Settings › Data's restore, merge and import: the operation's reference and its snapshot name. CoreHost sends the checked plan
             // (BackupOperations) between them, so the journal never holds library data.
             "backupDocumentCommit" to listOf("{id,sha256}", "id"),
+            // The native Pomodoro (R2b): core's prepared plan and replayOnly=false; its receipt answers a replay of one that landed.
+            "pomodoroTransitionCommit" to listOf("text", "bool"),
         )
         /** host-entry.ts's MENU_COMMANDS and the keys each one's JSON input holds (check-boot-gates.mjs keeps the names equal). */
         val MENU = mapOf(
