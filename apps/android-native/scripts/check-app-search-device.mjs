@@ -105,7 +105,7 @@ const general = async () => {
     nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await device.settle(nodes);
     nodes = await tapExpecting(withDescription(nodes, en['settings.title']) ?? fail('no Settings tile'), (current) => Boolean(tagged(current, 'settings-main')), 'Settings');
-    return tapExpecting(withDescription(nodes, en['settings.general']) ?? fail('no General row'), (current) => Boolean(withDescription(current, LABEL))
+    return tapExpecting(nodes.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.general']}. `)) ?? fail('no General row'), (current) => Boolean(withDescription(current, LABEL))
         || current.some((node) => node.text === LABEL), 'Settings › General');
 };
 const setSwitch = async (on) => {
