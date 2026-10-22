@@ -68,7 +68,7 @@ export const createNativeAppSearch = (info: unknown, call: AppSearchCall | undef
             try {
                 // A tester's proof the start ran: indexing, off, or no index on this Android (below 12).
                 logInfo('Native Android system search started', { scope: 'app-search', context: {
-                    releaseCheck: 'v1.3.7/native-app-search', outcome: !supported ? 'unsupported' : device.enabled ? 'indexing' : 'off' } });
+                    releaseCheck: 'v1.3.8/native-app-search', outcome: !supported ? 'unsupported' : device.enabled ? 'indexing' : 'off' } });
             } catch { /* logging never changes the start */ }
         },
         /**
