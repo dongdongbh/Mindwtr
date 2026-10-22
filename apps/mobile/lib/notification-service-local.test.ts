@@ -1401,6 +1401,8 @@ describe('notification-service-local', () => {
         data: {
           kind: 'pomodoro',
           phase: 'focus-complete',
+          // The library stamps the alert with the phase's end (setWhen), so a late one never reads as new.
+          endsAtMs: String(fireAt.getTime()),
         },
       })
     );
@@ -1684,6 +1686,17 @@ describe('notification-service-local', () => {
     );
 
     expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('stamps an already-due completion alert with the phase end, not the time it is shown', async () => {
+    installPomodoroStorage();
+    const fireAt = new Date(Date.now() - 90_000);
+
+    await scheduleLocalPomodoroCompletionNotification('Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' });
+
+    expect(mockAlarmSendNotification).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ kind: 'pomodoro', endsAtMs: String(fireAt.getTime()) }),
+    }));
   });
 
   it('does not send the same already-due completion alert twice', async () => {

@@ -471,6 +471,26 @@ const applyAlarmLockScreenPrivacyPatchToSource = (original) => {
   );
 };
 
+const POMODORO_WHEN_ANCHOR = '                    .setDeleteIntent(createOnDismissedIntent(mContext, alarm.getId()));\n';
+const applyAlarmPomodoroWhenPatchToSource = (original) => {
+  // dd's choice (2026-10-22): a Pomodoro alert carries its phase's end time
+  // (the JS side puts it in the alarm data as endsAtMs), so one shown late,
+  // after a reboot re-armed it or by the immediate path, reads as "2 h ago"
+  // in the tray instead of looking like a phase that just ended.
+  if (original.includes('String pomodoroEndsAtMs = bundle.getString("endsAtMs");')) return original;
+  if (!original.includes(POMODORO_WHEN_ANCHOR)) return original;
+  return original.replace(POMODORO_WHEN_ANCHOR, `${POMODORO_WHEN_ANCHOR}
+            String pomodoroEndsAtMs = bundle.getString("endsAtMs");
+            if ("pomodoro".equals(bundle.getString("kind")) && pomodoroEndsAtMs != null) {
+                try {
+                    mBuilder.setWhen(Long.parseLong(pomodoroEndsAtMs)).setShowWhen(true);
+                } catch (NumberFormatException ignored) {
+                    // A malformed stamp keeps the delivery time.
+                }
+            }
+`);
+};
+
 const applyAlarmAudioInterfacePatchToSource = (original) => {
   return original.replace(
     '        uri = Settings.System.DEFAULT_ALARM_ALERT_URI;',
@@ -1841,6 +1861,15 @@ const PATCHES = [
     required: true,
     firstMatchOnly: false,
     appliedMarker: '.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)',
+  },
+  {
+    id: 'alarm-pomodoro-when',
+    platform: 'android',
+    getCandidates: androidJavaCandidates('AlarmUtil.java'),
+    transform: applyAlarmPomodoroWhenPatchToSource,
+    required: true,
+    firstMatchOnly: false,
+    appliedMarker: 'String pomodoroEndsAtMs = bundle.getString("endsAtMs");',
   },
   {
     id: 'alarm-complete-action-util',

@@ -1208,6 +1208,10 @@ export async function scheduleLocalPomodoroCompletionNotification(
     return;
   }
 
+  // The phase's end rides with the alert: the Android library stamps the notification with it (setWhen), so one shown
+  // late (after a reboot re-armed it, or by the immediate path) reads as "2 h ago", never as a phase that just ended.
+  const alarmData = { ...(data ?? {}), endsAtMs: String(fireAtMs) };
+
   return enqueuePomodoroAlarmOperation('schedule', async () => {
     const api = await loadAlarmApi();
     if (!api) {
@@ -1254,7 +1258,7 @@ export async function scheduleLocalPomodoroCompletionNotification(
 
     if (isPomodoroAlarmImmediate(fireAtMs, Date.now())) {
       logNotificationInfo('Pomodoro completion already due; notifying immediately');
-      const delivered = await sendLocalMobileNotificationWithApi(api, trimmedTitle, message, data);
+      const delivered = await sendLocalMobileNotificationWithApi(api, trimmedTitle, message, alarmData);
       if (!delivered) return;
       const saved = await savePomodoroAlarmEntry({
         fireAtMs,
@@ -1274,7 +1278,7 @@ export async function scheduleLocalPomodoroCompletionNotification(
 
     try {
       const result = await api.scheduleAlarm({
-        ...buildPomodoroAlarmDetails(trimmedTitle, message, data),
+        ...buildPomodoroAlarmDetails(trimmedTitle, message, alarmData),
         fire_date: toAlarmFireDate(api, fireAt),
       });
       const id = Number(result?.id);
