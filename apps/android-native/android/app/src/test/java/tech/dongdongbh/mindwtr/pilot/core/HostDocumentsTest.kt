@@ -5,8 +5,8 @@ import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 import tech.dongdongbh.mindwtr.syncfiletransitioncas.SafDocumentProvider
 import tech.dongdongbh.mindwtr.syncfiletransitioncas.SafDocumentQuery
@@ -68,19 +68,17 @@ class HostDocumentsTest {
         assertEquals("data.json.bak", renamed.getString("name"))
     }
 
+    // Expo's SAF deleteAsync (FileSystemLegacyModule.kt): DocumentFile.delete() and its result ignored. A provider that refuses
+    // leaves the document, and the caller carries on, as RN's does (S5 review P3-8).
     @Test
-    fun aDeleteIsIdempotentOnlyForADocumentTheProviderSaysIsGone() {
+    fun aDeleteNeverFailsAsExposDoesNotAndARefusedOneLeavesTheDocument() {
         val folder = Folder()
         val host = HostDocuments(folder, folder)
         call(host, "op" to "delete", "uri" to "content://p/tree/t/document/missing")
         val created = call(host, "op" to "createFile", "uri" to this.folder, "name" to "x", "mimeType" to "text/plain").value as String
         folder.deleteFails = true
-        try {
-            call(host, "op" to "delete", "uri" to created)
-            fail("a document still there after a refused delete is an error")
-        } catch (error: java.io.IOException) {
-            assertEquals("provider refused", error.message)
-        }
+        assertEquals(null, call(host, "op" to "delete", "uri" to created).value)
+        assertNotNull(call(host, "op" to "stat", "uri" to created).value)
     }
 
     @Test

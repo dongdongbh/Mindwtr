@@ -251,9 +251,12 @@ class SyncSettingsModel(private val menu: MenuModel) {
             .onFailure { Log.w(CoreHost.TAG, "Sync folder grant refused ${failureForLog(it)}") }.isSuccess
         PendingSyncFolderPick.put(if (kept) JSONObject().put("treeUri", tree.toString()) else JSONObject().put("grant", "refused"))
         val runtime = shell.coreHost() ?: return
-        // After a process death the picker answers into the recreated screen: the command waits for that visit's open.
-        visits.execute { openNow(runtime) }
-        run("pickSyncFolder", JSONObject().put("requestId", uuid()), after = visits)
+        // After a process death the picker answers into the recreated screen: the command waits for that visit's open. A failed
+        // open must not end the visits thread (an uncaught throw there ends the app); the command then answers core's refusal.
+        visits.execute { runCatching { openNow(runtime) }.onFailure { Log.w(CoreHost.TAG, "Sync screen open failed ${failureForLog(it)}") } }
+        // Each pick its own key: a second pick while the first one's activation runs still reaches core, as RN sends it.
+        val requestId = uuid()
+        run("pickSyncFolder", JSONObject().put("requestId", requestId), key = "pickSyncFolder:$requestId", after = visits)
     }
 
     fun dropbox(connected: Boolean) = run(if (connected) "disconnectDropbox" else "connectDropbox", JSONObject().put("requestId", uuid()))

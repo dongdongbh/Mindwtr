@@ -53,13 +53,9 @@ class HostDocuments internal constructor(
             "write" -> HostFiles.Reply(null.also { core.writeBytes(uri, bytes ?: ByteArray(0)) })
             "createFile" -> HostFiles.Reply(ops.create(uri, request.getString("mimeType"), request.getString("name")))
             "makeDirectory" -> HostFiles.Reply(ops.create(uri, DocumentsContract.Document.MIME_TYPE_DIR, request.getString("name")))
-            // Expo's idempotent delete: a document the provider's query says is gone is no error.
-            "delete" -> HostFiles.Reply(null.also {
-                val deleted = runCatching { ops.delete(uri) }
-                if (deleted.getOrNull() != true && core.stat(uri) != null) {
-                    throw deleted.exceptionOrNull() ?: java.io.IOException("The provider did not delete the document")
-                }
-            })
+            // Expo's SAF deleteAsync: DocumentFile.delete() with its result ignored, so a provider that refuses leaves the
+            // document and the caller carries on, as RN's does (S5 review P3-8).
+            "delete" -> HostFiles.Reply(null.also { runCatching { ops.delete(uri) } })
             "rename" -> ops.rename(uri, request.getString("name")).let { (renamed, name) ->
                 HostFiles.Reply(JSONObject().put("uri", renamed).put("name", name))
             }
