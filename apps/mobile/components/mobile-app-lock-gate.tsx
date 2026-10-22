@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, type AppStateStatus, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, type AppStateStatus, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LockKeyhole } from 'lucide-react-native';
 import { resolveMobileAppLockRelockDelayMinutes, translateWithFallback, useTaskStore } from '@mindwtr/core';
@@ -139,7 +139,7 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
     return () => clearTimeout(timer);
   }, [appState, authenticate, authenticating, enabled, locked, lockNonce, promptedNonce]);
 
-  if (!enabled || !locked) {
+  if (!enabled) {
     return <>{children}</>;
   }
 
@@ -151,7 +151,7 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
         : 'Authentication failed. Try again.')
     : resolveText('appLock.description', 'Use your device lock to open Mindwtr. This protects the app view, not the on-device database.');
 
-  return (
+  const lockScreen = (
     <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top', 'right', 'bottom', 'left']}>
       <View style={styles.content}>
         <View style={[styles.iconWrap, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
@@ -180,6 +180,29 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
       </View>
     </SafeAreaView>
   );
+
+  // Android keeps the app mounted under the lock, so a return keeps the open task and screen and
+  // shows at once (#1423). The lock is a Modal, a window added after the app's own dialogs, so it
+  // also covers an open task editor. iOS cannot present it over an already presented modal, so
+  // iOS still renders only the lock screen while locked.
+  if (Platform.OS === 'android') {
+    return (
+      <>
+        {children}
+        <Modal
+          visible={locked}
+          animationType="none"
+          statusBarTranslucent
+          navigationBarTranslucent
+          onRequestClose={() => {}}
+        >
+          {lockScreen}
+        </Modal>
+      </>
+    );
+  }
+
+  return locked ? lockScreen : <>{children}</>;
 }
 
 const styles = StyleSheet.create({

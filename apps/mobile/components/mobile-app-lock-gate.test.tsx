@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, Modal, Platform, type AppStateStatus } from 'react-native';
 import { useTaskStore, type MobileAppLockRelockDelayMinutes } from '@mindwtr/core';
 
 const authenticateWithDeviceLockMock = vi.hoisted(() => vi.fn());
@@ -145,6 +145,59 @@ describe('MobileAppLockGate', () => {
       await leaveAndReturn(1_000);
       expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(2);
       expect(shows(tree)).toBe(false);
+    });
+
+    describe('on Android', () => {
+      const originalOs = Platform.OS;
+      const setOs = (os: typeof Platform.OS) => Object.defineProperty(Platform, 'OS', { configurable: true, value: os });
+      beforeEach(() => setOs('android'));
+      afterEach(() => setOs(originalOs));
+
+      const lockModal = (tree: ReactTestRenderer) => tree.root.findByType(Modal);
+      let contentMounts = 0;
+      const MountCounter = () => {
+        React.useEffect(() => { contentMounts += 1; }, []);
+        return React.createElement('Content');
+      };
+      const coldStartCounting = async () => {
+        contentMounts = 0;
+        let tree!: ReactTestRenderer;
+        await act(async () => {
+          tree = create(<MobileAppLockGate enabled><MountCounter /></MobileAppLockGate>);
+        });
+        mounted = tree;
+        expect(lockModal(tree).props.visible).toBe(true);
+        await wait(300);
+        return tree;
+      };
+
+      it('keeps the app, and an open task, mounted under the lock while it is away', async () => {
+        setDelay(5);
+        const tree = await coldStartCounting();
+        await changeTo('inactive');
+        await changeTo('background');
+        expect(lockModal(tree).props.visible).toBe(true);
+        expect(shows(tree)).toBe(true);
+        expect(contentMounts).toBe(1);
+      });
+
+      it('shows the same screen at once when the app returns within the delay', async () => {
+        setDelay(5);
+        const tree = await coldStartCounting();
+        await leaveAndReturn(60_000);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(1);
+        expect(lockModal(tree).props.visible).toBe(false);
+        expect(contentMounts).toBe(1);
+      });
+
+      it('keeps the screen after an unlock past the delay', async () => {
+        setDelay(1);
+        const tree = await coldStartCounting();
+        await leaveAndReturn(5 * 60_000);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(2);
+        expect(lockModal(tree).props.visible).toBe(false);
+        expect(contentMounts).toBe(1);
+      });
     });
   });
 });
