@@ -25,6 +25,8 @@
  * and actual self-hosted cycles refuse unfinished encryption transitions. This factory does not alter stored provider choices.
  */
 import { DOMParser } from '@xmldom/xmldom';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
 import {
     MOBILE_BACKGROUND_SYNC_DEADLINE_MS,
@@ -64,6 +66,7 @@ import {
     resolveBackend,
     resolveSyncBadgeState,
     sanitizeLogMessage,
+    setSha256HexProvider,
     shouldScheduleMobileBackgroundSync,
     useTaskStore,
     FileSyncRetainedGenerationError,
@@ -223,6 +226,9 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     if (platform === 'ios' && !channels) {
         throw new Error('Foreground sync requires native attachment files on this iOS build');
     }
+    // The engine has no WebCrypto, and a File Sync read's strong version is a SHA-256 (design §7): without the host's file
+    // channels (the gates' stand-in), a JS hash; with them, createNativeAttachments installs the host's own below.
+    if (!channels) setSha256HexProvider((bytes) => bytesToHex(sha256(bytes)));
     const { keyValue } = bindings;
     const storage = {
         getItem: (key: string) => keyValue.get(key),
@@ -340,14 +346,18 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     // The diagnostics line a File Sync cycle ends with (performSync): the first refusal one of the cycle's File Sync ports saw,
     // the folder's provider and the retained copies the guard counted. Null while the cycle touched no File Sync port.
+    // A cycle's record starts where it takes the folder lease, so a call core answers with a requeue while that cycle runs
+    // (mobile-sync-service.ts performMobileSync) neither wipes the record nor logs it.
     let fileCycle: { outcome: string | null; provider: string; retained: number } | null = null;
     const takeFileCycle = () => {
         const ended = fileCycle;
         fileCycle = null;
         return ended;
     };
-    const noteFileSync = async <T>(uri: string, run: () => Promise<T>): Promise<T> => {
-        fileCycle ??= { outcome: null, provider: /^content:\/\/([^/]+)/.exec(uri)?.[1] ?? 'none', retained: 0 };
+    const noteFileSync = async <T>(uri: string, run: () => Promise<T>, starts = false): Promise<T> => {
+        const provider = /^content:\/\/([^/]+)/.exec(uri)?.[1] ?? 'none';
+        if (starts) fileCycle = { outcome: null, provider, retained: 0 };
+        else fileCycle ??= { outcome: null, provider, retained: 0 };
         try {
             return await run();
         } catch (error) {
@@ -481,7 +491,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             resolveUri: (uri, options) => fileSync.resolveSyncFileUri(uri, options),
             isBookmarksAvailable: () => false,
             resolveBookmark: async () => null,
-            acquireLease: (path) => noteFileSync(path, () => leases.acquire(path)),
+            acquireLease: (path) => noteFileSync(path, () => leases.acquire(path), true),
             revalidateLease: (lease) => noteFileSync('', () => leases.revalidate(lease)),
             releaseLease: (lease) => leases.release(lease),
         } : {
@@ -592,8 +602,10 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
         if (fatalCleanupError) throw fatalCleanupError;
         if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
-        takeFileCycle();
+        // A record from before this call (a running cycle's, or an unlogged follow-up's) is not this call's to log.
+        const earlier = fileCycle;
         let succeeded = false;
+        let requeued = false;
         try {
             const before = platform === 'ios' && options.manual && !options.activationProbe
                 ? useTaskStore.getState().settings : null;
@@ -607,12 +619,13 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 }
             }
             succeeded = answer.success;
+            requeued = answer.skipped === 'requeued';
             return answer;
         } catch (error) {
             if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
             throw error;
         } finally {
-            const ended = takeFileCycle();
+            const ended = !requeued && fileCycle !== earlier ? takeFileCycle() : null;
             if (ended) {
                 const encrypted = (await encryptionState.getSyncEncryptionStatus().catch(() => null))?.state === 'enabled';
                 await logLine('info', 'Native Android File Sync cycle', { scope: 'sync', extra: {
