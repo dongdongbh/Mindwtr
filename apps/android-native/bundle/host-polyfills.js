@@ -864,7 +864,7 @@
         var releaseLate = function (answer) {
             if (answer.error === undefined && typeof answer.value === 'string' && answer.value) {
                 lockCall({ op: 'release', token: answer.value }, function (released) {
-                    // host-sync.ts logs it (v1.3.7/native-file-sync-late-release).
+                    // host-sync.ts logs it (v1.3.8/native-file-sync-late-release).
                     if (typeof global.__mindwtrLockReleasedLate === 'function') {
                         try { global.__mindwtrLockReleasedLate(released.error === undefined); } catch (_error) { /* a log only */ }
                     }

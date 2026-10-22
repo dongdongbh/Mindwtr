@@ -226,7 +226,7 @@ describe('native Android File Sync', () => {
         expect(folderLock.calls[0]).toBe('acquire');
         expect(folderLock.calls.at(-1)).toBe('release');
         expect(cycleLine()).toEqual([{
-            releaseCheck: 'v1.3.7/native-file-sync', outcome: 'synced', provider: AUTHORITY, encrypted: 'no', retained: '0',
+            releaseCheck: 'v1.3.8/native-file-sync', outcome: 'synced', provider: AUTHORITY, encrypted: 'no', retained: '0',
         }]);
         expect(JSON.stringify(cycleLine())).not.toContain('mine');
     });

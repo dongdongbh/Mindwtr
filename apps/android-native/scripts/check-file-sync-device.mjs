@@ -205,7 +205,7 @@ const toastsOf = (operation, since) => linesAfter(logs(), since).flatMap((line) 
     const found = new RegExp(`Native Android sync screen command=${operation} toasts=(.+)$`).exec(line);
     return found ? [found[1].trim()] : [];
 });
-/** The File Sync cycle lines (host-sync.ts performSync, v1.3.7/native-file-sync) after [since]: each line's outcome. */
+/** The File Sync cycle lines (host-sync.ts performSync, v1.3.8/native-file-sync) after [since]: each line's outcome. */
 const cycles = (since) => linesAfter(logs(), since).filter((line) => line.includes('Native Android File Sync cycle'))
     .map((line) => ({ outcome: /"outcome":"([\w-]+)"/.exec(line)?.[1], provider: /"provider":"([^"]+)"/.exec(line)?.[1], line }));
 const syncNow = async (description, outcome = 'synced') => {

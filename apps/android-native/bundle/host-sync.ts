@@ -270,7 +270,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     // A lease granted to an acquire that a host cancel abandoned, released by the lock channel (host-polyfills.js).
     (globalThis as { __mindwtrLockReleasedLate?: (released: boolean) => void }).__mindwtrLockReleasedLate = (released) => {
         void logLine(released ? 'info' : 'warn', 'Native Android File Sync lease released after a cancelled acquire', {
-            scope: 'sync', extra: { releaseCheck: 'v1.3.7/native-file-sync-late-release', outcome: released ? 'released' : 'failed' },
+            scope: 'sync', extra: { releaseCheck: 'v1.3.8/native-file-sync-late-release', outcome: released ? 'released' : 'failed' },
         });
     };
     const safPort = documentCall ? createHostSafPort(documentCall) : null;
@@ -629,7 +629,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             if (ended) {
                 const encrypted = (await encryptionState.getSyncEncryptionStatus().catch(() => null))?.state === 'enabled';
                 await logLine('info', 'Native Android File Sync cycle', { scope: 'sync', extra: {
-                    releaseCheck: 'v1.3.7/native-file-sync', outcome: ended.outcome ?? (succeeded ? 'synced' : 'failed'),
+                    releaseCheck: 'v1.3.8/native-file-sync', outcome: ended.outcome ?? (succeeded ? 'synced' : 'failed'),
                     provider: ended.provider, encrypted: encrypted ? 'yes' : 'no', retained: ended.retained,
                 } });
             }

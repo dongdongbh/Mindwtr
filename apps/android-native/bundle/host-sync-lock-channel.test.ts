@@ -57,7 +57,7 @@ describe('File Sync lock channel and host cancels', () => {
         expect(host.sent).toEqual([{ op: 'acquire', uri: 'content://p/tree/t' }, { op: 'release', token: 'late-token' }]);
         expect(host.lateReleases()).toBe(0);
         host.answer('lock-2', null);
-        // host-sync.ts logs the release (v1.3.7/native-file-sync-late-release) once it answered.
+        // host-sync.ts logs the release (v1.3.8/native-file-sync-late-release) once it answered.
         expect(host.lateReleases()).toBe(1);
         host.resume();
         // The lease is free again: the next acquire is sent and answered as usual.
