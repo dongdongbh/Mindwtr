@@ -415,9 +415,11 @@ internal object ProcessCoreHost {
             val app = application
             val runtime = boot?.takeIf { it.isDone }?.let { task -> runCatching { task.get() }.getOrNull() }
             if (app != null && runtime != null && reminders.reply != null) PersistentCapture.restore(app, runtime)
-            // Debug builds' system search check (check-app-search-device): the index's ids on each resume, never titles.
+            // Debug builds' system search check (check-app-search-device): the index's ids on each resume, never titles, in a
+            // cache file (a logcat line stops near 4 KiB, which a large library's ids pass).
             if (BuildConfig.DEBUG && runtime != null && debugProperty("appsearch_dump") == "1") {
-                runCatching { runtime.appSearchIds() }.onSuccess { Log.i(CoreHost.TAG, "Native Android system search debug ids=${it.optJSONArray("ids")}") }
+                runCatching { runtime.appSearchIds().optJSONArray("ids").also { File(app?.cacheDir, "appsearch-debug-ids.json").writeText(it.toString()) } }
+                    .onSuccess { Log.i(CoreHost.TAG, "Native Android system search debug ids written count=${it?.length()}") }
                     .onFailure { Log.w(CoreHost.TAG, "Native Android system search debug read failed ${failureForLog(it)}") }
             }
         }

@@ -4,8 +4,8 @@
 //   node apps/android-native/scripts/check-app-search-device.mjs <adb-serial> [apk]
 //
 // Installs the debug APK with `install -r` (existing development data stays). The launcher's results are Samsung's and not
-// checked; the index is read through the app's own debug query (debug.mindwtr.native.appsearch_dump: each resume logs the
-// index's ids, never titles). (a) Settings › General's "Expose to system search" turned on indexes exactly core's active items
+// checked; the index is read through the app's own debug query (debug.mindwtr.native.appsearch_dump: each resume writes the
+// index's ids, never titles, to the app's cache and logs their count). (a) Settings › General's "Expose to system search" turned on indexes exactly core's active items
 // (core's buildFullAppSearchIndex over a copy of the app's database); (b) a task this run captured is in the index, and after a
 // force-stop and a new start (the start's live indexing) Mark Done takes it out within the 2 s debounce; (c) the switch turned
 // off empties the index. It ends with the switch off and the
@@ -77,10 +77,10 @@ const indexIds = async () => {
     device.launch(ACTIVITY);
     let line = null;
     await waitFor('the index ids in the log', () => {
-        line = device.logs(pid(), TAG).split('\n').reverse().find((text) => text.includes('system search debug ids=')) ?? null;
+        line = device.logs(pid(), TAG).split('\n').reverse().find((text) => text.includes('system search debug ids written')) ?? null;
         return Boolean(line);
     }, 30_000);
-    return JSON.parse(line.slice(line.indexOf('ids=') + 4).trim().replace(/\\/g, ''));
+    return JSON.parse(sh(`run-as ${PKG} cat cache/appsearch-debug-ids.json`));
 };
 /** Core's index for the app's database now (a copy pulled through run-as). */
 const coreIds = () => {
