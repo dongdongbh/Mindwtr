@@ -593,7 +593,21 @@ jobs:
             fi
 
             echo "Stapling $dmg"
-            xcrun stapler staple "$dmg"
+            # stapler fetches the ticket from Apple's CloudKit; the Intel runners
+            # lose that connection now and then (error 68), so retry the fetch.
+            stapled=0
+            for attempt in 1 2 3 4 5; do
+              if xcrun stapler staple "$dmg"; then
+                stapled=1
+                break
+              fi
+              echo "::warning::stapler staple attempt $attempt failed for $dmg; retrying in 30 s"
+              sleep 30
+            done
+            if [ "$stapled" -ne 1 ]; then
+              echo "::error::Could not staple $dmg after 5 attempts"
+              exit 1
+            fi
             xcrun stapler validate "$dmg"
           done
           if [ "$found" -eq 0 ]; then
