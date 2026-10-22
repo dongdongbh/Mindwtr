@@ -5,6 +5,8 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import tech.dongdongbh.mindwtr.pilot.core.RkStore
+import tech.dongdongbh.mindwtr.pilot.core.routedDeviceStore
 
 /**
  * System search's two keys live in RN's RKStorage, every other device key in the preferences (pass O2d), and both keep

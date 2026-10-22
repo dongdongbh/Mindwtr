@@ -16,7 +16,7 @@ import java.io.File
  * A file this class creates gets RN's schema and `user_version = 1`, as RN's SQLiteOpenHelper (ReactDatabaseSupplier, version 1)
  * leaves it. At version 0 RN would run its onCreate over the existing table, fail, and delete the whole database on its retry.
  */
-class RnKeyValue(private val file: File) : tech.dongdongbh.mindwtr.pilot.RkStore {
+class RnKeyValue(private val file: File) : RkStore {
     companion object {
         /** AsyncStorage's own table and statements (ReactDatabaseSupplier, AsyncStorageModule). */
         private const val CREATE = "CREATE TABLE IF NOT EXISTS catalystLocalStorage (key TEXT PRIMARY KEY, value TEXT NOT NULL)"

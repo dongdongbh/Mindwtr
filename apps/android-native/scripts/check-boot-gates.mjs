@@ -904,7 +904,7 @@ const kotlinFiles = [activity, model, owner, editorUi, focusUi, projectsUi, labe
 assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
 // The dev build keeps its own database. The upgradetest build gets the RN database and RN's state
 // only from the guard, before CoreHost exists: before any open of it, the checkpoint, and any core write.
-assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\)\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
+assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app, keyValue\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\)\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
 // Once the guard passes, it copies RN's RKStorage before it returns, so before RnKeyValue (or anything) opens it: an open can
 // checkpoint RN's WAL away when it closes.
 assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
@@ -1047,7 +1047,9 @@ assert.match(model, /ProcessCoreHost\.get\(/);
 // Storage exceptions never cross the QuickJS JNI boundary.
 assert.equal(coreHost.match(/JSCallFunction \{/g).length, 1, 'the only JS callback constructor is guarded');
 const bridgeCallbacks = coreHost.match(/bridge\.setProperty\([^\n]*/g);
-assert.equal(bridgeCallbacks.length, 47, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, and the device calendar call: each guarded');
+assert.equal(bridgeCallbacks.length, 49, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, and system search\'s info and call (O2d): each guarded');
+// O2d: system search's calls run on HostIo's calendar thread, as the calendar's do.
+assert(bridgeCallbacks.includes('bridge.setProperty("appSearchCall", guarded { args -> io.calendar(args[0] as String, search::call) })'));
 // C3: the device calendar call only starts on the engine thread; HostIo's calendar thread runs it (a prompt answers later).
 assert(bridgeCallbacks.includes('bridge.setProperty("calendarCall", guarded { args -> io.calendar(args[0] as String, device::call) }) }'));
 assert(bridgeCallbacks.includes('bridge.setProperty("fileAbort", guarded { args -> io.fileAbort(args[0] as String); null })'));
@@ -1070,7 +1072,7 @@ for (const line of bridgeCallbacks) assert.match(line, /^bridge\.setProperty\("\
     assert.match(kv, /"INSERT OR REPLACE INTO catalystLocalStorage VALUES \(\?, \?\)"/);
     assert.match(kv, /PRAGMA user_version"\)\.use \{ it\.step\(\); it\.getLong\(0\) \} == 0L\) \{[\s\S]*?connection\.exec\(CREATE\)\s+connection\.exec\("PRAGMA user_version = 1"\)/);
     assert.match(kv, /connection\.exec\("PRAGMA synchronous = FULL"\)/);
-    assert.match(kv, /private fun write\(work: \(SQLiteConnection\) -> Unit\) = open \{ connection ->\s+connection\.exec\("BEGIN IMMEDIATE"\)/);
+    assert.match(kv, /private fun write\(work: \(SQLiteConnection\) -> Unit\) = open<Unit> \{ connection ->\s+connection\.exec\("BEGIN IMMEDIATE"\)/);
     assert.match(owner, /RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)/, 'the key-value store is RN\'s own RKStorage');
     for (const name of ['kvGet', 'kvSet', 'kvRemove', 'kvMultiGet', 'kvMultiSet', 'kvMultiRemove']) {
         assert(bridgeCallbacks.some((line) => line.startsWith(`bridge.setProperty("${name}", guarded { args -> `)), `${name} is guarded`);
@@ -1226,7 +1228,7 @@ assert.match(model, /if \(BuildConfig\.DEBUG\) debugProperty\("session_age_ms"\)
 assert.match(owner, /if \(BuildConfig\.DEBUG && runtime != null && debugProperty\("appsearch_dump"\) == "1"\)/);
 // System search's switch and its journal sequence land in one RKStorage transaction (O2d review R-P2-2).
 assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt'), 'utf8'), /\}, keyValue\)/);
-assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt'), 'utf8'), /if \(rk\.isNotEmpty\(\)\) rkStorage\.apply\(rk\)/);
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/DeviceWrites.kt'), 'utf8'), /if \(rk\.isNotEmpty\(\)\) rkStorage\.apply\(rk\)/);
 assert.match(model, /debugProperty\("boot_delay_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+val runtime = ProcessCoreHost\.get\(/);
 assert.match(captureUi, /withContext\(Dispatchers\.IO\) \{ debugProperty\("clipboard"\) \}\.takeIf \{ it\.isNotEmpty\(\) \}\?\.let \{ clipboard\.setText\(/);
 // The command path's fault hook, and the same hook for a journal replay (a replay can meet a failed save too).
@@ -1578,7 +1580,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     // Startup follow-up: the boot's start is held until the first screen shows its content: the Inbox's first rows (contentShown),
     // another tab's boot read, or a 3 s fallback; CoreWork's and the owed retry's start at once. One start at a time.
     // The reminder alarms start with sync (pass R1), held with it.
-    assert.match(owner, /startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\}\s+\},/);
+    assert.match(owner, /startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\/\/[^\n]*\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},/);
     assert.match(owner, /fun startDeferredSync\(trigger: String = "content"\) \{\s+synchronized\(deferredSync\) \{\s+screenShown = true\s+deferredSync\.getAndSet\(null\)\s+\}\?\.let \{ start -> syncThread\.execute \{ start\(\) \} \}\s+deferredWidgets\.take\(\)\?\.let \{ publishHeldWidgets\(it, trigger\) \}\s+\}/, 'the boot\'s widget publication waits with its sync start');
     // S4a: a process no screen showed in (a CoreWork job's) starts no triggers: as RN's headless runs, it syncs only through core's
     // background run, which the job awaits. Once a screen showed, CoreWork's recovery starts them at once.
@@ -1825,7 +1827,7 @@ assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.t
 assert.match(owner, /runtime\.start\([^\n]*\)\s+(?:\/\/[^\n]*\s+)*if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+(?:\/\/[^\n]*\s+)*recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+(?:\/\/[^\n]*\s+)*deferredWidgets\.hold\(runtime\)\s+return runtime/);
 // After a finished replay (the boot's, the owed retry's, CoreWork's): the queue drain, then sync (StartOrder, StartOrderTest). Any
 // drain that did not finish becomes the screens' owed journal retry, holds sync back, and CoreWork retries it.
-assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+(?:\/\/[^\n]*\s+)*startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
+assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+(?:\/\/[^\n]*\s+)*startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\/\/[^\n]*\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
 assert.match(source('StartOrder.kt'), /Drain\.Done -> \{\s+startSync\(\)\s+return true\s+\}\s+Drain\.Unswept -> \{\s+startSync\(\)\s+(?:\/\/[^\n]*\s+)*refreshWidgets\(\)\s+retryLater\(\)\s+\}\s+Drain\.Waiting -> retryLater\(\)\s+is Drain\.Failed -> \{\s+owe\(result\.message\)\s+retryLater\(\)\s+\}/);
 assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueue\(context, CoreJob\.INGEST, emptyMap\(\), ExistingWorkPolicy\.KEEP\)/, 'a retry never cancels a running drain');
 // S4a: the background sync job, as RN's expo-background-task worker: core's interval, a network, its next run appended after it; a
@@ -2791,10 +2793,12 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const pass10 = { settingsModel, settingsUi, taskViewUi, settingsIcons };
     const coreFile = (name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8');
     // Reads pass Kotlin's input to core unchanged; writes are core's commands, each logged as its operation.
-    for (const [name, method] of [['settingsMenu', 'getSettingsMenu'], ['generalSettings', 'getGeneralSettings'], ['gtdSettings', 'getGtdSettings'],
+    for (const [name, method] of [['settingsMenu', 'getSettingsMenu'], ['gtdSettings', 'getGtdSettings'],
         ['manageSettings', 'getManageSettings'], ['manageList', 'getManageSettingsList'], ['somedaySections', 'getSomedaySections']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
     }
+    // O2d: General adds only the device's system search state to Kotlin's input.
+    assert.match(hostEntry, /^\s+generalSettings: \(input\) => contract\.getGeneralSettings\(nativeAppSearch\n\s+\? \{ \.\.\.\(input as Parameters<typeof contract\.getGeneralSettings>\[0\]\), appSearch: nativeAppSearch\.device\(\) \} : input\),$/m);
     for (const [name, method] of [['generalSetting', 'setGeneralSetting'], ['gtdSetting', 'setGtdSetting'], ['manageEditor', 'saveManageEditor'],
         ['manageDelete', 'deleteManageItem'], ['somedayRename', 'renameSomedaySection'], ['somedayReorder', 'reorderSomedaySections'], ['somedayDelete', 'deleteSomedaySection']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuCommand ${name} is core's ${method}`);
@@ -2824,7 +2828,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // applies a key only when its entry is newer, so an old entry whose delete failed never undoes a newer setting; the journal
     // numbers new entries above every recorded sequence, so the numbering never goes back after the journal empties.
     assert.match(settingsModel, /fun deviceStore\(prefs: SharedPreferences\) = DeviceWrites\(\{ prefs\.all \}, \{ changes ->\s+prefs\.edit\(\)\.apply \{[^\n]*\}\.commit\(\)\s+\}\)/);
-    assert.match(settingsModel, /fun deviceStore\(app: Context\) = deviceStore\(app\.getSharedPreferences\(DEVICE_PREFS, Context\.MODE_PRIVATE\)\)/);
+    assert.match(settingsModel, /fun deviceStore\(app: Context, keyValue: RnKeyValue\): DeviceWrites \{\s+val prefs = app\.getSharedPreferences\(DEVICE_PREFS, Context\.MODE_PRIVATE\)/);
     assert.match(settingsModel, /private fun store\(writes: JSONArray\) = deviceStore\(prefs\)\.store\(writes, null, replay = false\)/);
     {
         const devicesKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/DeviceWrites.kt'), 'utf8');
@@ -3974,6 +3978,8 @@ export { getBulkMoveStatusOptions } from ${JSON.stringify(resolve(app, '../../pa
 export { formatI18nTemplate } from ${JSON.stringify(resolve(app, '../../packages/core/src/i18n/index.ts'))};
 export { sortRecoverySnapshotNames } from ${JSON.stringify(resolve(app, '../../packages/core/src/recovery-snapshot-names.ts'))};
 export { buildLastRouteSnapshot, LAST_ROUTE_STORAGE_KEY, parseRestorableLastRoute } from ${JSON.stringify(resolve(app, '../../packages/core/src/session-restore.ts'))};
+export { createAppSearchIndexing } from ${JSON.stringify(resolve(app, '../../packages/core/src/app-search-service.ts'))};
+export { MOBILE_APP_SEARCH_STORAGE_KEY, MOBILE_APP_SEARCH_WIPE_OWED_STORAGE_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/general-settings-model.ts'))};
 // These service stand-ins test bridge dispatch/admission, not import or receipt policy.
 // Actual shared policy and SQLite receipts have their own core and Swift/JSC suites.
 export function inspectNativeBackupDocument(text, metadata, t, format = 'json') {
