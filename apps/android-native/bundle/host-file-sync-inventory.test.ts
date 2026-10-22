@@ -169,6 +169,7 @@ const appFiles = (folder: ReturnType<typeof provider>) => {
                     return node ? { exists: true, size: node.bytes.length, modificationTime: 1 } : { exists: false };
                 }
                 case 'readBytes': return contentBytes(uri);
+                case 'readBytesRange': return contentBytes(uri).slice(Number(request.position), Number(request.position) + Number(request.length));
                 case 'copy': memory.put(String(request.to), contentBytes(uri)); return null;
                 case 'sha256File': return digest(contentBytes(uri));
                 // HostFiles refuses to change a picked document: only HostDocuments writes the folder.
@@ -516,7 +517,29 @@ describe('native Android File Sync: RN fix history through the native binding', 
             expect(outcome).toBeInstanceOf(core.AttachmentUploadTooLargeError);
         });
 
-        it('a plaintext device meeting an encrypted attachment in the folder fails its fetch closed and installs nothing (129)', async () => {
+        it('a plaintext device meeting an encrypted attachment in the folder uploads nothing, and the location stays paused (129)', async () => {
+            const { folder, app } = install();
+            // Another device's enable was cut off after it sealed its attachment in place: data.json is still plaintext.
+            const material = await core.deriveSyncKeyMaterial(PASS, new Uint8Array(16).fill(3), { mKib: 8, t: 1, p: 1 }, createHostSyncCrypto(cryptoCall));
+            folder.put('data.json', text(JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], settings: {} })));
+            folder.put('attachments/peer.txt', await core.encryptSyncArtifact(text('sealed by a peer'), material));
+            app.memory.put(`${MANAGED}a1.txt`, text('mine, in plaintext'));
+            const { sync, logged } = fileHost(withAttachments(fileAttachment('a1')));
+            const first = await sync.settingsHost.performSync(undefined, manual);
+            expect(first).toMatchObject({ success: false });
+            expect(String(first.error)).toContain('SYNC_ENCRYPTION_PARTLY_ENCRYPTED');
+            expect(folder.names('attachments')).toEqual(['peer.txt']);
+            expect(logged('File Sync attachment upload refused: the folder holds encrypted attachments')).toEqual([
+                expect.objectContaining({ context: expect.objectContaining({ releaseCheck: 'v1.3.8/file-partly-encrypted-upload' }) }),
+            ]);
+            // The location is marked: the next cycle refuses before any attachment work.
+            const before = folder.ops.length;
+            expect(await sync.settingsHost.performSync(undefined, manual)).toMatchObject({ success: false });
+            expect(folder.ops.slice(before).filter((op) => op.includes('attachments') || /^(write|createFile|delete) /.test(op))).toEqual([]);
+            expect(folder.names('attachments')).toEqual(['peer.txt']);
+        });
+
+        it('a plaintext device meeting an encrypted attachment in the folder fails its on-demand fetch closed and installs nothing (129)', async () => {
             const { folder, app } = install();
             const material = await core.deriveSyncKeyMaterial(PASS, new Uint8Array(16).fill(3), { mKib: 8, t: 1, p: 1 }, createHostSyncCrypto(cryptoCall));
             folder.put('attachments/r1.txt', await core.encryptSyncArtifact(text('sealed by a peer'), material));

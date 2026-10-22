@@ -43,6 +43,7 @@ import { isAbortError, isHostResponseTooLargeError, refuseWriteRedirect } from '
 import { withRetry } from './retry-utils';
 import { encryptedSyncArtifactByteLength, inspectSyncArtifact, type SyncKeyMaterial } from './sync-crypto';
 import { isSyncRemoteMutationFenceError } from './sync-remote-fence';
+import { isSyncEncryptionPartlyEncryptedError, SyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { getErrorStatus, isWebdavRateLimitedError } from './sync-runtime-utils';
 import {
   isWebdavRemoteWriteConflictError,
@@ -1766,6 +1767,29 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const getSafEntriesByName = async (): Promise<Map<string, string>> => (
       safEntriesByName ?? refreshSafEntriesByName()
     );
+    // No key here, yet an encryption enable cut off on another device left sealed attachments in the folder beside a plaintext
+    // data.json (it seals attachments first, the document last). Before this pass writes its first plaintext generation, every
+    // attachment the folder holds is checked for ciphertext: a File transition seals in the provider's listing order, so no
+    // sample of names stands for the rest. The refusal ends the cycle, which marks the location partly encrypted.
+    // ponytail: one header read per attachment, only on a keyless pass that uploads; a stored per-location proof if it costs.
+    let folderProvenPlaintext = false;
+    const assertFolderHoldsNoCiphertext = async (): Promise<void> => {
+      if (options.material || folderProvenPlaintext) return;
+      const entries: string[] = syncDir.type === 'saf'
+        ? [...(await getSafEntriesByName()).values()]
+        : (await fs.readDirectory(syncDir.attachmentsDirUri)).map((name) => `${syncDir.attachmentsDirUri}${name}`);
+      for (const uri of entries) {
+        assertAttachmentSyncNotAborted(signal);
+        // A subfolder (a desktop transition's recovery folder) or an entry gone since the listing has no header to read.
+        const head = await fs.readBytesRange(uri, 0, 64).catch(() => null);
+        if (!head || inspectSyncArtifact(head).kind === 'plaintext') continue;
+        files.logAttachmentWarn('File Sync attachment upload refused: the folder holds encrypted attachments', undefined, {
+          releaseCheck: 'v1.3.8/file-partly-encrypted-upload',
+        });
+        throw new SyncEncryptionPartlyEncryptedError();
+      }
+      folderProvenPlaintext = true;
+    };
     const remoteFilenameFor = (cloudKey: string, attachment: { id: string; title: string }): string =>
       cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
 
@@ -1853,6 +1877,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       isFatalError: (error) => (
         isAttachmentSyncAbortError(error, signal)
         || isAttachmentUploadAdmissionError(error)
+        || isSyncEncryptionPartlyEncryptedError(error)
       ),
       // Normal background sync leaves remote-only files for on-demand fetch. An
       // activation probe is different: its cloned snapshot must prove that every
@@ -1955,6 +1980,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       onDownloadError: () => {},
       onUpload: async (attachment, localPath, snapshot) => {
         if (!snapshot) throw new Error('Immutable attachment upload snapshot is unavailable');
+        await assertFolderHoldsNoCiphertext();
         const cloudKey = buildFileSyncGenerationCloudKey(attachment, snapshot.fileHash);
         const recordPublishedGeneration = (): void => {
           attachment.cloudKey = cloudKey;

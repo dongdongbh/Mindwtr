@@ -11,9 +11,11 @@ import { createMobileAttachmentCommon, type MobileAttachmentUploadTask } from '.
 import { createMobileAttachmentBackends, type MobileAttachmentBackendsCoreFunctions } from './mobile-attachment-backends';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
+import { SyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import {
   decryptSyncArtifact,
   defaultSyncCryptoPrimitives,
+  encryptSyncArtifact,
   encryptedSyncArtifactByteLength,
   inspectSyncArtifact,
   SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
@@ -1617,6 +1619,39 @@ describe('File Sync attachment pass', () => {
     });
   });
 
+  // A device's encryption enable seals the attachments in place first and the document last (runEnableSyncEncryptionOverRemote).
+  // Cut off between the two (the app killed, the phone off), the folder holds sealed attachments beside a plaintext data.json, and
+  // the device that started it waits on its transition journal. Another device with encryption off reads that data.json as usual.
+  describe('in a folder an interrupted encryption enable left partly encrypted', () => {
+    const sealedPeer = () => encryptSyncArtifact(new TextEncoder().encode('peer attachment'), material, defaultSyncCryptoPrimitives);
+
+    it('a device with encryption off uploads nothing into a path folder and stops the pass', async () => {
+      const { backends, memory, installer, lines } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}peer.txt`, await sealedPeer());
+
+      await expect(backends.syncFileAttachments(withAttachment(fileAttachment()), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+
+      expect(installer.reserveFileSyncAttachmentPublication).not.toHaveBeenCalled();
+      expect([...memory.files.keys()].filter((uri) => uri.startsWith(SYNC_DIR))).toEqual([`${SYNC_DIR}peer.txt`]);
+      expect(lines).toContainEqual(expect.objectContaining({
+        level: 'warn',
+        extra: expect.objectContaining({ releaseCheck: 'v1.3.8/file-partly-encrypted-upload' }),
+      }));
+    });
+
+    it('a device with the key still uploads its sealed generation there', async () => {
+      const { backends, memory } = setup({ crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}peer.txt`, await sealedPeer());
+
+      const result = await backends.syncFileAttachments(withAttachment(fileAttachment()), 'file:///sdcard/Mindwtr/data.json', undefined, { material });
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+    });
+  });
+
   describe('in a Storage Access Framework folder', () => {
     const TREE = 'content://com.example.docs/tree/primary%3AMindwtr';
     const FOLDER = `${TREE}/document/primary%3AMindwtr`;
@@ -1666,6 +1701,23 @@ describe('File Sync attachment pass', () => {
         message: 'Failed to copy attachment att-1 to sync folder',
         extra: { error: 'SAF attachment writes are unavailable' },
       }));
+    });
+
+    it('a device with encryption off uploads nothing beside an attachment an interrupted enable sealed', async () => {
+      let put: (uri: string, bytes: Uint8Array) => void = () => undefined;
+      const saf = createSaf((uri, bytes) => put(uri, bytes), true);
+      const { backends, memory } = setup({ saf });
+      put = memory.put;
+      memory.put(LOCAL_URI, LOCAL);
+      const peer = await saf.createFile!(ATTACHMENTS, 'peer.txt', 'application/octet-stream');
+      memory.put(peer, await encryptSyncArtifact(new TextEncoder().encode('peer attachment'), material, defaultSyncCryptoPrimitives));
+      vi.mocked(saf.createFile!).mockClear();
+
+      await expect(backends.syncFileAttachments(withAttachment(fileAttachment()), TREE))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+
+      expect(saf.createFile).not.toHaveBeenCalled();
+      expect(saf.writeBytes).not.toHaveBeenCalled();
     });
   });
 });
