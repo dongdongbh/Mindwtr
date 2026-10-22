@@ -268,6 +268,7 @@ export const koOverrides: Record<string, string> = {
         'quickAdd.example': '예: 엄마에게 전화 /due:tomorrow @전화',
         'quickAdd.inlineHint': '예: 엄마에게 전화 /due:tomorrow 5pm @전화 #가족',
         'quickAdd.syntaxHelp': '빠른 추가 문법 도움말',
+        'quickAdd.pasteImagesHint': '{{shortcut}}로 이미지나 스크린샷을 붙여 넣으면 첨부됩니다.',
         'quickAdd.placeholder': '할 일 추가… @context +Project #tag',
         'quickAdd.addAnother': '하나 더 추가',
         'quickAdd.inputLabel': '할 일 제목',

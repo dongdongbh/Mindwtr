@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, ClipboardEvent } from 'react';
+import type { ChangeEvent, ClipboardEvent, SyntheticEvent } from 'react';
 import {
     executeCaptureTransaction,
     CaptureSessionCoordinator,
@@ -46,7 +46,7 @@ import { join } from '@tauri-apps/api/path';
 import { getManagedPath } from '../lib/managed-paths';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
-import { isTauriRuntime } from '../lib/runtime';
+import { isMacRuntime, isTauriRuntime } from '../lib/runtime';
 import { reportError } from '../lib/report-error';
 import { logWarn } from '../lib/app-log';
 import { getClipboardImageFiles, getImageExtension } from '../lib/clipboard-images';
@@ -186,6 +186,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const [recordingBusy, setRecordingBusy] = useState(false);
     const [recordingError, setRecordingError] = useState<string | null>(null);
     const [pastedImageAttachments, setPastedImageAttachments] = useState<PastedImageAttachment[]>([]);
+    // The web build can attach a pasted image only with plaintext self-hosted Cloud, so it checks when help opens (#1433).
+    const [canPasteImages, setCanPasteImages] = useState(isTauriRuntime);
+    const handleSyntaxHelpToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
+        if (isTauriRuntime() || !event.currentTarget.open) return;
+        void getWebAttachmentUploadTarget().then(() => setCanPasteImages(true), () => setCanPasteImages(false));
+    }, []);
     const [pastedImageError, setPastedImageError] = useState<string | null>(null);
     const webDraftRef = useRef(createWebAttachmentDraft());
     const admittedBrowserTaskRef = useRef<{ id: string; baseline: Task; attachments: Attachment[] } | null>(null);
@@ -1446,13 +1452,18 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             </div>
                         )}
                         <p className="text-xs text-muted-foreground">{t('quickAdd.example')}</p>
-                        <details className="text-xs text-muted-foreground">
+                        <details className="text-xs text-muted-foreground" onToggle={handleSyntaxHelpToggle}>
                             <summary className="w-fit cursor-pointer whitespace-nowrap rounded-sm font-medium text-foreground/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
                                 {t('quickAdd.syntaxHelp')}
                             </summary>
                             <p className="mt-2 leading-5">
                                 <QuickAddSyntaxHint text={t('quickAdd.help')} />
                             </p>
+                            {canPasteImages && (
+                                <p className="mt-1 leading-5">
+                                    {t('quickAdd.pasteImagesHint').replace('{{shortcut}}', isMacRuntime() ? '⌘V' : 'Ctrl+V')}
+                                </p>
+                            )}
                         </details>
                         {scheduledLabel && (
                             <p className="text-xs text-muted-foreground">

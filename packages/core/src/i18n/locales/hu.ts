@@ -222,6 +222,7 @@ export const huOverrides: Record<string, string> = {
     'quickAdd.pastedImagesAttached': '{{count}} kép csatolva',
     'quickAdd.inlineHint': 'Próbálja ki: Anyu felhívása /due:tomorrow 17:00 @telefon #család',
     'quickAdd.syntaxHelp': 'Gyors hozzáadás szintaxis súgó',
+    'quickAdd.pasteImagesHint': 'Képeket vagy képernyőképeket a {{shortcut}} billentyűkkel beillesztve csatolhat.',
     'quickAdd.placeholder': 'Adjon hozzá egy feladatot… használja: @kontextus +Projekt #címke',
     'quickAdd.addAnother': 'Másik hozzáadása',
     'quickAdd.inputLabel': 'Feladat címe',

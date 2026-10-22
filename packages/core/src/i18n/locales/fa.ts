@@ -228,6 +228,7 @@ export const faOverrides: Record<string, string> = {
         'quickAdd.pastedImagesAttached': '{{count}} تصویر پیوست شد',
         'quickAdd.inlineHint': 'امتحان کنید: تماس با مامان /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'راهنمای نحو افزودن سریع',
+        'quickAdd.pasteImagesHint': 'برای پیوست تصویر یا اسکرین‌شات، آن را با {{shortcut}} بچسبانید.',
         'quickAdd.placeholder': 'افزودن یک کار… از @زمینه +پروژه #برچسب استفاده کنید',
         'quickAdd.addAnother': 'افزودن مورد دیگر',
         'quickAdd.inputLabel': 'عنوان کار',

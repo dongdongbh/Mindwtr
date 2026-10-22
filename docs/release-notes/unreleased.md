@@ -7,3 +7,5 @@ Changes collected since the latest stable release.
 - Mobile: a Pomodoro focus session's time is no longer lost when Mindwtr closes right as the session ends. The linked task now gets the time the next time you open the app, once.
 - Desktop: a Pomodoro focus session's time is no longer lost when Mindwtr quits right as the session ends, and is no longer counted twice when the timer state could not be saved. The linked task gets the time once, at the next start if needed.
 - Android: a Pomodoro completion alert shows the time its phase ended, so an alert that arrives late (for example right after the phone restarts) no longer looks like a phase that just ended.
+- Web: an image pasted into a task description shows in the description preview right away, before Save uploads it (#1433).
+- Desktop and web: Quick Add's syntax help says you can paste images or screenshots with Ctrl+V (⌘V on macOS). The web app shows it only when self-hosted Cloud can take the image (#1433).

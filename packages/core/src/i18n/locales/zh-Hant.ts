@@ -290,6 +290,7 @@ export const zhHant: Record<string, string> = {
         'quickAdd.example': '示例：給媽媽打電話 /due:tomorrow @phone',
         'quickAdd.inlineHint': '試試：給媽媽打電話 /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': '快速添加語法幫助',
+        'quickAdd.pasteImagesHint': '使用 {{shortcut}} 貼上圖片或截圖即可加入為附件。',
         'quickAdd.placeholder': '添加任務… 支持 @情境 +專案 #標籤',
         'quickAdd.addAnother': '連續添加',
         'quickAdd.audioCaptureLabel': '語音快速記錄',

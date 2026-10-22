@@ -17,6 +17,21 @@ type DraftFile = {
     storeOwned: boolean; uncertain: boolean; removed: boolean;
 };
 
+// A staged image's bytes exist only in its draft until Save uploads them, so the description
+// preview shows it from the draft's File meanwhile (#1433).
+const stagedPreviewUrls = new Map<string, string>();
+
+export function getStagedWebAttachmentPreviewUrl(id: string): string | undefined {
+    return stagedPreviewUrls.get(id);
+}
+
+const releaseStagedPreview = (id: string) => {
+    const url = stagedPreviewUrls.get(id);
+    if (!url) return;
+    stagedPreviewUrls.delete(id);
+    URL.revokeObjectURL(url);
+};
+
 export async function getWebAttachmentUploadTarget(): Promise<UploadTarget> {
     if (isSandboxMode() || isWorkspaceTransitionActive()) throw new WebAttachmentUploadError('attachments.webUploadChanged');
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new WebAttachmentUploadError('attachments.webUploadOffline');
@@ -76,6 +91,9 @@ export function createWebAttachmentDraft() {
                 mimeType: file.type || undefined, size: file.size, localStatus: 'available', createdAt: now, updatedAt: now,
             };
             files.set(attachment.id, { file, attachment, uploaded: false, storeOwned: false, uncertain: false, removed: false });
+            if (file.type.startsWith('image/') && typeof URL.createObjectURL === 'function') {
+                stagedPreviewUrls.set(attachment.id, URL.createObjectURL(file));
+            }
             return attachment;
         },
         has(attachments: Attachment[]): boolean {
@@ -161,12 +179,13 @@ export function createWebAttachmentDraft() {
             generation += 1;
             entry.removed = true;
             files.delete(id);
+            releaseStagedPreview(id);
             cleanup(entry);
         },
         discard() {
             generation += 1;
             controller?.abort();
-            for (const entry of files.values()) { entry.removed = true; cleanup(entry); }
+            for (const entry of files.values()) { entry.removed = true; releaseStagedPreview(entry.attachment.id); cleanup(entry); }
             files.clear();
         },
     };

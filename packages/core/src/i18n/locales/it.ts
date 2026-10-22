@@ -137,6 +137,7 @@ export const itOverrides: Record<string, string> = {
         'quickAdd.example': 'Esempio: Chiama la mamma /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Prova: Chiama la mamma /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Aiuto sulla sintassi di aggiunta rapida',
+        'quickAdd.pasteImagesHint': 'Incolla immagini o screenshot con {{shortcut}} per allegarli.',
         'quickAdd.placeholder': 'Aggiungi un\'attività… usa @context +Project #tag',
         'quickAdd.inputLabel': 'Inserimento rapido',
         'quickAdd.inputHint': 'Digita un’attività e premi Invio per salvarla.',

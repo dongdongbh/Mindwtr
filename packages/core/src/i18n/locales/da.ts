@@ -224,6 +224,7 @@ export const daOverrides: Record<string, string> = {
     'quickAdd.pastedImagesAttached': '{{count}} billeder vedhæftet',
     'quickAdd.inlineHint': 'Prøv: Ring til mor /due:tomorrow 17.00 @phone #family',
     'quickAdd.syntaxHelp': 'Hurtig tilføjelse af syntakshjælp',
+    'quickAdd.pasteImagesHint': 'Indsæt billeder eller skærmbilleder med {{shortcut}} for at vedhæfte dem.',
     'quickAdd.placeholder': 'Tilføj en opgave... brug @context +Project #tag',
     'quickAdd.addAnother': 'Tilføj en anden',
     'quickAdd.inputLabel': 'Opgavetitel',

@@ -182,6 +182,7 @@ export const deOverrides: Record<string, string> = {
         'quickAdd.example': 'Beispiel: Mama anrufen /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tipp: Mama anrufen /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hilfe zur Schnell-Hinzufügen-Syntax',
+        'quickAdd.pasteImagesHint': 'Füge Bilder oder Screenshots mit {{shortcut}} ein, um sie anzuhängen.',
         'quickAdd.placeholder': 'Eine Aufgabe hinzufügen … benutze @context +Project #tag',
         'quickAdd.inputLabel': 'Schnelle Eingabe',
         'quickAdd.inputHint': 'Gib eine Aufgabe ein und drücke Eingabe zum Speichern.',

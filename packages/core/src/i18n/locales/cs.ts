@@ -203,6 +203,7 @@ export const csOverrides: Record<string, string> = {
         'quickAdd.example': 'Příklad: Zavolat mámě /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Zkuste: Zavolat mámě /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Nápověda syntaxe rychlého přidání',
+        'quickAdd.pasteImagesHint': 'Obrázky nebo snímky obrazovky připojíte vložením pomocí {{shortcut}}.',
         'quickAdd.placeholder': 'Přidat úkol… použijte @context +Project #tag',
         'quickAdd.addAnother': 'Přidat další',
         'quickAdd.inputLabel': 'Název úkolu',

@@ -234,6 +234,7 @@ export const jaOverrides: Record<string, string> = {
         'quickAdd.pastedImagesAttached': '画像を{{count}}件添付しました',
         'quickAdd.inlineHint': '入力例：母に電話する /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'クイック追加の記法ヘルプ',
+        'quickAdd.pasteImagesHint': '{{shortcut}} で画像やスクリーンショットを貼り付けると添付できます。',
         'quickAdd.placeholder': 'タスクを追加… @context +Project #tag が使えます',
         'quickAdd.addAnother': '続けて追加',
         'quickAdd.inputLabel': 'タスク名',

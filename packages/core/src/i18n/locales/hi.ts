@@ -138,6 +138,7 @@ export const hiOverrides: Record<string, string> = {
         'quickAdd.example': 'उदाहरण: माँ को कॉल करें /due:tomorrow @phone',
         'quickAdd.inlineHint': 'आज़माएँ: माँ को कॉल करें /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'त्वरित जोड़ सिंटैक्स सहायता',
+        'quickAdd.pasteImagesHint': 'छवियाँ या स्क्रीनशॉट संलग्न करने के लिए उन्हें {{shortcut}} से पेस्ट करें।',
         'quickAdd.placeholder': 'एक कार्य जोड़ें... @context +Project #tag',
         'quickAdd.inputLabel': 'त्वरित जोड़',
         'quickAdd.inputHint': 'कार्य लिखें और सहेजने के लिए प्रवेश कुंजी दबाएं।',

@@ -136,6 +136,7 @@ export const plOverrides: Record<string, string> = {
         'quickAdd.example': 'Przykład: Zadzwoń do mamy /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Spróbuj: Zadzwoń do mamy /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Pomoc składni szybkiego dodawania',
+        'quickAdd.pasteImagesHint': 'Wklej obrazy lub zrzuty ekranu za pomocą {{shortcut}}, aby je dołączyć.',
         'quickAdd.placeholder': 'Dodaj zadanie… użyj @context +Project #tag',
         'quickAdd.inputLabel': 'Szybkie dodawanie',
         'quickAdd.inputHint': 'Wpisz zadanie i naciśnij Enter, aby zapisać.',

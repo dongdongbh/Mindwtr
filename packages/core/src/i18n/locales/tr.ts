@@ -141,6 +141,7 @@ export const trOverrides: Record<string, string> = {
         'quickAdd.example': 'Örnek: Annemi ara /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Deneyin: Annemi ara /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hızlı ekleme sözdizimi yardımı',
+        'quickAdd.pasteImagesHint': 'Görselleri veya ekran görüntülerini eklemek için {{shortcut}} ile yapıştırın.',
         'quickAdd.placeholder': 'Bir görev ekleyin… @context +Project #tag',
         'quickAdd.inputLabel': 'Hızlı ekleme',
         'quickAdd.inputHint': 'Bir görev yazın ve kaydetmek için Enter tuşuna basın.',

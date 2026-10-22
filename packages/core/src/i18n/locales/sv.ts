@@ -225,6 +225,7 @@ export const svOverrides: Record<string, string> = {
         'quickAdd.pastedImagesAttached': '{{count}} bilder bifogade',
         'quickAdd.inlineHint': 'Prova: Ring mamma /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hjälp för Snabbtillägg-syntax',
+        'quickAdd.pasteImagesHint': 'Klistra in bilder eller skärmbilder med {{shortcut}} för att bifoga dem.',
         'quickAdd.placeholder': 'Lägg till en uppgift… använd @context +Project #tag',
         'quickAdd.addAnother': 'Lägg till en till',
         'quickAdd.inputLabel': 'Uppgiftens titel',

@@ -141,6 +141,7 @@ export const ptOverrides: Record<string, string> = {
         'quickAdd.example': 'Exemplo: Ligue para a mãe /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tente: Ligue para a mãe /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Ajuda da sintaxe de adição rápida',
+        'quickAdd.pasteImagesHint': 'Cole imagens ou capturas de tela com {{shortcut}} para anexá-las.',
         'quickAdd.placeholder': 'Adicione uma tarefa… use @context +Project #tag',
         'quickAdd.inputLabel': 'Adição rápida',
         'quickAdd.inputHint': 'Digite uma tarefa e pressione Enter para salvar.',

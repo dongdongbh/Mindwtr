@@ -135,6 +135,7 @@ export const ruOverrides: Record<string, string> = {
         'quickAdd.example': 'Пример: Позвонить маме /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Например: Позвонить маме /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Справка по синтаксису быстрого добавления',
+        'quickAdd.pasteImagesHint': 'Вставьте изображения или снимки экрана сочетанием {{shortcut}}, чтобы прикрепить их.',
         'quickAdd.placeholder': 'Добавьте задачу… используйте @context +Project #tag',
         'quickAdd.inputLabel': 'Быстрое добавление',
         'quickAdd.inputHint': 'Введите задачу и нажмите клавишу ввода, чтобы сохранить.',

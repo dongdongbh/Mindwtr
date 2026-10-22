@@ -222,6 +222,7 @@ export const esOverrides: Record<string, string> = {
 'quickAdd.pastedImagesAttached': "{{count}} imágenes adjuntadas",
 'quickAdd.inlineHint': "Prueba: Llamar a mamá /due:tomorrow 5pm @phone #family",
 'quickAdd.syntaxHelp': "Ayuda de sintaxis de captura rápida",
+'quickAdd.pasteImagesHint': 'Pega imágenes o capturas de pantalla con {{shortcut}} para adjuntarlas.',
 'quickAdd.placeholder': "Añade una tarea… usa @context +Project #tag",
 'quickAdd.addAnother': "Añadir otra",
 'quickAdd.inputLabel': "Título de la tarea",

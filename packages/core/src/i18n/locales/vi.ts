@@ -214,6 +214,7 @@ export const viOverrides: Record<string, string> = {
         // Quick Add
         'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
         'quickAdd.example': 'Ví dụ: Gọi cho mẹ /start:tomorrow /due:tomorrow 5pm @phone #family',
+        'quickAdd.pasteImagesHint': 'Dán hình ảnh hoặc ảnh chụp màn hình bằng {{shortcut}} để đính kèm.',
         'quickAdd.placeholder': 'Thêm nhiệm vụ… dùng @ngữ cảnh +Dự án #thẻ',
         'quickAdd.addAnother': 'Thêm cái khác',
         'quickAdd.inputLabel': 'Tiêu đề nhiệm vụ',

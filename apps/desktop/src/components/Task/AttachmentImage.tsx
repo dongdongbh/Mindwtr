@@ -5,6 +5,7 @@ import { inferAttachmentMimeTypeFromUri } from '../../lib/attachment-mime';
 import { normalizeAttachmentPathForUrl, resolveAttachmentReadPath } from '../../lib/attachment-paths';
 import { isTauriRuntime } from '../../lib/runtime';
 import { fetchWebCloudAttachmentBlob } from '../../lib/web-attachment-source';
+import { getStagedWebAttachmentPreviewUrl } from '../../lib/web-attachment-upload';
 import { resolveAttachmentSource } from './task-item-attachment-utils';
 
 type AttachmentImageProps = {
@@ -60,6 +61,12 @@ export function AttachmentImage({ attachment, alt, className, unavailableText }:
         if (!isTauriRuntime()) {
             if (attachment.uri) {
                 setSrc(resolveAttachmentSource(attachment.uri));
+                return () => undefined;
+            }
+            // Not uploaded yet: the draft still holds the pasted File (#1433).
+            const stagedUrl = !attachment.cloudKey ? getStagedWebAttachmentPreviewUrl(attachment.id) : undefined;
+            if (stagedUrl) {
+                setSrc(stagedUrl);
                 return () => undefined;
             }
             // No filesystem in the web build: the bytes can only come from a self-hosted

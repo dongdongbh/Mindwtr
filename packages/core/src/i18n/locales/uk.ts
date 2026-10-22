@@ -246,6 +246,7 @@ export const ukOverrides: Record<string, string> = {
     "quickAdd.pastedImagesAttached": "Додано {{count}} зображень",
     "quickAdd.inlineHint": "Спробуйте: Зателефонувати мамі /due:tomorrow 5pm @phone #family",
     "quickAdd.syntaxHelp": "Довідка щодо синтаксису швидкого додавання",
+    "quickAdd.pasteImagesHint": "Вставте зображення або знімки екрана поєднанням {{shortcut}}, щоб прикріпити їх.",
     "quickAdd.placeholder": "Додайте завдання… використовуйте @context +Project #tag",
     "quickAdd.addAnother": "Додайте іншу",
     "quickAdd.inputLabel": "Назва завдання",

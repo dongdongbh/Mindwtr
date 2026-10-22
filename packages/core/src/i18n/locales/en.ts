@@ -220,6 +220,7 @@ export const en: Record<string, string> = {
         'quickAdd.pastedImagesAttached': '{{count}} images attached',
         'quickAdd.inlineHint': 'Try: Call mom /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Quick Add syntax help',
+        'quickAdd.pasteImagesHint': 'Paste images or screenshots with {{shortcut}} to attach them.',
         'quickAdd.placeholder': 'Add a task… use @context +Project #tag',
         'quickAdd.addAnother': 'Add another',
         'quickAdd.inputLabel': 'Task title',

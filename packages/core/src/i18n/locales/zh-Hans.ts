@@ -290,6 +290,7 @@ export const zhHans: Record<string, string> = {
         'quickAdd.example': '示例：给妈妈打电话 /due:tomorrow @phone',
         'quickAdd.inlineHint': '试试：给妈妈打电话 /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': '快速添加语法帮助',
+        'quickAdd.pasteImagesHint': '使用 {{shortcut}} 粘贴图片或截图即可添加为附件。',
         'quickAdd.placeholder': '添加任务… 支持 @情境 +项目 #标签',
         'quickAdd.addAnother': '连续添加',
         'quickAdd.audioCaptureLabel': '语音快速记录',

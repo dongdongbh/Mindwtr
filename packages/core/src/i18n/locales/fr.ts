@@ -183,6 +183,7 @@ export const frOverrides: Record<string, string> = {
         'quickAdd.example': 'Exemple : Appeler maman /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Essayez : Appeler maman /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Aide sur la syntaxe d’ajout rapide',
+        'quickAdd.pasteImagesHint': 'Collez des images ou des captures d’écran avec {{shortcut}} pour les joindre.',
         'quickAdd.placeholder': 'Ajouter une tâche… utilisez @context +Project #tag',
         'quickAdd.addAnother': 'Ajoutez-en un autre',
         'quickAdd.inputLabel': 'Titre de la tâche',

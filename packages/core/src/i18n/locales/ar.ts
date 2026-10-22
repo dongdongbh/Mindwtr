@@ -138,6 +138,7 @@ export const arOverrides: Record<string, string> = {
         'quickAdd.example': 'مثال: اتصل بأمي /due:tomorrow @phone',
         'quickAdd.inlineHint': 'جرّب: اتصل بأمي /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'مساعدة صيغة الإضافة السريعة',
+        'quickAdd.pasteImagesHint': 'الصق الصور أو لقطات الشاشة باستخدام {{shortcut}} لإرفاقها.',
         'quickAdd.placeholder': 'أضف مهمة... استخدم @context +Project #tag',
         'quickAdd.inputLabel': 'إضافة سريعة',
         'quickAdd.inputHint': 'اكتب مهمة ثم اضغط إدخال للحفظ.',

@@ -179,6 +179,7 @@ export const nlOverrides: Record<string, string> = {
         'quickAdd.example': 'Voorbeeld: Bel mama /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tip: Bel mama /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hulp voor snel toevoegen-syntax',
+        'quickAdd.pasteImagesHint': 'Plak afbeeldingen of screenshots met {{shortcut}} om ze bij te voegen.',
         'quickAdd.placeholder': 'Voeg een taak toe... gebruik @context +Project #tag',
         'quickAdd.inputLabel': 'Snel toevoegen',
         'quickAdd.inputHint': 'Typ een taak en druk op Enter om op te slaan.',
