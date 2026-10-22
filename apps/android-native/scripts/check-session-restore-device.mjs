@@ -131,6 +131,8 @@ try {
     nodes = await start((current) => onTabs(current) && tabSelected(current, en['tab.next']), 'Focus');
     check(tabSelected(nodes, en['tab.next']), '(a) a start whose last screen is older than 25 minutes opens Focus, as RN does');
     setProp('session_age_ms', '');
+    // The app reads session_age_ms once per process: start again, so (b)'s screens are stored with their real time.
+    await start(onTabs, 'the app without the age');
 
     // (b) Someday comes back after a force-stop; Back from it returns to the tabs.
     await openTile(en['someday.title'], en['someday.title']);
