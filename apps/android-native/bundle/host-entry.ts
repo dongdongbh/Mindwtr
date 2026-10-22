@@ -160,7 +160,7 @@ import { createNativeAppleReminderImportOwner } from '../../../packages/core/src
 import { nativePomodoroOwedTaskIds, prepareNativePomodoroTransition, validatePreparedNativePomodoroTransition,
     MAX_NATIVE_POMODORO_PLAN_BYTES, type NativePomodoroRequest } from '../../../packages/core/src/native-pomodoro-session';
 import { NativePomodoroTransitionRefusal } from '../../../packages/core/src/native-request-receipts';
-import { buildNativePomodoroAlarmIntent } from '../../../packages/core/src/native-pomodoro-alarm';
+import { buildNativePomodoroAlarmIntent, buildNativePomodoroLegacyAlert, NATIVE_POMODORO_LATE_LIMIT_MS } from '../../../packages/core/src/native-pomodoro-alarm';
 import { planNativePomodoroAlarmEffects, prepareNativePomodoroAlarmDispatch } from '../../../packages/core/src/native-pomodoro-alarm-effects';
 import { buildNativeAISettingsProjection } from '../../../packages/core/src/native-ai-settings-projection';
 import { createNativeAIRequestTimeoutMethods } from '../../../packages/core/src/native-ai-request-timeout';
@@ -1602,7 +1602,9 @@ const pomodoroJSON = (json: string, maximum = MAX_NATIVE_POMODORO_PLAN_BYTES): u
     try { return JSON.parse(json) as unknown; } catch { throw new Error('INVALID_INPUT: Invalid Pomodoro transport'); }
 };
 const pomodoroAdapter = () => {
-    if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
+    // R2b: native Android shares iOS's durable Pomodoro session, transitions and receipts.
+    if ((globalThis.__mindwtrHostPlatform !== 'ios' && globalThis.__mindwtrHostPlatform !== 'android')
+        || !bootAdapter || getStorageAdapter() !== bootAdapter
         || !bootAdapter.concurrentWritesGuarded || isSandboxMode() || isWorkspaceTransitionActive())
         throw new Error('NOT_READY: Pomodoro requires current validated personal storage');
     return bootAdapter;
@@ -4781,7 +4783,7 @@ globalThis.MindwtrHost = {
                 liveTasks: current.tasks, nowMs: Date.now(), t });
             if (new TextEncoder().encode(JSON.stringify(panel)).byteLength > 1_000_000)
                 throw new Error('INVALID_INPUT: Pomodoro presentation exceeds the bounded native read');
-            logInfo('Native Pomodoro panel state read', { scope: 'native-ios', force: true,
+            if (globalThis.__mindwtrHostPlatform === 'ios') logInfo('Native Pomodoro panel state read', { scope: 'native-ios', force: true,
                 context: { releaseCheck: 'v1.3.5/ios-pomodoro-panel', outcome: panel.kind } });
             return panel;
         });
@@ -4796,6 +4798,49 @@ globalThis.MindwtrHost = {
             logInfo('Native Pomodoro alarm intent read', { scope: 'native-ios', force: true,
                 context: { releaseCheck: 'v1.3.5/ios-pomodoro-alarm-plan', outcome: intent.kind } });
             return intent;
+        });
+    },
+    /**
+     * Android's Pomodoro alarm plan (PomodoroAlarms.kt): core's occurrence planner over Kotlin's inventories (the alarms it
+     * armed whose PendingIntent still exists, and the alerts its receiver showed: the tray plus its delivery ledger). Kotlin
+     * writes `writeAhead` before any effect and `published` after them, as iOS does.
+     */
+    pomodoroAlarmPlan(granted: boolean, raw: string | null, scope: string, pendingJSON: string, deliveredJSON: string): string {
+        return submit(async () => {
+            if (typeof granted !== 'boolean') throw new Error('INVALID_INPUT: Invalid Pomodoro permission');
+            const settings = useTaskStore.getState().settings;
+            // Denial and explicit off must work even when the saved timer cannot be decoded.
+            const session = !granted || settings.gtd?.pomodoro?.completionAlert === false
+                ? null : (await pomodoroAdapter().readPomodoroSession()).raw;
+            const nowMs = Date.now();
+            const intent = buildNativePomodoroAlarmIntent({ raw: session, settings, nowMs,
+                t: (key) => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key });
+            return planNativePomodoroAlarmEffects({ intent, granted, raw, scope, nowMs,
+                pending: pomodoroJSON(pendingJSON, 4 * 1024 * 1024), delivered: pomodoroJSON(deliveredJSON, 4 * 1024 * 1024),
+                android: { deliveryLedger: true, lateLimitMs: NATIVE_POMODORO_LATE_LIMIT_MS } });
+        });
+    },
+    /** Kotlin applied a plan's effects and stored its published record: the tester's line (diagnostics-ledger.md). */
+    pomodoroAlarmSaved(outcome: string): string {
+        return submit(async () => {
+            if (!['scheduled', 'retained', 'cancelled', 'uncertain', 'uninitialized', 'legacy-shown'].includes(outcome))
+                throw new Error('INVALID_INPUT: Invalid Pomodoro alarm outcome');
+            logInfo('Native Android Pomodoro alarm reconciliation saved', { scope: 'native-android', force: true,
+                context: { releaseCheck: 'v1.3.8/native-pomodoro-alarm', outcome } });
+            return {};
+        });
+    },
+    /**
+     * The RN Pomodoro alert owed at the upgrade. `raw`: RN's stored record. `upgradedAtMs`: when this app replaced RN
+     * (PackageInfo.lastUpdateTime, read at the first native start and kept); never firstInstallTime, which is RN's.
+     */
+    pomodoroLegacyAlert(raw: string | null, upgradedAtMs: number): string {
+        return submit(async () => {
+            pomodoroAdapter();
+            if ((raw !== null && typeof raw !== 'string') || !Number.isSafeInteger(upgradedAtMs) || upgradedAtMs <= 0)
+                throw new Error('INVALID_INPUT: Invalid RN Pomodoro record');
+            return buildNativePomodoroLegacyAlert({ raw, settings: useTaskStore.getState().settings, nowMs: Date.now(), upgradedAtMs,
+                t: (key) => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key });
         });
     },
     pomodoroSessionRead(): string {
@@ -5911,7 +5956,9 @@ globalThis.MindwtrHost = {
     iosPomodoroAlarmBegin(token: string): string {
         return submit(async (signal) => {
             requireReminderSignal(signal);
-            if (iosPomodoroAlarmTurn || typeof token !== 'string' || !token || token.length > 128)
+            // iOS's notification-center turn; Android plans through pomodoroAlarmPlan.
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || iosPomodoroAlarmTurn
+                || typeof token !== 'string' || !token || token.length > 128)
                 throw new Error('NOT_READY: Pomodoro alarm turn is unavailable');
             const adapter = pomodoroAdapter(), before = useTaskStore.getState();
             const generation = getPersistenceStatus().generation;

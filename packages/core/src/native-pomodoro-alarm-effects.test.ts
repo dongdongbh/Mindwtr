@@ -176,6 +176,65 @@ describe('native Pomodoro alarm effect ownership', () => {
     });
 });
 
+describe('native Android Pomodoro alarms (delivery ledger)', () => {
+    // Android's receiver records each alert it shows before posting it, and Kotlin reports those as delivered even after a
+    // dismissal: an occurrence in neither inventory was never shown, so it is shown now, as RN's boot receiver and immediate
+    // path do, but never more than 24 h late (RN's discardStaleOneShot).
+    const android = { deliveryLedger: true as const, lateLimitMs: 24 * 60 * 60 * 1000 };
+
+    it.each(['attempted', 'confirmed'] as const)('shows a %s occurrence that is due and in neither inventory', (status) => {
+        const intent = scheduleIntent(now - 60_000), raw = rawState(receipt(intent, status));
+        const result = plan({ intent, raw, android });
+        expect(result.schedule).toEqual({ ...intent, immediate: true, observedAtMs: now });
+        expect(result.outcome).toBe('scheduled');
+        expect(result.published).toBe(rawState({ ...receipt(intent), immediate: true }));
+    });
+
+    it('does not show an occurrence the ledger reports as delivered', () => {
+        const intent = scheduleIntent(now - 60_000), raw = rawState(receipt(intent, 'attempted'));
+        const result = plan({ intent, raw, android, delivered: [observation(intent)] });
+        expect(result.schedule).toBeNull();
+        expect(result.published).toBe(rawState(receipt(intent)));
+    });
+
+    it('never shows an occurrence more than 24 h late', () => {
+        const intent = scheduleIntent(now - 24 * 60 * 60 * 1000 - 1), raw = rawState(receipt(intent));
+        for (const input of [{ raw }, { raw: null }]) {
+            const result = plan({ intent, android, ...input });
+            expect(result.schedule).toBeNull();
+            expect(result.outcome).toBe('retained');
+        }
+        expect(plan({ intent: scheduleIntent(now - 24 * 60 * 60 * 1000), android }).schedule).not.toBeNull();
+    });
+
+    it.each(['pending', 'delivered'] as const)('never shows again an occurrence in the %s inventory, even when it is late', (inventory) => {
+        for (const fireAtMs of [now - 60_000, now - 25 * 60 * 60 * 1000]) {
+            const intent = scheduleIntent(fireAtMs), raw = rawState(receipt(intent, 'attempted'));
+            const result = plan({ intent, raw, android, [inventory]: [observation(intent)] });
+            expect(result.schedule).toBeNull();
+            expect(result.published).toBe(rawState(receipt(intent)));
+        }
+    });
+
+    it('never shows the failed arm of a phase that moved on', () => {
+        const old = scheduleIntent(now - 60_000), next = scheduleIntent(now + 300_000, 'break');
+        const result = plan({ intent: next, raw: rawState(receipt(old, 'attempted')), android });
+        expect(result.schedule).toEqual(next);
+        expect(result.published).toBe(rawState(receipt(next)));
+    });
+
+    it('refuses a malformed ledger option', () => {
+        for (const bad of [{ deliveryLedger: false, lateLimitMs: 1 }, { deliveryLedger: true, lateLimitMs: 0 },
+            { deliveryLedger: true, lateLimitMs: 1.5 }, { deliveryLedger: true }, { deliveryLedger: true, lateLimitMs: 1, extra: 1 }])
+            expect(() => plan({ android: bad as never })).toThrow();
+    });
+
+    it('keeps iOS\'s rule without the ledger: an absent due occurrence is never sent twice', () => {
+        const intent = scheduleIntent(now - 60_000), raw = rawState(receipt(intent, 'attempted'));
+        expect(plan({ intent, raw }).schedule).toBeNull();
+    });
+});
+
 describe('native Pomodoro alarm closed state and inventory validation', () => {
     it('refuses malformed state shapes, receipts, bounds and duplicate scopes without planning effects', () => {
         const good = { version: 1, libraries: [{ scope, alarm: receipt() }] };

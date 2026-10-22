@@ -5479,8 +5479,17 @@ const poll = async (state, id) => {
     assert.equal(state.pomodoroInputs.length, before, 'countdown/paused observation commits nothing');
     state.pomodoroReadError = true;
     assert.equal((await poll(state, state.MindwtrHost.pomodoroTransitionPrepare(reconcile))).ok, false, 'read failure never means native absence');
+    // R2b: native Android reads the same durable session, and plans its own alarms (iOS's notification turn stays iOS's).
     const android = await ready520('android');
-    assert.equal((await poll(android, android.MindwtrHost.pomodoroSessionRead())).ok, false);
+    const androidRead = await poll(android, android.MindwtrHost.pomodoroSessionRead());
+    assert.equal(androidRead.ok, true, 'native Android reads the durable Pomodoro session');
+    assert.equal(androidRead.value.raw, null);
+    const androidScope = 'tech.dongdongbh.mindwtr.nativeclient:' + 'a'.repeat(64);
+    const androidPlan = await poll(android, android.MindwtrHost.pomodoroAlarmPlan(true, null, androidScope, '[]', '[]'));
+    assert.equal(androidPlan.ok, true, 'native Android plans its Pomodoro alarm');
+    assert.equal(androidPlan.value.outcome, 'uninitialized');
+    assert.equal((await poll(android, android.MindwtrHost.pomodoroLegacyAlert(null, Number.NaN))).ok, false,
+        'the RN alert owed at the upgrade needs a real upgrade time');
     const raw = await ready520('ios', 'auto');
     const task = { id: 'task', title: 'Private', status: 'next', contexts: [], tags: [],
         createdAt: '2026-10-10T00:00:00.000Z', updatedAt: '2026-10-10T00:00:00.000Z', rev: 1,
@@ -5631,7 +5640,8 @@ const poll = async (state, id) => {
         'existing native session cannot fall back to legacy');
     assert.equal((await poll(absent, absent.MindwtrHost.pomodoroTransitionCommit(absence.value.planJSON, true))).value.replayed, true);
     assert.deepEqual(JSON.parse(absent.pomodoroInputs.at(-1)), [absentPlan, { replayOnly: true }]);
-    assert.equal((await poll(android, android.MindwtrHost.pomodoroTransitionPrepare(JSON.stringify(adoption())))).ok, false);
+    // R2b: native Android adopts RN's stored session too (its first start).
+    assert.equal((await poll(android, android.MindwtrHost.pomodoroTransitionPrepare(JSON.stringify(adoption())))).ok, true);
     for (const autoStartFocus of [false, true]) for (const autoStartBreaks of [false, true]) {
         const active = await ready520('ios', 'auto');
         active.fakeData = { ...active.fakeData, tasks: [task], settings: { deviceId: task.revBy } };

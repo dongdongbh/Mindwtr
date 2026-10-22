@@ -58,12 +58,22 @@ function observations(value: unknown): NativePomodoroAlarmObservation[] {
     return value as NativePomodoroAlarmObservation[];
 }
 
+/**
+ * Android's receiver records each alert in a durable ledger before posting it, and the host reports those as delivered
+ * even after a dismissal. An occurrence in neither inventory was then never shown, so it may be shown even at or after its
+ * deadline (RN's immediate path and its boot receiver), never more than `lateLimitMs` late (RN's 24 h discardStaleOneShot).
+ */
+export type NativePomodoroAlarmLedger = { deliveryLedger: true; lateLimitMs: number };
+
 /** No OS effects: native publishes each exact state before advancing to the corresponding effect. */
 export function planNativePomodoroAlarmEffects(input: {
     intent: Intent; granted: boolean; raw: string | null; scope: string;
-    pending: unknown; delivered: unknown; nowMs: number;
+    pending: unknown; delivered: unknown; nowMs: number; android?: NativePomodoroAlarmLedger;
 }) {
     if (!scopeValid(input.scope) || typeof input.granted !== 'boolean' || !instant(input.nowMs)) return invalid();
+    const ledger = input.android;
+    if (ledger !== undefined && (!record(ledger) || !exact(ledger, ['deliveryLedger', 'lateLimitMs'])
+        || ledger.deliveryLedger !== true || !Number.isSafeInteger(ledger.lateLimitMs) || ledger.lateLimitMs <= 0)) return invalid();
     const state = readState(input.raw), pending = observations(input.pending), delivered = observations(input.delivered);
     const all = new Map<string, NativePomodoroAlarmObservation>();
     for (const observation of [...pending, ...delivered]) {
@@ -94,7 +104,10 @@ export function planNativePomodoroAlarmEffects(input: {
         if (found) {
             next = { sessionID: intent.sessionID, phase: intent.phase, fireAtMs: intent.fireAtMs,
                 immediate: held ? prior!.immediate : intent.immediate, status: 'confirmed' };
-        } else if (attemptedNearDeadline) {
+        } else if (ledger && input.nowMs - intent.fireAtMs > ledger.lateLimitMs) {
+            // Too late to show: the alert is dropped, as RN's library drops a one-shot more than 24 h late.
+            outcome = 'retained';
+        } else if (attemptedNearDeadline && !ledger) {
             // An empty tray can mean dismissal or a crash after add; neither authorizes a second immediate attempt.
             outcome = prior!.status === 'attempted' ? 'uncertain' : 'retained';
         } else {
