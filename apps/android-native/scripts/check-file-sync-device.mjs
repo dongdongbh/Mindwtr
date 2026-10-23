@@ -608,7 +608,10 @@ try {
     await sleep(5_000);
     check(commands('pickSyncFolder', since) === 1, `(3b) the recreated Sync screen answered Select Folder once (${commands('pickSyncFolder', since)})`);
     check(rkStorage()['@mindwtr_sync_path'] === syncPath && persistedGrant(`Download%2F${FOLDER}`), '(3b) it stored the same folder, its grant kept');
-    check(cycles(since).some((line) => line.outcome === 'synced'), '(3b) the pick synced the folder');
+    // The recreated app's boot starts a cycle of its own, which can hold the lock when the pick lands: the pick then answers
+    // core's busy notice (as RN's does) and the folder syncs in the next cycle (batch-final-3, 10-23: 6.5 s after the pick).
+    await until('a synced cycle of the picked folder', () => cycles(since).some((line) => line.outcome === 'synced'), 60_000, 1_000);
+    check(true, `(3b) the folder synced after the pick (the pick's toasts: ${toastsOf('pickSyncFolder', since).join(' / ') || 'none'})`);
 
     // (4) The folder lock against a second holder.
     const lockInode = inode('.mindwtr.lock');
