@@ -1722,8 +1722,13 @@ mod tests {
         let worker = std::thread::spawn(move || {
             wait_callback(listener, "expected", Duration::from_secs(3), || Ok(()))
         });
+        let mut queued = None;
         for state in ["wrong", "expected"] {
             let mut stream = TcpStream::connect(address).unwrap();
+            if state == "expected" {
+                // Queue before completion so another test cannot reuse the closed listener's port.
+                queued = Some(TcpStream::connect(address).unwrap());
+            }
             write!(
                 stream,
                 "GET /oauth2/callback?state={state}&code=one HTTP/1.1\r\nHost: {address}\r\n\r\n"
@@ -1738,7 +1743,15 @@ mod tests {
             }));
         }
         assert_eq!(worker.join().unwrap().unwrap(), "one");
-        assert!(TcpStream::connect(address).is_err());
+        let mut queued = queued.unwrap();
+        queued
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        assert!(match queued.read(&mut [0; 1]) {
+            Ok(0) => true,
+            Err(err) => err.kind() == std::io::ErrorKind::ConnectionReset,
+            Ok(_) => false,
+        });
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let address = listener.local_addr().unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));
