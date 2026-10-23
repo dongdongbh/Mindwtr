@@ -265,6 +265,10 @@ class MindwtrTheme(val colors: ThemeColors, val isDark: Boolean, val isMaterial:
     val composerScrim = rgba(0, 0, 0, 0.55f)
     /** RN's themed alert backdrop (components/themed-alert.tsx), rgba(0,0,0,0.58). */
     val alertScrim = rgba(0, 0, 0, 0.58f)
+    /** RN's startup prompt window's backdrop (app-announcement-modal.tsx), rgba(0,0,0,0.42). */
+    val announcementScrim = rgba(0, 0, 0, 0.42f)
+    /** RN's welcome sheet's backdrop (MobileOnboardingFlow.tsx), rgba(2,6,23,0.68). */
+    val onboardingScrim = rgba(2, 6, 23, 0.68f)
     /** Core's calendar tone (CalendarTone) as RN paints it; `source` is an event's calendar color; `none` is null. */
     fun calendarTone(value: String?, source: Color? = null): Color? = when (value) {
         "tint" -> colors.tint; "danger" -> colors.danger; "secondary" -> colors.secondaryText; "text" -> colors.text; "input" -> colors.inputBg

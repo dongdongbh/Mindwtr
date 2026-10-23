@@ -68,6 +68,10 @@ object Lucide {
     val ChevronDown = lucide("ChevronDown", "m6 9 6 6 6-6", stroke = 2.2f)
     val ChevronRight = lucide("ChevronRight", "m9 18 6-6-6-6", stroke = 2.2f)
     val X = lucide("X", "M18 6 6 18", "m6 6 12 12")
+    /** The startup prompt window's icon and the welcome sheet's Import tasks (app-announcement-modal.tsx, MobileOnboardingFlow.tsx). */
+    val Megaphone = lucide("Megaphone", "M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
+        "M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14", "M8 6v8", stroke = 2.2f)
+    val Download = lucide("Download", "M12 15V3", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "m7 10 5 5 5-5", stroke = 2.2f)
     val RotateCcw = lucide("RotateCcw", "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
     val ArrowRight = lucide("ArrowRight", "M5 12h14", "m12 5 7 7-7 7")
     val CircleDot = lucide("CircleDot", circle(12, 12, 10), circle(12, 12, 1))

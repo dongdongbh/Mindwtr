@@ -789,9 +789,11 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
 type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
     | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'savedSearchDelete'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
-    | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | DataCommand;
+    | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | DataCommand | StartupPromptCommand;
 /** Settings › Data's own write (DataTransfer.kt's DATA_COMMANDS): Getting Started's seed, journaled with its frozen language. */
 type DataCommand = 'gettingStarted';
+/** The startup prompts' own write (StartupPrompts.kt's STARTUP_PROMPT_COMMANDS): the donation ask's synced record. */
+type StartupPromptCommand = 'supportPromptShown';
 /** Settings › Sync's screen commands: never journaled (core's NATIVE_UNJOURNALED_COMMANDS), sent by CoreHost.syncCommand. */
 type SyncScreenCommand = 'openSyncSettings' | 'closeSyncSettings' | 'selectSyncBackend' | 'saveSyncBackend' | 'syncNow' | 'testSyncConnection'
     | 'pickSyncFolder' | 'connectDropbox' | 'disconnectDropbox' | 'runSyncEncryptionAction';
@@ -1348,6 +1350,8 @@ const CALENDAR_REQUESTS: Record<string, (input: never) => Promise<Reply> | Reply
 /** The Menu tab's commands, by their diagnostic operation: each passes Kotlin's input (its request or capture UUID included) unchanged. */
 const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply>> = {
     activateProject: (input) => contract.activateProject(input),
+    // The donation ask's synced record (native-host-contract-startup-prompts.ts), with the time the ask showed.
+    supportPromptShown: (input) => contract.supportPromptShown(input),
     somedayMove: (input) => contract.moveSomedayTasksToSection(input),
     somedayUndo: (input) => contract.undoSomedaySectionMove(input),
     somedayTask: (input) => contract.addSomedaySectionTask(input),

@@ -301,6 +301,16 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         settings.push("sync")
     }
 
+    /**
+     * RN's `/settings?settingsScreen=<screen>`: the startup prompt window's feedback (About), and the welcome sheet's Set up sync
+     * and Import tasks (`sync`, `data`) with `onboardingHandoff=1`, which shows their Getting Started card for this visit.
+     */
+    fun openSettingsScreen(screen: String, onboardingHandoff: Boolean = false) {
+        open(MenuScreen.Settings)
+        settings.push(screen)
+        if (onboardingHandoff) settings.editLocal { put("onboardingHandoff", true) }
+    }
+
     /** An AI toast's Open (RN's `/settings?settingsScreen=ai`): Settings › AI. */
     fun openAISettings() {
         open(MenuScreen.Settings)

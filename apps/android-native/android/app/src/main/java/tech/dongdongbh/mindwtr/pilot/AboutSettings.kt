@@ -186,7 +186,7 @@ class AboutSettingsModel(private val menu: MenuModel) {
         val visit: Int = 0,
     )
 
-    private fun installerSource(runtime: CoreHost): String = installer ?: run {
+    internal fun installerSource(runtime: CoreHost): String = installer ?: run {
         val referrer = if (stubbed) debugProperty("about_referrer") else PlayServices.installReferrer(app)
         val installing = if (stubbed) debugProperty("about_installer").ifEmpty { null } else installingPackage()
         runtime.menuRead("aboutInstallerSource", JSONObject().put("referrer", referrer ?: JSONObject.NULL)

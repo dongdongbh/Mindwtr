@@ -1837,7 +1837,7 @@ export function createNativeHostContract(options: {
         // Settings › About, the heartbeat and the store review prompt: native-host-contract-about.ts.
         ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
         // The startup prompts after the boot (onboarding, announcement, update reminder, donation): native-host-contract-startup-prompts.ts.
-        ...createStartupPromptMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
+        ...createStartupPromptMethods({ readiness, save, t: () => translate, language: () => language, host: () => options.about ?? null }),
         ...createSettingsMethods({
             readiness,
             save,

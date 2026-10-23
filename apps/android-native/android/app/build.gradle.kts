@@ -32,6 +32,8 @@ val rnFeedbackUrl = (System.getenv("FEEDBACK_ENDPOINT_URL") ?: "").trim()
 val rnHeartbeatUrl = if (System.getenv("ANALYTICS_HEARTBEAT_DISABLED") in setOf("1", "true")) "" else
     (System.getenv("ANALYTICS_HEARTBEAT_URL") ?: "").trim().ifEmpty { "https://mindwtr-analytics.mindwtr.workers.dev/" }
 val rnHeartbeatChannel = System.getenv("ANALYTICS_HEARTBEAT_CHANNEL")
+// RN's donation ask (app.config.ts DONATION_PROMPT_ENABLED, on in release-android.yml): only a release with it set asks.
+val rnDonationPrompt = System.getenv("DONATION_PROMPT_ENABLED") in setOf("1", "true")
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 // Each build type's package (defaultConfig's for debug, the benchmarks' with their suffix; upgradetest's and release's are set in
@@ -72,6 +74,7 @@ android {
         buildConfigField("String", "ANALYTICS_HEARTBEAT_URL", "\"\"")
         // RN's File Sync lock JNI (apps/mobile/modules/sync-file-lock), with RN's C++ flags.
         externalNativeBuild { cmake { cppFlags += "-std=c++17 -Wall -Wextra -Werror" } }
+        buildConfigField("boolean", "DONATION_PROMPT", "false")
     }
 
     // RN's File Sync lock C++ (stable_root_lock.cpp, file_compat_lock.cpp), built from RN's CMakeLists.txt as RN builds it
@@ -85,6 +88,7 @@ android {
         getByName("release") {
             buildConfigField("boolean", "RN_STORAGE", "true")
             buildConfigField("String", "ANALYTICS_HEARTBEAT_URL", quoted(rnHeartbeatUrl))
+            buildConfigField("boolean", "DONATION_PROMPT", rnDonationPrompt.toString())
             launcherIdentity()
         }
         // Upgrade harness only (scripts/check-upgrade-device.mjs): installs in place over the
@@ -106,6 +110,7 @@ android {
             isProfileable = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             buildConfigField("String", "ANALYTICS_HEARTBEAT_URL", "\"\"")
+            buildConfigField("boolean", "DONATION_PROMPT", "false")
             launcherIdentity()
         }
         // The benchmark's debuggable twin (same id and key): installed first so run-as can seed a database, then the

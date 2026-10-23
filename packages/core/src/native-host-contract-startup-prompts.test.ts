@@ -77,6 +77,22 @@ const settledUser = () => JSON.stringify(recordPromptActivity(recordPromptActivi
 const longTimeUser = () => JSON.stringify(Array.from({ length: 25 }, (_, day) => Date.now() - (40 - day) * DAY_MS)
     .reduce((state, at) => recordPromptActivity(state, at), {}));
 
+describe('native host contract: the donation ask\'s synced record', () => {
+    it('writes settings.supportPrompt once per request, with the time the ask showed', async () => {
+        const contract = await openContract(device());
+        const shownAt = '2026-10-22T10:00:00.000Z';
+        const requestId = '0b6f8d0e-7c55-4a8e-9b1a-3d2f8f0c1a77';
+        expect(value(await contract.supportPromptShown({ requestId, shownAt }))).toEqual({ changed: true });
+        expect(useTaskStore.getState().settings.supportPrompt?.lastShownAt).toBe(shownAt);
+        // A replay of the same request answers from its receipt and writes nothing new.
+        useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, supportPrompt: { lastShownAt: '2026-10-23T00:00:00.000Z' } } } as never);
+        expect(value(await contract.supportPromptShown({ requestId, shownAt }))).toEqual({ changed: true });
+        expect(useTaskStore.getState().settings.supportPrompt?.lastShownAt).toBe('2026-10-23T00:00:00.000Z');
+        expect((await contract.supportPromptShown({ requestId: 'not-a-uuid', shownAt })).ok).toBe(false);
+        expect((await contract.supportPromptShown({ requestId: '1b6f8d0e-7c55-4a8e-9b1a-3d2f8f0c1a77', shownAt: 'soon' })).ok).toBe(false);
+    });
+});
+
 describe('native host contract: startup prompts', () => {
     afterEach(() => {
         vi.useRealTimers();

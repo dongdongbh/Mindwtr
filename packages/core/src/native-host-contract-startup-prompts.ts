@@ -5,8 +5,8 @@
  * (startup-prompt-run.ts); the host draws the prompt and opens links.
  *
  * Both requests write only RN's device keys (the prompt state, the onboarding and announcement dismissals), never the
- * store: the donation ask's synced record (settings.supportPrompt) is a journaled command of its own (pass O2f, with its Kotlin
- * sender), written with the `shownAt` that `startupPromptAction` returns, as RN writes both with one time.
+ * store: the donation ask's synced record (settings.supportPrompt) is the journaled supportPromptShown, sent by the host with
+ * the `shownAt` that `startupPromptAction` returns, as RN writes both with one time.
  */
 import type { AndroidInstallerSource } from './about-settings-model';
 import { ACTIVE_APP_ANNOUNCEMENT, APP_ANNOUNCEMENT_DISMISSED_VALUE, getAnnouncementDismissalStorageKey, type AppAnnouncement } from './announcements';
@@ -28,6 +28,7 @@ import { coerceSupportedBackend, resolveBackend } from './mobile-sync-utils';
 import type { NativeAboutHost } from './native-host-contract-about';
 import type { NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord } from './native-host-contract-menu-views';
+import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
 import { isSandboxMode } from './sandbox';
 import { runStartupPromptsOnce } from './startup-prompt-run';
 import { useTaskStore } from './store';
@@ -38,11 +39,13 @@ import {
     recordLocalPromptActivity,
     recordUpdateReminderDismissed,
     updateLocalUserPromptState,
+    withSupportPromptShown,
     type UserPromptState,
 } from './user-prompts';
 
 type Deps = {
     readiness: () => NativeHostResult<null>;
+    save: () => Promise<NativeHostResult<null>>;
     t: () => (key: string) => string;
     /** The app language: Start using Mindwtr seeds Getting Started in it (the journaled gettingStarted command). */
     language: () => string;
@@ -74,6 +77,7 @@ const ACTIONS = new Set<string>(['dismiss', 'act', 'shown']);
 const unavailable = () => fail('ACTION_FAILED', 'Startup prompts are not available on this host');
 
 export function createStartupPromptMethods(deps: Deps) {
+    const receipts = createNativeRequestReceipts({ save: deps.save });
     // The session (this process), as RN's queue keeps it: the prompts already opened, declined or failed, and whether today's
     // activity was recorded.
     const retired = new Set<string>();
@@ -214,6 +218,26 @@ export function createStartupPromptMethods(deps: Deps) {
                 if (id === 'donation') return { ok: true, value: { shownAt: new Date().toISOString() } };
             }
             return { ok: true, value: { shownAt: null } };
+        },
+
+        /**
+         * The donation ask's synced record (#1237, RN's updateSettings of supportPrompt when the window shows), journaled with
+         * the time `startupPromptAction` returned, so a replay writes the same value and the other installs skip the ask.
+         */
+        async supportPromptShown(input: unknown): Promise<NativeHostResult<{ changed: boolean }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const shownAtMs = isObjectRecord(input) && typeof input.shownAt === 'string' ? Date.parse(input.shownAt) : Number.NaN;
+            if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !Number.isFinite(shownAtMs)) {
+                return fail('INVALID_INPUT', 'supportPromptShown takes a request UUID and the time the ask showed');
+            }
+            return receipts.run<{ changed: boolean }>(input.requestId, JSON.stringify(['supportPromptShown', input.shownAt]), async () => {
+                const written = await runStoreWrite(() => {
+                    const { settings, updateSettings } = useTaskStore.getState();
+                    return updateSettings({ supportPrompt: withSupportPromptShown(settings.supportPrompt, shownAtMs) });
+                });
+                return settleWrite(written, { changed: true });
+            });
         },
     };
 }

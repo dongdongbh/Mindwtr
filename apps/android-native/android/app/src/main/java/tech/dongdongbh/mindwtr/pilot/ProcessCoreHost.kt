@@ -175,14 +175,13 @@ internal object ProcessCoreHost {
     private val aboutStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /**
-     * Once per process, when a screen first shows (RN's root layout at first paint, never a headless run): today counts as an
-     * active day for the prompts, then the day's anonymous heartbeat (core decides whether one goes: the build, the setting, the
-     * day). Off the main thread; a failure only logs, as RN keeps both silent.
+     * Once per process, when a screen first shows (RN's root layout at first paint, never a headless run): the day's anonymous
+     * heartbeat (core decides whether one goes: the build, the setting, the day). The prompts' active day is the startup prompts'
+     * first ask (StartupPromptsModel). Off the main thread; a failure only logs, as RN keeps it silent.
      */
     fun aboutStartup(runtime: CoreHost) {
         if (!aboutStarted.compareAndSet(false, true)) return
         Thread({
-            runCatching { runtime.aboutRequest("recordAboutPromptActivity", "{}") }.onFailure { Log.w(CoreHost.TAG, "Prompt activity not recorded ${failureForLog(it)}") }
             runCatching { runtime.aboutRequest("sendAboutHeartbeat", "{}") }
                 .onSuccess { Log.i(CoreHost.TAG, "Native Android heartbeat sent=${it.optBoolean("sent")}") }
                 .onFailure { Log.w(CoreHost.TAG, "Native Android heartbeat failed ${failureForLog(it)}") }

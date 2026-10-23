@@ -890,7 +890,7 @@ assert.match(model, /keepEditor\(current\.assignWaiting\(person\)\)\s+editFields
 // One host per process: the Activity and ViewModel never close it, and only the owner constructs it.
 // The ViewModel's only onCleared stops its sync event listener (ProcessCoreHost keeps the listeners), the entry router's
 // file-share staging thread (EntryRouter.close) and the last screen's store thread (pass O2b); it closes no host.
-const listenerOnly = /\n    override fun onCleared\(\) \{\n        ProcessCoreHost\.unlistenSync\(syncListener\)\n        entries\.close\(\)\n        routeWrites\.shutdown\(\)\n        super\.onCleared\(\)\n    \}\n/;
+const listenerOnly = /\n    override fun onCleared\(\) \{\n        ProcessCoreHost\.unlistenSync\(syncListener\)\n        entries\.close\(\)\n        routeWrites\.shutdown\(\)\n        prompts\.shutdown\(\)\n        super\.onCleared\(\)\n    \}\n/;
 assert.match(model, listenerOnly);
 for (const file of [activity, model.replace(listenerOnly, '\n'), editorUi, focusUi, projectsUi, labelsKt, rowUi, areaUi, viewStateKt, searchUi, processUi, captureUi, captureModalUi, captureModalModel, menuModel, ...Object.values(menuScreens)]) {
     assert.doesNotMatch(file, /close\(|onDestroy|onCleared|CoreHost\(/);
@@ -1310,7 +1310,9 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // Settings › Calendar (pass C3): an edit the view gave (a receipt of its own), and a new subscription (never journaled).
         'setCalendarSetting', 'addCalendarFeed',
         // Settings › Data's Getting Started (pass D1b): the seed and its receipt in one transaction, frozen language.
-        'seedGettingStarted'];
+        'seedGettingStarted',
+        // The donation ask's synced record (pass O2f), with the time the ask showed.
+        'supportPromptShown'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -2283,9 +2285,12 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     }
     // Settings › Data's own (pass D1b): Getting Started's seed, sent by DataTransfer.kt.
     const dataKinds = [.../val DATA_COMMANDS = setOf\(([^)]*)\)/.exec(source('DataTransfer.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    assert.deepEqual(hostKinds.sort(), [...kinds, ...syncKinds, ...aiKinds, ...calendarKinds, ...attachmentKinds, ...projectDetailKinds, ...dataKinds].sort(), 'every menu command kind is one host command, logged as its operation');
-    assert.match(hostEntry, new RegExp(`type MenuCommand = ${kinds.map((kind) => `'${kind}'`).join('\\s*\\| ')}\\s*\\| SyncScreenCommand \\| AIScreenCommand \\| CalendarScreenCommand \\| AttachmentCommand \\| ProjectDetailCommand \\| DataCommand;`));
+    // The startup prompts' own (pass O2f): the donation ask's synced record, sent by StartupPrompts.kt.
+    const promptKinds = [.../val STARTUP_PROMPT_COMMANDS = setOf\(([^)]*)\)/.exec(source('StartupPrompts.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
+    assert.deepEqual(hostKinds.sort(), [...kinds, ...syncKinds, ...aiKinds, ...calendarKinds, ...attachmentKinds, ...projectDetailKinds, ...dataKinds, ...promptKinds].sort(), 'every menu command kind is one host command, logged as its operation');
+    assert.match(hostEntry, new RegExp(`type MenuCommand = ${kinds.map((kind) => `'${kind}'`).join('\\s*\\| ')}\\s*\\| SyncScreenCommand \\| AIScreenCommand \\| CalendarScreenCommand \\| AttachmentCommand \\| ProjectDetailCommand \\| DataCommand \\| StartupPromptCommand;`));
     assert.match(hostEntry, new RegExp(`type DataCommand = ${dataKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
+    assert.match(hostEntry, new RegExp(`type StartupPromptCommand = ${promptKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type ProjectDetailCommand = ${projectDetailKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${projectDetailKinds.join('|')})"`), 'the Menu tab never sends a Project details command itself');
     // A Project details edit is the user's intent, journaled at once before anything else (CoreHost.journalAhead), then sent
@@ -3330,7 +3335,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /if \(failure != null && lifecycle\.head == entry\.id\) failed\(entry, "Staging failed"\) else pump\(\)/);
     assert.match(entryKt, /shell\.coreHost\(\)\?\.logLine\("Native file share staging failed releaseCheck=v1\.3\.7\/native-share-files", context\)/);
     assert.match(entryKt, /override fun authority\(uri: String\): String\? = Uri\.parse\(uri\)\.authority/);
-    assert.match(model, /entries\.close\(\)\s+routeWrites\.shutdown\(\)\s+super\.onCleared\(\)/);
+    assert.match(model, /entries\.close\(\)\s+routeWrites\.shutdown\(\)\s+prompts\.shutdown\(\)\s+super\.onCleared\(\)/);
     // Closing stops staging and drops every main-thread job of the router (a retry, a staging's completion): EntryThreads, JVM-tested.
     assert.match(entryKt, /fun close\(\) \{\s+threads\.close\(\)\s+\}/);
     assert.match(entryKt, /EntryThreads\(\{ delayMs, job -> main\.postDelayed\(\{ job\(\) \}, delayMs\) \}, \{ main\.removeCallbacksAndMessages\(null\) \}\)/);

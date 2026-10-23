@@ -256,6 +256,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     val lock = AppLock(this)
     /** RN's capture confirmation screen that links, shares and assistant notes open (CaptureModalModel.kt). */
     val captureModal = CaptureModalModel(this, saved, File(app.noBackupFilesDir, "capture-modal"))
+    /** RN's startup prompts (the welcome sheet, the announcement, the update reminder, the donation ask), after the boot. */
+    val prompts = StartupPromptsModel(this)
     /** RN's AI actions: the editor's copilot, Clarify and Break down, Process Inbox's Clarify, the review's analysis (AIActions.kt). */
     val ai = AIActionsModel(this)
     /** The editor's and the project screen's attachments (Attachments.kt): rows, pickers, links, downloads, opening. */
@@ -339,6 +341,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         ProcessCoreHost.unlistenSync(syncListener)
         entries.close()
         routeWrites.shutdown()
+        prompts.shutdown()
         super.onCleared()
     }
 
@@ -408,8 +411,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     if (slowStart) logSlowStart(runtime, "boot")
                     // The boot's held sync start: now when the boot read was this screen's content (not the Inbox, whose first rows
                     // report it: contentShown); a fallback covers an Inbox read that never draws.
-                    // RN's first-paint prompt activity and the day's heartbeat (once per process).
+                    // The day's heartbeat (once per process), and RN's startup prompts: core records the first-paint prompt activity
+                    // first, then answers the prompt to open (the activity has no second writer: review O2e P3-A).
                     ProcessCoreHost.aboutStartup(runtime)
+                    prompts.start(runtime)
                     if (screen != Screen.Inbox) ProcessCoreHost.startDeferredSync()
                     main.postDelayed({ ProcessCoreHost.startDeferredSync("boot-timeout") }, SYNC_FALLBACK_MS)
                     restored?.let { resumeEditor(it, savedDraft.optJSONObject("pending")) }
