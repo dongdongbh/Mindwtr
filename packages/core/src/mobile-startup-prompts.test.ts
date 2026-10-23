@@ -72,6 +72,26 @@ describe('mobile startup prompt rules', () => {
     });
 });
 
+describe('the update reminder in the app language', () => {
+    it('builds its title, body and action from the app words', () => {
+        const words: Record<string, string> = {
+            'updateReminder.title': 'Update verfügbar',
+            'updateReminder.body': 'Mindwtr {{latestVersion}} ist verfügbar. Du nutzt {{currentVersion}}.',
+            'updateReminder.updateNow': 'Jetzt aktualisieren',
+            'updateReminder.viewRelease': 'Release ansehen',
+        };
+        const resolveText = (key: string, fallback: string) => words[key] ?? fallback;
+        const info = { currentVersion: '1.3.7', latestVersion: '1.3.8', latestReleasedAt: null, releaseUrl: 'https://example.test/r' };
+        expect(buildUpdateReminderAnnouncement({ ...info, actionLabel: 'Update now' }, resolveText)).toEqual({
+            id: 'update-reminder-1.3.8',
+            title: 'Update verfügbar',
+            body: 'Mindwtr 1.3.8 ist verfügbar. Du nutzt 1.3.7.',
+            action: { type: 'url', label: 'Jetzt aktualisieren', url: 'https://example.test/r' },
+        });
+        expect(buildUpdateReminderAnnouncement(info, resolveText).action?.label).toBe('Release ansehen');
+    });
+});
+
 describe('buildMobileStartupPromptDescriptors', () => {
     const memoryStorage = () => {
         const values = new Map<string, string>();

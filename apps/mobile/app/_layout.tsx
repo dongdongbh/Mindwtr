@@ -1119,7 +1119,7 @@ function RootLayoutContentInner() {
             onShown={recordDonationPromptVisible}
           />
           <AppAnnouncementModal
-            announcement={updateReminderInfo ? buildUpdateReminderAnnouncement(updateReminderInfo) : null}
+            announcement={updateReminderInfo ? buildUpdateReminderAnnouncement(updateReminderInfo, resolveText) : null}
             visible={startupPromptOpenId === 'update-reminder'}
             onAction={handleUpdateReminderAction}
             onDismiss={dismissUpdateReminder}

@@ -6,6 +6,7 @@ import {
     type AppAnnouncement,
 } from './announcements';
 import { shouldOpenMobileFirstRunOnboarding } from './first-run-onboarding';
+import { formatI18nTemplate } from './i18n';
 import type { StartupPromptDescriptor } from './startup-prompts';
 import type { SyncBackend } from './sync-service-utils';
 import {
@@ -104,16 +105,30 @@ export const fetchMobileUpdateReminderInfo = async (
     };
 };
 
-export const buildUpdateReminderAnnouncement = (info: MobileUpdateReminderInfo): AppAnnouncement => ({
-    id: `update-reminder-${info.latestVersion}`,
-    title: 'Update available',
-    body: `Mindwtr ${info.latestVersion} is available. You are using ${info.currentVersion}. Update when you have a minute to keep fixes and improvements current.`,
-    action: {
-        type: 'url',
-        label: info.actionLabel ?? VIEW_RELEASE_ACTION_LABEL,
-        url: info.releaseUrl,
-    },
-});
+/** The app's words for [key], or the English [fallback] (RN's translateWithFallback; the default keeps English). */
+type ResolveText = (key: string, fallback: string) => string;
+
+export const buildUpdateReminderAnnouncement = (
+    info: MobileUpdateReminderInfo,
+    resolveText: ResolveText = (_key, fallback) => fallback,
+): AppAnnouncement => {
+    const label = info.actionLabel ?? VIEW_RELEASE_ACTION_LABEL;
+    return {
+        id: `update-reminder-${info.latestVersion}`,
+        title: resolveText('updateReminder.title', 'Update available'),
+        body: formatI18nTemplate(
+            resolveText('updateReminder.body', 'Mindwtr {{latestVersion}} is available. You are using {{currentVersion}}. Update when you have a minute to keep fixes and improvements current.'),
+            { latestVersion: info.latestVersion, currentVersion: info.currentVersion },
+        ),
+        action: {
+            type: 'url',
+            label: label === UPDATE_NOW_ACTION_LABEL
+                ? resolveText('updateReminder.updateNow', label)
+                : label === VIEW_RELEASE_ACTION_LABEL ? resolveText('updateReminder.viewRelease', label) : label,
+            url: info.releaseUrl,
+        },
+    };
+};
 
 export type MobileStartupPromptInput = {
     /** The device's key-value store (RN's AsyncStorage; the native app's RKStorage). */
