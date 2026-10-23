@@ -1092,8 +1092,7 @@ class CoreHost(
             if (call.method == BackupOperations.METHOD) backupFinish(call.entry, call.args.toList(), result, replay = false)
             else if (call.method in WriteJournal.WRITES) settle(call.entry, result, replay = false)
             dropSent(call.method, call.sent)
-            if (!result.getBoolean("ok")) throw IllegalStateException(result.getString("error"))
-            call.done.complete(result.getJSONObject("value"))
+            call.done.complete(replyValue(result))
         } catch (failure: Throwable) {
             call.done.completeExceptionally(failure)
         }
@@ -1197,9 +1196,7 @@ class CoreHost(
         } catch (failure: ExecutionException) {
             throw failure.cause ?: failure
         }
-        val result = JSONObject(answer)
-        if (!result.getBoolean("ok")) throw IllegalStateException(result.getString("error"))
-        return result.getJSONObject("value")
+        return replyValue(JSONObject(answer))
     }
 
     /** A polyfill function the idle pump calls often, kept once per engine (closeOnEngine drops it). */
