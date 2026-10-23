@@ -43,6 +43,7 @@ import {
   buildUpdateReminderAnnouncement,
   buildMobileStartupPromptDescriptors,
   translateDonationPromptAnnouncement,
+  PROMPT_TEST_ANNOUNCEMENT,
   UPDATE_REMINDER_RELEASES_URL,
   UPDATE_NOW_ACTION_LABEL,
   VIEW_RELEASE_ACTION_LABEL,
@@ -206,12 +207,6 @@ const getMobileUpdateTestTarget = (options: {
     return { label: UPDATE_NOW_ACTION_LABEL, url: UPDATE_REMINDER_RELEASES_URL };
   }
   return { label: VIEW_RELEASE_ACTION_LABEL, url: UPDATE_REMINDER_RELEASES_URL };
-};
-
-const PROMPT_TEST_ANNOUNCEMENT: AppAnnouncement = {
-  id: 'prompt-test-announcement',
-  title: 'Test announcement',
-  body: 'This is the temporary announcement template test. It uses the same popup surface as a real maintainer announcement.',
 };
 
 const getDeviceLocale = (): string => {

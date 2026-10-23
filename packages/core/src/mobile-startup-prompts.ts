@@ -131,6 +131,13 @@ export const buildUpdateReminderAnnouncement = (
     };
 };
 
+/** The prompt preview's announcement (RN's prompt test controls, a debug build's preview): the real window, test words. */
+export const PROMPT_TEST_ANNOUNCEMENT: AppAnnouncement = {
+    id: 'prompt-test-announcement',
+    title: 'Test announcement',
+    body: 'This is the temporary announcement template test. It uses the same popup surface as a real maintainer announcement.',
+};
+
 /** The donation ask in the app language (its words: donationPrompt.*). */
 export const translateDonationPromptAnnouncement = (resolveText: ResolveText): AppAnnouncement => ({
     ...DONATION_PROMPT_ANNOUNCEMENT,

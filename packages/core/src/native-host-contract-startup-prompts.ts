@@ -16,9 +16,12 @@ import {
     buildMobileStartupPromptDescriptors,
     buildUpdateReminderAnnouncement,
     fetchMobileUpdateReminderInfo,
+    PROMPT_TEST_ANNOUNCEMENT,
     resolveMobileDonationPromptAllowed,
     resolveMobileUpdateReminderAllowed,
     translateDonationPromptAnnouncement,
+    UPDATE_NOW_ACTION_LABEL,
+    UPDATE_REMINDER_RELEASES_URL,
     type MobileUpdateReminderInfo,
 } from './mobile-startup-prompts';
 import { coerceSupportedBackend, resolveBackend } from './mobile-sync-utils';
@@ -78,6 +81,18 @@ export function createStartupPromptMethods(deps: Deps) {
     // The update reminder that opened: its dismissal records this version (RN's updateReminderInfo).
     let openedUpdateVersion: string | null = null;
     const resolveText = (key: string, fallback: string) => translateWithFallback(deps.t(), key, fallback);
+    /** The open prompt's view: the welcome sheet's words, or the window's announcement and labels in the app language. */
+    const view = (id: NativeStartupPromptId, updateInfo: MobileUpdateReminderInfo | null, announcement: AppAnnouncement | null): NativeStartupPrompt | null => {
+        if (id === 'onboarding') {
+            const t = deps.t();
+            const words = Object.fromEntries(ONBOARDING_WORDS.map((key) => [key, t(`onboarding.${key}`)])) as Record<typeof ONBOARDING_WORDS[number], string>;
+            return { id, words, language: deps.language() };
+        }
+        const labels = { notNow: resolveText('common.notNow', 'Not now'), closeLabel: resolveText('announcement.dismiss', 'Dismiss announcement') };
+        if (id === 'announcement') return announcement ? { id, announcement, ...labels } : null;
+        if (id === 'update-reminder') return updateInfo ? { id, announcement: buildUpdateReminderAnnouncement(updateInfo, resolveText), ...labels } : null;
+        return { id, announcement: translateDonationPromptAnnouncement(resolveText), ...labels };
+    };
     const warn = (host: NativeAboutHost, message: string, error: unknown) => {
         try { host.logWarn(message, error); } catch { /* best effort */ }
     };
@@ -98,6 +113,15 @@ export function createStartupPromptMethods(deps: Deps) {
                 return fail('INVALID_INPUT', 'beginStartupPrompts takes installerSource and donationEnabled');
             }
             if (isSandboxMode()) return { ok: true, value: { prompt: null } };
+            // A debug build's preview (RN's prompt test controls): the prompt's window now, whatever the rules say; it reads and
+            // writes nothing, and the host sends no action for it.
+            if (input.preview !== undefined) {
+                if (typeof input.preview !== 'string' || !PROMPT_IDS.has(input.preview)) return fail('INVALID_INPUT', 'preview takes a prompt id');
+                return { ok: true, value: { prompt: view(input.preview as NativeStartupPromptId, {
+                    currentVersion: host.app.version, latestVersion: '99.99.99', latestReleasedAt: new Date().toISOString(),
+                    releaseUrl: UPDATE_REMINDER_RELEASES_URL, actionLabel: UPDATE_NOW_ACTION_LABEL, testOnly: true,
+                }, PROMPT_TEST_ANNOUNCEMENT) } };
+            }
             const storage = host.storage;
 
             // A failed read leaves the snapshot null, which keeps the donation and update prompts out, as in RN.
@@ -152,27 +176,10 @@ export function createStartupPromptMethods(deps: Deps) {
                 onLog: (error, context) => warn(host, `Startup prompt failed: ${context.id} ${context.phase}`, error),
             });
             if (!id) return { ok: true, value: { prompt: null } };
-            if (id === 'onboarding') {
-                const t = deps.t();
-                const words = Object.fromEntries(ONBOARDING_WORDS.map((key) => [key, t(`onboarding.${key}`)])) as Record<typeof ONBOARDING_WORDS[number], string>;
-                return { ok: true, value: { prompt: { id, words, language: deps.language() } } };
-            }
-            const words = {
-                notNow: resolveText('common.notNow', 'Not now'),
-                closeLabel: resolveText('announcement.dismiss', 'Dismiss announcement'),
-            };
-            if (id === 'announcement' && ACTIVE_APP_ANNOUNCEMENT) {
-                return { ok: true, value: { prompt: { id, announcement: ACTIVE_APP_ANNOUNCEMENT, ...words } } };
-            }
-            if (id === 'update-reminder' && updateInfo) {
-                const info: MobileUpdateReminderInfo = updateInfo;
-                openedUpdateVersion = info.latestVersion;
-                return { ok: true, value: { prompt: { id, announcement: buildUpdateReminderAnnouncement(info, resolveText), ...words } } };
-            }
-            if (id === 'donation') {
-                return { ok: true, value: { prompt: { id, announcement: translateDonationPromptAnnouncement(resolveText), ...words } } };
-            }
-            return { ok: true, value: { prompt: null } };
+            // Set by the update descriptor's present(), which TypeScript cannot see from here.
+            const opened = updateInfo as MobileUpdateReminderInfo | null;
+            if (id === 'update-reminder' && opened) openedUpdateVersion = opened.latestVersion;
+            return { ok: true, value: { prompt: view(id as NativeStartupPromptId, opened, ACTIVE_APP_ANNOUNCEMENT) } };
         },
 
         /**

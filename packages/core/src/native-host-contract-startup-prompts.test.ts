@@ -186,6 +186,20 @@ describe('native host contract: startup prompts', () => {
         expect((await hostless.startupPromptAction({ id: 'onboarding', action: 'dismiss' })).ok).toBe(false);
     });
 
+    it('previews any prompt for a debug build without reading or writing the device', async () => {
+        const bound = device();
+        const contract = await openContract(bound);
+        for (const id of ['onboarding', 'announcement', 'update-reminder', 'donation']) {
+            const prompt = value(await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, preview: id })).prompt;
+            expect(prompt?.id).toBe(id);
+        }
+        const update = value(await contract.beginStartupPrompts({ installerSource: 'play-store', donationEnabled: false, preview: 'update-reminder' })).prompt;
+        expect(update).toMatchObject({ announcement: { id: 'update-reminder-99.99.99', action: { label: 'Update now' } } });
+        expect([...bound.storage.keys()]).toEqual([]);
+        expect(bound.fetched).toEqual([]);
+        expect((await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, preview: 'other' })).ok).toBe(false);
+    });
+
     it('refuses malformed input', async () => {
         const contract = await openContract(device());
         expect((await contract.beginStartupPrompts({ installerSource: 'market', donationEnabled: false })).ok).toBe(false);
