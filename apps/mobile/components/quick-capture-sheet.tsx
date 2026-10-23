@@ -466,7 +466,7 @@ export function QuickCaptureSheet({
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [optionsExpanded, setOptionsExpanded] = useState(false);
   const [androidKeyboardAvoidingEnabled, setAndroidKeyboardAvoidingEnabled] = useState(true);
-  const androidKeyboardInset = useAndroidKeyboardInset(visible);
+  const androidKeyboardInset = useAndroidKeyboardInset(visible, inputRef);
   const { onModalShow, onAutoFocusRequest, onInputFocus, onInputBlur } = useQuickCaptureKeyboardDiagnostics({
     visible, openRequestId, inputRef,
     appliedInset: androidKeyboardAvoidingEnabled ? androidKeyboardInset : 0,
@@ -474,7 +474,8 @@ export function QuickCaptureSheet({
   });
   // The picker overlays render outside the KeyboardAvoidingView, so iOS needs
   // the measured inset too — only the sheet body is keyboard-avoided (#891).
-  const overlayKeyboardInset = useKeyboardInset(visible);
+  const iosOverlayKeyboardInset = useKeyboardInset(visible && Platform.OS !== 'android');
+  const overlayKeyboardInset = Platform.OS === 'android' ? androidKeyboardInset : iosOverlayKeyboardInset;
   const projectsRef = useRef(projects);
   const restoredActivitySessionRef = useRef(false);
   const contextOptionsLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

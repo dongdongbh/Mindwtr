@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Dimensions, Keyboard, Platform } from 'react-native';
+import { useEffect, useState, type RefObject } from 'react';
+import { Dimensions, Keyboard, Platform, type TextInput } from 'react-native';
 
 import { getAndroidKeyboardFrame } from './android-keyboard-frame';
+import { measureAndroidModalKeyboardInset } from './android-modal-keyboard';
+import { logInfo } from './app-log';
 
 /**
  * Track the on-screen Android keyboard inset (its height in px) while `active`.
@@ -61,7 +63,7 @@ export function useKeyboardInset(active = true): number {
   return inset;
 }
 
-export function useAndroidKeyboardInset(active = true): number {
+export function useAndroidKeyboardInset(active = true, inputRef?: RefObject<TextInput | null>): number {
   const [inset, setInset] = useState(0);
 
   useEffect(() => {
@@ -71,19 +73,53 @@ export function useAndroidKeyboardInset(active = true): number {
       return;
     }
     if (typeof Keyboard?.addListener !== 'function') return;
-    const applyFrame = (event: { endCoordinates?: { screenY?: number; height?: number } }) => {
-      setInset(getAndroidKeyboardFrame(event).inset);
+    let revision = 0;
+    let timers: ReturnType<typeof setTimeout>[] = [];
+    const cancelMeasurements = () => {
+      revision += 1;
+      timers.forEach(clearTimeout);
+      timers = [];
     };
-    const reset = () => setInset(0);
+    const applyFrame = (event: { endCoordinates?: { screenY?: number; height?: number } }) => {
+      cancelMeasurements();
+      const eventInset = getAndroidKeyboardFrame(event).inset;
+      setInset(eventInset);
+      if (!inputRef) return;
+      const currentRevision = revision;
+      let lastAppliedSample = -1;
+      // The activity event can precede the dialog's IME animation; re-read that
+      // dialog's insets through settlement instead of inventing a keyboard height.
+      const delays = [0, 80, 240, 480];
+      timers = delays.map((delay, sample) => setTimeout(() => {
+        const input = inputRef.current;
+        if (!input) return;
+        void measureAndroidModalKeyboardInset(input).then((nativeInset) => {
+          if (revision !== currentRevision || inputRef.current !== input || nativeInset === null
+            || sample < lastAppliedSample) return;
+          lastAppliedSample = sample;
+          setInset(nativeInset);
+          if (sample === delays.length - 1) {
+            void logInfo('Quick capture modal IME inset measured', { scope: 'quick-capture', force: true, extra: {
+              releaseCheck: 'v1.3.8/quick-capture-modal-ime', eventInset, nativeInset, outcome: 'measured',
+            } }).catch(() => undefined);
+          }
+        });
+      }, delay));
+    };
+    const reset = () => {
+      cancelMeasurements();
+      setInset(0);
+    };
     const showSub = Keyboard.addListener('keyboardDidShow', applyFrame);
     const changeSub = Keyboard.addListener('keyboardDidChangeFrame', applyFrame);
     const hideSub = Keyboard.addListener('keyboardDidHide', reset);
     return () => {
+      cancelMeasurements();
       showSub.remove();
       changeSub.remove();
       hideSub.remove();
     };
-  }, [active]);
+  }, [active, inputRef]);
 
   return inset;
 }

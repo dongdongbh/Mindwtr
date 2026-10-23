@@ -32,6 +32,7 @@ run_test() {
     printf '%s\n' "$output"
     [[ "$output" == *'OK (1 test)'* ]] || exit 1
 }
+run_test testDoneRequestsHeadlessProcessingWithoutActivity
 run_test testNotificationActions
 run_test testSeedDurableQueue
 run_test testReplayDurableQueue

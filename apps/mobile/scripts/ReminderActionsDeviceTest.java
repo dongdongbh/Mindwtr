@@ -4,6 +4,7 @@ import android.app.Application;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.ComponentName;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.app.Notification;
@@ -142,10 +143,38 @@ public class ReminderActionsDeviceTest extends InstrumentationTestCase {
             for (int i = 0; i < 60 && matchingAlarms(TASK) > 1; i++) Thread.sleep(50);
             assertEquals("Done cancels task reminders but preserves Pomodoro", 1, matchingAlarms(TASK));
             assertNotNull(db.getAlarm(pomodoro.getId()));
-            boolean queued = false;
-            for (Map<String,String> item : NotificationOpenPayloadStore.peekCompletions(app))
-                if (TASK.equals(item.get("taskId"))) queued = true;
-            assertTrue("Cold Done must survive on disk", queued);
+            // The headless writer may already acknowledge this disposable missing task.
+            // Durable-before-wake ordering is checked with an intercepted wake below.
+        } finally { cleanup(); }
+    }
+    public void testDoneRequestsHeadlessProcessingWithoutActivity() {
+        cleanup();
+        final boolean[] started = { false };
+        ContextWrapper background = new ContextWrapper(app) {
+            @Override public ComponentName startService(Intent intent) {
+                assertEquals(app.getPackageName(), intent.getComponent().getPackageName());
+                assertEquals("tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService", intent.getComponent().getClassName());
+                boolean durable = false;
+                for (Map<String,String> item : NotificationOpenPayloadStore.peekCompletions(app))
+                    if (TASK.equals(item.get("taskId"))) durable = true;
+                assertTrue("Receipt must be durable before the background wake", durable);
+                started[0] = true;
+                // Also proves the fallback without starting JS in an instrumentation
+                // process that may have no Metro/release bundle available.
+                throw new IllegalStateException("Disposable service refusal");
+            }
+            @Override public void startActivity(Intent intent) {
+                fail("Done must not launch the app Activity");
+            }
+        };
+        try {
+            Intent done = new Intent(Constants.NOTIFICATION_ACTION_COMPLETE);
+            done.putExtra("AlarmId", 1436001);
+            done.putExtra("taskId", TASK);
+            new AlarmReceiver().onReceive(background, done);
+            assertTrue("Done must request background processing", started[0]);
+            assertTrue("Refused wake must retain the durable receipt", NotificationOpenPayloadStore.peekCompletions(app)
+                .stream().anyMatch(item -> TASK.equals(item.get("taskId"))));
         } finally { cleanup(); }
     }
     // Run these methods in separate instrumentation invocations, killing the app between them.

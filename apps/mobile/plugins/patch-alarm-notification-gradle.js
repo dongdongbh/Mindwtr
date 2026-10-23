@@ -1224,7 +1224,7 @@ const applyAlarmReminderActionsUtilPatchToSource = (original) => {
   ]);
 };
 
-const applyAlarmReminderActionsReceiverPatchToSource = (original) => {
+const applyAlarmReminderActionsReceiverReceiptPatchToSource = (original) => {
   if (original.includes('String completionReceipt = NotificationOpenPayloadStore.persistCompletion')) return original;
   if (!original.includes('case Constants.NOTIFICATION_ACTION_COMPLETE')) return original;
   // Upgrade a dependency already patched by PR1346 without requiring a fresh install.
@@ -1276,6 +1276,35 @@ const applyAlarmReminderActionsReceiverPatchToSource = (original) => {
                                 // Dead row: degrade snooze to dismiss instead of`,
     ],
   ]) + patched;
+};
+
+// Notification buttons may wake a background service but cannot open an Activity
+// on Android 12+. Reuse capture's normal core writer instead of waiting for app UI.
+const applyAlarmReminderActionsReceiverPatchToSource = (original) => {
+  const next = applyAlarmReminderActionsReceiverReceiptPatchToSource(original);
+  if (next.includes('tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService')) return next;
+  if (!next.includes('case Constants.NOTIFICATION_ACTION_COMPLETE')) return next;
+  const start = next.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:');
+  const end = next.indexOf('case Constants.NOTIFICATION_ACTION_DISMISS:', start);
+  const completion = next.slice(start, end);
+  const deliveryStart = completion.indexOf('                            if (ANModule.getReactAppContext() != null) {');
+  const deliveryEnd = completion.indexOf('                        } catch (Exception e)', deliveryStart);
+  if (deliveryStart < 0 || deliveryEnd < 0 || !completion.slice(deliveryStart, deliveryEnd).includes('context.startActivity(launchIntent);')) {
+    throw new Error('alarm-reminder-actions-receiver: expected Done delivery anchor not found');
+  }
+  const delivery = `                            try {
+                                Intent completionService = new Intent().setClassName(context.getPackageName(), "tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService");
+                                context.startService(completionService);
+                                com.facebook.react.HeadlessJsTaskService.acquireWakeLockNow(context);
+                            } catch (RuntimeException error) {
+                                // The receipt stays durable for the next app/scheduled wake.
+                                Log.w(TAG, "Done background processing start refused: " + error.getClass().getSimpleName());
+                            }
+                            if (ANModule.getReactAppContext() != null) {
+                                ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("OnNotificationOpened", BundleJSONConverter.convertToJSON(payload).toString());
+                            }
+`;
+  return next.slice(0, start) + completion.slice(0, deliveryStart) + delivery + completion.slice(deliveryEnd) + next.slice(end);
 };
 
 const getAndroidSourceCandidates = (projectRoot, fileName) => [
@@ -1991,7 +2020,7 @@ const PATCHES = [
     required: true,
     // Must run after alarm-dead-row-actions: it extends the hardened cases.
     firstMatchOnly: false,
-    appliedMarker: 'cancelTaskReminders(reminderTag',
+    appliedMarker: 'tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService',
   },
   {
     id: 'alarm-complete-action-constants',

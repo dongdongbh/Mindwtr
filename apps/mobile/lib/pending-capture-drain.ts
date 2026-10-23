@@ -10,8 +10,11 @@ import {
 } from '@mindwtr/core';
 
 import { documentDirectory, getInfoAsync, readDirectoryAsync } from './file-system';
+import { logWarn } from './app-log';
 import { flushPendingTaskActionSave } from './pending-capture-persistence';
 import { ingestPendingCaptures, PENDING_CAPTURES_DIRECTORY } from './pending-captures';
+import { peekPendingNotificationCompletions } from '../modules/notification-open-intents';
+import { replayNotificationCompletions } from './notification-completion-drain';
 import { mobileStorage } from './storage-adapter';
 
 type IngestDeps = Parameters<typeof ingestPendingCaptures>[0];
@@ -68,7 +71,17 @@ export async function drainPendingCapturesInBackground(trigger: 'scheduled' | 'c
     // A visible app drains the queue itself, with transcription and widgets.
     if (AppState.currentState === 'active') return 0;
     if (isSandboxMode() || isWorkspaceTransitionActive()) return 0;
-    if (!(await hasQueuedCaptureFiles())) return 0;
+    const hasCaptures = await hasQueuedCaptureFiles();
+    let hasCompletions = false;
+    try {
+        hasCompletions = (await peekPendingNotificationCompletions()).length > 0;
+    } catch {
+        // An unreadable receipt queue must not strand the independent capture files.
+        await logWarn('[Local Notifications] Done queue unreadable; retained for retry', {
+            scope: 'notifications',
+        }).catch(() => undefined);
+    }
+    if (!hasCaptures && !hasCompletions) return 0;
 
     if (getStorageAdapter() === noopStorage) setStorageAdapter(mobileStorage);
     await flushPendingSave();
@@ -76,7 +89,8 @@ export async function drainPendingCapturesInBackground(trigger: 'scheduled' | 'c
     // fetchData reports a failed load through `error`; never write into a store that did not load.
     if (useTaskStore.getState().error || isSandboxMode()) return 0;
 
-    const count = await drainPendingCapturesFromStore();
+    const completed = hasCompletions ? await replayNotificationCompletions() : 0;
+    const count = completed + (hasCaptures ? await drainPendingCapturesFromStore() : 0);
     if (count > 0) {
         const { reconcileLocalMobileNotificationsInBackground } = await import('./notification-service-local');
         await reconcileLocalMobileNotificationsInBackground('capture');

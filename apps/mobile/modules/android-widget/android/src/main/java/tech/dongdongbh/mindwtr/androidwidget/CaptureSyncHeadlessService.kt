@@ -13,9 +13,9 @@ private const val CAPTURE_SYNC_HEADLESS_TASK_NAME = "MindwtrCaptureSync"
 private const val CAPTURE_SYNC_HEADLESS_TIMEOUT_MS = 5 * 60 * 1000L
 
 /**
- * Imports the capture queue and syncs it without opening the app (#1257). The
+ * Imports captures and notification Done receipts and syncs them without opening the app (#1257). The
  * dialog only ever writes a queue file; this wakes the JS side, which does every
- * store write through the normal path. Not exported: only the dialog starts it.
+ * store write through the normal path. Not exported: only internal capture/reminder actions start it.
  */
 class CaptureSyncHeadlessService : HeadlessJsTaskService() {
   override fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig =

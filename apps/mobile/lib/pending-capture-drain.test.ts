@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMobileBackgroundSyncRunner } from '@mindwtr/core/mobile-background-sync';
+import { peekPendingNotificationCompletions } from '../modules/notification-open-intents';
+import { drainPendingCapturesInBackground } from './pending-capture-drain';
 
 const order = vi.hoisted(() => [] as string[]);
 const noopStorage = vi.hoisted(() => ({ name: 'noop' }));
 const mobileStorage = vi.hoisted(() => ({ name: 'mobile' }));
+const logWarn = vi.hoisted(() => vi.fn(async () => undefined));
 
 const core = vi.hoisted(() => {
   const state = {
@@ -41,14 +44,15 @@ const reconcile = vi.hoisted(() => vi.fn(async (_reason: string) => { order.push
 
 vi.mock('react-native', () => reactNative);
 vi.mock('@mindwtr/core', () => ({ ...core, noopStorage }));
-vi.mock('./app-log', () => ({ logInfo: vi.fn() }));
+vi.mock('./app-log', () => ({ logInfo: vi.fn(), logWarn }));
 vi.mock('./file-system', () => fileSystem);
 vi.mock('./pending-capture-persistence', () => ({ flushPendingTaskActionSave: vi.fn() }));
 vi.mock('./pending-captures', () => ({ ...ingest, PENDING_CAPTURES_DIRECTORY: 'pending-captures' }));
+vi.mock('../modules/notification-open-intents', () => ({ peekPendingNotificationCompletions: vi.fn(async () => []) }));
+vi.mock('./notification-completion-drain', () => ({ replayNotificationCompletions: vi.fn(async () => 0) }));
 vi.mock('./storage-adapter', () => ({ mobileStorage }));
 vi.mock('./notification-service-local', () => ({ reconcileLocalMobileNotificationsInBackground: reconcile }));
 
-import { drainPendingCapturesInBackground } from './pending-capture-drain';
 
 describe('background capture drain (#1257)', () => {
   beforeEach(() => {
@@ -59,6 +63,7 @@ describe('background capture drain (#1257)', () => {
     core.state.store.error = null;
     reactNative.AppState.currentState = 'background';
     fileSystem.readDirectoryAsync.mockResolvedValue(['a.json']);
+    vi.mocked(peekPendingNotificationCompletions).mockResolvedValue([]);
     ingest.ingestPendingCaptures.mockImplementation(async () => { order.push('ingest'); return 1; });
     reconcile.mockImplementation(async () => { order.push('reminders'); });
   });
@@ -81,6 +86,16 @@ describe('background capture drain (#1257)', () => {
     fileSystem.readDirectoryAsync.mockResolvedValue(['a.json.tmp']);
     await expect(drainPendingCapturesInBackground('scheduled')).resolves.toBe(0);
     expect(order).toEqual([]);
+  });
+
+  it.each([true, false])('isolates unreadable reminder receipts from capture files (captures=%s)', async (hasCaptures) => {
+    const privateError = 'Malformed private receipt contents';
+    vi.mocked(peekPendingNotificationCompletions).mockRejectedValueOnce(new Error(privateError));
+    fileSystem.readDirectoryAsync.mockResolvedValue(hasCaptures ? ['a.json'] : []);
+    await expect(drainPendingCapturesInBackground('capture')).resolves.toBe(hasCaptures ? 1 : 0);
+    expect(order).toEqual(hasCaptures ? ['setStorageAdapter', 'flush', 'fetchData', 'ingest', 'reminders'] : []);
+    expect(logWarn).toHaveBeenCalledWith(expect.stringContaining('retained for retry'), { scope: 'notifications' });
+    expect(JSON.stringify(logWarn.mock.calls)).not.toContain(privateError);
   });
 
   it.each([

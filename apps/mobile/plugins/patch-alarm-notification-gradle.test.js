@@ -1366,9 +1366,12 @@ ${helpers}
       const completeCase = receiver.slice(receiver.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:'), receiver.indexOf('case Constants.NOTIFICATION_ACTION_DISMISS:'));
       const persistIndex = completeCase.indexOf('NotificationOpenPayloadStore.persistCompletion(context, pendingPayload)');
       expect(persistIndex).toBeGreaterThan(-1);
-      for (const operation of ['NotificationOpenPayloadStore.cache(', 'alarmUtil.removeFiredNotification(', 'alarmUtil.cancelAlarm(', 'cancelTaskReminders(', 'emit("OnNotificationOpened"', 'context.startActivity(']) {
+      for (const operation of ['NotificationOpenPayloadStore.cache(', 'alarmUtil.removeFiredNotification(', 'alarmUtil.cancelAlarm(', 'cancelTaskReminders(', 'emit("OnNotificationOpened"', 'context.startService(']) {
         expect(completeCase.indexOf(operation), operation).toBeGreaterThan(persistIndex);
       }
+      expect(completeCase).not.toContain('context.startActivity(');
+      expect(completeCase).toContain('tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService');
+      expect(completeCase).toContain('com.facebook.react.HeadlessJsTaskService.acquireWakeLockNow(context)');
       expect(completeCase).toContain('payload.putString("actionId", completionReceipt);');
       expect(receiver.match(/persistCompletion/g)).toHaveLength(1);
 

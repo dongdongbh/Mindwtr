@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { AppState, Platform } from 'react-native';
-import { flushPendingSave, runWithImmediateSaveTracking, useTaskStore } from '@mindwtr/core';
+import { useTaskStore } from '@mindwtr/core';
 import {
     getReminderCompletionBlocker,
     REMINDER_COMPLETE_UPDATE,
     resolveNotificationOpenRoute,
 } from '@mindwtr/core/mobile-notification-open';
 
-import { logInfo, logWarn } from '@/lib/app-log';
+import { logInfo } from '@/lib/app-log';
+import { replayNotificationCompletions } from '@/lib/notification-completion-drain';
 import { setNotificationOpenHandler } from '@/lib/notification-service';
-import { acknowledgeNotificationCompletion, peekPendingNotificationCompletions, consumePendingNotificationOpenPayload } from '@/modules/notification-open-intents';
+import { consumePendingNotificationOpenPayload } from '@/modules/notification-open-intents';
 
 // Outcome evidence for #1028: a received action that changes nothing must say
 // why, or the log can't separate a lost tap from a deliberately ignored one.
@@ -28,60 +29,6 @@ const logIosReminderAction = (stage: string, action = 'complete', reason = '') =
     });
 };
 
-// One replay owner across hook remounts; native receipts remain the durable owner.
-let completionReplay: Promise<void> | null = null;
-let replayRequested = false;
-const replayNotificationCompletions = (): Promise<void> => {
-    replayRequested = true;
-    if (completionReplay) return completionReplay;
-    completionReplay = (async () => {
-        do {
-            replayRequested = false;
-            try {
-                const completions = await peekPendingNotificationCompletions();
-                for (const completion of completions) {
-                    try {
-                        if (!completion.actionId || !completion.taskId) throw new Error('Invalid completion receipt');
-                        logNotificationOutcome('Done action stored', {
-                            releaseCheck: 'v1.3.5/reminder-done-durable', outcome: 'stored',
-                        });
-                        const state = useTaskStore.getState();
-                        const task = state._tasksById?.get(completion.taskId) ?? state.tasks?.find((item) => item.id === completion.taskId);
-                        const blocker = getReminderCompletionBlocker(task);
-                        if (!blocker) {
-                            const { result } = await runWithImmediateSaveTracking(() => state.updateTask(completion.taskId!, { ...REMINDER_COMPLETE_UPDATE }));
-                            if (!result.success) throw new Error('Completion update failed');
-                        } else {
-                            // A previous failed save may already have changed memory (including recurrence).
-                            // Save that snapshot again without reapplying completion or generating another instance.
-                            await state.persistSnapshot();
-                        }
-                        await flushPendingSave();
-                        await acknowledgeNotificationCompletion(completion.actionId);
-                        logNotificationOutcome('Done action saved and acknowledged', {
-                            releaseCheck: 'v1.3.5/reminder-done-durable',
-                            outcome: blocker || 'completed',
-                        });
-                    } catch {
-                        void logWarn('[Local Notifications] Done action retained for retry', {
-                            scope: 'notifications', extra: { releaseCheck: 'v1.3.5/reminder-done-durable', outcome: 'retained' },
-                        });
-                        // Retry only on another receipt, readiness change, or foreground; no failure loop.
-                        replayRequested = false;
-                        return;
-                    }
-                }
-            } catch {
-                void logWarn('[Local Notifications] Done queue retained for retry', {
-                    scope: 'notifications', extra: { releaseCheck: 'v1.3.5/reminder-done-durable', outcome: 'unreadable' },
-                });
-                replayRequested = false;
-                return;
-            }
-        } while (replayRequested);
-    })().finally(() => { completionReplay = null; });
-    return completionReplay;
-};
 
 type RouterLike = {
     push: (...args: any[]) => void;

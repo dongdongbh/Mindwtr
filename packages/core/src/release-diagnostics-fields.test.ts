@@ -13,6 +13,8 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // Android modal IME recovery and background reminder widget publication; no identifiers.
+    'eventInset', 'nativeInset', 'widgetUpdated',
     // auto-archive-converge reuses releaseCheck/count; count = archive-twin task pairs joined in one merge pass.
     // gmail-capture reuses releaseCheck/count; gmail-capture-storage reuses stage/errorKind. Never account or mail content.
     // focus-area-selection: aggregate selected slots only.
