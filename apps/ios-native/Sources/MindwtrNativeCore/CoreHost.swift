@@ -21857,6 +21857,8 @@ private final class Engine: @unchecked Sendable {
             valid = Set(context.keys) == Set(["releaseCheck", "stage", "reason"])
                 && context["releaseCheck"] as? String == "v1.3.5/ios-board-drag-stage"
                 && reasons[context["stage"] as? String ?? ""]?.contains(context["reason"] as? String ?? "") == true
+        case NativeBoardDragGeometry.message:
+            valid = NativeBoardDragGeometry.accepts(context)
         case "Native iOS AI settings summary published":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-ai-settings-summary", "outcome": "confirmed"])
         case "Native iOS Pomodoro panel transition acknowledged":

@@ -13,6 +13,9 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // ios-board-drag-geometry: six closed numeric rectangle records, never entity/content fields.
+    'originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow',
+    'validity', 'x', 'y', 'height',
     // auto-archive-converge reuses releaseCheck/count; count = archive-twin task pairs joined in one merge pass.
     // gmail-capture reuses releaseCheck/count; gmail-capture-storage reuses stage/errorKind. Never account or mail content.
     // focus-area-selection: aggregate selected slots only.
@@ -326,6 +329,23 @@ describe('release diagnostics field names', () => {
     it('preserves the fixed iOS device storage delivery receipt', () => {
         const receipt = { releaseCheck: 'v1.3.5/ios-device-storage', operation: 'device-storage', outcome: 'delivered' };
         expect(sanitizeLogContext(receipt)).toEqual(receipt);
+    });
+
+    it('preserves the closed native Board geometry numeric records and fractional precision', () => {
+        const finite = { validity: 'finite', x: 0.125, y: 12.0000001, width: 342.5, height: 53.25 };
+        const missing = { validity: 'missing', x: 0, y: 0, width: 0, height: 0 };
+        const nonfinite = { ...missing, validity: 'nonfinite' };
+        const context = {
+            releaseCheck: 'v1.3.8/ios-board-drag-geometry', reason: 'geometry-area',
+            originalViewport: finite, currentViewport: finite, originalArea: finite, currentArea: finite,
+            originalRow: missing, currentRow: nonfinite,
+        };
+        const exported = sanitizeLogContext(context);
+        expect(exported?.releaseCheck).toBe(context.releaseCheck);
+        expect(exported?.reason).toBe(context.reason);
+        for (const field of ['originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow'] as const) {
+            expect(JSON.parse(exported?.[field] ?? 'null')).toEqual(context[field]);
+        }
     });
 
     it('survive the log sanitizer intact', () => {

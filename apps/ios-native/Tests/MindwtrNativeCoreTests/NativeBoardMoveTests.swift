@@ -1137,6 +1137,75 @@ final class NativeBoardMoveTests: XCTestCase {
             _ = try await core.call("logLine", argumentsJSON: json([stageMessage,
                 #"{"releaseCheck":"v1.3.5/ios-board-drag-stage","stage":"begin","reason":"ready","reason":"private"}"#]))
         }
+        // Exercise the same numeric formatter used by App cancellation and the real host boundary.
+        let geometryMessage = NativeBoardDragGeometry.message
+        let sample = CGRect(x: 0.125, y: 12.0000001, width: 342.5, height: 53.25)
+        func geometryPayload(_ viewport: CGRect? = nil, area: CGRect? = nil, row: CGRect? = nil) throws -> [String: Any] {
+            try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-area", originalViewport: sample,
+                currentViewport: viewport, originalArea: sample, currentArea: area, originalRow: sample, currentRow: row))
+        }
+        let geometryContext = try geometryPayload(sample, area: sample, row: sample)
+        let numeric = try XCTUnwrap(geometryContext["originalViewport"] as? [String: Any])
+        XCTAssertEqual(numeric["validity"] as? String, "finite")
+        XCTAssertEqual(numeric["y"] as? Double, 12.0000001)
+        XCTAssertNil(NativeBoardDragGeometry.payload(reason: "saved", originalViewport: sample,
+            currentViewport: sample, originalArea: sample, currentArea: sample, originalRow: sample, currentRow: sample))
+        var geometryContexts: [[String: Any]] = []
+        for value in [geometryContext,
+                      try geometryPayload(sample.offsetBy(dx: 0, dy: 0.0000001), area: sample, row: sample),
+                      try geometryPayload(sample, area: sample.offsetBy(dx: 0, dy: 4), row: sample),
+                      try geometryPayload(sample, area: CGRect(x: sample.minX, y: sample.minY, width: sample.width, height: sample.height + 1), row: sample),
+                      try geometryPayload(sample, area: sample, row: sample.offsetBy(dx: 0, dy: 0.0000001)),
+                      try geometryPayload(),
+                      try geometryPayload(CGRect(x: CGFloat.infinity, y: 0, width: 1, height: 1))] {
+            XCTAssertTrue(NativeBoardDragGeometry.accepts(value))
+            _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(value)]))
+            geometryContexts.append(value)
+        }
+        let missing = try XCTUnwrap(geometryContexts[5]["currentViewport"] as? [String: Any])
+        XCTAssertEqual(missing["validity"] as? String, "missing")
+        let nonfinite = try XCTUnwrap(geometryContexts[6]["currentViewport"] as? [String: Any])
+        XCTAssertEqual(nonfinite["validity"] as? String, "nonfinite")
+        for value in [missing, nonfinite] {
+            for name in ["x", "y", "width", "height"] { XCTAssertEqual(value[name] as? Double, 0) }
+        }
+        for field in ["taskId", "text", "url", "outcome", "nonce"] {
+            var forged = geometryContext; forged[field] = "private"
+            XCTAssertFalse(NativeBoardDragGeometry.accepts(forged))
+            await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forged)])) }
+            var rect = numeric; rect[field] = "private"
+            forged = geometryContext; forged["originalViewport"] = rect
+            XCTAssertFalse(NativeBoardDragGeometry.accepts(forged))
+            await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forged)])) }
+        }
+        for field in geometryContext.keys {
+            var forged = geometryContext; forged.removeValue(forKey: field)
+            XCTAssertFalse(NativeBoardDragGeometry.accepts(forged))
+            await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forged)])) }
+        }
+        for (field, value) in [("x", true), ("y", "12"), ("height", NSNull()), ("validity", "unknown")] as [(String, Any)] {
+            var rect = numeric; rect[field] = value
+            var forged = geometryContext; forged["originalViewport"] = rect
+            XCTAssertFalse(NativeBoardDragGeometry.accepts(forged))
+            await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forged)])) }
+        }
+        for (field, value) in [("reason", "saved"), ("releaseCheck", "v1.3.5/ios-board-drag-stage")] {
+            var forged = geometryContext; forged[field] = value
+            XCTAssertFalse(NativeBoardDragGeometry.accepts(forged))
+            await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forged)])) }
+        }
+        var forgedRect = numeric; forgedRect["x"] = Double.infinity
+        var forgedGeometry = geometryContext; forgedGeometry["originalViewport"] = forgedRect
+        XCTAssertFalse(NativeBoardDragGeometry.accepts(forgedGeometry))
+        let overflow = try json(geometryContext).replacingOccurrences(of: "0.125", with: "1e999")
+        await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, overflow])) }
+        forgedRect = missing; forgedRect["x"] = 1
+        forgedGeometry = geometryContext; forgedGeometry["currentViewport"] = forgedRect
+        XCTAssertFalse(NativeBoardDragGeometry.accepts(forgedGeometry))
+        await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forgedGeometry)])) }
+        // New numeric records must not widen the old three-field stage schema.
+        var forgedStage: [String: Any] = stageContext; forgedStage["currentViewport"] = numeric
+        await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([stageMessage, json(forgedStage)])) }
         let pagingMessage = "Native iOS Inbox paging recovered"
         let pagingContext: [String: Any] = ["releaseCheck": "v1.3.5/ios-inbox-paging", "outcome": "recovered", "count": 55]
         _ = try await core.call("logLine", argumentsJSON: json([pagingMessage, json(pagingContext)]))
@@ -1208,6 +1277,18 @@ final class NativeBoardMoveTests: XCTestCase {
         let stages = lines.filter { $0["message"] as? String == stageMessage }
         XCTAssertEqual(stages.count, stageContexts.count)
         XCTAssertEqual(try stages.map { try json(XCTUnwrap($0["context"])) }.sorted(), try stageContexts.map { try json($0) }.sorted())
+        let geometryLines = lines.filter { $0["message"] as? String == geometryMessage }
+        XCTAssertEqual(geometryLines.count, geometryContexts.count)
+        for (line, expected) in zip(geometryLines, geometryContexts) {
+            let exported = try XCTUnwrap(line["context"] as? [String: Any])
+            XCTAssertEqual(exported["releaseCheck"] as? String, NativeBoardDragGeometry.releaseCheck)
+            XCTAssertEqual(exported["reason"] as? String, "geometry-area")
+            for field in ["originalViewport", "currentViewport", "originalArea", "currentArea", "originalRow", "currentRow"] {
+                let serialized = try XCTUnwrap(exported[field] as? String)
+                let decoded = try object(serialized)
+                XCTAssertEqual(try json(decoded), try json(XCTUnwrap(expected[field])))
+            }
+        }
         let paging = lines.filter { $0["message"] as? String == pagingMessage }
         XCTAssertEqual(paging.count, 1)
         XCTAssertEqual(try json(XCTUnwrap(paging.first?["context"])), try json([

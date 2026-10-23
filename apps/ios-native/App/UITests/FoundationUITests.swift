@@ -5952,22 +5952,41 @@ final class FoundationUITests: XCTestCase {
             let inset = min(CGFloat(24), target.height / 2)
             return CGPoint(x: target.midX, y: sourceFrame.midY < target.midY ? target.minY + inset : target.maxY - inset)
         }
+        // Cache only measurements already needed by admission; attach no content or screenshot.
+        var geometryTrace: [String] = []
+        func rect(_ frame: CGRect) -> String {
+            [frame.origin.x, frame.origin.y, frame.width, frame.height].map { String(Double($0)) }.joined(separator: ",")
+        }
+        func record(_ line: String) {
+            // Preserve initial preposition samples as well as the most recent settle samples.
+            if geometryTrace.count == 24 { geometryTrace.remove(at: 8) }
+            geometryTrace.append(line)
+        }
+        func attachTrace() {
+            let attachment = XCTAttachment(string: geometryTrace.joined(separator: "\n"))
+            attachment.name = "Board cross-drag numeric geometry"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
         // Scroll before admission only. Changing the viewport during a drag cancels it.
-        // Keep the handle and drop point away from scroll edges before admission.
         for _ in 0..<8 {
-            let viewport = app.frame.intersection(scroll.frame).insetBy(dx: 0, dy: 44), sourceFrame = handle.frame, target = body.frame
+            let viewport = app.frame.intersection(scroll.frame), sourceFrame = handle.frame, target = body.frame
             guard finite(viewport), finite(sourceFrame), finite(target) else {
+                record("preposition invalid rawViewport=\(rect(viewport)) effectiveViewport=\(rect(viewport)) sourceHandle=\(rect(sourceFrame)) target=\(rect(target))")
+                attachTrace()
                 XCTFail("Cross-column drag requires finite measured source, body and viewport")
                 throw CocoaError(.coderReadCorrupt)
             }
             let point = targetPoint(sourceFrame, target)
             let required = sourceFrame.union(CGRect(x: point.x - 1, y: point.y - 1, width: 2, height: 2))
+            let shift = viewport.midY - required.midY, distance = min(abs(shift), viewport.height * 0.4)
+            record("preposition rawViewport=\(rect(viewport)) effectiveViewport=\(rect(viewport)) sourceHandle=\(rect(sourceFrame)) target=\(rect(target)) point=\(Double(point.x)),\(Double(point.y)) span=\(rect(required)) shift=\(Double(shift)) distance=\(Double(distance))")
             guard required.height < viewport.height, required.minX >= viewport.minX, required.maxX <= viewport.maxX else {
+                attachTrace()
                 XCTFail("The externally seeded adjacent source and destination must fit at this text size")
                 throw CocoaError(.coderReadCorrupt)
             }
             if viewport.contains(sourceFrame), viewport.contains(point) { break }
-            let shift = viewport.midY - required.midY, distance = min(abs(shift), viewport.height * 0.4)
             let start = CGPoint(x: viewport.minX + 4, y: viewport.minY + viewport.height * (shift > 0 ? 0.3 : 0.7))
             let end = CGPoint(x: start.x, y: start.y + (shift > 0 ? distance : -distance))
             try task735Coordinate(app, start).press(forDuration: 0.05, thenDragTo: task735Coordinate(app, end),
@@ -5975,12 +5994,20 @@ final class FoundationUITests: XCTestCase {
         }
         var prior: [CGRect] = []
         let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let viewport = app.frame.intersection(scroll.frame).insetBy(dx: 0, dy: 44), frames = [handle.frame, body.frame, viewport]
+            let viewport = app.frame.intersection(scroll.frame), sourceFrame = handle.frame, target = body.frame
+            let frames = [sourceFrame, target, viewport], point = targetPoint(sourceFrame, target)
             let settled = prior == frames; prior = frames
-            return settled && frames.allSatisfy(finite) && viewport.contains(handle.frame)
-                && viewport.contains(targetPoint(handle.frame, body.frame)) && handle.isHittable
+            // Preserve short-circuit order, including the conditional hittability query.
+            let finiteFrames: Bool? = settled ? frames.allSatisfy(finite) : nil
+            let sourceContained: Bool? = finiteFrames == true ? viewport.contains(sourceFrame) : nil
+            let pointContained: Bool? = sourceContained == true ? viewport.contains(point) : nil
+            let hittable: Bool? = pointContained == true ? handle.isHittable : nil
+            func clause(_ value: Bool?) -> String { value.map { $0 ? "true" : "false" } ?? "not-evaluated" }
+            record("settle rawViewport=\(rect(viewport)) effectiveViewport=\(rect(viewport)) sourceHandle=\(rect(sourceFrame)) target=\(rect(target)) point=\(Double(point.x)),\(Double(point.y)) settled=\(settled) finite=\(clause(finiteFrames)) sourceContained=\(clause(sourceContained)) pointContained=\(clause(pointContained)) hittable=\(clause(hittable))")
+            return hittable == true
         }, object: nil)
         guard XCTWaiter.wait(for: [stable], timeout: 10) == .completed else {
+            attachTrace()
             XCTFail("Cross-column source and destination must settle before admission")
             throw CocoaError(.coderReadCorrupt)
         }
@@ -5992,7 +6019,9 @@ final class FoundationUITests: XCTestCase {
                 && self.boardCrossBody(app, destination).buttons["board-task-" + self.boardCrossSource].exists
                 && app.buttons["board-filter-open"].isEnabled
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 20), .completed)
+        let movedResult = XCTWaiter.wait(for: [moved], timeout: 20)
+        if movedResult != .completed { attachTrace() }
+        XCTAssertEqual(movedResult, .completed)
         boardCrossAssert(app, status: destination, completionOffer: completionOffer)
     }
 

@@ -261,7 +261,7 @@ struct BoardScreen: View {
         .onPreferenceChange(BoardDragFrames.self) { value in
             if dragMeasurements != value {
                 let reason = geometryCancellationReason(value)
-                dragMeasurements = value; cancelDrag(reason: reason)
+                cancelDrag(reason: reason, next: value); dragMeasurements = value
             }
         }
         .onReceive(dragInvalidations) { cancelDrag(reason: "model") }
@@ -504,10 +504,31 @@ struct BoardScreen: View {
         return "geometry-other"
     }
 
-    private func cancelDrag(reason: String) {
+    private func cancelDrag(reason: String, next: BoardDragMeasurements? = nil) {
         guard drag.capture != nil || drag.claim != nil || dropIndicator != nil else { return }
+        // Copy existing measurements before invalidation; this adds no layout observation.
+        let original = drag.measurements, capture = drag.capture
+        func viewport(_ value: BoardDragMeasurements?) -> CGRect? {
+            guard let value, value.viewports.count == 1 else { return nil }
+            return value.viewports[0]
+        }
+        func area(_ value: BoardDragMeasurements?) -> CGRect? {
+            guard let capture, let rows = value?.columns.filter({ $0.status == capture.status }), rows.count == 1 else { return nil }
+            return rows[0].frame
+        }
+        func row(_ value: BoardDragMeasurements?) -> CGRect? {
+            guard let capture, let rows = value?.rows.filter({ $0.status == capture.status && $0.id == capture.taskID }), rows.count == 1 else { return nil }
+            return rows[0].frame
+        }
+        let originalViewport = viewport(original), currentViewport = viewport(next)
+        let originalArea = area(original), currentArea = area(next), originalRow = row(original), currentRow = row(next)
         drag.invalidate(); dropIndicator = nil
-        traceDrag(.cancel, reason: reason)
+        guard let attempt = dragDiagnostics.attempt, attempt.take(.cancel) else { return }
+        model.logBoardDragStage("cancel", reason: reason)
+        if next != nil {
+            model.logBoardDragGeometry(reason: reason, originalViewport: originalViewport, currentViewport: currentViewport,
+                originalArea: originalArea, currentArea: currentArea, originalRow: originalRow, currentRow: currentRow)
+        }
     }
 
     private func dragTarget(_ point: CGPoint, status: String) -> BoardDropTarget? {

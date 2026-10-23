@@ -30,7 +30,7 @@ async function collectSources(directory) {
   return sources;
 }
 
-function collectCodeSlugs({ file, source }) {
+function collectCodeSlugs({ file, source, formatterSources = [] }) {
   const constants = new Map([...source.matchAll(
     /\bconst\s+([\w$]+)\s*(?::\s*string\s*)?=\s*(['"])([^'"\r\n]*)\2/g,
   )].map((match) => [match[1], match[3]]));
@@ -87,6 +87,22 @@ function collectCodeSlugs({ file, source }) {
         if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
       } catch { /* Invalid JSON cannot supply a Diagnostics context. */ }
     }
+    // Shared Swift formatters: count only a guard-bound payload actually forwarded
+    // with that formatter's message to logLine, not an unused static tag literal.
+    for (const call of source.matchAll(
+      /\bguard\s+let\s+(\w+)\s*=\s*(\w+)\.payload\([^{}]*\)\s*else\s*\{\s*return\s*\}\s*let\s+(\w+)\s*=\s*host\s+Task\s*\{\s*_\s*=\s*try\?\s*await\s+\3\?\.call\(\s*"logLine"\s*,\s*argumentsJSON:\s*json\(\s*\[\s*\2\.message\s*,\s*json\(\s*\1\s*\)\s*\]\s*\)\s*\)/g,
+    )) {
+      const type = call[2];
+      const definitions = formatterSources.filter((entry) => entry.file.endsWith(".swift")
+        && new RegExp(`\\bpublic\\s+enum\\s+${type}\\s*\\{`).test(entry.source));
+      if (definitions.length !== 1) continue;
+      const definition = definitions[0].source;
+      const tag = definition.match(/\bpublic\s+static\s+let\s+releaseCheck\s*=\s*"([^"\\\r\n]*)"/)?.[1];
+      const message = /\bpublic\s+static\s+let\s+message\s*=\s*"[^"\\\r\n]*"/.test(definition);
+      const payload = definition.match(/\bpublic\s+static\s+func\s+payload\b[\s\S]*?(?=\n    public static func|$)/)?.[0] ?? "";
+      const returned = /\bvar\s+(\w+)\s*:\s*\[String:\s*Any\]\s*=\s*\[\s*"releaseCheck"\s*:\s*releaseCheck\s*,[^\]]*\][\s\S]*?\breturn\s+\1\b/.test(payload);
+      if (tag !== undefined && message && returned) sites.push({ file, slug: tag });
+    }
     // Paired inline branches use the same simple condition for message and raw context.
     for (const call of source.matchAll(
       /\bcall\(\s*"logLine"\s*,\s*argumentsJSON:\s*(?:self\.)?json\(\s*\[\s*([A-Za-z_]\w*)\s*\?\s*"(?:\\[\s\S]|[^"\\])*"\s*:\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*\1\s*\?\s*(#+)"([\s\S]*?)"\2\s*:\s*(#+)"([\s\S]*?)"\4\s*,?\s*\]\s*\)\s*\)/g,
@@ -142,7 +158,7 @@ const sources = (await Promise.all([
   collectSources(path.join(root, "apps")),
   collectSources(path.join(root, "scripts")),
 ])).flat();
-const codeSites = sources.flatMap(collectCodeSlugs);
+const codeSites = sources.flatMap((entry) => collectCodeSlugs({ ...entry, formatterSources: sources }));
 function findUnemittedSlugs(slugs, sites) {
   const emittedSlugs = new Set(sites.map(({ slug }) => slug));
   return slugs.filter((slug) => !emittedSlugs.has(slug));
@@ -286,6 +302,30 @@ describe("release diagnostics ledger", () => {
         "Wrong field type", #"{"releaseCheck":123}"#,
       ]))
     ` })).toEqual([]);
+  });
+
+  it("resolves the actual shared Board geometry formatter only through its logLine emission", () => {
+    const file = "apps/ios-native/App/CoreModel.swift";
+    const source = sources.find((entry) => entry.file === file).source;
+    const start = source.indexOf("    func logBoardDragGeometry(");
+    const end = source.indexOf("    /// Final claim consumption", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const emission = source.slice(start, end);
+    const formatter = sources.find((entry) => entry.file.endsWith("/NativeBoardDragGeometry.swift"));
+    const resolve = (text, formatterSources = [formatter]) => collectCodeSlugs({ file, source: text, formatterSources });
+    expect(resolve(emission)).toEqual([{ file, slug: "v1.3.8/ios-board-drag-geometry" }]);
+    for (const text of [
+      emission.replace('call("logLine"', 'call("other"'),
+      emission.replace("NativeBoardDragGeometry.message", "Other.message"),
+      emission.replace("json(value)", "json(otherValue)"),
+      emission.slice(0, emission.indexOf("        let diagnosticHost")),
+    ]) expect(resolve(text)).toEqual([]);
+    expect(resolve(formatter.source)).toEqual([]);
+    expect(resolve(emission, [])).toEqual([]);
+    expect(resolve(emission, [formatter, formatter])).toEqual([]);
+    expect(resolve(emission, [{ ...formatter, source: formatter.source.replace(
+      '"releaseCheck": releaseCheck', '"unrelated": releaseCheck',
+    ) }])).toEqual([]);
   });
 
   it("resolves both actual Board inline Swift message/context branches", () => {

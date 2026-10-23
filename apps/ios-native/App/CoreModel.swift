@@ -17563,6 +17563,19 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    /// A numeric observation only, emitted alongside the existing once-per-attempt cancel slot.
+    func logBoardDragGeometry(reason: String, originalViewport: CGRect?, currentViewport: CGRect?,
+                              originalArea: CGRect?, currentArea: CGRect?, originalRow: CGRect?, currentRow: CGRect?) {
+        guard let value = NativeBoardDragGeometry.payload(reason: reason, originalViewport: originalViewport,
+            currentViewport: currentViewport, originalArea: originalArea, currentArea: currentArea,
+            originalRow: originalRow, currentRow: currentRow) else { return }
+        let diagnosticHost = host
+        Task {
+            _ = try? await diagnosticHost?.call("logLine", argumentsJSON: json([
+                NativeBoardDragGeometry.message, json(value)]))
+        }
+    }
+
     /// Final claim consumption and command retention must remain synchronous.
     @discardableResult
     func orderBoardCard(_ capture: BoardOrderDragCapture, afterID: String?, consume: () -> Bool) -> Bool {
