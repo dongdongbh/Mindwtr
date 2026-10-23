@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { safeParseDate, tFallback, type Project } from '@mindwtr/core';
-import { Calendar, CheckCircle, Copy, FolderOpenDot, FolderPlus, Loader2, MoreHorizontal, RotateCcw, Signal, Trash2, XCircle } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { Calendar, CheckCircle, Copy, FolderOpenDot, FolderPlus, Loader2, MoreHorizontal, RotateCcw, Signal, SlidersHorizontal, Trash2, XCircle } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
 type ProjectProgress = {
@@ -12,6 +12,7 @@ type ProjectProgress = {
 };
 
 type ProjectDetailsHeaderProps = {
+    primaryAction?: ReactNode;
     project: Project;
     projectColor: string;
     areaLabel?: string;
@@ -44,6 +45,7 @@ const MENU_ITEM_CLASS = 'flex w-full items-center gap-2 rounded px-3 py-2 text-l
 // Project management and the full settings grid remain available from the "..." menu
 // without competing with long titles (#1160).
 export function ProjectDetailsHeader({
+    primaryAction,
     project,
     projectColor,
     areaLabel,
@@ -109,8 +111,19 @@ export function ProjectDetailsHeader({
     useLayoutEffect(() => {
         const element = titleInputRef.current;
         if (!element) return;
-        element.style.height = 'auto';
-        element.style.height = `${element.scrollHeight}px`;
+        const resizeTitle = () => {
+            element.style.height = 'auto';
+            element.style.height = `${element.scrollHeight}px`;
+        };
+        resizeTitle();
+        let width = element.clientWidth;
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+            if (width === element.clientWidth) return;
+            width = element.clientWidth;
+            resizeTitle();
+        }) : null;
+        observer?.observe(element);
+        return () => observer?.disconnect();
     }, [editTitle]);
 
     // The menu renders through a portal with fixed coordinates. Inside the header it
@@ -174,12 +187,12 @@ export function ProjectDetailsHeader({
     const popoverOpen = menuOpen;
 
     return (
-        <header className={`project-details-header pb-3 border-b border-border/50 ${popoverOpen ? 'relative z-30' : ''}`}>
+        <header className={`project-details-header pb-4 ${popoverOpen ? 'relative z-30' : ''}`}>
             <div className="project-details-header__content flex items-start justify-between gap-3">
                 <div className="project-details-header__titleGroup flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex min-w-0 items-start gap-2">
                         <span
-                            className="mt-1.5 h-3 w-3 flex-none rounded-full border border-border"
+                            className="mt-[1.1rem] h-3 w-3 flex-none rounded-full border border-border"
                             style={{ backgroundColor: projectColor }}
                             aria-hidden="true"
                         />
@@ -211,38 +224,21 @@ export function ProjectDetailsHeader({
                             rows={1}
                             readOnly={readOnly}
                             aria-readonly={readOnly}
-                            className="project-details-header__titleInput min-w-0 flex-1 resize-none overflow-hidden break-words bg-transparent border-b border-transparent text-xl font-bold leading-tight focus:border-border focus:outline-none read-only:cursor-default read-only:focus:border-transparent"
+                            className="project-details-header__titleInput min-w-0 flex-1 resize-none overflow-hidden break-words bg-transparent border-b border-transparent text-[clamp(1.75rem,3.5vw,2.5rem)] font-semibold tracking-tight leading-tight focus:border-border focus:outline-none read-only:cursor-default read-only:focus:border-transparent"
                             aria-label={t('projects.title')}
                         />
                     </div>
-                    <div className="ml-5 flex flex-wrap items-center gap-1">
-                        {summaryItems.map((item) => {
-                            const Icon = item.icon;
-                            return (
-                                <span
-                                    key={item.key}
-                                    className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-muted/20 px-2 py-0.5 text-[11px] text-muted-foreground"
-                                >
-                                    <Icon className="h-3 w-3 flex-none" />
-                                    <span className="min-w-0 truncate">{item.label}</span>
-                                </span>
-                            );
-                        })}
-                    </div>
+
                 </div>
                 <div className="project-details-header__actions flex flex-none items-center gap-2">
-                    {projectProgress ? (
-                        <span className="whitespace-nowrap text-xs text-muted-foreground">{progressText}</span>
-                    ) : null}
                     <button
                         type="button"
                         onClick={onToggleDetails}
                         aria-expanded={detailsExpanded}
                         aria-controls="project-details-fields"
-                        className={`inline-flex h-8 items-center justify-center rounded-md border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${detailsExpanded
-                            ? 'border-primary/40 bg-primary/10 text-primary'
-                            : 'border-border bg-background text-muted-foreground hover:bg-muted/40 hover:text-foreground'}`}
+                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${detailsExpanded ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}`}
                     >
+                        <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
                         {detailsLabel}
                     </button>
                     <div ref={menuRef} className="relative">
@@ -254,7 +250,7 @@ export function ProjectDetailsHeader({
                             aria-expanded={menuOpen}
                             aria-label={menuLabel}
                             title={moreOptionsLabel}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                         >
                             {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <MoreHorizontal className="w-4 h-4" />}
                         </button>
@@ -337,7 +333,28 @@ export function ProjectDetailsHeader({
                             document.body,
                         )}
                     </div>
+                    {primaryAction}
                 </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+                {projectProgress && <>
+                    {projectProgress.total > 0 && <progress aria-label={t('status.done')} value={projectProgress.doneCount} max={projectProgress.total} className="project-progress h-2 w-56 overflow-hidden rounded-full" />}
+                    <span>{progressText}</span>
+                </>}
+                    <div className="flex flex-wrap items-center gap-4">
+                        {summaryItems.map((item) => {
+                            const Icon = item.icon;
+                            return (
+                                <span
+                                    key={item.key}
+                                    className="inline-flex max-w-full items-center gap-2 text-sm text-muted-foreground"
+                                >
+                                    {item.key === 'status' ? <span aria-hidden="true" className={`h-2 w-2 flex-none rounded-full ${project.status === 'active' && !project.cancelledAt ? 'bg-success' : 'bg-muted-foreground'}`} /> : <Icon className="h-4 w-4 flex-none" />}
+                                    <span className="min-w-0 truncate">{item.label}</span>
+                                </span>
+                            );
+                        })}
+                    </div>
             </div>
         </header>
     );

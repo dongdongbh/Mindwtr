@@ -681,6 +681,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const quickDoneButton = (
         <button
             type="button"
+            data-task-complete={!quickActionIsPromote || undefined}
             onClick={(event) => {
                 event.stopPropagation();
                 onStatusChange(quickActionIsPromote ? 'next' : 'done');
