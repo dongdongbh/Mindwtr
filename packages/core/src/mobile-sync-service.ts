@@ -577,6 +577,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
   };
 
   const followUpReceipts = new Set<string>();
+  let followUpIdleLogged = false;
   let previousCycleRequestedContribution = false;
   let contributionComparisonCaptured = false;
   let activeFollowUpContext: { backend: SyncBackend; step: string } | null = null;
@@ -2641,7 +2642,22 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       }
 
       const syncRun = new MobileSyncRun(backend, request, requestFollowUp, requestFollowUpAfter);
-      return runSerializedSyncDocumentOperation(() => syncRun.run());
+      const changeAtStart = core.useTaskStore.getState().lastDataChangeAt;
+      try {
+        return await runSerializedSyncDocumentOperation(() => syncRun.run());
+      } finally {
+        // #1435: the pause before a queued follow-up is not sync work, so the badge leaves 'syncing'
+        // here instead of at drain. An edit made during this cycle may not be in its upload: then
+        // the badge stays busy until the follow-up that carries it drains.
+        if (!fatalCleanupError && mobileSyncOrchestrator.getState().queued && mobileSyncActivityState === 'syncing'
+          && core.useTaskStore.getState().lastDataChangeAt === changeAtStart) {
+          setMobileSyncActivityState('idle');
+          if (!followUpIdleLogged) void Promise.resolve(log.info('Sync activity idle while a follow-up waits', {
+            scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.8/follow-up-idle-badge', backend },
+          })).catch(() => {});
+          followUpIdleLogged = true;
+        }
+      }
     },
     onQueuedRunComplete: (queuedResult) => {
       if (!queuedResult.success) {
@@ -2728,6 +2744,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       activeMobileSyncAbortReason = null;
       fatalCleanupError = null;
       followUpReceipts.clear();
+      followUpIdleLogged = false;
       previousCycleRequestedContribution = false;
       contributionComparisonCaptured = false;
       activeFollowUpContext = null;

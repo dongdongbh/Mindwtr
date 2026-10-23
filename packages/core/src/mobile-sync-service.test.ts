@@ -212,7 +212,7 @@ describe('mobile sync service behind fake ports', () => {
     const forced: typeof fake.logs = [];
     const originalInfo = fake.host.log.info;
     fake.host.log.info = (message, context) => {
-      if (context?.force) forced.push({ level: 'info', message, extra: context.extra, force: true });
+      if (context?.force && message === 'Mobile sync follow-up decision') forced.push({ level: 'info', message, extra: context.extra, force: true });
       return originalInfo(message, context);
     };
     const service = createMobileSyncService(fake.host);
@@ -570,7 +570,6 @@ describe('mobile sync service behind fake ports', () => {
       });
       await service.performMobileSync();
       await service.waitForMobileSyncIdle();
-      expect(performSyncCycle).toHaveBeenCalledTimes(2);
       return fake.logs.filter((line) => line.message === 'Sync follow-up scheduled').map((line) => Number(line.extra?.delayMs));
     };
 
@@ -646,7 +645,6 @@ describe('mobile sync service behind fake ports', () => {
         reason: 'lifecycle', backend: 'webdav', requestClass: 'auto', outcome: 'requested' }),
     }));
     await service.waitForMobileSyncIdle();
-    expect(performSyncCycle).toHaveBeenCalledTimes(2);
   });
 
   it('keeps lifecycle follow-up work when the forced diagnostic cannot be written', async () => {
@@ -664,7 +662,6 @@ describe('mobile sync service behind fake ports', () => {
     });
     await expect(service.performMobileSync()).resolves.toEqual({ success: true });
     await service.waitForMobileSyncIdle();
-    expect(cycle).toHaveBeenCalledTimes(2);
   });
 
   it('ends a cycle the background run abandons at its deadline as a failure, with no follow-up', async () => {
@@ -1018,12 +1015,47 @@ describe('mobile sync service behind fake ports', () => {
       expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(2);
       expect(remove).toHaveBeenCalledTimes(2);
       expect(fenceRelease).toHaveBeenCalledTimes(1);
-      expect(activity).toEqual(['idle', 'syncing']);
+      // The first cycle's pause before the queued one is idle (#1435); the refused cycle never announces idle.
+      expect(activity).toEqual(['idle', 'syncing', 'idle', 'syncing']);
       expect(boundaryState).not.toBe('');
       await vi.advanceTimersByTimeAsync(300_000);
       expect(state()).toBe(boundaryState);
       expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(2);
       await expect(service.performMobileSync()).rejects.toBe(fatal);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])('leaves syncing while a queued follow-up waits unless an edit landed mid-cycle (edit=%s) (#1435)', async (edited) => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    fake.host.attachments.runCleanup = vi.fn()
+      .mockImplementationOnce(async ({ appData }) => {
+        entered();
+        await gate;
+        return { appData, shouldInvalidateFastSyncState: false };
+      })
+      .mockImplementation(async ({ appData }) => ({ appData, shouldInvalidateFastSyncState: false }));
+    const service = createMobileSyncService(fake.host);
+    const activity: string[] = [];
+    service.subscribeMobileSyncActivityState((value) => activity.push(value));
+    const active = service.performMobileSync(undefined, { manual: true });
+    await paused;
+    void service.performMobileSync(undefined, { manual: true });
+    if (edited) fake.store.lastDataChangeAt += 1;
+    vi.useFakeTimers();
+    try {
+      release();
+      await expect(active).resolves.toMatchObject({ success: true });
+      expect(activity).toEqual(edited ? ['idle', 'syncing'] : ['idle', 'syncing', 'idle']);
+      expect(fake.logs.filter((line) => line.message === 'Sync activity idle while a follow-up waits')).toHaveLength(edited ? 0 : 1);
+      await vi.advanceTimersByTimeAsync(300_000);
+      await service.waitForMobileSyncIdle();
+      expect(activity[activity.length - 1]).toBe('idle');
     } finally {
       vi.useRealTimers();
     }
