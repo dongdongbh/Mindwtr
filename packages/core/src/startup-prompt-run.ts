@@ -73,19 +73,20 @@ export function scheduleStartupPrompt(candidate: StartupPromptDescriptor, settle
 /**
  * The queue run to the first prompt that opens, for a host whose inputs are all known when it starts (the native apps,
  * after the validated boot): the same selection, `onSelect`, delay, timeout and retirement as {@link useStartupPromptQueue}.
- * Resolves to the id that opened, or null when none did or [signal] aborted. As the hook goes on to the next prompt once
- * the open one is dismissed, the host calls this again with the ids it already showed in [retired].
+ * Resolves to the id that opened, or null when none did or [signal] aborted. [retired] is the session's set, kept by the
+ * caller: this run adds every prompt it declines, fails or opens, so the next run (the hook goes on to the next prompt once
+ * the open one is dismissed) never tries them again.
  */
 export async function runStartupPromptsOnce(
     descriptors: StartupPromptDescriptor[],
     options: {
         onLog?: (error: unknown, context: { id: string; phase: string }) => void;
-        retired?: Iterable<string>;
+        retired?: Set<string>;
         signal?: AbortSignal;
     } = {},
 ): Promise<string | null> {
     const { onLog, signal } = options;
-    const retired = new Set<string>(options.retired);
+    const retired = options.retired ?? new Set<string>();
     const retire: RetireStartupPrompt = (descriptor, error, phase) => {
         retired.add(descriptor.id);
         try {
@@ -105,13 +106,19 @@ export async function runStartupPromptsOnce(
             continue;
         }
         const outcome = await new Promise<StartupPromptOutcome | null>((resolve) => {
-            const cancel = scheduleStartupPrompt(candidate, resolve);
-            signal?.addEventListener('abort', () => { cancel(); resolve(null); }, { once: true });
+            const stop = () => { cancel(); resolve(null); };
+            const cancel = scheduleStartupPrompt(candidate, (settled) => {
+                signal?.removeEventListener('abort', stop);
+                resolve(settled);
+            });
+            signal?.addEventListener('abort', stop, { once: true });
         });
         if (!outcome || signal?.aborted) return null;
         if ('error' in outcome) retire(candidate, outcome.error, 'present');
-        else if (outcome.opened) return candidate.id;
-        else retired.add(candidate.id);
+        else if (outcome.opened) {
+            retired.add(candidate.id);
+            return candidate.id;
+        } else retired.add(candidate.id);
     }
     return null;
 }

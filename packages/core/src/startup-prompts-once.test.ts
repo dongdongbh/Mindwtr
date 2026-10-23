@@ -108,12 +108,31 @@ describe('runStartupPromptsOnce', () => {
             makeDescriptor({ id: 'update', priority: 20 }),
             makeDescriptor({ id: 'donation', priority: 10, delayMs: 2000 }),
         ];
-        const first = runStartupPromptsOnce(descriptors);
+        const retired = new Set<string>();
+        const first = runStartupPromptsOnce(descriptors, { retired });
         await vi.runAllTimersAsync();
         await expect(first).resolves.toBe('update');
-        const next = runStartupPromptsOnce(descriptors, { retired: ['update'] });
+        const next = runStartupPromptsOnce(descriptors, { retired });
         await vi.runAllTimersAsync();
         await expect(next).resolves.toBe('donation');
+    });
+
+    it('never tries again in the session a prompt that declined or failed', async () => {
+        const present = vi.fn(() => false);
+        const onSelect = vi.fn();
+        const descriptors = [
+            makeDescriptor({ id: 'update', priority: 20, onSelect, present }),
+            makeDescriptor({ id: 'donation', priority: 10 }),
+        ];
+        const retired = new Set<string>();
+        const first = runStartupPromptsOnce(descriptors, { retired });
+        await vi.runAllTimersAsync();
+        await expect(first).resolves.toBe('donation');
+        const next = runStartupPromptsOnce(descriptors, { retired });
+        await vi.runAllTimersAsync();
+        await expect(next).resolves.toBeNull();
+        expect(present).toHaveBeenCalledTimes(1);
+        expect(onSelect).toHaveBeenCalledTimes(1);
     });
 
     it('stops when its signal aborts, aborting the prompt being presented', async () => {
