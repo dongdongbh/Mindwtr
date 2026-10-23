@@ -1347,7 +1347,9 @@ internal fun OnboardingHandoffCard(model: InboxViewModel) {
         val shape = RoundedCornerShape(16.dp)
         Box(Modifier.padding(top = 12.dp).clip(shape).background(if (busy) c.filterBg else c.tint).border(1.dp, if (busy) c.border else c.tint, shape)
             .clickable(enabled = !busy, role = Role.Button) { transfer.gettingStarted(openProject = true) }.semantics { if (busy) disabled() }
-            .testTag("mobile-onboarding-start-fresh-handoff").padding(horizontal = 10.dp, vertical = 6.dp)) {
+            .testTag("mobile-onboarding-start-fresh-handoff")
+            // RN's padding (10, 6) inside its 1 dp border: Compose draws the border over the padding, so it adds that 1 dp here.
+            .padding(horizontal = 11.dp, vertical = 7.dp)) {
             Text(t(if (seeding) "common.loading" else "onboarding.startFreshTitle"), style = rnText(13, 700, 17), color = if (busy) c.secondaryText else c.onTint)
         }
     }

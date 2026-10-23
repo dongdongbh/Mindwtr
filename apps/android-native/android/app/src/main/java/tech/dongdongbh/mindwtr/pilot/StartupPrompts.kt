@@ -239,7 +239,8 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
     val dismiss = { prompts.close("dismiss") }
     FullScreenDialog(dismiss) {
         Box(Modifier.fillMaxSize().background(theme.announcementScrim).clickable(role = Role.Button, onClick = dismiss)
-            .semantics { contentDescription = open.getString("closeLabel") }.systemBarsPadding().padding(18.dp),
+            // TalkBack names the backdrop by the window's title, as ThemedAlert does (RN leaves it unnamed).
+            .semantics { contentDescription = announcement.getString("title") }.systemBarsPadding().padding(18.dp),
             contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(12.dp)
             val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
