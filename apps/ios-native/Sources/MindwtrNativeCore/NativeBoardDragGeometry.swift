@@ -1,5 +1,6 @@
 import Foundation
 import CoreFoundation
+import CoreGraphics
 
 /// Fixed, content-free cancellation snapshot shared by App emission and host admission.
 public enum NativeBoardDragGeometry {
