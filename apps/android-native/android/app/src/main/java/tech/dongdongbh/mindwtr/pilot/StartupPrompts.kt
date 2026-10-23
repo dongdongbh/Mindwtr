@@ -76,11 +76,23 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
     // One ask or action at a time, in order (review O2e P3-B: two asks never overlap).
     private val asks = Executors.newSingleThreadExecutor { Thread(it, "mindwtr-startup-prompts") }
     private var runtime: CoreHost? = null
-    /** A debug build's preview (RN's prompt test controls): `debug.mindwtr.native.startup_prompt` names the prompt to open. */
+    /**
+     * A debug build's preview (RN's prompt test controls): `debug.mindwtr.native.startup_prompt` names the prompt to open. As RN's
+     * tests, the welcome sheet runs its real handlers; a window's preview stores nothing.
+     */
     private val preview = if (BuildConfig.DEBUG) debugProperty("startup_prompt") else ""
     private var previewing = false
     /** The donation window whose showing was recorded (RN's onShown runs once per showing; a rotation redraws it). */
     private var recordedShowing: JSONObject? = null
+
+    /**
+     * [work] on the prompts' thread, in order. A screen model cleared before its boot ended (Back on the start screen) or before a
+     * seed answered has shut it: nothing more runs, as the last screen's writer (InboxViewModel.keepLastRoute).
+     */
+    private fun later(work: () -> Unit) {
+        if (asks.isShutdown) return
+        runCatching { asks.execute(work) }
+    }
 
     /** After the validated boot, once per screen model: core records today's prompt activity, then answers the prompt to open. */
     fun start(host: CoreHost) {
@@ -91,7 +103,7 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
 
     private fun ask(previewId: String? = null) {
         val host = runtime ?: return
-        asks.execute {
+        later {
             runCatching {
                 val input = JSONObject().put("installerSource", shell.menu.settings.about.installerSource(host))
                     .put("donationEnabled", BuildConfig.DONATION_PROMPT)
@@ -111,9 +123,9 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         val open = prompt ?: return
         prompt = null
         seedError = null
-        if (previewing) { previewing = false; return }
+        if (previewing) { previewing = false; if (open.optString("id") != "onboarding") return }
         val host = runtime ?: return
-        asks.execute {
+        later {
             runCatching { host.aboutRequest("startupPromptAction", JSONObject().put("id", open.getString("id")).put("action", action).toString()) }
                 .onFailure { Log.w(CoreHost.TAG, "Startup prompt action not stored ${failureForLog(it)}") }
         }
@@ -125,7 +137,7 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         if (open.optString("id") != "donation" || previewing || recordedShowing === open) return
         recordedShowing = open
         val host = runtime ?: return
-        asks.execute {
+        later {
             runCatching {
                 val at = host.aboutRequest("startupPromptAction", JSONObject().put("id", "donation").put("action", "shown").toString()).getString("shownAt")
                 host.menuCommand("supportPromptShown", JSONObject().put("requestId", UUID.randomUUID().toString()).put("shownAt", at).toString())
@@ -156,7 +168,6 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         val open = prompt?.takeIf { it.optString("id") == "onboarding" } ?: return
         if (seeding) return
         val words = open.getJSONObject("words")
-        if (previewing) return
         val host = runtime ?: return
         seeding = true
         seedError = null
@@ -227,7 +238,8 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
     LaunchedEffect(open) { prompts.shown(open) }
     val dismiss = { prompts.close("dismiss") }
     FullScreenDialog(dismiss) {
-        Box(Modifier.fillMaxSize().background(theme.announcementScrim).clickable(role = Role.Button, onClick = dismiss).systemBarsPadding().padding(18.dp),
+        Box(Modifier.fillMaxSize().background(theme.announcementScrim).clickable(role = Role.Button, onClick = dismiss)
+            .semantics { contentDescription = open.getString("closeLabel") }.systemBarsPadding().padding(18.dp),
             contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(12.dp)
             val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
