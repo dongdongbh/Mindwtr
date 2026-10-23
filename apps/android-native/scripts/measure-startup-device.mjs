@@ -131,6 +131,20 @@ if (command === 'fixture') {
         const pid = sh(`pidof ${pkg}`);
         return { mode, ...result, fullyDrawn: drawn, pid };
     };
+    // An INVALID sample's screen (a cold start whose first content never drew): the screenshot, the UI tree and the top
+    // activity, next to the run's JSON, so a miss shows what was on screen.
+    const evidence = (name) => {
+        mkdirSync(outDir, { recursive: true });
+        try {
+            writeFileSync(resolve(outDir, `${name}.png`), execFileSync(ADB, ['-s', serial, 'exec-out', 'screencap', '-p'], { maxBuffer: 64 << 20 }));
+            writeFileSync(resolve(outDir, `${name}-ui.xml`), adb('exec-out', 'uiautomator', 'dump', '/dev/tty'));
+            writeFileSync(resolve(outDir, `${name}-activity.txt`), sh('dumpsys activity activities').split('\n')
+                .filter((line) => /topResumedActivity|mResumedActivity|mFocusedApp/.test(line)).join('\n'));
+            console.log(`evidence ${name}: ${outDir}`);
+        } catch (error) {
+            console.log(`evidence ${name} failed: ${error.message}`);
+        }
+    };
     const report = { label, pkg, serial, compiled, runs, before: conditions(), samples: [] };
     const modes = modesText.split(',');
     for (const mode of modes) {
@@ -141,6 +155,7 @@ if (command === 'fixture') {
             const bad = s.state?.toUpperCase() !== mode.toUpperCase() || !(s.total > 0) || (mode !== 'hot' && s.fullyDrawn == null);
             report.samples.push({ ...s, valid: !bad });
             console.log(`${label} ${mode} #${i + 1}: state=${s.state} total=${s.total} wait=${s.wait} fullyDrawn=${s.fullyDrawn}${bad ? ' INVALID' : ''}`);
+            if (bad && mode !== 'hot') evidence(`${label}-${mode}-${i + 1}`);
         }
     }
     report.after = conditions();
