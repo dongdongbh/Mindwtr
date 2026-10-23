@@ -60,6 +60,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
@@ -96,7 +98,9 @@ private fun JSONArray.texts() = List(length()) { getString(it) }
 private fun JSONArray.objects() = List(length()) { getJSONObject(it) }
 
 /** One of core's layout sections: its fields in core's order, its badge, and whether it starts open. */
-data class EditorSection(val id: String, val titleKey: String?, val fields: List<String>, val filledCount: Int, val open: Boolean)
+data class EditorSection(val id: String, val titleKey: String?, val fields: List<String>, val filledCount: Int, val open: Boolean,
+                         /** Core's contextual help for the section (Scheduling and Details), or null. */
+                         val help: JSONObject? = null)
 data class EditorChoice(val id: String, val title: String)
 /** A Someday section choice: [viewSectionIds] is core's draft value (JSON text) after choosing it. */
 data class SomedayChoice(val id: String, val title: String, val selected: Boolean, val viewSectionIds: String)
@@ -118,7 +122,7 @@ class EditorModel(val source: String) {
     private val layout = reply.getJSONObject("layout")
     val sections = layout.getJSONArray("sections").objects().map {
         EditorSection(it.getString("id"), if (it.isNull("titleKey")) null else it.getString("titleKey"),
-            it.getJSONArray("fields").texts(), it.getInt("filledCount"), it.getBoolean("open"))
+            it.getJSONArray("fields").texts(), it.getInt("filledCount"), it.getBoolean("open"), it.optJSONObject("help"))
     }
     val showSomedaySection = layout.getBoolean("showSomedaySection")
     val dailyInterval = layout.getJSONObject("recurrence").getInt("dailyInterval")
@@ -1061,9 +1065,54 @@ private fun CollapsibleSection(editorId: String, section: EditorSection, content
                 Text("${section.filledCount}", style = rnText(12, 600), color = c.onTint)
             }
         }
-        if (open) Column(Modifier.padding(bottom = 16.dp), content = content)
+        if (open) Column(Modifier.padding(bottom = 16.dp)) {
+            section.help?.let { ContextualHelp(editorId, section.id, it) }
+            content()
+        }
     }
 }
+
+/**
+ * RN's ContextualHelp (components/ContextualHelp.tsx) at the top of an editor section: the help icon, closed by default; open, its
+ * label, core's hint, Read the guide (its failure line when no app opens it) and a close X. Closing only folds it: RN's stored
+ * dismissal changes nothing while no surface reveals help on its own (O2e ruling).
+ */
+@Composable
+private fun ContextualHelp(editorId: String, sectionId: String, help: JSONObject) {
+    val c = LocalTheme.current.colors
+    val context = LocalContext.current
+    var expanded by rememberSaveable(editorId, sectionId, "help") { mutableStateOf(false) }
+    var failed by rememberSaveable(editorId, sectionId, "helpError") { mutableStateOf(false) }
+    val label = help.getString("label")
+    Column(Modifier.padding(vertical = 4.dp).testTag("contextual-help-$sectionId")) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top) {
+            Row((if (expanded) Modifier.weight(1f) else Modifier).heightIn(min = 44.dp).widthIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button) { expanded = !expanded }.semantics { contentDescription = label }
+                .padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp, if (expanded) Alignment.Start else Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(Lucide.CircleHelp, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+                if (expanded) Text(label, style = rnText(14, 400), color = c.secondaryText)
+            }
+            if (expanded) Box(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { expanded = false }
+                .semantics { contentDescription = help.getString("dismiss") }, contentAlignment = Alignment.Center) {
+                Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
+            }
+        }
+        if (expanded) Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 4.dp)) {
+            Text(help.getString("body"), style = rnText(14, 400, 21), color = c.secondaryText)
+            Row(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) {
+                failed = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, help.getString("guideUrl").toUri())) }.isFailure
+            }.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(help.getString("readGuide"), style = rnText(14, 400), color = c.tint)
+                Icon(HelpExternalLink, null, tint = c.tint, modifier = Modifier.size(14.dp))
+            }
+            if (failed) Text(help.getString("guideError"), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        }
+    }
+}
+
+/** RN's ContextualHelp draws ExternalLink at lucide's default stroke 2. */
+private val HelpExternalLink = lucide("ExternalLink", "M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6")
 
 @Composable
 internal fun FormGroup(content: @Composable ColumnScope.() -> Unit) = Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), content = content)

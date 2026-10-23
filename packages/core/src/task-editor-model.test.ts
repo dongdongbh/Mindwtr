@@ -1,3 +1,4 @@
+import { getOnboardingGuideUrl } from './onboarding-guidance';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
@@ -271,6 +272,10 @@ describe('task editor model parity with the mobile editor', () => {
                 fields: fields.split('|')[index].split(',').filter(Boolean),
                 filledCount: filled[index],
                 open: open[id] || filled[index] > 0,
+                // RN's ContextualHelp sits in Scheduling and Details only (8184ce172), with the mobile guide's section link.
+                help: id === 'scheduling' || id === 'details'
+                    ? expect.objectContaining({ guideUrl: getOnboardingGuideUrl(id, 'mobile', undefined) })
+                    : null,
             })).filter((section) => section.fields.length > 0);
             expect(model.layout, key).toEqual({
                 sections: expectedSections,

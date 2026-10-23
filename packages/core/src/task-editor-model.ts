@@ -1,3 +1,4 @@
+import { getOnboardingGuideUrl, ONBOARDING_TOPIC_COPY } from './onboarding-guidance';
 import {
     formatTimeEstimateLabel,
     isCustomTimeEstimate,
@@ -570,6 +571,11 @@ export type TaskEditorLayoutSection = {
     filledCount: number;
     /** Whether the section starts expanded. */
     open: boolean;
+    /**
+     * Mobile's contextual help at the section's top (ContextualHelp: Scheduling and Details only), closed until tapped: its
+     * label, text, guide link in the app language and the link's failure line; null for the other sections.
+     */
+    help: { label: string; body: string; readGuide: string; guideError: string; dismiss: string; guideUrl: string } | null;
 };
 
 export type TaskEditorModel = {
@@ -787,6 +793,14 @@ export function buildTaskEditorModel(input: TaskEditorModelInput): TaskEditorMod
                     fields: sections[id],
                     filledCount,
                     open: openDefaults[id] || filledCount > 0,
+                    help: id === 'scheduling' || id === 'details' ? {
+                        label: `${t('onboarding.help')}: ${t(ONBOARDING_TOPIC_COPY[id].title)}`,
+                        body: t(ONBOARDING_TOPIC_COPY[id].body),
+                        readGuide: t('onboarding.readGuide'),
+                        guideError: t('onboarding.guideError'),
+                        dismiss: t('common.dismiss'),
+                        guideUrl: getOnboardingGuideUrl(id, 'mobile', input.language),
+                    } : null,
                 };
             }),
             showStatusField,
