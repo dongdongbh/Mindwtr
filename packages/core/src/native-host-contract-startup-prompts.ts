@@ -41,15 +41,21 @@ import {
 type Deps = {
     readiness: () => NativeHostResult<null>;
     t: () => (key: string) => string;
+    /** The app language: Start using Mindwtr seeds Getting Started in it (the journaled gettingStarted command). */
+    language: () => string;
     host: () => NativeAboutHost | null;
 };
 
 export const NATIVE_STARTUP_PROMPT_IDS = ['onboarding', 'announcement', 'update-reminder', 'donation'] as const;
 export type NativeStartupPromptId = typeof NATIVE_STARTUP_PROMPT_IDS[number];
 
-/** The prompt to open: the welcome sheet (its words come with the sheet), or the announcement window with its words. */
+/** RN's welcome sheet's words (MobileOnboardingFlow and its handlers' toasts), in RN's keys. */
+const ONBOARDING_WORDS = ['title', 'subtitle', 'startFreshTitle', 'startFreshDesc', 'startFreshBusy', 'syncTitle', 'syncDesc', 'importTitle',
+    'importDescMobile', 'footer', 'skipForNow', 'skip', 'errorNotCreated', 'errorFailed', 'toastNotCreated', 'toastFailed', 'toastReady'] as const;
+
+/** The prompt to open: the welcome sheet with its words and the seed's language, or the announcement window with its words. */
 export type NativeStartupPrompt =
-    | { id: 'onboarding' }
+    | { id: 'onboarding'; words: Record<typeof ONBOARDING_WORDS[number], string>; language: string }
     | {
         id: Exclude<NativeStartupPromptId, 'onboarding'>;
         announcement: AppAnnouncement;
@@ -146,7 +152,11 @@ export function createStartupPromptMethods(deps: Deps) {
                 onLog: (error, context) => warn(host, `Startup prompt failed: ${context.id} ${context.phase}`, error),
             });
             if (!id) return { ok: true, value: { prompt: null } };
-            if (id === 'onboarding') return { ok: true, value: { prompt: { id } } };
+            if (id === 'onboarding') {
+                const t = deps.t();
+                const words = Object.fromEntries(ONBOARDING_WORDS.map((key) => [key, t(`onboarding.${key}`)])) as Record<typeof ONBOARDING_WORDS[number], string>;
+                return { ok: true, value: { prompt: { id, words, language: deps.language() } } };
+            }
             const words = {
                 notNow: resolveText('common.notNow', 'Not now'),
                 closeLabel: resolveText('announcement.dismiss', 'Dismiss announcement'),

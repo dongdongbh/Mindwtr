@@ -86,7 +86,9 @@ describe('native host contract: startup prompts', () => {
         const bound = device();
         const contract = await openContract(bound);
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-        expect(await begin(contract, {})).toEqual({ id: 'onboarding' });
+        const sheet = await begin(contract, {});
+        expect(sheet).toMatchObject({ id: 'onboarding', language: 'en', words: { title: 'Welcome to Mindwtr', startFreshTitle: 'Start using Mindwtr', skipForNow: 'Skip for now', toastReady: 'Getting Started is ready in Projects.' } });
+        expect(Object.values((sheet as { words: Record<string, string> }).words).every((word) => !word.startsWith('onboarding.'))).toBe(true);
         expect(JSON.parse(bound.storage.get(LOCAL_USER_PROMPT_STATE_KEY)!).activeDayKeys).toHaveLength(1);
         expect(value(await contract.startupPromptAction({ id: 'onboarding', action: 'dismiss' }))).toEqual({ shownAt: null });
         expect(bound.storage.get(MOBILE_ONBOARDING_STORAGE_KEY)).toBe('dismissed');
