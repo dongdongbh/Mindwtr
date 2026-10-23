@@ -5,8 +5,8 @@
  * (startup-prompt-run.ts); the host draws the prompt and opens links.
  *
  * Both requests write only RN's device keys (the prompt state, the onboarding and announcement dismissals), never the
- * store: the donation ask's synced record is the journaled supportPromptShown command, sent by the host with the `shownAt`
- * that `startupPromptAction` returns, as RN writes both with one time.
+ * store: the donation ask's synced record (settings.supportPrompt) is a journaled command of its own (pass O2f, with its Kotlin
+ * sender), written with the `shownAt` that `startupPromptAction` returns, as RN writes both with one time.
  */
 import type { AndroidInstallerSource } from './about-settings-model';
 import { ACTIVE_APP_ANNOUNCEMENT, APP_ANNOUNCEMENT_DISMISSED_VALUE, getAnnouncementDismissalStorageKey, type AppAnnouncement } from './announcements';
@@ -68,6 +68,10 @@ const VERSION = /^[0-9A-Za-z.+-]{1,40}$/;
 const unavailable = () => fail('ACTION_FAILED', 'Startup prompts are not available on this host');
 
 export function createStartupPromptMethods(deps: Deps) {
+    // The session (this process), as RN's queue keeps it: the prompts already opened, declined or failed, and whether today's
+    // activity was recorded.
+    const retired = new Set<string>();
+    let activityRecorded = false;
     const resolveText = (key: string, fallback: string) => translateWithFallback(deps.t(), key, fallback);
     const warn = (host: NativeAboutHost, message: string, error: unknown) => {
         try { host.logWarn(message, error); } catch { /* best effort */ }
@@ -75,8 +79,8 @@ export function createStartupPromptMethods(deps: Deps) {
 
     return {
         /**
-         * The prompt that opens now, or null. `retired` holds the prompts this process already showed: the host asks again
-         * after a dismissal, as RN's queue goes on to the next prompt. The first ask (none retired) records today's activity
+         * The prompt that opens now, or null. The host asks again after a dismissal, as RN's queue goes on to the next prompt;
+         * a prompt this process already opened, declined or failed is never tried again. The first ask records today's activity
          * first, as RN does at first paint, so the donation and update rules count this launch.
          */
         async beginStartupPrompts(input: unknown): Promise<NativeHostResult<{ prompt: NativeStartupPrompt | null }>> {
@@ -85,17 +89,16 @@ export function createStartupPromptMethods(deps: Deps) {
             const host = deps.host();
             if (!host) return unavailable();
             if (!isObjectRecord(input) || typeof input.installerSource !== 'string' || !INSTALLER_SOURCES.has(input.installerSource)
-                || typeof input.donationEnabled !== 'boolean'
-                || !(input.retired === undefined || (Array.isArray(input.retired) && input.retired.every((id) => typeof id === 'string' && PROMPT_IDS.has(id))))) {
-                return fail('INVALID_INPUT', 'beginStartupPrompts takes installerSource, donationEnabled and the retired prompt ids');
+                || typeof input.donationEnabled !== 'boolean') {
+                return fail('INVALID_INPUT', 'beginStartupPrompts takes installerSource and donationEnabled');
             }
             if (isSandboxMode()) return { ok: true, value: { prompt: null } };
-            const retired = (input.retired ?? []) as string[];
             const storage = host.storage;
 
             // A failed read leaves the snapshot null, which keeps the donation and update prompts out, as in RN.
             let promptStateSnapshot: UserPromptState | null = null;
-            if (retired.length === 0) {
+            if (!activityRecorded) {
+                activityRecorded = true;
                 let outcome = 'stored';
                 try {
                     promptStateSnapshot = await recordLocalPromptActivity(storage);

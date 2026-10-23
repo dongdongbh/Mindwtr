@@ -119,8 +119,10 @@ describe('native host contract: startup prompts', () => {
         });
         value(await contract.startupPromptAction({ id: 'update-reminder', action: 'dismiss', version: '1.4.0' }));
         expect(JSON.parse(bound.storage.get(LOCAL_USER_PROMPT_STATE_KEY)!).update.dismissedVersion).toBe('1.4.0');
-        // RN's queue goes on after a dismissal; this user is too new for the donation ask, so nothing else opens.
-        expect(await begin(contract, { installerSource: 'sideload', donationEnabled: true, retired: ['update-reminder'] })).toBeNull();
+        // RN's queue goes on after a dismissal; this user is too new for the donation ask, so nothing else opens, and the
+        // update reminder is not checked again this session.
+        expect(await begin(contract, { installerSource: 'sideload', donationEnabled: true })).toBeNull();
+        expect(bound.fetched).toHaveLength(1);
     });
 
     it('asks for a donation in the app words and records the showing for the synced write', async () => {
@@ -149,7 +151,7 @@ describe('native host contract: startup prompts', () => {
     it('refuses malformed input', async () => {
         const contract = await openContract(device());
         expect((await contract.beginStartupPrompts({ installerSource: 'market', donationEnabled: false })).ok).toBe(false);
-        expect((await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, retired: ['other'] })).ok).toBe(false);
+        expect((await contract.beginStartupPrompts({ installerSource: 'sideload' })).ok).toBe(false);
         expect((await contract.startupPromptAction({ id: 'donation', action: 'open' })).ok).toBe(false);
         expect((await contract.startupPromptAction({ id: 'update-reminder', action: 'dismiss', version: 'x y' })).ok).toBe(false);
     });
