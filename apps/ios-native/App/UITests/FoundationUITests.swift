@@ -30385,6 +30385,7 @@ extension FoundationUITests {
                                 && (selected.value as? String ?? "").isEmpty && selected.isHittable
                         }, object: nil)
                         guard XCTWaiter.wait(for: [ready], timeout: max(0, hitPointDeadline - ProcessInfo.processInfo.systemUptime)) == .completed else {
+                            task739TokenHitScopeTimeout(app, role: role, tokenIdentifier: identifier, prefix: prefix)
                             task739FilterModalAXState(app, role: role, phase: prefix + "-reopened-selected-timeout",
                                 tokenIdentifier: identifier, prefix: prefix)
                             XCTFail("The reopened selected token must have a native accessibility hit point before its second tap")
@@ -30483,6 +30484,31 @@ extension FoundationUITests {
         XCTAssertTrue(app.buttons["area-open"].exists && app.buttons["area-open"].isEnabled)
         XCTAssertTrue(app.buttons["tab-menu"].exists && app.buttons["tab-menu"].isEnabled)
         XCTAssertTrue(app.descendants(matching: .any)["inbox-scroll"].firstMatch.exists)
+    }
+
+    private func task739TokenHitScopeTimeout(_ app: XCUIApplication, role: String,
+        tokenIdentifier: String, prefix: String) {
+        let sampleStarted = ProcessInfo.processInfo.systemUptime
+        func sample(_ category: String, query: XCUIElementQuery) -> String {
+            let started = ProcessInfo.processInfo.systemUptime - sampleStarted
+            let count = query.count, token = query.firstMatch, exists = token.exists
+            let enabled = exists && token.isEnabled, selected = exists && token.isSelected
+            let hittable = exists && token.isHittable
+            let finished = ProcessInfo.processInfo.systemUptime - sampleStarted
+            return "\(category)Count=\(count), \(category)Exists=\(exists), \(category)Enabled=\(enabled), "
+                + "\(category)Selected=\(selected), \(category)Hittable=\(hittable), "
+                + "\(category)StartedSeconds=\(started), \(category)FinishedSeconds=\(finished), "
+        }
+        let before = sample("globalBefore", query: app.buttons.matching(identifier: tokenIdentifier))
+        let scoped = sample("pickerScoped", query: app.scrollViews[prefix + "-filter-picker-scroll"]
+            .buttons.matching(identifier: tokenIdentifier))
+        let after = sample("globalAfter", query: app.buttons.matching(identifier: tokenIdentifier))
+        let state = "role=\(role), context=\(prefix), " + before + scoped + after
+            + "sampleSeconds=\(ProcessInfo.processInfo.systemUptime - sampleStarted)"
+        XCTAssertLessThanOrEqual(state.utf8.count, 2048)
+        let attachment = XCTAttachment(string: state)
+        attachment.name = "Task739 token timeout hit scope " + role + " " + prefix
+        attachment.lifetime = .keepAlways; add(attachment)
     }
 
     private func task739FilterModalAXState(_ app: XCUIApplication, role: String, phase: String,
