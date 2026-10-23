@@ -116,6 +116,22 @@ export type DataSettingsModel = {
 };
 
 /** `analyticsAvailable`: the build sends the heartbeat (isMobileAnalyticsHeartbeatConfigured). */
+/**
+ * Getting Started's seed words and language (RN's addGettingStartedContent): the Data row, and the welcome sheet's handoff card
+ * on Sync and Data (sync-settings-screen.tsx onboardingHandoffCard), which seed the same way.
+ */
+export function buildGettingStartedRow(t: Translate, language: string) {
+    return {
+        label: t('settings.gettingStartedContentAction'),
+        description: t('settings.gettingStartedContentDesc'),
+        language,
+        ready: t('onboarding.toastReady'),
+        notCreated: t('onboarding.toastNotCreated'),
+        failed: t('onboarding.toastFailed'),
+        open: t('common.open'),
+    };
+}
+
 export function buildDataSettingsModel(settings: AppSettings, t: Translate, analyticsAvailable = false, language = 'en'): DataSettingsModel {
     const on = isDiagnosticsLoggingEnabled(settings);
     const optedOut = analyticsAvailable && !isAnalyticsHeartbeatEnabled(settings);
@@ -153,15 +169,7 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate, anal
             snapshotsLabel: t('settings.recoverySnapshots'),
             restoreLabel: t('settings.recoverySnapshotsRestore'),
             restoreFailed: t('settings.backupMobile.restoreFailed'),
-            gettingStarted: {
-                label: t('settings.gettingStartedContentAction'),
-                description: t('settings.gettingStartedContentDesc'),
-                language,
-                ready: t('onboarding.toastReady'),
-                notCreated: t('onboarding.toastNotCreated'),
-                failed: t('onboarding.toastFailed'),
-                open: t('common.open'),
-            },
+            gettingStarted: buildGettingStartedRow(t, language),
         },
         importData: {
             title: t('settings.importData'),

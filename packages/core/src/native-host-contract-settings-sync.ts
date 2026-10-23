@@ -57,6 +57,7 @@
  * Only functions read this module's imports from native-host-contract.ts, so the
  * import cycle between the two files is safe.
  */
+import { buildGettingStartedRow } from './data-settings-model';
 import { getDocsGuideUrl } from './docs-guidance';
 import { createDateFormatter } from './date';
 import { isDropboxClientConfigured, type DropboxAuthTokens } from './dropbox-auth-tokens';
@@ -318,6 +319,8 @@ export type NativeSyncSettings = {
      */
     configRevision: string;
     title: string;
+    /** Getting Started's seed words and language, for the welcome sheet's handoff card (buildGettingStartedRow). */
+    gettingStarted: ReturnType<typeof buildGettingStartedRow>;
     backend: {
         title: string;
         current: string;
@@ -1109,6 +1112,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             revision: `${deps.dataRevision()}:${deps.language()}:${deps.systemLocale() ?? ''}:${current.generation}`,
             configRevision: current.configRevision,
             title: t('settings.sync'),
+            gettingStarted: buildGettingStartedRow(t, deps.language()),
             backend: {
                 title: t('settings.syncBackend'),
                 current: getSyncBackendCurrentLabel(state.syncBackend, selection, t),

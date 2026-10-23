@@ -6,7 +6,7 @@
 //
 // (a) An empty library with sync off opens the welcome sheet, RN's options in order (Start, Set up sync, Import tasks); Skip
 // stores the dismissal, so a new start opens no sheet. (b) Set up sync closes the sheet for this run only and opens Settings ›
-// Sync with RN's Getting Started card; the next start opens the sheet again. (c) Start using Mindwtr seeds Getting Started and
+// Sync with RN's Getting Started card, whose Start seeds and opens Getting Started; the next start opens the sheet again. (c) Start using Mindwtr seeds Getting Started and
 // opens it with RN's actions; Open Inbox shows the Inbox with the two sample items. (d) The editor's Scheduling help starts
 // closed and opens with core's hint. (e) A debug preview (debug.mindwtr.native.startup_prompt) opens the announcement, the
 // update reminder and the donation window; the close button dismisses each. GitHub is never called: about_stub points the
@@ -94,6 +94,14 @@ try {
     shot('handoff-sync');
     nodes = await start(sheet, 'the welcome sheet after the handoff');
     check(true, '(b) the handoff closed the sheet for that run only: the next start opens it again');
+    // The card's Start using Mindwtr on Sync seeds Getting Started and opens it (review O2f P1-1).
+    nodes = await tapExpecting(tagged(nodes, 'welcome-sync') ?? fail('no Set up sync'), (current) => Boolean(tagged(current, 'mobile-onboarding-start-fresh-handoff')), 'the Sync handoff card again');
+    nodes = await tapExpecting(tagged(nodes, 'mobile-onboarding-start-fresh-handoff'), (current) => Boolean(tagged(current, 'getting-started-actions')), 'Getting Started from the card', 60_000);
+    check(true, '(b) the Sync card\'s Start using Mindwtr seeds Getting Started and opens it');
+
+    // (c) needs an empty library again.
+    await wipe();
+    nodes = await start(sheet, 'the welcome sheet on a new empty library');
 
     // (c) Start using Mindwtr: Getting Started opens with RN's actions; Open Inbox shows the sample items.
     nodes = await tapExpecting(tagged(nodes, 'welcome-start') ?? fail('no Start using Mindwtr'), (current) => Boolean(tagged(current, 'getting-started-actions')), 'Getting Started', 60_000);

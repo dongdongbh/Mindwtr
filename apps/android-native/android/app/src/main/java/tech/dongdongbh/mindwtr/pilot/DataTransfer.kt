@@ -564,7 +564,9 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
      */
     fun gettingStarted(openProject: Boolean = false) {
         if (busy) return
-        val row = words()?.optJSONObject("gettingStarted") ?: return
+        // The Data row's words, or on Sync the handoff card's (core gives both screens the same row: buildGettingStartedRow).
+        val row = words()?.optJSONObject("gettingStarted")
+            ?: menu.settings.page?.takeIf { it.screen == "sync" }?.view?.optJSONObject("gettingStarted") ?: return
         action = "gettingStarted"
         val input = JSONObject().put("requestId", UUID.randomUUID().toString()).put("language", row.getString("language")).toString()
         whenHosted { runtime ->
