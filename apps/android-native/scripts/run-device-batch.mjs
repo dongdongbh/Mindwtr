@@ -76,6 +76,7 @@ export function verdict(results) {
 export function checkArgs(check) {
     if (check === 'check-projects-device') return ['--prune-old'];
     if (check === 'check-startup-device') return [`${apkDir}/benchmarkSeed/app-play-benchmarkSeed.apk`, `${apkDir}/benchmark/app-play-benchmark.apk`];
+    if (check === 'check-onboarding-device') return [`${apkDir}/benchmarkSeed/app-play-benchmarkSeed.apk`];
     return [];
 }
 

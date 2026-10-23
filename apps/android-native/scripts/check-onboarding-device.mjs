@@ -1,0 +1,140 @@
+// RN's first-run welcome sheet and startup prompts on the native app (pass O2f), on the benchmark package only (its own data,
+// never the dev app's): the debuggable benchmarkSeed build is installed there and its state wiped before each empty start, as
+// check-startup-device does.
+//
+//   node apps/android-native/scripts/check-onboarding-device.mjs <adb-serial> <benchmarkSeed.apk> [screenshot-dir]
+//
+// (a) An empty library with sync off opens the welcome sheet, RN's options in order (Start, Set up sync, Import tasks); Skip
+// stores the dismissal, so a new start opens no sheet. (b) Set up sync closes the sheet for this run only and opens Settings ›
+// Sync with RN's Getting Started card; the next start opens the sheet again. (c) Start using Mindwtr seeds Getting Started and
+// opens it with RN's actions; Open Inbox shows the Inbox with the two sample items. (d) The editor's Scheduling help starts
+// closed and opens with core's hint. (e) A debug preview (debug.mindwtr.native.startup_prompt) opens the announcement, the
+// update reminder and the donation window; the close button dismisses each. GitHub is never called: about_stub points the
+// update check at a closed local port. Screenshots of each surface go to [screenshot-dir] for the side-by-side with RN.
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { check, connect, evidenced, fail, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+
+const [serial, seedApk, shotsArg] = process.argv.slice(2);
+if (!serial || !seedApk) {
+    console.error('usage: check-onboarding-device.mjs <adb-serial> <benchmarkSeed.apk> [screenshot-dir]');
+    process.exit(2);
+}
+const app = resolve(import.meta.dirname, '..');
+const PKG = 'tech.dongdongbh.mindwtr.nativeclient.dev.benchmark';
+const ACTIVITY = `${PKG}/${PKG}.MainActivity`;
+const UI_FILE = '/data/local/tmp/mindwtr-onboarding-ui.xml';
+const PROPS = ['startup_prompt', 'about_stub'];
+const shots = shotsArg ?? resolve(process.env.HOME, '.mindwtr-harness/onboarding');
+const { en } = await import(resolve(app, '../../packages/core/src/i18n/locales/en.ts'));
+
+const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: process.env.ADB ?? '/home/dd/Android/Sdk/platform-tools/adb' });
+const { adbRaw, sh, home, front, requireAppFront, screen, waitFor, tap, tapExpecting } = device;
+const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
+const runAs = (command) => sh(`run-as ${PKG} ${command}`);
+const shot = (name) => {
+    mkdirSync(shots, { recursive: true });
+    writeFileSync(resolve(shots, `native-${name}.png`), adbRaw('exec-out', 'screencap', '-p'));
+};
+const byText = (nodes, text) => nodes.find((node) => node.text === text);
+const onTabs = (nodes) => Boolean(tab(nodes, en['tab.menu']));
+const sheet = (nodes) => Boolean(tagged(nodes, 'welcome-sheet'));
+const promptWindow = (nodes) => Boolean(tagged(nodes, 'startup-prompt'));
+
+/** The benchmark package's whole state goes (measure-startup-device.mjs seed): an empty library, sync off, nothing dismissed. */
+const wipe = async () => {
+    await device.stopApp();
+    runAs('rm -rf files no_backup shared_prefs cache databases');
+    runAs('mkdir -p files');
+};
+const start = async (done, description) => {
+    await device.stopApp();
+    device.launch(ACTIVITY);
+    requireAppFront();
+    return waitFor(description, done, 60_000);
+};
+const centerY = (node) => { const [, top, , bottom] = node.bounds.match(/\d+/g).map(Number); return (top + bottom) / 2; };
+
+const restore = async () => {
+    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    try { setProp('start_tab', 'inbox'); } catch { /* device gone */ }
+    try { if (front().includes(`${PKG}/`)) await device.stopApp(); } catch { /* the app is gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+};
+
+try {
+    console.log(`device: ${sh('getprop ro.product.model')} / Android ${sh('getprop ro.build.version.release')} (API ${sh('getprop ro.build.version.sdk')})`);
+    console.log(`apk: ${seedApk}\napk sha256: ${createHash('sha256').update(readFileSync(seedApk)).digest('hex')}`);
+    const beforeInstall = front();
+    if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
+    adbRaw('install', '-r', seedApk);
+    // The update reminder's GitHub read goes to a closed local port: it fails at once, and no real request leaves the phone.
+    setProp('about_stub', '9');
+    setProp('startup_prompt', '');
+
+    // (a) The sheet on an empty library, RN's order; Skip is stored.
+    await wipe();
+    let nodes = await start(sheet, 'the welcome sheet');
+    const options = [en['onboarding.startFreshTitle'], en['onboarding.syncTitle'], en['onboarding.importTitle']].map((title) => byText(nodes, title));
+    check(options.every(Boolean) && centerY(options[0]) < centerY(options[1]) && centerY(options[1]) < centerY(options[2]),
+        '(a) an empty library opens the welcome sheet: Start using Mindwtr, then Set up sync, then Import tasks');
+    shot('welcome');
+    nodes = await tapExpecting(byText(nodes, en['onboarding.skipForNow']) ?? fail('no Skip for now'), (current) => !sheet(current) && onTabs(current), 'the tabs');
+    await start(onTabs, 'the tabs after Skip');
+    await sleep(3000);
+    check(!sheet(await screen()), '(a) after Skip, a new start opens no welcome sheet');
+
+    // (b) Set up sync hands off to Settings › Sync with the Getting Started card; the sheet comes back next start.
+    await wipe();
+    nodes = await start(sheet, 'the welcome sheet again');
+    nodes = await tapExpecting(tagged(nodes, 'welcome-sync') ?? fail('no Set up sync'), (current) => Boolean(tagged(current, 'mobile-onboarding-start-fresh-handoff')), 'the Sync handoff card');
+    check(Boolean(byText(nodes, en['settings.gettingStartedContentContinueTitle'])), '(b) Set up sync opens Settings › Sync with the Getting Started card');
+    shot('handoff-sync');
+    nodes = await start(sheet, 'the welcome sheet after the handoff');
+    check(true, '(b) the handoff closed the sheet for that run only: the next start opens it again');
+
+    // (c) Start using Mindwtr: Getting Started opens with RN's actions; Open Inbox shows the sample items.
+    nodes = await tapExpecting(tagged(nodes, 'welcome-start') ?? fail('no Start using Mindwtr'), (current) => Boolean(tagged(current, 'getting-started-actions')), 'Getting Started', 60_000);
+    check(Boolean(byText(nodes, en['onboarding.captureAction'])) && Boolean(byText(nodes, en['onboarding.readGuide'])),
+        '(c) Start using Mindwtr opens Getting Started with Capture to Inbox and the guide link');
+    shot('getting-started');
+    nodes = await tapExpecting(byText(nodes, en['starter.processInbox.check1']) ?? fail('no Open Inbox'), (current) => tabSelected(current, en['tab.inbox']), 'the Inbox');
+    check(tabSelected(nodes, en['tab.inbox']), '(c) Open Inbox closes the project and shows the Inbox');
+
+    // (d) The editor's Scheduling help: closed, then open with core's hint.
+    const row = nodes.find((node) => node.text === en['starter.sampleBuyMilk']) ?? nodes.find((node) => (node['resource-id'] ?? '').endsWith('task-row'));
+    nodes = await tapExpecting(row ?? fail('no sample Inbox item'), (current) => current.some((node) => /(^|\/)task-editor$/.test(node['resource-id'] ?? '')), 'the editor');
+    const helpLabel = `${en['onboarding.help']}: ${en['taskEdit.scheduling']}`;
+    for (let step = 0; step < 6 && !withDescription(nodes, en['taskEdit.scheduling']); step += 1) {
+        sh('input swipe 540 1700 540 1100 400');
+        await sleep(700);
+        nodes = await screen();
+    }
+    const scheduling = withDescription(nodes, en['taskEdit.scheduling']) ?? fail('no Scheduling section');
+    if (!withDescription(nodes, helpLabel)) nodes = await tapExpecting(scheduling, (current) => Boolean(withDescription(current, helpLabel)), 'Scheduling open');
+    const help = withDescription(nodes, helpLabel) ?? fail('no Scheduling help');
+    check(!byText(nodes, en['onboarding.schedulingHint']), '(d) the Scheduling help starts closed');
+    nodes = await tapExpecting(help, (current) => Boolean(byText(current, en['onboarding.schedulingHint'])), 'the help open');
+    check(Boolean(byText(nodes, en['onboarding.readGuide'])), '(d) the open help shows core\'s hint and Read the guide');
+    shot('editor-help');
+
+    // (e) The debug preview of each window; its close dismisses it.
+    for (const id of ['announcement', 'update-reminder', 'donation']) {
+        setProp('startup_prompt', id);
+        nodes = await start(promptWindow, `the ${id} window`);
+        shot(`prompt-${id}`);
+        nodes = await tapExpecting(withDescription(nodes, en['announcement.dismiss']) ?? fail(`no close on the ${id} window`), (current) => !promptWindow(current), `the ${id} window closed`);
+        check(!promptWindow(nodes), `(e) the ${id} window opens in a preview and its close dismisses it`);
+    }
+    setProp('startup_prompt', '');
+    console.log(`screenshots: ${shots}`);
+    console.log('Onboarding device check passed');
+} catch (error) {
+    evidenced(error);
+    console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
+    process.exitCode = error instanceof Stopped ? 3 : 1;
+} finally {
+    await restore();
+}
