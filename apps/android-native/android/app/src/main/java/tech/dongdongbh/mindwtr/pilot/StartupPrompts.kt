@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -43,6 +44,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -200,12 +202,14 @@ fun StartupPromptOverlays(model: InboxViewModel) {
 }
 
 /** A window over the whole screen with its own backdrop, as RN's transparent Modal (the platform dim off). */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun FullScreenDialog(onBack: () -> Unit, content: @Composable () -> Unit) {
     Dialog(onDismissRequest = onBack, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect { window?.setDimAmount(0f) }
-        content()
+        // Its own window: the device checks find its tags only when this composition names them too, as MainActivity's does.
+        Box(Modifier.semantics { testTagsAsResourceId = true }) { content() }
     }
 }
 
