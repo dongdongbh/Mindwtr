@@ -1,5 +1,11 @@
 import SwiftUI
 
+private struct ListFilterPickerRow: Identifiable {
+    let value: CoreObject
+    let kind: String
+    var id: Data { Data((kind + "-" + value.text(kind == "tokens" ? "value" : "id")).utf8) }
+}
+
 /// The RN TaskFilterSheet contents shared by the two core list DTOs.
 /// Query, paging and edit ownership remain with the calling screen's model.
 struct ListFilterControls: View {
@@ -182,7 +188,9 @@ struct ListFilterControls: View {
                     // Keep the accepted projection in layout while refreshing to preserve the scroll position.
                     Group {
                         let items = picker.objects("items")
-                        ForEach(items.indices, id: \.self) { index in pickerOption(items[index]) }
+                        ForEach(items.map { ListFilterPickerRow(value: $0, kind: pickerName) }) { row in
+                            pickerOption(row.value)
+                        }
                         if pickerCurrent && items.isEmpty {
                             Text(localized("search.noResults")).rnFont(14).foregroundStyle(palette.secondary).padding(.vertical, 28)
                         }
