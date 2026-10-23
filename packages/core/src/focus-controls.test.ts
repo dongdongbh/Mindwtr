@@ -3,6 +3,7 @@ import {
     applyFocusControlEdit,
     canReorderFocusTasks,
     DEFAULT_FOCUS_CONTROL_STATE,
+    getFocusEmptyState,
     getFocusFilterTokens,
     getFocusGroupByOptions,
     getFocusReorderPositionLabel,
@@ -153,5 +154,14 @@ describe('Focus controls', () => {
         expect(moveFocusReorderTask([a, b, c], 'b', -1)?.map(({ id }) => id)).toEqual(['b', 'a', 'c']);
         expect(moveFocusReorderTask([a, b, c], 'a', -1)).toBeNull();
         expect(moveFocusReorderTask([a, b, c], 'c', 1)).toBeNull();
+    });
+});
+
+describe('the empty Focus screen', () => {
+    const t = (key: string) => key;
+    // #592: a library with no tasks yet points the user at capture; one with tasks says nothing is due.
+    it('says how to start when the library has no tasks, and that nothing is due when it has some', () => {
+        expect(getFocusEmptyState({ hasActiveFilters: false, hasAnyTasks: false, t })).toEqual({ title: 'agenda.allClear', subtitle: 'agenda.emptyStart' });
+        expect(getFocusEmptyState({ hasActiveFilters: false, hasAnyTasks: true, t })).toEqual({ title: 'agenda.allClear', subtitle: 'agenda.noTasks' });
     });
 });
