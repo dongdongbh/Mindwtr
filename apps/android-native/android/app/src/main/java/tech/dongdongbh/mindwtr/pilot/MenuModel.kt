@@ -777,12 +777,12 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
     /**
-     * A sort choice: Someday's is its session's, Done's and Archive's the device's (RN's view state), and Reference's is the
-     * stored task-list sort every list shares, a command through core's setTaskListSort.
+     * A sort choice: Someday's is its session's, Done's and Archive's the device's (RN's view state), and Reference's and
+     * Contexts' is the stored task-list sort every list shares, a command through core's setTaskListSort.
      */
     fun sort(value: String) {
         when (val list = list ?: return) {
-            "reference", "inbox" -> send(FailedAction("taskListSort", value))
+            "reference", "inbox", "contexts" -> send(FailedAction("taskListSort", value))
             "done" -> { ListViewState.read(prefs, DONE_VIEW_KEY).copy(sortBy = value).save(prefs, DONE_VIEW_KEY); reload() }
             "archive" -> { ListViewState.read(prefs, ARCHIVED_VIEW_KEY).copy(sortBy = value).save(prefs, ARCHIVED_VIEW_KEY); reload() }
             else -> { editOwn(list) { put("sortBy", value) }; reload() }

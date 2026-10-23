@@ -33,6 +33,25 @@ import {
 } from './date';
 
 describe('date utils', () => {
+    it.each(['system', 'ymd'])('falls back to the app language for invalid system locales with %s dates', (dateFormat) => {
+        for (const systemLocale of ['C', 'C.UTF-8', 'en_US.UTF-8', '@invalid']) {
+            const locale = resolveDateLocaleTag({ language: 'de', dateFormat, systemLocale });
+            expect(locale).toBe('de-DE');
+            expect(() => new Intl.DateTimeFormat(locale).format(new Date(2026, 3, 19))).not.toThrow();
+        }
+    });
+
+    it('validates locales when the host has DateTimeFormat without getCanonicalLocales', () => {
+        const canonicalLocales = Intl.getCanonicalLocales;
+        Object.defineProperty(Intl, 'getCanonicalLocales', { value: undefined, configurable: true, writable: true });
+        try {
+            expect(resolveDateLocaleTag({ language: 'en', systemLocale: 'C' })).toBe('en-US');
+            expect(resolveDateLocaleTag({ language: 'en', systemLocale: 'de_DE-u-hc-h23' })).toBe('de-DE-u-hc-h23');
+        } finally {
+            Object.defineProperty(Intl, 'getCanonicalLocales', { value: canonicalLocales });
+        }
+    });
+
     it('parses date-only strings as local dates', () => {
         const parsed = safeParseDate('2025-01-02');
         expect(parsed).not.toBeNull();

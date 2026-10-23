@@ -14,8 +14,10 @@ const mocks = vi.hoisted(() => {
   const modalPropsSpy = vi.fn();
   const showToast = vi.fn();
   const flushPendingSave = vi.fn(async () => undefined);
+  const backListeners: (() => boolean)[] = [];
 
   return {
+    backListeners,
     batchDeleteTasks,
     batchMoveTasks,
     batchUpdateTasks,
@@ -66,6 +68,7 @@ vi.mock('expo-router', () => ({
 }));
 
 vi.mock('@react-navigation/native', () => ({
+  NavigationContext: React.createContext(undefined),
   useFocusEffect: () => undefined,
 }));
 
@@ -191,7 +194,10 @@ vi.mock('react-native', async (importOriginal) => {
     ...actual,
     AppState: { addEventListener: vi.fn(() => ({ remove: vi.fn() })) },
     BackHandler: {
-      addEventListener: vi.fn(() => ({ remove: vi.fn() })),
+      addEventListener: (_event: string, listener: () => boolean) => {
+        mocks.backListeners.push(listener);
+        return { remove: () => { mocks.backListeners.splice(mocks.backListeners.indexOf(listener), 1); } };
+      },
     },
     FlatList: ({ data = [], renderItem, keyExtractor, ListEmptyComponent, ...props }: any) => {
       const children = data.length > 0
@@ -309,6 +315,40 @@ describe('ReviewScreen bulk organize', () => {
         }),
       },
     ]);
+  });
+
+  // RN runs Back listeners newest first and stops at the first that returns true.
+  it('keeps selection on Android Back while a review dialog is open, then leaves it (#1415)', async () => {
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<ReviewScreen />);
+    });
+    pressButtonWithText(tree, 'All open tasks');
+    pressButtonWithLabel(tree, 'Expand areas');
+    pressButtonWithLabel(tree, 'Expand projects');
+    const row = tree.root.findByType('SwipeableTaskItem' as unknown as React.ElementType);
+    act(() => {
+      row.props.onLongPressAction(row.props.task);
+    });
+    const pressBack = () => {
+      let handled = false;
+      act(() => {
+        handled = [...mocks.backListeners].reverse().some((listener) => listener());
+      });
+      return handled;
+    };
+    const selecting = () => tree.root.findAllByType(TouchableOpacity).some((node) => flattenText(node.props.children) === 'Organize');
+
+    pressButtonWithText(tree, 'Organize');
+    expect(mocks.modalPropsSpy.mock.calls.at(-1)?.[0].visible).toBe(true);
+    expect(pressBack()).toBe(false);
+    expect(selecting()).toBe(true);
+
+    act(() => {
+      mocks.modalPropsSpy.mock.calls.at(-1)?.[0].onClose();
+    });
+    expect(pressBack()).toBe(true);
+    expect(selecting()).toBe(false);
   });
 
   it('gives every bulk bar action the button role', async () => {

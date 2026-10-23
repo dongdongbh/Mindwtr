@@ -128,6 +128,13 @@ struct FocusControlsPanel: View {
     private var overview: some View {
         VStack(alignment: .leading, spacing: 12) {
             activeChips
+            let taskDates = sheet.object("taskDates")
+            if !taskDates.isEmpty {
+                let dateOptions = taskDates.objects("options")
+                overviewRow(taskDates.text("label"), summary: dateOptions.filter { $0.flag("selected") }.map { $0.text("label") }.joined(separator: ", "),
+                            expanded: expanded.contains("taskDates"), id: "focus-filter-taskDates") { toggle("taskDates") }
+                if expanded.contains("taskDates") { options(dateOptions, prefix: "focus-filter-taskDates") }
+            }
             if sheet.object("tokens").number("total") > 0 {
                 overviewRow(text.text("contexts"), summary: sheet.object("summaries").text("tokens"), id: "focus-filter-tokens") {
                     endInput(); model.openFocusPicker("tokens")
@@ -440,5 +447,124 @@ struct FocusSavedFilterDialog: View {
     private func endInput() {
         nameFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+
+struct PomodoroTimerPanel: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    private var panel: CoreObject { model.pomodoroPanel }
+    private var text: CoreObject { panel.object("text") }
+
+    var body: some View {
+        if panel.flag("visible") || model.pomodoroError != nil {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    if panel.flag("collapsed") { clock }
+                    else { Text(text.text("title").isEmpty ? model.label("pomodoro.mobileTitle") : text.text("title")).rnFont(16, .bold).accessibilityAddTraits(.isHeader) }
+                    Spacer(minLength: 8)
+                    Button { model.togglePomodoroCollapsed() } label: {
+                        Image(systemName: panel.flag("collapsed") ? "chevron.down" : "chevron.up")
+                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).accessibilityLabel(text.text("collapse"))
+                    .accessibilityIdentifier("pomodoro-collapse")
+                }
+                if panel.text("kind") != "ready" {
+                    if model.pomodoroError == nil { ProgressView(model.label("common.loading")) }
+                } else {
+                    Text(text.text("phase") + " · " + text.text("state")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                    if !panel.flag("collapsed") {
+                        clock.frame(maxWidth: .infinity)
+                        AppChipFlow {
+                            ForEach(panel.objects("presets").indices, id: \.self) { index in
+                                let preset = panel.objects("presets")[index]
+                                Button(preset.text("label")) {
+                                    Task { await model.performPomodoroAction("setDurations", values: ["durations": [
+                                        "focusMinutes": preset.number("focusMinutes"), "breakMinutes": preset.number("breakMinutes")]]) }
+                                }
+                                .buttonStyle(.bordered).tint(preset.flag("active") ? palette.tint : palette.secondary)
+                                .accessibilityAddTraits(preset.flag("active") ? .isSelected : [])
+                                .accessibilityIdentifier("pomodoro-preset-" + preset.text("id"))
+                                .disabled(!model.pomodoroInputsEnabled)
+                            }
+                        }
+                        AppChipFlow {
+                            Button(text.text("toggle")) { Task { await model.performPomodoroAction("toggle") } }
+                                .buttonStyle(.borderedProminent).tint(palette.tint).foregroundStyle(palette.onTint)
+                                .accessibilityIdentifier("pomodoro-toggle")
+                            Button(text.text("reset")) { Task { await model.performPomodoroAction("reset") } }
+                                .accessibilityIdentifier("pomodoro-reset")
+                            Button(text.text("switchPhase")) { Task { await model.performPomodoroAction("switchPhase") } }
+                                .accessibilityIdentifier("pomodoro-switch")
+                        }
+                        .buttonStyle(.bordered).disabled(!model.pomodoroInputsEnabled)
+                        Text(text.text("sessionsDone") + ": " + String(panel.number("completedToday")))
+                            .rnFont(13).foregroundStyle(palette.secondary).accessibilityIdentifier("pomodoro-count")
+                        if !panel.text("event").isEmpty {
+                            Text(panel.text("event")).rnFont(14).accessibilityIdentifier("pomodoro-event")
+                        }
+                        if panel.flag("linkTaskEnabled") {
+                            let selected = panel.object("selectedTask")
+                            Text(text.text("selectedTask")).rnFont(13, .semibold)
+                            Text(selected.isEmpty ? text.text("timerOnly") : selected.text("title"))
+                                .rnFont(14).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("pomodoro-task")
+                            Button(text.text("changeTask")) { Task { await model.openPomodoroPicker() } }
+                                .buttonStyle(.bordered).disabled(!model.pomodoroInputsEnabled).accessibilityIdentifier("pomodoro-link")
+                            if !selected.isEmpty {
+                                Button(text.text("markDone")) { Task { await model.completePomodoroTask() } }
+                                    .buttonStyle(.bordered).disabled(!model.pomodoroInputsEnabled).accessibilityIdentifier("pomodoro-complete")
+                            }
+                        }
+                    }
+                }
+                if let error = model.pomodoroError {
+                    Text(error).rnFont(13).foregroundStyle(palette.danger).accessibilityIdentifier("pomodoro-error")
+                    Button(model.label("common.retry")) { Task { await model.retryPomodoro() } }
+                        .disabled(model.busy).accessibilityIdentifier("pomodoro-retry")
+                }
+            }
+            .padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
+            .padding(.bottom, 12).controlSize(.large)
+            .sheet(isPresented: Binding(get: { model.pomodoroPickerPresented }, set: { if !$0 { model.closePomodoroPicker() } })) {
+                NavigationStack {
+                    List {
+                        Button(text.text("timerOnly")) { Task { await model.choosePomodoroTask(nil) } }
+                            .accessibilityIdentifier("pomodoro-task-none")
+                        ForEach(model.pomodoroTasks.indices, id: \.self) { index in
+                            let task = model.pomodoroTasks[index]
+                            Button(task.text("title")) { Task { await model.choosePomodoroTask(task.text("id")) } }
+                                .accessibilityIdentifier("pomodoro-choice-" + task.text("id"))
+                        }
+                        if model.pomodoroTasks.count < model.pomodoroTaskCount {
+                            Button(text.text("more")) { Task { await model.loadMorePomodoroTasks() } }
+                                .accessibilityIdentifier("pomodoro-more")
+                        }
+                        if let error = model.pomodoroError {
+                            Text(error).foregroundStyle(palette.danger)
+                            Button(model.label("common.retry")) { Task { await model.openPomodoroPicker() } }
+                        }
+                    }
+                    .disabled(!model.pomodoroInputsEnabled)
+                    .navigationTitle(text.text("selectedTask"))
+                    .toolbar { ToolbarItem(placement: .cancellationAction) {
+                        Button(model.label("common.close")) { model.closePomodoroPicker() }
+                    } }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var clock: some View {
+        if panel.flag("isRunning"), let end = panel["phaseEndsAtMs"] as? NSNumber,
+           let start = panel.object("observation")["nowMs"] as? NSNumber, end.doubleValue > start.doubleValue {
+            Text(timerInterval: Date(timeIntervalSince1970: start.doubleValue / 1000)...Date(timeIntervalSince1970: end.doubleValue / 1000), countsDown: true)
+                .monospacedDigit().rnFont(panel.flag("collapsed") ? 22 : 40, .bold).accessibilityIdentifier("pomodoro-clock")
+        } else {
+            Text(panel.text("clock")).monospacedDigit().rnFont(panel.flag("collapsed") ? 22 : 40, .bold)
+                .accessibilityIdentifier("pomodoro-clock")
+        }
     }
 }

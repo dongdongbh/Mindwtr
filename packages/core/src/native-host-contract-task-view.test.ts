@@ -275,7 +275,7 @@ describe('native host contract: checklist edits', () => {
         ] as const;
         for (const edit of edits) {
             const result = value(host.editTaskChecklist({ id: 't-open', draft, checklist, edit }));
-            const expected = applyTaskChecklistEdit(checklist, edit, { isReference: false, newId: generateUUID });
+            const expected = applyTaskChecklistEdit(checklist, edit, { newId: generateUUID });
             expect(result.checklist.map((entry) => [entry.title, entry.isCompleted])).toEqual(expected?.checklist.map((entry) => [entry.title, entry.isCompleted]));
             expect(result.checklist.filter((entry) => checklist.some((old) => old.id === entry.id)).map((entry) => entry.id))
                 .toEqual(expected?.checklist.filter((entry) => checklist.some((old) => old.id === entry.id)).map((entry) => entry.id));
@@ -310,6 +310,31 @@ describe('native host contract: checklist edits', () => {
         const reset = value(host.editTaskChecklist({ id: 't-done', draft: draftOf('t-done'), checklist: stored('t-done').checklist as ChecklistItem[], edit: { kind: 'uncheckAll' } }));
         expect(reset.draft.status).toBe('next');
         expect(reset.checklist.every((entry) => !entry.isCompleted)).toBe(true);
+    });
+
+    it('ticks a Reference list without moving the reference: no Done, no completedAt, no Focus (#1416)', async () => {
+        freezeClock();
+        const host = await openHost();
+        expect(await useTaskStore.getState().updateTask('t-list', { status: 'reference' })).toMatchObject({ success: true });
+        const draft = draftOf('t-list');
+        const checklist = stored('t-list').checklist as ChecklistItem[];
+        const ticked = value(host.editTaskChecklist({ id: 't-list', draft, checklist, edit: { kind: 'toggle', index: 1 } }));
+        expect(ticked.checklist.every((entry) => entry.isCompleted)).toBe(true);
+        expect(ticked.draft).toEqual(draft);
+        expect(ticked.field).toMatchObject({ label: 'List', canReset: true });
+        expect(ticked.field.items.map((entry) => entry.struck)).toEqual([true, true]);
+        // The store write the editor saves, and a direct one, leave it a reference.
+        expect(await useTaskStore.getState().updateTask('t-list', { checklist: ticked.checklist })).toMatchObject({ success: true });
+        expect(stored('t-list')).toMatchObject({ status: 'reference', checklist: ticked.checklist });
+        expect(stored('t-list').completedAt).toBeUndefined();
+        expect(stored('t-list').isFocusedToday).toBeFalsy();
+        // Reset unchecks every entry and keeps it a reference.
+        writes.length = 0;
+        const reset = await host.resetTaskChecklist({ id: 't-list', requestId: generateUUID(), taskRevision: taskRevisionOf(stored('t-list')) });
+        expect(reset).toMatchObject({ ok: true });
+        expect(writes).toEqual([['resetTaskChecklist', 't-list']]);
+        expect(stored('t-list').status).toBe('reference');
+        expect(stored('t-list').checklist?.every((entry) => !entry.isCompleted)).toBe(true);
     });
 
     it('refuses invalid edits and a read-only task', async () => {

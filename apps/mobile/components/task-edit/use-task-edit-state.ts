@@ -162,6 +162,7 @@ export function useTaskEditState({
     const baseTaskRef = React.useRef<Task | null>(null);
     const attachmentDraftSettledRef = React.useRef(true);
     const saveAwaitingDurabilityRef = React.useRef(false);
+    const pendingSavesRef = React.useRef(0);
     const pendingCancellationPatchRef = React.useRef<Partial<Task> | null>(null);
     const [cancelRetryPending, setCancelRetryPending] = React.useState(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
@@ -410,7 +411,7 @@ export function useTaskEditState({
         return false;
     }, [onSave, onSaveError]);
 
-    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' = 'save'): Promise<boolean> => {
+    const saveDraftImpl = React.useCallback(async (mode: 'save' | 'cancel' = 'save'): Promise<boolean> => {
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return Promise.resolve(false);
         if (mode === 'cancel') isDirtyRef.current = true;
@@ -496,6 +497,7 @@ export function useTaskEditState({
                 focusTaskLimit: limit,
                 sequentialProjectIds: derived.sequentialProjectIds,
                 sectionScopedProjectIds: derived.sequentialWithinSectionProjectIds,
+                sequentialSectionKeys: derived.sequentialSectionKeys,
             });
             if (!action.canToggle) {
                 onSaveError(getFocusStarBlockedText(translate, action, limit) ?? 'Focus unavailable');
@@ -590,6 +592,11 @@ export function useTaskEditState({
         writePatch,
     ]);
 
+    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' = 'save') => {
+        pendingSavesRef.current += 1;
+        try { return await saveDraftImpl(mode); }
+        finally { pendingSavesRef.current -= 1; }
+    }, [saveDraftImpl]);
     const cancelDraft = React.useCallback(() => saveDraft('cancel'), [saveDraft]);
 
     const discardDraft = React.useCallback(() => {
@@ -601,6 +608,7 @@ export function useTaskEditState({
     }, [clearPendingTextChanges, clearTaskEditActivitySession, liveTask, onClose, settleCurrentAttachmentDraft]);
 
     const hasPendingChanges = React.useCallback(() => {
+        if (pendingSavesRef.current > 0 || saveAwaitingDurabilityRef.current) return true;
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return false;
         if (checklistDraftRef.current.trim()) return true;

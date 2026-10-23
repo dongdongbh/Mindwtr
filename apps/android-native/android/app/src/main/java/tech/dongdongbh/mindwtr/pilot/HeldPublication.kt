@@ -29,6 +29,9 @@ internal class HeldPublication<T : Any> {
         }
     }
 
-    /** Leaving: nothing stays held (the leave publishes at once). */
-    fun clear() = held.set(null)
+    /**
+     * Leaving: nothing stays held. True when a publication was still held (a resume or the boot left before its first content
+     * or fallback): the leave publishes it in full. False: the leave only flushes a change still waiting (RN's flush).
+     */
+    fun leave(): Boolean = held.getAndSet(null) != null
 }

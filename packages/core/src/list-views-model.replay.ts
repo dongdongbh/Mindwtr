@@ -45,6 +45,7 @@ import {
     buildContextsViewModel,
     CONTEXTS_BULK_STATUSES,
     editContextsTaskTokens,
+    getContextsChipLabels,
     getContextsEmptyState,
     getContextsMatchModeLabels,
     getContextsTokenPicker,
@@ -52,6 +53,7 @@ import {
     getContextsRouteTokens,
     resolveContextsMatchMode,
     selectContextsRouteTokens,
+    selectContextsToken,
     toggleContextsNoContext,
     toggleContextsToken,
 } from './contexts-view-model';
@@ -236,8 +238,11 @@ async function replay<Screen>(
 
 // --- Contexts --------------------------------------------------------------
 
+type ContextsSelection = { tokens: string[]; matchMode: ContextOrTagMatchMode };
 type ContextsModel = {
     chips: [string, boolean, string[]][];
+    /** The selection a chip press leaves: plain, or the additive press (RN's long-press). */
+    press: (chip: string, additive: boolean) => ContextsSelection;
     matchMode: [string, [string, boolean][]] | null;
     rowIds: string[];
     empty: [string, string, string] | null;
@@ -279,15 +284,22 @@ export function createContextsCoreBackend(t: Translate): ContextsBackend {
             const labels = getContextsMatchModeLabels(t);
             const tasksById = Object.fromEntries(store.tasks.map((task) => [task.id, task]));
             const empty = getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: state.tokens }, t);
+            const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
             return {
                 chips: [
                     [t('contexts.all'), state.tokens.length === 0, [t('common.all'), String(model.allCount)]],
                     [t('contexts.none'), model.noContextSelected, [t('contexts.none'), String(model.noContextCount)]],
-                    ...model.tokenChips.map((chip): [string, boolean, string[]] => [`${chip.token} (${chip.count})`, chip.selected, [chip.token, String(chip.count)]]),
+                    // A child chip after its parent shows "/leaf"; the accessibility label keeps the full token (#1428).
+                    ...model.tokenChips.map((chip, index): [string, boolean, string[]] => [`${chip.token} (${chip.count})`, chip.selected, [chipLabels[index].label, String(chip.count)]]),
                 ],
                 matchMode: model.showMatchMode
                     ? [labels.label, [[labels.all, state.matchMode === 'all'], [labels.any, state.matchMode === 'any']]]
                     : null,
+                press: (chip, additive) => {
+                    if (chip === t_all) return { tokens: [], matchMode: 'all' };
+                    if (chip === t_none) return { tokens: toggleContextsNoContext(state.tokens), matchMode: 'all' };
+                    return { tokens: (additive ? toggleContextsToken : selectContextsToken)(state.tokens, chip), matchMode: state.matchMode };
+                },
                 rowIds: model.tasks.map((task) => task.id),
                 empty: [ICONS[empty.icon], empty.title, empty.message],
                 bulk: {
@@ -299,7 +311,7 @@ export function createContextsCoreBackend(t: Translate): ContextsBackend {
                     }))),
                     delete: t('common.delete'),
                 },
-                picker: (field, mode) => getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, selectedIds: state.selected, tasksById, t }),
+                picker: (field, mode) => getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, settings: store.settings, selectedIds: state.selected, tasksById, t }),
                 deleteConfirmation: getBulkTrashConfirmation(t),
             };
         },
@@ -350,6 +362,11 @@ export function createContextsContractBackend(host: Host, requestId: () => strin
             const pickers = view.bulk?.tokenActions ?? [];
             return {
                 chips: view.chips.map((chip): [string, boolean, string[]] => [chip.accessibilityLabel, chip.selected, [chip.label, String(chip.count)]]),
+                // The native screen applies the chip's own next selection; All and No context have no additive press.
+                press: (label, additive) => {
+                    const chip = view.chips.find(({ id }) => id === (label === t_all ? 'all' : label === t_none ? 'none' : label))!;
+                    return (additive && chip.additive ? chip.additive : chip).next;
+                },
                 matchMode: view.matchMode ? [view.matchMode.label, view.matchMode.options.map((option): [string, boolean] => [option.label, option.selected])] : null,
                 rowIds: view.rows.map((row) => row.id),
                 empty: view.empty ? [ICONS[view.empty.icon], view.empty.title, view.empty.message] : null,
@@ -429,10 +446,9 @@ export async function replayContexts(backend: ContextsBackend, scenario: ListVie
     return replay(screen, async (_screen, action) => {
         const [kind, first, second, third] = action as [string, string, string, unknown];
         if (kind === 'search') state.searchQuery = first;
-        else if (kind === 'chip') {
-            if (first === t_all) { state.tokens = []; state.matchMode = 'all'; }
-            else if (first === t_none) { state.tokens = toggleContextsNoContext(state.tokens); state.matchMode = 'all'; }
-            else state.tokens = toggleContextsToken(state.tokens, first);
+        else if (kind === 'chip' || kind === 'chipTap') {
+            // 'chip' is the additive press (RN's long-press), 'chipTap' the plain tap (#1427).
+            ({ tokens: state.tokens, matchMode: state.matchMode } = current.press(first, kind === 'chip'));
         } else if (kind === 'matchMode') state.matchMode = first as ContextOrTagMatchMode;
         else if (kind === 'row') {
             if (second === 'edit') state.editor = first;

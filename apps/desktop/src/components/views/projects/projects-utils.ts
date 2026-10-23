@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import { DEFAULT_AREA_COLOR as CORE_DEFAULT_AREA_COLOR, safeFormatDate, safeParseDate, type Area, type Project } from '@mindwtr/core';
 
 export const DEFAULT_AREA_COLOR = CORE_DEFAULT_AREA_COLOR;
@@ -24,11 +25,7 @@ export function parseTagInput(input: string): string[] {
 }
 
 export function getProjectColor(project: Project, areaById: Map<string, Area>, fallback = DEFAULT_AREA_COLOR): string {
-    if (project.areaId) {
-        const area = areaById.get(project.areaId);
-        if (area?.color) return area.color;
-    }
-    return fallback;
+    return getProjectAccentColor(project, areaById) ?? fallback;
 }
 
 export function sortAreasByName(areas: Area[]): string[] {

@@ -148,12 +148,15 @@ export const normalizeTaskForContentComparison = (task: Task): Record<string, un
 export const normalizeProjectForContentComparison = (project: Project): Record<string, unknown> => {
     const comparable: Record<string, unknown> = {
         ...project,
+        colorOverride: project.colorOverride ?? undefined,
         tagIds: normalizeOptionalArrayForComparison(project.tagIds),
         attachments: project.deletedAt ? undefined : normalizeAttachmentsForContentComparison(project.attachments),
         isSequential: project.isSequential ? true : undefined,
         sequentialScope: project.isSequential && normalizeProjectSequentialScope(project.sequentialScope) === 'section'
             ? 'section'
             : undefined,
+        // Off and never-set both mean "not Per section"; only true is a distinct value.
+        perSectionFlow: project.perSectionFlow === true ? true : undefined,
         taskSortBy: normalizeProjectTaskSortBy(project.taskSortBy),
         isFocused: project.isFocused ? true : undefined,
         viewSectionIds: canonicalizeStringMapForComparison(project.viewSectionIds),

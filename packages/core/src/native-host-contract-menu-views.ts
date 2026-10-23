@@ -15,6 +15,7 @@
  */
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
 import type { DateFormatter } from './date';
+import type { FilterCriteria } from './types';
 import { formatTimeEstimateLabel, isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import {
     applyListFilterEdit,
@@ -84,6 +85,8 @@ import {
     renameSomedaySection,
     type SomedaySectionAssignment,
 } from './someday-sections-model';
+import { normalizeDateRange } from './saved-filters';
+import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { useTaskStore } from './store';
 import { TASK_EDITOR_ENERGY_LEVEL_OPTIONS, TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
 import type { TaskGroupBy } from './task-group-sections';
@@ -154,6 +157,7 @@ export type NativeListFilterView = {
     priorities: { value: TaskPriority; label: string; selected: boolean; edit: ListFilterEdit }[];
     energyLevels: { value: TaskEnergyLevel; label: string; selected: boolean; edit: ListFilterEdit }[];
     timeEstimates: { value: TimeEstimate; label: string; selected: boolean; edit: ListFilterEdit }[];
+    taskDates: { label: string; options: { value: string; label: string; selected: boolean; edit: ListFilterEdit }[] };
 };
 
 export type NativeListChip = {
@@ -299,6 +303,24 @@ const MATCH_MODES = new Set(['all', 'any']);
 export const isTimeEstimate = (value: unknown): value is TimeEstimate => (
     typeof value === 'string' && (TIME_ESTIMATE_OPTIONS.includes(value as TimeEstimate) || isCustomTimeEstimate(value as TimeEstimate))
 );
+/** Known fields keep their wire shapes; future JSON criteria survive a date-only edit. */
+export const isPreservedFilterCriteria = (value: unknown): value is FilterCriteria => {
+    if (!isObjectRecord(value) || !isNativeJsonWithinBytes(value)) return false;
+    const arrays = ['contexts', 'excludedContexts', 'areas', 'projects', 'tags', 'excludedTags',
+        'energy', 'priority', 'statuses', 'assignedTo', 'locations', 'timeEstimates'];
+    return arrays.every((key) => value[key] == null || isTextList(value[key]))
+        && ['dueDateRange', 'startDateRange', 'anyDateRange', 'timeEstimateRange'].every((key) => value[key] == null || isObjectRecord(value[key]))
+        && ['hasDescription', 'isStarred'].every((key) => value[key] == null || typeof value[key] === 'boolean')
+        && ['contextMatchMode', 'tagMatchMode'].every((key) => value[key] == null || MATCH_MODES.has(value[key] as string));
+};
+
+const isFilterDateRange = (value: unknown): boolean => {
+    const normalized = normalizeDateRange(value);
+    return !!normalized && isObjectRecord(value) && Object.entries(value).every(([key, entry]) => (
+        isText(entry, 500) && key in normalized && normalized[key as keyof typeof normalized] === entry
+    ));
+};
+
 // Selections are bounded by the window, so the chips they make are bounded too.
 const FILTER_STATE_CHECKS: Record<keyof ListFilterState, (value: unknown) => boolean> = {
     searchQuery: (value) => isText(value, 2000),
@@ -311,6 +333,7 @@ const FILTER_STATE_CHECKS: Record<keyof ListFilterState, (value: unknown) => boo
     location: (value) => isText(value, 500),
     contextMatchMode: (value) => MATCH_MODES.has(value as string),
     tagMatchMode: (value) => MATCH_MODES.has(value as string),
+    anyDateRange: isFilterDateRange,
 };
 
 /** A partial state is completed from the empty one; unknown keys are refused. */
@@ -341,6 +364,8 @@ export const isFilterEdit = (edit: unknown): edit is ListFilterEdit => {
             return isText(edit.value, 2000);
         case 'setLocation':
             return isText(edit.value, 500);
+        case 'setAnyDateRange':
+            return edit.value === null || isFilterDateRange(edit.value);
         case 'setMatchMode':
             return (edit.kind === 'context' || edit.kind === 'tag') && MATCH_MODES.has(edit.value as string);
         case 'clear':
@@ -406,6 +431,18 @@ const projectOptions = (options: ListFilterOptions, state: ListFilterState): Pro
     edit: { type: 'toggleProject', value: project.id },
 })) ?? null;
 
+export const buildNativeTaskDateFilter = (state: ListFilterState, t: (key: string) => string): NativeListFilterView['taskDates'] => ({
+    label: tFallback(t, 'filters.taskDates', 'Task dates'),
+    options: [
+        { value: '', label: tFallback(t, 'filters.anyTime', 'Any time'), selected: !state.anyDateRange, edit: { type: 'setAnyDateRange', value: null } },
+        ...(['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const).map((preset) => ({
+            value: preset, label: t(`filters.datePreset.${preset}`),
+            selected: state.anyDateRange !== undefined && 'preset' in state.anyDateRange && state.anyDateRange.preset === preset,
+            edit: { type: 'setAnyDateRange' as const, value: { preset } },
+        })),
+    ],
+});
+
 export const nativeFilterView = (
     resolved: ResolvedListFilter,
     options: ListFilterOptions,
@@ -419,6 +456,7 @@ export const nativeFilterView = (
         activeCount: resolved.activeCount,
         hasActive: resolved.hasActive,
         clearEdit: { type: 'clear' },
+        taskDates: buildNativeTaskDateFilter(state, t),
         visibility: options.visibility,
         showContextMatchMode: resolved.showContextMatchMode,
         showTagMatchMode: resolved.showTagMatchMode,

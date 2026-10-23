@@ -7,7 +7,7 @@ import {
   type TaskFilterSelections,
   type TaskFilterSelectionsOptions,
 } from '@mindwtr/core/task-filter-selections';
-import type { SavedFilter, Task, TaskMetadataFilterVisibility } from '@mindwtr/core';
+import { normalizeFilterCriteria, type SavedFilter, type Task, type TaskMetadataFilterVisibility } from '@mindwtr/core';
 
 // The hook only. The predicates it feeds are shared with desktop, so they are
 // covered where they live: packages/core/src/task-filter-selections.test.ts.
@@ -76,6 +76,77 @@ afterEach(() => {
 });
 
 describe('useTaskFilterSelections', () => {
+  it('applies, edits, saves and clears dates without losing other saved criteria', () => {
+    const saved: SavedFilter = {
+      id: 'dates', name: 'Dated', view: 'focus',
+      criteria: { contexts: ['@work'], dueDateRange: { preset: 'this_week' }, anyDateRange: { preset: 'next_7_days' } },
+      createdAt: '2026-10-18T00:00:00Z', updatedAt: '2026-10-18T00:00:00Z',
+    };
+    const { handle, rerender } = renderSelections({ view: 'focus', savedFilters: [saved] });
+    act(() => handle.current.applySaved(saved));
+    expect(handle.current.anyDateRange).toEqual({ preset: 'next_7_days' });
+    expect(handle.current.canSave).toBe(false);
+    act(() => handle.current.setAnyDateRange({ preset: 'next_30_days' }));
+    expect(handle.current.activeSavedFilterId).toBeNull();
+    expect(handle.current.currentCriteria).toEqual({
+      contexts: ['@work'], dueDateRange: { preset: 'this_week' }, anyDateRange: { preset: 'next_30_days' },
+    });
+    expect(handle.current.criteria).toEqual(handle.current.currentCriteria);
+    expect(handle.current.canSave).toBe(true);
+    const reloaded = JSON.parse(JSON.stringify({ ...saved, criteria: handle.current.criteria }));
+    rerender({ view: 'focus', savedFilters: [reloaded] });
+    act(() => handle.current.clear());
+    act(() => handle.current.applySaved(reloaded));
+    expect(handle.current.criteria).toEqual(reloaded.criteria);
+    act(() => handle.current.chips.find((chip) => chip.id === 'anyDateRange')!.onPress());
+    expect(handle.current.criteria).toEqual({ contexts: ['@work'], dueDateRange: { preset: 'this_week' } });
+    expect(handle.current.chips.some((chip) => chip.id === 'advanced:dueDateRange')).toBe(true);
+    act(() => handle.current.chips.find((chip) => chip.id === 'advanced:dueDateRange')!.onPress());
+    expect(handle.current.criteria).toEqual({ contexts: ['@work'] });
+    act(() => handle.current.clear());
+    expect(handle.current.anyDateRange).toBeUndefined();
+    expect(handle.current.criteria).toEqual({});
+    expect(handle.current.activeCount).toBe(0);
+  });
+
+  it('keeps original saved values that pickers cannot express until that field is edited', () => {
+    const original = {
+      contexts: ['@work'], locations: ['Office', 'Home'], priority: ['none', 'high'],
+      timeEstimates: ['custom:45'], dueDateRange: { preset: 'this_week' }, futureCriterion: 'keep',
+    };
+    const saved = {
+      id: 'complex-dates', name: 'Complex', view: 'focus', criteria: original,
+      createdAt: '2026-10-18T00:00:00Z', updatedAt: '2026-10-18T00:00:00Z',
+    } as unknown as SavedFilter;
+    const normalizedSaved = { ...saved, criteria: normalizeFilterCriteria(saved.criteria) };
+    const { handle } = renderSelections({ view: 'focus', savedFilters: [normalizedSaved], rawSavedFilters: [saved] });
+    act(() => handle.current.applySaved(normalizedSaved));
+    act(() => handle.current.setAnyDateRange({ preset: 'next_7_days' }));
+    expect(handle.current.currentCriteria).toEqual({ ...original, anyDateRange: { preset: 'next_7_days' } });
+    act(() => handle.current.setLocation('Elsewhere'));
+    expect(handle.current.criteria).toEqual({ ...original, locations: ['Elsewhere'], anyDateRange: { preset: 'next_7_days' } });
+    act(() => handle.current.togglePriority('high'));
+    expect(handle.current.criteria.priority).toBeUndefined();
+    expect(handle.current.criteria.timeEstimates).toEqual(original.timeEstimates);
+    expect(handle.current.criteria.locations).toEqual(['Elsewhere']);
+    expect(handle.current.chips.some((chip) => chip.id === 'preserved:timeEstimates')).toBe(true);
+    act(() => handle.current.chips.find((chip) => chip.id === 'preserved:timeEstimates')!.onPress());
+    expect(handle.current.currentCriteria.timeEstimates).toBeUndefined();
+  });
+
+  it('preserves hidden metadata in the saved criteria when only dates change', () => {
+    const original = { contexts: ['@work'], priority: ['none', 'high'], timeEstimates: ['custom:45'], locations: ['Office', 'Home'] };
+    const saved = { id: 'hidden', name: 'Hidden', view: 'focus', criteria: original,
+      createdAt: '2026-10-18T00:00:00Z', updatedAt: '2026-10-18T00:00:00Z' } as SavedFilter;
+    const { handle } = renderSelections({ view: 'focus', visibility: { priority: false, energyLevel: false, location: false, timeEstimate: false }, savedFilters: [saved], rawSavedFilters: [saved] });
+    act(() => handle.current.applySaved(saved));
+    act(() => handle.current.setAnyDateRange({ preset: 'today' }));
+    expect(handle.current.currentCriteria).toEqual({ ...original, anyDateRange: { preset: 'today' } });
+    expect(handle.current.criteria.priority).toBeUndefined();
+    expect(handle.current.criteria.locations).toBeUndefined();
+    expect(handle.current.criteria.timeEstimates).toBeUndefined();
+  });
+
   it('cycles a token neutral → included → excluded → neutral, one side at a time', () => {
     const { handle } = renderSelections();
 

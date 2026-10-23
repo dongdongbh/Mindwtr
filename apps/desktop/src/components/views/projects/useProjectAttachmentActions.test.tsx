@@ -78,14 +78,14 @@ describe('useProjectAttachmentActions', () => {
         vi.mocked(isTauriRuntime).mockReturnValue(false);
     });
 
-    it('reports file attachments as unsupported on web runtime', async () => {
+    it('explains browser project uploads are unavailable while task uploads are supported', async () => {
         const { hook } = setup();
 
         await act(async () => {
             await hook.result.current.addProjectFileAttachment();
         });
 
-        expect(hook.result.current.attachmentError).toBe('attachments.fileNotSupported');
+        expect(hook.result.current.attachmentError).toBe('attachments.webProjectUploadUnsupported');
     });
 
     it('opens attachments in a browser tab on web runtime', async () => {

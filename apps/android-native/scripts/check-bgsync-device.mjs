@@ -108,7 +108,13 @@ const unfinished = (name) => sqlite(pullFile('no_backup/androidx.work.workdb', '
      JOIN WorkSpec s ON s.id = n.work_spec_id LEFT JOIN SystemIdInfo i ON i.work_spec_id = s.id
      WHERE n.name = '${name}' AND s.state IN (0, 1, 4)`);
 const serverTitles = () => (webdavDocument(dav, FOLDER)?.tasks ?? []).filter((task) => !task.deletedAt).map((task) => task.title);
-const puts = () => dav.state.requests.filter((request) => request.startsWith('PUT')).length;
+// Only this run's folder counts: another app on the phone (step 0's or the merge bench's package, its sync still pointed at
+// 127.0.0.1:18781) reaches this server through the same adb reverse.
+const ownRequests = () => dav.state.requests.filter((request) => {
+    const path = request.slice(request.indexOf(' ') + 1);
+    return path === FOLDER || path.startsWith(`${FOLDER}/`);
+});
+const puts = () => ownRequests().filter((request) => request.startsWith('PUT')).length;
 
 // ---- Process, broadcasts and the job ----
 /** The app's process gone, as after the system reclaimed it: a signal, never a force-stop (that cancels the app's scheduled work). */
@@ -350,10 +356,10 @@ try {
     check(phoneTitles().includes(title(4)) && !serverTitles().includes(title(4)) && puts() === putsBefore, '(4) the capture stays on the phone; nothing reached the server');
     check(failureRecord()?.consecutiveFailures === 1, `(4) core recorded the failure in RN's RKStorage key (${JSON.stringify(failureRecord())})`);
     await killApp();
-    const requestsBefore = dav.state.requests.length;
+    const requestsBefore = ownRequests().length;
     text = await forceSyncJob('(4)');
     check(count(text, 'Mobile background sync skipped during failure cooldown') >= 1, '(4) the scheduled run inside the cooldown was skipped (core\'s line)');
-    check(dav.state.requests.length === requestsBefore, '(4) the skipped run sent no request');
+    check(ownRequests().length === requestsBefore, '(4) the skipped run sent no request');
     check(unfinished(SYNC_WORK).length === 1, '(4) the job stays queued (its next run)');
     dav.state.down = false;
     await killApp();

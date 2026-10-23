@@ -164,6 +164,7 @@ import { isTaskDateCoherent } from './task-date-coherence';
 import { prepareTaskUpdatesForStore } from './store-tasks';
 import { applyTaskUpdates, ensureDeviceId, findTaskProjectReactivationTarget, getNextProjectOrder, nextRevision } from './store-helpers';
 import { buildNewTask } from './task-creation';
+import { getTaskReminderDefault } from './task-reminder-policy';
 import { buildNewProject } from './store-projects/project-actions';
 import { findSelectableProjectByTitleAndArea } from './project-utils';
 import { normalizeFocusTaskLimit } from './focus-utils';
@@ -752,14 +753,20 @@ const createIntentValid = (intent: CalendarCreateIntent, request: NativeCalendar
         && (project.areaId === null || typeof project.areaId === 'string'));
 };
 
-/** Re-run the existing factories over only the inputs they read; never parse the user's title again. */
-const calendarCreatedRows = (prepared: Pick<NativePreparedCalendarCreate, 'creation' | 'intent' | 'project' | 'preparedAt' | 'deviceIdBefore' | 'deviceIdToInitialize'>
-    & { request: { requestId: string } }): { task: Task; project: Project | null } | null => {
+/**
+ * Re-run the existing factories over only the inputs they read; never parse the user's title again.
+ * Validation reads the reminder default back from the frozen row's suppression flag, which an
+ * inheriting new row derives from it; journals keep their shape, and rows prepared before Skip was
+ * honored carry `false` and replay as Send.
+ */
+const calendarCreatedRows = (prepared: Pick<NativePreparedCalendarCreate, 'creation' | 'intent' | 'project' | 'preparedAt' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'task'>
+    & { request: { requestId: string } },
+    taskReminderDefault: 'send' | 'skip' = prepared.task.suppressMindwtrReminders === true ? 'skip' : 'send'): { task: Task; project: Project | null } | null => {
     const { creation, intent, project, preparedAt } = prepared;
     const settings = { gtd: {
         defaultAreaMode: creation.defaultAreaMode, defaultAreaId: creation.defaultAreaId,
         defaultProjectFlowMode: creation.defaultProjectFlowMode,
-    } } as unknown as ReturnType<typeof useTaskStore.getState>['settings'];
+    }, taskReminderDefault } as unknown as ReturnType<typeof useTaskStore.getState>['settings'];
     const deviceId = prepared.deviceIdBefore ?? prepared.deviceIdToInitialize;
     if (!deviceId) return null;
     let createdProject: Project | null = null;
@@ -2304,7 +2311,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                         localMinute: request.event.allDay ? 0 : plan.showDate.getHours() * 60 + plan.showDate.getMinutes() },
                     result: eventCopyResult(request, localDay),
                 };
-                const rows = calendarCreatedRows(prepared);
+                const rows = calendarCreatedRows(prepared, getTaskReminderDefault(store.settings));
                 if (!rows) return fail('INVALID_INPUT', 'Calendar event cannot resolve its task container');
                 prepared.task = rows.task;
                 const authority = validatePreparedCalendarEventTaskCreate({ request, prepared });
@@ -2406,7 +2413,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                 projection: { offsetMinutes: -start.getTimezoneOffset(), localDay: dayKey(start), localMinute: start.getHours() * 60 + start.getMinutes() },
                 result: result({ ...dayView(start), changed: true, taskId: input.requestId }),
             };
-            const rows = calendarCreatedRows(prepared);
+            const rows = calendarCreatedRows(prepared, getTaskReminderDefault(store.settings));
             if (!rows) return fail('INVALID_INPUT', 'Calendar creation cannot resolve its container');
             if (prepared.creation.focusRequested && rows.project?.isSequential === true) prepared.creation.sequentialEmpty = true;
             if (prepared.creation.focusRequested && (rows.project ?? prepared.creation.selectedProject)?.isSequential === true

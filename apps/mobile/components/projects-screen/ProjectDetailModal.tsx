@@ -1,5 +1,5 @@
 import React from 'react';
-import { getProjectToSectionEligibility, isGettingStartedProject } from '@mindwtr/core';
+import { AREA_PRESET_COLORS, DEFAULT_PROJECT_COLOR, getProjectToSectionEligibility, isGettingStartedProject } from '@mindwtr/core';
 import { GettingStartedActions, type GettingStartedAction } from '../GettingStartedActions';
 import {
     Alert,
@@ -23,14 +23,17 @@ import {
     type Attachment,
     getAttachmentDisplayTitle,
     getProjectDetailsPresentation,
+    getProjectFlowMode,
+    planProjectFlowModeChange,
     type Project,
+    type ProjectFlowMode,
     type ProjectSequenceTaskCue,
     type Section,
     type Task,
     type TaskSortBy,
     getSequentialProjectTaskCues,
     resolveTaskSortByForFeatures,
-    TASK_LIST_SORT_OPTIONS,
+    PROJECT_TASK_SORT_OPTIONS,
     safeFormatDate,
     safeParseDate,
     shallow,
@@ -94,6 +97,7 @@ function ProjectSectionManagerModal({
     canManage,
     deleteSection,
     onClose,
+    perSectionFlow,
     projectId,
     reorderSections,
     sections,
@@ -106,6 +110,8 @@ function ProjectSectionManagerModal({
     canManage: boolean;
     deleteSection: (id: string) => Promise<unknown> | unknown;
     onClose: () => void;
+    /** The project's Flow mode is Per section: each row offers its section's flow (#1429). */
+    perSectionFlow: boolean;
     projectId: string;
     reorderSections: (projectId: string, orderedIds: string[]) => Promise<unknown> | unknown;
     sections: Section[];
@@ -140,6 +146,9 @@ function ProjectSectionManagerModal({
         'Are you sure you want to delete this section?'
     );
     const sectionReorderFailed = tFallback(t, 'projects.sectionReorderFailed', 'Failed to reorder sections.');
+    const flowModeLabel = tFallback(t, 'projects.sequenceMode', 'Flow Mode');
+    const parallelLabel = tFallback(t, 'projects.parallel', 'Parallel');
+    const sequentialLabel = tFallback(t, 'projects.sequential', 'Sequential');
     const editing = sections.find((section) => section.id === editingSectionId);
     const showEditor = canManage && editingSectionId !== null;
 
@@ -359,6 +368,23 @@ function ProjectSectionManagerModal({
                                                         <Ionicons name="chevron-down" size={16} color={tc.secondaryText} />
                                                     </TouchableOpacity>
                                                 </View>
+                                                {perSectionFlow ? (
+                                                    <TouchableOpacity
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={`${flowModeLabel}: ${section.title}`}
+                                                        accessibilityValue={{ text: section.isSequential === true ? sequentialLabel : parallelLabel }}
+                                                        onPress={() => {
+                                                            if (!canMutateProject()) return;
+                                                            void Promise.resolve(updateSection(section.id, { isSequential: section.isSequential !== true }));
+                                                        }}
+                                                        style={[styles.smallButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                                        testID={`project-section-flow-${section.id}`}
+                                                    >
+                                                        <Text style={[styles.smallButtonText, { color: tc.secondaryText }]}>
+                                                            {section.isSequential === true ? sequentialLabel : parallelLabel}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ) : null}
                                                 <TouchableOpacity
                                                     accessibilityRole="button"
                                                     accessibilityLabel={`${editLabel}: ${section.title}`}
@@ -562,6 +588,7 @@ export function ProjectDetailModal({
         updateProject,
         cancelProject,
         updateSection,
+        setProjectFlowMode,
         settings,
         allProjects,
     } = useTaskStore((state) => ({
@@ -571,12 +598,21 @@ export function ProjectDetailModal({
         updateProject: state.updateProject,
         cancelProject: state.cancelProject,
         updateSection: state.updateSection,
+        setProjectFlowMode: state.setProjectFlowMode,
         settings: state.settings,
         allProjects: state._allProjects,
     }), shallow);
     const selectedProjectRef = React.useRef(selectedProject);
     selectedProjectRef.current = selectedProject;
     const liveSelectedProject = allProjects?.find((project) => project.id === selectedProject?.id);
+    const [colorSaving, setColorSaving] = React.useState(false);
+    const [colorError, setColorError] = React.useState(false);
+    const [colorIntent, setColorIntent] = React.useState<string | null>(null);
+    const colorGeneration = React.useRef(0);
+    React.useEffect(() => {
+        colorGeneration.current += 1;
+        setColorSaving(false); setColorError(false); setColorIntent(null);
+    }, [selectedProject?.id]);
     const liveSelectedProjectStatus = liveSelectedProject?.status;
     const isArchivedProject = selectedProject?.status === 'archived' || liveSelectedProjectStatus === 'archived';
     const isArchivedProjectRef = React.useRef(isArchivedProject);
@@ -595,6 +631,23 @@ export function ProjectDetailModal({
         onProjectChange(next);
         return next;
     }, [getMutableSelectedProject, onProjectChange, updateProject]);
+    const saveProjectColor = async (colorOverride: string | null) => {
+        const current = getMutableSelectedProject();
+        if (!current || colorSaving) return;
+        const generation = colorGeneration.current;
+        setColorSaving(true);
+        setColorIntent(colorOverride);
+        setColorError(false);
+        try {
+            const state = useTaskStore.getState();
+            if (state.persistenceFailure) await state.retryPersistence();
+            const result = await updateProject(current.id, { colorOverride });
+            if (!result.success) throw new Error('Save refused');
+            const live = useTaskStore.getState()._projectsById.get(current.id);
+            if (colorGeneration.current === generation && selectedProjectRef.current?.id === current.id) onProjectChange({ ...selectedProjectRef.current, colorOverride, color: live?.color ?? current.color });
+        } catch { if (colorGeneration.current === generation) setColorError(true); }
+        finally { if (colorGeneration.current === generation) setColorSaving(false); }
+    };
     // A stored 'timeEstimate' project sort reverts to default order while the
     // feature is off — list, sort sheet and label all read this one value (#1107).
     const projectTaskSortBy = resolveTaskSortByForFeatures(storedProjectTaskSortBy, settings);
@@ -711,7 +764,7 @@ export function ProjectDetailModal({
         t,
         'projects.projectTypeHelpText',
         'Sequential projects surface one available action at a time. Parallel projects can surface multiple independent Next tasks.'
-    );
+    ) + `\n\n${tFallback(t, 'projects.perSectionTooltip', 'Per section: each section is Parallel or Sequential, chosen from its menu.')}`;
     const sequenceCueLabels = React.useMemo<Record<ProjectSequenceTaskCue, string>>(
         () => ({
             available: tFallback(t, 'projects.availableNextAction', 'Available next action'),
@@ -788,6 +841,15 @@ export function ProjectDetailModal({
         projectTaskBulkBarPropsRef.current = props;
         setProjectTaskBulkBarProps(props);
     }, []);
+    // The Modal takes Android Back before the task list's listener: leave selection mode first (#1415).
+    const handleRequestClose = React.useCallback(() => {
+        const bulkBar = projectTaskBulkBarPropsRef.current;
+        if (bulkBar) {
+            bulkBar.onExitSelectionMode();
+            return;
+        }
+        onClose();
+    }, [onClose]);
     const handleProjectListScroll = React.useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
         projectDetailScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
     }, []);
@@ -896,6 +958,15 @@ export function ProjectDetailModal({
     const setSelectedProjectSequentialScope = (sequentialScope: Project['sequentialScope']) => {
         updateMutableSelectedProject({ sequentialScope });
     };
+    const setSelectedProjectFlowMode = (mode: ProjectFlowMode) => {
+        const current = getMutableSelectedProject();
+        if (!current) return;
+        const plan = planProjectFlowModeChange(current, useTaskStore.getState()._allSections ?? [], mode);
+        if (!plan) return;
+        void setProjectFlowMode(current.id, mode);
+        onProjectChange({ ...current, ...plan.project });
+    };
+    const selectedProjectFlowMode = selectedProject ? getProjectFlowMode(selectedProject) : 'parallel';
     const handleSetProjectStatus = (status: Project['status']) => {
         const current = liveSelectedProjectStatus === 'archived'
             ? liveSelectedProject
@@ -1164,48 +1235,49 @@ export function ProjectDetailModal({
 
                                             <View style={[styles.reviewLabelRow, styles.projectSettingsRowSpacing]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{projectTypeLabel}</Text>
-                                                <View style={styles.projectTypeControls}>
-                                                    <TouchableOpacity
-                                                        accessibilityRole="button"
-                                                        onPress={() => {
-                                                            updateMutableSelectedProject({ isSequential: !selectedProjectRef.current?.isSequential });
-                                                        }}
-                                                        disabled={isArchivedProject}
-                                                        accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
-                                                        accessibilityState={{ disabled: isArchivedProject }}
-                                                        style={[
-                                                            styles.sequentialToggle,
-                                                            {
-                                                                backgroundColor: selectedProject.isSequential ? tc.tint : tc.filterBg,
-                                                                borderColor: selectedProject.isSequential ? tc.tint : tc.border,
-                                                            },
-                                                        ]}
-                                                        testID="project-type-toggle"
-                                                    >
-                                                        <Text
+                                                <TouchableOpacity
+                                                    accessibilityLabel={projectTypeHelpLabel}
+                                                    accessibilityRole="button"
+                                                    onPress={showProjectTypeHelp}
+                                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                    style={[
+                                                        styles.projectTypeHelpButton,
+                                                        { backgroundColor: tc.filterBg, borderColor: tc.border },
+                                                    ]}
+                                                >
+                                                    <Ionicons name="help-circle-outline" size={17} color={tc.secondaryText} />
+                                                </TouchableOpacity>
+                                            </View>
+                                            <View style={styles.sequentialScopeOptions} testID="project-flow-mode-options">
+                                                {(['parallel', 'sequential', 'perSection'] as const).map((mode) => {
+                                                    const selected = selectedProjectFlowMode === mode;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={mode}
+                                                            accessibilityRole="button"
+                                                            onPress={() => setSelectedProjectFlowMode(mode)}
+                                                            disabled={isArchivedProject}
+                                                            accessibilityHint={isArchivedProject ? t('projects.reactivate') : undefined}
+                                                            accessibilityState={{ selected, disabled: isArchivedProject }}
                                                             style={[
-                                                                styles.sequentialToggleText,
-                                                                { color: selectedProject.isSequential ? tc.onTint : tc.secondaryText },
+                                                                styles.sequentialScopeButton,
+                                                                {
+                                                                    backgroundColor: selected ? tc.tint : tc.inputBg,
+                                                                    borderColor: selected ? tc.tint : tc.border,
+                                                                },
                                                             ]}
+                                                            testID={`project-flow-mode-${mode}`}
                                                         >
-                                                            {selectedProject.isSequential
-                                                                ? tFallback(t, 'projects.sequential', 'Sequential')
-                                                                : tFallback(t, 'projects.parallel', 'Parallel')}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        accessibilityLabel={projectTypeHelpLabel}
-                                                        accessibilityRole="button"
-                                                        onPress={showProjectTypeHelp}
-                                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                                        style={[
-                                                            styles.projectTypeHelpButton,
-                                                            { backgroundColor: tc.filterBg, borderColor: tc.border },
-                                                        ]}
-                                                    >
-                                                        <Ionicons name="help-circle-outline" size={17} color={tc.secondaryText} />
-                                                    </TouchableOpacity>
-                                                </View>
+                                                            <Text style={[styles.sequentialScopeText, { color: selected ? tc.onTint : tc.text }]}>
+                                                                {mode === 'sequential'
+                                                                    ? tFallback(t, 'projects.sequential', 'Sequential')
+                                                                    : mode === 'perSection'
+                                                                        ? tFallback(t, 'projects.perSection', 'Per section')
+                                                                        : tFallback(t, 'projects.parallel', 'Parallel')}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
                                             </View>
                                         </View>
 
@@ -1301,6 +1373,30 @@ export function ProjectDetailModal({
 
                                         <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                                             <View style={styles.projectMetadataRow}>
+                                                <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'projects.color', 'Project color')}</Text>
+                                                <View style={{ flex: 1, alignItems: 'flex-end', gap: 8 }}>
+                                                    <TouchableOpacity disabled={isArchivedProject || colorSaving} accessibilityRole="button"
+                                                        accessibilityLabel={tFallback(t, 'projects.useAreaColor', 'Use Area color')}
+                                                        accessibilityState={{ selected: !liveSelectedProject?.colorOverride, disabled: isArchivedProject || colorSaving }}
+                                                        onPress={() => { void saveProjectColor(null); }} style={{ minHeight: 44, justifyContent: 'center' }}>
+                                                        <Text style={{ color: tc.tint }}>{!liveSelectedProject?.colorOverride ? '✓ ' : ''}{tFallback(t, 'projects.useAreaColor', 'Use Area color')}</Text>
+                                                    </TouchableOpacity>
+                                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4 }}>
+                                                        {[DEFAULT_PROJECT_COLOR, ...AREA_PRESET_COLORS].map((color) => <TouchableOpacity key={color}
+                                                            disabled={isArchivedProject || colorSaving} accessibilityRole="button"
+                                                            accessibilityLabel={`${tFallback(t, 'projects.color', 'Project color')}: ${color}`}
+                                                            accessibilityState={{ selected: liveSelectedProject?.colorOverride === color, disabled: isArchivedProject || colorSaving }}
+                                                            onPress={() => { void saveProjectColor(color); }} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
+                                                            <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: color, borderWidth: liveSelectedProject?.colorOverride === color ? 3 : 1, borderColor: liveSelectedProject?.colorOverride === color ? tc.text : tc.border }} />
+                                                            {liveSelectedProject?.colorOverride === color && <Text style={{ color: tc.text }}>✓</Text>}
+                                                        </TouchableOpacity>)}
+                                                    </View>
+                                                    {colorError && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('common.retry')} onPress={() => { void saveProjectColor(colorIntent); }} disabled={colorSaving}>
+                                                        <Text accessibilityRole="alert" style={{ color: tc.danger }}>{tFallback(t, 'projects.colorSaveFailed', 'Color could not be saved.')} {t('common.retry')}</Text>
+                                                    </TouchableOpacity>}
+                                                </View>
+                                            </View>
+                                            <View style={[styles.projectMetadataRow, styles.projectMetadataRowDivider, { borderTopColor: tc.border }]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{t('projects.areaLabel')}</Text>
                                                 <TouchableOpacity
                                                     style={[styles.projectMetadataValueButton, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
@@ -1669,7 +1765,7 @@ export function ProjectDetailModal({
             presentationStyle={presentationStyle}
             transparent={false}
             allowSwipeDismissal
-            onRequestClose={onClose}
+            onRequestClose={handleRequestClose}
             onDismiss={onDismiss}
         >
             {/* Android Modal content needs its own gesture root; the screen root does not cover Modal.
@@ -1759,7 +1855,7 @@ export function ProjectDetailModal({
                                     onClose={() => setProjectSortModalVisible(false)}
                                     onSelect={handleProjectTaskSortSelect}
                                     sortBy={projectTaskSortBy}
-                                    sortOptions={TASK_LIST_SORT_OPTIONS}
+                                    sortOptions={PROJECT_TASK_SORT_OPTIONS}
                                     t={t}
                                     themeColors={tc}
                                     visible={projectSortModalVisible}
@@ -1943,6 +2039,7 @@ export function ProjectDetailModal({
                                     canManage={canManageProjectSections}
                                     deleteSection={deleteSection}
                                     onClose={() => setSectionManagerVisible(false)}
+                                    perSectionFlow={getProjectFlowMode(selectedProject) === 'perSection'}
                                     projectId={selectedProject.id}
                                     reorderSections={reorderSections}
                                     sections={selectedProjectSections}

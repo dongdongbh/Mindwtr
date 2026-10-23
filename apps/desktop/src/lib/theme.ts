@@ -210,6 +210,8 @@ const THEME_MODE_CLASSES = {
     oled: 'theme-oled',
     'catppuccin-macchiato': 'theme-catppuccin-macchiato',
     dracula: 'theme-dracula',
+    'gruvbox-light': 'theme-gruvbox-light',
+    'gruvbox-dark': 'theme-gruvbox-dark',
 } as const satisfies Partial<Record<DesktopThemeMode, string>>;
 
 export const applyThemeMode = (mode: DesktopThemeMode | null, systemTheme?: SystemThemePreference) => {

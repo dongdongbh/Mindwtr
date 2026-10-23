@@ -1,7 +1,9 @@
+import type { NativePreparedTrashItemsPurge } from './native-host-contract-trash-purge';
+import type { NativePreparedTrashItemsRestore } from './native-host-contract-trash-bulk-restore';
 import type { ChecklistProjectConversion } from './checklist-project-conversion';
 import type { ProjectTaskSummary } from './project-row-meta';
 import type { FocusStarAction } from './focus-star';
-import type { AppData, Area, Attachment, FilterCriteria, FocusGroupBy, Person, Project, SavedFilter, SavedSearch, Section, SortField, Task, TaskStatus } from './types';
+import type { AppData, Area, Attachment, FilterCriteria, FocusGroupBy, Person, Project, ProjectFlowMode, SavedFilter, SavedSearch, Section, SortField, Task, TaskStatus } from './types';
 import type { TaskQueryOptions } from './storage';
 import type { TaskDateCoherenceIssue } from './task-date-coherence';
 import type { TaskTokenUsage } from './task-token-usage';
@@ -10,6 +12,7 @@ import type { AreaOrderIntent } from './area-ordering';
 import type { ProjectTaskOrderAnchor, ProjectTaskOrderIdentity } from './project-task-reorder';
 import type { FocusControlState } from './focus-controls';
 import type { PreparedProjectToSection, ProjectToSectionReceipt } from './project-to-section';
+import type { FocusDateProjection } from './task-utils';
 
 /** Per-call saved authority for the three prepared Area commands; never journaled. */
 export type PreparedNativeSaveBoundary = { taskReference: Task[]; lastDataChangeAt: number;
@@ -70,6 +73,8 @@ export type PreparedTaskFocus = {
 
 /** Frozen visible Focus rows and the sparse, stamped order change. */
 export type PreparedFocusOrder = {
+    /** Absent on historical v1 journals, which retain their original 0..n effect. */
+    version?: 1 | 2;
     request: { requestId: string; controls: FocusControlState; ids: string[]; expectedOrder: string };
     scope: { tasks: Task[] };
     effect: { tasks: Array<{ before: Task; after: Task }> };
@@ -223,6 +228,7 @@ export type PreparedProjectStatus = {
 
 /** One frozen restore of a deleted Project and only its cascade-stamped children. */
 export type PreparedTrashProjectRestore = {
+    version?: 1 | 2;
     request: { requestId: string; projectId: string; projectRevision: string };
     scope: { project: Project; tasks: Task[]; sections: Section[]; area: Area | null };
     effect: { project: { before: Project; after: Project };
@@ -245,6 +251,7 @@ export type PreparedProjectDelete = {
 
 /** Frozen Undo reads current Task content and the confirmed Delete relationship proof. */
 export type PreparedProjectDeleteUndo = {
+    version?: 1 | 2;
     request: { requestId: string; deleteRequestId: string };
     delete: { request: PreparedProjectDelete['request']; prepared: PreparedProjectDelete & { version: 1 } };
     scope: { project: Project; tasks: Task[]; sections: Section[]; area: Area | null;
@@ -290,7 +297,8 @@ export type PreparedProjectDate = {
 
 /** One frozen Project Area assignment with its selected Area and destination-order witness. */
 export type PreparedProjectArea = {
-    scope: { project: Project; selectedArea: { id: string; name: string } | null; orderMax: number };
+    version?: 1 | 2;
+    scope: { project: Project; selectedArea: { id: string; name: string; color?: string | null } | null; orderMax: number };
     effect: { project: { before: Project; after: Project } };
     deviceIdBefore: string | null;
     deviceIdToInitialize: string | null;
@@ -383,6 +391,7 @@ export type PreparedPersonEdit = {
 
 /** Frozen final rows for a native Area create or legacy tombstone restoration. */
 export type PreparedAreaCreate = {
+    version?: 1 | 2;
     kind: 'fresh' | 'restored';
     scope: { area: Area | null; projects: Project[]; sections: Section[]; tasks: Task[] };
     effect: {
@@ -400,6 +409,7 @@ export type PreparedAreaCreate = {
 
 /** Frozen Area recolor and all linked Project rows the RN writer inspected. */
 export type PreparedAreaColor = {
+    version?: 1 | 2;
     scope: { area: Area; projects: Project[] };
     effect: { area: { before: Area; after: Area }; projects: Array<{ before: Project; after: Project }> };
     deviceIdBefore: string | null;
@@ -409,6 +419,7 @@ export type PreparedAreaColor = {
 
 /** Frozen live Area resolution inventory and complete linked-row witnesses for rename/merge. */
 export type PreparedAreaRename = {
+    version?: 1 | 2;
     scope: { areas: Area[]; projects: Project[]; tasks: Task[] };
     effect: {
         areas: Array<{ before: Area; after: Area }>;
@@ -431,6 +442,7 @@ export type PreparedAreaOrder = {
 
 /** Frozen native Area tombstone and directly linked detach rows. */
 export type PreparedAreaDelete = {
+    version?: 1 | 2;
     scope: { area: Area; tasks: Task[]; liveProjects: Project[] };
     effect: { area: { before: Area; after: Area }; tasks: Array<{ before: Task; after: Task }>;
         projects?: Array<{ before: Project; after: Project }> };
@@ -453,9 +465,21 @@ export type PreparedTaxonomy = {
         action: import('./taxonomy-policy').TaxonomyAction; name: string; to: string | null };
 };
 
+/** Frozen dependencies for the bounded nonterminal Board one-row move. */
+export type PreparedBoardMove = {
+    deviceIdBefore: string;
+    clock: { preparedLocalDay: string; preparedOffsetMinutes: number; boundaryOffsetMinutes: number;
+        futureBoundary: string; dates: FocusDateProjection[] };
+    scope: { projects: Project[]; sections: Section[]; areas: Area[];
+        focused: TaskFocusWitnessRow[]; focusLimit: number };
+};
+
 /** Internal native Board journal: before is the source guard, after the sole written row. */
 export type PreparedBoardTask = {
-    kind: 'duplicateTask' | 'trashTask' | 'restoreTask';
+    kind: 'duplicateTask' | 'trashTask' | 'restoreTask' | 'moveCard';
+    move?: PreparedBoardMove;
+    /** Invocation-local displayed-card admission, after exact durable replay. Never journaled. */
+    admitMove?: () => boolean;
     before: Task;
     after: Task;
     /** Restore binds the device stamp captured when its prepared effect was planned. */
@@ -576,6 +600,9 @@ export type PersistenceFailure = {
  * IMPORTANT: `tasks` and `projects` contain only VISIBLE (non-deleted) items for UI.
  * The store internally tracks ALL items (including soft-deleted) for persistence.
  */
+export type PreparedTrashItemsRestore = NativePreparedTrashItemsRestore;
+export type PreparedTrashItemsPurge = NativePreparedTrashItemsPurge;
+
 export interface TaskStore {
     tasks: Task[];
     projects: Project[];
@@ -646,6 +673,12 @@ export interface TaskStore {
         deviceIdToInitialize: string | null;
         deviceIdBefore?: string | null;
     }, options?: Extract<PreparedChecklistWriteOptions, { authority: PreparedAreaAuthority }>) => Promise<StoreActionResult>;
+    /** Internal all-row publication; the prepared-lines contract validates its journal first. */
+    commitPreparedCaptureLines: (input: {
+        tasks: Task[];
+        projects: Project[];
+        deviceIdToInitialize: string | null;
+    }) => Promise<StoreActionResult>;
     /** Internal prepared edit; native validates the journal before this atomic guarded overlay. */
     commitPreparedTaskEdit: (input: PreparedTaskEdit) => Promise<PreparedTaskEditResult>;
     /** Native one-task raw overlay; the calling contract validates its effect and guards. */
@@ -658,8 +691,26 @@ export interface TaskStore {
     commitPreparedArchivedTasksRestore: (input: Pick<import('./native-host-contract-archive-bulk-restore').NativePreparedArchivedTasksRestore,
         'request' | 'effect' | 'deviceIdBefore' | 'deviceIdToInitialize'>,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Complete raw BEFORE and one task-first Trash effect; never infer a receipt from AFTER. */
+    commitPreparedTrashItemsRestore: (input: PreparedTrashItemsRestore,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Complete raw rows and relevant attachment cleanup authority in one saved purge. */
+    commitPreparedTrashItemsPurge: (input: PreparedTrashItemsPurge,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     /** Reference-only atomic batch, including all shared recurrence-created rows. */
     commitPreparedReferenceTasksMove: (input: import('./native-host-contract-reference-bulk-status').NativeReferenceTasksMovePrepared,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Inbox-only shared raw batch; the registered family validates its closed source and complete effect. */
+    commitPreparedInboxTasksMove: (input: import('./native-host-contract-inbox-bulk-status').NativeInboxTasksMovePrepared,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Inbox Add tag's full source-aware guarded raw batch. */
+    commitPreparedInboxTasksAddTag: (input: import('./native-host-contract-inbox-bulk-tag').NativeInboxTasksAddTagPrepared,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Inbox Remove tag's complete source-aware guarded raw batch. */
+    commitPreparedInboxTasksRemoveTag: (input: import('./native-host-contract-inbox-bulk-remove-tag').NativeInboxTasksRemoveTagPrepared,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Inbox Organize's shared planner effect, including recurrence and parent changes. */
+    commitPreparedInboxTasksOrganize: (input: import('./native-host-contract-inbox-bulk-organize').NativeInboxTasksOrganizePrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     /** Reference Add tag's shared guarded raw batch; contract validates all selected members. */
     commitPreparedReferenceTasksAddTag: (input: import('./native-host-contract-reference-bulk-tag').NativeReferenceTasksAddTagPrepared,
@@ -678,6 +729,9 @@ export interface TaskStore {
     commitPreparedSavedSearchWrite: (input: PreparedSavedSearchWrite) => Promise<PreparedTaskEditResult>;
     /** Native validates the action-specific envelope before this atomic guarded write. */
     commitPreparedBoardTask: (input: PreparedBoardTask) => Promise<PreparedTaskEditResult>;
+    /** Exact before-only Board batch; receipt replay is owned by the native contract. */
+    commitPreparedBoardOrder: (input: import('./native-host-contract-board-order').NativePreparedBoardOrder,
+        authority: PreparedAreaAuthority, admit: () => boolean) => Promise<PreparedTaskEditResult>;
     commitPreparedCalendarTask: (input: PreparedCalendarTask) => Promise<PreparedTaskEditResult>;
     commitPreparedCalendarCreate: (input: PreparedCalendarCreate) => Promise<PreparedTaskEditResult>;
     commitPreparedInboxEffect: (input: PreparedInboxEffect) => Promise<PreparedTaskEditResult>;
@@ -759,7 +813,7 @@ export interface TaskStore {
     commitPreparedProjectDuplicate: (input: PreparedProjectDuplicate) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectLifecycle: (input: PreparedProjectLifecycle, options?: Extract<PreparedChecklistWriteOptions, { authority: PreparedAreaAuthority }>) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectDate: (input: PreparedProjectDate & { request: { projectId: string; field: 'startDate' | 'dueDate' | 'reviewAt'; value: string | null } }) => Promise<PreparedTaskEditResult>;
-    commitPreparedProjectArea: (input: PreparedProjectArea & { request: { projectId: string; areaId: string | null } }) => Promise<PreparedTaskEditResult>;
+    commitPreparedProjectArea: (input: PreparedProjectArea & { request: { projectId: string; areaId: string | null; colorOverride?: string | null } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectSectionCreate: (input: PreparedProjectSectionCreate) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectSectionRename: (input: PreparedProjectSectionRename & { request: {
         projectId: string; sectionId: string; title: string } }) => Promise<PreparedTaskEditResult>;
@@ -768,6 +822,8 @@ export interface TaskStore {
     commitPreparedProjectSectionOrder: (input: PreparedProjectSectionOrder) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectTaskOrder: (input: PreparedProjectTaskOrder) => Promise<PreparedTaskEditResult>;
     commitPreparedAreaCreate: (input: PreparedAreaCreate & { request: { requestId: string; name: string; color: string; expectedAreaId: string } }, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    commitPreparedInboxOrganizeDestinationCreate: (input: import('./native-host-contract-inbox-organize-create').NativeInboxOrganizeDestinationCreatePrepared,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedAreaColor: (input: PreparedAreaColor & { request: { requestId: string; areaId: string; color: string | null } }) => Promise<PreparedTaskEditResult>;
     commitPreparedAreaRename: (input: PreparedAreaRename & { request: { requestId: string; areaId: string; name: string; manageColor?: string };
         result: { id: string; areaId: string; name: string } }, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
@@ -789,6 +845,18 @@ export interface TaskStore {
     commitPreparedNotificationSetting: (request: import('./native-host-contract-notification-settings').NotificationSettingRequest,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     retryPreparedNotificationSettingSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Private synced AI request timeout against raw saved authority; never migrates secrets. */
+    commitPreparedAIRequestTimeout: (request: import('./native-ai-request-timeout').AIRequestTimeoutRequest,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    retryPreparedAIRequestTimeoutSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Private OpenAI reasoning effort against raw saved authority; preserves saved minimal until explicit choice. */
+    applyPreparedAIReasoningEffort: (request: import('./native-ai-reasoning-effort').AIReasoningEffortRequest,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    retryPreparedAIReasoningEffortSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    /** Private Gemini thinking budget against raw saved authority; preserves custom saved values until explicit choice. */
+    applyPreparedAIGeminiThinkingBudget: (request: import('./native-ai-gemini-thinking-budget').AIGeminiThinkingBudgetRequest,
+        authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
+    retryPreparedAIGeminiThinkingBudgetSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     /** Existing subscription metadata, saved only in canonical synced SQL settings. */
     commitPreparedCalendarSubscriptionSetting: (prepared: import('./native-host-contract-calendar-subscription-settings').PreparedCalendarSubscriptionSetting,
         authority: PreparedAreaAuthority, legacyRaw: string | null) => Promise<PreparedTaskEditResult>;
@@ -797,6 +865,8 @@ export interface TaskStore {
     retryPreparedCalendarSubscriptionSettingSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     /** Update a project */
     updateProject: (id: string, updates: Partial<Project>) => Promise<StoreActionResult>;
+    /** Switch a project's Flow mode and stamp section defaults in one write (#1429). */
+    setProjectFlowMode: (id: string, mode: ProjectFlowMode) => Promise<StoreActionResult>;
     /** Archive a project as cancelled and cancel its unfinished child tasks */
     cancelProject: (id: string) => Promise<StoreActionResult>;
     /** Delete a project */
@@ -866,12 +936,14 @@ export interface TaskStore {
     restorePerson: (id: string) => Promise<StoreActionResult>;
 
     // Tag Actions
+    addTag: (name: string) => Promise<void>;
     /** Delete a tag from tasks and projects */
     deleteTag: (tagId: string) => Promise<void>;
     /** Rename a tag across all tasks and projects */
     renameTag: (oldTagId: string, newTagId: string) => Promise<void>;
 
     // Context Actions
+    addContext: (name: string) => Promise<void>;
     /** Delete a context from all tasks */
     deleteContext: (context: string) => Promise<void>;
     /** Rename a context across all tasks */
@@ -907,15 +979,19 @@ export type DerivedState = {
     tagTokenUsage: TaskTokenUsage[];
     sequentialProjectIds: Set<string>;
     sequentialWithinSectionProjectIds: Set<string>;
+    /** Sequential sections of Per section projects, as `${projectId}:${sectionId}` (#1429). */
+    sequentialSectionKeys: Set<string>;
     dateCoherenceIssuesByTaskId: Map<string, TaskDateCoherenceIssue[]>;
     focusedCount: number;
     focusedProjectCount: number;
 };
 
 export type DerivedCache = {
+    taxonomyRef?: AppData['settings']['taxonomy'];
     visibleTasksRef: Task[];
     taskLookupRef: Map<string, Task>;
     projectLookupRef: Map<string, Project>;
+    sectionsRef?: Section[];
     day: string;
     value: DerivedState;
 };

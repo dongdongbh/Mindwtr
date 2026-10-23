@@ -3,12 +3,24 @@ import { loadTranslations } from './i18n/i18n-loader';
 import type { AppData, AppSettings, Task } from './types';
 import {
     buildAndroidWidgetPublication,
+    buildAndroidQuickCaptureLabels,
     buildWidgetPayload,
     createWidgetPayloadProjection,
     IOS_WIDGET_FAMILY_CACHE_ITEMS,
     iosWidgetProjectionOptions,
     resolveWidgetLanguage,
 } from './widget-payload';
+
+describe('Android quick capture destinations', () => {
+    it('publishes localized creation choices and queue feedback without an Inbox-only placeholder', async () => {
+        await loadTranslations('de');
+        const labels = buildAndroidQuickCaptureLabels('de');
+        expect(labels.statusLabels).toEqual({ inbox: 'Eingang', next: 'Nächste Aktionen', waiting: 'Warten', someday: 'Irgendwann/Vielleicht' });
+        expect(labels.statusLabel).toBe('Status');
+        expect(labels.placeholder).not.toContain('Eingang');
+        expect(buildAndroidQuickCaptureLabels('en').queued).toContain('will be added');
+    });
+});
 
 describe('resolveWidgetLanguage', () => {
     it('falls back to the device language, as the app does, when no language was chosen', () => {
@@ -149,5 +161,25 @@ describe('widget times', () => {
         } finally {
             spy.mockRestore();
         }
+    });
+});
+
+
+describe('Focus widget area selection', () => {
+    it('keeps only selected-area stars while the occupied count remains global before criteria', () => {
+        const stamp = '2026-10-01T12:00:00.000Z';
+        const task = (id: string, extra: Partial<Task> = {}): Task => ({ id, title: id, status: 'next',
+            tags: [], contexts: [], isFocusedToday: true, createdAt: stamp, updatedAt: stamp, ...extra });
+        const data: AppData = { tasks: [task('direct', { areaId: 'work' }), task('project', { projectId: 'p' }),
+            task('home', { areaId: 'home' })], projects: [{ id: 'p', title: 'P', areaId: 'work', status: 'active',
+                color: '#123456', order: 0, tagIds: [], createdAt: stamp, updatedAt: stamp }], sections: [],
+            areas: ['work', 'home'].map((id, order) => ({ id, name: id, order, createdAt: stamp, updatedAt: stamp })),
+            settings: { filters: { areaIds: ['work'] } } };
+        const payload = createWidgetPayloadProjection(data, 'en').build(10);
+        expect(payload.items.map((row) => row.id)).toEqual(['direct', 'project']);
+        expect(payload.focusedCount).toBe(3);
+        const filtered = createWidgetPayloadProjection(data, 'en', { focusFilter: { criteria: { hasDescription: true }, sortBy: 'default' } }).build(10);
+        expect(filtered.items).toEqual([]);
+        expect(filtered.focusedCount).toBe(3);
     });
 });

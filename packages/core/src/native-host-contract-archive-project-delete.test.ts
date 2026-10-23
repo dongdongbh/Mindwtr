@@ -3,6 +3,7 @@ import { openSqliteHost } from './screen-parity.replay';
 import { revisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
 import type { AppData, Project, Section, Task } from './types';
+import * as logger from './logger';
 
 const AT = '2026-09-30T12:00:00.000Z';
 const NOW = '2026-10-02T13:00:00.000Z';
@@ -64,9 +65,13 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(NOW));
         const rn = await openSqliteHost(seed(parent));
+        let expectedBefore: ReturnType<typeof rows>;
+        let expectedSettingsBefore: unknown;
         let expected: ReturnType<typeof rows>;
         let expectedCold: ReturnType<typeof rows>;
         try {
+            expectedBefore = rows();
+            expectedSettingsBefore = await rn.sql('SELECT rowid, * FROM settings');
             expect((await useTaskStore.getState().deleteProject(PROJECT_ID)).success).toBe(true);
             await flushPendingSave();
             expected = rows();
@@ -76,6 +81,8 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
         const native = await openSqliteHost(seed(parent));
         try {
             const before = rows();
+            expect(before).toEqual(expectedBefore);
+            expect(await native.sql('SELECT rowid, * FROM settings')).toEqual(expectedSettingsBefore);
             const proposed = request();
             const prepared = value(native.host.prepareProjectDelete(proposed)).prepared;
             expect(prepared.scope.project.status).toBe('archived');
@@ -100,8 +107,12 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
         vi.setSystemTime(new Date(NOW));
         const rn = await openSqliteHost(seed());
         let expected: ReturnType<typeof rows>;
+        let expectedBefore: ReturnType<typeof rows>;
+        let expectedSettingsBefore: unknown;
         try {
             insertLegacySectionOnly();
+            expectedBefore = rows();
+            expectedSettingsBefore = await rn.sql('SELECT rowid, * FROM settings');
             expect((await useTaskStore.getState().deleteProject(PROJECT_ID)).success).toBe(true);
             await flushPendingSave();
             expected = rows();
@@ -109,6 +120,8 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
         const native = await openSqliteHost(seed());
         try {
             insertLegacySectionOnly();
+            expect(rows()).toEqual(expectedBefore);
+            expect(await native.sql('SELECT rowid, * FROM settings')).toEqual(expectedSettingsBefore);
             const original = request();
             const prepared = value(native.host.prepareProjectDelete(original)).prepared;
             expect(prepared.scope.tasks.map((row) => row.id)).toContain('legacy-section-only');
@@ -232,7 +245,10 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(NOW));
         const fault = { commits: 0 };
+        const writes: string[] = [];
+        const diagnostic = vi.spyOn(logger, 'logInfo');
         const sqlite = await openSqliteHost(seed(), (client) => ({ ...client, run: async (sql, params) => {
+            writes.push(sql);
             if (sql === 'COMMIT' && fault.commits > 0) { fault.commits--; throw new Error('injected commit failure'); }
             return client.run(sql, params);
         } }));
@@ -241,7 +257,8 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
             const prepared = value(sqlite.host.prepareProjectDelete(original)).prepared;
             const tables = async () => ({ projects: await sqlite.sql('SELECT * FROM projects ORDER BY id'),
                 tasks: await sqlite.sql('SELECT * FROM tasks ORDER BY id'),
-                sections: await sqlite.sql('SELECT * FROM sections ORDER BY id') });
+                sections: await sqlite.sql('SELECT * FROM sections ORDER BY id'),
+                settings: await sqlite.sql('SELECT * FROM settings') });
             const before = await tables();
             const receiptIds = await sqlite.receiptIds();
             fault.commits = 10;
@@ -249,15 +266,32 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
                 .toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
             expect(await tables()).toEqual(before);
             expect(await sqlite.receiptIds()).toEqual(receiptIds);
+            expect(diagnostic.mock.calls.filter(([message]) => message === 'Native Project delete taxonomy retained')).toEqual([]);
             fault.commits = 0;
             resetForTests();
+            await sqlite.client().run("UPDATE settings SET data=json_set(data, '$.theme', 'dark') WHERE id=1");
             await sqlite.restart();
             expect(value(sqlite.host.projectDeleteOutcome({ request: original, prepared }))).toBeNull();
             expect(value(await sqlite.host.commitPreparedProjectDelete({ request: original, prepared })))
                 .toEqual(prepared.result);
             expect(useTaskStore.getState()._projectsById.get(PROJECT_ID)?.deletedAt).toBe(NOW);
+            expect(useTaskStore.getState().settings).toMatchObject({ theme: 'dark', taxonomy: {
+                contexts: [{ token: '@home', rev: 1, revBy: 'device-a', updatedAt: NOW }],
+                tags: [{ token: '#kept', rev: 1, revBy: 'device-a', updatedAt: NOW }],
+            } });
+            expect(diagnostic).toHaveBeenCalledWith('Native Project delete taxonomy retained', {
+                scope: 'native-host', category: 'storage', context: {
+                    releaseCheck: 'v1.3.7/native-project-delete-taxonomy', operation: 'delete', outcome: 'confirmed',
+                },
+            });
+            const durable = await tables();
             await sqlite.restart();
+            expect(await tables()).toEqual(durable);
+            writes.length = 0;
             expect(value(sqlite.host.projectDeleteOutcome({ request: original, prepared }))).toEqual(prepared.result);
-        } finally { await sqlite.close(); }
+            expect(value(await sqlite.host.commitPreparedProjectDelete({ request: original, prepared }))).toEqual(prepared.result);
+            expect(writes).toEqual([]);
+            expect(diagnostic.mock.calls.filter(([message]) => message === 'Native Project delete taxonomy retained')).toHaveLength(1);
+        } finally { await sqlite.close(); diagnostic.mockRestore(); }
     });
 });

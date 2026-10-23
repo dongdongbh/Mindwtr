@@ -863,6 +863,32 @@ describe('TaskList', () => {
     });
   });
 
+  it('labels each section with its flow only in a Per section project (#1429)', async () => {
+    const at = '2026-06-01T00:00:00.000Z';
+    const book = { id: 'book', projectId: project.id, title: 'Book campsite', order: 0, isSequential: true, createdAt: at, updatedAt: at };
+    const prep = { id: 'prep', projectId: project.id, title: 'Prep', order: 1, createdAt: at, updatedAt: at };
+    storeState.sections = [book, prep] as any;
+    storeState._allSections = [book, prep] as any;
+    const tasks = [makeTask('find-site', 'Find campsite', { sectionId: 'book' }), makeTask('find-tent', 'Find tent', { sectionId: 'prep' })];
+    const labels = async (projectRow: Project) => {
+      storeState.projects = [projectRow];
+      storeState._allProjects = [projectRow];
+      let tree!: ReturnType<typeof create>;
+      await act(async () => {
+        tree = create(
+          <TaskList project={{ id: project.id }} showHeader={false} statusFilter="all" taskSource={tasks} title={project.title} />,
+        );
+      });
+      const found = ['book', 'prep'].map((id) => tree.root.findAllByProps({ testID: `project-section-flow-label-${id}` })[0]?.props.children);
+      act(() => { tree.unmount(); });
+      return found;
+    };
+
+    expect(await labels({ ...project, perSectionFlow: true })).toEqual(['Sequential', 'Parallel']);
+    expect(await labels({ ...project, isSequential: true, perSectionFlow: true })).toEqual([undefined, undefined]);
+    expect(await labels(project)).toEqual([undefined, undefined]);
+  });
+
   it('passes a group control to non-reference list headers', async () => {
     const onChangeGroupBy = vi.fn();
     let tree!: ReturnType<typeof create>;

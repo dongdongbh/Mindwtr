@@ -170,7 +170,7 @@ function TaskEditViewTabComponent({
   });
   const checklist = mergedTask.checklist || [];
   const editChecklist = (edit: Parameters<typeof applyTaskChecklistEdit>[1]) => {
-    const result = applyTaskChecklistEdit(checklist, edit, { isReference: mergedTask.status === 'reference', newId: generateUUID });
+    const result = applyTaskChecklistEdit(checklist, edit, { newId: generateUUID });
     if (result) applyChecklistUpdate(result.checklist);
     return result;
   };
@@ -241,14 +241,7 @@ function TaskEditViewTabComponent({
               {row.items.map((item) => {
                 const content = (
                   <>
-                  {row.bullets ? (
-                    <Text
-                      style={{ color: tc.secondaryText, fontSize: 18, lineHeight: 20 }}
-                      accessible={false}
-                    >
-                      •
-                    </Text>
-                  ) : item.completed ? (
+                  {item.completed ? (
                     <CheckSquare size={18} color={tc.tint} strokeWidth={2} />
                   ) : (
                     <Square size={18} color={tc.secondaryText} strokeWidth={2} />
@@ -265,8 +258,8 @@ function TaskEditViewTabComponent({
                   return (
                     <View
                       key={item.id}
-                      style={[styles.viewChecklistItem, row.bullets ? { alignItems: 'flex-start' } : null]}
-                      accessibilityLabel={item.accessibilityLabel ?? undefined}
+                      style={styles.viewChecklistItem}
+                      accessibilityLabel={item.accessibilityLabel}
                     >
                       {content}
                     </View>
@@ -279,7 +272,7 @@ function TaskEditViewTabComponent({
                     onPress={() => editChecklist({ kind: 'toggle', index: item.index })}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: item.completed }}
-                    accessibilityLabel={item.accessibilityLabel ?? undefined}
+                    accessibilityLabel={item.accessibilityLabel}
                   >
                     {content}
                   </TouchableOpacity>

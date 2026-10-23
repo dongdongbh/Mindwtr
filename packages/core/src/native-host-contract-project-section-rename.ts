@@ -38,6 +38,7 @@ export const validSection = (value: unknown, id: string, projectId: string): val
         || !iso(row.createdAt) || !iso(row.updatedAt)
         || (row.description !== undefined && typeof row.description !== 'string')
         || (row.isCollapsed !== undefined && typeof row.isCollapsed !== 'boolean')
+        || (row.isSequential !== undefined && typeof row.isSequential !== 'boolean')
         || (row.rev !== undefined && !(typeof row.rev === 'number'
             && Number.isSafeInteger(row.rev) && row.rev >= 0))
         || (row.revBy !== undefined && typeof row.revBy !== 'string')

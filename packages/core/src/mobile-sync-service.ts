@@ -37,6 +37,7 @@ import { isLikelyOfflineSyncError, isRemoteSyncBackend, SYNC_FILE_NAME, SyncFile
 import { summarizeTaskLifecycleCounts } from './task-utils';
 import { decodeUriSafe } from './async-utils';
 import { flushPendingSave, lastStoreLoadWasRecovery, sameStoreData, storeDataOf, useTaskStore } from './store';
+import { getStoreListenerCount } from './store-notify-profiler';
 import { createSlicer, runSliced, type CooperativePass } from './cooperative';
 import { isSandboxMode, isWorkspaceTransitionActive } from './sandbox';
 import { performSyncCycle } from './sync';
@@ -455,7 +456,8 @@ export type MobileSyncServiceHost<Lease> = {
   allowQueuedFollowUp?: boolean;
   /**
    * D9b, native Android only: the notifier's slice port (sync-run-ports.ts). A host that binds it gets sliced cycles, with
-   * token-checked saves, write-free aborts and quiet-paced follow-ups. React Native binds none. No host binds it yet.
+   * token-checked saves, write-free aborts and quiet-paced follow-ups. Only the native Android host binds it
+   * (apps/android-native/bundle/host-sync.ts); React Native and iOS bind none.
    */
   sliceYield?(): Promise<void>;
   /** The device key-value store (React Native: AsyncStorage). */
@@ -575,6 +577,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
   };
 
   const followUpReceipts = new Set<string>();
+  let followUpIdleLogged = false;
   let previousCycleRequestedContribution = false;
   let contributionComparisonCaptured = false;
   let activeFollowUpContext: { backend: SyncBackend; step: string } | null = null;
@@ -1056,6 +1059,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             getInMemorySnapshot: () => core.getInMemoryAppDataSnapshot(),
             // A sliced cycle takes the lists in one turn and copies them in slices (cloneAppDataPass).
             captureInMemorySnapshot: () => captureInMemoryAppDataSnapshot(core.useTaskStore),
+            listenerCount: () => getStoreListenerCount(),
             flushPendingSave: () => core.flushPendingSave(),
             setUiError: (message) => core.useTaskStore.getState().setError(message),
             getSettings: () => core.useTaskStore.getState().settings,
@@ -2638,7 +2642,22 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       }
 
       const syncRun = new MobileSyncRun(backend, request, requestFollowUp, requestFollowUpAfter);
-      return runSerializedSyncDocumentOperation(() => syncRun.run());
+      const changeAtStart = core.useTaskStore.getState().lastDataChangeAt;
+      try {
+        return await runSerializedSyncDocumentOperation(() => syncRun.run());
+      } finally {
+        // #1435: the pause before a queued follow-up is not sync work, so the badge leaves 'syncing'
+        // here instead of at drain. An edit made during this cycle may not be in its upload: then
+        // the badge stays busy until the follow-up that carries it drains.
+        if (!fatalCleanupError && mobileSyncOrchestrator.getState().queued && mobileSyncActivityState === 'syncing'
+          && core.useTaskStore.getState().lastDataChangeAt === changeAtStart) {
+          setMobileSyncActivityState('idle');
+          if (!followUpIdleLogged) void Promise.resolve(log.info('Sync activity idle while a follow-up waits', {
+            scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.8/follow-up-idle-badge', backend },
+          })).catch(() => {});
+          followUpIdleLogged = true;
+        }
+      }
     },
     onQueuedRunComplete: (queuedResult) => {
       if (!queuedResult.success) {
@@ -2725,6 +2744,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       activeMobileSyncAbortReason = null;
       fatalCleanupError = null;
       followUpReceipts.clear();
+      followUpIdleLogged = false;
       previousCycleRequestedContribution = false;
       contributionComparisonCaptured = false;
       activeFollowUpContext = null;

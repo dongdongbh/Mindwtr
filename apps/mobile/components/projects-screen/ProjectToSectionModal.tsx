@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import React from 'react';
 import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import {
@@ -111,7 +112,7 @@ export function ProjectToSectionModal({ visible, source, projects, onClose, onSu
                         {prepared && <Text style={{ color: tc.text }}>{formatI18nTemplate(tFallback(t, 'projects.convertNamedSection', 'New section: {{name}}'), { name: prepared.section.title })}</Text>}
                         {sourceForSummary?.supportNotes ? <Text style={{ color: tc.secondaryText }}>{tFallback(t, 'projects.convertNotes', 'Project notes become section notes.')}</Text> : null}
                         <Text style={{ color: tc.secondaryText }}>{formatI18nTemplate(tFallback(t, 'projects.convertArea', 'Moved tasks use the destination Area: {{area}}.'), { area: destinationArea?.name ?? tFallback(t, 'projects.noArea', 'No Area') })}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: destinationArea?.color ?? destination?.color, borderColor: tc.border, borderWidth: 1 }} /><Text style={{ color: tc.secondaryText }}>{tFallback(t, 'projects.convertDestinationColor', 'Section follows the destination color.')}</Text></View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: destination ? getProjectAccentColor(destination, new Map(destinationArea ? [[destinationArea.id, destinationArea]] : [])) : undefined, borderColor: tc.border, borderWidth: 1 }} /><Text style={{ color: tc.secondaryText }}>{tFallback(t, 'projects.convertDestinationColor', 'Section follows the destination color.')}</Text></View>
                         <Text style={{ color: tc.secondaryText }}>{tFallback(t, 'projects.convertColor', 'The source project color is not carried to the section.')}</Text>
                         <Text style={{ color: tc.secondaryText }}>{tFallback(t, 'projects.convertSettings', 'The new section uses the destination project’s settings.')}</Text>
                         <Text style={{ color: tc.secondaryText }}>{tFallback(t, 'projects.convertTrash', 'The source project moves to Trash. Already-deleted tasks stay in Trash.')}</Text>

@@ -94,7 +94,7 @@ describe('themeExternalCalendarDisplayColor', () => {
         expect(themeExternalCalendarDisplayColor('#2563EB', 'nord')).toBe('#5e81ac');
     });
 
-    it.each(['nord', 'catppuccin-macchiato', 'dracula'])(
+    it.each(['nord', 'catppuccin-macchiato', 'dracula', 'gruvbox-light', 'gruvbox-dark'])(
         'covers all 8 pickable swatches with distinct colors under %s',
         (theme) => {
             const mapped = EXTERNAL_CALENDAR_COLORS.map((color) => themeExternalCalendarDisplayColor(color, theme));

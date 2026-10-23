@@ -10,6 +10,7 @@ import { Attachment,
     getProjectSectionsForView,
     getProjectToSectionEligibility,
     getSequentialProjectTaskCues,
+    getProjectFlowMode,
     isTaskFinished,
     isTaskCompleted,
     type BulkOrganizeTaskUpdateInput,
@@ -22,6 +23,7 @@ import { Attachment,
     parseAttachmentLinkBatch,
     getInlineMarkdownPreview,
     stripMarkdown,
+    PROJECT_TASK_SORT_OPTIONS,
     resolveTaskSortByForFeatures,
     sortTasksBy,
     splitCompletedTasks, tFallback, undoProjectDelete, updateProjectFromDraft, useTaskStore, } from '@mindwtr/core';
@@ -492,8 +494,9 @@ export function ProjectWorkspace({
     const pendingProjectScrollRestoreRef = useRef<ProjectScrollSnapshot | null>(null);
     const selectedProjectIdRef = useRef<string | null>(selectedProjectId);
     const isArchivedProject = selectedProject?.status === 'archived';
+    const isPerSectionProject = Boolean(selectedProject && getProjectFlowMode(selectedProject) === 'perSection');
     const shouldGroupCompletedTasks = Boolean(
-        selectedProject && !selectedProject.isSequential && !isArchivedProject && showCompletedTasks
+        selectedProject && getProjectFlowMode(selectedProject) === 'parallel' && !isArchivedProject && showCompletedTasks
     );
     const resolveText = useCallback((key: string, fallback: string) => {
         const value = t(key);
@@ -1251,6 +1254,10 @@ export function ProjectWorkspace({
             })()
             : '';
         const moreOptionsLabel = resolveText('taskEdit.moreOptions', 'More options');
+        // Per section Flow mode (#1429): the label and menu choice appear only then.
+        const sectionFlowLabel = isPerSectionProject
+            ? (group.section.isSequential === true ? t('projects.sequential') : t('projects.parallel'))
+            : null;
 
         return (
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1275,6 +1282,11 @@ export function ProjectWorkspace({
                     )}
                     <span className="truncate">{group.section.title}</span>
                     <span className="text-xs text-muted-foreground">{group.tasks.length}</span>
+                    {sectionFlowLabel && (
+                        <span data-section-flow-label className="text-xs font-normal text-muted-foreground">
+                            {sectionFlowLabel}
+                        </span>
+                    )}
                 </button>
                 <div className="flex items-center gap-1">
                     {!isArchivedProject && (
@@ -1307,6 +1319,16 @@ export function ProjectWorkspace({
                         onToggleNotes={() => handleToggleSectionNotes(group.section.id)}
                         onRename={() => handleRenameSection(group.section)}
                         onDelete={() => handleDeleteSection(group.section)}
+                        flow={isPerSectionProject ? {
+                            label: resolveText('projects.sequenceMode', 'Flow Mode'),
+                            parallelLabel: t('projects.parallel'),
+                            sequentialLabel: t('projects.sequential'),
+                            isSequential: group.section.isSequential === true,
+                            onChange: (isSequential) => {
+                                if (!getMutableSelectedProject()) return;
+                                void updateSection(group.section.id, { isSequential });
+                            },
+                        } : undefined}
                     />
                 </div>
                 {notesPreview && (
@@ -1843,8 +1865,16 @@ export function ProjectWorkspace({
                                         onAreaChange={(value) => {
                                             updateMutableSelectedProject({ areaId: value === noAreaId ? undefined : value });
                                         }}
-                                        isSequential={selectedProject.isSequential === true}
-                                        onToggleSequential={() => updateMutableSelectedProject({ isSequential: !selectedProjectRef.current?.isSequential })}
+                                        onColorChange={async (colorOverride) => {
+                                            const state = useTaskStore.getState();
+                                            if (state.persistenceFailure) await state.retryPersistence();
+                                            return updateMutableSelectedProject({ colorOverride });
+                                        }}
+                                        flowMode={getProjectFlowMode(selectedProject)}
+                                        onFlowModeChange={(mode) => {
+                                            const current = getMutableSelectedProject();
+                                            if (current) void useTaskStore.getState().setProjectFlowMode(current.id, mode);
+                                        }}
                                         sequentialScope={selectedProject.sequentialScope ?? 'project'}
                                         onSequentialScopeChange={(sequentialScope) => updateMutableSelectedProject({ sequentialScope })}
                                         status={selectedProject.status}
@@ -1928,6 +1958,7 @@ export function ProjectWorkspace({
                                                 <SortBySelect
                                                     value={projectTaskSortBy}
                                                     defaultValue="default"
+                                                    options={PROJECT_TASK_SORT_OPTIONS}
                                                     onChange={handleProjectTaskSortByChange}
                                                     t={t}
                                                 />

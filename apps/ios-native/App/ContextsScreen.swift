@@ -121,9 +121,12 @@ struct ContextsScreen: View {
         .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
     }
 
-    private func chip(_ chip: CoreObject) -> some View {
+    // RN's chip (#1427): a tap switches to core's `next`; a token chip's long-press, also VoiceOver's
+    // named action, applies core's `additive` selection. All and No context have no long-press.
+    @ViewBuilder private func chip(_ chip: CoreObject) -> some View {
         let selected = chip.flag("selected")
-        return Button { endInput(); model.selectContextsChip(chip.text("id")) } label: {
+        let additive = chip.object("additive")
+        let button = Button { endInput(); model.selectContextsChip(chip.text("id")) } label: {
             HStack(spacing: 6) {
                 Text(chip.text("label")).rnFont(13, .medium).fixedSize()
                 Text(String(chip.number("count"))).rnFont(10, .semibold)
@@ -142,6 +145,15 @@ struct ContextsScreen: View {
         .accessibilityLabel(chip.text("accessibilityLabel"))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("contexts-chip-" + chip.text("id"))
+        if additive.isEmpty {
+            button
+        } else {
+            let add = { endInput(); model.selectContextsChip(chip.text("id"), additive: true) }
+            button
+                // High priority, as RN's Pressable: a recognized long-press cancels the button's tap.
+                .highPriorityGesture(LongPressGesture().onEnded { _ in add() })
+                .accessibilityAction(named: additive.text("label"), add)
+        }
     }
 
     private func matchOptions(_ mode: CoreObject) -> some View {

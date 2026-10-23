@@ -71,10 +71,44 @@ export const DRACULA_CONTEXT_COLOR_PALETTE = [
     '#f1fa8c',
 ];
 
+/**
+ * Gruvbox light stand-ins, slot-for-slot with the canonical palette: the seven
+ * faded accents, then the neutral blue, purple and red for the slots the faded
+ * set cannot fill (it has one green where the canonical palette has two).
+ */
+export const GRUVBOX_LIGHT_CONTEXT_COLOR_PALETTE = [
+    '#076678',
+    '#427b58',
+    '#79740e',
+    '#8f3f71',
+    '#af3a03',
+    '#9d0006',
+    '#458588',
+    '#b16286',
+    '#cc241d',
+    '#b57614',
+];
+
+/** Gruvbox dark stand-ins: the bright accents, then the neutral aqua, purple and green. */
+export const GRUVBOX_DARK_CONTEXT_COLOR_PALETTE = [
+    '#83a598',
+    '#8ec07c',
+    '#b8bb26',
+    '#d3869b',
+    '#fe8019',
+    '#fb4934',
+    '#689d6a',
+    '#b16286',
+    '#98971a',
+    '#fabd2f',
+];
+
 const CONTEXT_COLOR_PALETTES_BY_THEME = new Map<AppTheme, readonly string[]>([
     ['nord', NORD_CONTEXT_COLOR_PALETTE],
     ['catppuccin-macchiato', CATPPUCCIN_MACCHIATO_CONTEXT_COLOR_PALETTE],
     ['dracula', DRACULA_CONTEXT_COLOR_PALETTE],
+    ['gruvbox-light', GRUVBOX_LIGHT_CONTEXT_COLOR_PALETTE],
+    ['gruvbox-dark', GRUVBOX_DARK_CONTEXT_COLOR_PALETTE],
 ]);
 
 function hashText(value: string): number {

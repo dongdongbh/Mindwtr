@@ -42,6 +42,17 @@ const close = (server: Server): Promise<void> => new Promise((resolve, reject) =
 });
 
 describe('desktop Local API URL and authentication boundary', () => {
+  test('forwards explicit Project color and null reset while preserving omitted fields', async () => {
+    const { service, calls } = fixture(() => jsonResponse({ project: project() }));
+    await service.addProject({ title: 'Project', colorOverride: '#94a3b8' });
+    await service.updateProject({ id: 'project-1', colorOverride: null });
+    await service.updateProject({ id: 'project-1', title: 'Renamed' });
+    expect(calls[0].body).toEqual({ title: 'Project', props: { colorOverride: '#94a3b8' } });
+    expect(calls[1].body).toEqual({ colorOverride: null });
+    expect(calls[2].body).toEqual({ title: 'Renamed' });
+    await expect(service.updateProject({ id: 'project-1', colorOverride: '#fff' })).rejects.toThrow(ValidationError);
+    expect(calls).toHaveLength(3);
+  });
   test('accepts canonical literal loopback origins', () => {
     for (const value of ['http://127.0.0.1:3000', 'https://127.0.0.1:3000/', 'http://[::1]:3000/']) {
       expect(validateLocalApiUrl(value)).toBe(value.replace(/\/$/, ''));

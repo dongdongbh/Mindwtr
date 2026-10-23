@@ -12,7 +12,7 @@ import { taskFocusAction, taskFocusEffect, taskFocusScope } from './store-tasks'
 import { sameTaskSqliteRow } from './store-projects/section-actions';
 import { TASK_SYNC_FIELD_SCHEMA, taskToSqliteRow } from './task-sync-schema';
 import type { PreparedTaskFocus, TaskFocusWitnessRow } from './store-types';
-import { projectFocusDateValues, type FocusDateProjection } from './task-utils';
+import { getProjectFlowMode, projectFocusDateValues, type FocusDateProjection } from './task-utils';
 import { isTaskActionable } from './task-status';
 import { hasRecurrenceRule } from './recurrence';
 import { isStatusListTaskReadOnly } from './menu-views-model';
@@ -150,9 +150,11 @@ export const validFrozenFocusDate = (value: unknown): value is FocusDateProjecti
 
 const requiredDates = (scope: PreparedTaskFocus['scope']): string[] => {
     const values: Array<string | null | undefined> = [scope.task.startTime, scope.task.reviewAt];
-    if (scope.project?.isSequential || !scope.task.startTime && hasRecurrenceRule(scope.task.recurrence))
+    // Per section projects (#1429) run sequences too, so their peers' dates count.
+    const sequenced = scope.project ? getProjectFlowMode(scope.project) !== 'parallel' : false;
+    if (sequenced || !scope.task.startTime && hasRecurrenceRule(scope.task.recurrence))
         values.push(scope.task.dueDate);
-    if (scope.project?.isSequential) {
+    if (sequenced) {
         scope.peers.forEach((row) => values.push(row.dueDate, row.reviewAt));
     }
     scope.focused.forEach((row) => {

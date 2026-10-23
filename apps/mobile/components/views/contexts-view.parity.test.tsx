@@ -136,6 +136,7 @@ const settingsVariants: Record<string, AppSettings> = {
 type Action =
   | ['search', string]
   | ['chip', string]
+  | ['chipTap', string]
   | ['matchMode', 'all' | 'any']
   | ['row', string, 'edit' | 'remove' | 'toggleSelect']
   | ['row', string, 'changeStatus', string]
@@ -173,6 +174,24 @@ export const scenarios: Scenario[] = [
       ['chip', 'No context'],
       ['chip', '#focus'],
       ['chip', 'All Contexts'],
+    ],
+  },
+  {
+    name: 'a tap switches to one token, long-press combines',
+    settings: 'base',
+    actions: [
+      ['chipTap', '@phone'],
+      ['chipTap', '#work'],
+      ['chip', '@phone'],
+      ['matchMode', 'any'],
+      ['chipTap', '@phone'],
+      ['chipTap', '@phone'],
+      ['chipTap', 'No context'],
+      ['chipTap', '@computer/deep'],
+      ['chip', '@computer/deep'],
+      ['chipTap', 'No context'],
+      ['chip', '#home'],
+      ['chipTap', 'All Contexts'],
     ],
   },
   {
@@ -336,6 +355,8 @@ const textOf = (node: ReactTestInstance): string[] => {
 const textsIn = (node: ReactTestInstance): string[] => node.findAll((child) => String(child.type) === 'Text')
   .map((child) => textOf(child).join(''));
 const hostsOf = (root: ReactTestInstance, type: string) => root.findAll((node) => String(node.type) === type);
+// A bulk button's name: its text, or the accessibility label of an icon-only button (the X exit).
+const buttonName = (node: ReactTestInstance): string | undefined => textsIn(node)[0] ?? node.props.accessibilityLabel;
 
 function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number; writes: number }) {
   const chipRow = hostsOf(root, 'ScrollView').find((node) => node.props.horizontal && node.props.style !== undefined);
@@ -351,9 +372,11 @@ function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number
   const flatList = hostsOf(root, 'FlatList')[0];
   const emptyIcon = flatList.findAll((node) => String(node.type).startsWith('Icon:'))[0];
   const empty = rows.length === 0 && emptyIcon ? [String(emptyIcon.type), ...textsIn(flatList)] : null;
-  const bulkButtons = hostsOf(root, 'TouchableOpacity');
+  // The search row's Sort button (#1415) is not part of the bulk bar.
+  const bulkButtons = hostsOf(root, 'TouchableOpacity')
+    .filter((node) => !node.findAll((child) => String(child.type) === 'Icon:ArrowUpDown').length);
   const bulk = bulkButtons.length > 0
-    ? bulkButtons.map((node) => [textsIn(node)[0], node.props.disabled === true])
+    ? bulkButtons.map((node) => [buttonName(node), node.props.disabled === true])
     : null;
   const pickerNode = hostsOf(root, 'TokenPickerModal')[0];
   const picker = pickerNode?.props.visible
@@ -394,12 +417,13 @@ async function perform(root: ReactTestInstance, action: Action) {
     await act(async () => { hostsOf(root, 'TextInput')[0].props.onChangeText(action[1]); });
     return;
   }
-  if (kind === 'chip') {
+  if (kind === 'chip' || kind === 'chipTap') {
     const chip = root.findAll((node) => String(node.type) === 'Pressable' && (
       node.props.accessibilityLabel === action[1] || String(node.props.accessibilityLabel).startsWith(`${action[1]} (`)
     ))[0];
     if (!chip) throw new Error(`No chip ${action[1]}`);
-    await act(async () => { chip.props.onPress(); });
+    // 'chip' is the additive press, RN's long-press (the host's `additive`); 'chipTap' the tap (`next`) (#1427).
+    await act(async () => { ((kind === 'chip' && chip.props.onLongPress) || chip.props.onPress)(); });
     return;
   }
   if (kind === 'matchMode') {
@@ -430,7 +454,7 @@ async function perform(root: ReactTestInstance, action: Action) {
     return;
   }
   if (kind === 'bulk') {
-    const button = hostsOf(root, 'TouchableOpacity').filter((node) => textsIn(node)[0] === action[1])[action[2] ?? 0];
+    const button = hostsOf(root, 'TouchableOpacity').filter((node) => buttonName(node) === action[1])[action[2] ?? 0];
     if (!button) throw new Error(`No bulk button ${action[1]}`);
     await act(async () => { await button.props.onPress(); });
     return;

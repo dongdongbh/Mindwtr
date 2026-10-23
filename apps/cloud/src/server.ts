@@ -11,6 +11,7 @@ import {
     buildCaptureTaskProps,
     buildHttpRemoteFileFingerprint,
     buildNewProject,
+    projectAreaSelection,
     canonicalRecurringFollowUp,
     compactPurgedProjectSectionTombstone,
     compactPurgedProjectTombstone,
@@ -959,9 +960,13 @@ const ENTITY_ROUTES: Array<EntityRouteDefinition<any>> = [
             );
             data.tasks = lifecycle.tasks;
             data.sections = lifecycle.sections;
+            const areaSelection = projectAreaSelection(existing, {
+                ...updates, ...(areaId !== undefined ? { areaId: areaId ?? undefined } : {}),
+            } as Partial<Project>, data.projects, data.areas);
             const updatedProject = {
                 ...existing,
                 ...lifecycle.projectUpdates,
+                ...areaSelection.fields,
                 title: typeof updates.title === 'string' ? updates.title.trim() : existing.title,
                 areaId: areaId !== undefined ? areaId ?? undefined : existing.areaId,
                 updatedAt: nowIso,
@@ -1898,6 +1903,9 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     }
                 })();
                 attachRequestId(response, requestId);
+                // A refusal that left the body unread (or stopped reading it) closes the connection, so a
+                // keep-alive client's next request is never parsed from the leftover body bytes.
+                if (req.body && (!req.bodyUsed || response.status === 413)) response.headers.set('Connection', 'close');
                 const completion: CloudRequestCompletion = {
                     requestId,
                     method: req.method,

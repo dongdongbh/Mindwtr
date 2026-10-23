@@ -1,4 +1,5 @@
-import { generateDeterministicUUID, type Task } from '@mindwtr/core';
+import { buildTaskFromEmailMessage, generateDeterministicUUID, type Task } from '@mindwtr/core';
+export { buildTaskFromEmailMessage } from '@mindwtr/core';
 
 import { invokeNative, invokeNativeOr } from './tauri-invoke';
 
@@ -10,7 +11,6 @@ const DEFAULT_INITIAL_POLL_DELAY_MS = 20_000;
 // A backlog (first setup with a full folder) is drained in bounded rounds per
 // cycle; anything left waits for the next interval.
 const DEFAULT_MAX_ROUNDS_PER_CYCLE = 10;
-const EMAIL_TITLE_FROM_BODY_MAX_CHARS = 100;
 
 // Rust falls back to `uid:<uidValidity>:<uid>` when an email has no Message-ID header.
 // That value changes when the server renumbers the folder, so it cannot name the task.
@@ -109,26 +109,6 @@ export const toEmailCaptureError = (error: unknown): EmailCaptureErrorInfo => {
 export const isTerminalEmailCaptureError = (info: EmailCaptureErrorInfo): boolean => (
     info.kind === 'auth' || info.kind === 'config' || info.kind === 'folder'
 );
-
-export const buildTaskFromEmailMessage = (
-    message: EmailCaptureMessage,
-): { title: string; description?: string } => {
-    const subject = message.subject.trim();
-    const body = message.bodyText.trim();
-    const firstBodyLine = body.split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? '';
-    const title = subject
-        || (firstBodyLine.length > EMAIL_TITLE_FROM_BODY_MAX_CHARS
-            ? `${firstBodyLine.slice(0, EMAIL_TITLE_FROM_BODY_MAX_CHARS)}…`
-            : firstBodyLine)
-        || message.from.trim()
-        || 'Email';
-    const from = message.from.trim();
-    const parts: string[] = [];
-    if (from) parts.push(`From: ${from}`);
-    if (body) parts.push(body);
-    const description = parts.join('\n\n');
-    return description ? { title, description } : { title };
-};
 
 type EmailCaptureStatusListener = (status: EmailCaptureStatus) => void;
 

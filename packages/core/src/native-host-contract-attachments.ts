@@ -80,6 +80,7 @@ import {
     type AttachmentAvailabilityOutcome,
 } from './mobile-attachment-availability';
 import type { NativeHostResult } from './native-host-contract';
+import type { LocalAttachmentPresence } from './attachment-transfer';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { createNativeRequestReceipts, requestRowId, runStoreWrite, settleWrite, taskRevisionOf } from './native-request-receipts';
@@ -108,6 +109,8 @@ export type NativeAttachmentsHost = {
     persistAttachmentLocallyDetailed?(attachment: Attachment): Promise<PersistAttachmentOutcome>;
     /** createMobileAttachmentFiles(...).canUploadAttachmentFrom: whether a uri is a managed copy (flat, no traversal). */
     canUploadAttachmentFrom?(uri: string): boolean;
+    /** createMobileAttachmentFiles(...).getLocalAttachmentPresence: a backup commit marks a live file whose copy is gone missing. */
+    getLocalAttachmentPresence?(uri: string): Promise<LocalAttachmentPresence>;
 };
 
 /** Whose attachments: the task editor's draft list, or a project's stored list. */

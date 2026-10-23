@@ -40,7 +40,8 @@ type ChecklistFieldProps = {
     t: (key: string) => string;
     taskId: string;
     checklist: Task['checklist'];
-    plainList?: boolean;
+    /** A Reference's list: labelled "List"; it ticks like a checklist (#1416). */
+    isReference?: boolean;
     resetTaskChecklist: (taskId: string) => void;
 };
 
@@ -150,7 +151,7 @@ export function ChecklistField({
     t,
     taskId,
     checklist,
-    plainList = false,
+    isReference = false,
     resetTaskChecklist,
 }: ChecklistFieldProps) {
     const markdownEditorAssist = useTaskStore((state) => isMarkdownEditorAssistEnabled(state.settings));
@@ -319,9 +320,7 @@ export function ChecklistField({
             ? {
                 ...current,
                 title: firstParsed?.title ?? '',
-                isCompleted: plainList
-                    ? current.isCompleted
-                    : current.isCompleted || (firstParsed?.isCompleted ?? false),
+                isCompleted: current.isCompleted || (firstParsed?.isCompleted ?? false),
             }
             : {
                 ...current,
@@ -333,14 +332,14 @@ export function ChecklistField({
         const inserted = restItems.map((item) => ({
             id: generateUUID(),
             title: item.title,
-            isCompleted: plainList ? false : item.isCompleted,
+            isCompleted: item.isCompleted,
         }));
         const nextList = [...list.slice(0, index), updatedCurrent, ...inserted, ...list.slice(index + 1)];
         setChecklistDraft(nextList);
         checklistDraftRef.current = nextList;
         checklistDirtyRef.current = false;
         commitChecklistUpdate(nextList);
-    }, [commitChecklistUpdate, getInputSelection, plainList]);
+    }, [commitChecklistUpdate, getInputSelection]);
 
     const handleChecklistDragEnd = useCallback((event: DragEndEvent) => {
         const { active, over } = event;
@@ -358,6 +357,7 @@ export function ChecklistField({
     }, [commitChecklistUpdate]);
 
     const checklistItems = checklistDraft || [];
+    const fieldLabel = t(isReference ? 'taskEdit.tab.list' : 'taskEdit.checklist');
     const canReorderChecklist = checklistItems.length > 1;
 
     return (
@@ -373,7 +373,7 @@ export function ChecklistField({
             }}
         >
             <TaskEditorFieldLabel icon={ListChecks}>
-                {t(plainList ? 'taskEdit.tab.list' : 'taskEdit.checklist')}
+                {fieldLabel}
             </TaskEditorFieldLabel>
             <div className="space-y-2 pr-3">
                 {/* Keep late-mounted drag announcements from adding a gap before the Add button. */}
@@ -390,36 +390,27 @@ export function ChecklistField({
                                     {({ handle }) => (
                                         <>
                                             {handle}
-                                            {plainList ? (
-                                                <span
-                                                    aria-hidden="true"
-                                                    className="w-4 shrink-0 text-center text-sm text-muted-foreground"
-                                                >
-                                                    •
-                                                </span>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    aria-label={`${t('taskEdit.checklist')} ${index + 1}`}
-                                                    onClick={() => {
-                                                        const newList = checklistItems.map((entry, i) =>
-                                                            i === index ? { ...entry, isCompleted: !entry.isCompleted } : entry
-                                                        );
-                                                        setChecklistDraft(newList);
-                                                        checklistDraftRef.current = newList;
-                                                        checklistDirtyRef.current = false;
-                                                        commitChecklistUpdate(newList);
-                                                    }}
-                                                    className={cn(
-                                                        'w-4 h-4 shrink-0 border rounded flex items-center justify-center transition-colors',
-                                                        item.isCompleted
-                                                            ? 'bg-primary border-primary text-primary-foreground'
-                                                            : 'border-muted-foreground hover:border-primary'
-                                                    )}
-                                                >
-                                                    {item.isCompleted && <Check className="w-3 h-3" />}
-                                                </button>
-                                            )}
+                                            <button
+                                                type="button"
+                                                aria-label={`${fieldLabel} ${index + 1}`}
+                                                onClick={() => {
+                                                    const newList = checklistItems.map((entry, i) =>
+                                                        i === index ? { ...entry, isCompleted: !entry.isCompleted } : entry
+                                                    );
+                                                    setChecklistDraft(newList);
+                                                    checklistDraftRef.current = newList;
+                                                    checklistDirtyRef.current = false;
+                                                    commitChecklistUpdate(newList);
+                                                }}
+                                                className={cn(
+                                                    'w-4 h-4 shrink-0 border rounded flex items-center justify-center transition-colors',
+                                                    item.isCompleted
+                                                        ? 'bg-primary border-primary text-primary-foreground'
+                                                        : 'border-muted-foreground hover:border-primary'
+                                                )}
+                                            >
+                                                {item.isCompleted && <Check className="w-3 h-3" />}
+                                            </button>
                                             <input
                                                 type="text"
                                                 value={item.title}
@@ -528,7 +519,7 @@ export function ChecklistField({
                                                 }}
                                                 className={cn(
                                                     'flex-1 bg-transparent text-sm focus:outline-none border-b border-transparent focus:border-primary/50 px-1',
-                                                    !plainList && item.isCompleted && 'text-muted-foreground line-through'
+                                                    item.isCompleted && 'text-muted-foreground line-through'
                                                 )}
                                                 placeholder={t('taskEdit.itemNamePlaceholder')}
                                             />
@@ -588,7 +579,7 @@ export function ChecklistField({
                     <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                     {t('taskEdit.addItem')}
                 </button>
-                {!plainList && (checklistDraft || []).length > 0 && (
+                {(checklistDraft || []).length > 0 && (
                     <div className="flex items-center gap-2">
                         <button
                             type="button"

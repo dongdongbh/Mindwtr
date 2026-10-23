@@ -1,4 +1,4 @@
-import { normalizeCloudProvider, type CloudProvider } from '@mindwtr/core';
+import { generateUUID, normalizeCloudProvider, type CloudProvider } from '@mindwtr/core';
 
 import type { CloudConfig, WebDavConfig } from './sync-attachment-backends';
 import { normalizeSyncBackend, type SyncBackend } from './sync-service-utils';
@@ -15,6 +15,9 @@ export const CLOUD_ALLOW_INSECURE_HTTP_KEY = 'mindwtr-cloud-allow-insecure-http'
 export const CLOUD_REMEMBER_TOKEN_KEY = 'mindwtr-cloud-remember-token';
 export const CLOUD_PROVIDER_KEY = 'mindwtr-cloud-provider';
 const DEFAULT_DROPBOX_APP_KEY = String(import.meta.env.VITE_DROPBOX_APP_KEY || '').trim();
+const BROWSER_CONFIGURATION_GENERATION = 'mindwtr-browser-sync-configuration-generation';
+export const getBrowserSyncConfigurationGeneration = (): string => localStorage.getItem(BROWSER_CONFIGURATION_GENERATION) || '';
+const invalidateBrowserConfiguration = () => localStorage.setItem(BROWSER_CONFIGURATION_GENERATION, generateUUID());
 
 type ConfigDeps = {
     isTauriRuntimeEnv: () => boolean;
@@ -32,6 +35,7 @@ export const getSyncBackendLocal = (): SyncBackend => {
 };
 
 const setSyncBackendLocal = (backend: SyncBackend) => {
+    invalidateBrowserConfiguration();
     localStorage.setItem(SYNC_BACKEND_KEY, backend);
 };
 
@@ -57,6 +61,7 @@ type WebDavConfigWrite = {
 };
 
 const setWebDavConfigLocal = (config: WebDavConfigWrite) => {
+    invalidateBrowserConfiguration();
     if (!config.url && getSyncBackendLocal() === 'webdav') setSyncBackendLocal('off');
     localStorage.setItem(WEBDAV_URL_KEY, config.url);
     localStorage.setItem(WEBDAV_USERNAME_KEY, config.username || '');
@@ -92,6 +97,7 @@ export const getCloudConfigLocal = (): CloudConfig => {
 };
 
 const setCloudConfigLocal = (config: { url: string; token?: string; allowInsecureHttp?: boolean; rememberToken?: boolean }) => {
+    invalidateBrowserConfiguration();
     const rememberToken = config.rememberToken === true;
     localStorage.setItem(CLOUD_URL_KEY, config.url);
     localStorage.setItem(CLOUD_ALLOW_INSECURE_HTTP_KEY, config.allowInsecureHttp === true ? 'true' : 'false');
@@ -119,6 +125,7 @@ const getCloudProviderLocal = (): CloudProvider => {
 };
 
 const setCloudProviderLocal = (provider: CloudProvider) => {
+    invalidateBrowserConfiguration();
     localStorage.setItem(CLOUD_PROVIDER_KEY, normalizeCloudProvider(provider));
 };
 

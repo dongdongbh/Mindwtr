@@ -5,6 +5,7 @@ import { normalizeTimeSpentMinutes } from './time-spent';
 import { normalizeRelativeStartOffset } from './task-relative-start';
 import { preserveShallowIdentity, sameShallowRecord } from './shallow-identity';
 import { safeParseDate } from './date';
+import type { FocusDateProjection } from './task-utils';
 
 export const TASK_STATUS_VALUES: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'];
 export const TASK_STATUS_SET = new Set<TaskStatus>(TASK_STATUS_VALUES);
@@ -99,7 +100,14 @@ const LEGACY_STATUS_MAP: Record<string, TaskStatus> = {
     doing: 'next',
 };
 
-const isFutureStart = (task: Pick<Task, 'startTime'>, now: Date): boolean => {
+/** Original native preparation's parse and end-of-day boundary, never a live fallback. */
+export type TaskLoadTemporalContext = { futureBoundary: string;
+    dates: ReadonlyMap<string, Pick<FocusDateProjection, 'parsedAt'>> };
+const isFutureStart = (task: Pick<Task, 'startTime'>, now: Date, temporal?: TaskLoadTemporalContext): boolean => {
+    if (temporal) {
+        const parsedAt = task.startTime ? temporal.dates.get(task.startTime)?.parsedAt : null;
+        return parsedAt != null && parsedAt > Date.parse(temporal.futureBoundary);
+    }
     const start = safeParseDate(task.startTime);
     if (!start) return false;
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -147,7 +155,7 @@ export function normalizeTaskLifecycleFields(task: Task): Task {
     return sameShallowRecord(task, next) ? task : next;
 }
 
-export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toISOString()): Task {
+export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toISOString(), temporal?: TaskLoadTemporalContext): Task {
     const normalizedStatus = normalizeTaskStatus((task as any).status);
     const { rev: _legacyRev, revBy: _legacyRevBy, ...rest } = task as Task & { rev?: unknown; revBy?: unknown };
 
@@ -224,7 +232,7 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
 
     // A future-start Next action keeps its queued star across load and sync.
     // focusOrder only applies once it has reached Today's Focus.
-    if (lifecycleNormalized.isFocusedToday && isFutureStart(lifecycleNormalized, new Date(nowIso))) {
+    if (lifecycleNormalized.isFocusedToday && isFutureStart(lifecycleNormalized, new Date(nowIso), temporal)) {
         if (lifecycleNormalized.status !== 'next') lifecycleNormalized.isFocusedToday = false;
         lifecycleNormalized.focusOrder = undefined;
     }

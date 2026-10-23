@@ -150,6 +150,42 @@ describe('apple-reminders-import', () => {
     );
   });
 
+  it('re-reads the source ID after a held first snapshot while retaining the earlier registry identity', async () => {
+    const originalId = 'AABBCCDD-1234-5678-9ABC-0123456789EF';
+    const changedId = '11223344-1234-5678-9ABC-0123456789EF';
+    const reminder = { id: originalId, title: ' Task ', notes: ' Notes ', completed: false };
+    mockGetRemindersAsync.mockResolvedValue([reminder] as any);
+    let releaseSnapshot!: () => void;
+    let snapshotEntered!: () => void;
+    const heldSnapshot = new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+    const enteredSnapshot = new Promise<void>((resolve) => { snapshotEntered = resolve; });
+    const createRecoverySnapshot = vi.fn(async () => {
+      snapshotEntered();
+      await heldSnapshot;
+      return 'snapshot.json';
+    });
+    const addTask = vi.fn(async () => ({ success: true, id: changedId.toLowerCase() }));
+
+    const importing = importAppleRemindersIntoInbox({
+      addTask, createRecoverySnapshot, listId: 'list-1', deleteImportedReminders: true,
+    });
+    await enteredSnapshot;
+    expect(addTask).not.toHaveBeenCalled();
+    expect(mockSetItem).not.toHaveBeenCalled();
+    expect(mockDeleteReminderAsync).not.toHaveBeenCalled();
+    reminder.id = changedId;
+    releaseSnapshot();
+
+    await expect(importing).resolves.toMatchObject({ importedCount: 1, deletedCount: 1, failedCount: 0 });
+    expect(addTask).toHaveBeenCalledWith('Task', { status: 'inbox', description: 'Notes' }, {
+      captureId: changedId.toLowerCase(),
+    });
+    expect(mockSetItem).toHaveBeenCalledWith(APPLE_REMINDERS_IMPORT_SETTINGS_KEY, JSON.stringify({
+      importedReminderIds: [originalId], deleteImportedReminders: false, autoImportOnOpen: false,
+    }));
+    expect(mockDeleteReminderAsync).toHaveBeenCalledWith(changedId);
+  });
+
   it('deletes reminders only after their Inbox task is created when enabled', async () => {
     const addTask = vi.fn()
       .mockResolvedValueOnce({ success: true, id: 'task-id' })

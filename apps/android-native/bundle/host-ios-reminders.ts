@@ -25,11 +25,13 @@ const signature = (value: unknown, marked: boolean) => {
     if (typeof value !== 'string' || (marked && !value.startsWith('native:'))) return false;
     try {
         const raw: unknown = JSON.parse(marked ? value.slice(7) : value);
-        return record(raw) && exact(raw, ['title', 'message', 'fireAt', 'repeatInterval', 'hasSnoozeAction', 'data'], ['hasCompleteAction'])
+        return record(raw) && exact(raw, ['title', 'message', 'fireAt', 'repeatInterval', 'hasSnoozeAction', 'data'], ['hasCompleteAction', 'timeZone'])
             && typeof raw.title === 'string' && typeof raw.message === 'string' && typeof raw.fireAt === 'string'
             && ['once', 'daily', 'weekly'].includes(String(raw.repeatInterval)) && typeof raw.hasSnoozeAction === 'boolean'
             && signedTime(raw.fireAt, raw.repeatInterval)
-            && (!Object.hasOwn(raw, 'hasCompleteAction') || raw.hasCompleteAction === true) && textMap(raw.data);
+            && (!Object.hasOwn(raw, 'hasCompleteAction') || raw.hasCompleteAction === true) && textMap(raw.data)
+            // The shared builder signs a repeating alarm's IANA zone (452a9d59d), so a time zone change re-arms it.
+            && (!Object.hasOwn(raw, 'timeZone') || raw.repeatInterval !== 'once' && typeof raw.timeZone === 'string' && raw.timeZone !== '');
     } catch { return false; }
 };
 const parsed = (raw: string | null) => {
@@ -143,13 +145,15 @@ type Dependencies = {
     capture: () => () => void;
     read: () => Promise<[string, string | null][]>;
     plan: (input: PlanInput) => Promise<{ ok: true; value: NativeReminderAlarmPlan } | { ok: false }>;
-    acknowledged: (mode: string, scheduled: number, cancelled: number, collapsed: number, rearmed: number) => Promise<void>;
+    acknowledged: (mode: string, scheduled: number, cancelled: number, collapsed: number, rearmed: number, zoned: number) => Promise<void>;
     observation?: { subscribe: (changed: () => void) => () => void; ready: () => boolean; rescheduleDelayMs: number };
 };
 
 /** Only the native no-argument facade supplies observations and owns the map CAS/effects. */
 export function createIosReminderMethods(deps: Dependencies) {
     let owner: { token: string; current: () => void } | null = null;
+    // Saved repeating alarms whose signature carries a time zone, from the last prepare; its acknowledgment logs the count.
+    let zoned = 0;
     let revision = 0, unsubscribe: (() => void) | null = null, resolvedLanguage: string | null = null;
     const changed = () => { revision += 1; };
     const current = (token: string) => {
@@ -195,6 +199,8 @@ export function createIosReminderMethods(deps: Dependencies) {
                 || entry.length !== 2 || entry[0] !== names[index] || entry[1] !== null && typeof entry[1] !== 'string')) throw unavailable();
             const storedAlarms = values[0][1], storedState = values[1][1];
             const owned = readOwnedIosReminderMaps(storedAlarms, storedState);
+            zoned = Object.values(owned.map).filter((entry) => record(entry)
+                && Object.hasOwn(JSON.parse(String(entry.signature).slice(7)) as object, 'timeZone')).length;
             // Repeating UN requests persist. Remake only ordinary IDs proved missing, never infer that they fired.
             const remake = Object.entries(owned.map).filter(([, entry]) => record(entry)
                 && !pending.has(Number(entry.id))).map(([name]) => name);
@@ -217,7 +223,8 @@ export function createIosReminderMethods(deps: Dependencies) {
                 || !Number.isInteger(cancelled) || cancelled < 0 || cancelled > 4096
                 || !Number.isInteger(collapsed) || collapsed < 0 || collapsed > 4096
                 || !Number.isInteger(rearmed) || rearmed < 0 || rearmed > scheduled || rearmed > 64) throw unavailable();
-            try { await deps.acknowledged(mode, scheduled, cancelled, collapsed, rearmed); } catch { /* Confirmed persistence survives logging failure. */ }
+            const admitted = zoned; zoned = 0;
+            try { await deps.acknowledged(mode, scheduled, cancelled, collapsed, rearmed, admitted); } catch { /* Confirmed persistence survives logging failure. */ }
             return null;
         },
     };

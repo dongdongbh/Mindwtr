@@ -1,0 +1,207 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { addSavedTaxonomyToken, getSavedTaxonomyTokens, isTaxonomyCatalog, mergeTaxonomyCatalog, normalizeTaxonomyToken,
+    planTaxonomyCatalogChange, retainTaskTaxonomy, retainTaxonomyEffects } from './taxonomy-catalog';
+import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
+import { SqliteAdapter } from './sqlite-adapter';
+import { mergeSettingsForSync } from './sync-merge-settings';
+import { areSyncPayloadsEqual, sanitizeAppDataForRemote } from './sync-helpers';
+import { prepareRestoredBackupDataForSync, validateBackupJson } from './backup-transfer';
+import { parseSyncDocument } from './sync-document';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
+import type { AppData, AppSettings, Task } from './types';
+
+const AT = '2026-10-20T12:00:00.000Z';
+const task = (extra: Partial<Task> = {}): Task => ({ id: 'task', title: 'task', status: 'next',
+    contexts: ['@Legacy'], tags: [], rev: 1, revBy: 'device', createdAt: AT, updatedAt: AT, ...extra });
+const document = (settings: AppSettings = { deviceId: 'device' }, tasks: Task[] = []): AppData =>
+    ({ tasks, projects: [], sections: [], areas: [], people: [], settings });
+
+async function open(data = document()) {
+    await flushPendingSave(); resetForTests();
+    let saved = structuredClone(data);
+    const saveTask = vi.fn(async () => undefined);
+    setStorageAdapter({ getData: async () => structuredClone(saved), saveTask,
+        saveData: async (next) => { saved = structuredClone(next); } });
+    useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
+        settings: {}, error: null, persistenceFailure: null, isLoading: false, lastDataChangeAt: 0 } as never);
+    await useTaskStore.getState().fetchData({ throwOnError: true }); await flushPendingSave();
+    return { saved: () => saved, saveTask };
+}
+
+afterEach(async () => { await flushPendingSave(); resetForTests(); setLogger(consoleLogger); });
+
+describe('saved contexts and tags', () => {
+    it('rejects a failed durable create and emits no persisted diagnostic', async () => {
+        const env = await open();
+        const lines: LogPayload[] = [];
+        setLogger((line) => { lines.push(line); });
+        setStorageAdapter({ getData: async () => env.saved(), saveData: async () => { throw new Error('disk unavailable'); } });
+        try {
+            await expect(useTaskStore.getState().addContext('@Unsaved')).rejects.toThrow();
+            expect(env.saved().settings.taxonomy).toBeUndefined();
+            expect(lines.filter((line) => line.context?.releaseCheck === 'v1.3.7/saved-taxonomy')).toEqual([]);
+        } finally { resetForTests(); }
+    }, 15_000);
+    it('keeps token length bounds and tied merges independent of JSON object property order', () => {
+        expect(normalizeTaxonomyToken('context', 'x'.repeat(500))).toBe('');
+        expect(normalizeTaxonomyToken('context', 'x'.repeat(499))).toHaveLength(500);
+        const entry = { token: '@Work', rev: 1, revBy: 'b', updatedAt: AT };
+        const left = { contexts: [entry] };
+        const right = { contexts: [{ updatedAt: AT, revBy: 'a', rev: 1, token: '@Home' }] };
+        expect(mergeTaxonomyCatalog(left, right)).toEqual(mergeTaxonomyCatalog(right, left));
+        const reordered = { contexts: [{ updatedAt: AT, revBy: 'b', rev: 1, token: '@work' }] };
+        expect(mergeTaxonomyCatalog(left, reordered)).toEqual(mergeTaxonomyCatalog(reordered, left));
+        expect(isTaxonomyCatalog({ contexts: [{ ...entry, updatedAt: 'Oct 20 2026' }] })).toBe(false);
+        expect(parseSyncDocument(document({ taxonomy: { contexts: [{ ...entry, rev: -1 }] } }), 'remote').ok).toBe(false);
+    });
+
+    it('retains large distinct-token batches with one catalogue publication', () => {
+        const effects = Array.from({ length: 5_000 }, (_, index) => ({ after: task({ id: String(index),
+            contexts: [`@context${index}`], tags: [`#tag${index}`] }) }));
+        const before = performance.now();
+        const settings = retainTaxonomyEffects({ deviceId: 'device' }, effects);
+        expect(settings.taxonomy?.contexts).toHaveLength(5_000);
+        expect(settings.taxonomy?.tags).toHaveLength(5_000);
+        expect(performance.now() - before).toBeLessThan(2_000);
+    });
+
+    it('restores catalogue revisions above current tombstones and enrolls an old backup only during restore', () => {
+        const saved = addSavedTaxonomyToken({ deviceId: 'a' }, 'context', '@Legacy', 'a', AT);
+        const previous = document(addSavedTaxonomyToken(saved, 'context', '@Legacy', 'a', AT, true));
+        const restored = prepareRestoredBackupDataForSync(document(saved, [task()]), { previousData: previous, restoredAt: AT });
+        expect(restored.settings.taxonomy?.contexts?.[0].rev).toBeGreaterThan(previous.settings.taxonomy!.contexts![0].rev);
+        expect(getSavedTaxonomyTokens(mergeSettingsForSync(restored.settings, previous.settings), 'context')).toEqual(['@Legacy']);
+        const old = prepareRestoredBackupDataForSync(document({ deviceId: 'a' }, [task()]), { restoredAt: AT });
+        expect(getSavedTaxonomyTokens(old.settings, 'context')).toEqual(['@Legacy']);
+    });
+    it('creates unused values durably, dedupes case, and refreshes derived suggestions', async () => {
+        const env = await open();
+        expect(useTaskStore.getState().getDerivedState().allContexts).toEqual([]);
+        await useTaskStore.getState().addContext(' Home ');
+        await useTaskStore.getState().addContext('@home');
+        await useTaskStore.getState().addTag('＃Work');
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Home']);
+        expect(env.saved().settings.taxonomy?.contexts).toHaveLength(1);
+        expect(useTaskStore.getState().getDerivedState().allContexts).toEqual(['@Home']);
+        expect(useTaskStore.getState().getDerivedState().allTags).toEqual(['#Work']);
+        await useTaskStore.getState().fetchData({ throwOnError: true });
+        expect(useTaskStore.getState().getDerivedState().allContexts).toEqual(['@Home']);
+        for (const name of ['', ' @# ', 'bad\nname', 'x'.repeat(501)])
+            await expect(useTaskStore.getState().addContext(name)).rejects.toThrow('Invalid context');
+    });
+
+    it('saves inline assignment and catalogue together, including the single-row fast path', async () => {
+        const env = await open(document({ deviceId: 'device' }, [task({ contexts: [] })]));
+        await useTaskStore.getState().updateTask('task', { contexts: ['@New'], tags: ['#Inline'] });
+        await flushPendingSave();
+        expect(env.saveTask).not.toHaveBeenCalled();
+        expect(env.saved().tasks[0].contexts).toEqual(['@New']);
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@New']);
+        await useTaskStore.getState().updateTask('task', { contexts: [], tags: [] });
+        await flushPendingSave();
+        expect(getSavedTaxonomyTokens(useTaskStore.getState().settings, 'context')).toEqual(['@New']);
+    });
+
+    it('retains tokens introduced by a native prepared capture in its exact saved snapshot', async () => {
+        const env = await open();
+        const prepared = task({ id: 'native-created', contexts: ['@Prepared'], tags: ['#Native'] });
+        const applied = await useTaskStore.getState().commitPreparedCapture({ task: prepared, project: null,
+            deviceIdBefore: 'device', deviceIdToInitialize: null });
+        expect(applied).toMatchObject({ success: true });
+        await flushPendingSave();
+        expect(env.saved().tasks.find((row) => row.id === prepared.id)).toEqual(prepared);
+        expect(env.saved().settings.taxonomy).toEqual(useTaskStore.getState().settings.taxonomy);
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Prepared']);
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'tag')).toEqual(['#Native']);
+        await useTaskStore.getState().deleteTask(prepared.id);
+        await flushPendingSave();
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Prepared']);
+    });
+
+    it.each(['edit', 'delete'] as const)('retains legacy last-use values on explicit %s without a load migration', async (action) => {
+        const env = await open(document({ deviceId: 'device' }, [task()]));
+        expect(useTaskStore.getState().settings.taxonomy).toBeUndefined();
+        if (action === 'edit') await useTaskStore.getState().updateTask('task', { contexts: [] });
+        else await useTaskStore.getState().deleteTask('task');
+        await flushPendingSave();
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Legacy']);
+    });
+
+    it('keeps deletion tombstones through unrelated edits and permits intentional assignment again', () => {
+        const initial = addSavedTaxonomyToken({ deviceId: 'a' }, 'context', '@Legacy', 'a', AT, true);
+        const before = task();
+        expect(retainTaskTaxonomy(initial, before, { ...before, title: 'edited' })).toBe(initial);
+        expect(retainTaskTaxonomy(initial, before, { ...before, contexts: [] })).toBe(initial);
+        const restored = retainTaskTaxonomy(initial, { ...before, contexts: [] }, before);
+        expect(getSavedTaxonomyTokens(restored, 'context')).toEqual(['@Legacy']);
+        expect(restored.taxonomy?.contexts?.[0].rev).toBe(2);
+    });
+
+    it('renames and deletes unused and assigned values without changing unrelated assignments', async () => {
+        const env = await open();
+        await useTaskStore.getState().addContext('@Unused');
+        await useTaskStore.getState().renameContext('@unused', '@Renamed');
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Renamed']);
+        await useTaskStore.getState().deleteContext('@Renamed');
+        expect(useTaskStore.getState().getDerivedState().allContexts).toEqual([]);
+        const result = await useTaskStore.getState().addTask('assigned', { contexts: ['@Home', '@Other'] });
+        await useTaskStore.getState().renameContext('@Home', '@Office');
+        expect(env.saved().tasks.find((row) => row.id === result.id)?.contexts).toEqual(['@Office', '@Other']);
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toContain('@Office');
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).not.toContain('@Home');
+    });
+
+    it('merges independent edits, retains tombstones, and converges with an omitted old-peer field', () => {
+        const left = addSavedTaxonomyToken({}, 'context', '@Home', 'a', AT);
+        const right = addSavedTaxonomyToken({}, 'tag', '#Work', 'b', AT);
+        const merged = mergeSettingsForSync(left, right);
+        expect(merged.taxonomy).toEqual(mergeSettingsForSync(right, left).taxonomy);
+        const deleted = addSavedTaxonomyToken(left, 'context', '@Home', 'a', AT, true);
+        expect(getSavedTaxonomyTokens(mergeSettingsForSync(deleted, merged), 'context')).toEqual([]);
+        expect(mergeTaxonomyCatalog(merged.taxonomy, undefined)).toEqual(merged.taxonomy);
+        const again = mergeSettingsForSync(merged, {});
+        expect(again.taxonomy).toEqual(merged.taxonomy);
+        expect(mergeSettingsForSync(again, merged).taxonomy).toEqual(merged.taxonomy);
+        expect(areSyncPayloadsEqual(document(again), document(merged))).toBe(true);
+    });
+
+    it('converges concurrent rename destinations and a tied create/delete without restoring removed names', () => {
+        const base = addSavedTaxonomyToken({}, 'context', '@Old', 'a', AT).taxonomy!;
+        const left = planTaxonomyCatalogChange(base, 'context', 'rename', '@Old', '@Left', 'a', AT);
+        const right = planTaxonomyCatalogChange(base, 'context', 'rename', '@Old', '@Right', 'b', AT);
+        const merged = mergeTaxonomyCatalog(left, right);
+        expect(merged).toEqual(mergeTaxonomyCatalog(right, left));
+        expect(getSavedTaxonomyTokens({ taxonomy: merged }, 'context')).toEqual(['@Left', '@Right']);
+        expect(merged?.contexts?.find((entry) => entry.token === '@Old')?.deletedAt).toBe(AT);
+        expect(mergeTaxonomyCatalog(merged, left)).toEqual(merged);
+        const created = addSavedTaxonomyToken({}, 'tag', '#Concurrent', 'b', AT).taxonomy!;
+        const deleted = addSavedTaxonomyToken({}, 'tag', '#Concurrent', 'a', AT, true).taxonomy!;
+        const removed = mergeTaxonomyCatalog(created, deleted);
+        expect(removed).toEqual(mergeTaxonomyCatalog(deleted, created));
+        expect(getSavedTaxonomyTokens({ taxonomy: removed }, 'tag')).toEqual([]);
+        const readded = addSavedTaxonomyToken({ taxonomy: removed }, 'tag', '#Concurrent', 'b', AT).taxonomy!;
+        expect(getSavedTaxonomyTokens({ taxonomy: mergeTaxonomyCatalog(removed, readded) }, 'tag')).toEqual(['#Concurrent']);
+    });
+
+    it('round-trips through SQLite, backup JSON and the synced settings record', async () => {
+        const db = new DatabaseSync(':memory:');
+        try {
+            const adapter = new SqliteAdapter({ exec: async (sql) => { db.exec(sql); },
+                run: async (sql, params = []) => { db.prepare(sql).run(...params as SQLInputValue[]); },
+                all: async <T>(sql: string, params: unknown[] = []) => db.prepare(sql).all(...params as SQLInputValue[]) as T[],
+                get: async <T>(sql: string, params: unknown[] = []) => db.prepare(sql).get(...params as SQLInputValue[]) as T | undefined });
+            const settings = addSavedTaxonomyToken({ deviceId: 'a' }, 'tag', '#Unused', 'a', AT);
+            const data = document(settings);
+            await adapter.saveData(data);
+            const loaded = await adapter.getData();
+            expect(loaded?.settings.taxonomy).toEqual(settings.taxonomy);
+            const backup = validateBackupJson(JSON.stringify(loaded));
+            expect(backup.valid).toBe(true);
+            expect(backup.data?.settings.taxonomy).toEqual(settings.taxonomy);
+            const remote = sanitizeAppDataForRemote(data);
+            expect(remote.settings.taxonomy).toEqual(settings.taxonomy);
+            expect(mergeSettingsForSync({}, remote.settings).taxonomy).toEqual(settings.taxonomy);
+        } finally { db.close(); }
+    });
+});

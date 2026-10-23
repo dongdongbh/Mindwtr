@@ -117,7 +117,7 @@ export function createProjectTagsWriteMethods(deps: {
             if (!validToken(expected)) return fail('INVALID_INPUT', 'Project Tags token exceeds the bounded native response');
             const value = { revision: deps.revision(), project: { id: project.id, ...expected },
                 canEdit: project.status !== 'archived',
-                suggestions: projectTagSuggestions(state.tasks, state.projects) };
+                suggestions: projectTagSuggestions(state.tasks, state.projects, state.settings) };
             return value.suggestions.every((tag) => typeof tag === 'string' && tag.length <= 100_000)
                 && isNativeJsonWithinBytes(value) ? { ok: true, value }
                 : fail('INVALID_INPUT', 'Project Tags options exceed the bounded native response');

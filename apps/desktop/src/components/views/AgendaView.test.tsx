@@ -2850,6 +2850,38 @@ describe('AgendaView', () => {
             expect(handles).toHaveLength(2);
         });
 
+        it('preserves hidden slots across statuses before any manual Focus order exists', async () => {
+            const tasks = [
+                { ...focusTask('hidden', 'Home waiting'), status: 'waiting' as const, areaId: 'home' },
+                { ...focusTask('task-a', 'Focus A'), areaId: 'work' },
+                { ...focusTask('task-b', 'Focus B'), areaId: 'work' },
+            ];
+            const areas = ['work', 'home'].map((id, order) => ({
+                id, name: id, order, createdAt: nowIso, updatedAt: nowIso,
+            }));
+            setAgendaTasks(tasks);
+            useTaskStore.setState({ areas, _allAreas: areas, settings: { deviceId: 'test-device' } });
+            const { getByTestId } = renderAgenda();
+            const rowIds = () => Array.from(getByTestId('todays-focus-section').querySelectorAll('[data-task-id]'))
+                .map((row) => row.getAttribute('data-task-id'));
+            expect(rowIds()).toEqual(['hidden', 'task-a', 'task-b']);
+
+            act(() => {
+                useTaskStore.setState({ settings: { deviceId: 'test-device', filters: { areaIds: ['work'] } } });
+            });
+            expect(rowIds()).toEqual(['task-a', 'task-b']);
+            await act(async () => {
+                capturedFocusDndProps.onDragEnd?.({ active: { id: 'task-a' }, over: { id: 'task-b' } });
+            });
+            expect(rowIds()).toEqual(['task-b', 'task-a']);
+            act(() => {
+                useTaskStore.setState({ settings: { deviceId: 'test-device', filters: {} } });
+            });
+            expect(rowIds()).toEqual(['hidden', 'task-b', 'task-a']);
+            expect(useTaskStore.getState().tasks.map(({ id, status, isFocusedToday }) => ({ id, status, isFocusedToday })))
+                .toEqual(tasks.map(({ id, status, isFocusedToday }) => ({ id, status, isFocusedToday })));
+        });
+
         it('commits a drop through reorderFocusedTasks with the new id order', () => {
             const taskA = focusTask('task-a', 'Focus A', 0);
             const taskB = focusTask('task-b', 'Focus B', 1);

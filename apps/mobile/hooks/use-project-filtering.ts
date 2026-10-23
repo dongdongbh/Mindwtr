@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import {
     buildProjectGroups,
     countLiveProjectsByArea,
+    type AppSettings,
     type Area,
     type AreaFilterSelection,
     projectTagSuggestions,
@@ -13,6 +14,7 @@ import {
 type UseProjectFilteringParams = {
     projects: Project[];
     tasks: Task[];
+    settings?: AppSettings;
     sortedAreas: Area[];
     selectedTagFilter: string;
     selectedAreaFilter: AreaFilterSelection;
@@ -24,6 +26,7 @@ type UseProjectFilteringParams = {
 export function useProjectFiltering({
     projects,
     tasks,
+    settings,
     sortedAreas,
     selectedTagFilter,
     selectedAreaFilter,
@@ -35,7 +38,7 @@ export function useProjectFiltering({
 
     const areaUsage = useMemo(() => countLiveProjectsByArea(projects), [projects]);
 
-    const projectTagOptions = useMemo<string[]>(() => projectTagSuggestions(tasks, projects), [tasks, projects]);
+    const projectTagOptions = useMemo<string[]>(() => projectTagSuggestions(tasks, projects, settings), [tasks, projects, settings]);
 
     const groupedProjects = useMemo(() => {
         const tagFilter: ProjectTagFilter = selectedTagFilter === allTagsValue

@@ -259,6 +259,15 @@ try {
     await waitFor('the switch\'s command', () => commands('dataSetting') === saves + 1, 15_000);
     expectSwitch(await screen(), false, 'd');
     await sleep(1500);
+    if (logPresent()) {
+        // Name what wrote while logging was off: each line's level, scope, message and releaseCheck (forced lines are allowed),
+        // never its other context.
+        for (const line of (logText() ?? '').split('\n').filter(Boolean)) {
+            let entry = {};
+            try { entry = JSON.parse(line); } catch { /* an unreadable line is named as such */ }
+            console.log(`note - (d) written while off: ${JSON.stringify([entry.level, entry.scope, entry.message, entry.context?.releaseCheck ?? null])}`);
+        }
+    }
     check(!logPresent(), '(d) with logging off the switch\'s command line reaches logcat but no file is written');
     console.log('Diagnostics log device check passed');
 } catch (error) {

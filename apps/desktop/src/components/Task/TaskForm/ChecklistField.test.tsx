@@ -30,11 +30,11 @@ const onStoredChecklist = (report: (updates: Partial<Task>) => void) => useTaskS
 function ChecklistHarness({
     initial = initialChecklist,
     onUpdateTask,
-    plainList = false,
+    isReference = false,
 }: {
     initial?: Task['checklist'];
     onUpdateTask?: (updates: Partial<Task>) => void;
-    plainList?: boolean;
+    isReference?: boolean;
 }) {
     useState(() => seedChecklist(initial));
     const checklist = useTaskStore((state) => state._tasksById.get('task-1')?.checklist);
@@ -44,7 +44,7 @@ function ChecklistHarness({
             t={(key) => key}
             taskId="task-1"
             checklist={checklist}
-            plainList={plainList}
+            isReference={isReference}
             resetTaskChecklist={() => seedChecklist([])}
         />
     );
@@ -105,51 +105,31 @@ describe('ChecklistField', () => {
         expect(useUiStore.getState().toasts.map((toast) => toast.message)).not.toContainEqual(expect.stringMatching(/^STALE_REVISION/));
     });
 
-    it('edits a reference list without completion controls and preserves item metadata', () => {
-        const updates: Partial<Task>[] = [];
+    it('ticks a reference list like a checklist and leaves the reference a reference (#1416)', async () => {
         const resetTaskChecklist = vi.fn();
         const referenceItems: NonNullable<Task['checklist']> = [
-            { id: 'done', title: 'Completed source item', isCompleted: true },
-            { id: 'pending', title: 'Pending source item', isCompleted: false },
+            { id: 'done', title: 'Alien', isCompleted: true },
+            { id: 'pending', title: 'Brazil', isCompleted: false },
         ];
-        seedChecklist(referenceItems);
-        unsubscribe = onStoredChecklist((update) => updates.push(update));
-        const props = {
-            t: (key: string) => key,
-            taskId: 'task-1',
-            checklist: referenceItems,
-            resetTaskChecklist,
-        };
-        const { getAllByRole, getByRole, getByText, queryByRole, queryByText, rerender } = render(
-            <div>
-                <ChecklistField {...props} />
-                <button type="button">outside</button>
-            </div>
-        );
-
-        fireEvent.change(getAllByRole('textbox')[0], { target: { value: 'Edited source item' } });
-        rerender(
-            <div>
-                <ChecklistField {...props} plainList />
-                <button type="button">outside</button>
-            </div>
+        useTaskStore.setState({ _allTasks: [storedTask(referenceItems, { status: 'reference', taskMode: 'list' })] });
+        const { getAllByRole, getByRole, getByText } = render(
+            <ChecklistField t={(key) => key} taskId="task-1" checklist={referenceItems} isReference resetTaskChecklist={resetTaskChecklist} />
         );
 
         expect(getByText('taskEdit.tab.list')).toBeInTheDocument();
-        expect((getAllByRole('textbox')[0] as HTMLInputElement).value).toBe('Edited source item');
-        expect(queryByRole('button', { name: 'taskEdit.checklist 1' })).not.toBeInTheDocument();
-        expect(queryByText('taskEdit.resetChecklist')).not.toBeInTheDocument();
-        expect(getAllByRole('textbox')[0]).not.toHaveClass('line-through');
+        expect(getAllByRole('textbox')[0]).toHaveClass('line-through');
+        expect(getAllByRole('textbox')[1]).not.toHaveClass('line-through');
+        fireEvent.click(getByRole('button', { name: 'taskEdit.tab.list 2' }));
 
-        fireEvent.blur(getAllByRole('textbox')[0], { relatedTarget: getByRole('button', { name: 'outside' }) });
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get('task-1')?.checklist?.map((item) => item.isCompleted))
+            .toEqual([true, true]));
+        const stored = useTaskStore.getState()._tasksById.get('task-1')!;
+        expect(stored.status).toBe('reference');
+        expect(stored.completedAt).toBeUndefined();
+        expect(stored.isFocusedToday).toBeFalsy();
 
-        expect(updates).toEqual([{
-            checklist: [
-                { id: 'done', title: 'Edited source item', isCompleted: true },
-                { id: 'pending', title: 'Pending source item', isCompleted: false },
-            ],
-        }]);
-        expect(resetTaskChecklist).not.toHaveBeenCalled();
+        fireEvent.click(getByText('taskEdit.resetChecklist'));
+        expect(resetTaskChecklist).toHaveBeenCalledWith('task-1');
     });
 
     it('renders desktop drag handles only when checklist order can change', () => {
@@ -389,20 +369,15 @@ describe('ChecklistField', () => {
         expect(committed?.[2]?.isCompleted).toBe(true);
     });
 
-    it('strips pasted checklist markers in a reference list without changing hidden completion state', () => {
+    it('keeps pasted checked markers checked in a reference list, as in a checklist (#1416)', () => {
         const updates: Partial<Task>[] = [];
         const initial: NonNullable<Task['checklist']> = [
             { id: 'existing-open', title: 'Replace me', isCompleted: false },
             { id: 'existing-done', title: 'Keep completed', isCompleted: true },
         ];
-        const renderField = (plainList: boolean) => (
-            <ChecklistHarness
-                initial={initial}
-                plainList={plainList}
-                onUpdateTask={(next) => updates.push(next)}
-            />
+        const { getAllByRole } = render(
+            <ChecklistHarness initial={initial} isReference onUpdateTask={(next) => updates.push(next)} />
         );
-        const { getAllByRole, queryByRole, rerender } = render(renderField(true));
 
         const input = getAllByRole('textbox')[0] as HTMLInputElement;
         input.setSelectionRange(0, input.value.length);
@@ -419,14 +394,9 @@ describe('ChecklistField', () => {
             'Also checked',
             'Keep completed',
         ]);
-        expect(committed?.map((item) => item.isCompleted)).toEqual([false, false, false, true]);
+        expect(committed?.map((item) => item.isCompleted)).toEqual([true, false, true, true]);
         expect(committed?.[0]?.id).toBe('existing-open');
-
-        rerender(renderField(false));
-        expect(getAllByRole('button', { name: /^taskEdit\.checklist \d$/ })).toHaveLength(4);
-        rerender(renderField(true));
-        expect(queryByRole('button', { name: /^taskEdit\.checklist \d$/ })).not.toBeInTheDocument();
-        expect(updates).toHaveLength(1);
+        expect(getAllByRole('button', { name: /^taskEdit\.tab\.list \d$/ })).toHaveLength(4);
     });
 
     it('inserts pasted lines at the cursor position within the current item title', () => {

@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from './task-accent-color';
 /**
  * The React Native Inbox, Waiting, Someday, Reference and Done screens as data: which
  * tasks each lists, their order and groups, the counts, the empty states, and
@@ -23,6 +24,8 @@ import { taskMatchesFilterSelections } from './task-filter-selections';
 import { buildTaskGroupSections, getTaskGroupByLabel, type TaskGroupBy, type TaskGroupItem } from './task-group-sections';
 import {
     DONE_TASK_LIST_SORT_OPTIONS,
+    getTaskSortByLabel,
+    getVisibleTaskSortOptions,
     resolveDoneTaskSortBy,
     resolveNonDoneTaskSortBy,
     TASK_LIST_SORT_OPTIONS,
@@ -112,7 +115,7 @@ export function buildDeferredProjectsSection(
             title: project.title,
             areaName: (project.areaId ? areaById.get(project.areaId)?.name : undefined) ?? null,
             // Mobile draws the stored color, else its secondary text color.
-            color: project.color || null,
+            color: getProjectAccentColor(project, areaById) ?? null,
         })),
     };
 }
@@ -286,10 +289,9 @@ export function buildSomedayFilterOptions(input: {
     };
 }
 
-/** Someday offers the task-list sorts, without Time estimate while that feature is off. */
+/** Someday offers the task-list sorts, without Time estimate or Priority while that feature is off. */
 function getSomedaySortOptions(settings: AppSettings | undefined): TaskSortBy[] {
-    const timeEstimates = resolveFeatureFlags(settings).timeEstimates;
-    return TASK_LIST_SORT_OPTIONS.filter((option) => option !== 'timeEstimate' || timeEstimates);
+    return getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, settings);
 }
 
 const toTaskListViewGroups = (items: readonly TaskGroupItem[]): ViewSectionTaskGroup[] => {
@@ -451,8 +453,8 @@ export function buildSomedayViewModel(input: {
             addTask: tFallback(t, 'nav.addTask', 'Add task'),
         },
         menu: {
-            sortValue: t(`sort.${effectiveSortBy}`),
-            sortOptions: sortOptions.map((option) => ({ value: option, label: t(`sort.${option}`), selected: effectiveSortBy === option })),
+            sortValue: getTaskSortByLabel(effectiveSortBy, t),
+            sortOptions: sortOptions.map((option) => ({ value: option, label: getTaskSortByLabel(option, t), selected: effectiveSortBy === option })),
             groupValue: getSomedayGroupByLabel(input.groupBy, t),
             groupOptions: SOMEDAY_GROUP_OPTIONS.map((option) => ({
                 value: option,
@@ -574,7 +576,10 @@ export function buildStatusListFilterOptions(input: {
     }
     const features = resolveFeatureFlags(input.settings);
     return {
-        tokens: withTokens ? getUsedTaskTokens([...input.tasks], (task) => [...(task.contexts ?? []), ...(task.tags ?? [])], { includeAncestors: true }) : [],
+        tokens: withTokens ? getUsedTaskTokens([...input.tasks], (task) => [
+            ...(task.contexts ?? []).map((token) => normalizeBulkTaskTokenInput(token, 'contexts')),
+            ...(task.tags ?? []).map((token) => normalizeBulkTaskTokenInput(token, 'tags')),
+        ], { includeAncestors: true }) : [],
         projects: null,
         timeEstimates: TIME_ESTIMATE_OPTIONS,
         visibility: getTaskMetadataFilterVisibility(input.tasks, {
@@ -648,17 +653,15 @@ export function buildStatusListModel(input: {
             ? { type: 'section', id: item.id, title: item.title, count: item.count, muted: item.muted === true, collapsible: item.collapsible === true, collapsed: item.collapsed === true }
             : { type: 'task', task: item.task, groupId: item.groupId ?? null }))
         : orderedTasks.map((task) => ({ type: 'task', task, groupId: null }));
-    const timeEstimates = resolveFeatureFlags(settings).timeEstimates;
     const groupOptions: readonly TaskGroupBy[] = kind === 'done' ? DONE_LIST_GROUP_OPTIONS : TASK_LIST_GROUP_OPTIONS;
     return {
         orderedTasks,
         items,
         sortBy,
-        sortByLabel: t(`sort.${sortBy}`),
+        sortByLabel: getTaskSortByLabel(sortBy, t),
         sortTitle: t('sort.label'),
-        sortOptions: (kind === 'done' ? DONE_TASK_LIST_SORT_OPTIONS : TASK_LIST_SORT_OPTIONS)
-            .filter((option) => option !== 'timeEstimate' || timeEstimates)
-            .map((option) => ({ value: option, label: t(`sort.${option}`), selected: option === sortBy })),
+        sortOptions: getVisibleTaskSortOptions(kind === 'done' ? DONE_TASK_LIST_SORT_OPTIONS : TASK_LIST_SORT_OPTIONS, settings)
+            .map((option) => ({ value: option, label: getTaskSortByLabel(option, t), selected: option === sortBy })),
         groupBy: input.groupBy,
         groupByLabel: getTaskGroupByLabel(input.groupBy, t),
         groupTitle: tFallback(t, 'list.groupBy', 'Group'),

@@ -24,6 +24,7 @@ import {
   taskMatchesAreaFilterSelection,
   DONE_TASK_LIST_SORT_OPTIONS,
   TASK_LIST_SORT_OPTIONS,
+  getTaskSortByLabel,
   TIME_ESTIMATE_OPTIONS,
   buildStatusListFilterOptions,
   buildStatusListFilterSummary,
@@ -662,6 +663,8 @@ function TaskListComponent({
         id: projectId,
         status: projectReadOnly ? 'archived' : 'active',
         tagIds: projectById.get(projectId)?.tagIds,
+        isSequential: projectById.get(projectId)?.isSequential,
+        perSectionFlow: projectById.get(projectId)?.perSectionFlow,
       },
       tasks: filterableTasks,
       visibleTasks: allVisibleTasks,
@@ -751,7 +754,7 @@ function TaskListComponent({
   const projectSections = projectTaskList?.sections ?? NO_SECTIONS;
 
   type ListItem =
-    | { type: 'section'; id: string; title: string; count: number; muted?: boolean; collapsible?: boolean; collapsed?: boolean; synthetic?: 'none' | 'completed' | 'reference' }
+    | { type: 'section'; id: string; title: string; count: number; muted?: boolean; collapsible?: boolean; collapsed?: boolean; synthetic?: 'none' | 'completed' | 'reference'; flowLabel?: string }
     | { type: 'task'; task: Task; reorderSectionId?: string | null; groupId?: string };
 
   const listItems = useMemo<ListItem[]>(() => {
@@ -1522,11 +1525,21 @@ function TaskListComponent({
         );
       }
 
+      const title = (
+        <Text style={[styles.sectionTitle, { color: item.muted ? themeColors.secondaryText : themeColors.text }]}>
+          {item.title}
+        </Text>
+      );
       return (
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: item.muted ? themeColors.secondaryText : themeColors.text }]}>
-            {item.title}
-          </Text>
+          {item.flowLabel ? (
+            <View style={styles.sectionHeaderTitleBlock}>
+              {title}
+              <Text testID={`project-section-flow-label-${item.id}`} style={[styles.sectionCount, { color: themeColors.secondaryText }]}>
+                {item.flowLabel}
+              </Text>
+            </View>
+          ) : title}
           <Text style={[styles.sectionCount, { color: themeColors.secondaryText }]}>
             {item.count}
           </Text>
@@ -1620,7 +1633,7 @@ function TaskListComponent({
       showHeader={false}
       showFilterButton={showFilterButton}
       showSort={showSort}
-      sortByLabel={t(`sort.${sortBy}`)}
+      sortByLabel={getTaskSortByLabel(sortBy, t)}
       t={t}
       themeColors={themeColors}
       title={title}
@@ -1662,7 +1675,7 @@ function TaskListComponent({
         showFilterButton={showFilterButton}
         showOverflow={overflowPlacement !== 'navigation'}
         showSort={showSort}
-        sortByLabel={t(`sort.${sortBy}`)}
+        sortByLabel={getTaskSortByLabel(sortBy, t)}
         t={t}
         themeColors={themeColors}
         title={title}

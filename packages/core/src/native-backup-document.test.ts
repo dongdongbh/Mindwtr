@@ -16,7 +16,7 @@ import { formatI18nTemplate, getTranslator } from './i18n';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { applyImportSource, parseImportSource } from './import-runner';
 import {
-    buildNativeBackupDocumentFailure, buildNativeBackupDocumentResult, buildNativeBackupSnapshotRestoreConfirmation, commitNativeBackupDocument,
+    buildNativeBackupDocumentFailure, buildNativeBackupDocumentResult, buildNativeBackupNoUndoConfirmation, buildNativeBackupSnapshotRestoreConfirmation, commitNativeBackupDocument,
     inspectNativeBackupDocument, nativeBackupDocumentWarningsHeld, prepareNativeBackupDocument, readNativeBackupDocumentOutcome,
     type NativeBackupDocumentPrepareInput, type NativeBackupOperationReference,
 } from './native-backup-document';
@@ -391,20 +391,127 @@ describe('an import whose Undo could not be admitted is refused before COMMIT (D
         expect(await roomy.adapter.libraryBytes()).toBeGreaterThan(maxTransferBytes);
     });
 
-    it('refuses the 60 000-row CSV whose library would pass 12 MiB, leaving SQLite and the receipts as they were', async () => {
+    it('runs the 60 000-row CSV whose library would pass 12 MiB without Undo, as RN runs it (large-library pass b)', async () => {
         const rows = Array.from({ length: 60_000 }, (_, index) => `Task ${index}`);
         const text = `Title\n${rows.join('\n')}\n`;
         expect(text.length).toBeLessThan(MIB);
         const source = { ...csvInput(text), admission: { sourceBytes: text.length, maxTransferBytes: 12 * MIB } };
         const env = await open(); const prepared = await prepareNativeBackupDocument(env.adapter, source);
-        expect(JSON.parse(prepared.planJSON).maxLibraryBytes).toBe(12 * MIB - strToU8(prepared.recoveryJSON!).length);
-        const before = await env.state();
-        await expect(commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME)).rejects.toThrow('TOO_LARGE:');
-        expect(await env.state()).toEqual(before);
+        // Prepare's estimate sees the library outgrow the limit: the app asks first. The commit decides from the real bytes.
+        expect(prepared).toMatchObject({ undo: false });
+        expect(prepared.recoveryJSON).toEqual(expect.any(String));
+        const plan = JSON.parse(prepared.planJSON);
+        expect(plan.reply).not.toHaveProperty('undo');
+        expect(plan).not.toHaveProperty('maxLibraryBytes');
+        expect(plan.undoLibraryBytes).toBe(12 * MIB - strToU8(prepared.recoveryJSON!).length);
+        const reply = await commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME);
+        expect(reply).toMatchObject({ operation: 'csv', undo: false });
+        expect((await env.state()).tasks).toHaveLength(original.tasks.length + 60_000);
+        expect(await env.adapter.libraryBytes()).toBeGreaterThan(12 * MIB - strToU8(prepared.recoveryJSON!).length);
+        // The result says so plainly and offers no Undo; a replay answers the same.
+        const model = buildNativeBackupDocumentResult(reply, t);
+        expect(model.undoLabel).toBe('');
+        expect(model.message).toContain(t('settings.backupMobile.undoUnavailableResult'));
+        expect(await readNativeBackupDocumentOutcome(env.adapter, reference, prepared.planJSON, NAME)).toMatchObject({ undo: false });
+        // Under a roomy limit the same import keeps its Undo.
         const roomy = await open(); const fits = await prepareNativeBackupDocument(roomy.adapter, { ...source, admission: { sourceBytes: text.length, maxTransferBytes: 512 * MIB } });
-        await expect(commitNativeBackupDocument(roomy.adapter, reference, fits.planJSON, NAME)).resolves.toMatchObject({ operation: 'csv' });
-        expect((await roomy.state()).tasks).toHaveLength(original.tasks.length + 60_000);
+        expect(fits).toMatchObject({ undo: true });
+        expect(JSON.parse(fits.planJSON).undoLibraryBytes).toBe(512 * MIB - strToU8(fits.recoveryJSON!).length);
+        const kept = await commitNativeBackupDocument(roomy.adapter, reference, fits.planJSON, NAME);
+        expect(kept).not.toHaveProperty('undo');
+        expect(buildNativeBackupDocumentResult(kept, t).undoLabel).toBe(t('settings.undoImport'));
     }, 120_000);
+
+    it('keeps Undo for L1\'s restore, which the admission before pass b kept: 3 MiB of emoji rows over 3 MiB at 15 MiB (large-library pass b)', async () => {
+        const emoji = (prefix: string): AppData => {
+            const row = (index: number) => task(`${prefix}${index} 🦉`, { description: 'aé🦉日本語 '.repeat(40) });
+            const per = strToU8(JSON.stringify(row(0), null, 2)).length + 8;
+            return { ...clone(original), tasks: Array.from({ length: Math.round(3 * MIB / per) }, (_, index) => row(index)) };
+        };
+        const env = await open();
+        const first = await prepareNativeBackupDocument(env.adapter, input(serializeBackupData(emoji('a')), 'replace'));
+        await commitNativeBackupDocument(env.adapter, reference, first.planJSON, NAME);
+        const text = serializeBackupData(emoji('b'));
+        const second = { id: '22222222-2222-4222-8222-222222222222', sha256: 'b'.repeat(64), byteCount: 420 };
+        const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'replace'), requestId: second.id,
+            admission: { sourceBytes: strToU8(text).length, maxTransferBytes: 15 * MIB } });
+        expect(prepared).toMatchObject({ undo: true });
+        const reply = await commitNativeBackupDocument(env.adapter, second, prepared.planJSON, NAME);
+        expect(reply).not.toHaveProperty('undo');
+        // The line before pass b: the recovery snapshot and the library left after fit the limit together.
+        expect(strToU8(prepared.recoveryJSON!).length + await env.adapter.libraryBytes()).toBeLessThanOrEqual(15 * MIB);
+    }, 120_000);
+
+    it('a question asked on the estimate still keeps Undo when the real bytes fit, and a recovery snapshot past the limit alone never has Undo (large-library pass b)', async () => {
+        const text = serializeBackupData(incoming);
+        const sourceBytes = strToU8(text).length;
+        const probe = await prepareNativeBackupDocument((await open()).adapter, { ...input(text, 'merge'), admission: { sourceBytes, maxTransferBytes: 512 * MIB } });
+        const recoveryBytes = strToU8(probe.recoveryJSON!).length;
+        // The library's pages are not what this checks: the room is set by the recovery snapshot alone.
+        const tight = async (maxTransferBytes: number) => {
+            const env = await open();
+            const pages = vi.spyOn(env.adapter, 'libraryBytes').mockResolvedValue(0);
+            const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'merge'), admission: { sourceBytes, maxTransferBytes } });
+            pages.mockRestore();
+            return { env, prepared, plan: JSON.parse(prepared.planJSON) };
+        };
+        // Room of one byte: the estimate asks first; the real bytes (here a roomy bound) keep Undo.
+        const asked = await tight(recoveryBytes + 1);
+        expect(asked.prepared).toMatchObject({ undo: false });
+        expect(asked.plan.undoLibraryBytes).toBe(1);
+        expect(asked.plan.reply).not.toHaveProperty('undo');
+        const kept = await commitNativeBackupDocument(asked.env.adapter, reference, JSON.stringify({ ...asked.plan, undoLibraryBytes: 512 * MIB }), NAME);
+        expect(kept).not.toHaveProperty('undo');
+        expect(buildNativeBackupDocumentResult(kept, t).undoLabel).toBe(t('settings.undoImport'));
+        // The recovery snapshot alone passes the limit: no Undo, decided at prepare, and the commit lands with no bound.
+        const over = await tight(recoveryBytes - 1);
+        expect(over.prepared).toMatchObject({ undo: false });
+        expect(over.plan).not.toHaveProperty('undoLibraryBytes');
+        expect(over.plan.reply.undo).toBe(false);
+        await expect(commitNativeBackupDocument(over.env.adapter, reference, over.prepared.planJSON, NAME)).resolves.toMatchObject({ undo: false });
+    });
+
+    it('a library that ends larger than the estimate still lands, and its result says Undo is not available (large-library pass b)', async () => {
+        const env = await open();
+        const text = serializeBackupData(incoming);
+        const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'merge'), admission: { sourceBytes: strToU8(text).length, maxTransferBytes: 512 * MIB } });
+        expect(prepared).toMatchObject({ undo: true });
+        // The estimate said the Undo fits; the saved library is larger than the bound it froze.
+        const plan = JSON.parse(prepared.planJSON);
+        plan.undoLibraryBytes = 1;
+        const planJSON = JSON.stringify(plan);
+        const reply = await commitNativeBackupDocument(env.adapter, reference, planJSON, NAME);
+        expect(reply).toMatchObject({ operation: 'merge', undo: false });
+        expect((await env.state()).tasks.map((item) => item.id)).toEqual(expect.arrayContaining(incoming.tasks.map((item) => item.id)));
+        const model = buildNativeBackupDocumentResult(reply, t);
+        expect(model.undoLabel).toBe('');
+        expect(model.message).toContain(t('settings.backupMobile.undoUnavailableResult'));
+        expect(await readNativeBackupDocumentOutcome(env.adapter, reference, planJSON, NAME)).toMatchObject({ undo: false });
+    });
+
+    it('an old plan\'s undo bound still refuses, a stored reply never drops a planned undo: false, and only false is a reply\'s undo', async () => {
+        const env = await open();
+        const text = serializeBackupData(incoming);
+        const prepared = await prepareNativeBackupDocument(env.adapter, { ...input(text, 'merge'), admission: { sourceBytes: strToU8(text).length, maxTransferBytes: 512 * MIB } });
+        // A plan written before large-library pass b carried maxLibraryBytes for a merge: its replay still rolls back.
+        const { undoLibraryBytes: _room, ...legacy } = JSON.parse(prepared.planJSON);
+        const before = await env.state();
+        await expect(commitNativeBackupDocument(env.adapter, reference, JSON.stringify({ ...legacy, maxLibraryBytes: 1 }), NAME))
+            .rejects.toThrow('TOO_LARGE: The imported library would be too large to undo');
+        expect(await env.state()).toEqual(before);
+        await commitNativeBackupDocument(env.adapter, reference, prepared.planJSON, NAME);
+        const planned = JSON.parse(prepared.planJSON);
+        await expect(readNativeBackupDocumentOutcome(env.adapter, reference, JSON.stringify({ ...planned, reply: { ...planned.reply, undo: false } }), NAME))
+            .rejects.toThrow('SAVE_FAILED:');
+        expect(() => buildNativeBackupDocumentResult({ ...planned.reply, undo: true }, t)).toThrow('INVALID_INPUT:');
+        expect(() => buildNativeBackupDocumentResult({ version: 1, operation: 'restore', snapshotName: NAME, added: 0, updated: 0, undo: false }, t)).toThrow('INVALID_INPUT:');
+    });
+
+    it('the question before an operation without Undo uses its own words', () => {
+        expect(buildNativeBackupNoUndoConfirmation(t)).toEqual({ title: t('settings.backupMobile.undoUnavailableTitle'),
+            message: t('settings.backupMobile.undoUnavailableConfirm'), confirmLabel: t('settings.backupMobile.undoUnavailableContinue'),
+            cancelLabel: t('common.cancel') });
+    });
 
     it('counts the receipt: data that fits and a receipt that crosses the limit are both rolled back', async () => {
         const reply = { blob: 'r'.repeat(40_000) };
@@ -1281,6 +1388,8 @@ describe('native OmniFocus CSV/JSON/ZIP prepared import', () => {
  * Pass D1c: prepare's plan and recovery snapshot, frozen from HEAD (f5d7d792a) before the plan is written in parts and the
  * copies are cut. A host that passes no writer (iOS) must keep getting these exact bytes. `MINDWTR_WRITE_PLAN_FIXTURE=1`
  * rewrites the fixture; only a deliberate format change may do that.
+ * The 2026-10-20 recapture on 3d10ce615 updates only four importer plan digests for shared taxonomy retention:
+ * deleting only data.settings.taxonomy reproduces each old plan's exact bytes/hash. All recovery and other mode bytes stay fixed.
  */
 describe('native backup prepare output stays byte-identical (D1c parity fixture)', () => {
     const FIXTURE = new URL('./native-backup-plan-parity.fixtures.json', import.meta.url);
@@ -1343,12 +1452,14 @@ describe('native backup prepare output stays byte-identical (D1c parity fixture)
                 const recovery: string[] = []; const parts: string[] = [];
                 const written = await prepareNativeBackupDocument((await open()).adapter, clone(withAdmission),
                     { recovery: (text) => recovery.push(text), plan: (part) => parts.push(part) });
-                expect(written).toEqual({ written: true, recovery: whole.recoveryJSON !== null });
+                expect(written).toEqual({ written: true, recovery: whole.recoveryJSON !== null, ...('undo' in whole ? { undo: whole.undo } : {}) });
                 expect(recovery).toEqual(whole.recoveryJSON === null ? [] : [whole.recoveryJSON]);
                 expect(parts.length).toBeGreaterThan(2);
                 expect(parts.join('')).toBe(whole.planJSON);
                 expect(JSON.stringify(JSON.parse(whole.planJSON))).toBe(whole.planJSON);
-                expect('maxLibraryBytes' in JSON.parse(whole.planJSON)).toBe(admitted);
+                // An admitted plan freezes a bound: the snapshot restore's library bound, else (pass b) its Undo's room.
+                const plan = JSON.parse(whole.planJSON);
+                expect('maxLibraryBytes' in plan || 'undoLibraryBytes' in plan).toBe(admitted);
             }
         } finally { vi.useRealTimers(); }
     }, 120_000);

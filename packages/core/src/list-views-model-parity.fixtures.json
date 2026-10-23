@@ -371,6 +371,60 @@
     ]
    },
    {
+    "name": "a tap switches to one token, long-press combines",
+    "settings": "base",
+    "actions": [
+     [
+      "chipTap",
+      "@phone"
+     ],
+     [
+      "chipTap",
+      "#work"
+     ],
+     [
+      "chip",
+      "@phone"
+     ],
+     [
+      "matchMode",
+      "any"
+     ],
+     [
+      "chipTap",
+      "@phone"
+     ],
+     [
+      "chipTap",
+      "@phone"
+     ],
+     [
+      "chipTap",
+      "No context"
+     ],
+     [
+      "chipTap",
+      "@computer/deep"
+     ],
+     [
+      "chip",
+      "@computer/deep"
+     ],
+     [
+      "chipTap",
+      "No context"
+     ],
+     [
+      "chip",
+      "#home"
+     ],
+     [
+      "chipTap",
+      "All Contexts"
+     ]
+    ]
+   },
+   {
     "name": "a deep link selects its tokens",
     "settings": "base",
     "route": {
@@ -724,7 +778,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -807,7 +861,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -816,7 +870,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -850,7 +914,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ]
@@ -901,8 +965,18 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
-      "1"
+      "/deep",
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -978,7 +1052,17 @@
       "No context",
       "1",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1044,7 +1128,17 @@
       "All",
       "7",
       "No context",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1078,7 +1172,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1161,7 +1255,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -1170,7 +1264,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -1206,7 +1310,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1289,7 +1393,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -1298,7 +1402,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1332,7 +1446,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1395,7 +1509,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -1404,7 +1518,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1438,7 +1562,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1508,7 +1632,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -1522,7 +1646,17 @@
       "All",
       "Any",
       "No active tasks for this context",
-      "No active tasks for this context @phone, #work"
+      "No active tasks for this context @phone, #work",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1556,7 +1690,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1639,7 +1773,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -1651,7 +1785,17 @@
       "2",
       "Contexts & Tags",
       "All",
-      "Any"
+      "Any",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1685,7 +1829,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1755,7 +1899,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -1769,7 +1913,17 @@
       "All",
       "Any",
       "No active tasks for this context",
-      "No active tasks for this context @phone, #work"
+      "No active tasks for this context @phone, #work",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1803,7 +1957,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1886,7 +2040,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -1898,7 +2052,17 @@
       "2",
       "Contexts & Tags",
       "All",
-      "Any"
+      "Any",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -1932,7 +2096,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -1995,7 +2159,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -2004,7 +2168,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -2038,7 +2212,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -2121,7 +2295,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -2130,7 +2304,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -2164,7 +2348,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -2227,7 +2411,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -2236,7 +2420,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -2270,7 +2464,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -2340,7 +2534,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -2354,7 +2548,17 @@
       "All",
       "Any",
       "No active tasks for this context",
-      "No active tasks for this context @computer, #home"
+      "No active tasks for this context @computer, #home",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -2388,7 +2592,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -2447,7 +2651,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -2456,7 +2660,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -2490,7 +2704,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -2553,7 +2767,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -2562,7 +2776,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -2596,7 +2820,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -2655,7 +2879,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -2664,7 +2888,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -2698,235 +2932,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
-        "1"
-       ]
-      ],
-      [
-       "@phone (2)",
-       false,
-       [
-        "@phone",
-        "2"
-       ]
-      ],
-      [
-       "#focus (1)",
-       false,
-       [
-        "#focus",
-        "1"
-       ]
-      ],
-      [
-       "#home (2)",
-       false,
-       [
-        "#home",
-        "2"
-       ]
-      ],
-      [
-       "#work (2)",
-       false,
-       [
-        "#work",
-        "2"
-       ]
-      ]
-     ],
-     "matchMode": null,
-     "rows": [
-      [
-       "c-plan",
-       false
-      ],
-      [
-       "c-call",
-       false
-      ],
-      [
-       "c-email",
-       false
-      ],
-      [
-       "c-deep",
-       false
-      ],
-      [
-       "c-sink",
-       false
-      ],
-      [
-       "c-idea",
-       false
-      ],
-      [
-       "c-ref",
-       false
-      ]
-     ],
-     "selectionMode": false,
-     "empty": null,
-     "bulk": null,
-     "picker": null,
-     "editor": null,
-     "alerts": [],
-     "toasts": [],
-     "writes": [],
-     "text": [
-      "All",
-      "7",
-      "No context",
-      "1",
-      "@computer",
-      "2",
-      "@computer/deep",
-      "1",
-      "@phone",
-      "2",
-      "#focus",
-      "1",
-      "#home",
-      "2",
-      "#work",
-      "2"
-     ]
-    },
-    {
-     "search": "",
-     "chips": [
-      [
-       "All Contexts",
-       false,
-       [
-        "All",
-        "7"
-       ]
-      ],
-      [
-       "No context",
-       false,
-       [
-        "No context",
-        "1"
-       ]
-      ],
-      [
-       "@computer (2)",
-       false,
-       [
-        "@computer",
-        "2"
-       ]
-      ],
-      [
-       "@computer/deep (1)",
-       false,
-       [
-        "@computer/deep",
-        "1"
-       ]
-      ],
-      [
-       "@phone (2)",
-       false,
-       [
-        "@phone",
-        "2"
-       ]
-      ],
-      [
-       "#focus (1)",
-       true,
-       [
-        "#focus",
-        "1"
-       ]
-      ],
-      [
-       "#home (2)",
-       false,
-       [
-        "#home",
-        "2"
-       ]
-      ],
-      [
-       "#work (2)",
-       false,
-       [
-        "#work",
-        "2"
-       ]
-      ]
-     ],
-     "matchMode": null,
-     "rows": [
-      [
-       "c-deep",
-       false
-      ]
-     ],
-     "selectionMode": false,
-     "empty": null,
-     "bulk": null,
-     "picker": null,
-     "editor": null,
-     "alerts": [],
-     "toasts": [],
-     "writes": [],
-     "text": [
-      "All",
-      "7",
-      "No context",
-      "1",
-      "@computer",
-      "2",
-      "@computer/deep",
-      "1",
-      "@phone",
-      "2",
-      "#focus",
-      "1",
-      "#home",
-      "2",
-      "#work",
-      "2"
-     ]
-    },
-    {
-     "search": "",
-     "chips": [
-      [
-       "All Contexts",
-       true,
-       [
-        "All",
-        "7"
-       ]
-      ],
-      [
-       "No context",
-       false,
-       [
-        "No context",
-        "1"
-       ]
-      ],
-      [
-       "@computer (2)",
-       false,
-       [
-        "@computer",
-        "2"
-       ]
-      ],
-      [
-       "@computer/deep (1)",
-       false,
-       [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3009,7 +3015,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3018,7 +3024,1878 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       true,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-deep",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       true,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-plan",
+       false
+      ],
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-email",
+       false
+      ],
+      [
+       "c-deep",
+       false
+      ],
+      [
+       "c-sink",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ],
+      [
+       "c-ref",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    }
+   ],
+   "a tap switches to one token, long-press combines": [
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       true,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-plan",
+       false
+      ],
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-email",
+       false
+      ],
+      [
+       "c-deep",
+       false
+      ],
+      [
+       "c-sink",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ],
+      [
+       "c-ref",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       true,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       true,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-email",
+       false
+      ],
+      [
+       "c-deep",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       true,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       true,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": [
+      "Contexts & Tags",
+      [
+       [
+        "All",
+        true
+       ],
+       [
+        "Any",
+        false
+       ]
+      ]
+     ],
+     "rows": [],
+     "selectionMode": null,
+     "empty": [
+      "Icon:CheckCircle2",
+      "No active tasks for this context",
+      "No active tasks for this context #work, @phone"
+     ],
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Contexts & Tags",
+      "All",
+      "Any",
+      "No active tasks for this context",
+      "No active tasks for this context #work, @phone",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       true,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       true,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": [
+      "Contexts & Tags",
+      [
+       [
+        "All",
+        false
+       ],
+       [
+        "Any",
+        true
+       ]
+      ]
+     ],
+     "rows": [
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-email",
+       false
+      ],
+      [
+       "c-deep",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Contexts & Tags",
+      "All",
+      "Any",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       true,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       true,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-plan",
+       false
+      ],
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-email",
+       false
+      ],
+      [
+       "c-deep",
+       false
+      ],
+      [
+       "c-sink",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ],
+      [
+       "c-ref",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       true,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-plan",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       true,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-deep",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       true,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-plan",
+       false
+      ],
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-email",
+       false
+      ],
+      [
+       "c-deep",
+       false
+      ],
+      [
+       "c-sink",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ],
+      [
+       "c-ref",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       true,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-plan",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       false,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       true,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-sink",
+       false
+      ],
+      [
+       "c-ref",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
+     ]
+    },
+    {
+     "search": "",
+     "chips": [
+      [
+       "All Contexts",
+       true,
+       [
+        "All",
+        "7"
+       ]
+      ],
+      [
+       "No context",
+       false,
+       [
+        "No context",
+        "1"
+       ]
+      ],
+      [
+       "@computer (2)",
+       false,
+       [
+        "@computer",
+        "2"
+       ]
+      ],
+      [
+       "@computer/deep (1)",
+       false,
+       [
+        "/deep",
+        "1"
+       ]
+      ],
+      [
+       "@phone (2)",
+       false,
+       [
+        "@phone",
+        "2"
+       ]
+      ],
+      [
+       "#focus (1)",
+       false,
+       [
+        "#focus",
+        "1"
+       ]
+      ],
+      [
+       "#home (2)",
+       false,
+       [
+        "#home",
+        "2"
+       ]
+      ],
+      [
+       "#work (2)",
+       false,
+       [
+        "#work",
+        "2"
+       ]
+      ]
+     ],
+     "matchMode": null,
+     "rows": [
+      [
+       "c-plan",
+       false
+      ],
+      [
+       "c-call",
+       false
+      ],
+      [
+       "c-email",
+       false
+      ],
+      [
+       "c-deep",
+       false
+      ],
+      [
+       "c-sink",
+       false
+      ],
+      [
+       "c-idea",
+       false
+      ],
+      [
+       "c-ref",
+       false
+      ]
+     ],
+     "selectionMode": false,
+     "empty": null,
+     "bulk": null,
+     "picker": null,
+     "editor": null,
+     "alerts": [],
+     "toasts": [],
+     "writes": [],
+     "text": [
+      "All",
+      "7",
+      "No context",
+      "1",
+      "@computer",
+      "2",
+      "/deep",
+      "1",
+      "@phone",
+      "2",
+      "#focus",
+      "1",
+      "#home",
+      "2",
+      "#work",
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -3054,7 +4931,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3124,7 +5001,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3138,7 +5015,17 @@
       "All",
       "Any",
       "No active tasks for this context",
-      "No active tasks for this context @phone, #work"
+      "No active tasks for this context @phone, #work",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -3172,7 +5059,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3255,7 +5142,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3267,7 +5154,17 @@
       "2",
       "Contexts & Tags",
       "All",
-      "Any"
+      "Any",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -3303,7 +5200,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3362,7 +5259,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3371,7 +5268,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -3407,7 +5314,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3490,7 +5397,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3499,7 +5406,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -3535,7 +5452,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3618,7 +5535,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3627,7 +5544,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -3661,7 +5588,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3724,7 +5651,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3733,7 +5660,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -3767,7 +5704,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3837,7 +5774,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3851,7 +5788,17 @@
       "All",
       "Any",
       "No active tasks for this context",
-      "No active tasks for this context @phone, #work"
+      "No active tasks for this context @phone, #work",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -3885,7 +5832,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -3968,7 +5915,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -3980,7 +5927,17 @@
       "2",
       "Contexts & Tags",
       "All",
-      "Any"
+      "Any",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4014,7 +5971,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4077,7 +6034,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -4086,7 +6043,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4120,7 +6087,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4183,7 +6150,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -4192,7 +6159,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4226,7 +6203,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4289,7 +6266,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -4298,7 +6275,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4332,7 +6319,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4395,7 +6382,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -4404,7 +6391,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4438,7 +6435,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4505,7 +6502,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "1",
@@ -4514,7 +6511,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4548,7 +6555,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4627,7 +6634,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "1",
@@ -4636,7 +6643,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4670,7 +6687,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4750,7 +6767,7 @@
       "0",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "1",
@@ -4759,7 +6776,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -4795,7 +6822,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -4878,7 +6905,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -4887,7 +6914,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -4921,7 +6958,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -5053,7 +7090,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -5064,7 +7101,6 @@
       "#work",
       "2",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -5075,7 +7111,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -5109,7 +7155,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -5241,7 +7287,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -5252,7 +7298,6 @@
       "#work",
       "2",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -5263,7 +7308,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -5297,7 +7352,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -5440,7 +7495,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -5451,7 +7506,6 @@
       "#work",
       "2",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -5462,7 +7516,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -5496,7 +7560,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -5628,7 +7692,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -5639,7 +7703,6 @@
       "#work",
       "2",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -5650,7 +7713,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -5684,7 +7757,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -5827,7 +7900,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -5838,7 +7911,6 @@
       "#work",
       "2",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -5849,7 +7921,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -5883,7 +7965,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -6004,7 +8086,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -6015,7 +8097,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -6049,7 +8141,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -6189,7 +8281,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -6202,7 +8294,6 @@
       "#work",
       "2",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -6213,7 +8304,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -6247,7 +8348,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -6387,7 +8488,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -6400,7 +8501,6 @@
       "#work",
       "2",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -6411,7 +8511,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -6445,7 +8555,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -6595,7 +8705,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -6608,7 +8718,6 @@
       "#work",
       "2",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -6619,7 +8728,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -6653,7 +8772,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -6763,7 +8882,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -6774,7 +8893,17 @@
       "#home",
       "2",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -6808,7 +8937,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -6948,7 +9077,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -6961,7 +9090,6 @@
       "#work",
       "1",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -6972,7 +9100,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -7006,7 +9144,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -7146,7 +9284,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -7159,7 +9297,6 @@
       "#work",
       "1",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -7170,7 +9307,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -7204,7 +9351,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -7355,7 +9502,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -7368,7 +9515,6 @@
       "#work",
       "1",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -7379,7 +9525,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -7413,7 +9569,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -7542,7 +9698,7 @@
       "0",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@desk",
       "2",
@@ -7555,7 +9711,17 @@
       "#home",
       "2",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -7589,7 +9755,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -7737,7 +9903,7 @@
       "0",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@desk",
       "2",
@@ -7752,7 +9918,6 @@
       "#work",
       "1",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -7763,7 +9928,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -7797,7 +9972,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -7955,7 +10130,7 @@
       "0",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@desk",
       "2",
@@ -7970,7 +10145,6 @@
       "#work",
       "1",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -7981,7 +10155,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -8138,7 +10322,17 @@
       "#home",
       "2",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -8325,7 +10519,6 @@
       "#work",
       "1",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -8336,7 +10529,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -8523,7 +10726,6 @@
       "#work",
       "1",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -8534,7 +10736,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -8686,7 +10898,17 @@
       "#home",
       "2",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -8873,7 +11095,6 @@
       "#work",
       "1",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -8884,7 +11105,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -9071,7 +11302,6 @@
       "#work",
       "1",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -9082,7 +11312,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -9284,7 +11524,6 @@
       "#work",
       "1",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -9295,7 +11534,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -9482,7 +11731,6 @@
       "#work",
       "1",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -9493,7 +11741,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -9695,7 +11953,6 @@
       "#work",
       "1",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -9706,7 +11963,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -9819,7 +12086,17 @@
       "#errand",
       "2",
       "#home",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -9964,7 +12241,17 @@
       "#home",
       "2",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -10151,7 +12438,6 @@
       "#work",
       "1",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -10162,7 +12448,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -10298,7 +12594,17 @@
       "#home",
       "2",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -10334,7 +12640,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -10417,7 +12723,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -10426,7 +12732,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -10460,7 +12776,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -10592,7 +12908,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -10603,7 +12919,6 @@
       "#work",
       "2",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -10614,7 +12929,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -10648,7 +12973,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -10780,7 +13105,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -10791,7 +13116,6 @@
       "#work",
       "2",
       "2 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -10802,7 +13126,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -10836,7 +13170,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -10948,7 +13282,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -10959,7 +13293,6 @@
       "#work",
       "2",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -10970,7 +13303,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -11004,7 +13347,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -11136,7 +13479,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -11147,7 +13490,6 @@
       "#work",
       "2",
       "1 selected",
-      "Done",
       "Inbox",
       "Next",
       "Waiting",
@@ -11158,7 +13500,17 @@
       "Remove tag",
       "Add context",
       "Remove context",
-      "Delete"
+      "Delete",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -11192,7 +13544,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -11286,7 +13638,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "1",
@@ -11295,7 +13647,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -11339,7 +13701,17 @@
       "All",
       "1",
       "No context",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -11381,7 +13753,17 @@
       "All",
       "1",
       "No context",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -11423,7 +13805,17 @@
       "All",
       "1",
       "No context",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -11501,7 +13893,17 @@
       "@phone",
       "1",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -11574,7 +13976,17 @@
       "#work",
       "1",
       "No active tasks for this context",
-      "No active tasks for this context No context"
+      "No active tasks for this context No context",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -11650,7 +14062,17 @@
       "@phone",
       "1",
       "#work",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -11695,7 +14117,17 @@
       "No context",
       "0",
       "No contexts found",
-      "No contexts found. Add contexts like @home, @work, @computer to your tasks"
+      "No contexts found. Add contexts like @home, @work, @computer to your tasks",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -11731,7 +14163,7 @@
        "@computer/deep (1)",
        false,
        [
-        "@computer/deep",
+        "/deep",
         "1"
        ]
       ],
@@ -11814,7 +14246,7 @@
       "1",
       "@computer",
       "2",
-      "@computer/deep",
+      "/deep",
       "1",
       "@phone",
       "2",
@@ -11823,7 +14255,17 @@
       "#home",
       "2",
       "#work",
-      "2"
+      "2",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ],
@@ -11891,7 +14333,17 @@
       "@phone",
       "1",
       "#home",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     },
     {
@@ -11953,7 +14405,17 @@
       "@phone",
       "1",
       "#home",
-      "1"
+      "1",
+      "Sort",
+      "Default",
+      "Due date",
+      "Start date",
+      "Review date",
+      "Priority",
+      "Time estimate",
+      "Title",
+      "Oldest",
+      "Newest"
      ]
     }
    ]

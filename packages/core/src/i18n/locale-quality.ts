@@ -47,6 +47,8 @@ export const allowedEnglishMirrorTerms = [
     'Catppuccin',
     'Macchiato',
     'Dracula',
+    'Gruvbox Light',
+    'Gruvbox Dark',
     'MCP',
     'Codex',
     'OLED',

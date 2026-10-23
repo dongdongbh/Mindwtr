@@ -378,6 +378,122 @@
     --badge-info-fg: 60 30% 96.1%;
   }
 
+  /* Gruvbox light, soft contrast (morhetz/gruvbox). Surfaces: bg0_s ground,
+     bg0 cards, bg1 secondary/muted, bg2 borders; the faded blue is the accent.
+     Gruvbox's darkest green and aqua stop near 3.9:1 on bg0_s, so success,
+     estimate and reference keep their hue and saturation with the lightness
+     lowered to 4.5:1, and done is the fg3 gray. --status-next and --warning
+     are darkened the same way so they clear 4.5:1 on their chip tint and on
+     the info badge. Status hues match core's GRUVBOX_LIGHT_STATUS_COLORS. */
+  :root.theme-gruvbox-light {
+    color-scheme: light;
+    --background: 45.6 67.5% 84.3%;
+    --foreground: 20 5.3% 22.4%;
+    --card: 48.5 86.7% 88.2%;
+    --card-foreground: 20 5.3% 22.4%;
+    --popover: 48.5 86.7% 88.2%;
+    --popover-foreground: 20 5.3% 22.4%;
+    --primary: 189.6 89% 24.9%;
+    --primary-foreground: 48.5 86.7% 88.2%;
+    --secondary: 43.2 58.8% 81%;
+    --secondary-foreground: 21.8 7.4% 29.2%;
+    --muted: 43.2 58.8% 81%;
+    --muted-foreground: 26.7 9.7% 36.5%;
+    --accent: 40.4 38.2% 73.3%;
+    --accent-foreground: 20 5.3% 22.4%;
+    --destructive: 357.7 100% 30.8%;
+    --destructive-foreground: 48.5 86.7% 88.2%;
+    --success: 56.9 78.9% 24.1%;
+    --success-foreground: 48.5 86.7% 88.2%;
+    --warning: 19.2 96.6% 34.6%;
+    --warning-foreground: 48.5 86.7% 88.2%;
+    --focus-star: 39.6 73.4% 48.6%;
+    --focus-star-outline: 36.5 80.1% 39.4%;
+    --info: 189.6 89% 24.9%;
+    --info-foreground: 48.5 86.7% 88.2%;
+    --border: 40.4 38.2% 73.3%;
+    --input: 40.4 38.2% 73.3%;
+    --ring: 189.6 89% 24.9%;
+    --status-inbox: 21.8 7.4% 29.2%;
+    --status-next: 189.6 89% 23.3%;
+    --status-waiting: 19.2 96.6% 34.9%;
+    --status-someday: 322.5 38.8% 40.4%;
+    --status-reference: 143.1 29.9% 34.1%;
+    --status-done: 26.7 9.7% 36.5%;
+    --status-archived: 21.8 7.4% 29.2%;
+    --badge-project-bg: 63.5 35.4% 81.2%;
+    --badge-project-fg: 189.6 89% 24.9%;
+    --badge-context-bg: 38 59% 83.7%;
+    --badge-context-fg: 322.5 38.8% 40.4%;
+    --badge-tag-bg: 43.2 58.8% 81%;
+    --badge-tag-fg: 21.8 7.4% 29.2%;
+    --badge-priority-bg: 39.4 72% 81.8%;
+    --badge-priority-fg: 19.2 96.6% 34.9%;
+    --badge-estimate-bg: 50.5 57.6% 80.6%;
+    --badge-estimate-fg: 56.8 78.3% 23.5%;
+    --badge-age-bg: 44.2 79.2% 81.2%;
+    --badge-age-fg: 21.8 7.4% 29.2%;
+    --badge-info-bg: 43.2 58.8% 81%;
+    --badge-info-fg: 21.8 7.4% 29.2%;
+  }
+
+  /* Gruvbox dark, medium contrast. Surfaces: bg0 ground, bg0_s cards, bg1
+     secondary/muted, bg2 borders; the bright blue is the accent, lightened
+     (--primary, --status-next) to clear 4.5:1 on its own tints. Muted text is
+     fg3 because fg4 drops to 4.2:1 on bg1. Status hues match core's
+     GRUVBOX_DARK_STATUS_COLORS. */
+  :root.theme-gruvbox-dark {
+    color-scheme: dark;
+    --background: 0 0% 15.7%;
+    --foreground: 43.2 58.8% 81%;
+    --card: 20 3.1% 19%;
+    --card-foreground: 43.2 58.8% 81%;
+    --popover: 20 3.1% 19%;
+    --popover-foreground: 43.2 58.8% 81%;
+    --primary: 157.1 15.9% 67.2%;
+    --primary-foreground: 0 0% 15.7%;
+    --secondary: 20 5.3% 22.4%;
+    --secondary-foreground: 40.4 38.2% 73.3%;
+    --muted: 20 5.3% 22.4%;
+    --muted-foreground: 38.6 24.1% 65.9%;
+    --accent: 21.8 7.4% 29.2%;
+    --accent-foreground: 43.2 58.8% 81%;
+    --destructive: 6.3 96.1% 59.4%;
+    --destructive-foreground: 195 6.5% 12.2%;
+    --success: 61.2 66.2% 44.1%;
+    --success-foreground: 0 0% 15.7%;
+    --warning: 42 95.3% 58.2%;
+    --warning-foreground: 0 0% 15.7%;
+    --focus-star: 42 95.3% 58.2%;
+    --focus-star-outline: 39.6 73.4% 48.6%;
+    --info: 157.1 15.9% 58%;
+    --info-foreground: 0 0% 15.7%;
+    --border: 21.8 7.4% 29.2%;
+    --input: 21.8 7.4% 29.2%;
+    --ring: 157.1 15.9% 58%;
+    --status-inbox: 35 17.1% 58.8%;
+    --status-next: 157.1 15.9% 67.2%;
+    --status-waiting: 42 95.3% 58.2%;
+    --status-someday: 343.6 46.7% 67.6%;
+    --status-reference: 104.1 35.1% 62%;
+    --status-done: 61.2 66.2% 44.1%;
+    --status-archived: 35 17.1% 58.8%;
+    --badge-project-bg: 135 3% 26.3%;
+    --badge-project-fg: 43.2 58.8% 81%;
+    --badge-context-bg: 348.8 11.3% 27.8%;
+    --badge-context-fg: 43.2 58.8% 81%;
+    --badge-tag-bg: 20 5.3% 22.4%;
+    --badge-tag-fg: 40.4 38.2% 73.3%;
+    --badge-priority-bg: 27.3 22% 19.6%;
+    --badge-priority-fg: 27 99.1% 54.7%;
+    --badge-estimate-bg: 64 15.8% 18.6%;
+    --badge-estimate-fg: 61.2 66.2% 44.1%;
+    --badge-age-bg: 42 19.6% 20%;
+    --badge-age-fg: 42 95.3% 58.2%;
+    --badge-info-bg: 20 5.3% 22.4%;
+    --badge-info-fg: 40.4 38.2% 73.3%;
+  }
+
   /* OLED / Midnight. The dark theme's hues on pure-black surfaces — matches the
      mobile `oled` preset (#000000 ground and cards, #1F2937 borders carrying the
      separation, #4F9DFF accent). Status colors stay the dark set, mirroring

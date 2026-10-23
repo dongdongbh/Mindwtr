@@ -8,7 +8,7 @@ import {
     getUsedTaskTokensFromUsage,
 } from './task-token-usage';
 import { resolveRelativeStartUpdates } from './task-relative-start';
-import { compareTasksByProjectOrder, isTaskFocusedNow, isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, isTaskFutureStart, isTaskFutureStartBeforeBoundary, rescheduleTask, shouldAutoArchiveCompletedTask, baseTextCollator } from './task-utils';
+import { compareTasksByProjectOrder, getTaskSequencing, isTaskFocusedNow, isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, isTaskFutureStart, isTaskFutureStartBeforeBoundary, rescheduleTask, shouldAutoArchiveCompletedTask, baseTextCollator } from './task-utils';
 import {
     isTaskActionable,
     isTaskFinished,
@@ -1182,8 +1182,8 @@ export const persist = (
     debouncedSave(snapshot, (msg) => set({ error: msg }));
 };
 
-export const computeDerivedState = (tasks: Task[], projects: Project[]): DerivedState => {
-    const projectDerived = computeProjectDerivedState(projects);
+export const computeDerivedState = (tasks: Task[], projects: Project[], sections?: readonly Section[]): DerivedState => {
+    const projectDerived = computeProjectDerivedState(projects, undefined, sections);
     const taskDerived = computeTaskDerivedState(tasks);
 
     return {
@@ -1194,11 +1194,11 @@ export const computeDerivedState = (tasks: Task[], projects: Project[]): Derived
 
 export const computeProjectDerivedState = (
     projects: Iterable<Project>,
-    projectMap?: Map<string, Project>
-): Pick<DerivedState, 'projectMap' | 'sequentialProjectIds' | 'sequentialWithinSectionProjectIds' | 'focusedProjectCount'> => {
+    projectMap?: Map<string, Project>,
+    sections?: readonly Section[],
+): Pick<DerivedState, 'projectMap' | 'sequentialProjectIds' | 'sequentialWithinSectionProjectIds' | 'sequentialSectionKeys' | 'focusedProjectCount'> => {
     const resolvedProjectMap = projectMap ?? new Map<string, Project>();
-    const sequentialProjectIds = new Set<string>();
-    const sequentialWithinSectionProjectIds = new Set<string>();
+    const liveProjects: Project[] = [];
     let focusedProjectCount = 0;
 
     for (const project of projects) {
@@ -1206,21 +1206,18 @@ export const computeProjectDerivedState = (
             resolvedProjectMap.set(project.id, project);
         }
         if (project.deletedAt) continue;
-        if (project.isSequential) {
-            sequentialProjectIds.add(project.id);
-            if (project.sequentialScope === 'section') {
-                sequentialWithinSectionProjectIds.add(project.id);
-            }
-        }
+        liveProjects.push(project);
         if (project.isFocused) {
             focusedProjectCount += 1;
         }
     }
+    const sequencing = getTaskSequencing(liveProjects, sections);
 
     return {
         projectMap: resolvedProjectMap,
-        sequentialProjectIds,
-        sequentialWithinSectionProjectIds,
+        sequentialProjectIds: sequencing.sequentialProjectIds as Set<string>,
+        sequentialWithinSectionProjectIds: sequencing.sectionScopedProjectIds as Set<string>,
+        sequentialSectionKeys: sequencing.sequentialSectionKeys as Set<string>,
         focusedProjectCount,
     };
 };

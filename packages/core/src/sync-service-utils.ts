@@ -164,7 +164,8 @@ export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): st
     if (error instanceof SyncFileLockUnavailableError) return error.message;
     const raw = sanitizeSyncErrorMessage(String(error));
     if (backend === 'file') {
-        if (READONLY_ERROR_PATTERN.test(raw)) {
+        // Classified from the raw text (only a fixed message leaves here): the sanitizer drops a line's text after a local path.
+        if (READONLY_ERROR_PATTERN.test(String(error))) {
             return 'Sync file is not writable. Re-select the sync folder in Settings -> Sync, then sync again.';
         }
         return raw;

@@ -6,6 +6,7 @@ import {
     editContextsTaskTokens,
     getContextsEmptyState,
     getContextsTokenCount,
+    getContextsTokenPicker,
     getContextsRouteTokens,
     selectContextsRouteTokens,
     taskHasContextOrTag,
@@ -295,5 +296,21 @@ describe('contexts view filters', () => {
         expect(getArchiveCompletedAtPickerStart(done, format, now)).toEqual({ day: '2026-09-03', time: '21:45' });
         expect(getArchiveCompletedAtPickerStart({ ...done, completedAt: undefined, updatedAt: 'nonsense' } as Task, format, now))
             .toEqual({ day: '2026-09-24', time: '08:30' });
+    });
+});
+
+
+describe('saved tokens in Contexts bulk pickers', () => {
+    it.each(['contexts', 'tags'] as const)('offers saved unused %s for Add while Remove stays selected-only', (field) => {
+        const stamp = '2026-10-20T00:00:00.000Z';
+        const selected: Task = { id: 'selected', title: 'Selected', status: 'next', contexts: ['@assigned'], tags: ['#assigned'], createdAt: stamp, updatedAt: stamp };
+        const other: Task = { ...selected, id: 'other', contexts: ['@other'], tags: ['#other'] };
+        const settings = { taxonomy: {
+            contexts: [{ token: '@unused', rev: 1, revBy: 'test', updatedAt: stamp }],
+            tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: stamp }],
+        } };
+        const input = { field, activeTasks: [selected, other], settings, selectedIds: ['selected'], tasksById: { selected, other }, t: (key: string) => key };
+        expect(getContextsTokenPicker({ ...input, action: 'add' }).tokens).toContain(field === 'tags' ? '#unused' : '@unused');
+        expect(getContextsTokenPicker({ ...input, action: 'remove' }).tokens).toEqual(selected[field]);
     });
 });

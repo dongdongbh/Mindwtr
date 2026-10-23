@@ -52,6 +52,45 @@ async function open(initial: Partial<AppData> = {}, fails?: () => boolean) {
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave().catch(() => undefined); resetForTests(); });
 
 describe('prepared Focus order', () => {
+    it('reorders an area subset in its global slots, keeps the global cap, and cold replays', async () => {
+        const initial: Partial<AppData> = { tasks: [task('a', { focusOrder: 0, areaId: 'work' }),
+            task('hidden', { focusOrder: 1, areaId: 'home' }), task('b', { focusOrder: 2, areaId: 'work' }),
+            task('candidate', { isFocusedToday: false, areaId: 'work' })],
+            areas: ['work', 'home'].map((id, order) => ({ id, name: id, order, createdAt: stamp, updatedAt: stamp })),
+            settings: { deviceId: 'device', filters: { areaIds: ['work'] }, gtd: { focusTaskLimit: 3 } } };
+        const host = await open(initial);
+        expect(await useTaskStore.getState().updateTask('candidate', { isFocusedToday: true }))
+            .toMatchObject({ success: false, error: 'Focus limit of 3 reached' });
+        const hidden = structuredClone(useTaskStore.getState()._tasksById.get('hidden'));
+        const request = host.request(['b', 'a']);
+        const plan = host.methods.prepareFocusOrder(request);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        expect(plan.value.prepared.version).toBe(2);
+        expect(plan.value.prepared.scope.tasks.map((row) => row.id)).toEqual(['a', 'hidden', 'b']);
+        const envelope = sorted({ request, prepared: plan.value.prepared });
+        const cold = await open(initial);
+        expect(await cold.methods.commitPreparedFocusOrder(envelope)).toEqual({ ok: true, value: { ids: ['b', 'a'] } });
+        expect(cold.stored().tasks.find((row) => row.id === 'hidden')).toEqual(hidden);
+        expect(cold.stored().tasks.find((row) => row.id === 'b')?.focusOrder).toBe(0);
+        expect(cold.stored().tasks.find((row) => row.id === 'a')?.focusOrder).toBe(2);
+        await useTaskStore.getState().reorderFocusedTasks(['a', 'b']);
+        await flushPendingSave();
+        expect(cold.stored().tasks.find((row) => row.id === 'hidden')).toEqual(hidden);
+        expect(cold.stored().tasks.find((row) => row.id === 'a')?.focusOrder).toBe(0);
+        expect(cold.stored().tasks.find((row) => row.id === 'b')?.focusOrder).toBe(2);
+    });
+
+    it('validates and cold commits a historical v1 whole-list journal without reinterpreting its effect', async () => {
+        const host = await open();
+        const request = host.request();
+        const plan = host.methods.prepareFocusOrder(request);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        const envelope = sorted({ request, prepared: { ...plan.value.prepared, version: 1 as const } });
+        expect(host.methods.validatePreparedFocusOrder(envelope)).toEqual({ ok: true, value: { ids: ['b', 'a'] } });
+        const cold = await open();
+        expect(await cold.methods.commitPreparedFocusOrder(envelope)).toEqual({ ok: true, value: { ids: ['b', 'a'] } });
+    });
+
     it('returns the complete bounded list, keeps raw dates and hidden rows, and stamps only changed rows', async () => {
         const host = await open({ tasks: [task('a', { focusOrder: 0, dueDate: '2026-10-01' }),
             task('b', { focusOrder: 1, startTime: '2026-09-01T09:00:00' }),

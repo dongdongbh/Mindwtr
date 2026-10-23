@@ -100,7 +100,7 @@ enum NativeCalendarPushWitness {
         return id
     }
 
-    private static func marker(_ id: UUID) -> String {
+    static func marker(_ id: UUID) -> String {
         "\n\n[Mindwtr native calendar operation: \(id.uuidString.lowercased())]"
     }
     private static func containsMarker(_ notes: String, id: UUID) -> Bool {

@@ -17,6 +17,41 @@ class QuickCaptureAudioSessionTest {
     QuickCaptureAudioSessionStore.clearForTests()
   }
 
+  @Test fun ownerSessionsKeepTheirOwnAudioDestinationAcrossBackgroundPublicationRetry() {
+    lateinit var deliver: (QuickCaptureAudioRecorder.Outcome) -> Unit
+    val publications = ArrayList<Publication>()
+    val recorder = FakeRecordingControl("01234567-89ab-cdef-0123-456789abcdef")
+    val first = QuickCaptureAudioSessionStore.acquire("TASKS/41") {
+      QuickCaptureAudioSession(
+        startRecorder = { callback -> deliver = callback; recorder },
+        publishAudio = { draft, title, note, complete -> publications.add(Publication(draft, title, note, complete)) },
+        discardAudio = {}, defaultStatus = "waiting", initialCaptureStatus = "inbox",
+      )
+    }
+    first.beginRecording()
+    first.onHostStopped()
+    assertEquals(1, recorder.stopCount)
+    val second = QuickCaptureAudioSessionStore.acquire("TASKS/42") {
+      QuickCaptureAudioSession(startRecorder = { error("No recording requested") }, publishAudio = { _, _, _, _ -> }, discardAudio = {}, defaultStatus = "someday")
+    }
+    assertNotSame(first, second)
+    assertEquals("someday", second.defaultStatus)
+    assertEquals(null, second.captureStatus)
+    assertTrue(QuickCaptureAudioSessionStore.activeIds().contains(recorder.id))
+    deliver(QuickCaptureAudioRecorder.Outcome.Ready(QuickCaptureAudioDraft(recorder.id!!, Date(0), File("/owned/audio.tmp"), 6_400)))
+    first.selectCaptureStatus("next")
+    assertEquals("inbox", first.captureStatus)
+    publications.single().complete(false)
+    assertTrue(QuickCaptureAudioSessionStore.activeIds().contains(recorder.id))
+    assertSame(first, QuickCaptureAudioSessionStore.acquire("TASKS/41") { error("Retain the original draft") })
+    assertEquals("waiting", first.defaultStatus)
+    assertEquals("inbox", first.captureStatus)
+    first.saveAudio()
+    assertEquals(2, publications.size)
+    assertEquals(publications[0].draft, publications[1].draft)
+    assertEquals(QuickCaptureAudioSession.State.IDLE, second.snapshot.state)
+  }
+
   @Test
   fun tooShortRotationRestoresTypedPrefixInIdleRetryState() {
     val recorder = FakeRecordingControl("01234567-89ab-cdef-0123-456789abcdef")

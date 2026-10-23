@@ -81,6 +81,11 @@ const PREVIOUS_SETTINGS_MENU_KEYWORD_KEYS: Record<SettingsMenuRowId, readonly st
 };
 
 describe('settings menu search index', () => {
+    it('finds Gmail capture under the GTD capture settings', () => {
+        expect(visibleRowIds('Gmail')).toContain('gtd');
+        expect(SETTINGS_SEARCH_MOBILE_EXCLUSIONS).not.toHaveProperty('gmailCapture');
+        expect(SETTINGS_SEARCH_MOBILE_EXCLUSIONS).not.toHaveProperty('gmailCaptureLabel');
+    });
     it('redirects retired preset-editor links to the GTD summary', () => {
         expect(normalizeSettingsScreen('gtd-time-estimates')).toBe('gtd');
         expect(normalizeSettingsScreen('gtd-task-editor')).toBe('gtd-task-editor');

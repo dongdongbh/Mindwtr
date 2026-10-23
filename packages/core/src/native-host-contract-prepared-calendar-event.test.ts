@@ -469,3 +469,15 @@ it('offers owned OS Open only for eligible system events while keeping the copie
     expect(saveData).not.toHaveBeenCalled();
     expect(useTaskStore.getState()._tasksById.has(requestId)).toBe(false);
 });
+
+it('copies the event under Skip as RN addTask does, and keeps an earlier Send journal valid', async () => {
+    const host = await open();
+    const sent = await prepare(host, { ...request(), requestId: '7475c779-e751-42d3-a2ea-85abffb3be73' });
+    expect(sent.prepared.task.suppressMindwtrReminders).toBe(false);
+    useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: 'skip' } }));
+    const skipped = await prepare(host);
+    expect(skipped.prepared.task.suppressMindwtrReminders).toBe(true);
+    expect(value(await host.commitCalendarEventTaskCreate(skipped))).toEqual(skipped.prepared.result);
+    expect(useTaskStore.getState()._tasksById.get(requestId)?.suppressMindwtrReminders).toBe(true);
+    expect(value(host.validatePreparedCalendarEventTaskCreate(sent))).toEqual(sent.prepared.result);
+});

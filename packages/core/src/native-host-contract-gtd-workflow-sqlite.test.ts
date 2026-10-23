@@ -71,6 +71,20 @@ async function plan(host: ReturnType<typeof createNativeHostContract>,
     return { request, prepared: prepared.value.prepared };
 }
 
+async function planPomodoro(host: ReturnType<typeof createNativeHostContract>,
+    edit: { type: 'pomodoro' | 'pomodoroLinkTask' | 'pomodoroAutoStartBreaks' | 'pomodoroAutoStartFocus'
+        | 'pomodoroCompletionAlert'; value: boolean }
+        | { type: 'pomodoroDurations'; value: { focusMinutes: number; breakMinutes: number } }) {
+    const options = await host.getGtdPomodoroOptions({});
+    if (!options.ok) throw new Error(JSON.stringify(options));
+    const expected = options.value.expected[edit.type];
+    if (!expected) throw new Error('Selected Pomodoro setting is unavailable');
+    const request: NativeGtdWorkflowRequest = { requestId: ID, edit, expected };
+    const prepared = await host.prepareGtdWorkflow(request);
+    if (!prepared.ok || prepared.value.kind !== 'prepared') throw new Error(JSON.stringify(prepared));
+    return { request, prepared: prepared.value.prepared };
+}
+
 async function planArchive(host: ReturnType<typeof createNativeHostContract>, value: number) {
     const options = await host.getGtdArchiveOptions({});
     if (!options.ok) throw new Error(JSON.stringify(options));
@@ -958,5 +972,89 @@ describe('GTD Task Editor reset uses the composite v1 SQLite receipt', () => {
         expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toMatchObject({ ok: false,
             error: { code: 'STALE_REVISION' } });
         expect(nineTables(cold.db)).toEqual(before);
+    });
+});
+
+
+describe('Pomodoro Settings SQLite durability', () => {
+    it.each([
+        { type: 'pomodoro', value: false },
+        { type: 'pomodoroLinkTask', value: true },
+        { type: 'pomodoroAutoStartBreaks', value: true },
+        { type: 'pomodoroAutoStartFocus', value: true },
+        { type: 'pomodoroCompletionAlert', value: false },
+        { type: 'pomodoroDurations', value: { focusMinutes: 33, breakMinutes: 8 } },
+    ] as const)('retries raw failed saves and cold-replays the exact $type receipt', async (edit) => {
+        const dir = mkdtempSync(join(tempRoot, 'gtd-pomodoro-')); directories.push(dir);
+        const path = join(dir, 'library.db'); const start = initial();
+        start.settings.features = { pomodoro: true, priorities: true };
+        start.settings.gtd = { ...start.settings.gtd, pomodoro: { customDurations: { focusMinutes: 25 },
+            legacy: 'raw sibling' } } as never;
+        start.settings.local = { pomodoroSession: 'opaque active session', pomodoroTaskId: 'raw selection' } as never;
+        const first = await open(path, true, start); const envelope = await planPomodoro(first.host, edit);
+        const before = nineTables(first.db); first.fault.commits = 10;
+        for (let retry = 0; retry < 2; retry += 1) {
+            expect(await first.host.commitPreparedGtdWorkflow(envelope)).toMatchObject({ ok: false,
+                error: { code: 'SAVE_FAILED' } });
+            expect(nineTables(first.db)).toEqual(before);
+        }
+        first.fault.commits = 0;
+        expect(await first.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
+        const landed = nineTables(first.db); const saved = await first.adapter.getData();
+        for (const table of tables.filter((table) => table !== 'settings')) expect(landed[table]).toEqual(before[table]);
+        expect(saved.settings.local).toEqual(start.settings.local);
+        expect(saved.settings.gtd).toMatchObject({ legacySibling: 'keep', pomodoro: { legacy: 'raw sibling' } });
+        expect(saved.settings.syncPreferencesUpdatedAt?.language).toBe(AT);
+        first.db.close(); databases.splice(databases.indexOf(first.db), 1);
+        const cold = await open(path);
+        expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
+        expect(nineTables(cold.db)).toEqual(landed);
+        expect(cold.host.probeGtdWorkflowOutcome(envelope.request)).toMatchObject({ ok: false,
+            error: { code: 'STALE_REVISION' } });
+    }, 20_000);
+
+    it('cold-applies the captured pair before any save, then permits owed settlement after the feature is disabled', async () => {
+        const dir = mkdtempSync(join(tempRoot, 'gtd-pomodoro-')); directories.push(dir);
+        const path = join(dir, 'library.db'); const start = initial(); start.settings.features = { pomodoro: true };
+        const first = await open(path, true, start);
+        const envelope = await planPomodoro(first.host, { type: 'pomodoroDurations', value: { focusMinutes: 33, breakMinutes: 8 } });
+        first.db.close(); databases.splice(databases.indexOf(first.db), 1);
+        const cold = await open(path);
+        expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
+        const disabled = await cold.adapter.getData(); disabled.settings.features!.pomodoro = false;
+        // A feature edit is not this selected leaf's receipt; it cannot block
+        // settlement of an already durable exact leaf/stamp/device receipt.
+        await cold.adapter.saveData(disabled); const after = nineTables(cold.db);
+        expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
+        expect(nineTables(cold.db)).toEqual(after);
+    });
+
+    it.each(['gate', 'stamp', 'device', 'selected'] as const)('cold-refuses a changed %s baseline without touching any table', async (race) => {
+        const dir = mkdtempSync(join(tempRoot, 'gtd-pomodoro-')); directories.push(dir);
+        const path = join(dir, 'library.db'); const start = initial(); start.settings.features = { pomodoro: true };
+        const first = await open(path, true, start);
+        const envelope = await planPomodoro(first.host, { type: 'pomodoroDurations', value: { focusMinutes: 33, breakMinutes: 8 } });
+        const changed = await first.adapter.getData();
+        if (race === 'gate') changed.settings.features!.pomodoro = false;
+        if (race === 'stamp') changed.settings.syncPreferencesUpdatedAt!.gtd = '2026-09-02T00:00:00.000Z';
+        if (race === 'device') changed.settings.deviceId = 'other';
+        if (race === 'selected') changed.settings.gtd!.pomodoro = { customDurations: { focusMinutes: 7, breakMinutes: 3 } };
+        await first.adapter.saveData(changed); first.db.close(); databases.splice(databases.indexOf(first.db), 1);
+        const cold = await open(path); const before = nineTables(cold.db);
+        expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toMatchObject({ ok: false,
+            error: { code: 'STALE_REVISION' } });
+        expect(nineTables(cold.db)).toEqual(before);
+    });
+
+    it('rejects an independently saved identical target without the frozen group stamp', async () => {
+        const dir = mkdtempSync(join(tempRoot, 'gtd-pomodoro-')); directories.push(dir);
+        const path = join(dir, 'library.db'); const start = initial(); start.settings.features = { pomodoro: true };
+        const first = await open(path, true, start);
+        const envelope = await planPomodoro(first.host, { type: 'pomodoroDurations', value: { focusMinutes: 33, breakMinutes: 8 } });
+        const changed = await first.adapter.getData(); changed.settings.gtd!.pomodoro = { customDurations: { focusMinutes: 33, breakMinutes: 8 } };
+        await first.adapter.saveData(changed); first.db.close(); databases.splice(databases.indexOf(first.db), 1);
+        const cold = await open(path); const before = nineTables(cold.db);
+        expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toMatchObject({ ok: false,
+            error: { code: 'STALE_REVISION' } }); expect(nineTables(cold.db)).toEqual(before);
     });
 });

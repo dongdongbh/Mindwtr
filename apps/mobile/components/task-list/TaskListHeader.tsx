@@ -6,6 +6,7 @@ import { formatListItemCount, getTaskListHeaderText } from '@mindwtr/core';
 
 import { ListOverflowMenu } from '@/components/list-overflow-menu';
 import { styles } from './task-list.styles';
+import { TaskListSortButton } from './TaskListSortButton';
 
 type ThemeColors = {
   border: string;
@@ -93,16 +94,7 @@ export function TaskListHeader({
   const directControlGroup = directControls ? (
     <View style={styles.headerAccessoryControls}>
       {showSort ? (
-        <TouchableOpacity
-          accessibilityLabel={text.sortAccessibilityLabel}
-          accessibilityRole="button"
-          onPress={onOpenSort}
-          style={styles.directControlButton}
-        >
-          <View style={[styles.directControlVisual, { borderColor: themeColors.border, backgroundColor: themeColors.filterBg }]}>
-            <ArrowUpDown size={16} color={themeColors.secondaryText} strokeWidth={2} />
-          </View>
-        </TouchableOpacity>
+        <TaskListSortButton accessibilityLabel={text.sortAccessibilityLabel} onPress={onOpenSort} themeColors={themeColors} />
       ) : null}
       {onOpenGroup ? (
         <TouchableOpacity

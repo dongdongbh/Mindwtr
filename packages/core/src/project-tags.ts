@@ -1,5 +1,6 @@
 import { getUsedTaskTokens } from './task-token-usage';
-import type { Project, Task } from './types';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
+import type { AppSettings, Project, Task } from './types';
 
 export type ProjectTagsIntent = { kind: 'add' | 'toggle'; input: string } | { kind: 'clear' };
 
@@ -11,10 +12,11 @@ export function normalizeProjectTag(value: string): string {
 }
 
 /** The complete RN suggestion inventory, in task-token order then Project insertion order. */
-export function projectTagSuggestions(tasks: Task[], projects: Project[]): string[] {
+export function projectTagSuggestions(tasks: Task[], projects: Project[], settings: AppSettings = {}): string[] {
     return Array.from(new Set([
         ...getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' }),
         ...projects.flatMap((project) => project.tagIds || []),
+        ...getSavedTaxonomyTokens(settings, 'tag'),
     ])).filter(Boolean);
 }
 

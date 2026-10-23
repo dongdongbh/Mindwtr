@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { build } from 'esbuild';
 import vm from 'node:vm';
 import { createIosReminderMethods, readOwnedIosReminderMaps } from './host-ios-reminders';
+import { buildReminderAlarmSignature } from '../../../packages/core/src/mobile-reminder-alarms';
 
 const now = 1_800_000_000_000, token = '12345678-1234-1234-1234-123456789abc';
 const names = ['mindwtr:local:alarms:v1', 'mindwtr:native:reminders:v1'];
@@ -60,6 +61,16 @@ describe('strict native iOS reminder ownership admission', () => {
             const signature = `native:${JSON.stringify({ ...JSON.parse(signed), repeatInterval, fireAt })}`;
             expect(() => readOwnedIosReminderMaps(JSON.stringify({ 'task:one': { id: 123, signature } }), '{}')).toThrow(unavailable);
         }
+        // The shared builder's repeating signature carries the device time zone; a once alarm or an empty zone does not.
+        for (const repeatInterval of ['daily', 'weekly'] as const) {
+            const signature = `native:${buildReminderAlarmSignature({ fireAt: new Date(now), title: 'Private', message: 'Private', repeatInterval }, 'America/New_York')}`;
+            expect(signature).toContain('"timeZone":"America/New_York"');
+            expect(() => readOwnedIosReminderMaps(JSON.stringify({ 'digest:morning': { id: 123, signature } }), '{}')).not.toThrow();
+        }
+        for (const [repeatInterval, fireAt, timeZone] of [['once', new Date(now).toISOString(), 'America/New_York'], ['daily', 'daily:09:00', ''], ['daily', 'daily:09:00', 5]]) {
+            const signature = `native:${JSON.stringify({ ...JSON.parse(signed), repeatInterval, fireAt, timeZone })}`;
+            expect(() => readOwnedIosReminderMaps(JSON.stringify({ 'task:one': { id: 123, signature } }), '{}')).toThrow(unavailable);
+        }
         for (const fireAtMs of [1.5, 8_640_000_000_000_001]) {
             expect(() => readOwnedIosReminderMaps('{}', JSON.stringify({ [snoozeName]: { ...snooze, fireAtMs } }))).toThrow(unavailable);
             expect(() => readOwnedIosReminderMaps('{}', JSON.stringify({ 'task:one': { kind: 'delivered', id: 123, firedAtMs: fireAtMs } }))).toThrow(unavailable);
@@ -112,7 +123,7 @@ describe('strict native iOS reminder ownership admission', () => {
         expect(counts).toEqual([]);
         await methods.acknowledge(token, 'active', 0, 0);
         await methods.acknowledge(token, 'active', 64, 0, 0, 64);
-        expect(counts).toEqual([['active', 0, 0, 0, 0], ['active', 64, 0, 0, 64]]);
+        expect(counts).toEqual([['active', 0, 0, 0, 0, 0], ['active', 64, 0, 0, 64, 0]]);
         methods.end(token);
         await expect(methods.acknowledge(token, 'active', 1, 0, 0, 1)).rejects.toThrow(unavailable);
         expect(counts).toHaveLength(2);

@@ -1,12 +1,9 @@
-import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
+import { isValidProjectColorOverride } from './color-constants';
+import { isNativeJsonWithinBytes, record } from './native-json';
+export { exact, record } from './native-json';
 import { PROJECT_SYNC_FIELD_SCHEMA, projectToSqliteRow } from './project-sync-schema';
 import type { Project } from './types';
 
-export const record = (value: unknown): value is Record<string, unknown> =>
-    Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
-export const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
-    Object.keys(value).length === keys.length && keys.every((key) => own(value, key));
 export const iso = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value))
     && new Date(value).toISOString() === value;
 
@@ -32,11 +29,12 @@ export const validProject = (value: unknown, projectId: string): value is Projec
     if (!record(value) || Object.keys(value).some((key) => !projectKeys.has(key as keyof Project))
         || value.id !== projectId || typeof value.title !== 'string'
         || !['active', 'someday', 'waiting', 'archived'].includes(String(value.status))
-        || typeof value.color !== 'string' || typeof value.order !== 'number' || !Number.isFinite(value.order)
+        || !isValidProjectColorOverride(value.colorOverride) || typeof value.color !== 'string' || typeof value.order !== 'number' || !Number.isFinite(value.order)
         || !Array.isArray(value.tagIds) || !value.tagIds.every((tag) => typeof tag === 'string')
         || !iso(value.createdAt) || !iso(value.updatedAt)
         || (value.isFocused !== undefined && typeof value.isFocused !== 'boolean')
         || (value.isSequential !== undefined && typeof value.isSequential !== 'boolean')
+        || (value.perSectionFlow !== undefined && typeof value.perSectionFlow !== 'boolean')
         || (value.sequentialScope !== undefined && !['project', 'section'].includes(String(value.sequentialScope)))
         || (value.taskSortBy !== undefined && typeof value.taskSortBy !== 'string')
         || (value.viewSectionIds !== undefined && !(record(value.viewSectionIds)

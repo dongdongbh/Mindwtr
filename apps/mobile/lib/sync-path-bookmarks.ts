@@ -1,3 +1,4 @@
+import { fileSyncErrorCode } from '@mindwtr/core';
 import { requireNativeModule, type NativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
@@ -49,7 +50,7 @@ export async function createSyncPathBookmark(fileUri?: string | null): Promise<s
   } catch (error) {
     void logWarn('Failed to create iOS sync-folder bookmark', {
       scope: 'sync',
-      extra: { error: error instanceof Error ? error.message : String(error) },
+      extra: { error: fileSyncErrorCode(error) },
     });
     return null;
   }
@@ -72,7 +73,7 @@ export async function resolveSyncPathBookmark(
   } catch (error) {
     void logWarn('Failed to resolve iOS sync-folder bookmark', {
       scope: 'sync',
-      extra: { error: error instanceof Error ? error.message : String(error) },
+      extra: { error: fileSyncErrorCode(error) },
     });
     return null;
   }

@@ -20,7 +20,12 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     remove: vi.fn(),
 }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
-vi.mock('../../lib/app-log', () => ({ logWarn: vi.fn() }));
+vi.mock('../../lib/app-log', () => ({ logWarn: vi.fn(), logInfo: vi.fn() }));
+vi.mock('../../lib/sync-service', () => ({ SyncService: {
+    getSyncBackend: async () => 'cloud', getCloudProvider: async () => 'selfhosted',
+    getSyncEncryptionStatus: async () => ({ state: 'off' }),
+    getCloudConfig: async () => ({ url: 'https://cloud.example.com', token: 'test-token-1234567890' }),
+} }));
 vi.mock('../../lib/ai-config', () => ({ loadAIKey: vi.fn(async () => '') }));
 vi.mock('../../lib/speech-to-text', () => ({ processAudioCapture: vi.fn(), resolveSpeechCapture: vi.fn() }));
 
@@ -48,6 +53,35 @@ const task = {
 } as unknown as Task;
 
 const t = (key: string) => key;
+
+it('stages dropped browser files, uploads on Save only, and retains admitted bytes on discard', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
+    await act(async () => { await result.current.addDroppedFileAttachments([new File(['report'], 'report.pdf', { type: 'application/pdf' })]); });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(result.current.editAttachments).toHaveLength(1);
+    act(() => result.current.openAttachment(result.current.editAttachments[0]));
+    expect(result.current.attachmentError).toBe('attachments.webUploadRetry');
+    let prepared: Attachment[] = [];
+    await act(async () => { prepared = await result.current.prepareAttachmentsForSave(); });
+    expect(prepared[0]).toMatchObject({ uri: '', cloudKey: expect.stringMatching(/^attachments\/.+\.pdf$/) });
+    result.current.retainWebAttachmentsBeforeStore(prepared);
+    act(() => result.current.resetAttachmentState([]));
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['PUT']);
+    fetcher.mockRestore();
+});
+
+it('preserves the draft after upload failure and permits explicit removal', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 503 }));
+    const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
+    await act(async () => { await result.current.addDroppedFileAttachments([new File(['report'], 'report.pdf')]); });
+    const id = result.current.editAttachments[0].id;
+    await expect(result.current.prepareAttachmentsForSave()).rejects.toThrow();
+    expect(result.current.editAttachments[0]).toMatchObject({ id, uri: '' });
+    act(() => result.current.removeAttachment(id));
+    expect(await result.current.prepareAttachmentsForSave()).toEqual([expect.objectContaining({ id, deletedAt: expect.any(String) })]);
+    fetcher.mockRestore();
+});
 
 // Real synced records carry `mimeType` (the importer sets it); with a metadata-only
 // attachment that is the only thing the web build can classify on, since `uri` is empty.

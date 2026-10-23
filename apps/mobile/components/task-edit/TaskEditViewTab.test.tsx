@@ -799,11 +799,16 @@ describe('TaskEditViewTab', () => {
       'Completed **source**',
       '[Pending link](https://example.com)\nwrapped detail',
     ]);
-    expect(tree.root.findAllByType(Text).filter((node) => node.props.children === '•')).toHaveLength(2);
-    expect(tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox')).toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.accessibilityState?.checked !== undefined)).toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'taskEdit.addItem')).toHaveLength(0);
-    expect(applyChecklistUpdate).not.toHaveBeenCalled();
+    // #1416: the list ticks like a checklist; the reference keeps no status row.
+    expect(tree.root.findAllByType(Text).filter((node) => node.props.children === '•')).toHaveLength(0);
+    const boxes = tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox' && typeof node.type !== 'string');
+    expect(boxes.map((node) => node.props.accessibilityState)).toEqual([{ checked: true }, { checked: false }]);
+    expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'taskEdit.addItem' && typeof node.type !== 'string')).toHaveLength(1);
+    renderer.act(() => boxes[1].props.onPress());
+    expect(applyChecklistUpdate).toHaveBeenCalledWith([
+      { id: 'step-1', title: 'Completed **source**', isCompleted: true },
+      { id: 'step-2', title: '[Pending link](https://example.com)\nwrapped detail', isCompleted: true },
+    ]);
     ['Status', 'Priority', 'Energy', 'Start', 'Due', 'Review', 'Estimate', 'Contexts', '@private', 'Location', 'Archive room', 'Recurrence', 'Checklist']
       .forEach((text) => expect(tree.root.findAllByProps({ children: text })).toHaveLength(0));
     expect(tree.root.findAllByType(MockTaskStatusBadge)).toHaveLength(0);

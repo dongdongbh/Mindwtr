@@ -170,6 +170,17 @@ afterEach(() => {
 });
 
 describe('TaskFilterSheet', () => {
+  it('discloses task dates and clears just the range with Any time', () => {
+    const handle = renderSheet();
+    expect(hasText('filters.datePreset.next_7_days')).toBe(false);
+    openCategory('filters.taskDates');
+    act(() => findButtonByText('filters.datePreset.next_7_days').props.onPress());
+    expect(handle.current.criteria).toEqual({ anyDateRange: { preset: 'next_7_days' } });
+    expect(handle.current.activeCount).toBe(1);
+    act(() => findButtonByText('filters.anyTime').props.onPress());
+    expect(handle.current.criteria).toEqual({});
+  });
+
   it('opens on compact category summaries instead of rendering every option', () => {
     renderSheet({
       options: {

@@ -1,6 +1,6 @@
 name: mindwtr
 base: core22
-version: '1.3.6'
+version: '1.3.7'
 summary: Get tasks out of your head and see the next step
 description: |
   Mindwtr is a free, open-source to-do app built on the Getting Things Done
@@ -31,5 +31,5 @@ apps:
 parts:
   mindwtr:
     plugin: dump
-    source: apps/desktop/src-tauri/target/release/bundle/deb/mindwtr_1.3.6_amd64.deb
+    source: apps/desktop/src-tauri/target/release/bundle/deb/mindwtr_1.3.7_amd64.deb
     source-type: deb

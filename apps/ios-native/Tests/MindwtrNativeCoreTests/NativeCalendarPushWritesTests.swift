@@ -2,10 +2,17 @@ import Foundation
 import XCTest
 @testable import MindwtrNativeCore
 
-private final class CalendarPushWritesProvider: NativeCalendarWriteWitnessing, @unchecked Sendable {
+private final class CalendarPushWritesProvider: NativeCalendarWriteWitnessing, NativeCalendarNotesSuffixClearing, @unchecked Sendable {
     enum Mode { case normal, preflightMissing, confirmedMissing, uncertainMissing }
     var mode = Mode.normal
     var beforeMutation: (() -> Void)?
+    /// Provider-side event state (title, notes) by event ID; tests may edit it as a user would.
+    var events: [String: (title: String, notes: String)] = [:]
+    func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        guard let event = events[eventID], event.notes.hasSuffix(suffix) else { return }
+        events[eventID] = (event.title, String(event.notes.dropLast(suffix.count)))
+    }
     private let lock = NSLock()
     private var recorded: [NativeCalendarWriteRequest] = []
     private var mutations = 0
@@ -35,7 +42,12 @@ private final class CalendarPushWritesProvider: NativeCalendarWriteWitnessing, @
         beforeMutation?()
         if case .uncertainMissing = mode { throw NativeCalendarWriteError.missingEvent }
         switch request {
-        case .createEvent: return .identifier("event-\(count)")
+        case .createEvent(_, let details):
+            lock.lock(); events["event-\(count)"] = (details.title, details.notes); lock.unlock()
+            return .identifier("event-\(count)")
+        case .updateEvent(let id, _, let details):
+            lock.lock(); events[id] = (details.title, details.notes); lock.unlock()
+            return .completed
         case .createCalendar: return .identifier("created-calendar")
         default: return .completed
         }
@@ -139,6 +151,27 @@ final class NativeCalendarPushWritesTests: XCTestCase {
         XCTAssertEqual(Data(actual.notes.utf8), Data(frozen.notes.utf8))
         XCTAssertTrue(actual.notes.contains(effect.id.uuidString.lowercased()))
         XCTAssertEqual(provider.mutationCount, 1)
+    }
+
+    func testMappedCreateRemovesOnlyTheRecoveryMarkerFromCurrentNotes() throws {
+        // Untouched event, a user edit kept around the marker, and a user edit that removed it.
+        for edit in ["none", "kept", "removed"] {
+            let task = "task-" + edit
+            let reply = try completed(pipeline.submit(requestJSON: request(), taskID: task))
+            let id = try operation(reply), event = try XCTUnwrap(try effects.current()?.result.flatMap {
+                if case .identifier(let value) = $0 { return value } else { return nil } })
+            let marker = "\n\n[Mindwtr native calendar operation: \(id.uuidString.lowercased())]"
+            XCTAssertEqual(provider.events[event]?.notes, "notes" + marker)
+            if edit == "kept" { provider.events[event] = ("User title", "User notes" + marker) }
+            if edit == "removed" { provider.events[event] = ("User title", "User notes") }
+            let mutations = provider.mutationCount
+            try pipeline.acknowledge(operationID: id, entry: mapping(task, event: event))
+            XCTAssertEqual(provider.mutationCount, mutations, "No full-event update after the mapping")
+            let expected = edit == "none" ? ("Synthetic", "notes") : ("User title", "User notes")
+            XCTAssertEqual(provider.events[event]?.title, expected.0); XCTAssertEqual(provider.events[event]?.notes, expected.1)
+            XCTAssertNil(try effects.current()); XCTAssertTrue(jobs.writeAdmissionAvailable)
+        }
+        _ = try completed(pipeline.submitSources())
     }
 
     func testCalendarStateAcknowledgementPrecedesSuccessReply() throws {

@@ -1,8 +1,11 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -37,13 +40,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -53,10 +56,11 @@ import org.json.JSONObject
 
 /**
  * RN's Contexts (components/views/contexts-view.tsx), as a stack screen or the quick-access tab, on core's getContextsView and
- * runContextsAction: the chip search, core's chips (All, No context, each context and tag, with core's counts), core's All/Any
- * switch, the bulk bar while rows are selected (core's statuses, token actions and Delete), core's rows, and core's empty
+ * runContextsAction: the chip search with RN's direct Sort control beside it (core's shared list sort), core's chips (All,
+ * No context, each context and tag, with core's counts), core's All/Any switch, the bulk bar while rows are selected (core's statuses, token actions and Delete), core's rows, and core's empty
  * state. A row swipes right to core's status action, left to Delete with core's Undo, and a long-press selects it.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContextsList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -65,11 +69,18 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
     val theme = LocalTheme.current
     val bulk = view.optJSONObject("bulk")
     val selected = view.optJSONArray("selectedIds").ids()
+    // Back leaves selection mode before the screen (RN's useTaskListSelection); an open dialog takes Back first.
+    BackHandler(enabled = bulk != null && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("contexts-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         item(key = "search") {
-            Box(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(12.dp)) {
-                ListSearchField(own("contexts").optString("searchQuery"), view.getString("searchPlaceholder"), Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ListSearchField(own("contexts").optString("searchQuery"), view.getString("searchPlaceholder"), Modifier.weight(1f)) {
                     typeSearch("contexts", "searchQuery", it)
+                }
+                // RN's TaskListSortButton: core's "Sort: <current>" label; the choice is core's setTaskListSort (#1415).
+                view.optJSONObject("sort")?.let { sort ->
+                    DirectControl(Lucide.ArrowUpDown, sort.getString("accessibilityLabel"), null, null, idle) { openDialog("sort") }
                 }
             }
         }
@@ -81,9 +92,13 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                         val on = chip.getBoolean("selected")
                         val count = chip.getInt("count")
                         val shape = RoundedCornerShape(16.dp)
+                        // RN's chip (#1427): a tap switches to core's `next`; a token chip's long-press, also TalkBack's labelled
+                        // long-press action, applies core's `additive` selection. All and No context have no long-press.
+                        val additive = chip.optJSONObject("additive")
                         Row(Modifier.heightIn(min = 44.dp).clip(shape).background(if (on) c.tint else c.filterBg).border(1.dp, c.border, shape)
-                            .selectable(selected = on, enabled = idle, role = Role.Button) { contextsChip(chip.getJSONObject("next")) }
-                            .semantics { contentDescription = chip.getString("accessibilityLabel") }.padding(horizontal = 12.dp, vertical = 6.dp),
+                            .combinedClickable(enabled = idle, role = Role.Button, onLongClickLabel = additive?.optString("label"),
+                                onLongClick = additive?.let { { contextsChip(it.getJSONObject("next")) } }) { contextsChip(chip.getJSONObject("next")) }
+                            .semantics { contentDescription = chip.getString("accessibilityLabel"); this.selected = on }.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(chip.getString("label"), style = rnText(13, 500), color = if (on) c.onTint else c.text)
                             Box(Modifier.widthIn(min = 18.dp).clip(RoundedCornerShape(8.dp)).background(if (on) c.cardBg else theme.chipBadge)
@@ -133,43 +148,37 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
 }
 
 /**
- * RN's Contexts bulk bar: core's count and Done, core's statuses, then core's token actions and Delete (core's question first). Each
- * sends the selection with [revisions], the view's taskRevisions for it.
+ * RN's Contexts bulk bar, in the look of the task lists' bar (BulkBar): core's count and the X exit, core's statuses, then core's
+ * token actions and Delete (core's question first). Each sends the selection with [revisions], the view's taskRevisions for it.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ContextsBulkBar(model: InboxViewModel, bulk: JSONObject, selected: List<String>, revisions: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(bulk.getString("countLabel"), style = rnText(13, 600), color = c.secondaryText)
-            PillChip(bulk.getString("exitLabel"), c.text, idle) { endSelection(); reload() }
+    val any = idle && selected.isNotEmpty()
+    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(bulk.getString("countLabel"), style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.weight(1f))
+            BulkExitButton(bulk.getString("exitLabel"), idle) { endSelection(); reload() }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (status in bulk.menuObjects("statuses")) {
-                PillChip(status.getString("label"), c.text, idle && selected.isNotEmpty()) { act("contextsAction", moveTasks(selected, status.getString("status"), revisions)) }
+                BarButton(status.getString("label"), any, c.filterBg, c.text, weight = 500) { act("contextsAction", moveTasks(selected, status.getString("status"), revisions)) }
             }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (token in bulk.menuObjects("tokenActions")) {
-                PillChip(token.getString("title"), c.text, idle && token.getBoolean("enabled")) {
+                BarButton(token.getString("title"), any && token.getBoolean("enabled"), c.filterBg, c.text) {
                     keepDialog(JSONObject().put("kind", "tokens").put("list", "contexts").put("field", token.getString("field"))
                         .put("mode", token.getString("mode")).put("text", "").put("picked", JSONArray()))
                 }
             }
-            PillChip(bulk.getString("deleteLabel"), c.text, idle && selected.isNotEmpty()) {
+            BarButton(bulk.getString("deleteLabel"), any, c.filterBg, c.text) {
                 confirm(bulk.getJSONObject("deleteConfirmation"), trashTasks(selected, revisions), "contextsAction")
             }
         }
     }
-}
-
-/** RN's round bulk button (Contexts): bordered, the filter background, 13/600, dimmed while disabled. */
-@Composable
-fun PillChip(label: String, color: Color, enabled: Boolean, onClick: () -> Unit) {
-    val c = LocalTheme.current.colors
-    Text(label, style = rnText(13, 600), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).clip(CircleShape).background(c.filterBg).border(1.dp, c.border, CircleShape)
-        .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp))
 }
 
 /** RN's search input on a list (Contexts): 40 high, radius 8, the input background, core's placeholder; the text as typed. */
@@ -187,7 +196,7 @@ fun ListSearchField(value: String, placeholder: String, modifier: Modifier, onCh
         })
 }
 
-/** Contexts' chip: the selection core put on it (its `next`), read at once. */
+/** Contexts' chip: the selection core put on it (its `next`, or its additive press's), read at once. */
 internal fun MenuModel.contextsChip(next: JSONObject) {
     editOwn("contexts") { put("tokens", next.getJSONArray("tokens")).put("matchMode", next.getString("matchMode")) }
     reload()

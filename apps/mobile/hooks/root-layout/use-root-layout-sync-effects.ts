@@ -8,13 +8,15 @@ import { createMobileSyncTriggers, type MobileSyncTriggers } from '@mindwtr/core
 import type { ToastOptions } from '@/contexts/toast-context';
 import { getNotificationPermissionStatus, startMobileNotifications, stopMobileNotifications } from '@/lib/notification-service';
 import { getCalendarPushEnabled, runFullCalendarSync, startCalendarPushSync, stopCalendarPushSync } from '@/lib/calendar-push-sync';
-import { abortMobileSync, performMobileSync } from '@/lib/sync-service';
+import { abortMobileSync, performMobileSync, waitForMobileSyncIdle } from '@/lib/sync-service';
 import { syncMobileBackgroundSyncRegistration } from '@/lib/background-sync-task';
 import { classifySyncFailure, coerceSupportedBackend, isLikelyOfflineSyncError, resolveBackend } from '@/lib/sync-service-utils';
 import { SYNC_BACKEND_KEY } from '@/lib/sync-constants';
 import { isCloudKitAvailable, subscribeToCloudKitChanges } from '@/lib/cloudkit-sync';
 import { updateMobileWidgetFromStore } from '@/lib/widget-service';
-import { logError, logWarn } from '@/lib/app-log';
+import { logError, logInfo, logWarn } from '@/lib/app-log';
+import { setMobileLocalChangePending } from '@/lib/sync-badge';
+import { beginIosBackgroundTask } from '@/modules/ios-scene-lifecycle';
 
 type ResolveText = (key: string, fallback: string) => string;
 
@@ -154,7 +156,12 @@ export function useRootLayoutSyncEffects({
             classifySyncFailure: (error) => classifySyncFailure(error),
             reportError: logAppError,
             logWarn: (message, context) => logWarn(message, context),
+            logInfo: (message, context) => logInfo(message, context),
+            onLocalChangePendingChange: setMobileLocalChangePending,
             showSyncIssue,
+            // iOS only: null elsewhere, so Android keeps its behavior.
+            holdBackgroundExecution: (onExpire) => beginIosBackgroundTask('Mindwtr sync', onExpire),
+            waitForSyncIdle: () => waitForMobileSyncIdle(),
         });
         return triggersRef.current;
     }, [showSyncIssue]);

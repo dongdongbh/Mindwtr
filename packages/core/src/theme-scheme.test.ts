@@ -28,6 +28,8 @@ const EXPECTED_SCHEMES: Record<Exclude<AppTheme, 'system' | 'system-oled'>, Them
     'oled': 'dark',
     'catppuccin-macchiato': 'dark',
     'dracula': 'dark',
+    'gruvbox-light': 'light',
+    'gruvbox-dark': 'dark',
 };
 
 describe('resolveThemeColorScheme', () => {
@@ -100,8 +102,17 @@ describe('STATUS_COLORS_BY_THEME', () => {
         expect(STATUS_COLORS_BY_THEME.dracula.done.text).toBe('#50fa7b');
     });
 
+    it('gives the gruvbox themes their own palette hues, with reference darkened only in light', () => {
+        expect(STATUS_COLORS_BY_THEME['gruvbox-light'].next.text).toBe('#075f70');
+        expect(STATUS_COLORS_BY_THEME['gruvbox-light'].reference.text).toBe('#3d7151');
+        expect(STATUS_COLORS_BY_THEME['gruvbox-light'].done.text).toBe('#665c54');
+        expect(STATUS_COLORS_BY_THEME['gruvbox-dark'].next.text).toBe('#9eb9ae');
+        expect(STATUS_COLORS_BY_THEME['gruvbox-dark'].reference.text).toBe('#8ec07c');
+        expect(STATUS_COLORS_BY_THEME['gruvbox-dark'].done.text).toBe('#b8bb26');
+    });
+
     it('keeps every status distinguishable within each new theme', () => {
-        for (const key of ['catppuccin-macchiato', 'dracula'] as const) {
+        for (const key of ['catppuccin-macchiato', 'dracula', 'gruvbox-light', 'gruvbox-dark'] as const) {
             // archived deliberately mirrors inbox, as it does in every other theme.
             const hues = TASK_STATUSES.filter((status) => status !== 'archived')
                 .map((status) => STATUS_COLORS_BY_THEME[key][status].text);

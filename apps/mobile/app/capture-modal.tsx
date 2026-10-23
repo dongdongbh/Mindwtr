@@ -22,6 +22,7 @@ import {
   buildQuickAddPreviewEntries,
   createAIProvider,
   getUsedTaskTokens,
+  getSavedTaxonomyTokens,
   parseQuickAdd,
   resolveDefaultNewTaskAreaId,
   formatQuickAddHelp,
@@ -194,11 +195,11 @@ export default function CaptureScreen() {
   }, [aiProvider, showToast, t]);
 
   const contextOptions = React.useMemo(() => {
-    return getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' });
-  }, [tasks]);
+    return Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' }), ...getSavedTaxonomyTokens(settings, 'context')]));
+  }, [tasks, settings]);
   const tagOptions = React.useMemo(() => {
-    return getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' });
-  }, [tasks]);
+    return Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' }), ...getSavedTaxonomyTokens(settings, 'tag')]));
+  }, [tasks, settings]);
   const quickAddParseOptions = React.useMemo(
     () => buildQuickAddParseOptions(settings, { tasks, _allTasks: allTasks, people }),
     [allTasks, people, settings, tasks]

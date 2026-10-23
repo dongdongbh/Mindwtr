@@ -6,6 +6,7 @@ import { readAreaDurableData } from './native-host-contract-area-durable';
 import { buildSaveSnapshot } from './store-helpers';
 import { buildBulkTaskTokenUpdates } from './bulk-task-tokens';
 import type { AppData, Task } from './types';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 import type { NativeReferenceTasksAddTagEnvelope } from './native-host-contract-reference-bulk-tag';
 import { deterministicHash128 } from './uuid';
 import * as uuid from './uuid';
@@ -62,6 +63,14 @@ const clock = () => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(n
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.restoreAllMocks(); vi.useRealTimers(); if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ; });
 
 describe('guarded Reference bulk Add tag', () => {
+    it('preserves pre-Task741 Reference envelope bytes', async () => {
+        clock(); process.env.TZ = 'UTC'; const sqlite = await openSqliteHost(seed());
+        try { const command = await prepare(sqlite, request('  @@## new  '));
+            // Captured by executing the exact pre-Task741 implementation, not
+            // rebuilt from the new source or a subset of envelope fields.
+            expect(deterministicHash128(JSON.stringify(command))).toEqual([2217490741, 714767651, 31281605, 2943030739]);
+        } finally { await sqlite.close(); }
+    });
     it.each(['new', 'different', ' one,two words ', '@@## new', 'École', 'x'.repeat(501), 'x'.repeat(2000)])('matches actual RN builder/batchUpdateTasks full AppData and all nine SQLite domains for %s', async (tag) => {
         clock(); const initial = seed(); initial.tasks![0].tags = ['#a', '#A', '#école', '#排序', '']; initial.tasks![1].tags = ['#new'];
         const rn = await openSqliteHost(initial); let expected; let expectedRaw; let count = 0;
@@ -235,7 +244,11 @@ describe('Reference Add tag exact authority and durable replay', () => {
             await sqlite.restart(undefined, { recoveryLoad: true });
             if (label === 'settings' || label === 'unrelated row') {
                 value(await host(sqlite).commitPreparedReferenceTasksAddTag(command)); const final = await raw(sqlite);
-                expect(final.settings).toEqual(after.settings);
+                // The successful RN-equivalent write also retains this exact prepared token effect.
+                const expectedSettings = clone(after.settings);
+                expectedSettings.rows[0].data = JSON.stringify(retainTaxonomyEffects(JSON.parse(expectedSettings.rows[0].data),
+                    command.prepared.effect.tasks, command.prepared.effect.projects));
+                expect(final.settings).toEqual(expectedSettings);
                 expect(final.tasks.rows.find((r: { id: string }) => r.id === 'unrelated')).toEqual(after.tasks.rows.find((r: { id: string }) => r.id === 'unrelated'));
             } else { expect(await host(sqlite).commitPreparedReferenceTasksAddTag(command)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } }); expect(await raw(sqlite)).toEqual(after); }
         } finally { other.close(); await sqlite.close(); }

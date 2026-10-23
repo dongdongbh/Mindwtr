@@ -24,7 +24,7 @@ import { LANGUAGE_STORAGE_KEY } from './i18n/i18n-constants';
 import { LOCALES } from './i18n/i18n-locales';
 import type { Language } from './i18n/i18n-types';
 import { resolveMobileQuickAccessView } from './more-menu-model';
-import type { AppSettings, AppTheme, MobileQuickAccessView } from './types';
+import type { AppSettings, AppTheme, MobileAppLockRelockDelayMinutes, MobileQuickAccessView } from './types';
 
 type Translate = (key: string) => string;
 
@@ -38,12 +38,28 @@ export const SETTINGS_LANGUAGE_OPTIONS: { id: Language; native: string }[] = [
 /** The quick-access tab's choices, in picker order. */
 export const MOBILE_QUICK_ACCESS_VIEW_OPTIONS: MobileQuickAccessView[] = ['review', 'projects', 'calendar', 'contexts'];
 
+/** App Lock's relock delay choices, in picker order. */
+export const MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS: MobileAppLockRelockDelayMinutes[] = [0, 1, 5, 15];
+
+const RELOCK_DELAY_LABEL_KEYS: Record<MobileAppLockRelockDelayMinutes, string> = {
+    0: 'settings.mobile.appLockRelockImmediately',
+    1: 'settings.mobile.appLockRelockAfter1',
+    5: 'settings.mobile.appLockRelockAfter5',
+    15: 'settings.mobile.appLockRelockAfter15',
+};
+
+/** The stored relock delay; a missing or unknown value reads as 0 (ask every time). */
+export function resolveMobileAppLockRelockDelayMinutes(value: unknown): MobileAppLockRelockDelayMinutes {
+    return MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS.includes(value as never) ? value as MobileAppLockRelockDelayMinutes : 0;
+}
+
 /** One control change: the setting it writes and the value it writes. */
 export type GeneralSettingsEdit =
     | { type: 'theme'; value: AppTheme }
     | { type: 'showTaskAge'; value: boolean }
     | { type: 'quickAccessView'; value: MobileQuickAccessView }
     | { type: 'appLock'; value: boolean }
+    | { type: 'appLockRelockDelay'; value: MobileAppLockRelockDelayMinutes }
     | { type: 'language'; value: Language }
     | { type: 'weekStart'; value: WeekStartPreference }
     | { type: 'dateFormat'; value: DateFormatSetting }
@@ -67,6 +83,8 @@ export function buildGeneralSettingsUpdate(settings: AppSettings, edit: GeneralS
             return { appearance: { ...(settings.appearance ?? {}), mobileQuickAccessView: edit.value } };
         case 'appLock':
             return { security: { ...(settings.security ?? {}), mobileAppLockEnabled: edit.value } };
+        case 'appLockRelockDelay':
+            return { security: { ...(settings.security ?? {}), mobileAppLockRelockDelayMinutes: edit.value } };
         case 'language':
             return { language: edit.value };
         case 'weekStart':
@@ -89,6 +107,7 @@ export function isGeneralSettingStored(settings: AppSettings, edit: GeneralSetti
         case 'showTaskAge': return settings.appearance?.showTaskAge === edit.value;
         case 'quickAccessView': return settings.appearance?.mobileQuickAccessView === edit.value;
         case 'appLock': return settings.security?.mobileAppLockEnabled === edit.value;
+        case 'appLockRelockDelay': return settings.security?.mobileAppLockRelockDelayMinutes === edit.value;
         case 'language': return settings.language === edit.value;
         case 'weekStart': return settings.weekStart === edit.value;
         case 'dateFormat': return settings.dateFormat === edit.value;
@@ -105,6 +124,8 @@ export const MOBILE_THEME_STORAGE_KEY = '@mindwtr_theme';
 export const MOBILE_THEME_STYLE_STORAGE_KEY = '@mindwtr_theme_style';
 /** lib/app-search-preference.ts: 'true' while on; removed when off. Android 12+ only. */
 export const MOBILE_APP_SEARCH_STORAGE_KEY = 'mindwtr:appSearchIndexingEnabled';
+/** A toggle-off's AppSearch wipe that has not landed yet; a start finishes it (app-search-service.ts). */
+export const MOBILE_APP_SEARCH_WIPE_OWED_STORAGE_KEY = 'mindwtr:appSearchWipeOwed';
 
 /** A device-local write: store `value` under `key`, or remove the key when null. */
 export type SettingsDeviceWrite = { key: string; value: string | null };
@@ -120,7 +141,9 @@ export function getGeneralSettingsDeviceWrites(edit: GeneralSettingsEdit): Setti
         case 'language':
             return [{ key: LANGUAGE_STORAGE_KEY, value: edit.value }];
         case 'appSearch':
-            return [{ key: MOBILE_APP_SEARCH_STORAGE_KEY, value: edit.value ? 'true' : null }];
+            // Off: the owed wipe is stored before the switch goes, so a death between them still leaves the wipe to finish.
+            return edit.value ? [{ key: MOBILE_APP_SEARCH_STORAGE_KEY, value: 'true' }]
+                : [{ key: MOBILE_APP_SEARCH_WIPE_OWED_STORAGE_KEY, value: 'true' }, { key: MOBILE_APP_SEARCH_STORAGE_KEY, value: null }];
         default:
             return [];
     }
@@ -171,6 +194,8 @@ export type GeneralSettingsModel = {
             enablePrompt: { promptMessage: string; cancelLabel: string; fallbackLabel: string };
             errors: { unavailable: string; cancelled: string; failed: string };
         };
+        /** How long the app may be away before App Lock asks again. Only while App Lock is on; null otherwise. */
+        appLockRelockDelay: GeneralSettingsPicker<MobileAppLockRelockDelayMinutes> | null;
         /** Android 12+ only; null elsewhere. */
         appSearch: GeneralSettingsToggle | null;
     };
@@ -214,6 +239,13 @@ export function buildGeneralSettingsModel(input: {
     const showTaskAge = settings.appearance?.showTaskAge === true;
     const quickAccessView = resolveMobileQuickAccessView(settings.appearance?.mobileQuickAccessView);
     const appLockEnabled = settings.security?.mobileAppLockEnabled === true;
+    const relockDelay = resolveMobileAppLockRelockDelayMinutes(settings.security?.mobileAppLockRelockDelayMinutes);
+    const relockDelayOptions = MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS.map((value) => option(
+        value,
+        tr(RELOCK_DELAY_LABEL_KEYS[value]),
+        relockDelay === value,
+        { type: 'appLockRelockDelay', value },
+    ));
 
     const themeOption = (value: AppTheme, label: string, icon: GeneralSettingsThemeIcon) => ({
         ...option(value, label, value === themeMode, { type: 'theme', value }), icon,
@@ -231,6 +263,8 @@ export function buildGeneralSettingsModel(input: {
         themeOption('nord', t('settings.nord'), 'snow-outline'),
         themeOption('catppuccin-macchiato', t('settings.catppuccinMacchiato'), 'cafe-outline'),
         themeOption('dracula', t('settings.dracula'), 'wine-outline'),
+        themeOption('gruvbox-light', t('settings.gruvboxLight'), 'sunny-outline'),
+        themeOption('gruvbox-dark', t('settings.gruvboxDark'), 'moon-outline'),
         themeOption('sepia', t('settings.sepia'), 'book-outline'),
         themeOption('oled', t('settings.oled'), 'contrast-outline'),
     ];
@@ -314,6 +348,12 @@ export function buildGeneralSettingsModel(input: {
                 },
                 errors: { unavailable: tr('appLock.unavailable'), cancelled: tr('appLock.cancelled'), failed: tr('appLock.failed') },
             },
+            appLockRelockDelay: appLockEnabled ? {
+                label: tr('settings.mobile.appLockRelock'),
+                value: current(relockDelayOptions, tr('settings.mobile.appLockRelockImmediately')),
+                pickerTitle: tr('settings.mobile.appLockRelock'),
+                options: relockDelayOptions,
+            } : null,
             appSearch: input.appSearch.supported ? {
                 label: tr('settings.appSearchLabel'),
                 description: tr('settings.appSearchDesc'),

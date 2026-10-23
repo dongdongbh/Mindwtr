@@ -81,6 +81,7 @@ vi.mock('../lib/notification-service', () => ({
 
 vi.mock('../lib/app-log', () => ({
   logWarn: vi.fn(async () => undefined),
+  logInfo: vi.fn(async () => undefined),
 }));
 
 const flattenText = (value: unknown): string => {
@@ -393,5 +394,85 @@ describe('PomodoroPanel', () => {
     sessionWrites.forEach(([, value]) => {
       expect(String(value)).not.toContain('collapsed');
     });
+  });
+
+  it.each([
+    { autoStartBreaks: false, autoStartFocus: false },
+    { autoStartBreaks: false, autoStartFocus: true },
+    { autoStartBreaks: true, autoStartFocus: false },
+    { autoStartBreaks: true, autoStartFocus: true },
+  ])('forwards breaks=$autoStartBreaks focus=$autoStartFocus when picking or clearing a task', async (autoStartOptions) => {
+    const task = { id: 'task-b', title: 'Read', status: 'next' } as Task;
+    storeState.settings.gtd.pomodoro = { linkTask: true, ...autoStartOptions };
+    storeState.tasks = [task];
+    mockStorage({});
+    const select = vi.spyOn(mobilePomodoroController, 'setSelectedTaskId');
+    let tree!: renderer.ReactTestRenderer;
+    try {
+      await act(async () => {
+        tree = renderer.create(<PomodoroPanel tasks={[task]} onMarkDone={vi.fn()} />);
+      });
+      act(() => tree.root.findAllByType(Pressable)
+        .find((node) => node.props.accessibilityLabel === 'Timer task')?.props.onPress());
+      const option = tree.root.findByType(FlatList).props.renderItem({ item: task });
+      act(() => option.props.onPress());
+      expect(select).toHaveBeenLastCalledWith(task.id, autoStartOptions);
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBe(task.id);
+
+      act(() => tree.root.findAllByType(Pressable)
+        .find((node) => node.props.accessibilityLabel === 'Timer task')?.props.onPress());
+      act(() => tree.root.findAllByType(Pressable)
+        .find((node) => flattenText(node.props.children) === 'Timer only')?.props.onPress());
+      expect(select).toHaveBeenLastCalledWith(undefined, autoStartOptions);
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
+    } finally {
+      if (tree) await act(async () => tree.unmount());
+      select.mockRestore();
+    }
+  });
+
+  it('forwards auto-start preferences when clearing a selection absent from the full live store', async () => {
+    const autoStartOptions = { autoStartBreaks: true, autoStartFocus: true };
+    storeState.settings.gtd.pomodoro = { linkTask: true, ...autoStartOptions };
+    mockStorage({
+      '@mindwtr_pomodoro_state': JSON.stringify({
+        durations: { focusMinutes: 25, breakMinutes: 5 },
+        timerState: { phase: 'focus', remainingSeconds: 1500, isRunning: false, completedFocusSessions: 0 },
+        selectedTaskId: 'no-longer-live',
+      }),
+    });
+    const select = vi.spyOn(mobilePomodoroController, 'setSelectedTaskId');
+    const tree = await renderPanel();
+    try {
+      expect(select).toHaveBeenCalledExactlyOnceWith(undefined, autoStartOptions);
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
+    } finally {
+      await act(async () => tree.unmount());
+      select.mockRestore();
+    }
+  });
+
+  it('hides task linking without clearing the retained selection when linking is off', async () => {
+    storeState.settings.gtd.pomodoro = { linkTask: false, autoStartBreaks: true, autoStartFocus: true };
+    mockStorage({
+      '@mindwtr_pomodoro_state': JSON.stringify({
+        durations: { focusMinutes: 25, breakMinutes: 5 },
+        timerState: { phase: 'focus', remainingSeconds: 1500, isRunning: false, completedFocusSessions: 0 },
+        selectedTaskId: 'retained-outside-scope',
+      }),
+    });
+    const select = vi.spyOn(mobilePomodoroController, 'setSelectedTaskId');
+    const tree = await renderPanel();
+    try {
+      expect(select).not.toHaveBeenCalled();
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBe('retained-outside-scope');
+      expect(tree.root.findAllByType(FlatList)).toHaveLength(0);
+      expect(tree.root.findAllByType(Pressable).some((node) => (
+        ['Timer task', 'Mark task done'].includes(node.props.accessibilityLabel)
+      ))).toBe(false);
+    } finally {
+      await act(async () => tree.unmount());
+      select.mockRestore();
+    }
   });
 });

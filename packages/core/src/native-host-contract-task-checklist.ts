@@ -27,7 +27,7 @@ import { canSkipRecurringTaskOccurrence, matchesAdvanceOneCalendarProjection,
     projectNextRecurringTask, type RecurrenceProjection } from './recurrence';
 import { generateUUID } from './uuid';
 import { getTranslator, resolveI18nText } from './i18n';
-import { isTaskActionable, isTaskCancelled, normalizeTaskForLoad } from './task-status';
+import { isTaskActionable, isTaskCancelled, normalizeTaskForLoad, type TaskLoadTemporalContext } from './task-status';
 import { normalizeProjectLifecycleFields } from './project-status';
 import { mapSqliteTaskRow, rawReadTaskSnapshot, TASK_SQLITE_COLUMNS, taskToSqliteRow } from './sqlite-adapter';
 import { rememberRawReadRow } from './sqlite-raw-snapshot';
@@ -121,7 +121,8 @@ export type NativePreparedOwnedCompleteCancellationUndo = Omit<NativePreparedTas
 export type NativeOwnedCompleteCancellationUndoEnvelope = {
     request: NativeTaskCancellationUndoRequest; prepared: NativePreparedOwnedCompleteCancellationUndo;
 };
-export type NativeTaskCompletionRequest = { id: string; requestId: string; taskRevision: string; source?: 'reference' };
+export type NativeTaskCompletionRequest = { id: string; requestId: string; taskRevision: string; source?: 'reference' | 'board' };
+type NativeBoardTaskCompletionRequest = NativeTaskCompletionRequest & { source: 'board' };
 type NativeReferenceTaskCompletionRequest = NativeTaskCompletionRequest & { source: 'reference' };
 export type NativeTaskCompletionResult = { id: string; completion: {
     completedAt: string; undoEnabled: boolean; message: string; undoLabel: string;
@@ -136,6 +137,10 @@ export type NativePreparedTaskCompletion = NativePreparedOrdinaryTaskCompletion 
     version: 2; kind: 'referenceComplete'; request: NativeReferenceTaskCompletionRequest;
     rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedChecklistWrite;
     notice: { message: string; undoLabel: string }; result: NativeTaskCompletionResult;
+} | {
+    version: 2; kind: 'boardComplete'; request: NativeBoardTaskCompletionRequest;
+    rawBefore: PreparedChecklistRawBefore; checklist: NativePreparedChecklistWrite;
+    notice: { message: string; undoLabel: string }; result: NativeTaskCompletionResult;
 };
 export type NativeTaskCompletionEnvelope = {
     request: NativeTaskCompletionRequest; prepared: NativePreparedTaskCompletion;
@@ -148,6 +153,10 @@ type NativePreparedOrdinaryTaskCompletionUndo = {
 };
 export type NativePreparedTaskCompletionUndo = NativePreparedOrdinaryTaskCompletionUndo | {
     version: 2; kind: 'referenceCompleteUndo'; request: NativeTaskCompletionUndoRequest;
+    completion: NativeTaskCompletionEnvelope; rawBefore: PreparedChecklistRawBefore;
+    witness: Witness; effect: PreparedChecklistEffect; result: { id: string };
+} | {
+    version: 2; kind: 'boardCompleteUndo'; request: NativeTaskCompletionUndoRequest;
     completion: NativeTaskCompletionEnvelope; rawBefore: PreparedChecklistRawBefore;
     witness: Witness; effect: PreparedChecklistEffect; result: { id: string };
 };
@@ -295,6 +304,12 @@ const readReferenceCompletionRequest = (value: unknown): NativeReferenceTaskComp
     const base = readCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision });
     return base ? { ...base, source: 'reference' } : null;
 };
+const readBoardCompletionRequest = (value: unknown): NativeBoardTaskCompletionRequest | null => {
+    const input = detach(value, 4096);
+    if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source']) || input.source !== 'board') return null;
+    const base = readCompletionRequest({ id: input.id, requestId: input.requestId, taskRevision: input.taskRevision });
+    return base ? { ...base, source: 'board' } : null;
+};
 const readReferenceBackdateRequest = (value: unknown): NativeReferenceTaskBackdateRequest | null => {
     const input = detach(value, 4096);
     if (!isRecord(input) || !exact(input, ['id', 'requestId', 'taskRevision', 'source', 'completedAt', 'timeSpentText'])
@@ -392,6 +407,44 @@ const validHistoryRowSource = (task: Task, request: NativeChecklistWriteRequest)
 export const canCompleteNativeTask = (task: Task, projects: readonly Project[], readOnly = false): boolean =>
     !readOnly && !task.deletedAt && !task.purgedAt && isTaskActionable(task)
     && !isProjectedRecurringTaskId(task.id) && !isStatusListTaskReadOnly(task, projects);
+/** Scoped Board authority, including a Section-only parent; no new journal field. */
+const boardCompletionContainer = (task: Task, lists: { projects: readonly Project[]; sections: readonly Section[] }) => {
+    const id = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 500;
+    if (task.projectId != null && !id(task.projectId) || task.sectionId != null && !id(task.sectionId)) return null;
+    const sections = task.sectionId ? lists.sections.filter(row => row.id === task.sectionId) : [];
+    if (task.sectionId && (sections.length !== 1 || !id(sections[0].projectId)
+        || sections[0].deletedAt != null && typeof sections[0].deletedAt !== 'string' || sections[0].deletedAt)) return null;
+    const section = sections[0];
+    if (task.projectId && section && task.projectId !== section.projectId) return null;
+    const parentId = task.projectId ?? section?.projectId;
+    const parents = parentId ? lists.projects.filter(row => row.id === parentId) : [];
+    if (parentId && (parents.length !== 1 || !['active', 'waiting', 'someday'].includes(parents[0].status)
+        || parents[0].deletedAt != null && typeof parents[0].deletedAt !== 'string'
+        || parents[0].purgedAt != null && typeof parents[0].purgedAt !== 'string' || parents[0].deletedAt || parents[0].purgedAt)) return null;
+    const parent = parents[0];
+    return { section: section ? { id: section.id, projectId: section.projectId, deletedAt: section.deletedAt ?? null } : null,
+        parent: parent ? { id: parent.id, status: parent.status, deletedAt: parent.deletedAt ?? null, purgedAt: parent.purgedAt ?? null } : null };
+};
+const sameBoardCompletionContainer = (source: Task, lists: Pick<Lists, 'projects' | 'sections'>, data: AppData): boolean => {
+    const captured = boardCompletionContainer(source, lists);
+    const fresh = boardCompletionContainer(source, { projects: data.projects, sections: data.sections ?? [] });
+    return captured !== null && fresh !== null && same(captured, fresh);
+};
+export const canCompleteNativeBoardTask = (task: Task, projects: readonly Project[], sections: readonly Section[], readOnly = false): boolean =>
+    canCompleteNativeTask(task, projects, readOnly) && ['inbox', 'next', 'waiting', 'someday'].includes(task.status)
+    && boardCompletionContainer(task, { projects, sections }) !== null;
+const boardUndoContainerMatches = (completion: NativeTaskCompletionEnvelope, source: Task, lists: Pick<Lists, 'projects' | 'sections'>): boolean => {
+    const after = completion.prepared.checklist.effect.tasks.find(row => row.after.id === completion.request.id)?.after;
+    if (!after || (source.projectId ?? null) !== (after.projectId ?? null) || (source.sectionId ?? null) !== (after.sectionId ?? null)
+        || !boardCompletionContainer(source, lists)) return false;
+    // RN normalization can detach a Section-only source. Its original context
+    // still owns this Undo, while current parent status is evaluated as policy.
+    const original = completion.prepared.checklist.witness;
+    if (!boardCompletionContainer(original.source, lists)) return false;
+    const originalSection = original.lists.sections.find(row => row.id === original.source.sectionId);
+    const currentSection = lists.sections.find(row => row.id === original.source.sectionId);
+    return !original.source.sectionId || Boolean(originalSection && currentSection && originalSection.projectId === currentSection.projectId);
+};
 export const canCancelNativeTask = (task: Task, projects: readonly Project[], readOnly = false): boolean =>
     !readOnly && !task.deletedAt && !task.purgedAt && isTaskActionable(task)
     && !isProjectedRecurringTaskId(task.id) && !isStatusListTaskReadOnly(task, projects);
@@ -504,7 +557,8 @@ const validClears = (value: Partial<Task>, fields: string[]) => fields.every((fi
     typeof field === 'string' && field.length <= 100 && !own(value, field))
     && new Set(fields).size === fields.length;
 const directSaveUpdates = (source: Task, request: NativeChecklistSaveRequest, preparedAt?: string,
-    selection?: ChecklistSelection): Partial<Task> | null => {
+    selection?: ChecklistSelection, boardCompletion = false): Partial<Task> | null => {
+    if (boardCompletion) return same(request, completionSaveRequest(source, request.requestId)) ? { status: 'done' } : null;
     if (request.intent === 'referenceDestination') return {
         projectId: request.patch.projectId || undefined, sectionId: request.patch.sectionId || undefined, areaId: request.patch.areaId || undefined,
     };
@@ -533,8 +587,8 @@ const directSaveUpdates = (source: Task, request: NativeChecklistSaveRequest, pr
     return updates;
 };
 const temporal = new Set(['startTime', 'dueDate', 'relativeStartOffset', 'reviewAt']);
-const directIsBound = (source: Task, request: NativeChecklistSaveRequest, witness: Witness, selection?: ChecklistSelection): boolean => {
-    const expected = directSaveUpdates(source, request, witness.preparedAt, selection);
+const directIsBound = (source: Task, request: NativeChecklistSaveRequest, witness: Witness, selection?: ChecklistSelection, boardCompletion = false): boolean => {
+    const expected = directSaveUpdates(source, request, witness.preparedAt, selection, boardCompletion);
     if (!expected || !validClears(witness.direct, witness.directClears)) return false;
     const frozen = restoreClears(witness.direct, witness.directClears);
     const names = new Set([...Object.keys(expected), ...Object.keys(frozen)]);
@@ -571,7 +625,7 @@ const effectResult = (kind: 'save' | 'reset', effect: PreparedChecklistEffect,
 };
 
 const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witness: Witness,
-    allowIds = false, undo = false, selection?: ChecklistSelection): {
+    allowIds = false, undo = false, selection?: ChecklistSelection, boardCompletion = false): {
     effect: PreparedChecklistEffect; result: NativeChecklistResult;
 } => {
     const source = witness.source;
@@ -593,8 +647,8 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
         const prepared = prepareTaskUpdatesForStore({ task: source, updates: direct,
             allProjects: lists.projects, allSections: lists.sections, allAreas: lists.areas,
             settings: witness.settings, futureBoundary: witness.futureBoundary,
-            nowMs: Date.parse(witness.preparedAt), reserveProjectOrder: true,
-            projectOrderReserver: request.intent === 'referenceDestination' ? undefined : createProjectOrderReserver(lists.tasks) });
+            nowMs: Date.parse(witness.preparedAt), reserveProjectOrder: !boardCompletion,
+            projectOrderReserver: boardCompletion || request.intent === 'referenceDestination' ? undefined : createProjectOrderReserver(lists.tasks) });
         if (!prepared.ok) throw new Error(prepared.error);
         if (isReferenceOperation(request)) {
             if (witness.focusLimit !== normalizeFocusTaskLimit(witness.settings.gtd?.focusTaskLimit))
@@ -691,7 +745,7 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
 };
 
 /** Keep only rows the deterministic planner reads; never journal the library. */
-const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state: Pick<TaskStore, '_allTasks' | '_allProjects' | '_allSections' | '_allAreas'>, reference = false): void => {
+const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state: Pick<TaskStore, '_allTasks' | '_allProjects' | '_allSections' | '_allAreas'>, reference = false, retainedContext?: Task): void => {
     const tasks = new Set<string>([
         witness.source.id,
         ...effect.tasks.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
@@ -705,13 +759,13 @@ const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state:
     }
     const projects = new Set<string>([
         ...effect.projects.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
-        ...[witness.source.projectId, effect.guards.selectedProject?.id, effect.guards.reactivation?.projectId,
+        ...[witness.source.projectId, retainedContext?.projectId, effect.guards.selectedProject?.id, effect.guards.reactivation?.projectId,
             effect.tasks.find((row) => row.after.id === witness.source.id)?.after.projectId].filter((id): id is string => Boolean(id)),
     ]);
     const sections = new Set<string>([
         ...effect.sections.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
         ...effect.guards.reactivation?.sectionIds ?? [],
-        ...[witness.source.sectionId, effect.tasks.find((row) => row.after.id === witness.source.id)?.after.sectionId]
+        ...[witness.source.sectionId, retainedContext?.sectionId, effect.tasks.find((row) => row.after.id === witness.source.id)?.after.sectionId]
             .filter((id): id is string => Boolean(id)),
     ]);
     if (reference) for (const section of state._allSections) if (sections.has(section.id)) projects.add(section.projectId);
@@ -730,6 +784,7 @@ const readChecklistPrepared = (
     input: unknown,
     validateField: (field: TaskDraftField, value: unknown) => boolean,
     selection?: ChecklistSelection,
+    boardCompletion = false,
 ): NativePreparedChecklistWrite | OwnedChecklistProof | null => {
     const envelope = detach(input, selection ? 16 * 1024 * 1024 : LIMIT_BYTES);
     if (!isRecord(envelope) || !exact(envelope, ['request', 'prepared']) || !isRecord(envelope.prepared)) return null;
@@ -794,7 +849,7 @@ const readChecklistPrepared = (
     if (isSave(request)) {
         if (!validNativeTaskDraftBases(witness.source, draftRequest(request))
             || !same(toChecklist(witness.source.checklist), request.checklist.base)
-            || !directIsBound(witness.source, request, witness, selection)
+            || !directIsBound(witness.source, request, witness, selection, boardCompletion)
             || (isHistoryRowRequest(request) && !validHistoryRowSource(witness.source, request))
             || ((witness.source.status === 'reference' || request.patch.status === 'reference')
                 && (request.patch.priority || request.patch.timeEstimate))) return null;
@@ -803,7 +858,7 @@ const readChecklistPrepared = (
         || witness.directClears.length > 0 || witness.ids.length > 0
         || witness.recurrenceProjection !== null) return null;
     try {
-        const planned = plan(kind, request, witness, false, false, selection);
+        const planned = plan(kind, request, witness, false, false, selection, boardCompletion);
         if (noop) {
             if (!isSave(request) || request.intent || planned.effect.tasks.length || planned.effect.projects.length
                 || planned.effect.sections.length || !validRawTask(raw.rawBefore, request.id)
@@ -823,14 +878,14 @@ const readChecklistPrepared = (
         return null;
     }
 };
-const readPrepared = (input: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativePreparedChecklistWrite | null =>
-    readChecklistPrepared(input, validateField) as NativePreparedChecklistWrite | null;
+const readPrepared = (input: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean, boardCompletion = false): NativePreparedChecklistWrite | null =>
+    readChecklistPrepared(input, validateField, undefined, boardCompletion) as NativePreparedChecklistWrite | null;
 
 /** The actual SQLite display codec followed by the normal load projection. */
-export const historyRowLoadProjection = (task: Task, preparedAt: string): Task => {
+export const historyRowLoadProjection = (task: Task, preparedAt: string, temporal?: TaskLoadTemporalContext): Task => {
     const values = taskToSqliteRow(task);
     const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, values[index]]));
-    return normalizeTaskForLoad(mapSqliteTaskRow(row), preparedAt);
+    return normalizeTaskForLoad(mapSqliteTaskRow(row), preparedAt, temporal);
 };
 const validReferenceRawTask = (task: unknown, id: string): task is Task => isRecord(task)
     && validRawTask({ ...task, tags: task.tags ?? [], contexts: task.contexts ?? [] }, id);
@@ -1052,26 +1107,29 @@ const readCompletion = (value: unknown,
     validateField: (field: TaskDraftField, value: unknown) => boolean): NativeTaskCompletionEnvelope | null => {
     const envelope = detach(value, COMPLETION_BYTES);
     if (!isRecord(envelope) || !exact(envelope, ['request', 'prepared']) || !isRecord(envelope.prepared)) return null;
-    const request = readCompletionRequest(envelope.request) ?? readReferenceCompletionRequest(envelope.request);
+    const request = readCompletionRequest(envelope.request) ?? readReferenceCompletionRequest(envelope.request) ?? readBoardCompletionRequest(envelope.request);
     const reference = request?.source === 'reference';
+    const board = request?.source === 'board';
+    const rawCompletion = reference || board;
     const raw = envelope.prepared;
-    if (!request || !exact(raw, ['version', 'kind', 'request', 'checklist', 'notice', 'result', ...(reference ? ['rawBefore'] : [])])
-        || raw.version !== (reference ? 2 : 1) || raw.kind !== (reference ? 'referenceComplete' : 'complete') || !same(raw.request, request)
+    if (!request || !exact(raw, ['version', 'kind', 'request', 'checklist', 'notice', 'result', ...(rawCompletion ? ['rawBefore'] : [])])
+        || raw.version !== (rawCompletion ? 2 : 1) || raw.kind !== (board ? 'boardComplete' : reference ? 'referenceComplete' : 'complete') || !same(raw.request, request)
         || !isRecord(raw.checklist) || !isRecord(raw.notice) || !isRecord(raw.result)
         || !exact(raw.notice, ['message', 'undoLabel'])
         || !validCancelText(raw.notice.message, 512) || !validCancelText(raw.notice.undoLabel, 80)
         || !exact(raw.result, ['id', 'completion']) || !isRecord(raw.result.completion)
         || !exact(raw.result.completion, ['completedAt', 'undoEnabled', 'message', 'undoLabel'])) return null;
     const prepared = raw as unknown as NativePreparedTaskCompletion;
-    const checklist = readPrepared({ request: prepared.checklist.request, prepared: prepared.checklist }, validateField);
+    const checklist = readPrepared({ request: prepared.checklist.request, prepared: prepared.checklist }, validateField, board);
     if (!checklist || checklist.kind !== 'save' || !isSave(checklist.request)
         || !(reference ? checklist.witness.source.status === 'reference'
             && !referenceContainerReadOnly(checklist.witness.source, checklist.witness.lists)
-            && !isProjectedRecurringTaskId(checklist.witness.source.id) : canCompleteNativeTask(checklist.witness.source, checklist.witness.lists.projects))
+            && !isProjectedRecurringTaskId(checklist.witness.source.id) : board ? canCompleteNativeBoardTask(checklist.witness.source, checklist.witness.lists.projects, checklist.witness.lists.sections)
+                : canCompleteNativeTask(checklist.witness.source, checklist.witness.lists.projects))
         || taskRevisionOf(checklist.witness.source) !== request.taskRevision
         || !same(checklist.request, reference ? referenceCompletionSaveRequest(checklist.witness.source, request.requestId)
             : completionSaveRequest(checklist.witness.source, request.requestId))
-        || reference && (prepared.version !== 2 || !validReferenceRawBefore(prepared.rawBefore, checklist.effect, checklist.witness.preparedAt))) return null;
+        || rawCompletion && (prepared.version !== 2 || !validReferenceRawBefore(prepared.rawBefore, checklist.effect, checklist.witness.preparedAt))) return null;
     const after = checklist.effect.tasks.find((row) => row.after.id === request.id)?.after;
     const result = prepared.result;
     return after && after.status === 'done' && typeof after.completedAt === 'string'
@@ -1113,18 +1171,22 @@ const planCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: W
     return { ...effect, tasks: [...effect.tasks, { before: child, after: tombstone }] };
 };
 /** Exactly RN's delete-follow-up, moveTask, then conditional Focus update. */
-const planReferenceCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: Witness): PreparedChecklistEffect => {
+const planRawCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: Witness): PreparedChecklistEffect => {
+    const board = completion.prepared.kind === 'boardComplete';
     const child = ownedCompletionChild(completion);
     let lists = witness.lists;
     if (child) {
         const current = lists.tasks.find((row) => row.id === child.id);
         if (!current || current.deletedAt || current.purgedAt
-            || !sameSavedTask(current, historyRowLoadProjection(child, witness.preparedAt))) throw new Error('Recurring follow-up changed');
+            || !sameSavedTask(current, board ? child : historyRowLoadProjection(child, witness.preparedAt))) throw new Error('Recurring follow-up changed');
         const [tombstone] = planTaskMutations({ tasks: [current], state: {}, now: witness.preparedAt,
             deviceId: deviceId(witness), buildUpdates: (_task, context) => ({ deletedAt: context.now }) });
         lists = { ...lists, tasks: lists.tasks.map((row) => row.id === child.id ? tombstone : row) };
     }
-    const moved = plan('save', completion.prepared.checklist.request, { ...witness, lists }, false, true).effect;
+    const moveWitness = board ? { ...witness, lists,
+        direct: { status: completion.prepared.checklist.witness.source.status, isFocusedToday: false },
+        directClears: ['focusOrder'] } : { ...witness, lists };
+    const moved = plan('save', completion.prepared.checklist.request, moveWitness, false, true).effect;
     let tasks = lists.tasks.map((row) => moved.tasks.find((item) => item.after.id === row.id)?.after ?? row);
     const starred = completion.prepared.checklist.witness.source.isFocusedToday === true;
     if (starred && witness.focusCount < witness.focusLimit) {
@@ -1145,8 +1207,10 @@ const readCompletionUndo = (value: unknown,
     const raw = envelope.prepared;
     const completion = readCompletion(raw.completion, validateField);
     const reference = completion?.prepared.kind === 'referenceComplete';
-    if (!request || !exact(raw, ['version', 'kind', 'request', 'completion', 'witness', 'effect', 'result', ...(reference ? ['rawBefore'] : [])])
-        || raw.version !== (reference ? 2 : 1) || raw.kind !== (reference ? 'referenceCompleteUndo' : 'undo') || !same(raw.request, request)
+    const board = completion?.prepared.kind === 'boardComplete';
+    const rawCompletion = reference || board;
+    if (!request || !exact(raw, ['version', 'kind', 'request', 'completion', 'witness', 'effect', 'result', ...(rawCompletion ? ['rawBefore'] : [])])
+        || raw.version !== (rawCompletion ? 2 : 1) || raw.kind !== (board ? 'boardCompleteUndo' : reference ? 'referenceCompleteUndo' : 'undo') || !same(raw.request, request)
         || !completion || !same(raw.completion, completion) || request.completionRequestId !== completion.request.requestId
         || !isRecord(raw.witness) || !isRecord(raw.effect) || !isRecord(raw.result)
         || !exact(raw.result, ['id'])) return null;
@@ -1191,11 +1255,12 @@ const readCompletionUndo = (value: unknown,
         || !Number.isSafeInteger(witness.focusLimit) || witness.focusLimit < 1
         || witness.focusLimit !== normalizeFocusTaskLimit((witness.settings.gtd as { focusTaskLimit?: number } | undefined)?.focusTaskLimit)
         || (reference && referenceContainerReadOnly(witness.source, witness.lists))
+        || (board && !boardUndoContainerMatches(completion, witness.source, witness.lists))
         || !same(restoreClears(witness.direct, witness.directClears), reference ? { status: 'reference' } : completionUndoDirect(completion, witness))
         || prepared.result.id !== witness.source.id) return null;
     try {
-        return same(reference ? planReferenceCompletionUndo(completion, witness) : planCompletionUndo(completion, witness), prepared.effect)
-            && (!reference || prepared.version === 2 && validReferenceRawBefore(prepared.rawBefore, prepared.effect, witness.preparedAt))
+        return same(rawCompletion ? planRawCompletionUndo(completion, witness) : planCompletionUndo(completion, witness), prepared.effect)
+            && (!rawCompletion || prepared.version === 2 && validReferenceRawBefore(prepared.rawBefore, prepared.effect, witness.preparedAt))
             ? envelope as NativeTaskCompletionUndoEnvelope : null;
     } catch { return null; }
 };
@@ -1262,9 +1327,9 @@ const readCancellationUndoProof = (value: unknown,
 const readPreparedUndo = (value: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean): NativeTaskCancellationUndoEnvelope | null =>
     readCancellationUndoProof(value, validateField) as NativeTaskCancellationUndoEnvelope | null;
 
-const rawWriteEffect = (envelope: NativeRawWriteEnvelope): PreparedChecklistEffect => envelope.prepared.kind === 'referenceCompleteUndo'
+const rawWriteEffect = (envelope: NativeRawWriteEnvelope): PreparedChecklistEffect => (envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo')
     ? envelope.prepared.effect : envelope.prepared.checklist.effect;
-const rawWriteWitness = (envelope: NativeRawWriteEnvelope): Witness => envelope.prepared.kind === 'referenceCompleteUndo'
+const rawWriteWitness = (envelope: NativeRawWriteEnvelope): Witness => (envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo')
     ? envelope.prepared.witness : envelope.prepared.checklist.witness;
 const historyRawSource = (prepared: NativeBoundHistoryRowEnvelope['prepared']): Task =>
     prepared.kind === 'referenceStatus' ? prepared.rawBeforeTask : prepared.rawBefore;
@@ -1274,6 +1339,8 @@ const rawWritePrefix = (envelope: NativeHistoryRowEnvelope | NativeRawReferenceE
         case 'referenceStatus': return 'referenceTaskStatus';
         case 'referenceComplete': return 'referenceTaskCompletion';
         case 'referenceCompleteUndo': return 'referenceTaskCompletionUndo';
+        case 'boardComplete': return 'boardTaskCompletion';
+        case 'boardCompleteUndo': return 'boardTaskCompletionUndo';
         case 'referenceBackdate': return 'referenceTaskBackdate';
         case 'referenceDestination': return 'referenceTaskDestination';
         case 'doneStatus': return 'doneTaskStatus';
@@ -1299,6 +1366,12 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
     const checkReferenceAtomicAuthority = (envelope: NativeRawReferenceEnvelope, authority: PreparedAreaAuthority): NativeHostResult<null> => {
         const prepared = envelope.prepared; const effect = rawWriteEffect(envelope); const witness = rawWriteWitness(envelope);
         const data = authority.snapshot;
+        const board = prepared.kind === 'boardComplete' || prepared.kind === 'boardCompleteUndo';
+        if (board) {
+            if (!sameBoardCompletionContainer(witness.source, witness.lists, data)
+                || prepared.kind === 'boardCompleteUndo' && !sameBoardCompletionContainer(prepared.completion.prepared.checklist.witness.source, witness.lists, data))
+                return fail('STALE_REVISION', 'Board completion container changed since preparation');
+        }
         for (const bound of prepared.rawBefore.tasks) {
             const current = data.tasks.filter((row) => row.id === bound.id);
             if (bound.before === null ? current.length !== 0 : current.length !== 1 || !rawReadTaskSnapshot(current[0]) || !sameRawHistoryRowTask(rawReadTaskSnapshot(current[0])!, bound.before))
@@ -1320,19 +1393,20 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const source = lists.tasks.find((row) => row.id === witness.source.id);
             const memory = useTaskStore.getState()._tasksById.get(witness.source.id);
             if (!source || !memory || source.deletedAt || source.purgedAt || deps.isReadOnly(memory)
-                || referenceContainerReadOnly(source, lists)) return fail('STALE_REVISION', 'Reference source is no longer writable');
+                || (board ? !boardCompletionContainer(source, lists) : referenceContainerReadOnly(source, lists))) return fail('STALE_REVISION', 'Reference source is no longer writable');
             const currentWitness = { ...witness, source, lists, settings: data.settings,
                 deviceIdBefore: data.settings.deviceId ?? null,
                 focusCount: countFocusedTasksBeforeBoundary(lists.tasks, witness.futureBoundary),
                 focusLimit: normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit) };
-            const current = prepared.kind === 'referenceCompleteUndo' ? planReferenceCompletionUndo(prepared.completion, currentWitness)
-                : plan('save', prepared.checklist.request, currentWitness).effect;
+            const current = prepared.kind === 'boardCompleteUndo' || prepared.kind === 'referenceCompleteUndo'
+                ? planRawCompletionUndo(prepared.completion, currentWitness)
+                : plan('save', prepared.checklist.request, currentWitness, false, false, undefined, prepared.kind === 'boardComplete').effect;
             return same(current, effect) ? { ok: true, value: null } : fail('STALE_REVISION', 'Reference guards changed since preparation');
         } catch { return fail('STALE_REVISION', 'Reference destination or recurring follow-up changed'); }
     };
     const checkHistoryRowAuthority = (envelope: NativeRawWriteEnvelope,
     authority: PreparedAreaAuthority): NativeHostResult<null> => {
-        if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'referenceDestination')
+        if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardComplete' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'referenceDestination')
             return checkReferenceAtomicAuthority(envelope as NativeRawReferenceEnvelope, authority);
         const history = envelope as NativeBoundHistoryRowEnvelope;
         const prepared = history.prepared;
@@ -1376,7 +1450,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         } catch { return fail('STALE_REVISION', `${reference ? 'Reference Next' : 'Done status'} destination changed since preparation`); }
     };
     const applyHistoryRowOverlay = async (envelope: NativeRawWriteEnvelope, authority: PreparedAreaAuthority) => {
-        if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'referenceDestination')
+        if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardComplete' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'referenceBackdate' || envelope.prepared.kind === 'referenceDestination')
             return useTaskStore.getState().commitPreparedChecklistEffect(rawWriteEffect(envelope),
                 { requireBefore: true, authority, rawBefore: envelope.prepared.rawBefore });
         const history = envelope as NativeBoundHistoryRowEnvelope; const effect = history.prepared.checklist.effect;
@@ -1452,9 +1526,9 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return { ok: false, error: { code: 'ACTION_FAILED', message } };
         };
         const confirmed = await historyRowReceipts.run(envelope.request.requestId, payload, async () => {
-            if (bound.prepared.kind === 'referenceCompleteUndo') {
+            if (bound.prepared.kind === 'referenceCompleteUndo' || bound.prepared.kind === 'boardCompleteUndo') {
                 const completion = bound.prepared.completion;
-                const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON(['referenceTaskCompletion', completion]));
+                const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON([completion.prepared.kind === 'boardComplete' ? 'boardTaskCompletion' : 'referenceTaskCompletion', completion]));
                 if (!confirmed?.ok || !same(confirmed.value, completion.prepared.result)) return fail('STALE_REVISION', 'Completion has no saved request receipt');
             }
             if (useTaskStore.getState().persistenceFailure)
@@ -1489,7 +1563,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 } else if (envelope.prepared.kind === 'referenceDestination') {
                     logInfo('Native Reference Task destination confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: 'v1.3.4/ios-reference-destination', outcome: 'moved' } });
-                } else {
+                } else if (envelope.prepared.kind !== 'boardComplete' && envelope.prepared.kind !== 'boardCompleteUndo') {
                     logInfo(envelope.prepared.kind === 'doneStatus' ? 'Native Done Task status confirmed'
                         : envelope.prepared.kind === 'doneCompletedAt' ? 'Native Done completion time confirmed' : 'Native Archive completion time confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: envelope.prepared.kind === 'doneStatus'
@@ -1502,7 +1576,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         return confirmed;
     };
     const prepareChecklist = (kind: 'save' | 'reset', input: unknown, selection?: ChecklistSelection,
-        durable?: { data: AppData; at: string }): NativeHostResult<NativeChecklistPreparation | { kind: 'prepared'; prepared: NativePreparedOwnedCompleteChecklistSave }
+        durable?: { data: AppData; at: string }, boardCompletion = false): NativeHostResult<NativeChecklistPreparation | { kind: 'prepared'; prepared: NativePreparedOwnedCompleteChecklistSave }
             | { kind: 'noop'; prepared: NativeOwnedCompleteChecklistNoop }> => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
@@ -1548,7 +1622,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const preparedAt = durable?.at ?? new Date().toISOString();
             const boundary = futureBoundary(preparedAt);
             const device = ensureDeviceId(state.settings);
-            const direct = isSave(request) ? directSaveUpdates(task, request, preparedAt, selection) : {};
+            const direct = isSave(request) ? directSaveUpdates(task, request, preparedAt, selection, boardCompletion) : {};
             if (!direct) return fail('INVALID_INPUT', 'Checklist edit cannot produce a task update');
             if (isSave(request) && request.intent === 'skip'
                 && !canSkipRecurringTaskOccurrence({ ...task, ...direct })) {
@@ -1586,21 +1660,21 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 ...(cancelTranslator ? { cancelMessage: resolveI18nText(cancelTranslator, 'task.cancelledWithRestore'),
                     cancelUndoLabel: resolveI18nText(cancelTranslator, 'common.undo') } : {}),
             };
-            let first = plan(kind, request, witness, true, false, selection);
+            let first = plan(kind, request, witness, true, false, selection, boardCompletion);
             const noop = Boolean(selection && !first.effect.tasks.length && !first.effect.projects.length && !first.effect.sections.length);
             if (noop) {
                 witness.deviceIdToInitialize = null;
-                first = plan(kind, request, witness, false, false, selection);
+                first = plan(kind, request, witness, false, false, selection, boardCompletion);
             }
-            reduceWitness(witness, first.effect, state, isReferenceMenuRequest(request));
-            const bounded = plan(kind, request, witness, false, false, selection);
+            reduceWitness(witness, first.effect, state, isReferenceMenuRequest(request) || boardCompletion);
+            const bounded = plan(kind, request, witness, false, false, selection, boardCompletion);
             if (!same(first, bounded)) return fail('INVALID_INPUT', 'Checklist effect exceeds the bounded witness');
             const frozen = detach(JSON.parse(JSON.stringify({ version: selection ? 2 : 1, kind: noop ? 'noop' : kind, request, witness,
                 ...(!noop ? { effect: bounded.effect } : {}), result: bounded.result,
                 ...(selection && durable ? { rawBefore: noop
                     ? rawReadTaskSnapshot(durable.data.tasks.find((row) => row.id === request.id)!)
                     : bindRawChecklistRows(bounded.effect, durable.data) } : {}) })), selection ? 16 * 1024 * 1024 : LIMIT_BYTES);
-            const checked = frozen && readChecklistPrepared({ request, prepared: frozen }, deps.validateField, selection);
+            const checked = frozen && readChecklistPrepared({ request, prepared: frozen }, deps.validateField, selection, boardCompletion);
             if (!checked) {
                 return fail('INVALID_INPUT', 'Checklist effect cannot produce a valid prepared journal');
             }
@@ -1612,8 +1686,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return fail('INVALID_INPUT', 'Checklist could not be prepared');
         }
     };
-    const prepare = (kind: 'save' | 'reset', input: unknown): NativeHostResult<NativeChecklistPreparation> =>
-        prepareChecklist(kind, input) as NativeHostResult<NativeChecklistPreparation>;
+    const prepare = (kind: 'save' | 'reset', input: unknown, retainInferredParent = false): NativeHostResult<NativeChecklistPreparation> =>
+        prepareChecklist(kind, input, undefined, undefined, retainInferredParent) as NativeHostResult<NativeChecklistPreparation>;
     const commitEffect = async <T>(effect: PreparedChecklistEffect, result: T): Promise<NativeHostResult<T>> => {
         const applied = await useTaskStore.getState().commitPreparedChecklistEffect(effect);
         if (!applied.success) return fail('STALE_REVISION', applied.error ?? 'Prepared task change conflicts with current data');
@@ -1631,13 +1705,25 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return applied.success ? { ok: true, value: result }
                 : fail('STALE_REVISION', applied.error ?? 'Prepared task change conflicts with current data');
         });
-    const prepareReferenceCompletion = async (input: NativeReferenceTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>> => {
-        const request = readReferenceCompletionRequest(input);
-        if (!request) return fail('INVALID_INPUT', 'Reference completion request is malformed');
-        const source = readHistoryRowSource({ id: request.id, taskRevision: request.taskRevision }, false, true);
+    const prepareRawCompletion = async (input: NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>> => {
+        const board = input.source === 'board';
+        const request = board ? readBoardCompletionRequest(input) : readReferenceCompletionRequest(input);
+        if (!request) return fail('INVALID_INPUT', 'Completion source request is malformed');
+        const ready = deps.readiness(); if (!ready.ok) return ready;
+        const state = useTaskStore.getState();
+        const matches = state._allTasks.filter(row => row.id === request.id);
+        const task = matches.length === 1 ? matches[0] : null;
+        const source = board ? !task ? fail('TASK_NOT_FOUND', 'Board task not found')
+            : taskRevisionOf(task) !== request.taskRevision ? fail('STALE_REVISION', 'Board task changed since it was shown')
+            : !canCompleteNativeBoardTask(task, state._allProjects, state._allSections, deps.isReadOnly(task))
+                ? fail('INVALID_INPUT', 'Board task cannot be completed') : { ok: true as const, value: task }
+            : readHistoryRowSource({ id: request.id, taskRevision: request.taskRevision }, false, true);
         if (!source.ok) return source;
         const read = await readAreaDurableData(false, true); if (!read.ok) return read;
-        const planned = prepare('save', referenceCompletionSaveRequest(source.value, request.requestId));
+        if (board && !sameBoardCompletionContainer(source.value, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot))
+            return fail('STALE_REVISION', 'Board completion container changed before preparation');
+        const planned = prepare('save', board ? completionSaveRequest(source.value, request.requestId)
+            : referenceCompletionSaveRequest(source.value, request.requestId), board);
         if (!planned.ok) return planned;
         if (planned.value.kind !== 'prepared') return fail('INVALID_INPUT', 'Reference completion made no change');
         const checklist = planned.value.prepared;
@@ -1647,18 +1733,18 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         const undoLabel = validCancelText(undo, 80) ? undo : 'Undo';
         const completedAt = checklist.effect.tasks.find((row) => row.after.id === request.id)?.after.completedAt;
         if (!completedAt) return fail('INVALID_INPUT', 'Reference completion has no instant');
-        const prepared = detach({ version: 2 as const, kind: 'referenceComplete' as const, request,
+        const prepared = detach({ version: 2 as const, kind: board ? 'boardComplete' as const : 'referenceComplete' as const, request,
             rawBefore: JSON.parse(JSON.stringify(bindRawChecklistRows(checklist.effect, read.value.authority.snapshot))), checklist,
             notice: { message, undoLabel }, result: { id: request.id, completion: { completedAt, undoEnabled: true, message, undoLabel } } }, COMPLETION_BYTES);
         const envelope = prepared && readCompletion({ request, prepared }, deps.validateField);
         return envelope?.prepared.version === 2 ? { ok: true, value: { kind: 'prepared', prepared: envelope.prepared } }
             : fail('INVALID_INPUT', 'Reference completion cannot produce a valid bounded journal');
     };
-    function prepareCompletion(input: NativeReferenceTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>>;
+    function prepareCompletion(input: NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion & { version: 2 } }>>;
     function prepareCompletion(input: NativeTaskCompletionRequest & { source?: never }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedOrdinaryTaskCompletion }>;
     function prepareCompletion(input: NativeTaskCompletionRequest): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }>>;
     function prepareCompletion(input: NativeTaskCompletionRequest): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletion }>> {
-        if (input?.source === 'reference') return prepareReferenceCompletion(input as NativeReferenceTaskCompletionRequest);
+        if (input?.source === 'reference' || input?.source === 'board') return prepareRawCompletion(input as NativeReferenceTaskCompletionRequest | NativeBoardTaskCompletionRequest);
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const request = readCompletionRequest(input);
@@ -1691,34 +1777,45 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 : fail('INVALID_INPUT', 'Completion cannot produce a valid bounded journal');
 
     }
-    const prepareReferenceCompletionUndo = async (input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope }): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo & { version: 2 } }>> => {
+    const prepareRawCompletionUndo = async (input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope }): Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo & { version: 2 } }>> => {
         const ready = deps.readiness(); if (!ready.ok) return ready;
         const request = readCompletionUndoRequest(input?.request); const completion = readCompletion(input?.completion, deps.validateField);
-        if (!request || !completion || completion.prepared.kind !== 'referenceComplete' || request.completionRequestId !== completion.request.requestId)
+        const board = completion?.prepared.kind === 'boardComplete';
+        if (!request || !completion || (!board && completion.prepared.kind !== 'referenceComplete') || request.completionRequestId !== completion.request.requestId)
             return fail('INVALID_INPUT', 'A confirmed Reference completion and new Undo UUID are required');
-        const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON(['referenceTaskCompletion', completion]));
+        const confirmed = historyRowReceipts.saved<NativeTaskCompletionResult>(completion.request.requestId, canonicalJSON([completion.prepared.kind === 'boardComplete' ? 'boardTaskCompletion' : 'referenceTaskCompletion', completion]));
         if (!confirmed?.ok || !same(confirmed.value, completion.prepared.result)) return fail('STALE_REVISION', 'Completion has no saved request receipt');
         const read = await readAreaDurableData(false, true); if (!read.ok) return read;
         const state = useTaskStore.getState(); const task = state._tasksById.get(completion.request.id);
+        if (board && (!task || !sameBoardCompletionContainer(task, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot)
+            || !sameBoardCompletionContainer(completion.prepared.checklist.witness.source, { projects: state._allProjects, sections: state._allSections }, read.value.authority.snapshot)))
+            return fail('STALE_REVISION', 'Board Undo container changed before preparation');
         const completed = completion.prepared.checklist.effect.tasks.find((row) => row.after.id === completion.request.id)?.after;
         if (!task || !completed || task.deletedAt || task.purgedAt || task.status !== 'done' || task.completedAt !== completed.completedAt
             || (task.rev ?? 0) < (completed.rev ?? 0) || deps.isReadOnly(task)
-            || referenceContainerReadOnly(task, { projects: state._allProjects, sections: state._allSections }))
+            || (board ? !boardUndoContainerMatches(completion, task, { projects: state._allProjects, sections: state._allSections })
+                : referenceContainerReadOnly(task, { projects: state._allProjects, sections: state._allSections })))
             return fail('STALE_REVISION', 'Reference completion was superseded');
         try {
             const at = new Date().toISOString(); const boundary = futureBoundary(at); const device = ensureDeviceId(state.settings);
             const witness: Witness = { source: JSON.parse(JSON.stringify(task)), lists: { tasks: state._allTasks,
                 projects: state._allProjects, sections: state._allSections, areas: state._allAreas },
-                settings: JSON.parse(JSON.stringify({ deviceId: state.settings.deviceId, gtd: { focusTaskLimit: state.settings.gtd?.focusTaskLimit } })),
+                settings: JSON.parse(JSON.stringify({ deviceId: state.settings.deviceId, gtd: { focusTaskLimit: state.settings.gtd?.focusTaskLimit,
+                    ...(board ? { autoArchiveDays: state.settings.gtd?.autoArchiveDays } : {}) } })),
                 preparedAt: at, preparedLocalDay: new Date(Date.parse(at) - new Date(at).getTimezoneOffset() * 60_000).toISOString().slice(0, 10),
                 preparedOffsetMinutes: new Date(at).getTimezoneOffset(), boundaryOffsetMinutes: new Date(boundary).getTimezoneOffset(), futureBoundary: boundary,
                 deviceIdBefore: state.settings.deviceId ?? null, deviceIdToInitialize: device.updated ? device.deviceId : null,
                 recurrenceProjection: null, ids: [], directClears: [], direct: { status: 'reference' },
                 focusCount: countFocusedTasksBeforeBoundary(state.tasks, boundary), focusLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit) };
-            const first = planReferenceCompletionUndo(completion, witness); reduceWitness(witness, first, state, true);
-            const effect = planReferenceCompletionUndo(completion, witness);
+            if (board) {
+                const direct = completionUndoDirect(completion, witness);
+                witness.directClears = cleared(direct); witness.direct = JSON.parse(JSON.stringify(direct));
+            }
+            const first = planRawCompletionUndo(completion, witness);
+            reduceWitness(witness, first, state, true, board ? completion.prepared.checklist.witness.source : undefined);
+            const effect = planRawCompletionUndo(completion, witness);
             if (!same(first, effect)) return fail('INVALID_INPUT', 'Reference Undo exceeds bounded witness');
-            const prepared = detach(JSON.parse(JSON.stringify({ version: 2 as const, kind: 'referenceCompleteUndo' as const, request, completion,
+            const prepared = detach(JSON.parse(JSON.stringify({ version: 2 as const, kind: board ? 'boardCompleteUndo' as const : 'referenceCompleteUndo' as const, request, completion,
                 rawBefore: JSON.parse(JSON.stringify(bindRawChecklistRows(effect, read.value.authority.snapshot))), witness, effect, result: { id: task.id } })), COMPLETION_UNDO_BYTES);
             const envelope = prepared && readCompletionUndo({ request, prepared }, deps.validateField);
             return envelope?.prepared.version === 2 ? { ok: true, value: { kind: 'prepared', prepared: envelope.prepared } }
@@ -1728,7 +1825,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
     function prepareCompletionUndo(input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope & { prepared: NativePreparedOrdinaryTaskCompletion } }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedOrdinaryTaskCompletionUndo }>;
     function prepareCompletionUndo(input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }>>;
     function prepareCompletionUndo(input: { request: NativeTaskCompletionUndoRequest; completion: NativeTaskCompletionEnvelope }): NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }> | Promise<NativeHostResult<{ kind: 'prepared'; prepared: NativePreparedTaskCompletionUndo }>> {
-        if (input?.completion?.prepared?.kind === 'referenceComplete') return prepareReferenceCompletionUndo(input);
+        if (input?.completion?.prepared?.kind === 'referenceComplete' || input?.completion?.prepared?.kind === 'boardComplete') return prepareRawCompletionUndo(input);
 
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -2280,7 +2377,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion is malformed');
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            if (envelope.prepared.kind === 'referenceComplete') return commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope & { prepared: { result: NativeTaskCompletionResult } });
+            if (envelope.prepared.kind === 'referenceComplete' || envelope.prepared.kind === 'boardComplete') return commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope & { prepared: { result: NativeTaskCompletionResult } });
             const result = await commitReceipted(envelope.request.requestId,
                 canonicalJSON(['taskCompletion', envelope]), envelope.prepared.checklist.effect, envelope.prepared.result);
             return result.ok && !same(result.value, envelope.prepared.result)
@@ -2289,8 +2386,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         taskCompletionOutcome(input: NativeTaskCompletionEnvelope): NativeHostResult<NativeTaskCompletionResult | null> {
             const envelope = readCompletion(input, deps.validateField);
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion is malformed');
-            const saved = (envelope.prepared.kind === 'referenceComplete' ? historyRowReceipts : deps.receipts).saved<NativeTaskCompletionResult>(envelope.request.requestId,
-                canonicalJSON([envelope.prepared.kind === 'referenceComplete' ? 'referenceTaskCompletion' : 'taskCompletion', envelope]));
+            const saved = (envelope.prepared.version === 2 ? historyRowReceipts : deps.receipts).saved<NativeTaskCompletionResult>(envelope.request.requestId,
+                canonicalJSON([envelope.prepared.version === 2 ? rawWritePrefix(envelope as NativeRawReferenceEnvelope) : 'taskCompletion', envelope]));
             return saved?.ok && !same(saved.value, envelope.prepared.result)
                 ? fail('INVALID_INPUT', 'Saved completion result does not match its journal')
                 : saved ?? { ok: true, value: null };
@@ -2304,8 +2401,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         taskCompletionUndoOutcome(input: NativeTaskCompletionUndoEnvelope): NativeHostResult<{ id: string } | null> {
             const envelope = readCompletionUndo(input, deps.validateField);
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion Undo is malformed');
-            const saved = (envelope.prepared.kind === 'referenceCompleteUndo' ? historyRowReceipts : deps.receipts).saved<{ id: string }>(envelope.request.requestId,
-                canonicalJSON([envelope.prepared.kind === 'referenceCompleteUndo' ? 'referenceTaskCompletionUndo' : 'taskCompletionUndo', envelope]));
+            const saved = (envelope.prepared.version === 2 ? historyRowReceipts : deps.receipts).saved<{ id: string }>(envelope.request.requestId,
+                canonicalJSON([envelope.prepared.version === 2 ? rawWritePrefix(envelope as NativeRawReferenceEnvelope) : 'taskCompletionUndo', envelope]));
             return saved?.ok && !same(saved.value, envelope.prepared.result)
                 ? fail('INVALID_INPUT', 'Saved completion Undo result does not match its journal')
                 : saved ?? { ok: true, value: null };
@@ -2315,7 +2412,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             if (!envelope) return fail('INVALID_INPUT', 'Prepared completion Undo is malformed');
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            if (envelope.prepared.kind === 'referenceCompleteUndo') return commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope);
+            if (envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo') return commitHistoryRowWrite(envelope as NativeRawReferenceEnvelope);
             const payload = canonicalJSON(['taskCompletionUndo', envelope]);
             const savedUndo = deps.receipts.saved<{ id: string }>(envelope.request.requestId, payload);
             if (savedUndo) return savedUndo.ok && !same(savedUndo.value, envelope.prepared.result)

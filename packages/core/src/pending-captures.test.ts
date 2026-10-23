@@ -428,3 +428,80 @@ describe('Android capture description persistence', () => {
         expect(queue.stored.size).toBe(0);
     });
 });
+
+
+describe('Android widget capture destination', () => {
+    it.each(['text', 'audio'] as const)('validates optional %s metadata without losing old or invalid captures', (kind) => {
+        const body = { kind, id: CAPTURE_ID, title: 'Keep title', audioPath: 'file:///owned.wav', note: 'Keep note' };
+        for (const status of ['inbox', 'next', 'waiting', 'someday']) {
+            expect(parsePendingCapture(JSON.stringify({ ...body, defaultStatus: status, status })))
+                .toMatchObject({ defaultStatus: status, status });
+        }
+        for (const invalid of ['done', 'archived', 'reference', 'NEXT', '', null, 42, {}, ['next']]) {
+            const parsed = parsePendingCapture(JSON.stringify({ ...body, defaultStatus: invalid, status: invalid }));
+            expect(parsed).toMatchObject({ title: 'Keep title', note: 'Keep note' });
+            expect(parsed).not.toHaveProperty('defaultStatus');
+            expect(parsed).not.toHaveProperty('status');
+        }
+        expect(parsePendingCapture(JSON.stringify(body))).not.toHaveProperty('status');
+    });
+
+    it.each(['text', 'audio'] as const)('applies fallback < default < quick syntax < explicit status to %s captures', async (kind) => {
+        for (const [defaultStatus, status, syntax, expected] of [
+            [undefined, undefined, '', 'inbox'],
+            ['next', undefined, '', 'next'],
+            ['waiting', undefined, '', 'waiting'],
+            ['someday', undefined, '', 'someday'],
+            ['waiting', undefined, '/next', 'next'],
+            ['someday', 'inbox', '/next', 'inbox'],
+            ['inbox', 'inbox', '/next', 'inbox'],
+            ['next', 'waiting', '/next', 'waiting'],
+            ['next', undefined, '/due:INVALID_DATE', 'next'],
+            ['next', 'someday', '/due:INVALID_DATE', 'someday'],
+        ] as const) {
+            await openStore([]);
+            const title = `Capture ${syntax}`.trim();
+            const queue = fakeQueue({ [`${AUDIO_ID}.json`]: {
+                kind, id: AUDIO_ID, title, defaultStatus, status, source: 'android-quick-capture',
+                ...(kind === 'audio' ? { audioPath: `file:///owned/${AUDIO_ID}.wav` } : {}),
+            } });
+            const deps = storeDeps(queue.port, { audio: {
+                resolvePath: (capture) => capture.audioPath,
+                transcribe: async () => 'Transcript', delete: async () => undefined,
+            } });
+            expect(await drainPendingCaptureQueue(deps)).toBe(1);
+            expect(saved().tasks).toHaveLength(1);
+            expect(saved().tasks[0].status).toBe(expected);
+            expect(deps.log.info).toHaveBeenCalledWith('Android quick capture destination ingested', {
+                scope: 'capture', force: true, extra: {
+                    releaseCheck: 'v1.3.7/android-widget-capture-status', kind, destination: expected,
+                    selection: status ? 'explicit' : 'default', outcome: 'created',
+                },
+            });
+        }
+    });
+
+    it.each(['text', 'audio'] as const)('keeps the %s destination through failed ingestion and cleanup replay', async (kind) => {
+        await openStore([]);
+        const queue = fakeQueue({ [`${AUDIO_ID}.json`]: {
+            kind, id: AUDIO_ID, title: 'Capture /next', source: 'android-quick-capture',
+            defaultStatus: 'someday', status: 'waiting', audioPath: `file:///owned/${AUDIO_ID}.wav`,
+        } });
+        const audio = { resolvePath: (capture: { audioPath: string }) => capture.audioPath, transcribe: vi.fn(async () => 'Transcript'), delete: vi.fn(async () => undefined) };
+        expect(await drainPendingCaptureQueue(storeDeps(queue.port, { audio, addTask: async () => ({ success: false }) }))).toBe(0);
+        expect(queue.stored.size).toBe(1);
+        queue.failDelete.add(`${AUDIO_ID}.json`);
+        expect(await drainPendingCaptureQueue(storeDeps(queue.port, { audio }))).toBe(0);
+        expect(saved().tasks[0].status).toBe('waiting');
+        await restartStore();
+        await useTaskStore.getState().updateTask(AUDIO_ID, { status: 'someday' });
+        await flushPendingSave();
+        const replay = storeDeps(queue.port, { audio });
+        expect(await drainPendingCaptureQueue(replay)).toBe(1);
+        expect(saved().tasks).toHaveLength(1);
+        expect(saved().tasks[0].status).toBe('someday');
+        expect(replay.log.info).toHaveBeenCalledWith('Android quick capture destination ingested', expect.objectContaining({
+            extra: expect.objectContaining({ destination: 'someday', outcome: 'already-created' }),
+        }));
+    });
+});

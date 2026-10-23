@@ -11,6 +11,7 @@ import tech.dongdongbh.mindwtr.pilot.core.BytecodeCache
 import tech.dongdongbh.mindwtr.pilot.core.CoreBundle
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import tech.dongdongbh.mindwtr.pilot.core.DiagnosticsLogFile
+import tech.dongdongbh.mindwtr.pilot.core.HostAppSearch
 import tech.dongdongbh.mindwtr.pilot.core.HostCalendars
 import tech.dongdongbh.mindwtr.pilot.core.HostFiles
 import tech.dongdongbh.mindwtr.pilot.core.HostInstaller
@@ -19,6 +20,7 @@ import tech.dongdongbh.mindwtr.pilot.core.HostNetwork
 import tech.dongdongbh.mindwtr.pilot.core.HostWidgets
 import tech.dongdongbh.mindwtr.pilot.core.LegacyRnStoreGuard
 import tech.dongdongbh.mindwtr.pilot.core.RnKeyValue
+import tech.dongdongbh.mindwtr.pilot.core.debugProperty
 import tech.dongdongbh.mindwtr.pilot.core.traced
 import java.io.File
 import java.util.Locale
@@ -119,13 +121,14 @@ internal object ProcessCoreHost {
         val installer = HostInstaller(app.filesDir, app.cacheDir)
         val keyValue = RnKeyValue(app.getDatabasePath("RKStorage"))
         val runtime = CoreHost(legacy?.database ?: File(app.filesDir, "mindwtr-native-dev.db"), legacy?.let { app.dataDir }, HostIo(app),
-            File(app.filesDir, "journal"), deviceStore(app), File(app.filesDir, DiagnosticsLogFile.RELATIVE_PATH),
+            File(app.filesDir, "journal"), deviceStore(app, keyValue), File(app.filesDir, DiagnosticsLogFile.RELATIVE_PATH),
             keyValue, HostFiles(app.filesDir, app.cacheDir, content = AndroidContentSource(app)), installer,
             ReminderAlarms(app, keyValue, checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) }),
             HostWidgets(app) { appState },
             scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
             backups = BackupOperations(File(app.noBackupFilesDir, "backup-operations"), File(app.filesDir, "snapshots"), maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
-            calendars = HostCalendars(app))
+            calendars = HostCalendars(app),
+            appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)))
         try {
             runtime.start(coreBundle(app), legacy?.bootState ?: "", legacy?.backup ?: "", legacy?.preflight == true)
             // After the boot, so the line reaches RN's diagnostics log with the settings loaded.
@@ -317,9 +320,12 @@ internal object ProcessCoreHost {
             if (deferSync) deferredSync.set {
                 startSync(app, runtime)
                 startReminders(runtime)
+                startAppSearch(runtime)
             } else {
                 startSyncWithScreen(app, runtime)
                 startReminders(runtime)
+                // A screen's process only: a CoreWork job's headless process never rebuilds the index (RN starts it at its layout).
+                if (screenShown) startAppSearch(runtime)
             }
         },
         refreshWidgets = { refreshWidgets(runtime) },
@@ -334,6 +340,17 @@ internal object ProcessCoreHost {
     @Volatile private var application: Application? = null
     /** Done once the reminder alarms started (with sync, after the first screen's content): the permission question waits for it. */
     val remindersStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    /**
+     * Android system search, started with the reminder alarms (after the validated load, the journal replay and the queue drain),
+     * on a thread of its own: core reindexes in full and indexes live when the switch is on, or finishes a wipe a switch-off owes.
+     * A failure never fails the boot.
+     */
+    private fun startAppSearch(runtime: CoreHost) {
+        Thread({
+            runCatching { runtime.appSearchStart() }.onFailure { Log.w(CoreHost.TAG, "Native Android system search start failed ${failureForLog(it)}") }
+        }, "mindwtr-app-search-start").start()
+    }
 
     /**
      * Started where sync starts, after the validated load, the journal replay and the queue drain: RN's old alarms are cancelled
@@ -378,9 +395,12 @@ internal object ProcessCoreHost {
         refreshWidgets(runtime)
     }
 
-    /** The home-screen widgets published from the store now if what they show changed, off the caller's thread. */
-    private fun refreshWidgets(runtime: CoreHost) = widgetThread.execute {
-        runCatching { runtime.refreshWidgets() }.onFailure { Log.w(CoreHost.TAG, "Native Android widget refresh failed", it) }
+    /**
+     * The home-screen widgets published from the store now if what they show changed, off the caller's thread; [leave]: only a
+     * change still waiting (RN's flush on leaving).
+     */
+    private fun refreshWidgets(runtime: CoreHost, leave: Boolean = false) = widgetThread.execute {
+        runCatching { runtime.refreshWidgets(leave) }.onFailure { Log.w(CoreHost.TAG, "Native Android widget refresh failed", it) }
     }
 
     /** MainActivity resumed ("active") or paused ("background"): core's triggers sync on resume and on leaving. */
@@ -395,6 +415,13 @@ internal object ProcessCoreHost {
             val app = application
             val runtime = boot?.takeIf { it.isDone }?.let { task -> runCatching { task.get() }.getOrNull() }
             if (app != null && runtime != null && reminders.reply != null) PersistentCapture.restore(app, runtime)
+            // Debug builds' system search check (check-app-search-device): the index's ids on each resume, never titles, in a
+            // cache file (a logcat line stops near 4 KiB, which a large library's ids pass).
+            if (BuildConfig.DEBUG && runtime != null && debugProperty("appsearch_dump") == "1") {
+                runCatching { runtime.appSearchIds().optJSONArray("ids").also { File(app?.cacheDir, "appsearch-debug-ids.json").writeText(it.toString()) } }
+                    .onSuccess { Log.i(CoreHost.TAG, "Native Android system search debug ids written count=${it?.length()}") }
+                    .onFailure { Log.w(CoreHost.TAG, "Native Android system search debug read failed ${failureForLog(it)}") }
+            }
         }
         if (state == appState) return
         appState = state
@@ -409,8 +436,9 @@ internal object ProcessCoreHost {
                 widgetThread.schedule({ deferredWidgets.takeIf(generation)?.let { publishHeldWidgets(it, "resume-fallback") } },
                     WIDGET_FALLBACK_MS, TimeUnit.MILLISECONDS)
             } else {
-                deferredWidgets.clear()
-                refreshWidgets(runtime)
+                // A publication still held (this resume left before its first content or fallback) runs in full; else only a
+                // change still waiting is published (RN's flush on leaving).
+                refreshWidgets(runtime, leave = !deferredWidgets.leave())
             }
         }
         val runtime = syncHost ?: return

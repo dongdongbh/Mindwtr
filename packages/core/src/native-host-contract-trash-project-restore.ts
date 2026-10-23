@@ -13,7 +13,7 @@ import type { PreparedTrashProjectRestore } from './store-types';
 import type { Area, Project } from './types';
 
 export type NativeTrashProjectRestoreRequest = PreparedTrashProjectRestore['request'];
-export type NativePreparedTrashProjectRestore = PreparedTrashProjectRestore & { version: 1 };
+export type NativePreparedTrashProjectRestore = PreparedTrashProjectRestore & { version: 1 | 2 };
 export type NativeTrashProjectRestorePreparation = { kind: 'prepared'; prepared: NativePreparedTrashProjectRestore };
 export type NativeTrashProjectRestoreEnvelope = { request: NativeTrashProjectRestoreRequest;
     prepared: NativePreparedTrashProjectRestore };
@@ -65,7 +65,7 @@ const readPrepared = (input: unknown): NativeTrashProjectRestoreEnvelope | null 
     const request = readRequest(envelope.request);
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'scope', 'effect', 'deviceIdBefore',
-        'deviceIdToInitialize', 'updateAt', 'result']) || raw.version !== 1
+        'deviceIdToInitialize', 'updateAt', 'result']) || (raw.version !== 1 && raw.version !== 2)
         || !same(raw.request, request) || !record(raw.scope)
         || !exact(raw.scope, ['project', 'tasks', 'sections', 'area'])
         || !Array.isArray(raw.scope.tasks) || !Array.isArray(raw.scope.sections)
@@ -100,7 +100,7 @@ const readPrepared = (input: unknown): NativeTrashProjectRestoreEnvelope | null 
                 || !validSection(pair.before, pair.before.id, request.projectId)
                 || !validSection(pair.after, pair.before.id, request.projectId))) return null;
         const expected = projectRestoreEffect(scope,
-            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.updateAt);
+            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.updateAt, prepared.version);
         return same(expected, effect) ? envelope as NativeTrashProjectRestoreEnvelope : null;
     } catch { return null; }
 };
@@ -133,7 +133,7 @@ export function createTrashProjectRestoreMethods(deps: {
                 sections: state._allSections.filter((section) => section.projectId === target.id),
                 area: state._allAreas.find((area) => area.id === target.areaId) ?? null };
             const updateAt = new Date().toISOString();
-            const prepared = detach<NativePreparedTrashProjectRestore>(JSON.parse(JSON.stringify({ version: 1, request, scope,
+            const prepared = detach<NativePreparedTrashProjectRestore>(JSON.parse(JSON.stringify({ version: 2, request, scope,
                 effect: projectRestoreEffect(scope, device.deviceId, updateAt),
                 deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,

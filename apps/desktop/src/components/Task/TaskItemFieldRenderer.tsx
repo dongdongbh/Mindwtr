@@ -1,4 +1,4 @@
-import { getClipboardImageFiles, getImageExtension } from '../../lib/clipboard-images';
+import { getClipboardImageFiles, getImageExtension, isEmptyPasteEvent, readAsyncClipboardImageFiles } from '../../lib/clipboard-images';
 import { Calendar, CalendarClock, CalendarDays, Navigation, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import {
@@ -514,33 +514,38 @@ export function TaskItemFieldRenderer({
         lastDescriptionPairSelectionRef.current = null;
         applyDescriptionKeyboardResult(next);
     };
+    const pasteDescriptionImages = (textarea: HTMLTextAreaElement, images: File[], text: string) => {
+        const pastedValue = textarea.value;
+        const pastedSelection = { start: textarea.selectionStart, end: textarea.selectionEnd };
+        const files = images.map((file) => new File([file], file.name || `clipboard.${getImageExtension(file)}`, { type: file.type }));
+        void addDroppedFileAttachments(files).then((imported) => {
+            // A collapsed field may unmount while the owning task draft still retains the attachment.
+            if (!descriptionRendererActiveRef.current || !imported || (imported.length === 0 && !text)) return;
+            const value = latestDescriptionRef.current;
+            const start = value === pastedValue ? pastedSelection.start : value.length;
+            const end = value === pastedValue ? pastedSelection.end : value.length;
+            const insertion = `${text}${text ? '\n\n' : ''}${imported.map((attachment) => `![Image](mindwtr://attachment/${attachment.id})`).join('\n\n')}`;
+            const selection = { start: start + insertion.length, end: start + insertion.length };
+            applyDescriptionValue(`${value.slice(0, start)}${insertion}${value.slice(end)}`, { baseSelection: { start, end }, nextSelection: selection });
+            void logInfo('Description clipboard image references inserted', {
+                scope: 'attachment',
+                extra: { releaseCheck: 'v1.3.8/description-clipboard-images', count: imported.length },
+            });
+            if (textarea.isConnected && document.activeElement === textarea) restoreDescriptionTextareaSelection(textarea, selection);
+        }).catch((error) => setDescriptionAudioError(error instanceof Error ? error.message : t('attachments.fileNotReadable')));
+    };
     const handleDescriptionPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
         const images = getClipboardImageFiles(event.clipboardData);
         if (images.length > 0) {
             event.preventDefault();
+            pasteDescriptionImages(event.currentTarget, images, event.clipboardData.getData('text/plain'));
+            return;
+        }
+        if (isEmptyPasteEvent(event.clipboardData)) {
             const textarea = event.currentTarget;
-            const pastedValue = textarea.value;
-            const pastedSelection = { start: textarea.selectionStart, end: textarea.selectionEnd };
-            const text = event.clipboardData.getData('text/plain');
-            const files = images.map((file) => new File([file], file.name || `clipboard.${getImageExtension(file)}`, { type: file.type }));
-            // ponytail: clipboard events carrying images are supported; empty WebKit paste events need the Quick Add fallback.
-            void addDroppedFileAttachments(files).then((imported) => {
-                // ponytail: collapsing Details during import keeps the image as an attachment; skip stale draft callbacks.
-                if (!descriptionRendererActiveRef.current || !imported || (imported.length === 0 && !text)) return;
-                const value = latestDescriptionRef.current;
-                const start = value === pastedValue ? pastedSelection.start : value.length;
-                const end = value === pastedValue ? pastedSelection.end : value.length;
-                const insertion = `${text}${text ? '\n\n' : ''}${imported.map((attachment) => `![Image](mindwtr://attachment/${attachment.id})`).join('\n\n')}`;
-                const selection = { start: start + insertion.length, end: start + insertion.length };
-                applyDescriptionValue(`${value.slice(0, start)}${insertion}${value.slice(end)}`, { baseSelection: { start, end }, nextSelection: selection });
-                if (imported.length > 0) {
-                    void logInfo('Description clipboard image references inserted', {
-                        scope: 'attachments', force: true,
-                        extra: { releaseCheck: 'v1.3.7/description-clipboard-images', count: imported.length },
-                    });
-                }
-                if (textarea.isConnected && document.activeElement === textarea) restoreDescriptionTextareaSelection(textarea, selection);
-            }).catch((error) => setDescriptionAudioError(error instanceof Error ? error.message : t('attachments.fileNotReadable')));
+            void readAsyncClipboardImageFiles().then((files) => {
+                if (files.length > 0 && descriptionRendererActiveRef.current) pasteDescriptionImages(textarea, files, '');
+            });
             return;
         }
         const pastedText = event.clipboardData.getData('text/plain');
@@ -1244,7 +1249,7 @@ export function TaskItemFieldRenderer({
                         t={t}
                         taskId={taskId}
                         checklist={task.checklist}
-                        plainList={editStatus === 'reference'}
+                        isReference={editStatus === 'reference'}
                         resetTaskChecklist={resetTaskChecklist}
                     />
                 </div>

@@ -594,6 +594,14 @@ export class SqliteAdapter {
      */
     protected async afterReadNow(_loaded: (table: SqliteReadTable) => number, _settings: AppData['settings']): Promise<void> {}
 
+    /** A domain transaction changed rows outside the ordinary save/cache pipeline. */
+    protected invalidateWriteBaselineAfterDirectSQL(): void {
+        this.lastSavedFingerprints = null;
+        this.lastReadRows = null;
+        this.lastKnownRowVersions = null;
+        this.lastObservedExternalChangeEpoch = undefined;
+    }
+
     private async loadAllRows(table: 'tasks' | 'projects' | 'sections' | 'areas' | 'people'): Promise<Record<string, unknown>[]> {
         const rows: Record<string, unknown>[] = [];
         try {

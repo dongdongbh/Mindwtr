@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -15,7 +16,7 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, TIME_ESTIMATE_OPTIONS, buildFocusPools, compareProjectsByOrder, planFocusFilterCriterionRemoval, formatFocusTaskLimitText,
-    getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
+    getFocusHiddenByAreaLabel, logInfo, getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
 import { DEFAULT_FOCUS_SORT_BY } from '@mindwtr/core';
 import type { MultiValueFilterMatchMode, SavedFilter, SortField, Task, TaskEnergyLevel } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
@@ -27,7 +28,7 @@ import { AlertCircle, CalendarDays, ChevronDown, ChevronRight, Clock, ArrowRight
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
-import { isTaskVisibleInArea, projectMatchesAreaFilterSelection } from '@mindwtr/core';
+import { isTaskVisibleInArea, taskMatchesAreaFilterSelection, projectMatchesAreaFilterSelection } from '@mindwtr/core';
 import { useAreaVisibility } from '../../hooks/useVisibleTaskContext';
 import { usePersistedViewState } from '../../hooks/usePersistedViewState';
 import { PomodoroPanel } from './PomodoroPanel';
@@ -396,6 +397,7 @@ export function AgendaView() {
     const {
         activeTasksByStatus,
         focusedCount,
+        focusedTasks: globalFocusedTasks,
         projectMap,
         tasksById,
     } = getDerivedState();
@@ -487,7 +489,7 @@ export function AgendaView() {
             .map((project) => ({
                 id: project.id,
                 title: project.title,
-                dotColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || project.color || undefined,
+                dotColor: getProjectAccentColor(project, areaById),
             }));
     }, [activeTasks, areaById, projects]);
     const showNoProjectOption = activeTasks.some((task) => !task.projectId);
@@ -498,9 +500,12 @@ export function AgendaView() {
         t,
         visibility: metadataFilterVisibility,
         savedFilters: savedFocusFilters,
+        rawSavedFilters: settings?.savedFilters,
         onClear: resetFocusSort,
     });
     const {
+        anyDateRange,
+        setAnyDateRange,
         activeSavedFilter,
         activeSavedFilterId,
         applySaved: applySavedSelections,
@@ -605,10 +610,15 @@ export function AgendaView() {
         // The pickers are tri-state here, so a chip's Remove maps back to the
         // hook action that clears that one value rather than to a criteria edit.
         buildSelectionChips(currentFilterCriteria, chipDeps).forEach((chip) => {
+            if (chip.id.startsWith('priority:') && filterSelections.chips.some((item) => item.id === 'preserved:priority')) return;
+            if (chip.id.startsWith('time:') && filterSelections.chips.some((item) => item.id === 'preserved:timeEstimates')) return;
             chips.push({ ...chip, onRemove: () => removeSelectionChip(chip.id) });
         });
+        filterSelections.chips.filter((chip) => chip.id === 'anyDateRange' || chip.id.startsWith('advanced:') || chip.id.startsWith('preserved:')).forEach((chip) => {
+            chips.push({ ...chip, onRemove: chip.onPress });
+        });
         const normalizedLocationFilter = locationFilter.trim();
-        if (normalizedLocationFilter && !activeSavedFilter) {
+        if (normalizedLocationFilter && !activeSavedFilter && !filterSelections.chips.some((chip) => chip.id.startsWith('advanced:location:'))) {
             chips.push({
                 id: `location:${normalizedLocationFilter}`,
                 label: `${resolveText('taskEdit.locationLabel', 'Location')}: ${normalizedLocationFilter}`,
@@ -618,7 +628,7 @@ export function AgendaView() {
         if (activeSavedFilter) {
             // Advanced criteria come from the saved filter, not from the pickers,
             // so they are built from its own criteria and removed through it.
-            chips.push(...buildAdvancedChips(effectiveFilterCriteria, chipDeps).map((chip) => ({
+            chips.push(...buildAdvancedChips({ ...effectiveFilterCriteria, anyDateRange: undefined }, chipDeps).map((chip) => ({
                 ...chip,
                 onRemove: () => removeAdvancedSavedFilterCriterion(chip.id.slice('advanced:'.length)),
             })));
@@ -629,6 +639,7 @@ export function AgendaView() {
         chipDeps,
         currentFilterCriteria,
         effectiveFilterCriteria,
+        filterSelections.chips,
         removeSelectionChip,
         removeAdvancedSavedFilterCriterion,
         resolveText,
@@ -648,11 +659,9 @@ export function AgendaView() {
         void futureStartTick;
         const now = new Date();
         const pools = buildFocusPools({
-            // The starred pool must not inherit the area-visibility narrowing,
-            // so it reads the pre-visibility list; everything else reads the
-            // visible one.
-            tasks: derivedActiveTasks,
+            tasks: globalFocusedTasks,
             visibleTasks: baseActiveTasks,
+            isAreaVisible: (task) => taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectMap, areaById),
             projects,
             criteria: effectiveFilterCriteria,
             now,
@@ -674,7 +683,16 @@ export function AgendaView() {
                     .map((task) => [task.id, safeFormatDate(task.startTime, 'p')]),
             ),
         };
-    }, [baseActiveTasks, derivedActiveTasks, effectiveFilterCriteria, futureStartTick, localDayKey, matchesSearchQuery, projects]);
+    }, [areaById, baseActiveTasks, effectiveFilterCriteria, futureStartTick, globalFocusedTasks, localDayKey, matchesSearchQuery, projectMap, projects, resolvedAreaFilter]);
+
+    const focusHiddenByAreaLabel = getFocusHiddenByAreaLabel(focusPools.selection, t);
+    useEffect(() => {
+        if (!focusPools.selection.hiddenByAreaCount) return;
+        void logInfo('Focus area selection projected', { scope: 'focus', force: true, context: {
+            releaseCheck: 'v1.3.7/focus-area-selection',
+            globalCount: focusPools.selection.globalCount, hiddenByAreaCount: focusPools.selection.hiddenByAreaCount,
+        } });
+    }, [focusPools.selection.globalCount, focusPools.selection.hiddenByAreaCount]);
 
     const getUpcomingAppearsAtLabel = useCallback(
         (taskId: string) => upcomingAppearsAtById.get(taskId),
@@ -951,7 +969,7 @@ export function AgendaView() {
         }));
     }, [collapseOtherSections, setPersistedViewState]);
     const nextActionsCount = sections.nextActions.length;
-    const hasAgendaContent = focusedTasks.length > 0
+    const hasAgendaContent = focusedCount > 0
         || sections.schedule.length > 0
         || sections.nextActions.length > 0
         || sections.upcoming.length > 0
@@ -1050,7 +1068,7 @@ export function AgendaView() {
         </div>
     );
 
-    const todaysFocusSection = focusedTasks.length > 0 ? (
+    const todaysFocusSection = focusedCount > 0 ? (
         <div
             data-testid="todays-focus-section"
             className="rounded-xl border border-border/70 border-l-4 border-l-amber-400 bg-card/70 p-6 shadow-sm dark:border-border/60 dark:border-l-amber-400/80 dark:bg-card/60"
@@ -1074,6 +1092,7 @@ export function AgendaView() {
                 </button>
             </h3>
 
+            {focusHiddenByAreaLabel && <p className="mb-3 text-sm text-muted-foreground" data-testid="focus-hidden-by-area">{focusHiddenByAreaLabel}</p>}
             {expandedSections.focus && <div id="agenda-section-focus">{focusListBody}</div>}
         </div>
     ) : null;
@@ -1133,6 +1152,8 @@ export function AgendaView() {
 
             {shouldRenderFiltersPanel && (
                 <AgendaFiltersPanel
+                    anyDateRange={anyDateRange}
+                    onAnyDateRangeChange={setAnyDateRange}
                     allTokens={allTokens}
                     activeFilterChips={activeFilterChips}
                     canSaveFilter={canSaveFocusPerspective}
@@ -1342,6 +1363,7 @@ export function AgendaView() {
                 )}
 
                 <AgendaProjectSection
+                        areaById={areaById}
                     title={tFallback(t, 'agenda.reviewDueProjects', 'Projects to review')}
                     icon={Folder}
                     onProjectPress={handleOpenReviewProject}

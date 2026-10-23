@@ -40,7 +40,7 @@ const maps = (projects: Project[], areas: Area[]) => [
 
 describe('getTaskAccentColor', () => {
     it('uses an explicitly chosen project color', () => {
-        const [projects, areas] = maps([project({ color: '#f97316', areaId: 'a1' })], [area({ color: '#8b5cf6' })]);
+        const [projects, areas] = maps([project({ colorOverride: '#f97316', areaId: 'a1' })], [area({ color: '#8b5cf6' })]);
         expect(getTaskAccentColor(task({ projectId: 'p1' }), projects, areas)).toBe('#f97316');
     });
 
@@ -62,9 +62,16 @@ describe('getTaskAccentColor', () => {
 });
 
 describe('getProjectAccentColor', () => {
+    it('keeps explicit same-hue and default-grey choices independent of the area', () => {
+        const [, areas] = maps([], [area({ color: '#8b5cf6' })]);
+        expect(getProjectAccentColor(project({ colorOverride: '#8b5cf6', areaId: 'a1' }), areas)).toBe('#8b5cf6');
+        expect(getProjectAccentColor(project({ colorOverride: DEFAULT_PROJECT_COLOR, areaId: 'a1' }), areas)).toBe(DEFAULT_PROJECT_COLOR);
+        expect(getProjectAccentColor(project({ color: '#ef4444', areaId: 'a1' }), areas)).toBe('#8b5cf6');
+        expect(getProjectAccentColor(project({ color: '#ef4444' }), areas)).toBe('#ef4444');
+    });
     it('uses an explicitly chosen project color over the area', () => {
         const [, areas] = maps([], [area({ color: '#8b5cf6' })]);
-        expect(getProjectAccentColor(project({ color: '#f97316', areaId: 'a1' }), areas)).toBe('#f97316');
+        expect(getProjectAccentColor(project({ colorOverride: '#f97316', areaId: 'a1' }), areas)).toBe('#f97316');
     });
 
     it('falls through the never-changed default project color to the area color', () => {

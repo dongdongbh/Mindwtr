@@ -389,9 +389,9 @@ function SwipeableTaskItemInner({
         const promptTasks = allTasks.some((candidate) => candidate.id === completedTaskId)
             ? allTasks.map((candidate) => (candidate.id === completedTaskId ? completedTask : candidate))
             : [...allTasks, completedTask];
-        const promptData = getProjectNextActionPromptData(completedTask, promptTasks, allProjects);
-        if (!promptData) return;
         const allSections = Array.isArray(storeState.sections) ? storeState.sections : [];
+        const promptData = getProjectNextActionPromptData(completedTask, promptTasks, allProjects, allSections);
+        if (!promptData) return;
         setProjectNextActionTitle('');
         setProjectNextActionPrompt({
             candidates: promptData.candidates,

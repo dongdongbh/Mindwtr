@@ -30,13 +30,15 @@ import { assertBulkActionSucceeded } from '@/components/use-task-list-selection'
 import { getBulkActionFailureMessage } from '@/components/task-list-utils';
 import { useToast } from '@/contexts/toast-context';
 import { logError } from '@/lib/app-log';
+import { addHardwareBackPressListener } from '@/lib/hardware-back';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors, ThemeColors } from '@/hooks/use-theme-colors';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
-import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { NavigationContext } from '@react-navigation/native';
 
 function TrashSwipeRow({
   children,
@@ -310,6 +312,18 @@ export default function TrashScreen() {
     setSelectedTaskIds(new Set());
     setSelectedProjectIds(new Set());
   }, []);
+
+  // Android Back leaves selection mode before it leaves the screen (#1415), while Trash is the screen on top.
+  const navigation = useContext(NavigationContext);
+  useEffect(() => {
+    if (!selectionMode) return undefined;
+    const subscription = addHardwareBackPressListener(() => {
+      if (navigation && !navigation.isFocused()) return false;
+      exitSelectionMode();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [exitSelectionMode, navigation, selectionMode]);
 
   const runTrashBulkAction = useCallback(async (
     label: string,

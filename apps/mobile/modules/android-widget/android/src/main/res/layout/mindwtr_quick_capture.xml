@@ -65,6 +65,57 @@
                 android:textColorHint="@color/mindwtr_widget_muted_text"
                 android:textSize="14sp" />
 
+            <Button
+                android:id="@+id/mindwtr_quick_capture_status"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="start|center_vertical"
+                android:minHeight="48dp"
+                android:textAllCaps="false"
+                android:textColor="@color/mindwtr_widget_accent" />
+
+            <!-- Contexts button (#1418): a filter box and up to 8 matches; a tap inserts the token at the caret. -->
+            <Button
+                android:id="@+id/mindwtr_quick_capture_contexts"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="start|center_vertical"
+                android:minHeight="48dp"
+                android:textAllCaps="false"
+                android:textColor="@color/mindwtr_widget_accent"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/mindwtr_quick_capture_context_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/mindwtr_quick_capture_context_filter"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/mindwtr_dialog_field"
+                    android:imeOptions="actionDone"
+                    android:importantForAutofill="no"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:padding="12dp"
+                    android:textColor="@color/mindwtr_widget_text"
+                    android:textColorHint="@color/mindwtr_widget_muted_text"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:id="@+id/mindwtr_quick_capture_context_matches"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
+
             <LinearLayout
                 android:id="@+id/mindwtr_quick_capture_audio_row"
                 android:layout_width="match_parent"

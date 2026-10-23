@@ -1,5 +1,5 @@
 {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "fields": [
         { "name": "id", "nullability": "required", "cloudSynced": false, "cloudWrite": "managed", "sqliteColumn": "id", "sqliteOrder": 0, "sqliteType": null },
         { "name": "projectId", "nullability": "required", "cloudSynced": true, "cloudWrite": "patch", "sqliteColumn": "projectId", "sqliteOrder": 1, "sqliteType": null },
@@ -13,7 +13,8 @@
         { "name": "updatedAt", "nullability": "required", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "updatedAt", "sqliteOrder": 9, "sqliteType": "TEXT" },
         { "name": "deletedAt", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "deletedAt", "sqliteOrder": 10, "sqliteType": "TEXT" },
         { "name": "deletedAtBeforeProjectArchive", "nullability": "optional-nullable", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "deletedAtBeforeProjectArchive", "sqliteOrder": 11, "sqliteType": "TEXT" },
-        { "name": "projectArchivedAt", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "projectArchivedAt", "sqliteOrder": 12, "sqliteType": "TEXT" }
+        { "name": "projectArchivedAt", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "projectArchivedAt", "sqliteOrder": 12, "sqliteType": "TEXT" },
+        { "name": "isSequential", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "isSequential", "sqliteOrder": 13, "sqliteType": "INTEGER" }
     ],
     "fixture": {
         "id": "section-schema-fixture",
@@ -22,6 +23,7 @@
         "description": "Schema fixture description",
         "order": 2,
         "isCollapsed": true,
+        "isSequential": true,
         "rev": 5,
         "revBy": "device-schema",
         "createdAt": "2026-07-01T10:00:00.000Z",

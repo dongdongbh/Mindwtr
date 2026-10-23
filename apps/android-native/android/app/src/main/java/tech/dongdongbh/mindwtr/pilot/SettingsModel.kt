@@ -20,6 +20,8 @@ import tech.dongdongbh.mindwtr.androidwidget.CaptureIntentConfigStore
 import tech.dongdongbh.mindwtr.pilot.InboxViewModel.Part
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import tech.dongdongbh.mindwtr.pilot.core.DeviceWrites
+import tech.dongdongbh.mindwtr.pilot.core.RnKeyValue
+import tech.dongdongbh.mindwtr.pilot.core.routedDeviceStore
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -56,7 +58,12 @@ fun deviceStore(prefs: SharedPreferences) = DeviceWrites({ prefs.all }, { change
  * CoreHost's store for a reply's deviceWrites (a General or GTD setting's device-local part): the first send and the journal's
  * replay both store them before the write's journal entry goes, so a process death after core's reply loses none.
  */
-fun deviceStore(app: Context) = deviceStore(app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE))
+fun deviceStore(app: Context, keyValue: RnKeyValue): DeviceWrites {
+    val prefs = app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
+    return routedDeviceStore({ prefs.all }, { changes ->
+        prefs.edit().apply { changes.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
+    }, keyValue)
+}
 
 /** Core windows Manage's lists and the Someday sections by NATIVE_HOST_MAX_WINDOW. */
 private const val WINDOW = 100
@@ -472,6 +479,9 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
             Labels.load(runtime.strings(LABEL_KEYS))
         }
         if (THEME_KEY in keys) runCatching { ThemeChoice.load(runtime.theme(prefs.getString(THEME_KEY, null).orEmpty())) }
+        // System search's switch, now in RKStorage: the index follows it (core's enable or wipe).
+        if ("mindwtr:appSearchIndexingEnabled" in keys) runCatching { runtime.appSearchApply() }
+            .onFailure { Log.w(CoreHost.TAG, "Native Android system search apply failed ${failureForLog(it)}") }
     }
 
     /**

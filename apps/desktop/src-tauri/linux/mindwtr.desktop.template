@@ -1,0 +1,13 @@
+# Keep URI forwarding explicit: Tauri's default template omits %u (#1377).
+[Desktop Entry]
+Categories={{categories}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} %u
+StartupWMClass={{exec}}
+Icon={{icon}}
+Name={{name}}
+Terminal=false
+Type=Application
+MimeType=x-scheme-handler/mindwtr;

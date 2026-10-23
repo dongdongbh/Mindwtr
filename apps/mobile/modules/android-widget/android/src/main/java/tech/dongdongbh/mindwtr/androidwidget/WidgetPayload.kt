@@ -130,6 +130,9 @@ data class WidgetPayload(
     val audioError: String,
     val audioPermissionDenied: String,
     val descriptionPlaceholder: String = "Description (optional)",
+    val statusLabel: String = "Status",
+    val statusLabels: Map<String, String> = mapOf("inbox" to "Inbox", "next" to "Next Actions", "waiting" to "Waiting For", "someday" to "Someday/Maybe"),
+    val queued: String = "Saved. Your task will be added when Mindwtr opens.",
   )
 
   /** True when the launcher's own day/night resources should color the widget. */
@@ -350,7 +353,7 @@ data class WidgetPayload(
       palette = null,
       quickCapture = QuickCaptureLabels(
         title = "Quick capture",
-        placeholder = "Add task to inbox...",
+        placeholder = "Add a task… use @context +Project #tag",
         save = "Save",
         cancel = "Cancel",
         added = "Task added to Mindwtr.",
@@ -415,7 +418,14 @@ data class WidgetPayload(
       val labels = root.optJSONObject("quickCapture")
       val quickCapture = QuickCaptureLabels(
         title = labels.stringOr("title", defaults.quickCapture.title),
-        placeholder = labels.stringOr("placeholder", defaults.quickCapture.placeholder),
+        // Pre-status cached payloads still say "Add task to inbox".
+        placeholder = if (labels?.optJSONObject("statusLabels") != null) labels.stringOr("placeholder", defaults.quickCapture.placeholder)
+          else defaults.quickCapture.placeholder,
+        statusLabel = labels.stringOr("statusLabel", defaults.quickCapture.statusLabel),
+        statusLabels = defaults.quickCapture.statusLabels.mapValues { (status, fallback) ->
+          labels?.optJSONObject("statusLabels").stringOr(status, fallback)
+        },
+        queued = labels.stringOr("queued", defaults.quickCapture.queued),
         descriptionPlaceholder = labels.stringOr("descriptionPlaceholder", defaults.quickCapture.descriptionPlaceholder),
         save = labels.stringOr("save", defaults.quickCapture.save),
         cancel = labels.stringOr("cancel", defaults.quickCapture.cancel),

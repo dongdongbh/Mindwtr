@@ -23,6 +23,7 @@ import {
     isProjectedRecurringTask,
     buildQuickAddParseOptions,
     getRetainedTaskContexts,
+    getSavedTaxonomyTokens,
     hasTimeComponent,
     isCalendarAllDayItem,
     resolveAreaFilterSelection,
@@ -127,6 +128,7 @@ export function useDesktopCalendarController() {
         projectMap,
         sequentialProjectIds = new Set<string>(),
         sequentialWithinSectionProjectIds = new Set<string>(),
+        sequentialSectionKeys = new Set<string>(),
     } = getDerivedState();
     const { t, language } = useLanguage();
     const resolveText = useCallback(
@@ -200,7 +202,7 @@ export function useDesktopCalendarController() {
         () => Array.from(new Set([...allContexts, ...allTags])).sort(),
         [allContexts, allTags]
     );
-    const quickAddContextHistory = useMemo(() => getRetainedTaskContexts(allTasks), [allTasks]);
+    const quickAddContextHistory = useMemo(() => Array.from(new Set([...getRetainedTaskContexts(allTasks), ...getSavedTaxonomyTokens(settings, 'context')])), [allTasks, settings]);
 
     useEffect(() => {
         if (!perf.enabled) return;
@@ -340,6 +342,7 @@ export function useDesktopCalendarController() {
             sections,
             sectionScopedProjectIds: sequentialWithinSectionProjectIds,
             sequentialProjectIds,
+            sequentialSectionKeys,
         },
     ), [
         isSchedulableTask,
@@ -348,6 +351,7 @@ export function useDesktopCalendarController() {
         sections,
         localDayKey,
         sequentialProjectIds,
+        sequentialSectionKeys,
         sequentialWithinSectionProjectIds,
         tasks,
     ]);

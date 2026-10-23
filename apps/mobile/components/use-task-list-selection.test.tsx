@@ -2,17 +2,34 @@ import React from 'react';
 import renderer from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runStoreCommand, runSyncStoreSave, useTaskStore, type StoreActionResult, type Task } from '@mindwtr/core';
+import { NavigationContext } from '@react-navigation/native';
 
 const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
   alert: vi.fn(),
+  backListeners: [] as (() => boolean)[],
 }));
+
+// Android Back as RN runs it: newest listener first, stop at the first that returns true.
+const pressBack = () => {
+  let handled = false;
+  renderer.act(() => {
+    handled = [...mocks.backListeners].reverse().some((listener) => listener());
+  });
+  return handled;
+};
 
 vi.mock('react-native', async () => {
   const actual = await vi.importActual<any>('react-native');
   return {
     ...actual,
     Alert: { ...actual.Alert, alert: mocks.alert },
+    BackHandler: {
+      addEventListener: (_event: string, listener: () => boolean) => {
+        mocks.backListeners.push(listener);
+        return { remove: () => { mocks.backListeners = mocks.backListeners.filter((item) => item !== listener); } };
+      },
+    },
   };
 });
 
@@ -413,5 +430,79 @@ describe('useTaskListSelection handleBatchOrganize', () => {
     release();
     await renderer.act(async () => { await save; await pending; });
     expect(useTaskStore.getState()._tasksById.get('b')?.tags).toEqual(expect.arrayContaining(['#urgent', '#remote', '#new']));
+  });
+});
+
+describe('useTaskListSelection Android Back (#1415)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.backListeners = [];
+  });
+
+  it('leaves selection mode on Back and consumes the press', () => {
+    renderer.act(() => {
+      renderer.create(<Harness {...baseParams()} />);
+    });
+    expect(mocks.backListeners).toHaveLength(0);
+    expect(pressBack()).toBe(false);
+
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+    });
+    expect(hookRef.selectionMode).toBe(true);
+
+    expect(pressBack()).toBe(true);
+    expect(hookRef.selectionMode).toBe(false);
+    expect(hookRef.hasSelection).toBe(false);
+    // Out of selection mode the next Back goes to navigation again.
+    expect(mocks.backListeners).toHaveLength(0);
+    expect(pressBack()).toBe(false);
+  });
+
+  it('leaves Back to the screen on top while its own screen is not focused', () => {
+    const navigation = { isFocused: () => false };
+    renderer.act(() => {
+      renderer.create(
+        <NavigationContext.Provider value={navigation as never}>
+          <Harness {...baseParams()} />
+        </NavigationContext.Provider>,
+      );
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+    });
+    expect(pressBack()).toBe(false);
+    expect(hookRef.selectionMode).toBe(true);
+
+    navigation.isFocused = () => true;
+    expect(pressBack()).toBe(true);
+    expect(hookRef.selectionMode).toBe(false);
+  });
+
+  it('leaves Back to the screen while it says a dialog is open, or while a tag dialog is open', () => {
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<Harness {...baseParams({ backExitsSelection: false })} />);
+    });
+    renderer.act(() => {
+      hookRef.toggleMultiSelect('a');
+    });
+    expect(pressBack()).toBe(false);
+    expect(hookRef.selectionMode).toBe(true);
+
+    renderer.act(() => {
+      tree.update(<Harness {...baseParams()} />);
+    });
+    renderer.act(() => {
+      hookRef.setTagModalVisible(true);
+    });
+    expect(pressBack()).toBe(false);
+    expect(hookRef.selectionMode).toBe(true);
+
+    renderer.act(() => {
+      hookRef.setTagModalVisible(false);
+    });
+    expect(pressBack()).toBe(true);
+    expect(hookRef.selectionMode).toBe(false);
   });
 });

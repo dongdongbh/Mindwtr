@@ -1588,9 +1588,10 @@ struct ProjectDetailScreen: View {
                 .buttonStyle(.plain).disabled(model.busy)
                 .accessibilityIdentifier("project-task-order-retry")
             }
-            if model.busy { ProgressView().padding(12) }
+            // An overlay keeps the order table still while busy toggles.
             ProjectTaskOrderTable(model: model, palette: palette)
                 .accessibilityIdentifier("project-task-order-list")
+                .overlay(alignment: .top) { if model.busy { ProgressView().padding(12) } }
         }
         .background(palette.bg)
     }
@@ -2920,6 +2921,14 @@ private struct ProjectAreaMetadata: View {
                     .accessibilityIdentifier("project-area-open")
                 }
             }
+            if !model.projectDetail.flag("readOnly") {
+                Button(action: onOpen) {
+                    Label(model.label("projects.color"), systemImage: "paintpalette")
+                        .rnFont(14).foregroundStyle(palette.tint).frame(minHeight: 44)
+                }
+                .buttonStyle(.plain).disabled(!model.projectAreaOpenEnabled)
+                .accessibilityIdentifier("project-color-open")
+            }
             Text(metadata.text("areaLabel"))
                 .rnFont(14).foregroundStyle(palette.text)
                 .fixedSize(horizontal: false, vertical: true)
@@ -2994,6 +3003,29 @@ private struct ProjectAreaSelectionSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("project-area-created-status")
                     }
+                    Text(model.label("projects.color")).rnFont(14, .semibold).foregroundStyle(palette.secondary)
+                    areaChoice(model.label("projects.useAreaColor"), color: nil,
+                               selected: model.projectAreaOptions["colorOverride"] is NSNull,
+                               identifier: "project-color-area") {
+                        Task { await model.chooseProjectColor(nil) }
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
+                        ForEach(model.projectAreaOptions["colors"] as? [String] ?? [], id: \.self) { color in
+                            let selected = model.projectAreaOptions["colorOverride"] as? String == color
+                            Button { Task { await model.chooseProjectColor(color) } } label: {
+                                Circle().fill(Color(hex: color)).frame(width: 30, height: 30)
+                                    .overlay(Circle().stroke(selected ? palette.text : palette.border, lineWidth: selected ? 3 : 1))
+                                    .overlay { if selected { Image(systemName: "checkmark").foregroundStyle(palette.text) } }
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }
+                            .buttonStyle(.plain).disabled(!model.projectAreaChoiceEnabled)
+                            .accessibilityLabel(model.label("projects.color") + ": " + color)
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                            .accessibilityIdentifier("project-color-" + color)
+                        }
+                    }
+                    Divider()
+                    Text(model.label("projects.areaLabel")).rnFont(14, .semibold).foregroundStyle(palette.secondary)
                     let noneSelected = model.projectAreaSelectedID == nil
                     areaChoice(model.projectAreaOptions.text("noAreaLabel"), color: nil,
                                selected: noneSelected, identifier: "project-area-none") {

@@ -119,6 +119,7 @@ vi.mock('expo-router', () => {
   };
 });
 vi.mock('@react-navigation/native', () => ({
+  NavigationContext: React.createContext(undefined),
   CommonActions: { navigate: vi.fn((route) => ({ type: 'NAVIGATE', payload: route })) },
 }));
 vi.mock('react-native-safe-area-context', () => ({

@@ -114,6 +114,15 @@ describe('diagnostics log', () => {
         expect(formatDiagnosticsLogLine(buildDiagnosticsErrorEntry('plain', { scope: 'x' }))).not.toContain('"stack"');
     });
 
+    it('writes no local file or document URI from a failed sync\'s error line (File Sync, S5)', () => {
+        const uri = 'file:///storage/emulated/0/private-folder/data.json';
+        const error = new Error(`EACCES: permission denied, open '${uri}'`);
+        error.stack = `Error: EACCES: permission denied, open '${uri}'\n    at write (content://provider/tree/private-folder)`;
+        const line = formatDiagnosticsLogLine(buildDiagnosticsErrorEntry(error, { scope: 'sync', extra: { error: error.message, step: 'write-remote' } }));
+        expect(line).not.toContain('private-folder');
+        expect(line).toContain('[redacted-file-uri]');
+    });
+
     it('turns a core logger payload into the line React Native\'s bridge writes', () => {
         const error = new TypeError('bad');
         const line = diagnosticsEntryFromLogPayload({ level: 'error', message: 'Save failed', category: 'storage', error, context: { table: 'tasks' } });

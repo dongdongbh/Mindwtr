@@ -8,6 +8,7 @@ import { getSomedaySectionTaskText, planSomedaySectionTaskAdd } from './someday-
 import { useTaskStore } from './store';
 import { sameSectionDeleteJson, sameTaskSqliteRow } from './store-projects/section-actions';
 import { buildNewTask } from './task-creation';
+import { getTaskReminderDefault } from './task-reminder-policy';
 import { TASK_SQLITE_COLUMNS, taskFromSqliteRow, taskToSqliteRow } from './task-sync-schema';
 import type { Area, Task, ViewSectionDefinition } from './types';
 import { sortViewSectionDefinitions } from './view-sections';
@@ -80,7 +81,9 @@ const selectedSection = (raw: readonly ViewSectionDefinition[], id: string): Vie
     if (matches.length !== 1) return null;
     return sortViewSectionDefinitions(raw).includes(matches[0]) ? matches[0] : null;
 };
-const expectedTask = (prepared: NativePreparedSomedaySectionTask): Task | null => {
+// Validation reads the reminder default back from the frozen row, which inherits it; the journal keeps its shape.
+const expectedTask = (prepared: NativePreparedSomedaySectionTask,
+    taskReminderDefault: 'send' | 'skip' = prepared.task.suppressMindwtrReminders === true ? 'skip' : 'send'): Task | null => {
     const section = prepared.request.sectionId === null ? undefined : prepared.sectionWitness;
     const plan = planSomedaySectionTaskAdd({ title: prepared.request.title,
         sectionId: prepared.request.sectionId ?? undefined, stored: section ? [section] : [] });
@@ -88,7 +91,7 @@ const expectedTask = (prepared: NativePreparedSomedaySectionTask): Task | null =
     const built = buildNewTask({
         title: plan.title, initialTaskProps: { ...plan.props, areaId: prepared.selectedArea?.id },
         id: prepared.request.requestId, now: prepared.preparedAt, deviceId: prepared.deviceId,
-        state: { settings: {}, _allProjects: [], _allSections: [],
+        state: { settings: { taskReminderDefault }, _allProjects: [], _allSections: [],
             _allAreas: prepared.selectedArea ? [prepared.selectedArea as Area] : [] },
         tasks: [], focusedCount: 0, focusTaskLimit: 0, projectOrderReserver: () => undefined,
     });
@@ -205,7 +208,7 @@ export function createSomedaySectionTaskMethods(deps: {
                 deviceId: state.settings.deviceId, selectedArea: area ? { id: area.id } : null,
                 sectionWitness: section, result: { id: request.requestId },
             };
-            const task = expectedTask(prepared);
+            const task = expectedTask(prepared, getTaskReminderDefault(state.settings));
             if (!task) return fail('INVALID_INPUT', 'Someday task could not be prepared');
             prepared.task = task;
             const detached = detach<NativePreparedSomedaySectionTask>(JSON.parse(JSON.stringify(prepared)));

@@ -1086,6 +1086,107 @@ describe('createAutoSyncController platform policy switches', () => {
 });
 
 
+// #1431: a fresh local change skips the adaptive stretch; storms, backoff and coalescing stay.
+// Fake timers step the clock to each timer, so a cycle's end is measured where it happened.
+describe('createAutoSyncController local change after a cycle that carried none (#1431)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    const setup = (options: { durations?: number[]; results?: Array<{ success: boolean; error?: string }> } = {}) => {
+        vi.useFakeTimers();
+        const base = Date.now();
+        const runs: number[] = [];
+        let changeSeq = 0;
+        let coveredSeq = 0;
+        const performSync = vi.fn(async () => {
+            runs.push(Date.now() - base);
+            const startSeq = changeSeq;
+            const duration = options.durations?.shift() ?? 0;
+            if (duration > 0) await new Promise((resolve) => setTimeout(resolve, duration));
+            const result = options.results?.shift() ?? { success: true };
+            if (result.success) coveredSeq = Math.max(coveredSeq, startSeq);
+            return result;
+        });
+        const controller = createAutoSyncController({
+            performSync,
+            flushPendingSave: async () => undefined,
+            reportError: vi.fn(),
+            isRuntimeActive: () => true,
+            periodicSyncIntervalMs: null,
+            minIntervalMs: 5_000,
+            debounceFirstChangeMs: 2_000,
+            debounceContinuousChangeMs: 5_000,
+            adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 300_000 },
+            hasPendingLocalChanges: () => changeSeq > coveredSeq,
+        });
+        const edit = () => {
+            changeSeq += 1;
+            controller.handleDataChange();
+        };
+        const advanceTo = (offsetMs: number) => vi.advanceTimersByTimeAsync(Math.max(0, base + offsetMs - Date.now()));
+        return { runs, controller, edit, advanceTo };
+    };
+
+    it('still stretches a request that carries no local change', async () => {
+        const { runs, controller, advanceTo } = setup({ durations: [1_919] });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(9_000);
+        void controller.requestAutoSync(undefined, 'external');
+        await advanceTo(19_189);
+        expect(runs).toEqual([0]);
+        await advanceTo(19_190);
+        expect(runs).toEqual([0, 19_190]);
+        controller.dispose();
+    });
+
+    it('coalesces rapid edits into one upload', async () => {
+        const { runs, controller, edit, advanceTo } = setup({ durations: [1_919] });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(9_000);
+        edit();
+        await advanceTo(9_300);
+        edit();
+        await advanceTo(9_600);
+        edit();
+        await advanceTo(40_000);
+        // The last edit restarted the 5 s continuous debounce: one upload at 14,600.
+        expect(runs).toEqual([0, 14_600]);
+        controller.dispose();
+    });
+
+    it('runs exactly one prompt follow-up for an edit made while a cycle runs', async () => {
+        const { runs, controller, edit, advanceTo } = setup({ durations: [5_000] });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(500);
+        edit();
+        // The debounce fires at 2,500 while the cycle runs and queues one follow-up.
+        // The opening cycle ended at 5,000; the follow-up keeps the 5 s gap, not 9 x 5 s.
+        await advanceTo(10_000);
+        expect(runs).toEqual([0, 10_000]);
+        await advanceTo(130_000);
+        expect(runs).toEqual([0, 10_000]);
+        controller.dispose();
+    });
+
+    it('keeps the failure cooldown in front of a fresh local change', async () => {
+        const { runs, controller, edit, advanceTo } = setup({
+            durations: [1_919],
+            results: [{ success: false, error: 'HTTP 503' }],
+        });
+        void controller.requestAutoSync(0, 'initial');
+        await advanceTo(9_000);
+        edit();
+        await advanceTo(61_918);
+        expect(runs).toEqual([0]);
+        // The 60 s cooldown runs from the failed cycle's end at 1,919.
+        await advanceTo(61_919);
+        expect(runs).toEqual([0, 61_919]);
+        controller.dispose();
+    });
+});
+
 describe('createAutoSyncController invocation-owned mode', () => {
     afterEach(() => {
         vi.useRealTimers();

@@ -43,6 +43,7 @@ export function GeneralSettingsScreen() {
     const [timeFormatPickerOpen, setTimeFormatPickerOpen] = useState(false);
     const [regionalFormatsOpen, setRegionalFormatsOpen] = useState(false);
     const [quickAccessPickerOpen, setQuickAccessPickerOpen] = useState(false);
+    const [relockDelayPickerOpen, setRelockDelayPickerOpen] = useState(false);
     const [appLockBusy, setAppLockBusy] = useState(false);
     const [appLockErrorKey, setAppLockErrorKey] = useState<string | null>(null);
 
@@ -167,6 +168,17 @@ export function GeneralSettingsScreen() {
                         />
                     </View>
 
+                    {privacy.appLockRelockDelay && (
+                        <SettingRow
+                            divider
+                            onPress={() => setRelockDelayPickerOpen(true)}
+                            label={privacy.appLockRelockDelay.label}
+                            description={privacy.appLockRelockDelay.value}
+                        >
+                            <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
+                        </SettingRow>
+                    )}
+
                     {privacy.appSearch && (
                         <SettingToggleRow
                             divider
@@ -178,6 +190,49 @@ export function GeneralSettingsScreen() {
                         />
                     )}
                 </View>
+
+                {privacy.appLockRelockDelay && (
+                    <Modal
+                        transparent
+                        visible={relockDelayPickerOpen}
+                        animationType="fade"
+                        onRequestClose={() => setRelockDelayPickerOpen(false)}
+                    >
+                        <Pressable style={styles.pickerOverlay} onPress={() => setRelockDelayPickerOpen(false)}>
+                            <View
+                                style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                                onStartShouldSetResponder={() => true}
+                            >
+                                <Text style={[styles.pickerTitle, { color: tc.text }]}>{privacy.appLockRelockDelay.pickerTitle}</Text>
+                                <ScrollView style={styles.pickerList} contentContainerStyle={styles.pickerListContent}>
+                                    {privacy.appLockRelockDelay.options.map((option) => {
+                                        const { selected } = option;
+                                        return (
+                                            <TouchableOpacity
+                                                key={option.value}
+                                                accessibilityRole="radio"
+                                                accessibilityState={{ selected }}
+                                                style={[
+                                                    styles.pickerOption,
+                                                    { borderColor: tc.border, backgroundColor: selected ? tc.filterBg : 'transparent' },
+                                                ]}
+                                                onPress={() => {
+                                                    writeSetting(option.edit);
+                                                    setRelockDelayPickerOpen(false);
+                                                }}
+                                            >
+                                                <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
+                                                    {option.label}
+                                                </Text>
+                                                {selected && <Ionicons color={tc.tint} name="checkmark" size={18} />}
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
+                            </View>
+                        </Pressable>
+                    </Modal>
+                )}
 
                 <Modal
                     transparent

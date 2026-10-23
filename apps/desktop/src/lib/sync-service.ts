@@ -3601,7 +3601,12 @@ export class SyncService {
 
         // `runSyncCycle` already published the busy status; yield so the footer paints it
         // before the cycle's first blocking work.
-        await yieldToRenderer();
+        if (await yieldToRenderer() === 'timer') {
+            void syncServiceDependencies.logInfo('Sync continued without a renderer frame', {
+                scope: 'sync', force: true,
+                extra: { releaseCheck: 'v1.3.8/windowless-sync-yield', documentVisibility: typeof document === 'undefined' ? 'none' : document.visibilityState },
+            });
+        }
 
         let result: SyncRunResult;
         let fileSyncLockCleanupDeferred = false;
@@ -3654,7 +3659,7 @@ export class SyncService {
                         );
                     },
                     tracePayload: (event, data, extra) => logSyncPayloadTrace(SYNC_TRACE_EVENT_MESSAGES[event], data, extra),
-                    yieldToUi: () => yieldToRenderer(),
+                    yieldToUi: async () => { await yieldToRenderer(); },
                 },
                 store: {
                     getLastDataChangeAt: () => getStoreState().lastDataChangeAt,

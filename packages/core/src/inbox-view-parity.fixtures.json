@@ -1,13 +1,8 @@
 {
  "provenance": {
   "command": "cd apps/mobile && MINDWTR_CAPTURE_INBOX_VIEW=1 MINDWTR_CAPTURE_INBOX_VIEW_COMMIT=$(git rev-parse HEAD) bunx vitest run components/task-list/inbox-view-parity.test.tsx",
-  "capturedAt": "6cb44d10c5b45fbdd2ef54bd441050e1d0a01948",
-  "capturedAtNote": "Captured from HEAD's React Native code before any Inbox change: the harness and this fixture were the only changes in the checkout.",
-  "renamedAfterCapture": {
-   "from": "inbox: a stored time-estimate sort with the feature off reads as default",
-   "to": "inbox: a stored time-estimate sort (the feature is on by default)",
-   "note": "Only the scenario name changed, in the harness and here; no observation changed. Time estimates are on by default, so the stored sort applies, as the observations show."
-  }
+  "capturedAt": "6bdf8e9cb9c462358da95e0f2d55bcccbe40e040",
+  "capturedAtNote": "Captured from HEAD's React Native code before any Inbox change: the harness and this fixture were the only changes in the checkout."
  },
  "timeZone": "America/New_York",
  "now": "2026-09-24T14:00:00.000Z",
@@ -1585,6 +1580,11 @@
      [
       "review",
       "Review date",
+      false
+     ],
+     [
+      "priority",
+      "Priority",
       false
      ],
      [
@@ -3715,6 +3715,11 @@
      [
       "review",
       "Review date",
+      false
+     ],
+     [
+      "priority",
+      "Priority",
       false
      ],
      [
@@ -5901,6 +5906,11 @@
       false
      ],
      [
+      "priority",
+      "Priority",
+      false
+     ],
+     [
       "timeEstimate",
       "Time estimate",
       true
@@ -6248,6 +6258,11 @@
       false
      ],
      [
+      "priority",
+      "Priority",
+      false
+     ],
+     [
       "timeEstimate",
       "Time estimate",
       false
@@ -6554,6 +6569,11 @@
       false
      ],
      [
+      "priority",
+      "Priority",
+      false
+     ],
+     [
       "timeEstimate",
       "Time estimate",
       false
@@ -6773,6 +6793,11 @@
      [
       "review",
       "Review date",
+      false
+     ],
+     [
+      "priority",
+      "Priority",
       false
      ],
      [
@@ -7010,6 +7035,11 @@
      [
       "review",
       "Review date",
+      false
+     ],
+     [
+      "priority",
+      "Priority",
       false
      ],
      [
@@ -7752,6 +7782,11 @@
      [
       "review",
       "Review date",
+      false
+     ],
+     [
+      "priority",
+      "Priority",
       false
      ],
      [
@@ -8500,6 +8535,11 @@
      [
       "review",
       "Review date",
+      false
+     ],
+     [
+      "priority",
+      "Priority",
       false
      ],
      [

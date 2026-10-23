@@ -45,6 +45,19 @@ describe('native host contract: the capture popup', () => {
     const writes = (log: unknown[]) => log.map((entry) => (entry as unknown[])[0]);
     const chip = (view: NativeQuickCaptureView, kind: string) => view.preview.find((entry) => entry.kind === kind)?.value;
 
+    it('offers saved unused contexts and invalidates retained context choices when only settings changes', async () => {
+        const { host } = await openHost();
+        const opened = value(host.openQuickCapture());
+        value(host.getQuickCaptureView({ text: 'Plan', options: opened.options, picker: { kind: 'context', query: 'saved' } }));
+        const tasks = useTaskStore.getState()._allTasks;
+        await useTaskStore.getState().addContext('saved unused');
+        expect(useTaskStore.getState()._allTasks).toBe(tasks);
+        expect(value(host.getQuickCaptureView({ text: 'Plan', options: opened.options, picker: { kind: 'context', query: 'saved' } })).picker)
+            .toMatchObject({ items: [{ label: '@saved unused' }] });
+        expect(value(host.getQuickCaptureView({ text: 'Plan', options: opened.options, picker: { kind: 'context', query: '' } })).picker)
+            .toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ label: '@saved unused' })]) });
+    });
+
     it('opens with the default area and carries the edit on every control', async () => {
         const { host } = await openHost('fixedArea');
         const view = value(host.openQuickCapture());

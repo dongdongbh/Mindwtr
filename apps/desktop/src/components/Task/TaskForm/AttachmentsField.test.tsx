@@ -25,6 +25,16 @@ const renderField = (attachments: Parameters<typeof AttachmentsField>[0]['visibl
 );
 
 describe('AttachmentsField', () => {
+    it('does not label an in-memory browser draft file as missing', () => {
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+        const { getByText, queryByText } = renderField([{
+            id: 'staged', kind: 'file', title: 'report.pdf', uri: '', localStatus: 'available',
+            createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z',
+        }]);
+        expect(getByText('report.pdf')).toBeVisible();
+        expect(queryByText('attachments.missing')).not.toBeInTheDocument();
+    });
+
     it('renders image attachments as inline previews and opens them on click', () => {
         const openAttachment = vi.fn();
         const attachment = {

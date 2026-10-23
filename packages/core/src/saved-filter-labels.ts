@@ -26,6 +26,10 @@ const DATE_RANGE_PRESET_LABELS: Record<string, string> = {
     this_month: 'This month',
     overdue: 'Overdue',
     no_date: 'No date',
+    next_7_days: 'Next 7 days',
+    next_14_days: 'Next 14 days',
+    next_30_days: 'Next 30 days',
+    upcoming: 'All upcoming',
 };
 
 function titleCase(value: string): string {
@@ -133,6 +137,10 @@ export function buildAdvancedFilterCriteriaChips(
     const startDateRange = formatDateRange(startDateLabel, criteria.startDateRange, options);
     if (startDateRange) chips.push({ id: 'startDateRange', label: startDateRange });
 
+    const taskDatesLabel = resolveText(options, 'filters.taskDates', 'Task dates');
+    const anyDateRange = formatDateRange(taskDatesLabel, criteria.anyDateRange, options);
+    if (anyDateRange) chips.push({ id: 'anyDateRange', label: anyDateRange });
+
     const timeEstimateRange = formatTimeEstimateRange(criteria.timeEstimateRange, options);
     if (timeEstimateRange) chips.push({ id: 'timeEstimateRange', label: timeEstimateRange });
 
@@ -206,6 +214,11 @@ export function removeAdvancedFilterCriteriaChip(criteria: FilterCriteria, chipI
 
     if (chipId === 'startDateRange') {
         const { startDateRange: _removed, ...next } = criteria;
+        return next;
+    }
+
+    if (chipId === 'anyDateRange') {
+        const { anyDateRange: _removed, ...next } = criteria;
         return next;
     }
 

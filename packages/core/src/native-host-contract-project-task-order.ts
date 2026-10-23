@@ -7,7 +7,7 @@ import { getProjectSectionsForView } from './project-utils';
 import { getProjectSyntheticSectionIds, sortProjectTasksByOrder } from './project-task-list-model';
 import { projectTaskOrderToken } from './project-task-reorder';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
-import { resolveTaskSortByForFeatures } from './task-utils';
+import { getProjectFlowMode, resolveTaskSortByForFeatures } from './task-utils';
 import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { projectTaskOrderEffect } from './store-projects/ordering-actions';
@@ -94,7 +94,7 @@ const validItems = (scope: PreparedProjectTaskOrder['scope'], request: NativePro
         const task = tasks.get(item.id);
         if (!task || task.status === 'reference'
             || (!request.showCompleted && (task.status === 'done' || task.status === 'archived'))
-            || (request.showCompleted && !scope.project.isSequential && task.status === 'done')) return false;
+            || (request.showCompleted && getProjectFlowMode(scope.project) === 'parallel' && task.status === 'done')) return false;
         const bucket = task.sectionId && live.has(task.sectionId) ? task.sectionId : null;
         if (bucket !== current || sectionIds.length > 0 && !sawHeader) return false;
         seenTasks.add(task.id);

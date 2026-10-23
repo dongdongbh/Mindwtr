@@ -1,6 +1,7 @@
 import {
     filterNotDeleted,
     isArchiveRetentionDays,
+    isTaxonomyCatalog,
     isTaskSectionProjectArchiveReference,
     normalizeCancellationTimestamp,
     normalizeRecurrenceForLoad,
@@ -190,6 +191,12 @@ function validateTaskPropValues(value: Record<string, unknown>): string | null {
 }
 
 function validateProjectPropValues(value: Record<string, unknown>): string | null {
+    if (value.perSectionFlow != null && typeof value.perSectionFlow !== 'boolean') {
+        return 'Invalid project perSectionFlow';
+    }
+    if (value.colorOverride != null && (typeof value.colorOverride !== 'string' || !/^#[0-9a-f]{6}$/i.test(value.colorOverride))) {
+        return 'Invalid project colorOverride';
+    }
     const cancellationError = validateCancellationTimestamp(value, 'project');
     if (cancellationError) return cancellationError;
     const attachmentsError = validateAttachments(value, 'project');
@@ -229,6 +236,8 @@ export function validateAppData(
     if (areas !== undefined && !Array.isArray(areas)) return { ok: false, error: 'Invalid data: areas must be an array' };
     if (people !== undefined && !Array.isArray(people)) return { ok: false, error: 'Invalid data: people must be an array' };
     if (settings !== undefined && !isRecord(settings)) return { ok: false, error: 'Invalid data: settings must be an object' };
+    if (isRecord(settings) && settings.taxonomy !== undefined && !isTaxonomyCatalog(settings.taxonomy))
+        return { ok: false, error: 'Invalid data: settings.taxonomy must contain valid saved contexts and tags' };
     if (tasks.length > MAX_ITEMS_PER_COLLECTION) return { ok: false, error: `Invalid data: tasks exceeds limit (${MAX_ITEMS_PER_COLLECTION})` };
     if (projects.length > MAX_ITEMS_PER_COLLECTION) return { ok: false, error: `Invalid data: projects exceeds limit (${MAX_ITEMS_PER_COLLECTION})` };
     if (Array.isArray(sections) && sections.length > MAX_ITEMS_PER_COLLECTION) {
@@ -317,6 +326,9 @@ export function validateAppData(
             }
             if (section.deletedAt != null && !isValidIsoTimestamp(section.deletedAt)) {
                 return { ok: false, error: 'Invalid data: section deletedAt must be a valid ISO timestamp when present' };
+            }
+            if (section.isSequential != null && typeof section.isSequential !== 'boolean') {
+                return { ok: false, error: 'Invalid data: section isSequential must be a boolean when present' };
             }
             sectionsById.set(section.id, section);
             if (section.deletedAt == null) {

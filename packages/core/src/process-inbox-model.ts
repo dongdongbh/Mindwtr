@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from './task-accent-color';
 import { getTaskReminderPolicy } from './task-reminder-policy';
 import { formatTimeEstimateLabel, resolveTimeEstimateOptions } from './calendar-scheduling';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
@@ -1768,7 +1769,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                 ...filteredProjects.map((project) => ({
                     label: project.title,
                     selected: draft.projectId === project.id,
-                    color: project.areaId ? areaById.get(project.areaId)?.color ?? null : null,
+                    color: getProjectAccentColor(project, areaById) ?? null,
                     edit: { type: 'selectProject' as const, value: project.id },
                 })),
             ] : [],

@@ -224,4 +224,21 @@ describe('checked native Someday section task creation', () => {
         }
         expect(useTaskStore.getState()._allTasks.some((task) => task.id === envelope.request.requestId)).toBe(false);
     });
+    it('creates the row under Skip as RN addTask does, and keeps an earlier Send journal valid', async () => {
+        const host = await open();
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: 'skip' } }));
+        const skipped = prepare(host, request('Someday under Skip'));
+        expect(skipped.prepared.task.suppressMindwtrReminders).toBe(true);
+        const ordinary = await useTaskStore.getState().addTask('Reference', { status: 'someday' });
+        expect(useTaskStore.getState()._tasksById.get(ordinary.id!)?.suppressMindwtrReminders).toBe(true);
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: undefined } }));
+        const sent = prepare(host, request('Someday under Send'));
+        expect(sent.prepared.task.suppressMindwtrReminders).toBe(false);
+        expect(skipped.prepared.version).toBe(1); expect(skipped.prepared).not.toHaveProperty('taskReminderDefault');
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: 'skip' } }));
+        expect(value(host.validatePreparedSomedaySectionTask(sent))).toEqual({ id: sent.request.requestId });
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: undefined } }));
+        expect(value(await host.commitPreparedSomedaySectionTask(skipped))).toEqual({ id: skipped.request.requestId });
+        expect(useTaskStore.getState()._tasksById.get(skipped.request.requestId)?.suppressMindwtrReminders).toBe(true);
+    });
 });

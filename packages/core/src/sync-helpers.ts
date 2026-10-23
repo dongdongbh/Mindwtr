@@ -206,6 +206,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
     };
     // Not preference groups: the dataset id and the support-prompt cooldown
     // must reach every device regardless of what the user chose to sync.
+    if (settings.taxonomy !== undefined) next.taxonomy = settings.taxonomy;
     if (isNonEmptyString(settings.analyticsProfileId)) {
         next.analyticsProfileId = settings.analyticsProfileId;
     }

@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from './task-accent-color';
 /**
  * The Board screen's logic, shared by the React Native Board and the native host
  * contract: the status columns and their order (board order, then list order),
@@ -120,7 +121,7 @@ export type BoardProjectBadge = { title: string; color?: string };
  * color is the placeholder, never shown here.
  */
 export const getBoardProjectBadges = (projects: readonly Project[], areaById: Map<string, Area>): Map<string, BoardProjectBadge> => new Map(
-    projects.map((project) => [project.id, { title: project.title, color: project.areaId ? areaById.get(project.areaId)?.color : undefined }]),
+    projects.map((project) => [project.id, { title: project.title, color: getProjectAccentColor(project, areaById) }]),
 );
 
 export type BoardCard = {

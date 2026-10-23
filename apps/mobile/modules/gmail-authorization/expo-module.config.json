@@ -1,0 +1,11 @@
+{
+  "platforms": ["android", "ios"],
+  "android": {
+    "modules": ["tech.dongdongbh.mindwtr.gmailauthorization.MindwtrGmailAuthorizationModule"]
+  },
+  "ios": {
+    "podspecPath": "MindwtrGmailAuthorization.podspec",
+    "swiftModuleName": "MindwtrGmailAuthorization",
+    "modules": ["MindwtrGmailAuthorizationModule"]
+  }
+}

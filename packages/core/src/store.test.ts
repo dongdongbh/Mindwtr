@@ -2782,6 +2782,26 @@ describe('TaskStore', () => {
         expect(mockStorage.saveData).toHaveBeenCalled();
     });
 
+    it('refreshes repeated raw recovery at a capped revision while ordinary loads reuse task identity', async () => {
+        const at = '2026-10-10T00:00:00.000Z';
+        const source = { tasks: [{ id: 'capped', title: 'Task', status: 'next' as const, contexts: [], tags: [],
+            createdAt: at, updatedAt: at, rev: 2_147_483_647, revBy: 'device-a', timeSpentMinutes: 4 }],
+            projects: [], sections: [], areas: [], people: [], settings: { deviceId: 'device-a', analyticsProfileId: 'profile-a',
+                migrations: { version: 9999, lastAutoArchiveAt: at, lastTombstoneCleanupAt: at },
+                gtd: { taskEditor: { defaultsVersion: 9999 }, focusGroupByDefaultsVersion: 1 } } };
+        mockStorage.getData = vi.fn().mockImplementation(async () => structuredClone(source));
+        await useTaskStore.getState().fetchData({ silent: true, recoveryLoad: true });
+        const old = useTaskStore.getState()._tasksById.get('capped');
+        source.tasks[0].timeSpentMinutes = 29;
+        await useTaskStore.getState().fetchData({ silent: true, recoveryLoad: true });
+        expect(useTaskStore.getState()._tasksById.get('capped')).not.toBe(old);
+        expect(useTaskStore.getState()._tasksById.get('capped')!.timeSpentMinutes).toBe(29);
+        await useTaskStore.getState().fetchData({ silent: true });
+        const ordinary = useTaskStore.getState()._tasksById.get('capped');
+        await useTaskStore.getState().fetchData({ silent: true });
+        expect(useTaskStore.getState()._tasksById.get('capped')).toBe(ordinary);
+    });
+
     it('does not overwrite local task edits made during an in-flight fetch', async () => {
         const nowIso = '2026-07-31T12:00:00.000Z';
         vi.setSystemTime(new Date(nowIso));

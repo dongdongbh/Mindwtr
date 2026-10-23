@@ -134,6 +134,23 @@ describe('project to section', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it('turns a Sequential source into a Sequential section of a Per section destination (#1429)', async () => {
+        rows([project('source', { isSequential: true }),
+            project('destination', { isSequential: false, perSectionFlow: true })],
+        [task('first', { order: 1 }), task('second', { order: 2 })]);
+        const command = prepare();
+        expect(await useTaskStore.getState().convertProjectToSection(command)).toMatchObject({ success: true });
+        expect(saved.sections.find((row) => row.id === command.sectionId)?.isSequential).toBe(true);
+        const destination = saved.projects.find((row) => row.id === 'destination')!;
+        const cues = getSequentialProjectTaskCues(destination, saved.tasks, saved.sections);
+        expect([cues.get('first'), cues.get('second')]).toEqual(['available', 'later']);
+
+        // A Parallel source lands as an explicit Parallel section.
+        rows([project('source'), project('destination', { perSectionFlow: true })], [task('only')]);
+        const parallel = prepare();
+        expect(parallel.section.isSequential).toBe(false);
+    });
+
     it('refuses confirmation when the destination flow changes', async () => {
         rows([project('source', { isSequential: true }),
             project('destination', { isSequential: true, sequentialScope: 'section' })], [task('first')]);

@@ -30,6 +30,12 @@ const render = (item: Project, patch: Partial<Parameters<typeof getProjectDetail
     });
 
 describe('Project Details presentation shared with RN', () => {
+    it('names the Per section Flow mode and keeps project-wide Sequential first (#1429)', () => {
+        expect(render(project({ perSectionFlow: true })).typeLabel).toBe('Per section');
+        expect(render(project({ perSectionFlow: true })).sequentialScopeLabel).toBeNull();
+        expect(render(project({ isSequential: true, perSectionFlow: true })).typeLabel).toBe('Sequential');
+    });
+
     it('shows Clear only for RN truthy raw dates, even if raw text equals the missing label', () => {
         for (const value of [undefined, null, '', 'Not set', 'invalid', '2026-03-08', '2026-03-08T04:30:00.000Z']) {
             const item = project({ startDate: value, dueDate: value, reviewAt: value } as Partial<Project>);

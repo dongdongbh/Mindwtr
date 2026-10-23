@@ -351,13 +351,21 @@ export function createReminderMethods(deps: ReminderDeps) {
             const translations = await loadTranslations(deps.language());
             const state = useTaskStore.getState();
             const digest = deps.reminderPlatform === 'ios' ? getDigestSchedule(state.settings) : null;
+            const storedState = readNativeReminderState(input.storedState);
+            // iOS holds 64 pending requests: the one-shot cap (60) already leaves room for the
+            // three summaries and a Pomodoro alert, so each Snooze still to come takes one more.
+            // Counted before the judging below, so a Snooze it withdraws only costs a slot once.
+            const snoozeSlots = deps.reminderPlatform === 'ios' ? [...storedState.values()].filter((entry) =>
+                entry.kind === 'snooze' && (entry.fireAtMs > Date.now() || !entry.armed)).length : 0;
+            if (snoozeSlots > 0) logInfo('Native iOS reminder one-shot cap reduced for Snoozes', { scope: 'notifications',
+                context: { releaseCheck: 'v1.3.7/ios-reminder-snooze-capacity', count: snoozeSlots } });
             const plan = planReminderAlarms({
                 settings: state.settings,
                 tasks: state.tasks,
                 projects: state.projects,
                 now: new Date(),
                 translations,
-                maxOneShotReminders: MAX_PENDING_ONE_SHOT_REMINDER_ALARMS[deps.reminderPlatform],
+                maxOneShotReminders: Math.max(0, MAX_PENDING_ONE_SHOT_REMINDER_ALARMS[deps.reminderPlatform] - snoozeSlots),
                 alarms: held,
                 permissionGranted: input.permissionGranted,
             });
@@ -375,7 +383,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             const fired = new Set(input.fired ?? []);
             const shown = input.shown ? new Set(input.shown) : null;
             const stillShown = (id: number, sinceMs: number) => (shown ? shown.has(id) : nowMs - sinceMs <= DELIVERED_RETENTION_MS);
-            for (const [key, entry] of readNativeReminderState(input.storedState)) {
+            for (const [key, entry] of storedState) {
                 if (entry.kind === 'snooze') {
                     const late = entry.fireAtMs < nowMs - SNOOZE_LATE_LIMIT_MS;
                     if (plan.mode === 'revoked' || isReminderOwnerGone(snoozedKey(entry), owners.tasks, owners.projects)

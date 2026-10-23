@@ -186,6 +186,7 @@ export function ArchiveView() {
         removeFilterChip,
         clearFilters,
         setFiltersOpen,
+        setListFilters,
     } = useListFilterControls();
     const archivedGroupBy = useUiStore((state) => state.listOptions.archivedGroupBy);
     const archivedSortBy = useUiStore((state) => state.listOptions.archivedSortBy);
@@ -676,6 +677,8 @@ export function ArchiveView() {
 
             {segment === 'tasks' && (filtersOpen || hasFilterChips) && (
                 <ListFiltersPanel
+                    anyDateRange={listFilterCriteria.anyDateRange}
+                    onAnyDateRangeChange={(value) => setListFilters({ criteria: { ...listFilterCriteria, anyDateRange: value } })}
                     t={t}
                     activeFilterChips={activeFilterChips}
                     hasFilters={hasFilterChips}

@@ -288,13 +288,14 @@ describe('SqliteAdapter lock, read tokens and epoch bracket', () => {
             }
             throw new Error('unbalanced');
         };
-        // The public API runs outside any hold (each public method only takes the lock and runs its body). Every other method
-        // of the three adapter classes can run inside a hold: …Now bodies, hooks, and the private helpers they call.
+        // Public entry points and canonical projection adoption run outside any hold. Every other method of the three
+        // adapter classes can run inside a hold: …Now bodies, hooks, and the private SQL helpers they call.
         const outsideHold = new Set(['constructor', 'getData', 'saveData', 'saveTask', 'readRowBaseline', 'queryTasks', 'searchAll',
             'ensureSchema', 'libraryBytes', 'commitReceiptOnly', 'readDurableReceipt', 'hasForeignKeyViolations', 'withConnection',
             'saveDocumentWithReceipt', 'getCalendarSyncEntry', 'upsertCalendarSyncEntry', 'deleteCalendarSyncEntry',
             'getAllCalendarSyncEntries', 'verifyActivation', 'armReceiptPrerequisite', 'clearReceiptPrerequisite',
-            'getLastSaveDataStats', 'readTokenOf', 'concurrentWritesGuarded']);
+            'getLastSaveDataStats', 'readTokenOf', 'concurrentWritesGuarded', 'acknowledgeDataLoad',
+            'reloadPomodoroProjection', 'readPomodoroSession', 'readPomodoroTransitionOutcome', 'savePomodoroTransitionWithReceipt']);
         const held: string[] = [];
         const classes: [string, string][] = [[source('./sqlite-adapter.ts'), 'export class SqliteAdapter {'],
             [source('./native-request-receipts.ts'), 'export class NativeReceiptSqliteAdapter extends SqliteAdapter {'],
@@ -306,9 +307,11 @@ describe('SqliteAdapter lock, read tokens and epoch bracket', () => {
                 if (outsideHold.has(match[1])) continue;
                 held.push(`${match[1]}: ${block(body, body.indexOf(' {\n', match.index) + 1)}`);
             }
-            // The document save's whole hold.
-            const document = body.indexOf("this.exclusive('saveDocumentWithReceipt'");
-            if (document >= 0) held.push(`saveDocumentWithReceipt: ${block(body, body.indexOf('(', document), ['(', ')'])}`);
+            // Every actual hold, including a domain transaction nested in a public store command.
+            const holds = /\bthis\.exclusive\('([^']+)'/g;
+            for (let match = holds.exec(body); match; match = holds.exec(body)) {
+                held.push(`${match[1]}: ${block(body, body.indexOf('(', match.index), ['(', ')'])}`);
+            }
         }
         // The host's own SQL: each callback it hands withConnection.
         const calls = /\b(?:withConnection|withHostConnection)\(/g;
@@ -318,7 +321,8 @@ describe('SqliteAdapter lock, read tokens and epoch bracket', () => {
         const names = held.map((body) => body.slice(0, body.indexOf(':')));
         for (const name of ['ensureSchemaNow', 'ensureSchemaInternal', 'ensureFtsPopulated', 'getDataNow', 'readRowBaselineNow', 'saveTaskNow',
             'saveDataNow', 'libraryBytesNow', 'commitReceiptOnlyNow', 'readCurrentReceipt', 'beforeCommit', 'afterReadNow', 'validate',
-            'saveDocumentWithReceipt']) expect(names).toContain(name);
+            'saveDocumentWithReceipt', 'readPomodoroSession', 'readPomodoroTransitionOutcome',
+            'savePomodoroTransitionWithReceipt']) expect(names).toContain(name);
         expect(names.filter((name) => name === 'withConnection').length).toBeGreaterThanOrEqual(7);
         const publicCall = [...outsideHold].filter((name) => name !== 'constructor' && name !== 'readTokenOf').join('|');
         const reentry = new RegExp(`\\.(?:${publicCall})\\(|\\brunStoreCommand\\(|\\brunSyncStoreSave\\(|\\buseTaskStore\\b|\\bfetchData\\(`);

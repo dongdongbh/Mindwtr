@@ -15,7 +15,7 @@ import {
 // equivalent comment in project-sync-schema.test.ts — same rules apply here.
 const PRE_REFACTOR_SECTION_SQLITE_COLUMNS = [
     'id', 'projectId', 'title', 'description', 'orderNum', 'isCollapsed', 'rev', 'revBy',
-    'createdAt', 'updatedAt', 'deletedAt', 'deletedAtBeforeProjectArchive', 'projectArchivedAt',
+    'createdAt', 'updatedAt', 'deletedAt', 'deletedAtBeforeProjectArchive', 'projectArchivedAt', 'isSequential',
 ];
 
 const PRE_REFACTOR_SECTION_UPSERT_UPDATE_CLAUSE = `projectId=excluded.projectId,
@@ -29,12 +29,13 @@ createdAt=excluded.createdAt,
 updatedAt=excluded.updatedAt,
 deletedAt=excluded.deletedAt,
 deletedAtBeforeProjectArchive=excluded.deletedAtBeforeProjectArchive,
-projectArchivedAt=excluded.projectArchivedAt
+projectArchivedAt=excluded.projectArchivedAt,
+isSequential=excluded.isSequential
 WHERE sections.rev IS NULL OR sections.rev <= excluded.rev`;
 
 const PRE_REFACTOR_ENSURE_SECTION_COLUMNS_NAMES = [
     'description', 'orderNum', 'isCollapsed', 'rev', 'revBy', 'createdAt', 'updatedAt',
-    'deletedAt', 'deletedAtBeforeProjectArchive', 'projectArchivedAt',
+    'deletedAt', 'deletedAtBeforeProjectArchive', 'projectArchivedAt', 'isSequential',
 ];
 
 const PRE_REFACTOR_ENSURE_SECTION_COLUMNS_SQL = [
@@ -48,6 +49,7 @@ const PRE_REFACTOR_ENSURE_SECTION_COLUMNS_SQL = [
     'ALTER TABLE sections ADD COLUMN deletedAt TEXT',
     'ALTER TABLE sections ADD COLUMN deletedAtBeforeProjectArchive TEXT',
     'ALTER TABLE sections ADD COLUMN projectArchivedAt TEXT',
+    'ALTER TABLE sections ADD COLUMN isSequential INTEGER',
 ];
 
 const sorted = (values: Iterable<string>): string[] => Array.from(values).sort();

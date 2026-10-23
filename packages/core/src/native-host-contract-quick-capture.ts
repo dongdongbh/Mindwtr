@@ -49,7 +49,8 @@ import { findSelectableProjectByTitleAndArea, isSelectableProjectForTaskAssignme
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { isSandboxMode } from './sandbox';
 import { flushPendingSave, getStorageAdapter, useTaskStore } from './store';
-import type { Project, Task, TaskPriority } from './types';
+import type { AppSettings, Project, Task, TaskPriority } from './types';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { buildNewTask } from './task-creation';
 import { buildNewProject } from './store-projects/project-actions';
 import { createProjectOrderReserver, ensureDeviceId, getReferenceTaskFieldClears } from './store-helpers';
@@ -131,6 +132,22 @@ export type NativePreparedQuickCapture = {
 export type NativeQuickCapturePrepareResult =
     | { kind: 'prepared'; prepared: NativePreparedQuickCapture }
     | Extract<NativeQuickCaptureSubmitResult, { kind: 'refused' | 'confirmLines' }>;
+
+export type NativeQuickCaptureLinesInput = {
+    text: string;
+    options: QuickCaptureOptions;
+    captureIds: string[];
+};
+export type NativePreparedQuickCaptureLines = {
+    version: 1;
+    request: NativeQuickCaptureLinesInput;
+    tasks: Task[];
+    projects: Project[];
+    deviceIdToInitialize: string | null;
+    result: Extract<NativeQuickCaptureLinesResult, { kind: 'saved' }>;
+};
+export const NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES = 8 * 1024 * 1024;
+export const NATIVE_PREPARED_CAPTURE_LINES_MAX_COUNT = 1000;
 
 const fail = (code: NativeHostErrorCode, message: string): NativeHostResult<never> => ({ ok: false, error: { code, message } });
 const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
@@ -313,6 +330,111 @@ const readPreparedCapture = (value: unknown): NativePreparedQuickCapture | null 
         result: { kind: 'saved', taskId: task.id, ...(task.projectId ? { projectId: task.projectId } : { projectId: undefined }), next, reset } };
 };
 
+// Count the closed JSON grammar incrementally, before building a full journal
+// string. JSON escapes unpaired surrogates; no native TextEncoder is required.
+const jsonBytes = (value: unknown): number => {
+    let bytes = 0;
+    const ancestors = new Set<object>();
+    const string = (text: string) => {
+        if (text.length > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) { bytes = NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES + 1; return; }
+        for (const character of JSON.stringify(text)) {
+            const point = character.codePointAt(0)!;
+            bytes += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+            if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return;
+        }
+    };
+    const omitted = (entry: unknown) => entry === undefined || typeof entry === 'function' || typeof entry === 'symbol';
+    const visit = (entry: unknown) => {
+        if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return;
+        if (typeof entry === 'string') { string(entry); return; }
+        if (entry === null || typeof entry === 'number' || typeof entry === 'boolean') { bytes += JSON.stringify(entry).length; return; }
+        if (typeof entry !== 'object' || ancestors.has(entry)) throw new TypeError('Malformed JSON');
+        ancestors.add(entry); bytes += 2;
+        let count = 0;
+        if (Array.isArray(entry)) {
+            for (const item of entry) {
+                if (count++) bytes += 1;
+                if (omitted(item)) bytes += 4; else visit(item);
+                if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) break;
+            }
+        } else {
+            for (const name of Object.keys(entry)) {
+                const item = (entry as Record<string, unknown>)[name];
+                if (omitted(item)) continue;
+                if (count++) bytes += 1;
+                string(name); bytes += 1; visit(item);
+                if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) break;
+            }
+        }
+        ancestors.delete(entry);
+    };
+    visit(value);
+    return bytes;
+};
+const readLinesRequest = (value: unknown): NativeQuickCaptureLinesInput | null => {
+    if (!isObjectRecord(value) || !hasKeys(value, ['text', 'options', 'captureIds'])
+        || !isText(value.text, TEXT_LIMIT) || !Array.isArray(value.captureIds)
+        || value.captureIds.length < 2 || value.captureIds.length > NATIVE_PREPARED_CAPTURE_LINES_MAX_COUNT
+        || !value.captureIds.every((id) => isText(id, 36) && UUID_PATTERN.test(id) && id === id.toLowerCase())
+        || new Set(value.captureIds).size !== value.captureIds.length) return null;
+    const options = readOriginalOptions(value.options);
+    const plan = planQuickCaptureSave(value.text);
+    if (!options || plan.kind !== 'bulk' || plan.lines.length !== value.captureIds.length) return null;
+    const request = { text: value.text, options, captureIds: [...value.captureIds] as string[] };
+    return jsonBytes(request) <= NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES ? request : null;
+};
+const readPreparedLines = (value: unknown): NativePreparedQuickCaptureLines | null => {
+    if (!isObjectRecord(value) || !hasKeys(value, ['version', 'request', 'tasks', 'projects', 'deviceIdToInitialize', 'result'])
+        || value.version !== 1 || !Array.isArray(value.tasks) || !Array.isArray(value.projects)
+        || value.tasks.length > NATIVE_PREPARED_CAPTURE_LINES_MAX_COUNT
+        || value.projects.length > NATIVE_PREPARED_CAPTURE_LINES_MAX_COUNT) return null;
+    const request = readLinesRequest(value.request);
+    if (!request || value.tasks.length !== request.captureIds.length
+        || !(value.deviceIdToInitialize === null || isText(value.deviceIdToInitialize, 36) && UUID_PATTERN.test(value.deviceIdToInitialize))
+        || !isObjectRecord(value.result) || !hasKeys(value.result, ['kind', 'taskIds'])
+        || value.result.kind !== 'saved' || !Array.isArray(value.result.taskIds)
+        || value.result.taskIds.length !== request.captureIds.length
+        || !value.result.taskIds.every((id, index) => id === request.captureIds[index])) return null;
+    let bytes = jsonBytes(request);
+    const tasks: Task[] = [], projects: Project[] = [];
+    for (const [index, row] of value.tasks.entries()) {
+        bytes += jsonBytes(row);
+        if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return null;
+        const task = readPreparedTask(row);
+        if (!task || task.id !== request.captureIds[index]
+            || index > 0 && (task.createdAt !== tasks[0].createdAt || task.revBy !== tasks[0].revBy)) return null;
+        tasks.push(task);
+    }
+    if (value.deviceIdToInitialize !== null && value.deviceIdToInitialize !== tasks[0].revBy) return null;
+    const projectIDs = new Set<string>();
+    for (const row of value.projects) {
+        bytes += jsonBytes(row);
+        if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return null;
+        const project = readPreparedProject(row);
+        if (!project || projectIDs.has(project.id) || project.createdAt !== tasks[0].createdAt
+            || project.revBy !== tasks[0].revBy || !tasks.some((task) => task.projectId === project.id)) return null;
+        projectIDs.add(project.id);
+        projects.push(JSON.parse(JSON.stringify(project)) as Project);
+    }
+    const prepared: NativePreparedQuickCaptureLines = {
+        version: 1, request, tasks, projects, deviceIdToInitialize: value.deviceIdToInitialize as string | null,
+        result: { kind: 'saved', taskIds: [...request.captureIds] },
+    };
+    return jsonBytes(prepared) <= NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES ? prepared : null;
+};
+
+/** Pure authority for a private native journal, including cold terminal cleanup. */
+export const validatePreparedQuickCaptureLines = (input: unknown): NativeHostResult<NativePreparedQuickCaptureLines['result']> => {
+    try {
+        if (!isObjectRecord(input) || !hasKeys(input, ['request', 'prepared'])
+            || jsonBytes(input) > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return fail('INVALID_INPUT', 'A bounded prepared lines command is required');
+        const request = readLinesRequest(input.request), prepared = readPreparedLines(input.prepared);
+        if (!request || !prepared || !sameJson(request, prepared.request)
+            || jsonBytes({ request, prepared }) > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return fail('INVALID_INPUT', 'Prepared lines request or journal does not match');
+        return { ok: true, value: prepared.result };
+    } catch { return fail('INVALID_INPUT', 'Prepared lines journal is malformed'); }
+};
+
 const sameTokens = (left: readonly string[] | undefined, right: readonly string[] | undefined) => (
     JSON.stringify([...(left ?? [])].sort()) === JSON.stringify([...(right ?? [])].sort())
 );
@@ -486,13 +608,17 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         }
         return { ...ctx, projects };
     };
-    const contextChoices = () => getQuickCaptureContextChoices(useTaskStore.getState().tasks);
-    let cachedContextHistory: { tasks: Task[]; choices: string[] } | null = null;
+    const contextChoices = () => {
+        const state = useTaskStore.getState();
+        return getQuickCaptureContextChoices(state.tasks, getSavedTaxonomyTokens(state.settings, 'context'));
+    };
+    let cachedContextHistory: { tasks: Task[]; taxonomy: AppSettings['taxonomy']; choices: string[] } | null = null;
     const contextHistory = () => {
-        const tasks = useTaskStore.getState()._allTasks;
-        if (cachedContextHistory?.tasks === tasks) return cachedContextHistory.choices;
-        const choices = getQuickCaptureContextChoices(tasks);
-        cachedContextHistory = { tasks, choices };
+        const { _allTasks: tasks, settings } = useTaskStore.getState();
+        const { taxonomy } = settings;
+        if (cachedContextHistory?.tasks === tasks && cachedContextHistory.taxonomy === taxonomy) return cachedContextHistory.choices;
+        const choices = getQuickCaptureContextChoices(tasks, getSavedTaxonomyTokens(settings, 'context'));
+        cachedContextHistory = { tasks, taxonomy, choices };
         return choices;
     };
     const freshOptions = (addAnother: boolean) => {
@@ -534,6 +660,93 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
     };
 
     return {
+        /** Read-only prerequisite; the native owner must write its backup and journal before commit. */
+        prepareQuickCaptureLines(input: NativeQuickCaptureLinesInput): NativeHostResult<
+            { kind: 'prepared'; prepared: NativePreparedQuickCaptureLines } | Extract<NativeQuickCaptureLinesResult, { kind: 'refused' }>
+        > {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const request = readLinesRequest(input);
+            if (!request) return fail('INVALID_INPUT', 'A bounded multiline request and ordered lowercase UUIDs are required');
+            const options = readOptions(request.options)!;
+            const plan = planQuickCaptureSave(request.text);
+            if (plan.kind !== 'bulk') return fail('INVALID_INPUT', 'Several lines are required');
+            // Repeated notes/contexts alone can exceed the journal before any row array is built.
+            const repeatedBytes = Math.max(0, jsonBytes(options.note.trim()) - 2) + jsonBytes([...new Set(options.contexts)]);
+            let bytes = 2 * jsonBytes(request);
+            if (bytes + repeatedBytes * plan.lines.length > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return fail('INVALID_INPUT', 'Prepared lines exceed the supported byte limit');
+            const ctx = context(), state = useTaskStore.getState();
+            for (const line of plan.lines) {
+                const checked = planQuickCaptureTask({ text: line, options }, ctx);
+                if (!checked.success) return checked.reason === 'invalid-date-command'
+                    ? { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), checked.invalidDateCommands) } }
+                    : fail('INVALID_INPUT', 'A line cannot be captured');
+            }
+            if (request.captureIds.some((id) => state._allTasks.some((task) => task.id === id))) return fail('INVALID_INPUT', 'Capture ID already exists; replay its prepared journal');
+            const device = ensureDeviceId(state.settings), now = ctx.now.toISOString();
+            const projects: Project[] = [], plans: { title: string; props: Partial<Task> }[] = [];
+            let visibleProjects = ctx.projects, allProjects = state._allProjects;
+            for (const line of plan.lines) {
+                const planned = planQuickCaptureTask({ text: line, options, projects: visibleProjects }, ctx);
+                if (!planned.success) return fail('INVALID_INPUT', 'A line cannot be captured');
+                let props = planned.props;
+                if (planned.projectToCreate) {
+                    const create = planned.projectToCreate;
+                    const duplicate = findSelectableProjectByTitleAndArea(allProjects, create.title, create.initialProps?.areaId);
+                    const project = duplicate ?? buildNewProject({ ...create, id: generateUUID(), existingProjects: allProjects,
+                        existingAreas: state._allAreas, settings: state.settings, deviceId: device.deviceId, now });
+                    if (!duplicate) {
+                        bytes += jsonBytes(project);
+                        if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return fail('INVALID_INPUT', 'Prepared lines exceed the supported byte limit');
+                        projects.push(project); allProjects = [...allProjects, project];
+                    }
+                    visibleProjects = [...visibleProjects, project];
+                    props = applyCapturedProject(props, project.id);
+                }
+                plans.push({ title: planned.title.trim(), props });
+            }
+            const tasks: Task[] = [], precedingTasks = [...state._allTasks];
+            const projectOrderReserver = createProjectOrderReserver(state._allTasks);
+            let focusedCount = state.getFocusedCount();
+            for (const [index, planned] of plans.entries()) {
+                const built = buildNewTask({ title: planned.title, initialTaskProps: planned.props,
+                    id: request.captureIds[index], now, deviceId: device.deviceId, state: { ...state, _allProjects: allProjects },
+                    tasks: precedingTasks, focusedCount, focusTaskLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit), projectOrderReserver });
+                if (!built.ok) return fail('INVALID_INPUT', built.error);
+                bytes += jsonBytes(built.task);
+                if (bytes > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return fail('INVALID_INPUT', 'Prepared lines exceed the supported byte limit');
+                focusedCount = built.focusedCount; tasks.push(built.task); precedingTasks.push(built.task);
+            }
+            const payload: NativePreparedQuickCaptureLines = { version: 1, request, tasks, projects,
+                deviceIdToInitialize: device.updated ? device.deviceId : null, result: { kind: 'saved', taskIds: request.captureIds } };
+            if (jsonBytes(payload) > NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES) return fail('INVALID_INPUT', 'Prepared lines exceed the supported byte limit');
+            const prepared = readPreparedLines(JSON.parse(JSON.stringify(payload)));
+            if (!prepared || !validatePreparedQuickCaptureLines({ request, prepared }).ok) return fail('INVALID_INPUT', 'Lines could not produce a valid prepared journal');
+            return { ok: true, value: { kind: 'prepared', prepared } };
+        },
+
+        validatePreparedQuickCaptureLines,
+
+        async commitPreparedQuickCaptureLines(input: { request: NativeQuickCaptureLinesInput; prepared: NativePreparedQuickCaptureLines }): Promise<NativeHostResult<NativePreparedQuickCaptureLines['result']>> {
+            const authority = validatePreparedQuickCaptureLines(input);
+            if (!authority.ok) return authority;
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const prepared = readPreparedLines(input.prepared)!;
+            const applied = await useTaskStore.getState().commitPreparedCaptureLines(prepared);
+            if (!applied.success) return fail('INVALID_INPUT', applied.error ?? 'Prepared lines conflict with current data');
+            const saved = await durableSave();
+            if (!saved.ok) return saved;
+            rebuildParseOptions();
+            try {
+                logInfo('Prepared native capture lines saved', {
+                    scope: 'native-host', category: 'storage',
+                    context: { releaseCheck: 'v1.3.5/native-capture-lines', operation: 'captureLinesCommit', count: prepared.tasks.length },
+                });
+            } catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            return { ok: true, value: prepared.result };
+        },
+
         /** Read-only. The serial native owner must journal this result before commit. */
         prepareQuickCapture(input: NativeQuickCaptureInput): NativeHostResult<NativeQuickCapturePrepareResult> {
             const ready = deps.readiness();

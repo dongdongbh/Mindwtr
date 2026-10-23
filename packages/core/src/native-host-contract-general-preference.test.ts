@@ -115,7 +115,7 @@ describe('prepared General preferences', () => {
         expect(groups).toHaveLength(2);
         expect(groups[0].map((row) => row.value)).toEqual(['system', 'system-oled', 'light', 'dark']);
         expect(groups[1].map((row) => row.value)).toEqual(['material3-light', 'material3-dark', 'eink',
-            'nord', 'catppuccin-macchiato', 'dracula', 'sepia', 'oled']);
+            'nord', 'catppuccin-macchiato', 'dracula', 'gruvbox-light', 'gruvbox-dark', 'sepia', 'oled']);
         expect([...groups.flat().map((row) => row.value)].sort()).toEqual([...SETTINGS_THEME_VALUES].sort());
         expect(groups.flat().find((row) => row.value === value)?.edit).toEqual({ type: 'theme', value });
         expect(options.value.expected.theme).toEqual({ present: false, value: null,

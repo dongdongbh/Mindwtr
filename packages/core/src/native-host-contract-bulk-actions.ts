@@ -250,7 +250,7 @@ const exactDestination = (kind: 'project' | 'area', query: string): Project | Ar
 };
 
 /** A draft as the host sends it, completed from the empty one; null when a field is not one the dialog holds. */
-const readDraftShape = (value: unknown): BulkOrganizeDraft | null => {
+export const readBulkOrganizeDraftShape = (value: unknown): BulkOrganizeDraft | null => {
     if (value === undefined) return EMPTY_BULK_ORGANIZE_DRAFT;
     if (!isObjectRecord(value) || Object.keys(value).some((key) => !DRAFT_KEYS.has(key))) return null;
     const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT, ...value } as BulkOrganizeDraft;
@@ -269,7 +269,7 @@ const offersChoices = (draft: BulkOrganizeDraft): boolean => {
 };
 /** A draft as the host sends it, completed from the empty one; null when a choice is not one the dialog offers. */
 const readDraft = (value: unknown): BulkOrganizeDraft | null => {
-    const draft = readDraftShape(value);
+    const draft = readBulkOrganizeDraftShape(value);
     return draft && offersChoices(draft) ? draft : null;
 };
 const readEdit = (value: unknown): BulkOrganizeDraftEdit | null => {
@@ -553,7 +553,9 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             if (!read.ok) return read;
             const { revision: listRevision, rows } = read.value;
             const removeTagPicker = input.picker?.kind === 'removeTag';
-            if (!removeTagPicker && (input.picker?.offset ?? 0) > 0 && input.picker?.revision !== listRevision) return fail('STALE_REVISION', 'The list changed; open the picker again');
+            const inboxOrganizePicker = input.list === 'inbox' && input.organize !== undefined
+                && (input.picker?.kind === 'project' || input.picker?.kind === 'area');
+            if (!removeTagPicker && !inboxOrganizePicker && (input.picker?.offset ?? 0) > 0 && input.picker?.revision !== listRevision) return fail('STALE_REVISION', 'The list changed; open the picker again');
             const selectable = selectableIds(rows);
             const onScreen = new Set(selectable);
 
@@ -582,7 +584,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             // A minute refreshes labels, not an unchanged tag inventory. Re-read
             // eligibility first, then bind the picker to its actual scope/selection
             // and ordered RN token union; never strip an opaque list revision.
-            const revision = removeTagPicker ? `${deps.pickerRevision()}:${revisionsToken([
+            let revision = removeTagPicker ? `${deps.pickerRevision()}:${revisionsToken([
                 JSON.stringify({ kind: 'removeTag', list: input.list, params: input.params ?? {}, query: input.picker?.query ?? null }),
                 JSON.stringify(selectable),
                 JSON.stringify(selection.map((id) => [id, taskRevisionOf(state._tasksById.get(id)!)])),
@@ -605,6 +607,16 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             if (input.organize) {
                 organize = buildNativeBulkOrganizeView(input.organize, { selectedCount: selection.length, t, formatDate: deps.formatDate() });
                 if (!organize) return fail('INVALID_INPUT', 'A Bulk organize draft and edit with choices the dialog offers are required');
+            }
+            if (inboxOrganizePicker) {
+                // Display minutes do not change an offer; re-read eligibility and bind its complete picker context.
+                revision = `${deps.pickerRevision()}:${revisionsToken([
+                    JSON.stringify({ list: input.list, params: input.params ?? {}, kind: input.picker!.kind, query: (input.picker!.query ?? '').trim() }),
+                    JSON.stringify(selectable),
+                    JSON.stringify(selection.map((id) => [id, taskRevisionOf(state._tasksById.get(id)!)])),
+                    JSON.stringify(organize!.draft),
+                ])}`;
+                if ((input.picker?.offset ?? 0) > 0 && input.picker?.revision !== revision) return fail('STALE_REVISION', 'The selection or Inbox destination offer changed; open the picker again');
             }
 
             let picker: NativeBulkPicker | null = null;
@@ -669,7 +681,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             if (!ready.ok) return ready;
             // Only the shape here: what the dialog offers is checked when the request first runs,
             // so a retry that owes only a save is never refused by a change since.
-            const draft = isObjectRecord(input) ? readDraftShape(input.draft) : null;
+            const draft = isObjectRecord(input) ? readBulkOrganizeDraftShape(input.draft) : null;
             if (!isObjectRecord(input) || (input.list !== 'review' && (!BULK_LISTS.includes(input.list) || !TASK_LIST_BULK_SCREENS[input.list].organize))
                 || (input.kind !== 'project' && input.kind !== 'area') || !isText(input.name) || !input.name.trim() || !draft) {
                 return fail('INVALID_INPUT', 'A request UUID, a list that offers Bulk organize, a project or area name and a valid draft are required');

@@ -1324,7 +1324,7 @@
           "id": "pa-dead-area-p",
           "title": "Ship the thing",
           "status": "active",
-          "color": "#2563EB",
+          "color": "#94a3b8",
           "order": 0,
           "tagIds": [],
           "createdAt": "2026-01-01T00:00:00.000Z",

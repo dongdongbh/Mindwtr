@@ -173,10 +173,12 @@ export function createInboxViewMethods(deps: InboxViewDeps) {
             return null;
         }
         const edit = input.filterEdit as ListFilterEdit | undefined;
+        const nextFilters = edit ? readFilterState(applyListFilterEdit(filters, edit)) : filters;
+        if (!nextFilters) return null;
         return {
             groupBy: (input.groupBy as TaskGroupBy | undefined) ?? 'none',
             collapsedGroupIds: (input.collapsedGroupIds as string[] | undefined) ?? [],
-            filters: edit ? applyListFilterEdit(filters, edit) : filters,
+            filters: nextFilters,
         };
     };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, type DragEvent } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     useTaskStore,
@@ -6,10 +6,10 @@ import {
     shallow,
     sortTasksBy,
     TaskStatus,
-    getFrequentTaskTokens,
-    getUsedTaskTokens,
+    getContextsAddTokenOptions,
     buildContextsTokenIndex,
     buildContextsViewFilterSections,
+    getContextsChipLabels,
     getContextsTokenCount,
     collectBulkTaskTokens,
     normalizeBulkTaskTokenInput,
@@ -17,8 +17,11 @@ import {
     formatI18nTemplate,
     tFallback,
     updateTaskFromLatest,
+    selectContextsToken,
+    toggleContextsToken,
     type Task,
     type ContextOrTagMatchMode,
+    type ContextsChipLabel,
 } from '@mindwtr/core';
 import { AtSign, CheckSquare, ChevronDown, ChevronRight, Filter, Hash, List, Tag, type LucideIcon } from 'lucide-react';
 import { TokenPickerModal } from '../TokenPickerModal';
@@ -138,12 +141,27 @@ export function ContextsView() {
     }, [setPersistedViewState]);
     const toggleSelectedContext = useCallback((value: string) => {
         setPersistedViewState((current) => {
-            const next = current.selectedContexts.includes(value)
-                ? current.selectedContexts.filter((token) => token !== value)
-                : [...current.selectedContexts.filter((token) => token !== NO_CONTEXT_TOKEN), value];
+            const next = toggleContextsToken(current.selectedContexts, value);
             return { ...current, selectedContexts: next, matchMode: next.length === 0 ? 'all' : current.matchMode };
         });
     }, [setPersistedViewState]);
+    // A plain click switches to the token; Ctrl/Cmd-click (or Ctrl/Cmd+Enter) adds it (#1427).
+    const pressContextToken = useCallback((value: string, additive: boolean) => {
+        if (additive) {
+            toggleSelectedContext(value);
+            return;
+        }
+        setPersistedViewState((current) => ({
+            ...current,
+            selectedContexts: selectContextsToken(current.selectedContexts, value),
+            matchMode: 'all',
+        }));
+    }, [setPersistedViewState, toggleSelectedContext]);
+    const onContextTokenKeyDown = (value: string) => (event: KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
+        event.preventDefault();
+        pressContextToken(value, true);
+    };
     const setMatchMode = useCallback((value: ContextOrTagMatchMode) => {
         setPersistedViewState((current) => ({ ...current, matchMode: value }));
     }, [setPersistedViewState]);
@@ -293,18 +311,12 @@ export function ContextsView() {
         },
     });
     const addTagOptions = useMemo(
-        () => Array.from(new Set([
-            ...getFrequentTaskTokens(activeTasks, (task) => task.tags, 12, { prefix: '#' }),
-            ...getUsedTaskTokens(activeTasks, (task) => task.tags, { prefix: '#' }),
-        ])),
-        [activeTasks]
+        () => getContextsAddTokenOptions(activeTasks, 'tags', settings),
+        [activeTasks, settings]
     );
     const addContextOptions = useMemo(
-        () => Array.from(new Set([
-            ...getFrequentTaskTokens(activeTasks, (task) => task.contexts, 12, { prefix: '@' }),
-            ...getUsedTaskTokens(activeTasks, (task) => task.contexts, { prefix: '@' }),
-        ])),
-        [activeTasks]
+        () => getContextsAddTokenOptions(activeTasks, 'contexts', settings),
+        [activeTasks, settings]
     );
 
     const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
@@ -478,7 +490,7 @@ export function ContextsView() {
         }
     };
 
-    const renderTokenRow = (token: string, marker: '@' | '#') => {
+    const renderTokenRow = (token: string, marker: '@' | '#', { label, depth }: ContextsChipLabel) => {
         const taskCount = getContextsTokenCount(tokenIndex, token);
         const context = normalizeBulkTaskTokenInput(token, 'contexts');
         const isHovered = marker === '@' && hoveredContext === token;
@@ -486,7 +498,8 @@ export function ContextsView() {
             <button
                 key={token}
                 type="button"
-                onClick={() => toggleSelectedContext(token)}
+                onClick={(event) => pressContextToken(token, event.ctrlKey || event.metaKey)}
+                onKeyDown={onContextTokenKeyDown(token)}
                 onDragOver={marker === '@' ? (event) => {
                     if (!acceptsContextDrop(event, context)) {
                         setHoveredContext(null);
@@ -502,6 +515,7 @@ export function ContextsView() {
                 onDrop={marker === '@' ? (event) => { void handleContextDrop(event, context); } : undefined}
                 aria-label={`${token} (${taskCount})`}
                 aria-pressed={selectedContexts.includes(token)}
+                title={depth > 0 ? token : undefined}
                 className={cn(
                     "flex w-full items-center gap-2 rounded-lg p-2 text-left text-sm transition-colors",
                     selectedContexts.includes(token) || isHovered ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted/40 text-foreground",
@@ -509,7 +523,7 @@ export function ContextsView() {
                 )}
             >
                 <span className="w-4 text-center text-muted-foreground">{marker}</span>
-                <span className="flex-1 truncate">{isHovered ? contextDropLabel('contexts.dropAdd', context) : token.replace(marker === '@' ? /^@/ : /^#/, '')}</span>
+                <span className="flex-1 truncate" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>{isHovered ? contextDropLabel('contexts.dropAdd', context) : label.replace(marker === '@' ? /^@/ : /^#/, '')}</span>
                 <span className="text-xs text-muted-foreground">
                     {taskCount}
                 </span>
@@ -549,7 +563,7 @@ export function ContextsView() {
                 </button>
                 {!collapsed && (
                     <div className="mt-1 space-y-1">
-                        {tokens.map((token) => renderTokenRow(token, marker))}
+                        {getContextsChipLabels(tokens).map((chipLabel, index) => renderTokenRow(tokens[index], marker, chipLabel))}
                     </div>
                 )}
             </div>
@@ -599,7 +613,7 @@ export function ContextsView() {
 
                             <button
                                 type="button"
-                                onClick={() => setSelectedContext(NO_CONTEXT_TOKEN)}
+                                onClick={() => pressContextToken(NO_CONTEXT_TOKEN, false)}
                                 aria-label={`${t('contexts.none')} (${scopedTasks.filter((t) => !hasContext(t)).length})`}
                                 className={cn(
                                     "flex w-full items-center gap-2 rounded-lg p-2 text-left text-sm transition-colors",

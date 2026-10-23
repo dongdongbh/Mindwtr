@@ -1,4 +1,5 @@
 import { safeParseDate } from './date';
+import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { logInfo, logWarn } from './logger';
 import { markCoreStartupPhase } from './startup-profiler';
 import { dedupeLiveAreasByName } from './area-utils';
@@ -664,6 +665,7 @@ const repairDanglingEntityReferencesMigration: LoadMigration = {
             return {
                 ...project,
                 areaId: undefined,
+                color: project.colorOverride ?? DEFAULT_PROJECT_COLOR,
                 updatedAt: ctx.nowIso,
                 rev: nextRevision(project.rev),
                 revBy: deviceId,

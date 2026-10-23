@@ -351,6 +351,23 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
         XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), saved)
         XCTAssertNil(try store.readAvailability()); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
+    /// Core's `normalizeAttachmentCleanupUri` treats percent-encoded and plain spellings as one file.
+    func testDurableOnlyPercentEncodedReferenceRetainsBytes() async throws {
+        let seeded = try await seed(), id = UUID().uuidString.lowercased(), identity = try inode(target)
+        let live = host(); _ = try await live.start(); _ = try await discard(live, requestId: id)
+        var reference = try XCTUnwrap((object(seeded.operations[0].after.payloadJSON)["attachments"] as? [[String: Any]])?.first)
+        let uri = try XCTUnwrap(reference["uri"] as? String), last = try XCTUnwrap(uri.unicodeScalars.last)
+        XCTAssertTrue(last.isASCII && last != "/")
+        reference["id"] = "independent-reference"
+        reference["uri"] = String(uri.dropLast()) + String(format: "%%%02X", last.value)
+        _ = try sql("UPDATE tasks SET attachments=? WHERE id='other'", [json([reference])])
+        let saved = try rows()
+        await boundary(.afterDiscardTerminal, host: live)
+        await refused { _ = try await self.finishDiscard(live, session: seeded.session.sessionID, requestId: id) }
+        XCTAssertEqual(((try terminalBody())["operations"] as? [[String: Any]])?.first?["target"] as? String, "referenced")
+        XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), saved)
+        await live.close()
+    }
     func testSidecarAndEditorSameByteReplacementRefuseBeforeSaveCommit() async throws {
         let parent = try XCTUnwrap(root)
         for fileName in ["sidecar", "editor"] {

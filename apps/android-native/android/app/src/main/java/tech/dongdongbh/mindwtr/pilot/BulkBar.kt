@@ -95,13 +95,7 @@ fun BulkBar(model: InboxViewModel) = with(model.menu) {
                 Text(busyLabels.optString(running, bar.getString("busyLabel")), style = rnText(11, 500), color = c.secondaryText)
             }
             val exit = bar.getJSONObject("exit")
-            val exitOn = exit.getBoolean("enabled") && !model.busy
-            val exitLabel = exit.getString("accessibilityLabel")
-            Box(Modifier.fade(if (exitOn) 1f else 0.5f).size(32.dp).clip(CircleShape).background(c.filterBg)
-                .clearAndSetSemantics { contentDescription = exitLabel; role = Role.Button; if (exitOn) onClick { endBulk(list ?: ""); true } else disabled() }
-                .clickable(enabled = exitOn) { list?.let(::endBulk) }, contentAlignment = Alignment.Center) {
-                Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
-            }
+            BulkExitButton(exit.getString("accessibilityLabel"), exit.getBoolean("enabled") && !model.busy) { list?.let(::endBulk) }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (option in bar.menuObjects("statuses")) {
@@ -133,9 +127,20 @@ fun BulkBar(model: InboxViewModel) = with(model.menu) {
     }
 }
 
+/** RN's bulk bar exit (bulkExitButton): a 32 circle with Lucide X at 16, named [label] (core's bulk.exitSelect); dimmed while off. */
+@Composable
+internal fun BulkExitButton(label: String, enabled: Boolean, onExit: () -> Unit) {
+    val c = LocalTheme.current.colors
+    Box(Modifier.fade(if (enabled) 1f else 0.5f).size(32.dp).clip(CircleShape).background(c.filterBg)
+        .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { onExit(); true } else disabled() }
+        .clickable(enabled = enabled, onClick = onExit), contentAlignment = Alignment.Center) {
+        Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+    }
+}
+
 /** One of the bar's buttons (RN's bulkMoveButton and bulkActionButton): one node with its label, role and state; dimmed while off. */
 @Composable
-private fun BarButton(label: String, enabled: Boolean, background: Color, color: Color, description: String = label, selected: Boolean? = null,
+internal fun BarButton(label: String, enabled: Boolean, background: Color, color: Color, description: String = label, selected: Boolean? = null,
                       weight: Int = 600, icon: ImageVector? = null, action: () -> Unit) {
     Row(Modifier.fade(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(6.dp)).background(background)
         .clearAndSetSemantics {

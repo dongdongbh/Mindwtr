@@ -1,0 +1,208 @@
+{
+  "now": 1792584000000,
+  "writes": [
+    {
+      "pathname": "/focus",
+      "params": null,
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/focus\",\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/inbox",
+      "params": {
+        "projectId": "p1"
+      },
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/inbox\",\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/projects-screen",
+      "params": {
+        "projectId": "p1",
+        "openToken": "x"
+      },
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/projects-screen\",\"params\":{\"projectId\":\"p1\"},\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/projects-screen",
+      "params": null,
+      "openProjectId": "mirror",
+      "stored": "{\"pathname\":\"/projects-screen\",\"params\":{\"projectId\":\"mirror\"},\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/projects",
+      "params": null,
+      "openProjectId": "mirror",
+      "stored": "{\"pathname\":\"/projects\",\"params\":{\"projectId\":\"mirror\"},\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/projects",
+      "params": {
+        "projectId": 7
+      },
+      "openProjectId": "mirror",
+      "stored": "{\"pathname\":\"/projects\",\"params\":{\"projectId\":\"mirror\"},\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/history",
+      "params": {
+        "tab": "archived"
+      },
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/history\",\"params\":{\"tab\":\"archived\"},\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/history",
+      "params": {
+        "tab": "done"
+      },
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/history\",\"params\":{\"tab\":\"done\"},\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/history",
+      "params": {
+        "tab": "weird"
+      },
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/history\",\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/saved-search/abc",
+      "params": {
+        "id": "abc"
+      },
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/saved-search/abc\",\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/capture-modal",
+      "params": null,
+      "openProjectId": null,
+      "stored": null
+    },
+    {
+      "pathname": "/settings",
+      "params": null,
+      "openProjectId": null,
+      "stored": null
+    },
+    {
+      "pathname": "/someday",
+      "params": null,
+      "openProjectId": "mirror",
+      "stored": "{\"pathname\":\"/someday\",\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/review",
+      "params": null,
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/review\",\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/trash",
+      "params": null,
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/trash\",\"at\":1792584000000}"
+    },
+    {
+      "pathname": "/board",
+      "params": null,
+      "openProjectId": null,
+      "stored": "{\"pathname\":\"/board\",\"at\":1792584000000}"
+    }
+  ],
+  "reads": [
+    {
+      "raw": null,
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "",
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "not json",
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "null",
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "{\"pathname\":\"/focus\",\"at\":1792584000000}",
+      "nowMs": 1792584000000,
+      "result": {
+        "pathname": "/focus"
+      }
+    },
+    {
+      "raw": "{\"pathname\":\"/focus\",\"at\":1792582500000}",
+      "nowMs": 1792584000000,
+      "result": {
+        "pathname": "/focus"
+      }
+    },
+    {
+      "raw": "{\"pathname\":\"/focus\",\"at\":1792582499999}",
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "{\"pathname\":\"/focus\",\"at\":1792584060000}",
+      "nowMs": 1792584000000,
+      "result": {
+        "pathname": "/focus"
+      }
+    },
+    {
+      "raw": "{\"pathname\":\"/focus\",\"at\":1792584060001}",
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "{\"pathname\":\"/settings\",\"at\":1792584000000}",
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "{\"pathname\":\"/projects-screen\",\"params\":{\"projectId\":\"p1\",\"n\":3},\"at\":1792584000000}",
+      "nowMs": 1792584000000,
+      "result": {
+        "pathname": "/projects-screen",
+        "params": {
+          "projectId": "p1"
+        }
+      }
+    },
+    {
+      "raw": "{\"pathname\":\"/history\",\"params\":[],\"at\":1792584000000}",
+      "nowMs": 1792584000000,
+      "result": {
+        "pathname": "/history"
+      }
+    },
+    {
+      "raw": "{\"pathname\":\"/saved-search/x\",\"params\":{},\"at\":1792584000000}",
+      "nowMs": 1792584000000,
+      "result": {
+        "pathname": "/saved-search/x"
+      }
+    },
+    {
+      "raw": "{\"pathname\":5,\"at\":1792584000000}",
+      "nowMs": 1792584000000,
+      "result": null
+    },
+    {
+      "raw": "{\"pathname\":\"/inbox\",\"at\":\"1792584000000\"}",
+      "nowMs": 1792584000000,
+      "result": null
+    }
+  ]
+}

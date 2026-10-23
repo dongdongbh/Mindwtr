@@ -2,6 +2,7 @@ import { TaskProjectConversionModal } from './task-edit/TaskProjectConversionMod
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, Modal, Animated, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { NavigationContext } from '@react-navigation/native';
 import { Task,
     TaskEditorFieldId,
     useTaskStore,
@@ -12,6 +13,7 @@ import { Task,
     buildTaskEditorMonthlyCustomRRule,
     getTaskEditorMonthlyCustom,
     getRetainedTaskContexts,
+    getSavedTaxonomyTokens,
     isTaskEditorTimeSpentEnabled,
     getTaskEditorBackdatedCompletionStart,
     resolveAutoTextDirection,
@@ -213,6 +215,7 @@ function TaskEditModalInner({
         focusedCount,
         sequentialProjectIds,
         sequentialWithinSectionProjectIds,
+        sequentialSectionKeys,
     } = useTaskStore((state) => {
         const derived = state.getDerivedState();
         return {
@@ -245,6 +248,7 @@ function TaskEditModalInner({
             focusedCount: derived.focusedCount,
             sequentialProjectIds: derived.sequentialProjectIds,
             sequentialWithinSectionProjectIds: derived.sequentialWithinSectionProjectIds,
+            sequentialSectionKeys: derived.sequentialSectionKeys,
         };
     }, shallow);
     const referenceTaskId = useMemo(
@@ -253,8 +257,8 @@ function TaskEditModalInner({
         [allTasks, task],
     );
     const contextHistory = useMemo(
-        () => getRetainedTaskContexts(allTasks),
-        [allTasks],
+        () => Array.from(new Set([...getRetainedTaskContexts(allTasks), ...getSavedTaxonomyTokens(settings, 'context')])),
+        [allTasks, settings],
     );
     const { t, language } = useLanguage();
     // Already identity-stable: resolveThemeTokens caches its result on the theme,
@@ -300,6 +304,7 @@ function TaskEditModalInner({
         descriptionDraftRef,
         editTab,
         isAIWorking,
+        isDirtyRef,
         isContextInputFocused,
         isTagInputFocused,
         pendingDueDate,
@@ -416,8 +421,8 @@ function TaskEditModalInner({
     resetCopilotStateRef.current = resetCopilotState;
 
     const {
-        addFileAttachment,
-        addImageAttachment,
+        addFileAttachment: pickFileAttachment,
+        addImageAttachment: pickImageAttachment,
         audioAttachment,
         audioLoading,
         audioTranscribing,
@@ -456,6 +461,17 @@ function TaskEditModalInner({
         visible,
     });
     settleAttachmentDraftRef.current = settleDraftAttachments;
+    const pendingAttachmentImportsRef = useRef(0);
+    const addFileAttachment = useCallback(async () => {
+        pendingAttachmentImportsRef.current += 1;
+        try { await pickFileAttachment(); }
+        finally { pendingAttachmentImportsRef.current -= 1; }
+    }, [pickFileAttachment]);
+    const addImageAttachment = useCallback(async () => {
+        pendingAttachmentImportsRef.current += 1;
+        try { await pickImageAttachment(); }
+        finally { pendingAttachmentImportsRef.current -= 1; }
+    }, [pickImageAttachment]);
 
     const {
         contextTokenSuggestions,
@@ -641,6 +657,7 @@ function TaskEditModalInner({
             focusTaskLimit: limit,
             sequentialProjectIds,
             sectionScopedProjectIds: sequentialWithinSectionProjectIds,
+            sequentialSectionKeys,
         });
         const blocked = getFocusStarBlockedText(t, action, limit);
         const label = tFallback(t, action.labelKey, action.isFocused ? 'Remove from focus' : "Add to today's focus");
@@ -652,7 +669,7 @@ function TaskEditModalInner({
             onToggle: () => setDraftField('focusedToday', !action.isFocused),
         };
     }, [activeTasksByStatus, focusedCount, projectMap, readOnly, sections, sequentialProjectIds,
-        sequentialWithinSectionProjectIds, settings, setDraftField, t, task, taskEditDraft]);
+        sequentialSectionKeys, sequentialWithinSectionProjectIds, settings, setDraftField, t, task, taskEditDraft]);
 
     const [customRecurrenceVisible, setCustomRecurrenceVisible] = useState(false);
     const [customInterval, setCustomInterval] = useState(1);
@@ -1123,6 +1140,26 @@ function TaskEditModalInner({
         || descriptionEditor.isDescriptionInputFocused
         || isContextInputFocused
         || isTagInputFocused;
+
+    const navigation = React.useContext(NavigationContext);
+    const navigationBlurRef = useRef(() => {});
+    navigationBlurRef.current = () => {
+        if (!visible) return;
+        if (!readOnly && (isDirtyRef.current || draftLifecycle.hasPendingChanges()
+            || pendingAttachmentImportsRef.current > 0 || isAIWorking || audioLoading || audioTranscribing
+            || audioModalVisible || linkModalVisible || imagePreviewAttachment || aiModal
+            || showDatePicker || showAreaPicker || showProjectPicker || showSectionPicker
+            || customRecurrenceVisible || waitingAssignmentModalVisible || completedAtPickerVisible
+            || projectConversionOpen || descriptionEditor.descriptionExpanded)) return;
+        if (readOnly) onClose();
+        else draftLifecycle.discard();
+        void logInfo('Mobile task editor dismissed on navigation', {
+            scope: 'task-edit',
+            extra: { releaseCheck: 'v1.3.7/mobile-editor-navigation', outcome: 'closed-clean' },
+        });
+    };
+    // Blurred screens can freeze before another render; subscribe to the owner route directly.
+    useEffect(() => navigation?.addListener('blur', () => navigationBlurRef.current()), [navigation]);
 
     if (!task) return null;
 

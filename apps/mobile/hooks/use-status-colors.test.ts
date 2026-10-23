@@ -57,6 +57,8 @@ describe('resolveStatusColors', () => {
             { themePreset: 'oled', isDark: true },
             { themePreset: 'catppuccin-macchiato', isDark: true },
             { themePreset: 'dracula', isDark: true },
+            { themePreset: 'gruvbox-light', isDark: false },
+            { themePreset: 'gruvbox-dark', isDark: true },
         ] as const;
         for (const theme of themes) {
             const palette = resolveStatusColors(theme);

@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTaskStore } from '@mindwtr/core';
 
@@ -11,6 +11,15 @@ const translations: Record<string, string> = {
     'common.delete': 'Delete',
     'contexts.tags': 'Tags',
     'contexts.title': 'Contexts',
+    'tags.title': 'Tags',
+    'contexts.new': 'New context',
+    'tags.new': 'New tag',
+    'common.add': 'Add',
+    'common.edit': 'Edit',
+    'common.save': 'Save',
+    'common.cancel': 'Cancel',
+    'common.close': 'Close',
+    'settings.feedback.saveFailed': 'Could not save. Try again.',
     'people.title': 'People',
     'search.title': 'Search',
     'viewSections.somedaySections': 'Someday sections',
@@ -170,4 +179,127 @@ describe('SettingsManagePage Someday sections', () => {
         });
         window.removeEventListener('mindwtr:open-search', onOpenSearch);
     });
+});
+
+
+describe('Manage saved contexts and tags', () => {
+    beforeEach(() => {
+        useTaskStore.setState(initialTaskState, true);
+        useTaskStore.setState({ _allTasks: [], _allProjects: [], settings: {} });
+    });
+
+    it.each([
+        ['context', 'Contexts', 'New context', 'addContext'],
+        ['tag', 'Tags', 'New tag', 'addTag'],
+    ] as const)('creates an unused %s only after Add and keeps its draft until saved', async (_kind, section, label, action) => {
+        let finish!: () => void;
+        const add = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+        useTaskStore.setState({ [action]: add });
+        const view = render(<SettingsManagePage t={{ manage: 'Manage' }} translate={translate} requestConfirmation={vi.fn()} />);
+        fireEvent.click(view.getByRole('button', { name: new RegExp(section + '\\s*0') }));
+        const input = view.getByLabelText(label);
+        fireEvent.change(input, { target: { value: '  Garden  ' } });
+        expect(add).not.toHaveBeenCalled();
+        fireEvent.click(view.getByRole('button', { name: 'Add' }));
+        expect(add).toHaveBeenCalledWith('Garden');
+        expect(input).toHaveValue('  Garden  ');
+        expect(input).toBeDisabled();
+        await act(async () => finish());
+        expect(input).toHaveValue('');
+        expect(useTaskStore.getState()._allTasks).toEqual([]);
+    });
+
+    it('keeps a failed creation visible and Escape cancels a draft without saving', async () => {
+        const addContext = vi.fn().mockRejectedValue(new Error('Disk full'));
+        useTaskStore.setState({ addContext });
+        const view = render(<SettingsManagePage t={{ manage: 'Manage' }} translate={translate} requestConfirmation={vi.fn()} />);
+        fireEvent.click(view.getByRole('button', { name: /Contexts\s*0/ }));
+        const input = view.getByLabelText('New context');
+        fireEvent.change(input, { target: { value: '@garden' } });
+        fireEvent.click(view.getByRole('button', { name: 'Add' }));
+        await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent('Could not save'));
+        expect(input).toHaveValue('@garden');
+        fireEvent.change(input, { target: { value: '@different' } });
+        expect(input).toHaveValue('@garden');
+        fireEvent.click(view.getByRole('button', { name: 'Close' }));
+        expect(input).toHaveValue('');
+        expect(addContext).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains a failed rename draft and shows delete failures for unused catalogue rows', async () => {
+        const stamp = '2026-10-20T00:00:00.000Z';
+        const renameContext = vi.fn().mockRejectedValue(new Error('Disk full'));
+        const deleteContext = vi.fn().mockRejectedValue(new Error('Disk full'));
+        useTaskStore.setState({ renameContext, deleteContext, settings: { taxonomy: {
+            contexts: [{ token: '@garden', rev: 1, revBy: 'test', updatedAt: stamp }],
+        } } });
+        const view = render(<SettingsManagePage t={{ manage: 'Manage' }} translate={translate} requestConfirmation={vi.fn()} />);
+        fireEvent.click(view.getByRole('button', { name: /Contexts\s*1/ }));
+        fireEvent.click(view.getByRole('button', { name: 'Edit' }));
+        const input = view.getByDisplayValue('@garden');
+        fireEvent.change(input, { target: { value: '@outside' } });
+        fireEvent.click(view.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent('Could not save'));
+        expect(input).toHaveValue('@outside');
+        expect(renameContext).toHaveBeenCalledWith('@garden', '@outside');
+        fireEvent.click(view.getByRole('button', { name: 'Close' }));
+        fireEvent.click(view.getByRole('button', { name: 'Delete' }));
+        await waitFor(() => expect(deleteContext).toHaveBeenCalledWith('@garden'));
+        await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent('Could not save'));
+        expect(view.getByText('@garden')).toBeInTheDocument();
+    });
+
+
+    it.each(['rename', 'delete'] as const)('preserves %s errors and retry state across an optimistic inventory replacement', async (mode) => {
+        const stamp = '2026-10-20T00:00:00.000Z';
+        const entry = { token: '@garden', rev: 1, revBy: 'test', updatedAt: stamp };
+        useTaskStore.setState({ settings: { taxonomy: { contexts: [entry] } }, _allTasks: [{
+            id: 'assigned', title: 'Assigned', status: 'next', contexts: ['@garden'], tags: [], createdAt: stamp, updatedAt: stamp,
+        }] });
+        let reject!: (reason: Error) => void;
+        let finish!: () => void;
+        const change = vi.fn().mockImplementationOnce(() => {
+            // The real store publishes its inventory before persistence has finished.
+            useTaskStore.setState({ _allTasks: useTaskStore.getState()._allTasks.map((task) => ({ ...task, contexts: mode === 'rename' ? ['@outside'] : [] })), settings: { taxonomy: { contexts: [mode === 'rename'
+                ? { ...entry, token: '@outside', rev: 2 }
+                : { ...entry, deletedAt: stamp, rev: 2 }] } } });
+            return new Promise<void>((_resolve, fail) => { reject = fail; });
+        }).mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+        useTaskStore.setState(mode === 'rename' ? { renameContext: change } : { deleteContext: change });
+        const view = render(<SettingsManagePage t={{ manage: 'Manage' }} translate={translate} requestConfirmation={vi.fn()} />);
+        fireEvent.click(view.getByRole('button', { name: /Contexts\s*1/ }));
+        if (mode === 'rename') {
+            fireEvent.click(view.getByRole('button', { name: 'Edit' }));
+            fireEvent.change(view.getByDisplayValue('@garden'), { target: { value: '@outside' } });
+        }
+        const action = mode === 'rename' ? 'Save' : 'Delete';
+        fireEvent.click(view.getByRole('button', { name: action }));
+        expect(useTaskStore.getState().getDerivedState().allContexts).not.toContain('@garden');
+        expect(mode === 'rename' ? view.getByDisplayValue('@outside') : view.getByText('@garden')).toBeInTheDocument();
+        await act(async () => reject(new Error('Disk full')));
+        expect(view.getByRole('alert')).toHaveTextContent('Could not save');
+        if (mode === 'rename') {
+            for (const attempted of ['@other', '@garden']) {
+                fireEvent.change(view.getByDisplayValue('@outside'), { target: { value: attempted } });
+                expect(view.getByDisplayValue('@outside')).toBeDisabled();
+            }
+            expect(useTaskStore.getState()._allTasks[0].contexts).toEqual(['@outside']);
+        }
+        fireEvent.click(view.getByRole('button', { name: /Contexts\s*1/ }));
+        fireEvent.click(view.getByRole('button', { name: /Contexts\s*1/ }));
+        expect(view.getByRole('alert')).toHaveTextContent('Could not save');
+        if (mode === 'rename') expect(view.getByDisplayValue('@outside')).toBeInTheDocument();
+        fireEvent.click(view.getByRole('button', { name: action }));
+        expect(change).toHaveBeenCalledTimes(2);
+        if (mode === 'rename') expect(change).toHaveBeenLastCalledWith('@garden', '@outside');
+        expect(view.getByRole('button', { name: action })).toBeDisabled();
+        await act(async () => finish());
+        expect(view.queryByRole('alert')).toBeNull();
+        if (mode === 'rename') {
+            expect(view.getByText('@outside')).toBeInTheDocument();
+            fireEvent.click(view.getByRole('button', { name: 'Edit' }));
+            expect(view.getByDisplayValue('@outside')).toBeEnabled();
+        } else expect(view.queryByText('@garden')).toBeNull();
+    });
+
 });

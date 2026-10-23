@@ -1,6 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
-import { resolveFeatureFlags, useTaskStore, type TaskSortBy } from '@mindwtr/core';
+import { getTaskSortByLabel, getVisibleTaskSortOptions, useTaskStore, type TaskSortBy } from '@mindwtr/core';
 
 import { styles } from './task-list.styles';
 
@@ -30,14 +30,12 @@ export function TaskListSortModal({
   themeColors,
   visible,
 }: TaskListSortModalProps) {
-  // Gated here rather than at each caller (task list + project detail) so a new
-  // caller cannot leak a disabled feature's sort. Callers pass the resolved sort
-  // ('timeEstimate' reads as 'default' while the feature is off), so dropping the
-  // option can never hide the row that is actually selected (#1107).
-  const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
-  const visibleSortOptions = sortOptions.filter(
-    (option) => option !== 'timeEstimate' || timeEstimatesEnabled,
-  );
+  // Gated here rather than at each caller (task lists, Contexts, project detail) so
+  // a new caller cannot leak a disabled feature's sort. Callers pass the resolved
+  // sort ('timeEstimate' and 'priority' read as 'default' while their feature is
+  // off), so dropping the option can never hide the row that is selected (#1107).
+  const features = useTaskStore((state) => state.settings?.features);
+  const visibleSortOptions = getVisibleTaskSortOptions(sortOptions, { features });
   return (
     <Modal
       visible={visible}
@@ -60,7 +58,7 @@ export function TaskListSortModal({
                 ]}
               >
                 <Text style={[styles.sortItemText, { color: themeColors.text }]}>
-                  {t(`sort.${option}`)}
+                  {getTaskSortByLabel(option, t)}
                 </Text>
               </Pressable>
             ))}

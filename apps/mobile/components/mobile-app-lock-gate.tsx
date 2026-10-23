@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, type AppStateStatus, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, type AppStateStatus, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LockKeyhole } from 'lucide-react-native';
-import { translateWithFallback } from '@mindwtr/core';
+import { resolveMobileAppLockRelockDelayMinutes, translateWithFallback, useTaskStore } from '@mindwtr/core';
 
 import { useLanguage } from '@/contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -10,6 +10,7 @@ import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 import {
   authenticateWithDeviceLock,
   getMobileAppLockErrorKey,
+  isWithinMobileAppLockRelockDelay,
   shouldAttemptMobileAppLockAuthentication,
 } from '@/lib/mobile-app-lock';
 
@@ -21,6 +22,10 @@ type MobileAppLockGateProps = {
 const AUTHENTICATE_AFTER_ACTIVE_DELAY_MS = 250;
 
 export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps) {
+  // Minutes away before a return asks again; 0 asks every time. A cold start always asks.
+  const relockDelayMinutes = useTaskStore((state) => (
+    resolveMobileAppLockRelockDelayMinutes(state.settings?.security?.mobileAppLockRelockDelayMinutes)
+  ));
   const tc = useThemeColors();
   const filledButton = useFilledButtonColors();
   const { t } = useLanguage();
@@ -33,6 +38,10 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const authInFlightRef = useRef(false);
   const wasEnabledRef = useRef(enabled);
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  // When the app last left 'active' while unlocked; null while locked or after a cold start.
+  const leftUnlockedAtRef = useRef<number | null>(null);
 
   const resolveText = useCallback((key: string, fallback: string) => (
     translateWithFallback(t, key, fallback)
@@ -97,11 +106,19 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
       const previous = appStateRef.current;
       appStateRef.current = nextAppState;
       if (previous === 'active' && (nextAppState === 'inactive' || nextAppState === 'background')) {
+        // The lock screen still covers the app while it is away; the delay only skips the prompt on return.
+        leftUnlockedAtRef.current = lockedRef.current ? null : Date.now();
         lockApp();
+      } else if (nextAppState === 'active') {
+        const leftUnlockedAt = leftUnlockedAtRef.current;
+        leftUnlockedAtRef.current = null;
+        if (isWithinMobileAppLockRelockDelay({ delayMinutes: relockDelayMinutes, leftUnlockedAt, now: Date.now() })) {
+          setLocked(false);
+        }
       }
     });
     return () => subscription.remove();
-  }, [enabled]);
+  }, [enabled, relockDelayMinutes]);
 
   useEffect(() => {
     if (!shouldAttemptMobileAppLockAuthentication({
@@ -122,7 +139,7 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
     return () => clearTimeout(timer);
   }, [appState, authenticate, authenticating, enabled, locked, lockNonce, promptedNonce]);
 
-  if (!enabled || !locked) {
+  if (!enabled) {
     return <>{children}</>;
   }
 
@@ -134,7 +151,7 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
         : 'Authentication failed. Try again.')
     : resolveText('appLock.description', 'Use your device lock to open Mindwtr. This protects the app view, not the on-device database.');
 
-  return (
+  const lockScreen = (
     <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top', 'right', 'bottom', 'left']}>
       <View style={styles.content}>
         <View style={[styles.iconWrap, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
@@ -163,6 +180,29 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
       </View>
     </SafeAreaView>
   );
+
+  // Android keeps the app mounted under the lock, so a return keeps the open task and screen and
+  // shows at once (#1423). The lock is a Modal, a window added after the app's own dialogs, so it
+  // also covers an open task editor. iOS cannot present it over an already presented modal, so
+  // iOS still renders only the lock screen while locked.
+  if (Platform.OS === 'android') {
+    return (
+      <>
+        {children}
+        <Modal
+          visible={locked}
+          animationType="none"
+          statusBarTranslucent
+          navigationBarTranslucent
+          onRequestClose={() => {}}
+        >
+          {lockScreen}
+        </Modal>
+      </>
+    );
+  }
+
+  return locked ? lockScreen : <>{children}</>;
 }
 
 const styles = StyleSheet.create({

@@ -443,7 +443,11 @@ describe('native host contract: selection mode', () => {
                 create: { name: 'LA', label: '+ Create "LA"', accessibilityLabel: 'Create: LA' },
                 submit: { create: 'LA' },
             });
-            const areas = value(host.getBulkActions({ list: 'inbox', taskIds: ['i-call'], organize: {}, picker: { kind: 'area', offset: 2, limit: 1, revision: view.revision } }));
+            const areaInput = { list: 'inbox' as const, taskIds: ['i-call'], organize: {}, picker: { kind: 'area' as const, limit: 1 } };
+            expect(host.getBulkActions({ ...areaInput, picker: { ...areaInput.picker, offset: 2, revision: view.revision } }))
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            const firstAreaPage = value(host.getBulkActions(areaInput));
+            const areas = value(host.getBulkActions({ ...areaInput, picker: { ...areaInput.picker, offset: 2, revision: firstAreaPage.revision } }));
             expect(areas.picker).toMatchObject({ total: 4, items: [{ value: 'a-work', label: 'Work' }] });
             // Choosing a project resets the area to Keep.
             const chosen = value(host.getBulkActions({

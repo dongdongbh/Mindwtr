@@ -1,3 +1,5 @@
+import { getFocusHiddenByAreaLabel } from './focus-controls';
+import { getPomodoroTaskChoices } from './pomodoro';
 import { createReferenceProjectNextActionMethods } from './native-host-contract-project-next-action';
 import { MAX_FOCUSED_PROJECTS } from './store-projects/project-actions';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToFilters, areaFilterSelectionToValue, cycleAreaFilterSelection, isAreaFilterSelectionActive, isTaskVisibleInArea, isTaskVisibleInInbox, resolveAreaFilterSelection, taskMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
@@ -5,7 +7,7 @@ import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import { gateStoreCommands } from './store-write-gate';
 import { noopStorage, type StorageAdapter } from './storage';
-import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
+import { getTaskSortByLabel, getVisibleTaskSortOptions, resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
 import { getProjectSectionsForView, getSequentialProjectTaskCues, isSelectableProjectForTaskAssignment, type ProjectSequenceTaskCue } from './project-utils';
 import { getProjectDetailsPresentation, type ProjectDetailsMetadata } from './project-details-presentation';
 import {
@@ -22,6 +24,8 @@ import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
 import { getTaskReminderPolicy } from './task-reminder-policy';
 import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
+import type { AppSettings } from './types';
 import {
     applyTaskDraftPatch,
     buildTaskDraftDestinationPicker,
@@ -102,6 +106,9 @@ import {
     type NativeInboxDurableResult,
     type NativePreparedInboxWrite,
 } from './native-host-contract-process-inbox';
+import { canonicalInboxJSON, createInboxUndoMethods, nativeInboxDecisionPayload, nativeInboxUndoOffer,
+    type NativeInboxUndoOffer } from './native-host-contract-process-inbox-undo';
+import type { NativeRequestReceipts } from './native-request-receipts';
 import { isCustomTimeEstimate as isCustomInboxTimeEstimate, TIME_ESTIMATE_OPTIONS as INBOX_TIME_ESTIMATES } from './calendar-scheduling';
 import { resolveProcessInboxPlan } from './process-inbox-plan';
 import {
@@ -202,17 +209,19 @@ import {
     buildContextsViewModel,
     CONTEXTS_BULK_STATUSES,
     editContextsTaskTokens,
+    getContextsChipLabels,
     getContextsEmptyState,
     getContextsMatchModeLabels,
     getContextsTokenPicker,
     resolveContextsMatchMode,
+    selectContextsToken,
     toggleContextsNoContext,
     toggleContextsToken,
     type ContextsTokenPicker,
 } from './contexts-view-model';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import { applyListFilterEdit, resolveListFilterState, type ListFilterEdit, type ListFilterState, type ResolvedListFilter } from './list-filter-state';
-import { isStatusListTaskReadOnly, type ListFilterOptions } from './menu-views-model';
+import { getTaskListHeaderText, isStatusListTaskReadOnly, type ListFilterOptions } from './menu-views-model';
 import { getProjectAccentColor } from './task-accent-color';
 import { formatListItemCount } from './list-count';
 import type { ContextOrTagMatchMode } from './hierarchy-utils';
@@ -288,11 +297,18 @@ import { createProjectFileAddWriteMethods } from './native-host-contract-project
 import { createProjectAvailabilityMethods } from './native-host-contract-project-availability';
 import { createProjectStatusMethods } from './native-host-contract-project-status';
 import { createTrashProjectRestoreMethods } from './native-host-contract-trash-project-restore';
+import { createTrashItemsRestoreMethods } from './native-host-contract-trash-bulk-restore';
+import { createTrashItemsPurgeMethods } from './native-host-contract-trash-purge';
 import { createProjectDeleteMethods } from './native-host-contract-project-delete';
 import { createProjectDuplicateMethods } from './native-host-contract-project-duplicate';
 import { createProjectLifecycleMethods } from './native-host-contract-project-lifecycle';
 import { createArchivedTaskRestoreMethods } from './native-host-contract-archive-task-restore';
+import { createInboxTasksMoveMethods } from './native-host-contract-inbox-bulk-status';
 import { createReferenceTasksMoveMethods } from './native-host-contract-reference-bulk-status';
+import { createInboxTasksAddTagMethods } from './native-host-contract-inbox-bulk-tag';
+import { createInboxTasksRemoveTagMethods } from './native-host-contract-inbox-bulk-remove-tag';
+import { createInboxTasksOrganizeMethods } from './native-host-contract-inbox-bulk-organize';
+import { createInboxOrganizeDestinationCreateMethods } from './native-host-contract-inbox-organize-create';
 import { createReferenceTasksAddTagMethods } from './native-host-contract-reference-bulk-tag';
 import { createReferenceTasksRemoveTagMethods } from './native-host-contract-reference-bulk-remove-tag';
 import { createArchivedTasksRestoreMethods } from './native-host-contract-archive-bulk-restore';
@@ -493,14 +509,17 @@ export type NativeSearchView = {
 export type NativeFocusSection = {
     key: FocusTaskSectionKey;
     title: string;
-    /** The header count: the section's tasks. */
+    /** The header count: globally occupied slots for Focus, visible tasks for other sections. */
     total: number;
+    /** Focus's global occupied slots / cap, independent of its visible rows. */
+    countLabel?: string;
+    hiddenByAreaLabel?: string | null;
     rows: NativeTaskRow[];
     focusBlockedLabel: string | null;
     /**
-     * Only on a read that sends `controls`. The rows to page through: `total`, except
-     * that under a grouping a task in two groups is listed twice. A read without
-     * `controls` keeps the flat rows it always had: each task once, never grouped.
+     * Visible rows to page through. Present with `controls`, and for Focus when
+     * its global occupied count differs from its visible rows. Under grouping
+     * a task in two groups is listed twice. Without `controls` rows stay flat.
      */
     rowTotal?: number;
     /**
@@ -683,6 +702,7 @@ const toNativeProjectRow = (
     summaries: ReturnType<ReturnType<typeof useTaskStore.getState>['getDerivedState']>['projectTaskSummaryById'],
     focusedProjectCount: number,
     t: (key: string) => string,
+    areaById: Map<string, Area>,
 ): NativeProjectRow => {
     const summary = summaries.get(project.id);
     const nextAction = summary?.nextAction;
@@ -696,7 +716,7 @@ const toNativeProjectRow = (
         ...getProjectRowStatus(project, t),
         isFocused,
         focusDisabled: !isFocused && focusedProjectCount >= MAX_FOCUSED_PROJECTS,
-        color: project.color ?? null,
+        color: getProjectAccentColor(project, areaById) ?? null,
         activeTaskCount,
         nextActionId: nextAction?.id ?? null,
         nextActionTitle: nextAction?.title ?? null,
@@ -1040,12 +1060,13 @@ export function createNativeHostContract(options: {
     let cachedFilteredProjects: NativeFilteredProjectsView | null = null;
     let cachedProjectDetailKey = '';
     let cachedProjectDetail: ProjectDetailCache | null = null;
-    let cachedContextHistory: { tasks: Task[]; tokens: string[] } | null = null;
+    let cachedContextHistory: { tasks: Task[]; taxonomy: AppSettings['taxonomy']; tokens: string[] } | null = null;
     let cachedMarkdownLookup: { tasks: Task[]; projects: Project[]; lookup: ReturnType<typeof createMarkdownLinkLookup> } | null = null;
     const retainedContexts = (tasks: Task[]): string[] => {
-        if (cachedContextHistory?.tasks === tasks) return cachedContextHistory.tokens;
-        const tokens = getRetainedTaskContexts(tasks);
-        cachedContextHistory = { tasks, tokens };
+        const { taxonomy } = useTaskStore.getState().settings;
+        if (cachedContextHistory?.tasks === tasks && cachedContextHistory.taxonomy === taxonomy) return cachedContextHistory.tokens;
+        const tokens = [...new Set([...getRetainedTaskContexts(tasks), ...getSavedTaxonomyTokens({ taxonomy }, 'context')])];
+        cachedContextHistory = { tasks, taxonomy, tokens };
         return tokens;
     };
     let cachedProjectNotesKey = '';
@@ -1133,7 +1154,7 @@ export function createNativeHostContract(options: {
                 areaName: area?.name ?? null,
                 areaColor: area?.color ?? null,
                 areaIcon: area?.icon ?? null,
-                projects: group.projects.map((project) => toNativeProjectRow(project, summaries, focusedProjectCount, translate)),
+                projects: group.projects.map((project) => toNativeProjectRow(project, summaries, focusedProjectCount, translate, areaById)),
             };
         };
         const view: NativeProjectsView = {
@@ -1227,7 +1248,8 @@ export function createNativeHostContract(options: {
             cachedFocusSections = buildFocusTaskSections(lists, (key) => {
                 const value = translate(key);
                 return value === key ? undefined : value;
-            }).map((section): CachedFocusSection => {
+            }, model.selection.globalCount).map((section): CachedFocusSection => {
+                if (section.key === 'focus') return { ...section, total: model.selection.globalCount, groups: null };
                 if (section.key === 'schedule') {
                     return { ...section, items: [...schedule.ready, ...schedule.laterToday], total: section.items.length, groups: null };
                 }
@@ -1284,7 +1306,7 @@ export function createNativeHostContract(options: {
             state: model.filter.state,
             activeSavedFilter: model.filter.activeSavedFilter,
             effectiveSortBy: model.perspective.effectiveSortBy,
-        }, edit, model.savedFilters);
+        }, edit, model.savedFilters, useTaskStore.getState().settings.savedFilters);
         return next ? { controls: next } : null;
     };
 
@@ -1578,6 +1600,7 @@ export function createNativeHostContract(options: {
             focusTaskLimit,
             sequentialProjectIds: derived.sequentialProjectIds,
             sectionScopedProjectIds: derived.sequentialWithinSectionProjectIds,
+            sequentialSectionKeys: derived.sequentialSectionKeys,
             now,
         });
         return {
@@ -1641,9 +1664,16 @@ export function createNativeHostContract(options: {
         },
     });
 
+    const bulkActionMethods = createBulkActionMethods({
+        readiness, save, t: () => translate,
+        formatDate: () => createDateFormatter(dateFormatting()),
+        views: { ...menuViewMethods, ...inboxViewMethods },
+        pickerRevision: () => `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}`,
+    });
+
     // Built before the contract object: Process Inbox's Clarify reads the current step's draft.
     const inboxProcessingMethods = createInboxProcessingMethods({
-        readiness, save, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()),
+        readiness, save, receipts, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()),
         revision: (now) => `${revision()}:${displayRevision(now)}`,
     });
 
@@ -1728,14 +1758,8 @@ export function createNativeHostContract(options: {
         // The Inbox tab's list, toolbar and screen parts: native-host-contract-inbox-view.ts.
         ...inboxViewMethods,
         // Selection mode on those lists: native-host-contract-bulk-actions.ts.
-        ...createBulkActionMethods({
-            readiness,
-            save,
-            t: () => translate,
-            formatDate: () => createDateFormatter(dateFormatting()),
-            views: { ...menuViewMethods, ...inboxViewMethods },
-            pickerRevision: () => `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}`,
-        }),
+        ...bulkActionMethods,
+        ...createInboxOrganizeDestinationCreateMethods({ readiness, save, getBulkActions: bulkActionMethods.getBulkActions }),
         // The Board: native-host-contract-board.ts.
         ...createBoardViewMethods({
             readiness,
@@ -1918,13 +1942,19 @@ export function createNativeHostContract(options: {
         ...createProjectStatusMethods({ readiness, save,
             revision: projectMutationRevision }),
         ...createTrashProjectRestoreMethods({ readiness, save }),
+        ...createTrashItemsRestoreMethods({ readiness, save }),
+        ...createTrashItemsPurgeMethods({ readiness, save }),
         ...createProjectDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectDuplicateMethods({ readiness, save, t: () => translate }),
         ...createProjectLifecycleMethods({ readiness, save }),
         ...createArchivedTaskRestoreMethods({ readiness, save }),
         ...createArchivedTasksRestoreMethods({ readiness, save }),
         ...createReferenceTasksMoveMethods({ readiness, save }),
+        ...createInboxTasksMoveMethods({ readiness, save }),
         ...createReferenceTasksAddTagMethods({ readiness, save }),
+        ...createInboxTasksAddTagMethods({ readiness, save }),
+        ...createInboxTasksRemoveTagMethods({ readiness, save }),
+        ...createInboxTasksOrganizeMethods({ readiness, save }),
         ...createReferenceTasksRemoveTagMethods({ readiness, save }),
         ...createArchivedTasksDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectDateMethods({ readiness, save,
@@ -2304,18 +2334,26 @@ export function createNativeHostContract(options: {
             if (!read) return fail('INVALID_INPUT', 'The Focus controls or control edit are not valid');
             const { controls } = read;
             const { model, revision: currentRevision } = focusModel(controls, now);
+            if (model.selection.hiddenByAreaCount) void logInfo('Focus area selection projected', {
+                scope: 'focus', force: true, context: { releaseCheck: 'v1.3.7/focus-area-selection', ...model.selection },
+            });
             const sections = focusSections(focusRevision(now), now, controls).map((section) => ({
                 key: section.key,
                 title: section.title,
                 total: section.total,
+                ...(section.key === 'focus' ? {
+                    countLabel: `${model.selection.globalCount}/${normalizeFocusTaskLimit(useTaskStore.getState().settings.gtd?.focusTaskLimit)}`,
+                    hiddenByAreaLabel: getFocusHiddenByAreaLabel(model.selection, translate),
+                } : {}),
                 rows: focusRows(section, 0, input.limit, now),
                 focusBlockedLabel: section.key === 'upcoming'
                     ? getFocusStarBlockedText(translate, { blockedReason: 'deferred' }, normalizeFocusTaskLimit(useTaskStore.getState().settings.gtd?.focusTaskLimit))
                     : null,
-                ...(controls ? { rowTotal: section.items.length, groups: windowGroups(section, 0, input.limit) } : {}),
+                ...(controls || (section.key === 'focus' && section.total !== section.items.length) ? { rowTotal: section.items.length, groups: windowGroups(section, 0, input.limit) } : {}),
             }));
             const { projectTaskSummaryById: summaries, focusedProjectCount } = useTaskStore.getState().getDerivedState();
             const formatDate = createDateFormatter(dateFormatting());
+            const areaById = new Map(useTaskStore.getState().areas.map((area) => [area.id, area]));
             return {
                 ok: true,
                 value: {
@@ -2324,7 +2362,7 @@ export function createNativeHostContract(options: {
                     dateLabel: formatDate(now, 'PPPP'),
                     sections,
                     reviewProjects: cachedReviewProjects.map((project) => ({
-                        ...toNativeProjectRow(project, summaries, focusedProjectCount, translate),
+                        ...toNativeProjectRow(project, summaries, focusedProjectCount, translate, areaById),
                         reviewDateLabel: project.reviewAt ? formatDate(project.reviewAt, 'P') : null,
                     })),
                     controls: buildNativeFocusControls(model, { t: translate, formatDate }),
@@ -2696,6 +2734,32 @@ export function createNativeHostContract(options: {
             } };
         },
 
+        getPomodoroTaskWindow(input: {
+            offset: number; limit: number; revision: string; controls?: NativeFocusControlsInput;
+        }): NativeHostResult<{
+            version: typeof NATIVE_HOST_CONTRACT_VERSION; revision: string; total: number;
+            rows: { id: string; title: string }[];
+        }> {
+            const ready = readiness();
+            if (!ready.ok) return ready;
+            if (!input || typeof input !== 'object' || Array.isArray(input)
+                || Object.keys(input).some((key) => !['offset', 'limit', 'revision', 'controls'].includes(key))
+                || !Number.isSafeInteger(input.offset) || input.offset < 0
+                || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > NATIVE_HOST_MAX_WINDOW
+                || typeof input.revision !== 'string' || !isNativeJsonWithinBytes(input)) {
+                return fail('INVALID_INPUT', 'A bounded Pomodoro task window and Focus revision are required');
+            }
+            const now = new Date(), read = readFocusControls(input, now);
+            if (!read) return fail('INVALID_INPUT', 'The Focus controls are not valid');
+            const { model, revision: currentRevision } = focusModel(read.controls, now);
+            if (input.revision !== currentRevision) return fail('STALE_REVISION', 'Focus changed; restart paging');
+            const tasks = getPomodoroTaskChoices(model.lists);
+            const value = { version: NATIVE_HOST_CONTRACT_VERSION, revision: currentRevision, total: tasks.length,
+                rows: tasks.slice(input.offset, input.offset + input.limit).map(({ id, title }) => ({ id, title })) } as const;
+            return isNativeJsonWithinBytes(value) ? { ok: true, value }
+                : fail('INVALID_INPUT', 'Pomodoro task window exceeds the bounded native read');
+        },
+
         /** A later window of one Focus section's rows. Send the `controls.state` the Focus read returned. */
         getFocusSectionWindow(input: {
             key: FocusTaskSectionKey; offset: number; limit: number; revision: string; controls?: NativeFocusControlsInput;
@@ -2730,7 +2794,7 @@ export function createNativeHostContract(options: {
                     key: section.key,
                     total: section.total,
                     rows: focusRows(section, input.offset, input.limit, now),
-                    ...(controls ? { rowTotal: section.items.length, groups: windowGroups(section, input.offset, input.limit) } : {}),
+                    ...(controls || (section.key === 'focus' && section.total !== section.items.length) ? { rowTotal: section.items.length, groups: windowGroups(section, input.offset, input.limit) } : {}),
                 },
             };
         },
@@ -3377,12 +3441,13 @@ export type NativeInboxProcessingResult = {
     /** A message the step shows instead of moving on, like "Choose a start date". */
     notice: ProcessInboxNotice | null;
     /** The confirmation shown after a decision lands, with its Undo label. */
-    toast: { message: string; undoLabel: string } | null;
+    toast: { message: string; undoLabel: string; undo?: NativeInboxUndoOffer } | null;
 };
 
 type InboxProcessingDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
+    receipts: NativeRequestReceipts;
     revision: (now: Date) => string;
     t: () => (key: string) => string;
     formatDate: () => DateFormatter;
@@ -3683,6 +3748,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
     };
 
     return {
+        ...createInboxUndoMethods({ readiness: deps.readiness, receipts: deps.receipts }),
         /** Open the queue: Inbox items and returning Someday items, in store order. */
         startInboxProcessing(input: { mode?: ProcessInboxMode } = {}): NativeHostResult<{
             sessionId: string | null;
@@ -3932,10 +3998,19 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             if (!ready.ok) return ready;
             const prepared = readNativePreparedInboxWrite(input);
             if (!prepared) return fail('INVALID_INPUT', 'Prepared Inbox request or journal does not match');
+            const envelope = { request: prepared.request, prepared };
+            const payload = nativeInboxDecisionPayload(envelope);
+            const saved = deps.receipts.saved<NativeInboxDurableResult>(prepared.request.requestId, payload);
+            if (saved) {
+                if (saved.ok && canonicalInboxJSON(saved.value) !== canonicalInboxJSON(prepared.result))
+                    return fail('INVALID_INPUT', 'Saved Process Inbox result does not match its journal');
+                if (saved.ok) markAllSaved();
+                return saved;
+            }
             const entry = sessions.get(prepared.request.sessionId);
             const previous = entry?.prepared.get(prepared.request.requestId);
-            if (previous && (JSON.stringify(previous.request) !== JSON.stringify(prepared.request)
-                || previous.preparedJSON !== JSON.stringify(prepared))) {
+            if (previous && (canonicalInboxJSON(previous.request) !== canonicalInboxJSON(prepared.request)
+                || canonicalInboxJSON(JSON.parse(previous.preparedJSON)) !== canonicalInboxJSON(prepared))) {
                 return fail('INVALID_INPUT', 'Request ID already belongs to another Inbox change');
             }
             // Freeze the warm transition while the pre-write queue still contains
@@ -3951,31 +4026,34 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                     selectedProjectId = prepared.kind === 'projectCreate' ? prepared.result.createdProjectId ?? null : null;
                 }
             }
-            const applied = await useTaskStore.getState().commitPreparedInboxEffect(prepared.effect);
-            if (!applied.success) return fail('STALE_REVISION', applied.error ?? 'Prepared Inbox change conflicts with current data');
-            if (entry && !previous && (nextSession || selectedProjectId)) {
-                if (entry.prepared.size >= 20) {
-                    const oldest = Array.from(entry.prepared.entries()).find(([, receipt]) => receipt.saved && receipt.advanced)?.[0];
-                    if (oldest) entry.prepared.delete(oldest);
-                }
-                entry.prepared.set(prepared.request.requestId, {
-                    request: prepared.request, result: prepared.result, saved: false, advanced: false,
-                    preparedJSON: JSON.stringify(prepared),
-                    nextSession, selectedProjectId, committed: prepared.witness.committed,
-                    title: prepared.witness.draft.title.trim() || prepared.witness.source.title,
-                });
-            }
+            let outcome = 'replayed';
             try {
-                if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
-                const saved = await deps.save();
-                if (!saved.ok) return saved;
+                const committed = await deps.receipts.run<NativeInboxDurableResult>(prepared.request.requestId, payload, async () => {
+                    const applied = await useTaskStore.getState().commitPreparedInboxEffect(prepared.effect);
+                    if (!applied.success) return fail('STALE_REVISION', applied.error ?? 'Prepared Inbox change conflicts with current data');
+                    outcome = applied.outcome ?? 'applied';
+                    if (entry && !previous && (nextSession || selectedProjectId)) {
+                        if (entry.prepared.size >= 20) {
+                            const oldest = Array.from(entry.prepared.entries()).find(([, receipt]) => receipt.saved && receipt.advanced)?.[0];
+                            if (oldest) entry.prepared.delete(oldest);
+                        }
+                        entry.prepared.set(prepared.request.requestId, {
+                            request: prepared.request, result: prepared.result, saved: false, advanced: false,
+                            preparedJSON: JSON.stringify(prepared),
+                            nextSession, selectedProjectId, committed: prepared.witness.committed,
+                            title: prepared.witness.draft.title.trim() || prepared.witness.source.title,
+                        });
+                    }
+                    return { ok: true, value: prepared.result };
+                });
+                if (!committed.ok) return committed;
                 markAllSaved();
             } catch (error) {
                 return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error));
             }
             logInfo('Native prepared Process Inbox saved', { scope: 'native-host', category: 'storage',
                 context: { releaseCheck: 'v1.3.3/native-prepared-process-inbox',
-                    outcome: applied.outcome ?? 'applied', action: prepared.kind } });
+                    outcome, action: prepared.kind } });
             return { ok: true, value: prepared.result };
         },
 
@@ -4002,9 +4080,11 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 }
             }
             const t = deps.t();
+            const prepared = JSON.parse(receipt.preparedJSON) as NativePreparedInboxWrite;
+            const undo = nativeInboxUndoOffer(prepared);
             return { ok: true, value: result(entry, null, receipt.committed
                 ? { message: formatProcessInboxCommitMessage(t, receipt.committed, receipt.title),
-                    undoLabel: tFallback(t, 'common.undo', 'Undo') } : null) };
+                    undoLabel: tFallback(t, 'common.undo', 'Undo'), ...(undo ? { undo } : {}) } : null) };
         },
 
         /** Close the session. Nothing is written; a write still waiting for its save stays retryable. */
@@ -4043,8 +4123,13 @@ export type NativeContextsChip = {
     accessibilityLabel: string;
     count: number;
     selected: boolean;
-    /** The selection after tapping this chip. */
+    /** The selection after tapping this chip: a token chip switches to itself, or clears when alone (#1427). */
     next: { tokens: string[]; matchMode: ContextOrTagMatchMode };
+    /**
+     * A token chip's additive press (RN's long-press and its accessibility action): the selection
+     * with this token toggled in or out, and the action's label. Absent on All and No context.
+     */
+    additive?: { label: string; next: { tokens: string[]; matchMode: ContextOrTagMatchMode } };
 };
 export type NativeContextsTokenAction = ContextsTokenPicker & { field: BulkTaskTokenField; mode: BulkTaskTokenMode; enabled: boolean };
 export type NativeContextsView = {
@@ -4055,6 +4140,8 @@ export type NativeContextsView = {
     searchPlaceholder: string;
     chips: NativeContextsChip[];
     matchMode: { label: string; options: { mode: ContextOrTagMatchMode; label: string; selected: boolean }[] } | null;
+    /** RN's Sort control beside the search: the shared list sort (settings.taskSortBy); choose with setTaskListSort. */
+    sort: { title: string; accessibilityLabel: string; options: { value: TaskSortBy; label: string; selected: boolean }[] };
     total: number;
     rows: NativeTaskRow[];
     empty: ReturnType<typeof getContextsEmptyState> | null;
@@ -4326,6 +4413,17 @@ function createListViewMethods(deps: ListViewDeps) {
     };
     const projectTitles = () => new Map(useTaskStore.getState().projects.map((project) => [project.id, project.title]));
 
+    // The same full filtered membership supplies paging, pruning and readonly Select all.
+    const buildTrash = (revision: string) => cached('trash', revision, () => {
+        const { state, areaById, projectById, selection } = areaScope();
+        const tasks = selectTrashedTasks(state._allTasks, selection, projectById, areaById);
+        const projects = selectTrashedProjects(state._allProjects, selection, areaById);
+        return { tasks, projects, areaById, items: buildTrashTimeline(tasks, projects),
+            scope: resolveTrashClearScope(tasks, projects, state._allTasks, state._allProjects),
+            taskIds: new Set(tasks.map((task) => task.id)), projectIds: new Set(projects.map((project) => project.id)),
+            projectById: new Map(projects.map((project) => [project.id, project])), titles: projectTitles() };
+    });
+
     /** Run the screen's store write (one call, or several together): SAVE_FAILED only when it landed. */
     const write = runStoreWrite;
     const liveTask = (id: unknown): Task | undefined => {
@@ -4506,6 +4604,7 @@ function createListViewMethods(deps: ListViewDeps) {
                 const onScreen = new Set(model.tasks.map((task) => task.id));
                 const selected = selectedIds.filter((id) => onScreen.has(id));
                 const tasksById = Object.fromEntries(state.tasks.map((task) => [task.id, task]));
+                const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
                 return {
                     model,
                     selected,
@@ -4513,22 +4612,32 @@ function createListViewMethods(deps: ListViewDeps) {
                     chips: [
                         { id: 'all', kind: 'all' as const, label: t('common.all'), accessibilityLabel: t('contexts.all'), count: model.allCount, selected: tokens.length === 0, next: next([], 'all') },
                         { id: 'none', kind: 'none' as const, label: t('contexts.none'), accessibilityLabel: t('contexts.none'), count: model.noContextCount, selected: model.noContextSelected, next: next(toggleContextsNoContext(tokens), 'all') },
-                        ...model.tokenChips.map((chip) => ({
-                            id: chip.token, kind: chip.kind, label: chip.token, accessibilityLabel: `${chip.token} (${chip.count})`,
-                            count: chip.count, selected: chip.selected, next: next(toggleContextsToken(tokens, chip.token), matchMode),
+                        // A child chip after its parent shows "/leaf"; id and accessibility label keep the full token (#1428).
+                        ...model.tokenChips.map((chip, index) => ({
+                            id: chip.token, kind: chip.kind, label: chipLabels[index].label, accessibilityLabel: `${chip.token} (${chip.count})`,
+                            count: chip.count, selected: chip.selected, next: next(selectContextsToken(tokens, chip.token), matchMode),
+                            additive: { label: chip.selected ? t('filters.remove') : t('common.add'), next: next(toggleContextsToken(tokens, chip.token), matchMode) },
                         })),
                     ],
                     matchMode: model.showMatchMode ? {
                         label: labels.label,
                         options: (['all', 'any'] as const).map((mode) => ({ mode, label: mode === 'all' ? labels.all : labels.any, selected: matchMode === mode })),
                     } : null,
+                    sort: {
+                        title: t('sort.label'),
+                        accessibilityLabel: getTaskListHeaderText({
+                            sortByLabel: getTaskSortByLabel(model.sortBy, t), hasActiveFilters: false, filterActiveCount: 0, t,
+                        }).sortAccessibilityLabel,
+                        options: getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, state.settings)
+                            .map((value) => ({ value, label: getTaskSortByLabel(value, t), selected: value === model.sortBy })),
+                    },
                     empty: model.tasks.length === 0 ? getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: tokens }, t) : null,
                     bulk: selected.length === 0 ? null : {
                         countLabel: `${selected.length} ${t('bulk.selected')}`,
                         exitLabel: t('bulk.exitSelect'),
                         statuses: CONTEXTS_BULK_STATUSES.map((status) => ({ status, label: t(`status.${status}`) })),
                         tokenActions: (['tags', 'contexts'] as const).flatMap((field) => (['add', 'remove'] as const).map((mode) => {
-                            const picker = getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, selectedIds: selected, tasksById, t });
+                            const picker = getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, settings: state.settings, selectedIds: selected, tasksById, t });
                             return { ...picker, field, mode, enabled: mode === 'add' || picker.tokens.length > 0 };
                         })),
                         deleteLabel: t('common.delete'),
@@ -4544,6 +4653,7 @@ function createListViewMethods(deps: ListViewDeps) {
                 searchPlaceholder: t('contexts.search'),
                 chips: view.chips,
                 matchMode: view.matchMode,
+                sort: view.sort,
                 total: view.model.tasks.length,
                 rows: view.model.tasks.slice(input.offset, input.offset + input.limit).map((task) => toNativeTaskRow(task, view.titles, deps.rowMeta(task, now))),
                 empty: view.empty,
@@ -4894,24 +5004,11 @@ function createListViewMethods(deps: ListViewDeps) {
             const revision = deps.revision(now);
             if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'Trash changed; restart paging from offset zero');
             const t = deps.t();
-            const view = cached('trash', JSON.stringify([revision, input.selected]), () => {
-                const { state, areaById, projectById, selection } = areaScope();
-                const tasks = selectTrashedTasks(state._allTasks, selection, projectById, areaById);
-                const projects = selectTrashedProjects(state._allProjects, selection, areaById);
-                const taskIds = new Set(tasks.map((task) => task.id));
-                const projectIds = new Set(projects.map((project) => project.id));
-                return {
-                    tasks, projects, areaById,
-                    items: buildTrashTimeline(tasks, projects),
-                    scope: resolveTrashClearScope(tasks, projects, state._allTasks, state._allProjects),
-                    selected: {
-                        taskIds: (input.selected?.taskIds ?? []).filter((id) => taskIds.has(id)),
-                        projectIds: (input.selected?.projectIds ?? []).filter((id) => projectIds.has(id)),
-                    },
-                    projectById: new Map(projects.map((project) => [project.id, project])),
-                    titles: projectTitles(),
-                };
-            });
+            const scope = buildTrash(revision);
+            const view = { ...scope, selected: {
+                taskIds: (input.selected?.taskIds ?? []).filter((id) => scope.taskIds.has(id)),
+                projectIds: (input.selected?.projectIds ?? []).filter((id) => scope.projectIds.has(id)),
+            } };
             const formatDate = deps.formatDate();
             const labels = getTrashRowLabels(t);
             const deletedLabel = (deletedAt: string | undefined) => `${labels.deleted}: ${formatTrashDeletedDate(deletedAt, formatDate, labels.notSet)}`;
@@ -4967,6 +5064,26 @@ function createListViewMethods(deps: ListViewDeps) {
                     }, t),
                 },
             } };
+        },
+
+        /** All filtered IDs/revisions, independent of the loaded page or optional replay-token mode. */
+        getTrashSelection(input: { revision: string }): NativeHostResult<{
+            taskIds: string[]; projectIds: string[]; taskRevisions: NativeRevisions; projectRevisions: NativeRevisions;
+        }> {
+            const ready = deps.readiness(); if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || Object.keys(input).length !== 1 || typeof input.revision !== 'string'
+                || !input.revision || !isNativeJsonWithinBytes(input)) return fail('INVALID_INPUT', 'The displayed Trash revision is required');
+            const revision = deps.revision(new Date());
+            if (input.revision !== revision) return fail('STALE_REVISION', 'Trash changed; refresh before selecting all');
+            const view = buildTrash(revision), taskIds = [...view.taskIds], projectIds = [...view.projectIds];
+            if (taskIds.length + projectIds.length > 10_000 || !isIdList(taskIds, true) || !isIdList(projectIds, true)
+                || taskIds.some((id) => id.length > 500) || projectIds.some((id) => id.length > 200))
+                return fail('INVALID_INPUT', 'Too many Trash items to select together; narrow the Area filter');
+            const result = { taskIds, projectIds, taskRevisions: taskRevisionsOf(taskIds),
+                projectRevisions: Object.fromEntries(view.projects.map((project) => [project.id, revisionOf(project)])) };
+            if ([...Object.values(result.taskRevisions), ...Object.values(result.projectRevisions)].some((value) => !value || value.length > 200)
+                || !isNativeJsonWithinBytes(result)) return fail('INVALID_INPUT', 'Trash selection is too large; narrow the Area filter');
+            return { ok: true, value: result };
         },
 
         /**

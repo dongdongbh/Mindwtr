@@ -9,7 +9,8 @@ export type TimeEstimatePreset = '5min' | '10min' | '15min' | '30min' | '1hr' | 
 export type CustomTimeEstimate = `custom:${number}`;
 export type TimeEstimate = TimeEstimatePreset | CustomTimeEstimate;
 
-export type TaskSortBy = 'default' | 'due' | 'start' | 'review' | 'title' | 'timeEstimate' | 'created' | 'created-desc' | 'completed';
+// 'priority' is a shared-list sort only: Project.taskSortBy never stores it (project-utils.ts).
+export type TaskSortBy = 'default' | 'due' | 'start' | 'review' | 'title' | 'timeEstimate' | 'priority' | 'created' | 'created-desc' | 'completed';
 
 export type TaskMode = 'task' | 'list';
 
@@ -81,15 +82,20 @@ export type DefaultProjectFlowMode = 'parallel' | 'sequential';
 
 export type ProjectSequentialScope = 'project' | 'section';
 
+/** A project's Flow mode as the user picks it; see getProjectFlowMode (#1429). */
+export type ProjectFlowMode = 'parallel' | 'sequential' | 'perSection';
+
 export interface Project {
     id: string;
     title: string;
     status: 'active' | 'someday' | 'waiting' | 'archived';
     color: string;
+    colorOverride?: string | null; // Explicit project identity color; absent/null follows its Area.
     order: number; // Sort order within an Area
     tagIds: string[]; // Array of Tag IDs
     isSequential?: boolean; // If true, only first incomplete task shows in Next Actions
     sequentialScope?: ProjectSequentialScope; // 'project' = one stream, 'section' = first incomplete task per section
+    perSectionFlow?: boolean; // Flow mode "Per section" (#1429): each Section's isSequential decides; ignored while isSequential is true. Absent = never set.
     taskSortBy?: TaskSortBy; // Optional synced task-list sort; absent means manual project order
     isFocused?: boolean; // If true, this project is a priority focus (max 5 allowed)
     supportNotes?: string;
@@ -117,6 +123,7 @@ export interface Section {
     description?: string;
     order: number; // Sort order within a Project
     isCollapsed?: boolean;
+    isSequential?: boolean; // Section flow in a Per section project (#1429): true = Sequential, false = Parallel, absent = no stored choice (Parallel).
     rev?: number; // Monotonic revision counter for sync conflict resolution
     revBy?: string; // Device identifier that issued the revision
     createdAt: string;
@@ -310,7 +317,7 @@ export type FilterPriority = 'none' | TaskPriority;
 export type MultiValueFilterMatchMode = 'any' | 'all';
 
 export type DateRange =
-    | { preset: 'today' | 'this_week' | 'this_month' | 'overdue' | 'no_date' }
+    | { preset: 'today' | 'this_week' | 'this_month' | 'overdue' | 'no_date' | 'next_7_days' | 'next_14_days' | 'next_30_days' | 'upcoming' }
     | { from?: string; to?: string };
 
 export interface FilterCriteria {
@@ -328,6 +335,8 @@ export interface FilterCriteria {
     priority?: FilterPriority[];
     dueDateRange?: DateRange;
     startDateRange?: DateRange;
+    /** Match any task start, due, or review date; combined with other criteria using AND. */
+    anyDateRange?: DateRange;
     statuses?: TaskStatus[];
     assignedTo?: string[];
     locations?: string[];
@@ -361,7 +370,7 @@ export interface PendingRemoteAttachmentDelete {
 import type { MergeStats, SyncHistoryEntry } from './sync';
 import type { Language } from './i18n/i18n-types';
 
-export type AppTheme = 'light' | 'dark' | 'system' | 'system-oled' | 'eink' | 'nord' | 'sepia' | 'material3-light' | 'material3-dark' | 'oled' | 'catppuccin-macchiato' | 'dracula';
+export type AppTheme = 'light' | 'dark' | 'system' | 'system-oled' | 'eink' | 'nord' | 'sepia' | 'material3-light' | 'material3-dark' | 'oled' | 'catppuccin-macchiato' | 'dracula' | 'gruvbox-light' | 'gruvbox-dark';
 // Every supported UI language (see LOCALES in i18n/i18n-locales.ts) plus 'system', which
 // tracks the device locale instead of pinning one.
 export type AppLanguage = Language | 'system';
@@ -528,8 +537,13 @@ export interface SupportPromptSettings {
     lastShownAt?: string;
 }
 
+/** Minutes away from the app before App Lock asks again; 0 asks every time. */
+export type MobileAppLockRelockDelayMinutes = 0 | 1 | 5 | 15;
+
 export interface SecuritySettings {
     mobileAppLockEnabled?: boolean;
+    /** Device-local like the whole group. A missing or unknown value reads as 0. */
+    mobileAppLockRelockDelayMinutes?: MobileAppLockRelockDelayMinutes;
 }
 
 export interface NetworkSettings {
@@ -561,7 +575,21 @@ export interface MigrationSettings {
     legacyReferenceRecoveryVersion?: number;
 }
 
+export interface TaxonomyCatalogEntry {
+    token: string;
+    rev: number;
+    revBy: string;
+    updatedAt: string;
+    deletedAt?: string;
+}
+
+export interface TaxonomyCatalog {
+    contexts?: TaxonomyCatalogEntry[];
+    tags?: TaxonomyCatalogEntry[];
+}
+
 export interface AppSettings extends NotificationSettings {
+    taxonomy?: TaxonomyCatalog;
     gtd?: GtdSettings;
     attachments?: AttachmentSettings;
     features?: FeatureSettings;

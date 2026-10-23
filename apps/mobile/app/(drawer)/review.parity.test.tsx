@@ -47,7 +47,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   default: { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined },
 }));
 vi.mock('expo-router', () => ({ useRouter: () => ({ push: (route: string) => { harness.pushes.push(route); } }) }));
-vi.mock('@react-navigation/native', () => ({ useFocusEffect: (effect: () => unknown) => React.useEffect(effect as () => void, [effect]) }));
+vi.mock('@react-navigation/native', () => ({ NavigationContext: React.createContext(undefined), useFocusEffect: (effect: () => unknown) => React.useEffect(effect as () => void, [effect]) }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0, left: 0, right: 0, top: 0 }) }));
 vi.mock('@/contexts/toast-context', () => ({
   useToast: () => ({ showToast: (toast: (typeof harness.toasts)[number]) => { harness.toasts.push(toast); }, dismissToast: vi.fn() }),

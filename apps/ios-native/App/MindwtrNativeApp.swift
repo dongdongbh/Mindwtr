@@ -488,11 +488,38 @@ private struct AppLockRoot: View {
                 requestDismiss: { model.requestCalendarEventOpenDismissal($0, outcome: $1) },
                 didDismiss: { model.calendarEventOpenDidDismiss($0) })
         }
+        .overlay(alignment: .bottom) {
+            if let notice = model.appleRemindersAutoNotice, !lock.concealed {
+                Text(notice).rnFont(15).foregroundStyle(palette.text).fixedSize(horizontal: false, vertical: true)
+                    .padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12)).padding(16)
+                    .allowsHitTesting(false).accessibilityIdentifier("apple-reminders-auto-notice")
+            }
+        }
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        .overlay(alignment: .topTrailing) {
+            if model.pomodoroAlarmTestEnabled {
+                VStack(spacing: 4) {
+                    Text(model.pomodoroAlarmTestState).lineLimit(1)
+                        .accessibilityLabel(model.pomodoroAlarmTestState)
+                        .accessibilityIdentifier("pomodoro-alarm-fixture-state")
+                    HStack {
+                        Button("Read alarm fixture") { Task { await model.refreshPomodoroAlarmTestState() } }
+                            .accessibilityIdentifier("pomodoro-alarm-fixture-refresh")
+                        Button("Release alarm fixture") { Task { await model.releasePomodoroAlarmTestAdd() } }
+                            .accessibilityIdentifier("pomodoro-alarm-fixture-release")
+                        Button("Retire alarm fixture") { model.retirePomodoroAlarmTestHost() }
+                            .accessibilityIdentifier("pomodoro-alarm-fixture-retire")
+                    }
+                }.font(.caption2).padding(4).background(palette.card).frame(maxWidth: 300)
+            }
+        }
+        #endif
         .onAppear {
             lock.sceneChanged(phase)
-            if applicationActive { model.notificationSettingsDidBecomeActive(); model.calendarSettingsDidBecomeActive(); model.calendarFeedDidBecomeActive() }
+            if applicationActive { model.appleRemindersDidBecomeActive(); model.notificationSettingsDidBecomeActive(); model.calendarSettingsDidBecomeActive(); model.calendarFeedDidBecomeActive() }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
+            model.requestAppleRemindersAutoImport(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
@@ -504,6 +531,7 @@ private struct AppLockRoot: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             observedApplicationActive = true
+            model.appleRemindersDidBecomeActive()
             model.notificationSettingsDidBecomeActive()
             model.calendarSettingsDidBecomeActive()
             model.calendarFeedDidBecomeActive()
@@ -512,16 +540,21 @@ private struct AppLockRoot: View {
             model.requestSearchLifecycle(token: model.completedStartupToken, active: true, force: true)
             guard !lock.concealed else { return }
             model.requestForegroundSync(token: model.completedStartupToken, active: true)
+            model.requestAppleRemindersAutoImport(token: model.completedStartupToken, active: true)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: true)
             model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             observedApplicationActive = false
+            model.retireTrashPresentation()
+            model.retireCaptureEditNavigation()
             model.suspendEntityLinks()
+            model.appleRemindersWillResignActive()
             model.notificationSettingsWillResignActive()
             model.calendarSettingsWillResignActive()
             model.calendarFeedWillResignActive()
             model.cancelForegroundSync()
+            model.cancelAppleRemindersAutoImport()
             model.cancelReminderLifecycle()
             model.cancelCalendarPushLifecycle()
             model.cancelSearchLifecycle()
@@ -535,16 +568,20 @@ private struct AppLockRoot: View {
             lock.concealSnapshot()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            model.cancelAppleRemindersIntent()
             model.cancelNotificationSettingsIntent()
             model.cancelCalendarSettingsIntent()
             model.retireCalendarFeed()
         }
         .onChange(of: phase) { next in
-            if next == .background { model.cancelNotificationSettingsIntent(); model.cancelCalendarSettingsIntent(); model.retireCalendarFeed() }
+            if next == .background { model.cancelAppleRemindersIntent(); model.cancelNotificationSettingsIntent(); model.cancelCalendarSettingsIntent(); model.retireCalendarFeed() }
             model.observeForegroundSyncScene(next, token: startupToken)
             if next != .active {
+                model.retireTrashPresentation()
+                model.retireCaptureEditNavigation()
                 model.suspendEntityLinks()
                 model.cancelForegroundSync()
+                model.cancelAppleRemindersAutoImport()
                 model.cancelReminderLifecycle()
                 model.cancelCalendarPushLifecycle()
                 model.cancelSearchLifecycle()
@@ -560,17 +597,22 @@ private struct AppLockRoot: View {
             lock.sceneChanged(next)
             if next == .active && !lock.concealed { Task { await model.refresh() } }
             model.requestForegroundSync(token: model.completedStartupToken, active: applicationActive)
+            model.requestAppleRemindersAutoImport(token: model.completedStartupToken, active: applicationActive)
             model.requestReminderLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestCalendarPushLifecycle(token: model.completedStartupToken, active: applicationActive)
             model.requestSearchLifecycle(token: model.completedStartupToken, active: applicationActive)
         }
         .onChange(of: lock.concealed) { concealed in
             if concealed {
+                model.retireTrashPresentation()
+                model.retireCaptureEditNavigation()
                 model.suspendEntityLinks()
+                model.cancelAppleRemindersIntent()
                 model.cancelNotificationSettingsIntent()
                 model.cancelCalendarSettingsIntent()
                 model.retireCalendarFeed()
                 model.cancelForegroundSync()
+                model.cancelAppleRemindersAutoImport()
                 model.cancelReminderLifecycle()
                 model.cancelCalendarPushLifecycle()
                 model.cancelProjectAttachmentDownload()
@@ -587,6 +629,7 @@ private struct AppLockRoot: View {
         .onChange(of: model.appLockActive) { _ in model.searchPolicyChanged() }
         .onChange(of: foreground) { next in
             model.requestForegroundSync(token: next.token, active: next.active)
+            model.requestAppleRemindersAutoImport(token: next.token, active: next.active)
             model.requestReminderLifecycle(token: next.token, active: next.active)
             model.requestCalendarPushLifecycle(token: next.token, active: next.active)
             model.requestSearchLifecycle(token: next.token, active: next.active)
@@ -597,6 +640,18 @@ private struct AppLockRoot: View {
             if clean { model.externalContextBecameClean() }
         }
         #if DEBUG && targetEnvironment(simulator)
+        .overlay(alignment: .bottom) {
+            if model.captureSaveEditPostAckTestHeld {
+                VStack {
+                    Text(model.captureSaveEditTestState).rnFont(10)
+                        .accessibilityIdentifier("capture-save-edit-fixture-state")
+                    Button("Release capture read") { model.releaseCaptureSaveEditFixtureAcknowledgement() }
+                        .buttonStyle(.bordered).frame(minHeight: 44)
+                        .accessibilityIdentifier("capture-save-edit-fixture-release")
+                }
+                .padding(16).background(palette.card)
+            }
+        }
         .onChange(of: model.morePresented) { presented in
             if presented {
                 model.deliverEntityLinkTestInput("more")

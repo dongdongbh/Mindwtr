@@ -26,6 +26,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 /*
  * Settings › Data's Backup and Import folds and Sync › Recovery snapshots (RN's use-sync-settings-backup-actions.ts and
@@ -38,10 +39,12 @@ import java.util.UUID
 
 /** The measured transfer limit (design §4.1): a picked file and the library together, before anything is decoded or parsed. */
 object DataTransferLimits {
-    // Measured on the S23 (pass D1a, result.md measure2; heap growth limit 256 MiB): a 12 MiB file restored over a 12 MiB
-    // library (24 MiB in all) peaked at 128 MiB Java heap, half the growth limit, and the limit is half of that.
+    // Measured on the S23 (pass D1c step 0 runs 5 and 6; native heap ceiling 512 MiB): the smallest workload bound was an
+    // OmniFocus import that left a 31.5 MiB library (native 228 MiB), and the limit is half of that. Restoring into a fresh
+    // library passed at 91 MiB (run 5); an Undo over 53.4 MiB of rows reached 641 MiB native. Every workload rerun at 15 MiB
+    // peaked at or under 327 MiB native and 79 MiB Java (rule: 128, half the 256 MiB growth limit).
     // ponytail: one fixed limit; a device with a smaller heap gets the same number. Stream the plan through a file if libraries outgrow it.
-    internal const val LIMIT_BYTES = 12L * 1024 * 1024
+    internal const val LIMIT_BYTES = 15L * 1024 * 1024
     /** Core's MAX_BACKUP_SOURCE_BYTES: a picked JSON backup alone. */
     const val MAX_BACKUP_SOURCE_BYTES = 128L * 1024 * 1024
     /** Core's DEFAULT_IMPORT_SOURCE_LIMITS.maxInputBytes: an import's picked file alone. */
@@ -90,7 +93,10 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
      * "snapshot:<name>"), or "gettingStarted" (RN's own busy flag for that row; every Data row is off while it runs).
      */
     var action by mutableStateOf<String?>(null); private set
-    /** The open question (RN's Alert): `{ kind: "confirm", model, mode, stage }` or `{ kind: "snapshot", model, name, undo }`. */
+    /**
+     * The open question (RN's Alert): `{ kind: "confirm", model, mode, stage }`, `{ kind: "snapshot", model, name, undo }`, or
+     * `{ kind: "noUndo", model }` (large-library pass b: a prepared operation that may run without Undo; [noUndoAnswer] waits on it).
+     */
     var question by mutableStateOf<JSONObject?>(null); private set
     /** A system picker the Data screen opens next ("json", "tree"); the screen launches it and clears it. */
     var launch by mutableStateOf<String?>(null); private set
@@ -100,6 +106,7 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
     var share by mutableStateOf<Pair<File, String>?>(null); private set
     /** The export made at press time (RN reads its snapshot before the folder picker), held for the picker's answer. */
     private var exportFile: JSONObject? = null
+    @Volatile private var noUndoAnswer: CompletableFuture<Boolean>? = null
 
     /** Every Data row is off while one runs or a sync runs (RN's `isSyncing || isBackupBusy`); each entry point checks it. */
     val busy get() = dataRowsBusy(action, shell.syncActive)
@@ -281,6 +288,8 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
 
     /** The question's Cancel: nothing was written; the staged copy goes. */
     fun cancel() {
+        // The no-Undo question's Cancel: the waiting operation discards its prepared files and ends itself.
+        if (question?.optString("kind") == "noUndo") { question = null; noUndoAnswer?.complete(false); return }
         question?.optString("stage")?.takeIf { it.isNotEmpty() }?.let { StagedCopies.release(File(staging, it)) }
         question = null
         finish()
@@ -291,6 +300,7 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
         val open = question ?: return
         question = null
         when (open.getString("kind")) {
+            "noUndo" -> noUndoAnswer?.complete(true)
             "confirm" -> {
                 val file = File(staging, open.getString("stage"))
                 val importMode = open.optString("importMode").takeIf { it.isNotEmpty() }
@@ -354,6 +364,16 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
                         .put("admission", JSONObject().put("sourceBytes", sourceBytes).put("maxTransferBytes", DataTransferLimits.MAX_DATA_TRANSFER_BYTES)).toString(),
                         recoveryFile, ops.pendingPlan(requestId), DataTransferLimits.MAX_PLAN_BYTES)
                 } finally { staged?.let(StagedCopies::release) }
+                // Large-library pass b: core estimates the library may be too large to undo this change. dd's warning first; it runs only on
+                // Continue, with its recovery snapshot still written (RN's safety net); the commit then decides Undo from the real bytes.
+                prepared.optJSONObject("noUndo")?.let { words ->
+                    if (!askNoUndo(words)) {
+                        ops.discard(requestId); ops.pendingSnapshot(requestId).delete()
+                        outcome = "cancelled"
+                        shell.ui { finish() }
+                        return@whenHosted
+                    }
+                }
                 val recovery = prepared.optJSONObject("recovery")?.let(::closed)
                 if (recovery != null) RecoverySnapshots.publish(snapshots, recoveryFile!!, name, recovery.bytes, recovery.sha256)
                 stop("after-snapshot")
@@ -387,6 +407,15 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
 
     private fun closed(json: JSONObject) = DataChannel.Closed(json.getLong("bytes"), json.getString("sha256"))
 
+    /** Shows the no-Undo question ([words]: core's model) and waits on this operation's thread, as long as the app's other questions wait. */
+    private fun askNoUndo(words: JSONObject): Boolean {
+        val answer = CompletableFuture<Boolean>()
+        shell.ui { noUndoAnswer = answer; question = JSONObject().put("kind", "noUndo").put("model", words) }
+        val continued = runCatching { answer.get() }.getOrDefault(false)
+        shell.ui { noUndoAnswer = null; if (question?.optString("kind") == "noUndo") question = null }
+        return continued
+    }
+
     /** RN's result toast (core's words and duration), with Undo; [shown] (the result record goes) runs once it shows (design §4.3). */
     private fun showResult(result: JSONObject, undo: String?, shown: () -> Unit) {
         val undoLabel = result.optString("undoLabel").takeIf { it.isNotEmpty() && undo != null }
@@ -408,7 +437,20 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
         takeLeftover(operations, snapshots, { runtime.backupResultModel(it) }) { leftover, shown ->
             found = if (leftover is Leftover.Result) "result" else "failure"
             when (leftover) {
-                is Leftover.Result -> shell.ui { showResult(leftover.model, leftover.undo, shown) }
+                is Leftover.Result -> {
+                    // Its Undo comes back with this toast: core holds that Undo's attachment files again first, as the commit did
+                    // in the process that died (a sync's cleanup must not delete them before the Undo is taken).
+                    // A result without Undo (large-library pass b: its toast says so) has nothing to hold.
+                    leftover.undo?.takeIf { leftover.model.optString("undoLabel").isNotEmpty() }?.let { name ->
+                        val held = runCatching { runtime.backupUndoHold(File(snapshots, name)).optBoolean("held") }
+                            .onFailure { Log.w(CoreHost.TAG, "Leftover Undo hold failed ${failureForLog(it)}") }.getOrDefault(false)
+                        runCatching {
+                            runtime.logLine("Native Android leftover Undo held its attachments releaseCheck=v1.3.7/leftover-undo-hold", JSONObject()
+                                .put("releaseCheck", "v1.3.7/leftover-undo-hold").put("outcome", if (held) "held" else "failed"))
+                        }
+                    }
+                    shell.ui { showResult(leftover.model, leftover.undo, shown) }
+                }
                 is Leftover.Failure -> {
                     val model = failureModel(runtime, leftover.operation, leftover.error)
                     shell.ui {

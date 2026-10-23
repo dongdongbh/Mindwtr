@@ -6,6 +6,8 @@ struct InboxScreen: View {
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var inboxBulkDeletePresented = false
+    @State private var bottomSafeInset: CGFloat = 0
     private var palette: AppPalette { AppPalette(theme: model.theme, system: systemScheme) }
     private var focusSections: [CoreObject] { model.focus.objects("sections").filter { $0.number("total") > 0 } }
     private var reviewProjects: [CoreObject] { model.focus.objects("reviewProjects") }
@@ -18,7 +20,7 @@ struct InboxScreen: View {
         model.area.objects("options").first(where: { $0.text("id") == "__all__" })?.text("state") == "included"
     }
     private var menuPanelPresented: Bool {
-        model.morePresented || !model.somedayPanel.isEmpty || !model.referencePanel.isEmpty || !model.historyPanel.isEmpty
+        model.inboxSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented || (model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.morePresented || !model.somedayPanel.isEmpty || !model.referencePanel.isEmpty || !model.historyPanel.isEmpty
     }
     private var menuListPrefix: String {
         model.selectedSurface == .savedSearch ? "saved-search" : model.selectedSurface == .contexts ? "contexts" : model.selectedSurface == .trash ? "trash" : model.selectedSurface == .history ? "history" : model.selectedSurface == .reference ? "reference" : model.selectedSurface == .someday ? "someday" : "waiting"
@@ -72,7 +74,11 @@ struct InboxScreen: View {
                         } else {
                             header
                             if model.ready {
-                                if model.selectedSurface == .inbox { inboxContent }
+                                // Bound opaque metadata after an observed iOS 17 stack overflow.
+                                if model.selectedSurface == .inbox {
+                                    AnyView(inboxContent)
+                                        .onAppear { Task { await model.recordInboxViewBoundaryRendered() } }
+                                }
                                 else if model.selectedSurface == .review { ReviewScreen(model: model, palette: palette) }
                                 else if model.selectedSurface == .calendar { CalendarScreen(model: model, palette: palette) }
                                 else if model.selectedSurface == .board { BoardScreen(model: model, palette: palette) }
@@ -113,7 +119,7 @@ struct InboxScreen: View {
                         if !model.taskFocusNotice.isEmpty && !model.reviewGuidePresented {
                             TaskFocusNotice(model: model, palette: palette)
                         }
-                        if model.error != nil && !model.capturePresented && !model.areaPickerPresented && !model.morePresented && !model.mindSweepPresented && !model.processInboxPresented && !model.calendarItemPresented
+                        if (model.error ?? model.inboxBulkRetryError) != nil && !model.capturePresented && !model.areaPickerPresented && !model.morePresented && !model.mindSweepPresented && !model.processInboxPresented && !model.calendarItemPresented
                             && !(model.somedayPanel == "newSection" && model.somedaySectionCreateError != nil)
                             && !(model.somedayPanel == "newSectionTask" && model.somedaySectionTaskError != nil)
                             && !(model.somedayPanel == "moveSection" && model.somedayMoveError != nil)
@@ -125,11 +131,14 @@ struct InboxScreen: View {
                             FailureBanner(model: model, palette: palette)
                         }
                     }
+                    .allowsHitTesting(!model.inboxGroupPresented && !model.inboxFiltersPresented && !(model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented))
                     .accessibilityElement(children: menuPanelPresented ? .ignore : .contain)
                     .accessibilityHidden(menuPanelPresented)
                     if model.morePresented { MoreMenuSheet(model: model, palette: palette) }
                     if !model.somedayPanel.isEmpty { SomedayPanel(model: model, palette: palette) }
                     if !model.referencePanel.isEmpty { ReferencePanel(model: model, palette: palette) }
+                    if model.inboxSortPresented { InboxSortPanel(model: model, palette: palette) }
+                    if model.inboxGroupPresented { InboxGroupPanel(model: model, palette: palette) }
                     if !model.historyPanel.isEmpty { HistoryPanel(model: model, palette: palette) }
                 }
                 if model.selectedSurface != .search && model.selectedSurface != .project && model.selectedSurface != .waiting
@@ -137,16 +146,30 @@ struct InboxScreen: View {
                     && model.selectedSurface != .trash && model.selectedSurface != .savedSearch
                     && (model.selectedSurface != .contexts || model.quickAccessView == "contexts")
                     && model.selectedSurface != .settings {
-                    tabBar
+                    tabBar.disabled(model.inboxSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented)
+                        .accessibilityHidden(model.inboxSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented)
                 }
             }
+            .background(GeometryReader { proxy in
+                Color.clear.onAppear { bottomSafeInset = proxy.safeAreaInsets.bottom }
+                    .onChange(of: proxy.safeAreaInsets.bottom) { bottomSafeInset = $0 }
+            })
             // More's content, dismissal backdrop and visible tabs share one modal boundary.
             .accessibilityElement(children: .contain)
-            .accessibilityAddTraits(model.morePresented ? .isModal : [])
-            .disabled(model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || !model.focusPanel.isEmpty || (model.selectedSurface == .review
+            .accessibilityAddTraits(model.morePresented || model.inboxSortPresented || model.inboxGroupPresented ? .isModal : [])
+            .disabled((model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || !model.focusPanel.isEmpty || (model.selectedSurface == .review
                 && (model.reviewGuidePresented || model.reviewPickerPresented)))
-            .accessibilityHidden(model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || model.capturePresented || model.areaPickerPresented || !model.focusPanel.isEmpty
+            .accessibilityHidden((model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || model.capturePresented || model.areaPickerPresented || !model.focusPanel.isEmpty
                 || (model.selectedSurface == .review && (model.reviewGuidePresented || model.reviewPickerPresented)))
+            if model.inboxBulkTagPresented && model.selectedSurface == .inbox && !model.appLock.concealed {
+                InboxBulkTagDialog(model: model, palette: palette)
+            }
+            if model.inboxBulkRemovePresented && model.selectedSurface == .inbox && !model.appLock.concealed {
+                InboxBulkRemoveTagDialog(model: model, palette: palette)
+            }
+            if model.inboxBulkOrganizePresented && model.selectedSurface == .inbox && !model.appLock.concealed {
+                AnyView(InboxBulkOrganizeDialog(model: model, palette: palette))
+            }
             if model.selectedSurface == .board && model.boardFiltersPresented {
                 BoardFiltersSheet(model: model, palette: palette)
             }
@@ -178,7 +201,7 @@ struct InboxScreen: View {
             }
             if model.capturePresented {
                 Color.black.opacity(0.35).ignoresSafeArea()
-                    .onTapGesture { if !model.busy && !model.retryNeeded { model.capturePresented = false } }
+                    .onTapGesture { model.requestCaptureClose() }
                 CaptureSheet(model: model, palette: palette)
                     .frame(maxWidth: 860)
             }
@@ -210,6 +233,11 @@ struct InboxScreen: View {
         .sheet(isPresented: Binding(get: { model.taskPresented }, set: { if !$0 && !model.appLock.concealed { model.closeTask() } })) {
             TaskViewSheet(model: model, palette: palette)
                 .presentationDetents([.large])
+        }
+        .sheet(isPresented: Binding(get: { model.inboxFiltersPresented }, set: { if !$0 && !model.appLock.concealed { model.closeInboxFilters() } })) {
+            InboxFiltersModalContent(model: model, lock: model.appLock, palette: palette)
+                .presentationDetents([.large])
+                .interactiveDismissDisabled()
         }
         .onChange(of: model.selectedSurface) { _ in model.referenceProjectNextActionOwnerChanged() }
         .onChange(of: model.taskPresented) { _ in model.referenceProjectNextActionOwnerChanged() }
@@ -322,32 +350,193 @@ struct InboxScreen: View {
         .padding(.bottom, 8)
     }
 
+    private var inboxRows: [(id: [String], item: CoreObject)] {
+        model.items.map { (id: model.inboxItemIdentity($0), item: $0) }
+    }
+
     private var inboxContent: some View {
         VStack(spacing: 0) {
             toolbar
-            primaryAction
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
+            inboxFilterChips
+            if model.inboxSelectionMode { AnyView(inboxBulkDeleteBar) }
+            primaryAction.disabled(!model.inboxActionsEnabled || model.inboxSelectionMode)
+            // Selection uses the same row-local UIKit gesture host as Done and Reference.
+            List {
+                Group {
                     Text(model.inbox.text("scopeLabel"))
                         .rnFont(13, .semibold).foregroundStyle(palette.secondary)
                         .padding(.horizontal, 16).padding(.bottom, 2)
                     if model.items.isEmpty { emptyState }
-                    ForEach(model.items.indices, id: \.self) { index in
-                        let item = model.items[index]
-                        if item.text("type") == "task" {
-                            TaskCard(row: item.object("row"), model: model, palette: palette)
-                                .id(item.object("row").text("id"))
-                                .onAppear {
-                                    if index == model.items.count - 5 { Task { await model.loadMore() } }
+                    if let error = model.inboxReadError {
+                        Text(error).rnFont(13).foregroundStyle(palette.danger)
+                            .accessibilityIdentifier("inbox-group-error")
+                        Button(model.label("common.retry")) { Task { await model.retryInboxGrouping() } }
+                            .frame(minHeight: 44).disabled(model.busy || model.retryNeeded || menuPanelPresented)
+                            .accessibilityIdentifier("inbox-group-retry")
+                    }
+                    ForEach(inboxRows, id: \.id) { entry in
+                        let item = entry.item
+                        Group {
+                            if item.text("type") == "section" { inboxSection(item) }
+                            else if item.text("type") == "task" {
+                                let row = item.object("row")
+                                let selected = model.inboxTaskSelected(row.text("id"))
+                                HStack(spacing: 8) {
+                                    if model.inboxSelectionMode, !row.flag("readOnly") {
+                                        Button { Task { await model.selectInboxTask(row) } } label: {
+                                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                                                .font(.system(size: 22)).foregroundStyle(palette.tint)
+                                                .frame(width: 45, height: 45).contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain).accessibilityLabel(row.text("title"))
+                                        .accessibilityAddTraits(selected ? .isSelected : [])
+                                        .accessibilityIdentifier("inbox-select-" + (item.text("groupId").isEmpty ? "none" : item.text("groupId")) + "-" + row.text("id"))
+                                    }
+                                    TaskCard(row: row, model: model, palette: palette,
+                                             readOnly: model.inboxSelectionMode || row.flag("readOnly"),
+                                             hideStatusBadge: model.inboxSelectionMode,
+                                             onSelection: model.inboxSelectionMode && !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil,
+                                             onSelectionStart: !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil)
+                                        .accessibilityIdentifier("inbox-item-" + item.text("groupId") + "-" + row.text("id"))
                                 }
+                                    .disabled(!model.inboxActionsEnabled)
+                            }
                         }
+                        .onAppear {
+                            Task { await model.loadMore(automaticRow: entry.id) }
+                        }
+                        .onChange(of: model.inboxActionsEnabled) { enabled in
+                            if enabled { Task { await model.loadMore(automaticRow: entry.id) } }
+                        }
+                    }
+                    if model.items.count < model.inbox.number("total") {
+                        Button { Task { await model.loadMore() } } label: {
+                            Text(model.label("common.more")).rnFont(12, .semibold)
+                                .padding(.horizontal, 12).frame(minHeight: 44)
+                                .background(palette.filter, in: Capsule()).contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || menuPanelPresented)
+                        .accessibilityIdentifier("inbox-more")
                     }
                     if model.busy && !model.capturePresented { ProgressView().frame(maxWidth: .infinity).padding(12) }
                 }
-                .padding(12)
+                .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .accessibilityIdentifier("inbox-scroll")
             .refreshable { await model.refresh() }
         }
+        .alert(model.archiveBulkDeleteConfirmation.text("title"), isPresented: $inboxBulkDeletePresented) {
+            Button(model.archiveBulkDeleteConfirmation.text("cancelLabel"), role: .cancel) {
+                model.cancelArchiveBulkDeleteConfirmation()
+            }.accessibilityIdentifier("inbox-bulk-cancel")
+            Button(model.archiveBulkDeleteConfirmation.text("confirmLabel"), role: .destructive) {
+                Task { await model.confirmDeleteSelectedArchiveTasks() }
+            }.accessibilityIdentifier("inbox-bulk-confirm")
+        } message: { Text(model.archiveBulkDeleteConfirmation.text("message")) }
+        .onChange(of: model.archiveBulkDeleteConfirmation.isEmpty) { if $0 { inboxBulkDeletePresented = false } }
+        .onChange(of: scenePhase) { model.inboxSelectionOwnerChanged(active: $0 == .active) }
+        .onDisappear { model.inboxSelectionOwnerChanged(active: false) }
+    }
+
+    private var inboxBulkDeleteBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(model.inboxBulk.object("bar").text("countLabel"))
+                    .rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("inbox-bulk-count")
+                Spacer(minLength: 0)
+                Button { model.leaveInboxTaskSelection() } label: {
+                    AppIcon(name: "x", size: 16).frame(width: 45, height: 45).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(!model.inboxSelectionExitEnabled)
+                .accessibilityLabel(model.inboxBulk.object("bar").object("exit").text("accessibilityLabel"))
+                .accessibilityIdentifier("inbox-bulk-exit")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    let statuses = model.inboxBulk.object("bar").objects("statuses")
+                    ForEach(statuses.indices, id: \.self) { index in
+                        let option = statuses[index]
+                        Button { Task { await model.moveSelectedInboxTasks(status: option.text("status")) } } label: {
+                            inboxBulkActionLabel(option.text("label"))
+                        }
+                        .buttonStyle(.plain).foregroundStyle(palette.tint)
+                        .disabled(!model.inboxBulkStatusEnabled(option.text("status")))
+                        .accessibilityLabel(option.text("accessibilityLabel"))
+                        .accessibilityIdentifier("inbox-bulk-status-" + option.text("status"))
+                    }
+                    Button { model.openInboxBulkOrganize() } label: {
+                        inboxBulkActionLabel(model.inboxBulk.object("bar").object("organize").text("label"))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.inboxBulkOrganizeEnabled)
+                    .accessibilityLabel(model.inboxBulk.object("bar").object("organize").text("label"))
+                    .accessibilityIdentifier("inbox-bulk-organize-open")
+                    Button { model.openInboxBulkTag() } label: {
+                        inboxBulkActionLabel(model.inboxBulk.object("bar").object("addTag").text("label"))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.inboxBulkTagEnabled)
+                    .accessibilityLabel(model.inboxBulk.object("bar").object("addTag").text("accessibilityLabel"))
+                    .accessibilityIdentifier("inbox-bulk-tag-open")
+                    Button { model.openInboxBulkRemove() } label: {
+                        inboxBulkActionLabel(model.inboxBulk.object("bar").object("removeTag").text("label"))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.inboxBulkRemoveEnabled)
+                    .accessibilityLabel(model.inboxBulk.object("bar").object("removeTag").text("label"))
+                    .accessibilityIdentifier("inbox-bulk-remove-tag-open")
+                    Button { Task { await model.toggleInboxTaskRange() } } label: {
+                        inboxBulkActionLabel(model.inboxBulk.object("bar").object("range").text("label"))
+                    }
+                    .buttonStyle(.plain).disabled(!model.inboxBulkDeleteEnabled)
+                    .accessibilityAddTraits(model.inboxBulk.object("bar").object("range").flag("active") ? .isSelected : [])
+                    .accessibilityIdentifier("inbox-bulk-range")
+                    Button {
+                        model.requestDeleteSelectedInboxTasks()
+                        inboxBulkDeletePresented = !model.archiveBulkDeleteConfirmation.isEmpty
+                    } label: { inboxBulkActionLabel(model.inboxBulk.object("bar").object("delete").text("label")) }
+                    .buttonStyle(.plain).foregroundStyle(palette.danger).disabled(!model.inboxBulkDeleteEnabled)
+                    .accessibilityIdentifier("inbox-bulk-delete")
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("inbox-bulk-actions-scroll")
+        }
+        .padding(12).background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border).allowsHitTesting(false))
+        .padding(.horizontal, 16).padding(.vertical, 8)
+    }
+
+    private func inboxBulkActionLabel(_ text: String) -> some View {
+        Text(text).rnFont(13, .semibold).fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 12).frame(minWidth: 45, minHeight: 45)
+            .background(palette.card, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border).allowsHitTesting(false))
+            .contentShape(Rectangle())
+    }
+
+    @ViewBuilder private func inboxSection(_ item: CoreObject) -> some View {
+        if item.flag("collapsible") {
+            Button { Task { await model.toggleInboxSection(item.text("id")) } } label: { inboxSectionLabel(item) }
+                .buttonStyle(.plain).disabled(!model.inboxActionsEnabled)
+                .accessibilityValue(model.label(item.flag("collapsed") ? "markdown.expand" : "markdown.collapse"))
+                .accessibilityIdentifier("inbox-section-" + item.text("id"))
+        } else { inboxSectionLabel(item).accessibilityAddTraits(.isHeader) }
+    }
+
+    private func inboxSectionLabel(_ item: CoreObject) -> some View {
+        HStack(spacing: 6) {
+            if item.flag("collapsible") {
+                AppIcon(name: "chevron", size: 15).rotationEffect(.degrees(item.flag("collapsed") ? -90 : 0))
+                    .foregroundStyle(palette.secondary)
+            }
+            Text(item.text("title")).rnFont(13, .bold).foregroundStyle(item.flag("muted") ? palette.secondary : palette.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(String(item.number("count"))).rnFont(12, .semibold).foregroundStyle(palette.secondary)
+        }
+        .frame(minHeight: 44).contentShape(Rectangle()).padding(.top, 4)
     }
 
     private var focusContent: some View {
@@ -360,6 +549,7 @@ struct InboxScreen: View {
                         .rnFont(14, .semibold).frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
                         .accessibilityIdentifier("focus-retry")
                 }
+                PomodoroTimerPanel(model: model, palette: palette)
                 if !model.focus.isEmpty {
                     focusToolbar
                     focusFilterRows
@@ -375,7 +565,11 @@ struct InboxScreen: View {
                     ForEach(focusSections.indices, id: \.self) { index in
                         let section = focusSections[index]
                         let key = section.text("key")
-                        focusSectionHeader(key: key, title: section.text("title"), count: section.number("total"), first: index == 0)
+                        focusSectionHeader(key: key, title: section.text("title"), count: section.number("total"), first: index == 0, countLabel: section.text("countLabel"))
+                        if !section.text("hiddenByAreaLabel").isEmpty {
+                            Text(section.text("hiddenByAreaLabel")).rnFont(12).foregroundStyle(palette.secondary)
+                                .padding(.bottom, 10)
+                        }
                         if !model.collapsedFocusSections.contains(key) {
                             let rows = section.objects("rows")
                             ForEach(rows.indices, id: \.self) { rowIndex in
@@ -590,20 +784,21 @@ struct InboxScreen: View {
         .padding(.top, 6)
     }
 
-    private func focusSectionHeader(key: String, title: String, count: Int, first: Bool) -> some View {
+    private func focusSectionHeader(key: String, title: String, count: Int, first: Bool, countLabel: String = "") -> some View {
         let open = !model.collapsedFocusSections.contains(key)
+        let countText = countLabel.isEmpty ? String(count) : countLabel
         return HStack(spacing: 8) {
             Button { model.toggleFocusSection(key) } label: {
                 HStack(spacing: 10) {
                     Text(open ? "▾" : "▸").rnFont(12).frame(width: 14)
                     Text(title.uppercased()).rnFont(12, .bold, maxScale: 1.2).tracking(1).lineLimit(2)
-                    Text("(\(count))").rnFont(12, .semibold, maxScale: 1.2)
+                    Text("(\(countText))").rnFont(12, .semibold, maxScale: 1.2)
                     Spacer(minLength: 0)
                 }
                 .foregroundStyle(palette.secondary).frame(minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(!model.focusControlsEnabled)
-            .accessibilityLabel(title + " · \(count)")
+            .accessibilityLabel(title + " · " + countText)
             .accessibilityValue(model.label(open ? "markdown.collapse" : "markdown.expand"))
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("focus-section-" + key)
@@ -873,15 +1068,32 @@ struct InboxScreen: View {
     private var toolbar: some View {
         HStack(spacing: 0) {
             ForEach([("sort", "sort"), ("folder", "group"), ("sliders", "filters")], id: \.0) { icon, field in
-                Button {} label: {
-                    AppIcon(name: icon, size: 16).foregroundStyle(palette.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(palette.filter, in: Circle())
-                        .overlay(Circle().stroke(palette.border, lineWidth: 1))
-                        .frame(width: 44, height: 44)
+                Button {
+                    if field == "sort" { Task { await model.openInboxSort() } }
+                    else if field == "group" { Task { await model.openInboxGroup() } }
+                    else { model.openInboxFilters() }
+                } label: {
+                    let selected = field == "filters" && model.inbox.object("toolbar").object(field).flag("selected")
+                    let count = model.inbox.object("toolbar").object(field).text("countLabel")
+                    // RN TaskListHeader: the active-filter count sits beside the icon and the circle grows into a pill.
+                    let counted = field == "filters" && !count.isEmpty
+                    HStack(spacing: 5) {
+                        AppIcon(name: icon, size: 16)
+                        if counted { Text(count).rnFont(13, .bold) }
+                    }
+                    .foregroundStyle(selected ? palette.tint : palette.secondary)
+                    .padding(.horizontal, counted ? 9 : 0)
+                    .frame(minWidth: 32, minHeight: 32)
+                    .background(palette.filter, in: Capsule())
+                    .overlay(Capsule().stroke(selected ? palette.tint : palette.border, lineWidth: 1))
+                    .padding(.horizontal, counted ? 6 : 0)
+                    .frame(minWidth: 44, minHeight: 44)
                 }
-                .buttonStyle(.plain).disabled(true)
+                .buttonStyle(.plain).disabled(field == "sort" ? !model.inboxSortEnabled : field == "group" ? !model.inboxGroupEnabled : !model.inboxFiltersEnabled)
                 .accessibilityLabel(model.inbox.object("toolbar").object(field).text("accessibilityLabel"))
+                .accessibilityIdentifier("inbox-" + field + "-open")
+                .accessibilityAddTraits(field == "filters" && model.inbox.object("toolbar").object(field).flag("selected") ? .isSelected : [])
+                .accessibilityValue(field == "filters" ? model.inbox.object("toolbar").object(field).text("countLabel") : "")
             }
             Spacer(minLength: 8)
             if model.inbox.object("mindSweep").text("placement") == "accessory" {
@@ -891,11 +1103,47 @@ struct InboxScreen: View {
                         .background(palette.filter, in: Capsule())
                         .overlay(Capsule().stroke(palette.border, lineWidth: 1))
                 }
-                .buttonStyle(.plain).disabled(!model.ready || model.busy || model.retryNeeded || model.inbox.object("mindSweep").text("label").isEmpty)
+                .buttonStyle(.plain).disabled(!model.inboxActionsEnabled || model.inboxSelectionMode || model.inbox.object("mindSweep").text("label").isEmpty)
                 .accessibilityIdentifier("inbox-mind-sweep-accessory")
             }
         }
         .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 6)
+    }
+
+    @ViewBuilder private var inboxFilterChips: some View {
+        let chips = model.inbox.objects("chips")
+        if !chips.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                ForEach(chips.indices, id: \.self) { index in
+                    let chip = chips[index]
+                    let tone = chip.flag("excluded") ? palette.danger : palette.tint
+                    Button { Task { await model.applyInboxChipAction(chip.object("action")) } } label: {
+                        HStack(spacing: 4) {
+                            Text(chip.text("label")).rnFont(12, .semibold).strikethrough(chip.flag("excluded"))
+                            AppIcon(name: "x", size: 12)
+                        }
+                        .foregroundStyle(tone).padding(.horizontal, 12).frame(minHeight: 44)
+                        .background(palette.filter, in: Capsule()).overlay(Capsule().stroke(tone, lineWidth: 1))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain).disabled(!model.inboxActionsEnabled)
+                    .accessibilityLabel(chip.text("accessibilityLabel")).accessibilityAddTraits(.isSelected)
+                    .accessibilityValue(chip.flag("excluded") ? model.label("filters.excluded") : "")
+                    .accessibilityIdentifier("inbox-chip-" + chip.text("id"))
+                }
+                Button { Task { await model.editInboxFilter(model.inbox.object("filters").object("clearEdit")) } } label: {
+                    Text(model.inbox.text("clearLabel")).rnFont(12, .semibold).padding(.horizontal, 12)
+                        .frame(minHeight: 44).contentShape(Capsule())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.inboxActionsEnabled)
+                .accessibilityIdentifier("inbox-chips-clear")
+                }
+                .padding(.horizontal, 16)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("inbox-chips-scroll")
+        }
     }
 
     private var primaryAction: some View {
@@ -924,14 +1172,22 @@ struct InboxScreen: View {
         VStack(spacing: 8) {
             Text(model.inbox.object("empty").text("message")).rnFont(15, .semibold)
             Text(model.inbox.object("empty").text("hint")).rnFont(13).foregroundStyle(palette.secondary.opacity(0.8))
-            Button { Task { await model.openCapture() } } label: {
+            Button {
+                Task {
+                    let edit = model.inbox.object("empty").object("action").object("filterEdit")
+                    if !edit.isEmpty { await model.editInboxFilter(edit) }
+                    else { await model.openCapture() }
+                }
+            } label: {
                 Text(model.inbox.object("empty").text("actionLabel"))
                     .rnFont(13, .bold).padding(.horizontal, 16).padding(.vertical, 9)
+                    .frame(minHeight: 44).contentShape(Capsule())
                     .overlay(Capsule().stroke(palette.text, lineWidth: 1))
             }
             .buttonStyle(.plain).padding(.top, 8)
-            .disabled(model.busy || model.retryNeeded)
-            .accessibilityIdentifier("inbox-empty-capture")
+            .disabled(!model.inboxActionsEnabled)
+            .accessibilityIdentifier(model.inbox.object("empty").object("action").object("filterEdit").isEmpty
+                ? "inbox-empty-capture" : "inbox-empty-clear")
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity).padding(.horizontal, 20).padding(.vertical, 36)
@@ -951,7 +1207,7 @@ struct InboxScreen: View {
                     .offset(y: -4)
                     .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(!model.ready || model.busy || model.retryNeeded)
+            .buttonStyle(.plain).disabled(!model.ready || model.busy || model.retryNeeded || (model.selectedSurface == .inbox && model.inboxSelectionMode))
             .accessibilityLabel(model.label("nav.addTask"))
             .accessibilityIdentifier("capture-open")
             quickAccessTab
@@ -969,8 +1225,8 @@ struct InboxScreen: View {
         }
         .frame(minHeight: 66)
         .disabled(model.unassignedAreaColorActive || model.settingsAreaCreatePresented)
-        // RN's iOS tab bar subtracts 12pt from the bottom safe-area inset.
-        .padding(.bottom, -12)
+        // RN's iOS tab bar uses max(0, inset - 12): it moves at most 12pt into the bottom safe area.
+        .padding(.bottom, -min(12, bottomSafeInset))
         .background(palette.card.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { palette.border.frame(height: 0.5) }
     }
@@ -1487,7 +1743,7 @@ struct FailureBanner: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(model.error ?? "").rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+            Text(model.error ?? model.inboxBulkRetryError ?? "").rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
                 .accessibilityIdentifier("persistence-error")
             Button { Task { await model.retry() } } label: {
                 Text(model.label("common.retry").isEmpty ? "Retry" : model.label("common.retry"))
@@ -1495,6 +1751,9 @@ struct FailureBanner: View {
             }
             .disabled(model.busy)
             .accessibilityIdentifier("persistence-retry")
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            .accessibilityValue(model.settingsAIGeminiRetryFixtureValue)
+            #endif
             DiagnosticsFailureAction(model: model, palette: palette)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
@@ -1661,5 +1920,576 @@ private struct ReferenceProjectNextActionPrompt: View {
         }
         .disabled(!model.referenceProjectNextActionControlsEnabled || !enabled)
         .accessibilityIdentifier(prefix + "-" + suffix)
+    }
+}
+
+private struct InboxSortPanel: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Button { model.closeInboxSort() } label: { Color.black.opacity(0.28).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).ignoresSafeArea().accessibilityLabel(model.label("common.close"))
+                    .accessibilityIdentifier("inbox-sort-dismiss").disabled(model.busy || model.retryNeeded)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text(model.label("sort.label")).rnFont(17, .bold).frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityAddTraits(.isHeader)
+                        Button { model.closeInboxSort() } label: { AppIcon(name: "x", size: 20).frame(width: 44, height: 44).contentShape(Rectangle()) }
+                            .buttonStyle(.plain).accessibilityLabel(model.label("common.close"))
+                            .accessibilityIdentifier("inbox-sort-close").disabled(model.busy || model.retryNeeded)
+                    }
+                    .frame(minHeight: 44).padding(.bottom, 12)
+                    ViewThatFits(in: .vertical) {
+                        TaskListSortChoices(model: model, palette: palette, caller: .inbox).fixedSize(horizontal: false, vertical: true)
+                        ScrollView { TaskListSortChoices(model: model, palette: palette, caller: .inbox) }
+                            .accessibilityIdentifier("inbox-sort-scroll")
+                    }
+                }
+                .padding(12).frame(maxWidth: 440, maxHeight: geometry.size.height * 0.82, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1))
+                .padding(.horizontal, 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { model.closeInboxSort() }
+        }
+    }
+}
+
+private struct InboxGroupPanel: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Button { model.closeInboxGroup() } label: { Color.black.opacity(0.28).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).ignoresSafeArea().accessibilityLabel(model.label("common.close"))
+                    .accessibilityIdentifier("inbox-group-dismiss").disabled(model.busy || model.retryNeeded)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text(model.inbox.object("toolbar").object("group").text("title"))
+                            .rnFont(17, .bold).frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+                        Button { model.closeInboxGroup() } label: {
+                            AppIcon(name: "x", size: 20).frame(width: 44, height: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).accessibilityLabel(model.label("common.close"))
+                        .accessibilityIdentifier("inbox-group-close").disabled(model.busy || model.retryNeeded)
+                    }
+                    .frame(minHeight: 44).padding(.bottom, 12)
+                    ViewThatFits(in: .vertical) {
+                        choices.fixedSize(horizontal: false, vertical: true)
+                        ScrollView { choices }.accessibilityIdentifier("inbox-group-scroll")
+                    }
+                }
+                .padding(12).frame(maxWidth: 440, maxHeight: geometry.size.height * 0.82, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1))
+                .padding(.horizontal, 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { model.closeInboxGroup() }
+        }
+    }
+
+    private var choices: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let error = model.inboxReadError {
+                Text(error).rnFont(13).foregroundStyle(palette.danger).accessibilityIdentifier("inbox-group-error")
+                Button(model.label("common.retry")) { Task { await model.retryInboxGrouping() } }
+                    .frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
+                    .accessibilityIdentifier("inbox-group-retry")
+            }
+            let options = model.inbox.object("toolbar").object("group").objects("options")
+            ForEach(options.indices, id: \.self) { index in
+                let choice = options[index]
+                Button { Task { await model.setInboxGroup(choice.text("value")) } } label: {
+                    HStack(spacing: 8) {
+                        Text(choice.text("label")).rnFont(15).frame(maxWidth: .infinity, alignment: .leading)
+                        if choice.flag("selected") { AppIcon(name: "check", size: 16) }
+                    }
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!model.inboxGroupActionsEnabled)
+                .accessibilityAddTraits(choice.flag("selected") ? .isSelected : [])
+                .accessibilityIdentifier("inbox-group-" + choice.text("value"))
+            }
+            if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
+        }
+    }
+}
+
+private struct InboxFiltersModalContent: View {
+    @ObservedObject var model: CoreModel
+    @ObservedObject var lock: AppLockController
+    let palette: AppPalette
+
+    var body: some View {
+        Group {
+            if lock.concealed {
+                palette.bg.ignoresSafeArea().accessibilityHidden(true)
+            } else {
+                InboxFiltersPanel(model: model, palette: palette).id(model.inboxFilterPresentation)
+            }
+        }
+    }
+}
+
+private struct InboxFiltersPanel: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @FocusState private var focusedField: String?
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Button { close() } label: { Color.black.opacity(0.28).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).ignoresSafeArea().accessibilityLabel(model.label("common.close"))
+                    .accessibilityIdentifier("inbox-filters-dismiss")
+                ListFilterControls(
+                    data: model.inbox, strings: model.strings, palette: palette, prefix: "inbox",
+                    enabled: model.inboxFilterControlsEnabled, busy: model.busy, frozen: model.retryNeeded,
+                    error: model.inboxReadError,
+                    searchText: Binding(get: { model.inboxSearchText }, set: { model.setInboxFilterText($0) }),
+                    locationText: Binding(get: { model.inboxLocationText }, set: { model.setInboxFilterText($0, location: true) }),
+                    pickerName: model.inboxFilterPickerName, picker: model.inboxFilterPicker,
+                    pickerCurrent: model.inboxFilterPickerCurrent, pickerEnabled: model.inboxFilterPickerActionsEnabled,
+                    pickerError: model.inboxFilterPickerError,
+                    pickerQuery: Binding(get: { model.inboxFilterPickerQuery }, set: model.setInboxFilterPickerQuery),
+                    onEdit: { edit in Task { await model.editInboxFilter(edit) } },
+                    onChipAction: { action in Task { await model.applyInboxChipAction(action) } },
+                    onArchived: { _ in }, onOpenPicker: model.openInboxFilterPicker, onBack: model.closeInboxFilterPicker,
+                    onMore: model.loadMoreInboxFilterPicker, onRetry: model.retryInboxFilters,
+                    onRetryPicker: model.retryInboxFilterPicker, onClose: close, focusedField: $focusedField)
+                    .padding(12).frame(maxWidth: 440, maxHeight: geometry.size.height * 0.9, alignment: .top)
+                    .background(palette.card, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1))
+                    .padding(.horizontal, 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+        }
+    }
+
+    private func close() { focusedField = nil; model.closeInboxFilters() }
+}
+
+private struct InboxBulkTagDialog: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+
+    private var fields: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(model.inboxBulkTagOptions.text("title")).rnFont(18, .bold).accessibilityAddTraits(.isHeader)
+            TextField(model.inboxBulkTagOptions.text("placeholder"), text: Binding(
+                get: { model.inboxBulkTagText }, set: { model.setInboxBulkTagText($0) }))
+                .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+                .disabled(model.busy || model.retryNeeded)
+                .accessibilityLabel(model.inboxBulkTagOptions.text("placeholder"))
+                .accessibilityIdentifier("inbox-bulk-tag-input")
+            if let error = model.inboxBulkTagReadError {
+                Text(error).rnFont(13).foregroundStyle(palette.danger).accessibilityIdentifier("inbox-bulk-tag-read-error")
+                Button { model.setInboxBulkTagText(model.inboxBulkTagText) } label: {
+                    Text(model.label("common.retry")).rnFont(14, .semibold).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(model.busy || model.retryNeeded)
+                .accessibilityIdentifier("inbox-bulk-tag-read-retry")
+            }
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture {
+                    if !model.busy && !model.retryNeeded { model.closeInboxBulkTag() }
+                }.accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 12) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        ScrollView { fields }
+                            .frame(maxHeight: min(420, max(120, geometry.size.height - 132)))
+                            .accessibilityIdentifier("inbox-bulk-tag-scroll")
+                    } else { fields }
+                    HStack {
+                        Spacer()
+                        Button { model.closeInboxBulkTag() } label: {
+                            Text(model.inboxBulkTagOptions.text("cancelLabel")).rnFont(14, .semibold)
+                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("inbox-bulk-tag-cancel")
+                        Button { Task { await model.saveInboxBulkTag() } } label: {
+                            Text(model.inboxBulkTagOptions.text("saveLabel")).rnFont(14, .semibold)
+                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.inboxBulkTagSaveEnabled)
+                        .accessibilityIdentifier("inbox-bulk-tag-save")
+                    }
+                }
+                .padding(16).frame(maxWidth: 420)
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).padding(16)
+            }
+            .foregroundStyle(palette.text).accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityIdentifier("inbox-bulk-tag-dialog").accessibilityAction(.escape) {
+                if !model.busy && !model.retryNeeded { model.closeInboxBulkTag() }
+            }
+        }
+    }
+}
+
+private struct InboxBulkRemoveTagDialog: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @FocusState private var focused: Bool
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(model.inboxBulkRemoveOptions.text("title")).rnFont(18, .bold).accessibilityAddTraits(.isHeader)
+            Text(model.inboxBulkRemoveOptions.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var queryInput: some View {
+        TextField(model.inboxBulkRemoveOptions.text("placeholder"), text: Binding(get: { model.inboxBulkRemoveQuery }, set: { model.setInboxBulkRemoveQuery($0) }))
+            .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled().focused($focused)
+            .submitLabel(.done).onSubmit { focused = false }
+            .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+            .accessibilityLabel(model.inboxBulkRemoveOptions.text("placeholder"))
+            .disabled(model.busy || model.retryNeeded)
+            .accessibilityIdentifier("inbox-bulk-remove-tag-input")
+            .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
+    }
+
+    private var options: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            AppChipFlow {
+                ForEach(model.inboxBulkRemoveItems.indices, id: \.self) { index in
+                    let item = model.inboxBulkRemoveItems[index]
+                    let picked = model.inboxBulkRemovePicked(item.text("value"))
+                    Button { model.toggleInboxBulkRemove(item.text("value")) } label: {
+                        Text(item.text("label")).rnFont(14).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12).padding(.vertical, 8).frame(minWidth: 44, minHeight: 44)
+                            .background(picked ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(picked ? palette.tint : palette.border, lineWidth: 1))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).foregroundStyle(picked ? palette.onTint : palette.text)
+                    .disabled(model.busy || model.retryNeeded || !model.inboxBulkRemoveCurrent || model.inboxBulkRemoveReading)
+                    .accessibilityLabel(item.text("label")).accessibilityAddTraits(picked ? .isSelected : [])
+                    .accessibilityIdentifier("inbox-bulk-remove-tag-option-\(index)")
+                }
+            }
+            if model.inboxBulkRemoveReading { ProgressView().accessibilityLabel(model.label("common.loading")) }
+            if model.inboxBulkRemoveCurrent && model.inboxBulkRemoveTotal == 0 {
+                Text(model.label("common.noMatches")).rnFont(14).foregroundStyle(palette.secondary)
+                    .accessibilityIdentifier("inbox-bulk-remove-tag-no-matches")
+            }
+            if model.inboxBulkRemoveItems.count < model.inboxBulkRemoveTotal {
+                Button { model.loadMoreInboxBulkRemove() } label: {
+                    Text(model.label("common.more")).rnFont(14, .semibold).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.inboxBulkRemoveCanLoadMore)
+                .accessibilityIdentifier("inbox-bulk-remove-tag-more")
+            }
+            if let error = model.inboxBulkRemoveReadError {
+                Text(error).rnFont(13).foregroundStyle(palette.danger).accessibilityIdentifier("inbox-bulk-remove-tag-read-error")
+                Button { model.retryInboxBulkRemoveRead() } label: {
+                    Text(model.label("common.retry")).rnFont(14, .semibold).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(model.busy || model.retryNeeded || model.inboxBulkRemoveReading)
+                .accessibilityIdentifier("inbox-bulk-remove-tag-read-retry")
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack {
+            Spacer()
+            Button { model.closeInboxBulkRemove() } label: {
+                Text(model.inboxBulkRemoveOptions.text("cancelLabel")).rnFont(14, .semibold).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(model.busy || model.retryNeeded).accessibilityIdentifier("inbox-bulk-remove-tag-cancel")
+            Button { Task { await model.saveInboxBulkRemove() } } label: {
+                Text(model.inboxBulkRemoveOptions.text("saveLabel")).rnFont(14, .semibold).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.inboxBulkRemoveSaveEnabled)
+            .accessibilityIdentifier("inbox-bulk-remove-tag-save")
+        }
+        .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
+    }
+
+    private func contents(scrollingHeading: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !scrollingHeading { heading }
+            queryInput
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if scrollingHeading { heading }
+                    options
+                }
+            }
+            .scrollDismissesKeyboard(.interactively).frame(minHeight: 44, maxHeight: 480)
+            .accessibilityIdentifier("inbox-bulk-remove-tag-scroll")
+            actions
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { if !model.busy && !model.retryNeeded { model.closeInboxBulkRemove() } }.accessibilityHidden(true)
+                // Keep one query field as keyboard height changes. Accessibility
+                // text or less than 500pt moves only informational copy into the scroll.
+                contents(scrollingHeading: dynamicTypeSize.isAccessibilitySize || geometry.size.height < 500)
+                .padding(16).frame(maxWidth: 420, maxHeight: max(0, geometry.size.height - 32))
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).padding(16)
+            }
+            .foregroundStyle(palette.text).accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityIdentifier("inbox-bulk-remove-tag-dialog").accessibilityAction(.escape) { if !model.busy && !model.retryNeeded { model.closeInboxBulkRemove() } }
+            .onAppear { focused = true }
+        }
+    }
+}
+
+// Task743: rendering consumes core's Organize view/edit models; no draft/date/token rules here.
+private struct InboxBulkOrganizeDialog: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    @State private var dateField: String?
+    @State private var pickerDate = Date()
+    private var view: CoreObject { model.inboxBulkOrganizeView }
+    private var locked: Bool { !model.inboxBulkOrganizeControlsEnabled }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                    .onTapGesture { model.closeInboxBulkOrganize() }.accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text(view.text("title").isEmpty ? model.label("bulk.organize") : view.text("title"))
+                            .rnFont(18, .bold).accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 0)
+                        Button { model.closeInboxBulkOrganize() } label: {
+                            AppIcon(name: "x", size: 16).frame(width: 44, height: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!model.inboxBulkOrganizeCloseEnabled)
+                        .accessibilityLabel(view.text("closeLabel").isEmpty ? model.label("common.close") : view.text("closeLabel"))
+                        .accessibilityIdentifier("inbox-organize-close")
+                    }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if !view.text("subtitle").isEmpty {
+                                Text(view.text("subtitle")).rnFont(13).foregroundStyle(palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if model.inboxBulkOrganizePickerKind != nil { AnyView(picker) }
+                            else { AnyView(fields) }
+                        }
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .frame(maxHeight: max(120, geometry.size.height - 230))
+                    .accessibilityIdentifier("inbox-organize-scroll")
+                    if model.inboxBulkOrganizeReading || model.busy { ProgressView().frame(maxWidth: .infinity) }
+                    if let error = model.inboxBulkOrganizeReadError {
+                        Text(error).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("inbox-organize-error")
+                        Button {
+                            if model.retryNeeded { Task { await model.retry() } }
+                            else { model.retryInboxBulkOrganizeRead() }
+                        } label: { Text(model.label("common.retry")).frame(minHeight: 44).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier("inbox-organize-retry")
+                    }
+                    HStack {
+                        Button {
+                            if model.inboxBulkOrganizePickerKind != nil { model.closeInboxOrganizePicker() }
+                            else { model.closeInboxBulkOrganize() }
+                        } label: {
+                            Text(view.text("cancelLabel").isEmpty ? model.label("common.cancel") : view.text("cancelLabel"))
+                                .frame(minWidth: 60, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!model.inboxBulkOrganizeCloseEnabled)
+                        .accessibilityIdentifier("inbox-organize-cancel")
+                        Spacer(minLength: 0)
+                        if model.inboxBulkOrganizePickerKind == nil {
+                            Button { Task { await model.applyInboxBulkOrganize() } } label: {
+                                Text(view.text("applyLabel")).rnFont(14, .semibold).fixedSize(horizontal: false, vertical: true)
+                                    .padding(.horizontal, 12).frame(minHeight: 44).foregroundStyle(palette.onTint)
+                                    .background(palette.tint, in: RoundedRectangle(cornerRadius: 10)).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(!model.inboxBulkOrganizeApplyEnabled)
+                            .accessibilityIdentifier("inbox-organize-apply")
+                        }
+                    }
+                }
+                .padding(16).frame(maxWidth: 480).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).padding(16)
+            }
+            .foregroundStyle(palette.text).accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { model.closeInboxBulkOrganize() }
+        }
+        .onChange(of: model.inboxBulkOrganizePickerKind) { _ in dateField = nil }
+    }
+
+    private var fields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(view.text("statusLabel")).rnFont(14, .semibold)
+            AppChipFlow {
+                ForEach(view.objects("statuses").indices, id: \.self) { index in
+                    let item = view.objects("statuses")[index]
+                    Button { model.editInboxBulkOrganize(item.object("edit")) } label: {
+                        Text(item.text("label")).rnFont(14).padding(.horizontal, 12).padding(.vertical, 10)
+                            .frame(minHeight: 44).foregroundStyle(item.flag("selected") ? palette.onTint : palette.text)
+                            .background(item.flag("selected") ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 12))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(locked)
+                    .accessibilityAddTraits(item.flag("selected") ? .isSelected : [])
+                    .accessibilityIdentifier("inbox-organize-status-" + item.text("value"))
+                }
+            }
+            destination("project"); destination("area")
+            if view["waitingFor"] is CoreObject {
+                input("delegateWho", part: view.object("waitingFor"))
+            }
+            ForEach(view.objects("dates").indices, id: \.self) { index in
+                AnyView(date(view.objects("dates")[index]))
+            }
+            input("contexts", part: view.object("contexts"))
+            input("tags", part: view.object("tags"))
+            if !view.isEmpty && !view.flag("canApply") {
+                Text(view.text("validationMessage")).rnFont(13).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("inbox-organize-validation")
+            }
+        }
+        .padding(.bottom, 8)
+    }
+    private func destination(_ kind: String) -> some View {
+        let part = view.object(kind)
+        return Button { model.openInboxOrganizePicker(kind) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(part.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                HStack {
+                    Text(part.text("value")).rnFont(16).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0); AppIcon(name: "chevron-down", size: 16)
+                }
+            }
+            .padding(12).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(palette.input, in: RoundedRectangle(cornerRadius: 10)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(locked || !model.inboxBulkOrganizeCurrent || part.flag("disabled"))
+        .accessibilityLabel(part.text("accessibilityLabel")).accessibilityIdentifier("inbox-organize-" + kind)
+    }
+    private func input(_ field: String, part: CoreObject) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(part.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+            TextField(part.text("placeholder"), text: Binding(
+                get: { model.inboxBulkOrganizeInputs[field] ?? part.text("value") },
+                set: { model.setInboxBulkOrganizeText(field, value: $0) }))
+                .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).disabled(locked)
+                .accessibilityLabel(part.text("label")).accessibilityIdentifier("inbox-organize-" + field)
+        }
+    }
+    private func date(_ part: CoreObject) -> some View {
+        let field = part.text("field")
+        return VStack(alignment: .leading, spacing: 8) {
+            input(field, part: part)
+            AppChipFlow {
+                ForEach(part.objects("quickDates").indices, id: \.self) { index in
+                    let quick = part.objects("quickDates")[index]
+                    Button { model.editInboxBulkOrganize(quick.object("edit")) } label: {
+                        Text(quick.text("label")).rnFont(14).padding(.horizontal, 12).frame(minHeight: 44)
+                            .foregroundStyle(quick.flag("selected") ? palette.onTint : palette.text)
+                            .background(quick.flag("selected") ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 10))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(locked).accessibilityLabel(quick.text("accessibilityLabel"))
+                    .accessibilityIdentifier("inbox-organize-" + field + "-" + quick.text("preset"))
+                }
+                Button {
+                    guard let date = TaskDatePickerComponents.date(["date": part.text("pickerStart"), "time": "12:00"]) else { return }
+                    pickerDate = date; dateField = field
+                } label: { AppIcon(name: "calendar", size: 18).frame(width: 44, height: 44).contentShape(Rectangle()) }
+                .buttonStyle(.plain).disabled(locked).accessibilityLabel(part.text("calendarAccessibilityLabel"))
+                .accessibilityIdentifier("inbox-organize-" + field + "-calendar")
+            }
+            if dateField == field {
+                DatePicker(part.text("label"), selection: Binding(get: { pickerDate }, set: { value in
+                    let next = TaskDatePickerComponents.string(value, time: false)
+                    let previous = TaskDatePickerComponents.string(pickerDate, time: false)
+                    pickerDate = value
+                    if next != previous { model.setInboxBulkOrganizeText(field, value: next) }
+                }), displayedComponents: .date)
+                    .datePickerStyle(.wheel).labelsHidden().disabled(locked)
+                    .accessibilityIdentifier("inbox-organize-" + field + "-picker")
+                Button { dateField = nil } label: { Text(part.text("doneText")).frame(minHeight: 44).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).disabled(locked).accessibilityLabel(part.text("doneLabel"))
+                    .accessibilityIdentifier("inbox-organize-" + field + "-done")
+            }
+        }
+    }
+    private var picker: some View {
+        let items = model.inboxBulkOrganizePickerItems
+        return VStack(alignment: .leading, spacing: 8) {
+            TextField(model.label("common.search"), text: Binding(
+                get: { model.inboxBulkOrganizePickerQuery }, set: { model.setInboxOrganizePickerQuery($0) }))
+                .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done)
+                .onSubmit { Task { await model.submitInboxOrganizePicker() } }
+                .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                .disabled(locked).accessibilityLabel(model.label("common.search"))
+                .accessibilityIdentifier("inbox-organize-picker-search")
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(items.indices, id: \.self) { index in
+                    let item = items[index]
+                    Button { model.chooseInboxOrganizePicker(item) } label: {
+                        HStack {
+                            Text(item.text("label")).rnFont(16).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            if item.flag("selected") { Image(systemName: "checkmark").foregroundStyle(palette.tint) }
+                        }
+                        .padding(10).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(locked || !model.inboxBulkOrganizePickerCurrent || model.inboxBulkOrganizePickerReading)
+                    .accessibilityAddTraits(item.flag("selected") ? .isSelected : [])
+                    .accessibilityIdentifier("inbox-organize-picker-choice-" + String(index))
+                }
+            }
+            if !model.inboxBulkOrganizePicker.object("create").isEmpty {
+                Button { Task { await model.createInboxOrganizePickerChoice() } } label: {
+                    Text(model.inboxBulkOrganizePicker.object("create").text("label")).rnFont(16)
+                        .fixedSize(horizontal: false, vertical: true).padding(10).frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(locked || !model.inboxBulkOrganizePickerCurrent || model.inboxBulkOrganizePickerReading)
+                .accessibilityLabel(model.inboxBulkOrganizePicker.object("create").text("accessibilityLabel"))
+                .accessibilityIdentifier("inbox-organize-picker-create")
+            }
+            if model.inboxBulkOrganizePickerReading { ProgressView().frame(maxWidth: .infinity) }
+            if let error = model.inboxBulkOrganizePickerError {
+                Text(error).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                Button { model.retryInboxOrganizePicker() } label: { Text(model.label("common.retry")).frame(minHeight: 44).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).disabled(locked || model.inboxBulkOrganizePickerReading)
+                    .accessibilityIdentifier("inbox-organize-picker-retry")
+            } else if model.inboxOrganizePickerCanLoadMore {
+                Button { model.loadMoreInboxOrganizePicker() } label: { Text(model.label("common.more")).frame(minHeight: 44).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).accessibilityIdentifier("inbox-organize-picker-more")
+            }
+        }
     }
 }

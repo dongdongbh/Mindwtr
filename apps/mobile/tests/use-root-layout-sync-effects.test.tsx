@@ -122,6 +122,7 @@ vi.mock('@/lib/widget-service', () => ({
 
 vi.mock('@/lib/app-log', () => ({
   logError: vi.fn(async () => undefined),
+  logInfo: vi.fn(async () => undefined),
   logWarn: vi.fn(async () => undefined),
 }));
 

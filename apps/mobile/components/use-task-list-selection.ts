@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Alert } from 'react-native';
+import { NavigationContext } from '@react-navigation/native';
 import {
   buildBulkOrganizeTaskUpdates,
   buildBulkTaskTokenUpdates,
@@ -16,10 +17,13 @@ import {
   type TaskStatus,
 } from '@mindwtr/core';
 import { logError } from '../lib/app-log';
+import { addHardwareBackPressListener } from '../lib/hardware-back';
 import { getBulkActionFailureMessage } from './task-list-utils';
 import { useToast } from '../contexts/toast-context';
 
 type UseTaskListSelectionParams = {
+  /** False while the screen shows its own dialog: Android Back then belongs to the dialog. */
+  backExitsSelection?: boolean;
   batchDeleteTasks: (ids: string[]) => Promise<void | StoreActionResult>;
   batchMoveTasks: (ids: string[], status: TaskStatus) => Promise<void | StoreActionResult>;
   batchUpdateTasks: (updates: { id: string; updates: Partial<Task> }[]) => Promise<void | StoreActionResult>;
@@ -64,6 +68,7 @@ export function usePruneSelectionToVisible(
 }
 
 export function useTaskListSelection({
+  backExitsSelection = true,
   batchDeleteTasks,
   batchMoveTasks,
   batchUpdateTasks,
@@ -95,6 +100,20 @@ export function useTaskListSelection({
     setRangeSelectMode(false);
     rangeSelectionAnchorIdRef.current = null;
   }, []);
+
+  // Android Back leaves selection mode before it leaves the screen (#1415). A screen left mounted
+  // under another (a tab, a screen pushed over it) keeps its selection: Back belongs to the screen on top.
+  const navigation = useContext(NavigationContext);
+  const backOwnsSelection = selectionMode && backExitsSelection && !tagModalVisible && !removeTagPickerVisible;
+  useEffect(() => {
+    if (!backOwnsSelection) return undefined;
+    const subscription = addHardwareBackPressListener(() => {
+      if (navigation && !navigation.isFocused()) return false;
+      exitSelectionMode();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [backOwnsSelection, exitSelectionMode, navigation]);
 
   const runBulkAction = useCallback(async (label: string, action: () => Promise<void>) => {
     if (bulkActionLoading) return;

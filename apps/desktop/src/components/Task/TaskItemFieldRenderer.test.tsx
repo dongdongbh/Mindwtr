@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { createTaskDraft, setTaskDraftField, taskDraftToUpdatePatch, useTaskStore, type Task, type TaskDraft } from '@mindwtr/core';
 
@@ -236,12 +236,12 @@ function DraftFieldHarness({
     fieldId,
     initialDraft = {},
     options = {},
-    attachments,
+    attachments = {},
 }: {
     fieldId: RendererProps['fieldId'];
-    attachments?: FixtureOverrides['attachments'];
     initialDraft?: Partial<TaskDraft>;
     options?: Partial<TaskEditorOptionLists>;
+    attachments?: Partial<RendererProps['attachments']>;
 }) {
     const [draft, setDraft] = useState<TaskDraft>(() => ({ ...createTaskDraft(baseTask), ...initialDraft }));
 
@@ -579,7 +579,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(view.queryByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' })).toBeNull();
     });
 
-    it('uses the effective draft status to edit a retained reference checklist as a plain list', () => {
+    it('uses the effective draft status to label a retained reference checklist List, with checkboxes and Reset (#1416)', () => {
         const task: Task = {
             ...baseTask,
             status: 'next',
@@ -593,8 +593,8 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(getByText('List')).toBeInTheDocument();
-        expect(queryByRole('button', { name: 'Checklist 1' })).not.toBeInTheDocument();
-        expect(queryByText('taskEdit.resetChecklist')).not.toBeInTheDocument();
+        expect(queryByRole('button', { name: 'List 1' })).toBeInTheDocument();
+        expect(queryByText('taskEdit.resetChecklist')).toBeInTheDocument();
     });
 
     it('shows a date-coherence note on conflicting start and due date fields', () => {
@@ -2026,72 +2026,58 @@ describe('TaskItemFieldRenderer quick-add token hints (#918)', () => {
 });
 
 
-describe('description clipboard images', () => {
-    beforeEach(() => logMocks.logInfo.mockClear());
-    it('keeps typing during import and undo restores the latest text', async () => {
-        let complete!: (value: import('@mindwtr/core').Attachment[]) => void;
-        const addDroppedFileAttachments = vi.fn(() => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { complete = resolve; }));
-        const { getByRole } = render(<DraftFieldHarness fieldId="description" attachments={{ addDroppedFileAttachments }} />);
-        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
-        fireEvent.change(textarea, { target: { value: 'Before' } });
-        const image = new File(['image'], 'screenshot.png', { type: 'image/png' });
-        fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: image.type, getAsFile: () => new File([image], image.name, { type: image.type }) }], files: [image], getData: () => '' } });
-        expect(addDroppedFileAttachments).toHaveBeenCalledTimes(1);
-        expect(addDroppedFileAttachments).toHaveBeenCalledWith([expect.objectContaining({ name: 'screenshot.png' })]);
-        fireEvent.change(textarea, { target: { value: 'Before typing' } });
-        textarea.setSelectionRange(0, 6);
-        await act(async () => complete([{ id: 'image-1', kind: 'file', title: 'screenshot.png', uri: '/data/image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
-        expect(textarea.value).toBe('Before typing![Image](mindwtr://attachment/image-1)');
-        expect(logMocks.logInfo).toHaveBeenCalledWith('Description clipboard image references inserted', {
-            scope: 'attachments', force: true,
-            extra: { releaseCheck: 'v1.3.7/description-clipboard-images', count: 1 },
-        });
-        fireEvent.keyDown(textarea, { key: 'z', ctrlKey: true });
-        expect(textarea.value).toBe('Before typing');
-    });
-
-    it('does not change the description when image import fails', async () => {
-        const addDroppedFileAttachments = vi.fn(async () => []);
-        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Keep this' }} attachments={{ addDroppedFileAttachments }} />);
+describe('browser description image paste', () => {
+    it('inserts a managed reference once and preserves intervening typing', async () => {
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+        let finish!: (attachments: import('@mindwtr/core').Attachment[]) => void;
+        const addDroppedFileAttachments = vi.fn((_files: File[]) => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { finish = resolve; }));
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Before' }} attachments={{ addDroppedFileAttachments }} />);
         const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
         const image = new File(['image'], 'image.png', { type: 'image/png' });
-        await act(async () => fireEvent.paste(textarea, { clipboardData: { items: [], files: [image], getData: () => '' } }));
-        expect(textarea.value).toBe('Keep this');
-        expect(logMocks.logInfo).not.toHaveBeenCalled();
+        fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: image.type, getAsFile: () => new File([image], image.name, { type: image.type }) }], files: [image], getData: () => 'caption' } });
+        fireEvent.change(textarea, { target: { value: 'Before typing' } });
+        await act(async () => finish([{ id: 'image-1', kind: 'file', title: 'image.png', uri: '', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
+        expect(addDroppedFileAttachments).toHaveBeenCalledOnce();
+        expect(addDroppedFileAttachments.mock.calls[0][0]).toHaveLength(1);
+        expect(textarea.value).toBe('Before typingcaption\n\n![Image](mindwtr://attachment/image-1)');
     });
-});
 
+    it('reads the image through the async clipboard when WebKitGTK sends an empty paste (#1403)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        const png = new Blob(['png'], { type: 'image/png' });
+        const read = vi.fn(async () => [{ types: ['image/png'], getType: async () => png }]);
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read } });
+        const attachment = { id: 'linux-image', kind: 'file' as const, title: 'clipboard-0', uri: '/data/attachments/linux-image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt };
+        const addDroppedFileAttachments = vi.fn(async (_files: File[]) => [attachment]);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: '' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        await act(async () => {
+            fireEvent.paste(textarea, { clipboardData: { items: [], files: [], types: [], getData: () => '' } });
+        });
+        await vi.waitFor(() => expect(textarea.value).toBe('![Image](mindwtr://attachment/linux-image)'));
+        expect(read).toHaveBeenCalledOnce();
+        expect(addDroppedFileAttachments.mock.calls[0][0][0]).toMatchObject({ type: 'image/png' });
+        Reflect.deleteProperty(navigator, 'clipboard');
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    });
 
-it('keeps a pending image reference when the textarea is replaced by preview', async () => {
-    let complete!: (value: import('@mindwtr/core').Attachment[]) => void;
-    const addDroppedFileAttachments = vi.fn(() => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { complete = resolve; }));
-    function PreviewPasteHarness() {
-        const [draft, setDraft] = useState(createTaskDraft(baseTask));
-        const [preview, setPreview] = useState(false);
-        return <TaskItemFieldRenderer fieldId="description" {...createProps({ attachments: { addDroppedFileAttachments }, showDescriptionPreview: preview, descriptionPreview: { toggle: () => setPreview((value) => !value) } })} draft={draft} setField={(field, value) => setDraft((current) => setTaskDraftField(current, field, value))} />;
-    }
-    const { getByRole, queryByRole } = render(<PreviewPasteHarness />);
-    const textarea = getByRole('textbox', { name: 'Description' });
-    const image = new File(['png'], 'image.png', { type: 'image/png' });
-    fireEvent.paste(textarea, { clipboardData: { items: [], files: [image], getData: () => 'Caption' } });
-    fireEvent.click(getByRole('button', { name: /^Preview$/ }));
-    expect(queryByRole('textbox', { name: 'Description' })).toBeNull();
-    await act(async () => complete([{ id: 'image-1', kind: 'file', title: 'image.png', uri: '/data/image.png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
-    fireEvent.click(getByRole('button', { name: /^Edit$/ }));
-    expect(getByRole('textbox', { name: 'Description' })).toHaveValue('Caption\n\n![Image](mindwtr://attachment/image-1)');
-});
-
-
-it.each([null, []])('ignores late clipboard captions after reopening (%j)', async (imported) => {
-    let complete!: (value: import('@mindwtr/core').Attachment[] | null) => void;
-    const addDroppedFileAttachments = vi.fn(() => new Promise<import('@mindwtr/core').Attachment[] | null>((resolve) => { complete = resolve; }));
-    const setField = vi.fn();
-    const oldEditor = render(<TaskItemFieldRenderer fieldId="description" {...createProps({ draft: { description: 'Old draft' }, setField, attachments: { addDroppedFileAttachments } })} />);
-    const image = new File(['png'], 'image.png', { type: 'image/png' });
-    fireEvent.paste(oldEditor.getByRole('textbox', { name: 'Description' }), { clipboardData: { items: [], files: [image], getData: () => 'Discarded caption' } });
-    oldEditor.unmount();
-    const reopened = render(<TaskItemFieldRenderer fieldId="description" {...createProps({ draft: { description: 'New draft' }, setField })} />);
-    await act(async () => complete(imported));
-    expect(setField).not.toHaveBeenCalled();
-    expect(reopened.getByRole('textbox', { name: 'Description' })).toHaveValue('New draft');
+    it('imports a pasted image in the desktop app and inserts its managed reference (#1403)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        logMocks.logInfo.mockClear();
+        const attachment = { id: 'desktop-image', kind: 'file' as const, title: 'image.png', uri: '/data/attachments/desktop-image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt };
+        const addDroppedFileAttachments = vi.fn(async () => [attachment]);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Notes' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        textarea.setSelectionRange(5, 5);
+        await act(async () => {
+            fireEvent.paste(textarea, { clipboardData: { items: [], files: [new File(['x'], 'image.png', { type: 'image/png' })], getData: () => '' } });
+        });
+        expect(addDroppedFileAttachments).toHaveBeenCalledOnce();
+        expect(textarea.value).toBe('Notes![Image](mindwtr://attachment/desktop-image)');
+        expect(logMocks.logInfo).toHaveBeenCalledWith('Description clipboard image references inserted', {
+            scope: 'attachment',
+            extra: { releaseCheck: 'v1.3.8/description-clipboard-images', count: 1 },
+        });
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    });
 });

@@ -5,6 +5,7 @@ import type { StoreActionResult, TaskStore } from './store-types';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import { isTaskFinished } from './task-status';
 import { getFrequentTaskTokens, getUsedTaskTokens } from './task-token-usage';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { baseTextCollator, sortTasksBy } from './task-utils';
 import type { AppSettings, Task, TaskSortBy, TaskStatus } from './types';
 
@@ -57,6 +58,37 @@ export const buildContextsViewFilterSections = ({
     ];
 };
 
+export type ContextsChipLabel = {
+    /** The text the chip shows: the full token, or "/" and its last part. */
+    label: string;
+    /** How many shown ancestors sit above the chip; 0 for a full token. */
+    depth: number;
+};
+
+/**
+ * What each chip of one section shows, in order (#1428). A chip whose parent
+ * token is the chip before it, or an earlier chip of the same family run,
+ * shows only "/" and its last part: `@person`, `/emma`, `/todd`. Any other
+ * chip, including one whose parent the search hid, shows its full token.
+ * Display only: selection, counts and accessibility labels keep the full token.
+ */
+export function getContextsChipLabels(tokens: readonly string[]): ContextsChipLabel[] {
+    // The chips from the family root down to the previous chip.
+    const path: string[] = [];
+    return tokens.map((token) => {
+        while (path.length > 0 && !token.startsWith(`${path[path.length - 1]}/`)) path.pop();
+        const slash = token.lastIndexOf('/');
+        const leaf = token.slice(slash + 1);
+        if (path.length === 0 || slash !== path[path.length - 1].length || !leaf) {
+            path.length = 0;
+            path.push(token);
+            return { label: token, depth: 0 };
+        }
+        path.push(token);
+        return { label: `/${leaf}`, depth: path.length - 1 };
+    });
+}
+
 export const taskHasContextOrTag = (task: Task): boolean => (
     (task.contexts?.length ?? 0) > 0 || (task.tags?.length ?? 0) > 0
 );
@@ -75,7 +107,16 @@ export function selectContextsRouteTokens(requested: string[]): string[] {
         : Array.from(new Set(requested));
 }
 
-/** A token chip press: it replaces No context, otherwise toggles itself. */
+/**
+ * A plain chip press (token or No context): the chip alone, or nothing when it
+ * already was alone. Adding to the selection is the additive gesture's
+ * job (long-press on mobile, Ctrl/Cmd-click on desktop): toggleContextsToken.
+ */
+export function selectContextsToken(selected: string[], token: string): string[] {
+    return selected.length === 1 && selected[0] === token ? [] : [token];
+}
+
+/** The additive token chip press: it replaces No context, otherwise toggles itself. */
 export function toggleContextsToken(selected: string[], token: string): string[] {
     if (selected.includes(CONTEXTS_NO_CONTEXT_TOKEN)) return [token];
     return selected.includes(token) ? selected.filter((item) => item !== token) : [...selected, token];
@@ -221,12 +262,13 @@ export function getContextsMatchModeLabels(t: (key: string) => string): { label:
     };
 }
 
-/** Tokens the add pickers offer: the 12 most used, then every other one in use. */
-export function getContextsAddTokenOptions(activeTasks: Task[], field: BulkTaskTokenField): string[] {
+/** Tokens the add pickers offer: the 12 most used, then every other used or saved token. */
+export function getContextsAddTokenOptions(activeTasks: Task[], field: BulkTaskTokenField, settings: AppSettings = {}): string[] {
     const prefix = field === 'tags' ? '#' : '@';
     return Array.from(new Set([
         ...getFrequentTaskTokens(activeTasks, (task) => task[field], 12, { prefix }),
         ...getUsedTaskTokens(activeTasks, (task) => task[field], { prefix }),
+        ...getSavedTaxonomyTokens(settings, field === 'tags' ? 'tag' : 'context'),
     ]));
 }
 
@@ -251,6 +293,7 @@ export function getContextsTokenPicker({
     field,
     action,
     activeTasks,
+    settings,
     selectedIds,
     tasksById,
     t,
@@ -258,6 +301,7 @@ export function getContextsTokenPicker({
     field: BulkTaskTokenField;
     action: BulkTaskTokenMode;
     activeTasks: Task[];
+    settings?: AppSettings;
     selectedIds: string[];
     tasksById: Record<string, Task>;
     t: (key: string) => string;
@@ -266,7 +310,7 @@ export function getContextsTokenPicker({
         title: getContextsTokenPickerTitle(field, action, t),
         placeholder: field === 'tags' ? t('taskEdit.tagsPlaceholder') : t('taskEdit.contextsPlaceholder'),
         tokens: action === 'add'
-            ? getContextsAddTokenOptions(activeTasks, field)
+            ? getContextsAddTokenOptions(activeTasks, field, settings)
             : collectBulkTaskTokens(selectedIds, tasksById, field),
         allowCustomValue: action === 'add',
         multiSelect: action === 'remove',

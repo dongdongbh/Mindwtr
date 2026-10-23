@@ -2860,6 +2860,28 @@ describe('TaskItem', () => {
         await waitFor(() => expect(useTaskStore.getState()._tasksById.get(task.id)?.checklist?.[0]?.isCompleted).toBe(true));
     });
 
+    it('ticks every entry of a Reference list on the row and the item stays a reference (#1416)', async () => {
+        const task: Task = {
+            ...mockTask,
+            id: 'reference-list-task',
+            status: 'reference',
+            taskMode: 'list',
+            rev: 1,
+            checklist: [{ id: 'c1', title: 'Alien', isCompleted: true }, { id: 'c2', title: 'Brazil', isCompleted: false }],
+        };
+        act(() => useTaskStore.setState({ _allTasks: [task], tasks: [task] }));
+        const view = render(<LanguageProvider><TaskItem task={task} /></LanguageProvider>);
+        fireEvent.click(view.getByRole('button', { name: /toggle task details/i }));
+        fireEvent.click(view.getByRole('button', { name: 'Brazil' }));
+
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get(task.id)?.checklist?.map((item) => item.isCompleted))
+            .toEqual([true, true]));
+        const stored = useTaskStore.getState()._tasksById.get(task.id)!;
+        expect(stored.status).toBe('reference');
+        expect(stored.completedAt).toBeUndefined();
+        expect(stored.isFocusedToday).toBeFalsy();
+    });
+
     it('does not rerender for unrelated project updates while not editing', () => {
         const task: Task = {
             ...mockTask,

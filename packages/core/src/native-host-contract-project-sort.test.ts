@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProjectTaskSortMethods, type NativeProjectTaskSortRequest } from './native-host-contract-project-sort';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { PROJECT_SQLITE_COLUMNS, projectToSqliteRow } from './project-sync-schema';
-import { resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
+import { PROJECT_TASK_SORT_OPTIONS, resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import type { AppData, Project, Section, Task } from './types';
 
 const now = '2026-09-28T15:00:00.000Z';
@@ -48,7 +48,7 @@ afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTe
 
 describe('durable Project task sort', () => {
     it('offers the RN roster and makes every saved choice a project-only write', async () => {
-        for (const sortBy of TASK_LIST_SORT_OPTIONS.filter((choice) => choice !== 'default')) {
+        for (const sortBy of PROJECT_TASK_SORT_OPTIONS.filter((choice) => choice !== 'default')) {
             vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-28T16:00:00.000Z'));
             const rich = project({ supportNotes: 'raw notes', attachments: [{ id: 'link', kind: 'link',
                 title: 'Source', uri: 'https://example.test/', createdAt: now, updatedAt: now }] });
@@ -57,7 +57,7 @@ describe('durable Project task sort', () => {
             const sectionsBefore = structuredClone(useTaskStore.getState()._allSections);
             expect(methods.getProjectTaskSortOptions({ projectId: 'target' })).toMatchObject({ ok: true,
                 value: { label: 'sort.label', effectiveSortBy: 'default', canEdit: true,
-                    choices: TASK_LIST_SORT_OPTIONS.map((id) => ({ id, label: `sort.${id}`, selected: id === 'default' })) } });
+                    choices: PROJECT_TASK_SORT_OPTIONS.map((id) => ({ id, label: `sort.${id}`, selected: id === 'default' })) } });
             const input = request(sortBy);
             const prepared = methods.prepareProjectTaskSort(input);
             if (!prepared.ok || prepared.value.kind !== 'prepared') throw new Error(JSON.stringify(prepared));
@@ -70,6 +70,16 @@ describe('durable Project task sort', () => {
             expect(data().sections).toEqual(sectionsBefore);
             vi.useRealTimers();
         }
+    });
+
+    // Project.taskSortBy syncs, and older clients erase a project sort they do not know (#1415).
+    it('never offers or accepts the shared-list-only priority sort', async () => {
+        const { methods, request } = await open();
+        const options = methods.getProjectTaskSortOptions({ projectId: 'target' });
+        if (!options.ok) throw new Error(JSON.stringify(options));
+        expect(options.value.choices.map((choice) => choice.id)).not.toContain('priority');
+        expect(methods.prepareProjectTaskSort(request('priority'))).toMatchObject({ ok: false,
+            error: { code: 'INVALID_INPUT' } });
     });
 
     it('clears saved sort for default, including a hidden time estimate, and no-op never saves', async () => {
@@ -113,7 +123,7 @@ describe('durable Project task sort', () => {
     });
 
     it('matches RN updateProject persisted rows for every offered sort and default clear', async () => {
-        for (const sortBy of TASK_LIST_SORT_OPTIONS) {
+        for (const sortBy of PROJECT_TASK_SORT_OPTIONS) {
             vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-28T16:00:00.000Z'));
             const { methods, request } = await open({ projects: [project({ taskSortBy: 'due' })] });
             const input = request(sortBy);

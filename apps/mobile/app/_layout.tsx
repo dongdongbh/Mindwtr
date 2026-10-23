@@ -29,23 +29,27 @@ import {
   getAnnouncementDismissalStorageKey,
   isSupportedLanguage,
   recordDonationPromptShown,
-  recordUpdateReminderChecked,
   recordUpdateReminderDismissed,
-  recordUpdateReminderShown,
   setSha256HexProvider,
   setLogger,
-  shouldCheckUpdateReminder,
-  shouldShowAppAnnouncement,
-  shouldShowDonationPrompt,
   withSupportPromptShown,
-  shouldShowUpdateReminder,
   translateWithFallback,
   useStartupPromptQueue,
   useTaskStore,
   isSandboxMode,
   resolveAndroidInstallerSource,
+  resolveMobileDonationPromptAllowed,
+  resolveMobileUpdateReminderAllowed,
+  fetchMobileUpdateReminderInfo,
+  buildUpdateReminderAnnouncement,
+  buildMobileStartupPromptDescriptors,
+  UPDATE_REMINDER_RELEASES_URL,
+  UPDATE_NOW_ACTION_LABEL,
+  VIEW_RELEASE_ACTION_LABEL,
+  type AndroidInstallerSource,
   type AppAnnouncement,
   type AppAnnouncementAction,
+  type MobileUpdateReminderInfo,
   type StartupPromptDescriptor,
   type UserPromptState,
 } from '@mindwtr/core';
@@ -61,6 +65,7 @@ import { useRootLayoutContextAutomation } from '@/hooks/root-layout/use-root-lay
 import { useRootLayoutExternalCapture } from '@/hooks/root-layout/use-root-layout-external-capture';
 import { useRootLayoutAppleRemindersAutoImport } from '@/hooks/root-layout/use-root-layout-apple-reminders';
 import { useRootLayoutPendingCaptures } from '@/hooks/root-layout/use-root-layout-pending-captures';
+import { useRootLayoutGmailCapture } from '@/hooks/root-layout/use-root-layout-gmail-capture';
 import { useRootLayoutPomodoro } from '@/hooks/root-layout/use-root-layout-pomodoro';
 import { useRootLayoutWatch } from '@/hooks/root-layout/use-root-layout-watch';
 import { useRootLayoutNotificationOpenHandler } from '@/hooks/root-layout/use-root-layout-notification-open-handler';
@@ -82,7 +87,6 @@ import { MobileWorkspaceSwitchOverlay, SandboxWorkspaceBanner } from '@/componen
 import { applyAndroidSystemBars } from '@/lib/android-system-bars';
 import { isCloudKitAvailable } from '@/lib/cloudkit-sync';
 import {
-  readLocalUserPromptState,
   recordLocalPromptActivity,
   updateLocalUserPromptState,
 } from '@/lib/user-prompt-state';
@@ -90,12 +94,11 @@ import { subscribePromptTest } from '@/lib/prompt-test-controls';
 import { requestStoreReviewForTesting } from '@/lib/store-review-prompt';
 import {
   readMobileOnboardingDismissed,
-  shouldOpenMobileFirstRunOnboarding,
   subscribeMobileOnboardingEvent,
   writeMobileOnboardingDismissed,
 } from '@/lib/mobile-onboarding-events';
 import { SYNC_BACKEND_KEY } from '@/lib/sync-constants';
-import { coerceSupportedBackend, resolveBackend, type SyncBackend } from '@/lib/sync-service-utils';
+import { coerceSupportedBackend, resolveBackend } from '@/lib/sync-service-utils';
 import { persistLastRoute, sanitizeAndroidActivityNavigationState } from '@/lib/session-restore';
 import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 import { useIosSceneDiagnostics } from '@/hooks/use-ios-scene-diagnostics';
@@ -145,91 +148,9 @@ type MobileExtraConfig = {
 const parseBool = (value: unknown): boolean =>
   value === true || value === 1 || value === '1' || value === 'true';
 
-const resolveMobileDonationPromptAllowed = async (options: {
-  isExpoGo: boolean;
-  donationPromptEnabled: boolean;
-}): Promise<boolean> => {
-  if (!options.donationPromptEnabled) return false;
-  if (options.isExpoGo) return false;
-  return Platform.OS === 'android' || Platform.OS === 'ios';
-};
-
-const ANNOUNCEMENT_STARTUP_DELAY_MS = 250;
-const DONATION_PROMPT_STARTUP_DELAY_MS = 2000;
-const UPDATE_REMINDER_STARTUP_DELAY_MS = 1750;
-// fetchMobileUpdateReminderInfo is a plain fetch with no timeout; cap present()
-// so a hung network never holds the single prompt slot for the whole session.
-const UPDATE_REMINDER_FETCH_TIMEOUT_MS = 15000;
-const UPDATE_REMINDER_RELEASES_API = 'https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest';
-const UPDATE_REMINDER_RELEASES_URL = 'https://github.com/dongdongbh/Mindwtr/releases/latest';
 const APP_STORE_APP_ID = '6758597144';
 const APP_STORE_REVIEW_URL = `itms-apps://itunes.apple.com/app/id${APP_STORE_APP_ID}?action=write-review`;
 const APP_STORE_LISTING_URL = `https://apps.apple.com/app/mindwtr/id${APP_STORE_APP_ID}`;
-const UPDATE_NOW_ACTION_LABEL = 'Update now';
-const VIEW_RELEASE_ACTION_LABEL = 'View release';
-
-type MobileUpdateReminderInfo = {
-  currentVersion: string;
-  latestVersion: string;
-  latestReleasedAt: string | null;
-  releaseUrl: string;
-  actionLabel?: string;
-  testOnly?: boolean;
-};
-
-type AndroidInstallerSource = 'play-store' | 'sideload' | 'unknown';
-
-type GitHubLatestRelease = {
-  tag_name?: unknown;
-  html_url?: unknown;
-  published_at?: unknown;
-};
-
-const resolveMobileUpdateReminderAllowed = async (options: {
-  androidInstallerSource: AndroidInstallerSource;
-  isExpoGo: boolean;
-  isFossBuild: boolean;
-}): Promise<boolean> => {
-  if (options.isExpoGo) return false;
-  if (Platform.OS !== 'android') return false;
-  if (options.isFossBuild) return false;
-  return options.androidInstallerSource === 'sideload';
-};
-
-const fetchMobileUpdateReminderInfo = async (currentVersion: string): Promise<MobileUpdateReminderInfo> => {
-  const response = await fetch(UPDATE_REMINDER_RELEASES_API, {
-    headers: {
-      Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'Mindwtr-App',
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status}`);
-  }
-  const release = await response.json() as GitHubLatestRelease;
-  const latestVersion = String(release.tag_name || '').trim().replace(/^v/i, '');
-  if (!latestVersion) throw new Error('GitHub release returned no version');
-  return {
-    currentVersion,
-    latestVersion,
-    latestReleasedAt: typeof release.published_at === 'string' ? release.published_at : null,
-    releaseUrl: typeof release.html_url === 'string' && release.html_url.trim()
-      ? release.html_url.trim()
-      : UPDATE_REMINDER_RELEASES_URL,
-    actionLabel: UPDATE_NOW_ACTION_LABEL,
-  };
-};
-
-const buildUpdateReminderAnnouncement = (info: MobileUpdateReminderInfo): AppAnnouncement => ({
-  id: `update-reminder-${info.latestVersion}`,
-  title: 'Update available',
-  body: `Mindwtr ${info.latestVersion} is available. You are using ${info.currentVersion}. Update when you have a minute to keep fixes and improvements current.`,
-  action: {
-    type: 'url',
-    label: info.actionLabel ?? VIEW_RELEASE_ACTION_LABEL,
-    url: info.releaseUrl,
-  },
-});
 
 const getAndroidPackageName = (): string => (
   Constants.expoConfig?.android?.package || Application.applicationId || 'tech.dongdongbh.mindwtr'
@@ -582,6 +503,7 @@ function RootLayoutContentInner() {
   });
   useRootLayoutPomodoro({ canonicalDataReady, disabled: sandboxMode, resolveText });
   const drainPendingCaptures = useRootLayoutPendingCaptures({ canonicalDataReady, disabled: sandboxMode });
+  useRootLayoutGmailCapture({ canonicalDataReady, disabled: sandboxMode });
   useRootLayoutAppleRemindersAutoImport({ canonicalDataReady, disabled: sandboxMode, showToast, t });
   useRootLayoutWatch({ canonicalDataReady, disabled: sandboxMode, language, onPendingCapture: drainPendingCaptures });
 
@@ -715,123 +637,55 @@ function RootLayoutContentInner() {
   // precedence (onboarding > announcement > update > donation), the startup
   // delays, and session dismissal. See packages/core/src/startup-prompts.ts.
   const startupPromptsEnabled = !sandboxMode && process.env.NODE_ENV !== 'test';
+  // A failed load marks data ready with an empty store; the welcome sheet then waits (core's descriptors), and this line
+  // proves it held.
+  // Forced: a failed load leaves the store's settings empty, so the diagnostics switch reads off.
+  const onboardingHeldLogged = useRef(false);
+  const dataLoadFailed = useTaskStore((state) => Boolean(state.error));
+  useEffect(() => {
+    if (!startupPromptsEnabled || onboardingHeldLogged.current || !mobileOnboardingDismissalLoaded) return;
+    if (!dataReady || canonicalDataReady || !dataLoadFailed || mobileOnboardingDismissed || visibleDataCount !== 0) return;
+    onboardingHeldLogged.current = true;
+    void logWarn('First-run onboarding held: the local data did not load', {
+      scope: 'onboarding',
+      force: true,
+      extra: { releaseCheck: 'v1.3.8/onboarding-waits-for-canonical-load', outcome: 'held' },
+    });
+  }, [
+    canonicalDataReady,
+    dataLoadFailed,
+    dataReady,
+    mobileOnboardingDismissalLoaded,
+    mobileOnboardingDismissed,
+    startupPromptsEnabled,
+    visibleDataCount,
+  ]);
   const startupPromptGateOpen = isFirstPaintReady && mobileOnboardingDismissalLoaded;
-  const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => [
-    {
-      // First-run onboarding outranks everything: a brand-new user must not meet
-      // an announcement or a donation ask before the welcome flow.
-      id: 'onboarding',
-      priority: 40,
-      delayMs: 0,
-      isEligible: () => dataReady && !mobileOnboardingDismissed && visibleDataCount === 0,
-      present: async (signal) => {
-        let syncBackend: SyncBackend = 'off';
-        try {
-          const rawBackend = await AsyncStorage.getItem(SYNC_BACKEND_KEY);
-          syncBackend = coerceSupportedBackend(resolveBackend(rawBackend), isCloudKitAvailable());
-        } catch (error) {
-          void logError(error, { scope: 'onboarding', extra: { step: 'readMobileSyncBackend' } });
-        }
-        if (signal.aborted) return false;
-        return shouldOpenMobileFirstRunOnboarding({
-          dataReady,
-          dismissed: mobileOnboardingDismissed,
-          syncBackend,
-          visibleDataCount,
-        });
-      },
+  const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => buildMobileStartupPromptDescriptors({
+    storage: AsyncStorage,
+    dataReady,
+    canonicalDataReady,
+    mobileOnboardingDismissed,
+    visibleDataCount,
+    readSyncBackend: async () => coerceSupportedBackend(resolveBackend(await AsyncStorage.getItem(SYNC_BACKEND_KEY)), isCloudKitAvailable()),
+    onSyncBackendReadError: (error) => {
+      void logError(error, { scope: 'onboarding', extra: { step: 'readMobileSyncBackend' } });
     },
-    {
-      // Maintainer announcement: when one is configured it also blocks the
-      // donation and update prompts (see their isEligible).
-      id: 'announcement',
-      priority: 30,
-      delayMs: ANNOUNCEMENT_STARTUP_DELAY_MS,
-      isEligible: () => shouldShowAppAnnouncement(ACTIVE_APP_ANNOUNCEMENT, null),
-      present: async (signal) => {
-        const announcement = ACTIVE_APP_ANNOUNCEMENT;
-        if (!shouldShowAppAnnouncement(announcement, null)) return false;
-        let dismissedValue: string | null = null;
-        try {
-          dismissedValue = await AsyncStorage.getItem(getAnnouncementDismissalStorageKey(announcement.id));
-        } catch {
-          dismissedValue = null;
-        }
-        if (signal.aborted) return false;
-        return shouldShowAppAnnouncement(announcement, dismissedValue);
-      },
+    updateReminderAllowed,
+    donationPromptAllowed,
+    promptStateSnapshot,
+    onUpdateCheckRecordError: (error) => {
+      void logWarn('Failed to record update reminder check', {
+        scope: 'prompt-state',
+        extra: { error: error instanceof Error ? error.message : String(error) },
+      });
     },
-    {
-      // Update reminder: records the check on selection, then confirms an update
-      // actually exists before opening (declines otherwise).
-      id: 'update-reminder',
-      priority: 20,
-      delayMs: UPDATE_REMINDER_STARTUP_DELAY_MS,
-      presentTimeoutMs: UPDATE_REMINDER_FETCH_TIMEOUT_MS,
-      isEligible: () => {
-        if (updateReminderAllowed !== true) return false;
-        if (ACTIVE_APP_ANNOUNCEMENT) return false;
-        if (!promptStateSnapshot) return false;
-        return shouldCheckUpdateReminder({
-          nowMs: Date.now(),
-          promptState: promptStateSnapshot,
-          updateReminderAllowed: true,
-        });
-      },
-      onSelect: () => {
-        // Safe here and only here: the queue runs onSelect after this descriptor
-        // has won the slot, so the once-a-day check is never burned by a prompt
-        // that never ran.
-        void updateLocalUserPromptState((state) => recordUpdateReminderChecked(state, Date.now()))
-          .catch((error) => {
-            void logWarn('Failed to record update reminder check', {
-              scope: 'prompt-state',
-              extra: { error: error instanceof Error ? error.message : String(error) },
-            });
-          });
-      },
-      present: async (signal) => {
-        const info = await fetchMobileUpdateReminderInfo(appVersion);
-        if (signal.aborted) return false;
-        const latestPromptState = await readLocalUserPromptState();
-        if (signal.aborted) return false;
-        if (!shouldShowUpdateReminder({
-          nowMs: Date.now(),
-          promptState: latestPromptState,
-          updateReminderAllowed: true,
-          currentVersion: info.currentVersion,
-          latestVersion: info.latestVersion,
-          latestReleasedAt: info.latestReleasedAt,
-        })) {
-          return false;
-        }
-        await updateLocalUserPromptState((state) => recordUpdateReminderShown(state, Date.now()));
-        if (signal.aborted) return false;
-        setUpdateReminderInfo(info);
-        return true;
-      },
-    },
-    {
-      // Donation ask: lowest precedence; suppressed whenever an announcement is
-      // configured or an update reminder is showing (via the queue).
-      id: 'donation',
-      priority: 10,
-      delayMs: DONATION_PROMPT_STARTUP_DELAY_MS,
-      isEligible: () => {
-        if (donationPromptAllowed !== true) return false;
-        if (ACTIVE_APP_ANNOUNCEMENT) return false;
-        if (!promptStateSnapshot) return false;
-        return shouldShowDonationPrompt({
-          nowMs: Date.now(),
-          promptState: promptStateSnapshot,
-          supportPrompt: useTaskStore.getState().settings.supportPrompt,
-          donationAllowed: true,
-        });
-      },
-      present: () => true,
-    },
-  ], [
+    fetchUpdateInfo: () => fetchMobileUpdateReminderInfo(appVersion, fetch),
+    onUpdateReminderInfo: setUpdateReminderInfo,
+    getSupportPrompt: () => useTaskStore.getState().settings.supportPrompt,
+  }), [
     appVersion,
+    canonicalDataReady,
     dataReady,
     donationPromptAllowed,
     mobileOnboardingDismissed,
@@ -1143,7 +997,7 @@ function RootLayoutContentInner() {
       return;
     }
     let cancelled = false;
-    resolveMobileDonationPromptAllowed({ donationPromptEnabled, isExpoGo })
+    resolveMobileDonationPromptAllowed({ platform: Platform.OS, donationPromptEnabled, isExpoGo })
       .then((allowed) => {
         if (!cancelled) setDonationPromptAllowed(allowed);
       })
@@ -1165,7 +1019,7 @@ function RootLayoutContentInner() {
       return;
     }
     let cancelled = false;
-    resolveMobileUpdateReminderAllowed({ androidInstallerSource, isExpoGo, isFossBuild })
+    resolveMobileUpdateReminderAllowed({ platform: Platform.OS, androidInstallerSource, isExpoGo, isFossBuild })
       .then((allowed) => {
         if (!cancelled) setUpdateReminderAllowed(allowed);
       })
@@ -1276,7 +1130,7 @@ function RootLayoutContentInner() {
             onShown={recordDonationPromptVisible}
           />
           <AppAnnouncementModal
-            announcement={updateReminderInfo ? buildUpdateReminderAnnouncement(updateReminderInfo) : null}
+            announcement={updateReminderInfo ? buildUpdateReminderAnnouncement(updateReminderInfo, resolveText) : null}
             visible={startupPromptOpenId === 'update-reminder'}
             onAction={handleUpdateReminderAction}
             onDismiss={dismissUpdateReminder}

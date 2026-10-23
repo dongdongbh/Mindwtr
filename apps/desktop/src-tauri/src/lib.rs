@@ -46,6 +46,7 @@ mod attachment_installer;
 mod autostart;
 mod config;
 mod email_capture;
+mod gmail_capture;
 mod file_sync_attachment_publication;
 mod install;
 mod system_fonts;
@@ -89,6 +90,11 @@ use config::{
 };
 use email_capture::{
     email_capture_commit, email_capture_poll, get_email_capture_config, set_email_capture_config,
+};
+use gmail_capture::{
+    gmail_capture_cancel, gmail_capture_commit, gmail_capture_configure, gmail_capture_connect,
+    gmail_capture_disconnect, gmail_capture_labels, gmail_capture_poll, gmail_capture_status,
+    gmail_capture_validate,
 };
 use install::{
     check_microsoft_store_update, diagnostics_enabled, get_install_source, get_linux_distro,
@@ -1879,8 +1885,12 @@ pub fn run() {
                     .find(|window| window.label == "main")
                     .cloned()
                     .ok_or("main window config missing")?;
+                // WebKitGTK refuses navigator.clipboard.writeText once the click's user
+                // activation is gone, which a menu path can lose (#1327). Clipboard access
+                // drops that gesture check; the webview only runs Mindwtr's own UI.
                 let mut main_window_builder =
-                    tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?;
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?
+                        .enable_clipboard_access();
                 if let Some(webview_dir) = crate::storage::portable_webview_data_dir() {
                     let _ = std::fs::create_dir_all(&webview_dir);
                     main_window_builder = main_window_builder.data_directory(webview_dir);
@@ -2269,6 +2279,15 @@ pub fn run() {
             set_email_capture_config,
             email_capture_poll,
             email_capture_commit,
+            gmail_capture_status,
+            gmail_capture_connect,
+            gmail_capture_cancel,
+            gmail_capture_labels,
+            gmail_capture_configure,
+            gmail_capture_disconnect,
+            gmail_capture_poll,
+            gmail_capture_validate,
+            gmail_capture_commit,
             get_desktop_rendering_config,
             set_desktop_rendering_config,
             write_macos_widget_payload,

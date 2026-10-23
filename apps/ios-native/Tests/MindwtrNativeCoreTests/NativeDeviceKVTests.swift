@@ -13,6 +13,7 @@ final class NativeDeviceKVTests: XCTestCase {
     private let webdav = "@mindwtr_webdav_url"
     private let calendarSetting = "mindwtr-system-calendar-settings"
     private let calendarMarker = "mindwtr:native:calendar-setting:v1"
+    private let appleRemindersImportName = "mindwtr-apple-reminders-import-v1"
     private let calendarPushNames = [
         "mindwtr:calendar-push-sync:enabled", "mindwtr:calendar-push-sync:calendar-id",
         "mindwtr:calendar-push-sync:target-calendar-id", "mindwtr:calendar-push-sync:color",
@@ -42,6 +43,47 @@ final class NativeDeviceKVTests: XCTestCase {
         }
         additionalRoots.removeAll()
     }
+    func testAISummaryEvidenceIncludesUnknownOrphansWithoutMutationAndRefusesSymlinkOrOversize() throws {
+        #if DEBUG
+        try seed("{\"unknown\":\"private fixture\"}")
+        let orphan = namespace.appendingPathComponent("unreferenced-private-cell")
+        try Data([0, 255, 42]).write(to: orphan)
+        let ownerOrphan = namespace.deletingLastPathComponent().appendingPathComponent("owner-private-orphan")
+        try Data([42, 0]).write(to: ownerOrphan)
+        let store = try open(), original = try bytes()
+        let evidence = try store.captureAISummaryEvidence()
+        XCTAssertEqual(evidence["RCTAsyncLocalStorage_V1/unreferenced-private-cell"], Data([0, 255, 42]))
+        XCTAssertEqual(evidence["owner-private-orphan"], Data([42, 0]))
+        XCTAssertEqual(evidence["RCTAsyncLocalStorage_V1/manifest.json"], try Data(contentsOf: manifest))
+        XCTAssertEqual(try bytes(), original)
+        try FileManager.default.createSymbolicLink(at: namespace.appendingPathComponent("foreign-link"), withDestinationURL: orphan)
+        XCTAssertThrowsError(try store.captureAISummaryEvidence())
+        try FileManager.default.removeItem(at: namespace.appendingPathComponent("foreign-link"))
+        // Refuse malformed UTF-8 rather than lossy replacement-name aliases or duplicate-key traps.
+        let directoryFD = Darwin.open(namespace.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        XCTAssertGreaterThanOrEqual(directoryFD, 0)
+        defer { Darwin.close(directoryFD) }
+        var invalid: [CChar] = [CChar(bitPattern: 0xff), 0]
+        let invalidFD = invalid.withUnsafeMutableBufferPointer { openat(directoryFD, $0.baseAddress!, O_CREAT | O_EXCL | O_WRONLY, 0o600) }
+        let invalidErrno = errno
+        if invalidFD >= 0 {
+            Darwin.close(invalidFD)
+            XCTAssertThrowsError(try store.captureAISummaryEvidence())
+            XCTAssertEqual(invalid.withUnsafeMutableBufferPointer { unlinkat(directoryFD, $0.baseAddress!, 0) }, 0)
+        } else {
+            // APFS refuses malformed UTF-8 before a directory entry can exist.
+            XCTAssertEqual(invalidErrno, EILSEQ, "Unexpected malformed filename errno: \(invalidErrno)")
+            XCTAssertEqual(try store.captureAISummaryEvidence(), evidence)
+            XCTAssertEqual(try bytes(), original)
+        }
+        let oversized = namespace.appendingPathComponent("oversized")
+        FileManager.default.createFile(atPath: oversized.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: oversized)
+        try handle.truncate(atOffset: 16 * 1024 * 1024 + 1); try handle.close()
+        XCTAssertThrowsError(try store.captureAISummaryEvidence())
+        #endif
+    }
+
     private func open() throws -> NativeDeviceKV {
         let store = try NativeDeviceKV(containerURL: container, bundleIdentifier: bundle)
         current = store
@@ -83,6 +125,185 @@ final class NativeDeviceKVTests: XCTestCase {
             if let value { object.setObject(value, forKey: name as NSString) }
         }
         try seed(String(decoding: JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+    }
+
+    private func seedAppleRemindersImport(_ value: String?) throws {
+        let object = NSMutableDictionary(dictionary: ["unknown": "keep", "mindwtr-data": "ordinary backup"])
+        if let value { object.setObject(value, forKey: appleRemindersImportName as NSString) }
+        try seed(String(decoding: JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+    }
+
+    func testAppleRemindersImportStateReadsMissingInlineAndExternalRawBytesWithoutWriting() throws {
+        let absent = try open(), beforeAbsent = try bytes()
+        XCTAssertNil(try absent.readAppleRemindersImportState()); XCTAssertFalse(absent.hasPendingAppleRemindersImportMutation)
+        XCTAssertEqual(try bytes(), beforeAbsent); XCTAssertFalse(FileManager.default.fileExists(atPath: manifest.path))
+        absent.close(); current = nil
+        let raw = "\u{FEFF}  not JSON é e\u{301} 🧠\n"
+        try seedAppleRemindersImport(raw)
+        let inline = try open(), beforeInline = try bytes()
+        XCTAssertEqual(try inline.readAppleRemindersImportState().map { Data($0.utf8) }, Data(raw.utf8))
+        XCTAssertEqual(try bytes(), beforeInline); inline.close(); current = nil
+        try seed("{\"mindwtr-apple-reminders-import-v1\":null,\"unknown\":\"keep\"}")
+        // Exact RN MD5 filename for the fixed cell; raw file remains untouched.
+        let external = namespace.appendingPathComponent("bef8d9511555677497b5b0f4b8076e57")
+        let externalBytes = Data(raw.utf8); try externalBytes.write(to: external)
+        let store = try open(), beforeExternal = try bytes(), originalInode = try inode(external)
+        // Existing RN external-file decoding consumes one encoding marker; inline content does not.
+        let decodedExternal = String(raw.dropFirst())
+        XCTAssertEqual(try store.readAppleRemindersImportState().map { Data($0.utf8) }, Data(decodedExternal.utf8))
+        XCTAssertEqual(try bytes(), beforeExternal); XCTAssertEqual(try Data(contentsOf: external), externalBytes)
+        XCTAssertEqual(try inode(external), originalInode)
+    }
+
+    func testAppleRemindersImportCASWritesOnlyFixedCellColdReadsAndSkipsExactNoop() throws {
+        try seed("{\"@mindwtr_sync_path\":null,\"unknown\":\"keep\",\"mindwtr-data\":\"ordinary backup\"}")
+        let external = namespace.appendingPathComponent("3841382bf18a349689a3256aa5be82e1")
+        let externalData = Data("raw external path 🧠".utf8); try externalData.write(to: external)
+        let store = try open(), before = try bytes(), priorExternal = try externalBytes(), externalInode = try inode(external)
+        var promotions = 0; store.faults.beforePromotion = { promotions += 1 }
+        XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: "", next: "after"))
+        XCTAssertEqual(try bytes(), before); XCTAssertEqual(promotions, 0)
+        try store.compareAndSetAppleRemindersImportState(expected: nil, next: "")
+        XCTAssertEqual(try store.readAppleRemindersImportState(), ""); XCTAssertEqual(promotions, 1)
+        XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: nil, next: "after"))
+        let raw = "  {\"importedIds\":[\"é\",\"e\\u0301\"],\"unknown\":true} 🧠\n"
+        try store.compareAndSetAppleRemindersImportState(expected: "", next: raw)
+        XCTAssertEqual(promotions, 2); XCTAssertFalse(store.hasPendingAppleRemindersImportMutation)
+        let after = try bytes(), manifestInode = try inode(manifest)
+        store.faults.beforePromotion = { throw Injected.failure }
+        try store.compareAndSetAppleRemindersImportState(expected: raw, next: raw)
+        XCTAssertEqual(try bytes(), after); XCTAssertEqual(try inode(manifest), manifestInode)
+        XCTAssertFalse(store.hasPendingAppleRemindersImportMutation)
+        XCTAssertEqual(try externalBytes(), priorExternal); XCTAssertEqual(try inode(external), externalInode)
+        XCTAssertEqual(try store.get("unknown"), "keep"); XCTAssertEqual(try store.get("mindwtr-data"), "ordinary backup")
+        store.close(); current = nil
+        let cold = try open()
+        XCTAssertEqual(try cold.readAppleRemindersImportState().map { Data($0.utf8) }, Data(raw.utf8))
+        XCTAssertEqual(try cold.get(path), "raw external path 🧠"); XCTAssertEqual(try Data(contentsOf: external), externalData)
+        // Matching bytes are only a baseline/no-op, never an importer receipt.
+        cold.faults.beforePromotion = { throw Injected.failure }
+        try cold.compareAndSetAppleRemindersImportState(expected: raw, next: raw)
+        XCTAssertFalse(cold.hasPendingAppleRemindersImportMutation); XCTAssertEqual(try bytes(), after)
+    }
+
+    func testAppleRemindersImportCASUsesExactUnicodeAndStaysOutsideGenericAuthority() throws {
+        let composed = "café", decomposed = "cafe\u{301}"
+        try seedAppleRemindersImport(composed)
+        let store = try open(), before = try bytes(); var promotions = 0
+        store.faults.beforePromotion = { promotions += 1 }
+        XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: decomposed, next: "after"))
+        XCTAssertThrowsError(try store.set(appleRemindersImportName, "after"))
+        XCTAssertThrowsError(try store.remove(appleRemindersImportName))
+        XCTAssertThrowsError(try store.multiSet([(backend, "cloud"), (appleRemindersImportName, "after")]))
+        XCTAssertThrowsError(try store.multiRemove([backend, appleRemindersImportName]))
+        XCTAssertEqual(try bytes(), before); XCTAssertEqual(promotions, 0)
+        try store.compareAndSetAppleRemindersImportState(expected: composed, next: decomposed)
+        XCTAssertEqual(promotions, 1); XCTAssertEqual(try store.readAppleRemindersImportState().map { Data($0.utf8) }, Data(decomposed.utf8))
+        XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: composed, next: composed))
+        XCTAssertFalse(store.hasPendingAppleRemindersImportMutation)
+    }
+
+    func testAppleRemindersImportUTF8CapsRefuseBeforePublicationAndAcceptExactLimit() throws {
+        try seedAppleRemindersImport(nil)
+        let store = try open(), before = try bytes(); var promotions = 0
+        store.faults.beforePromotion = { promotions += 1 }
+        for tooLarge in [String(repeating: "a", count: 1024 * 1024 + 1), String(repeating: "🧠", count: 262_145)] {
+            XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: tooLarge, next: "after"))
+            XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: nil, next: tooLarge))
+        }
+        XCTAssertEqual(try bytes(), before); XCTAssertEqual(promotions, 0); XCTAssertFalse(store.hasPendingAppleRemindersImportMutation)
+        let boundary = String(repeating: "\0", count: 1024 * 1024)
+        try store.compareAndSetAppleRemindersImportState(expected: nil, next: boundary)
+        XCTAssertEqual(try store.readAppleRemindersImportState()?.utf8.count, 1024 * 1024); XCTAssertEqual(promotions, 1)
+        store.faults.beforePromotion = { throw Injected.failure }
+        try store.compareAndSetAppleRemindersImportState(expected: boundary, next: boundary)
+        XCTAssertFalse(store.hasPendingAppleRemindersImportMutation)
+    }
+
+    func testAppleRemindersImportReadRefusesOversizedInlineAndExternalCellsWithoutRepair() throws {
+        let oversized = String(repeating: "x", count: 1024 * 1024 + 1)
+        for external in [false, true] {
+            if external {
+                try seed("{\"mindwtr-apple-reminders-import-v1\":null,\"unknown\":\"keep\"}")
+                try Data(oversized.utf8).write(to: namespace.appendingPathComponent("bef8d9511555677497b5b0f4b8076e57"))
+            } else { try seedAppleRemindersImport(oversized) }
+            let store = try open(), before = try bytes()
+            XCTAssertThrowsError(try store.readAppleRemindersImportState())
+            XCTAssertEqual(try bytes(), before); XCTAssertFalse(store.hasPendingAppleRemindersImportMutation)
+            store.close(); current = nil
+        }
+    }
+
+    func testAppleRemindersImportLostPublicationRetainsExactRequestUntilRetry() throws {
+        let initial = "café", next = "cafe\u{301}"
+        for cut in ["before", "after", "readback"] {
+            try seedAppleRemindersImport(initial)
+            let store = try open(), original = try bytes(); var promotions = 0
+            store.faults.beforePromotion = { promotions += 1; if cut == "before" { throw Injected.failure } }
+            if cut == "after" { store.faults.afterPromotion = { throw Injected.failure } }
+            if cut == "readback" { store.faults.beforeReadback = { throw Injected.failure } }
+            XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: initial, next: next))
+            XCTAssertTrue(store.hasPendingAppleRemindersImportMutation)
+            XCTAssertFalse(store.hasPendingCalendarSettingMutation); XCTAssertFalse(store.hasPendingCalendarPushMutation); XCTAssertFalse(store.hasPendingReminderMutation)
+            let uncertain = try bytes(), uncertainInode: UInt64? = cut == "before" ? nil : try inode(manifest)
+            if cut == "before" { XCTAssertEqual(uncertain, original) }
+            XCTAssertThrowsError(try store.readAppleRemindersImportState())
+            XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: initial, next: initial))
+            XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: next, next: next))
+            XCTAssertThrowsError(try store.set(backend, "webdav"))
+            XCTAssertEqual(try bytes(), uncertain); XCTAssertTrue(store.hasPendingAppleRemindersImportMutation)
+            store.faults.beforePromotion = { promotions += 1 }; store.faults.afterPromotion = nil; store.faults.beforeReadback = nil
+            try store.compareAndSetAppleRemindersImportState(expected: initial, next: next)
+            XCTAssertFalse(store.hasPendingAppleRemindersImportMutation); XCTAssertEqual(promotions, cut == "before" ? 2 : 1)
+            if let uncertainInode { XCTAssertEqual(try inode(manifest), uncertainInode); XCTAssertEqual(try bytes(), uncertain) }
+            store.close(); current = nil
+            let cold = try open()
+            XCTAssertEqual(try cold.readAppleRemindersImportState().map { Data($0.utf8) }, Data(next.utf8))
+            XCTAssertEqual(try cold.get("unknown"), "keep"); XCTAssertEqual(try cold.get("mindwtr-data"), "ordinary backup")
+            cold.close(); current = nil
+        }
+    }
+
+    func testAppleRemindersImportCASRefusesOtherPendingMutationAndForeignPublication() throws {
+        try seedAppleRemindersImport("before")
+        let store = try open()
+        store.faults.afterPromotion = { throw Injected.failure }
+        XCTAssertThrowsError(try store.set(backend, "cloud")); XCTAssertFalse(store.hasPendingAppleRemindersImportMutation)
+        let other = try bytes()
+        XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: "before", next: "after"))
+        XCTAssertEqual(try bytes(), other)
+        store.faults.afterPromotion = nil; try store.set(backend, "cloud")
+        store.faults.afterPromotion = { throw Injected.failure }
+        XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: "before", next: "after"))
+        XCTAssertTrue(store.hasPendingAppleRemindersImportMutation)
+        try sameByteReplacement(manifest); let foreign = try bytes()
+        store.faults.afterPromotion = nil
+        XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: "before", next: "after"))
+        XCTAssertEqual(try bytes(), foreign); XCTAssertThrowsError(try store.readAppleRemindersImportState())
+    }
+
+    func testAppleRemindersImportCASRefusesForeignNamespaceBeforePublication() throws {
+        for replaceNamespace in [false, true] {
+            try seedAppleRemindersImport("before")
+            let store = try open(), original = try Data(contentsOf: manifest)
+            let foreign = Data("{\"mindwtr-apple-reminders-import-v1\":\"foreign\",\"unknown\":\"external edit\"}".utf8)
+            var displaced: URL?
+            store.faults.beforePromotion = {
+                if replaceNamespace {
+                    let old = self.namespace.deletingLastPathComponent().appendingPathComponent("displaced-" + UUID().uuidString)
+                    try FileManager.default.moveItem(at: self.namespace, to: old); displaced = old
+                    try FileManager.default.createDirectory(at: self.namespace, withIntermediateDirectories: false)
+                }
+                try foreign.write(to: self.manifest)
+            }
+            XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: "before", next: "after"))
+            XCTAssertEqual(try Data(contentsOf: manifest), foreign)
+            if let displaced { XCTAssertEqual(try Data(contentsOf: displaced.appendingPathComponent("manifest.json")), original) }
+            let after = try bytes()
+            XCTAssertThrowsError(try store.compareAndSetAppleRemindersImportState(expected: "before", next: "after"))
+            XCTAssertThrowsError(try store.readAppleRemindersImportState()); XCTAssertEqual(try bytes(), after)
+            store.close(); current = nil
+        }
     }
 
     func testRNInlineExternalUnicodeAndBOMReadWithoutChangingRecords() throws {

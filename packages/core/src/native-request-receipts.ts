@@ -1,6 +1,6 @@
 import type { NativeHostResult } from './native-host-contract';
 import { SqliteAdapter, type SqliteAdapterOptions, type SqliteClient } from './sqlite-adapter';
-import { getPersistenceStatus, getSaveSnapshotGeneration, trackSaveSnapshotGenerations, useTaskStore } from './store';
+import { getPersistenceStatus, getSaveSnapshotGeneration, getStorageAdapter, trackSaveSnapshotGenerations, useTaskStore } from './store';
 import type { StoreActionResult } from './store-types';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import type { AppData, Project, Task } from './types';
@@ -8,8 +8,11 @@ import { deterministicHash128, generateDeterministicUUID } from './uuid';
 import { taskEditValuesEqual } from './json-value-equality';
 import { strToU8 } from 'fflate';
 import { logInfo } from './logger';
+import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { stripSensitiveSettings } from './store-helpers';
 import { runStoreCommand } from './store-write-gate';
+import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, validatePreparedNativePomodoroTransition,
+    type NativePomodoroSessionRead, type NativePomodoroResult, type PreparedNativePomodoroTransition } from './native-pomodoro-session';
 
 /**
  * Exact-retry bookkeeping for native host writes, shared by every contract write
@@ -62,6 +65,11 @@ export type NativeRequestReceipts = {
 
 /** A write whose change landed while the store could not save it; `value` answers the request once a retry saves. */
 export type NativeUnsavedWrite<T> = { ok: false; error: { code: 'SAVE_FAILED'; message: string }; value: T };
+
+/** Private native owner proof: this execution attempted no domain mutation. */
+export class NativePomodoroTransitionRefusal extends Error {
+    constructor(readonly code: 'staleBaseline' | 'notReady', message: string) { super(message); }
+}
 
 type StoreCall = () => Promise<StoreActionResult | void | (StoreActionResult | void | undefined)[]>;
 const storeData = () => {
@@ -241,9 +249,18 @@ export const withRequestProject = (projects: readonly Project[], id: string, tit
 export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction']);
 
 const commandOf = (payload: string): string => /^\["([^"\\]{1,64})"/.exec(payload)?.[1] ?? '';
-/** Bounded non-sensitive App lock/document tuples are exact; established commands keep their compact hash. */
-const fingerprintOf = (payload: string): string => ['appLock', 'backupDocument'].includes(commandOf(payload))
-    ? payload : `${commandOf(payload)}:${hash128Hex(payload)}`;
+/** Bounded non-sensitive domain tuples are exact; established commands keep their compact hash. */
+const fingerprintOf = (payload: string): string => {
+    if (commandOf(payload) === 'pomodoroTransition') {
+        try {
+            const tuple: unknown = JSON.parse(payload);
+            if (!Array.isArray(tuple) || tuple.length !== 2 || tuple[0] !== 'pomodoroTransition'
+                || nativePomodoroReceiptPayload(tuple[1] as PreparedNativePomodoroTransition) !== payload) throw new Error();
+            return payload;
+        } catch { throw new Error('Invalid Pomodoro receipt payload'); }
+    }
+    return ['appLock', 'backupDocument'].includes(commandOf(payload)) ? payload : `${commandOf(payload)}:${hash128Hex(payload)}`;
+};
 const fingerprintCommand = (value: string): string => value.startsWith('[')
     ? commandOf(value) : value.split(':', 1)[0] ?? '';
 const validAppLockStoredReceipt = (row: { request_id: string; method: string; reply: string; saved_at: string },
@@ -281,6 +298,11 @@ export type NativeDocumentReceiptInput = {
      * before COMMIT, so a refusal ([UNDO_LIMIT_EXCEEDED]) rolls back the data and the receipt together.
      */
     maxLibraryBytes?: number;
+    /**
+     * The library's SQLite bytes this write may leave while its Undo still fits (large-library pass b): past them the write still
+     * commits, and its stored reply gains `undo: false`, so a replay answers the same.
+     */
+    undoLibraryBytes?: number;
     /**
      * The caller hands both documents over (core's native backup commit, which parsed them itself and keeps no reference): no
      * detaching copy is made, and the baseline goes once the stale check has read it.
@@ -324,6 +346,23 @@ const hasPendingDocumentStoreWork = (): boolean => {
     return Boolean(status.queued || status.inFlight || status.immediate || status.retrying || status.failed);
 };
 
+const POMODORO_TABLE = `CREATE TABLE IF NOT EXISTS native_pomodoro_session (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    state_json TEXT NOT NULL
+)`;
+const pomodoroReceiptPlan = (row: DocumentReceiptRow): PreparedNativePomodoroTransition => {
+    try {
+        const tuple: unknown = JSON.parse(row.method);
+        if (!Array.isArray(tuple) || tuple.length !== 2 || tuple[0] !== 'pomodoroTransition') throw new Error();
+        const plan = validatePreparedNativePomodoroTransition(tuple[1]);
+        if (row.request_id !== plan.request.requestId || row.method !== nativePomodoroReceiptPayload(plan)
+            || row.reply !== JSON.stringify(plan.result) || typeof row.saved_at !== 'string'
+            || row.saved_at.length > 40 || !Number.isFinite(Date.parse(row.saved_at))
+            || new Date(row.saved_at).toISOString() !== row.saved_at) throw new Error();
+        return plan;
+    } catch { throw new Error('Invalid saved Pomodoro receipt'); }
+};
+
 // Durable receipts: the native host only (loadNativeRequestReceipts turns them on).
 type StoredReceipt = { fingerprint: string; reply: unknown; savedAt: string };
 type PendingReceipt = { fingerprint: string; reply: unknown; generation: number };
@@ -339,6 +378,9 @@ const requestPayloads = new Map<string, string>();
 /** Landed, not committed yet; `generation` is the store's when it landed (every change it made is saved at or before it). */
 const pendingReceipts = new Map<string, PendingReceipt>();
 let receiptedWritesRunning = 0;
+// The existing generation writer must refuse before its callback can mutate memory.
+// Weak ownership follows the active concrete adapter and exposes no latch-clearing API.
+const pomodoroStoreWriteFences = new WeakSet<SqliteAdapter>();
 
 const RECEIPTS_TABLE = `CREATE TABLE IF NOT EXISTS native_request_receipts (
     request_id TEXT PRIMARY KEY,
@@ -361,12 +403,18 @@ const recordPendingReceipt = (requestId: string, payload: string, reply: unknown
 export async function loadNativeRequestReceipts(client: SqliteClient,
     options?: { durableCommands?: readonly string[] }): Promise<number> {
     await client.run(RECEIPTS_TABLE);
+    await client.run(POMODORO_TABLE);
     const rows = await client.all<{ request_id: string; method: string; reply: string; saved_at: string }>(
         'SELECT request_id, method, reply, saved_at FROM native_request_receipts',
     );
+    let legacyPomodoroReceipts = 0;
     durableReceipts = new Map(rows.map((row) => {
         if (fingerprintCommand(row.method) === 'backupDocument' && !validDocumentReceiptRow(row))
             throw new Error('Invalid saved document receipt');
+        if (fingerprintCommand(row.method) === 'pomodoroTransition') {
+            const plan = pomodoroReceiptPlan(row);
+            if (plan.target?.row?.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length) legacyPomodoroReceipts += 1;
+        }
         const reply: unknown = JSON.parse(row.reply);
         if (options?.durableCommands?.includes('appLock') && fingerprintCommand(row.method) === 'appLock'
             && !validAppLockStoredReceipt(row, reply)) throw new Error('Invalid saved App lock receipt');
@@ -377,6 +425,12 @@ export async function loadNativeRequestReceipts(client: SqliteClient,
     requestPayloads.clear();
     receiptedWritesRunning = 0;
     trackSaveSnapshotGenerations(true);
+    if (legacyPomodoroReceipts > 0) {
+        try {
+            logInfo('Native Pomodoro legacy receipts accepted', { scope: 'storage', force: true,
+                context: { releaseCheck: 'v1.3.7/native-pomodoro-legacy-receipt', count: legacyPomodoroReceipts, outcome: 'accepted' } });
+        } catch { /* Diagnostics cannot change successful receipt validation. */ }
+    }
     return durableReceipts.size;
 }
 
@@ -389,10 +443,17 @@ export async function pruneNativeRequestReceipts(client: SqliteClient, now = new
     const cutoff = new Date(now.getTime() - RECEIPT_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const retainedIds = new Set(retention?.retainedRequestIds);
     const retainedCommands = new Set(retention?.retainedCommands);
+    // One receipt proves the timer was established even if its singleton row is later lost.
+    let latestPomodoro: [string, StoredReceipt] | undefined;
+    for (const entry of durableReceipts ?? []) {
+        if (fingerprintCommand(entry[1].fingerprint) === 'pomodoroTransition'
+            && (!latestPomodoro || entry[1].savedAt > latestPomodoro[1].savedAt
+                || (entry[1].savedAt === latestPomodoro[1].savedAt && entry[0] > latestPomodoro[0]))) latestPomodoro = entry;
+    }
     const expires = (id: string, receipt: StoredReceipt): boolean => receipt.savedAt < cutoff
         && (durableCommands === null || durableCommands.has(fingerprintCommand(receipt.fingerprint)))
-        && !retainedIds.has(id) && !retainedCommands.has(fingerprintCommand(receipt.fingerprint));
-    if (durableCommands === null && retention === undefined) await client.run('DELETE FROM native_request_receipts WHERE saved_at < ?', [cutoff]);
+        && id !== latestPomodoro?.[0] && !retainedIds.has(id) && !retainedCommands.has(fingerprintCommand(receipt.fingerprint));
+    if (durableCommands === null && retention === undefined && !latestPomodoro) await client.run('DELETE FROM native_request_receipts WHERE saved_at < ?', [cutoff]);
     else for (const [id, receipt] of durableReceipts ?? []) {
         if (expires(id, receipt))
             await client.run('DELETE FROM native_request_receipts WHERE request_id = ? AND saved_at < ?', [id, cutoff]);
@@ -419,6 +480,8 @@ export const resetNativeRequestReceipts = () => {
     trackSaveSnapshotGenerations(false);
 };
 
+type PomodoroProjectionAcknowledgment = { references: ReturnType<typeof storeData>; frozen: unknown; changedAt: number };
+
 /**
  * The native host's SQLite adapter. A save of a queued snapshot also commits, in the same
  * transaction, every pending receipt whose changes that snapshot holds (landed at its
@@ -432,7 +495,14 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     private prerequisite: { requestId: string; fingerprint: string; originId: string; originFingerprint: string; reply: unknown } | null = null;
     private documentBusy = false;
     private ordinaryWrites = 0;
-    private documentReceipt: { requestId: string; payload: string; data: AppData; replyJson: string; savedAt: string; maxLibraryBytes?: number } | null = null;
+    private baselineReads = 0;
+    private pomodoroBusy = false;
+    private pomodoroReloadRequired = false;
+    private pomodoroReloadRequest: string | null = null;
+    private pomodoroUncertainRequest: string | null = null;
+    private pomodoroReload: { data: AppData | null; available: boolean; acknowledged: PomodoroProjectionAcknowledgment | null;
+        generation: number; fetch: ReturnType<typeof useTaskStore.getState>['fetchData'] } | null = null;
+    private documentReceipt: { requestId: string; payload: string; data: AppData; replyJson: string; savedAt: string; maxLibraryBytes?: number; undoLibraryBytes?: number } | null = null;
 
     constructor(client: SqliteClient, options?: SqliteAdapterOptions) {
         let isDocumentWrite = () => false;
@@ -452,11 +522,222 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             ...(client.exec ? { exec: (sql: string) => protect(() => client.exec!(sql)) } : {}),
         };
         super(receiptClient, options);
-        isDocumentWrite = () => this.documentBusy;
+        isDocumentWrite = () => this.documentBusy || this.pomodoroBusy;
         this.receiptClient = receiptClient;
         const saveTask = this.saveTask;
         Object.defineProperty(this, 'saveTask', {
             get: () => (pendingReceipts.size === 0 && receiptedWritesRunning === 0 ? saveTask : undefined),
+        });
+    }
+
+    override async getData(options?: Parameters<SqliteAdapter['getData']>[0]): ReturnType<SqliteAdapter['getData']> {
+        const reload = this.pomodoroReload;
+        const privateRead = this.pomodoroBusy && reload?.available === true;
+        if (this.pomodoroBusy && !privateRead) throw new Error('Pomodoro storage is busy');
+        if (privateRead) reload.available = false;
+        this.baselineReads += 1;
+        try {
+            const data = await super.getData(privateRead ? { rawTasks: true } : options);
+            if (privateRead && this.pomodoroReload === reload) reload.data = data;
+            return data;
+        } finally { this.baselineReads -= 1; }
+    }
+
+    override async readRowBaseline(): ReturnType<SqliteAdapter['readRowBaseline']> {
+        if (this.pomodoroBusy) throw new Error('Pomodoro storage is busy');
+        this.baselineReads += 1;
+        try { return await super.readRowBaseline(); }
+        finally { this.baselineReads -= 1; }
+    }
+
+    /** Existing store acknowledgement seam, usable only for this private owned canonical read. */
+    acknowledgeDataLoad(data: AppData): void {
+        const reload = this.pomodoroReload;
+        if (!reload || reload.acknowledged || reload.data !== data || getStorageAdapter() !== this || hasPendingDocumentStoreWork()
+            || getPersistenceStatus().generation !== reload.generation || useTaskStore.getState().editLockCount > 0
+            || useTaskStore.getState().fetchData !== reload.fetch) return;
+        const state = useTaskStore.getState();
+        if (!taskEditValuesEqual([state._allTasks, state._allProjects, state._allSections, state._allAreas, state._allPeople, state.settings],
+            [data.tasks, data.projects, data.sections ?? [], data.areas ?? [], data.people ?? [], stripSensitiveSettings(data.settings)])) return;
+        const references = storeData();
+        reload.acknowledged = { references, frozen: JSON.parse(JSON.stringify(references)) as unknown, changedAt: state.lastDataChangeAt };
+    }
+
+    private refusePomodoroWriteFence(): void {
+        if (this.pomodoroBusy) throw new Error('Pomodoro storage is busy');
+        if (this.pomodoroReloadRequired) throw new Error('Pomodoro canonical reload is required');
+    }
+
+    private async reloadPomodoroProjection(before: ReturnType<typeof storeData>, frozen: unknown, generation: number, changedAt: number): Promise<boolean> {
+        if (!this.pomodoroReloadRequired) return true;
+        if (getStorageAdapter() !== this || hasPendingDocumentStoreWork() || useTaskStore.getState().editLockCount > 0) return false;
+        const fetch = useTaskStore.getState().fetchData;
+        const relevant = () => getStorageAdapter() === this && useTaskStore.getState().fetchData === fetch && !hasPendingDocumentStoreWork()
+            && getPersistenceStatus().generation === generation && useTaskStore.getState().editLockCount === 0
+            && useTaskStore.getState().lastDataChangeAt === changedAt
+            && storeData().every((value, index) => value === before[index]) && taskEditValuesEqual(storeData(), frozen);
+        const context = { data: null as AppData | null, available: true, acknowledged: null as PomodoroProjectionAcknowledgment | null, fetch, generation };
+        this.pomodoroReload = context;
+        try {
+            await fetch({ silent: true, recoveryLoad: true, throwOnError: true, isResultStillRelevant: relevant });
+            const accepted = context.acknowledged;
+            // ACK precedes fetch completion. Its exact adopted projection and fetch
+            // owner must still be current before stale-snapshot writers are unfenced.
+            if (!accepted || getStorageAdapter() !== this || hasPendingDocumentStoreWork()
+                || getPersistenceStatus().generation !== generation || useTaskStore.getState().editLockCount > 0
+                || useTaskStore.getState().fetchData !== fetch || useTaskStore.getState().lastDataChangeAt !== accepted.changedAt
+                || !storeData().every((value, index) => value === accepted.references[index])
+                || !taskEditValuesEqual(storeData(), accepted.frozen)) return false;
+            this.pomodoroReloadRequired = false;
+            this.pomodoroReloadRequest = null;
+            return true;
+        } catch { return false; }
+        finally { this.pomodoroReload = null; }
+    }
+
+    private async readPomodoroCell(): Promise<NativePomodoroSessionRead> {
+        const columns = await this.receiptClient.all<{ name: string; type: string; pk: number; notnull: number }>('PRAGMA table_info(native_pomodoro_session)');
+        if (columns.length !== 2 || columns[0].name !== 'id' || columns[0].type !== 'INTEGER' || columns[0].pk !== 1
+            || columns[1].name !== 'state_json' || columns[1].type !== 'TEXT' || columns[1].notnull !== 1 || columns[1].pk !== 0)
+            throw new Error('Invalid Pomodoro storage schema');
+        const rows = await this.receiptClient.all<{ id: number; state_json: string }>('SELECT id, state_json FROM native_pomodoro_session');
+        if (rows.length === 0) {
+            const established = await this.receiptClient.get<{ present: number }>(
+                'SELECT 1 AS present FROM native_request_receipts WHERE method LIKE ? LIMIT 1', ['["pomodoroTransition",%']);
+            if (established) {
+                try { logInfo('Native Pomodoro refused missing established session', { scope: 'storage', force: true,
+                    context: { releaseCheck: 'v1.3.5/ios-pomodoro-absence', outcome: 'refused' } }); } catch { /* The refusal is independent of diagnostics. */ }
+                throw new Error('Established Pomodoro session is missing');
+            }
+            return { raw: null, state: null };
+        }
+        if (rows.length !== 1 || rows[0].id !== 1 || typeof rows[0].state_json !== 'string') throw new Error('Invalid Pomodoro storage row');
+        return { raw: rows[0].state_json, state: decodeNativePomodoroSession(rows[0].state_json) };
+    }
+
+    async readPomodoroSession(): Promise<NativePomodoroSessionRead> {
+        if (this.pomodoroBusy) throw new Error('Pomodoro storage is busy');
+        try { return await this.exclusive('readPomodoroSession', () => this.readPomodoroCell()); }
+        catch { throw new Error('Pomodoro session could not be read'); }
+    }
+
+    private async readPomodoroProof(plan: PreparedNativePomodoroTransition, payload: string): Promise<NativePomodoroResult | null> {
+        const rows = await this.receiptClient.all<DocumentReceiptRow>(
+            'SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?', [plan.request.requestId]);
+        if (rows.length === 0) {
+            if (durableReceipts?.has(plan.request.requestId) || this.pomodoroUncertainRequest === plan.request.requestId)
+                throw new Error('Saved Pomodoro receipt is missing');
+            return null;
+        }
+        if (rows.length !== 1) throw new Error('Invalid saved Pomodoro receipt');
+        const saved = pomodoroReceiptPlan(rows[0]);
+        if (rows[0].method !== payload || saved.request.requestId !== plan.request.requestId) throw new Error('Pomodoro receipt identity changed');
+        return saved.result;
+    }
+
+    async readPomodoroTransitionOutcome(input: PreparedNativePomodoroTransition): Promise<NativePomodoroResult | null> {
+        if (this.pomodoroBusy) throw new Error('Pomodoro storage is busy');
+        try {
+            const plan = validatePreparedNativePomodoroTransition(input);
+            return await this.exclusive('readPomodoroTransitionOutcome', () => this.readPomodoroProof(plan, nativePomodoroReceiptPayload(plan)));
+        } catch { throw new Error('Pomodoro outcome could not be proven'); }
+    }
+
+    async savePomodoroTransitionWithReceipt(input: PreparedNativePomodoroTransition, options?: { replayOnly?: boolean }): Promise<{
+        result: NativePomodoroResult; replayed: boolean; projectionReloaded: boolean;
+    }> {
+        return runStoreCommand(async () => {
+            if (this.pomodoroBusy || this.documentBusy || this.ordinaryWrites > 0 || this.baselineReads > 0 || this.prerequisite
+                || pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) throw new NativePomodoroTransitionRefusal('notReady', 'Pomodoro storage is busy');
+            if (!this.concurrentWritesGuarded || !isNativeRequestReceiptDurable('pomodoroTransition')) throw new NativePomodoroTransitionRefusal('notReady', 'Pomodoro storage requires guarded receipt ownership');
+            const plan = validatePreparedNativePomodoroTransition(input); const payload = nativePomodoroReceiptPayload(plan);
+            const requestId = plan.request.requestId; const owner = requestPayloads.get(requestId);
+            if (owner !== undefined && owner !== payload) throw new Error('Pomodoro receipt identity changed');
+            if (this.pomodoroReloadRequired && this.pomodoroReloadRequest !== requestId) throw new Error('Pomodoro canonical reload is required');
+            if (this.pomodoroUncertainRequest && this.pomodoroUncertainRequest !== requestId) throw new Error('Earlier Pomodoro outcome is uncertain');
+            const projectionBefore = storeData();
+            const projectionFrozen = JSON.parse(JSON.stringify(projectionBefore)) as unknown;
+            const projectionGeneration = getPersistenceStatus().generation;
+            const projectionChangedAt = useTaskStore.getState().lastDataChangeAt;
+            this.pomodoroBusy = true; pomodoroStoreWriteFences.add(this); requestPayloads.set(requestId, payload);
+            let transaction = false; let commitAttempted = false; let taskAttempted = false; let domainAttempted = false; let proven = false; let replayed = false;
+            let result = plan.result;
+            let refusal: NativePomodoroTransitionRefusal | null = null;
+            const stale = (message: string): never => { refusal = new NativePomodoroTransitionRefusal('staleBaseline', message); throw refusal; };
+            try {
+                await this.exclusive('savePomodoroTransitionWithReceipt', async () => {
+                    try {
+                        transaction = true;
+                        await this.receiptClient.run('BEGIN IMMEDIATE');
+                        this.noteWrite();
+                        const saved = await this.readPomodoroProof(plan, payload);
+                        if (saved) { result = saved; replayed = true; }
+                        else {
+                            if (options?.replayOnly === true) throw new Error('Saved Pomodoro receipt is required');
+                            const session = await this.readPomodoroCell();
+                            if (session.raw !== plan.sessionBefore) stale('Stale Pomodoro session baseline');
+                            if (plan.target) {
+                                const rows = await this.receiptClient.all<Record<string, string | number | null>>(
+                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [plan.target.id]);
+                                const raw = rows.length === 0 ? null : TASK_SQLITE_COLUMNS.map((name) => rows[0][name]);
+                                if (rows.length > 1 || !taskEditValuesEqual(raw, plan.target.row)) stale('Stale Pomodoro task baseline');
+                            }
+                            if (plan.taskPatch) {
+                                const settings = await this.receiptClient.get<{ data: string }>('SELECT data FROM settings WHERE id = 1');
+                                let device: unknown;
+                                try { device = (JSON.parse(settings?.data ?? '{}') as { deviceId?: unknown }).deviceId; } catch { /* Refuse unreadable identity. */ }
+                                if (device !== plan.deviceId) stale('Pomodoro device identity changed');
+                                taskAttempted = true; domainAttempted = true;
+                                await this.receiptClient.run('UPDATE tasks SET timeSpentMinutes=?, rev=?, revBy=?, updatedAt=? WHERE id=?',
+                                    [plan.taskPatch.timeSpentMinutes, plan.taskPatch.rev, plan.taskPatch.revBy, plan.taskPatch.updatedAt, plan.target!.id]);
+                            }
+                            domainAttempted = true;
+                            if (plan.sessionBefore === null) await this.receiptClient.run('INSERT INTO native_pomodoro_session (id,state_json) VALUES (1,?)', [plan.sessionAfter]);
+                            else await this.receiptClient.run('UPDATE native_pomodoro_session SET state_json=? WHERE id=1 AND state_json=?', [plan.sessionAfter, plan.sessionBefore]);
+                            if ((await this.readPomodoroCell()).raw !== plan.sessionAfter) throw new Error('Pomodoro session readback changed');
+                            if (plan.taskPatch) {
+                                const rows = await this.receiptClient.all<Record<string, string | number | null>>(
+                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [plan.target!.id]);
+                                const expected = [...plan.target!.row!];
+                                for (const [name, value] of Object.entries(plan.taskPatch)) expected[TASK_SQLITE_COLUMNS.indexOf(name)] = value;
+                                if (rows.length !== 1 || !taskEditValuesEqual(TASK_SQLITE_COLUMNS.map((name) => rows[0][name]), expected))
+                                    throw new Error('Pomodoro task readback changed');
+                            }
+                            await this.receiptClient.run('INSERT INTO native_request_receipts (request_id, method, reply, saved_at) VALUES (?, ?, ?, ?)',
+                                [requestId, payload, JSON.stringify(plan.result), new Date().toISOString()]);
+                            if (!await this.readPomodoroProof(plan, payload)) throw new Error('Pomodoro receipt readback changed');
+                        }
+                        commitAttempted = true; await this.receiptClient.run('COMMIT'); transaction = false; proven = true;
+                        this.pomodoroUncertainRequest = null;
+                        if (plan.taskPatch) {
+                            this.pomodoroReloadRequired = true; this.pomodoroReloadRequest = requestId; this.invalidateWriteBaselineAfterDirectSQL();
+                        }
+                        durableReceipts?.set(requestId, { fingerprint: payload, reply: result, savedAt: new Date().toISOString() });
+                        try { logInfo('Native Pomodoro transition confirmed', { scope: 'storage', force: true,
+                            context: { releaseCheck: 'v1.3.5/ios-pomodoro-credit', outcome: 'confirmed' } }); } catch { /* SQL proof survives diagnostic failure. */ }
+                    } catch (error) {
+                        let rolledBack = false;
+                        if (transaction) {
+                            try { await this.receiptClient.run('ROLLBACK'); rolledBack = true; } catch { /* The exact receipt remains the only success authority. */ }
+                        }
+                        if (taskAttempted && transaction && !rolledBack) {
+                            this.pomodoroReloadRequired = true; this.pomodoroReloadRequest = requestId; this.invalidateWriteBaselineAfterDirectSQL();
+                        }
+                        if (transaction && !rolledBack) this.pomodoroUncertainRequest = requestId;
+                        // A successful rollback proves failed COMMIT did not change projection. A lost
+                        // actual COMMIT reply cannot be mistaken for rollback or receiptless success.
+                        if (refusal !== null && error === refusal && !domainAttempted && !commitAttempted && (!transaction || rolledBack)) throw error;
+                        throw new Error('Pomodoro transition could not be proven');
+                    }
+                });
+                const projectionReloaded = await this.reloadPomodoroProjection(projectionBefore, projectionFrozen, projectionGeneration, projectionChangedAt);
+                return { result: { ...result }, replayed, projectionReloaded };
+            } finally {
+                this.pomodoroBusy = false;
+                if (!this.pomodoroReloadRequired) pomodoroStoreWriteFences.delete(this);
+                if (!proven && this.pomodoroUncertainRequest !== requestId && owner === undefined && requestPayloads.get(requestId) === payload)
+                    requestPayloads.delete(requestId);
+            }
         });
     }
 
@@ -467,8 +748,28 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     }
 
     /** Current durable proof for a prerequisite receipt; never updates the session cache. */
-    async readDurableReceipt(requestId: string, payload: string): Promise<NativeHostResult<unknown | null>> {
-        return this.exclusive('readDurableReceipt', () => this.readCurrentReceipt(requestId, fingerprintOf(payload)));
+    async readDurableReceipt(requestId: string, payload: string, options?: { committedOnly: true }): Promise<NativeHostResult<unknown | null>> {
+        if (this.pomodoroBusy) return { ok: false, error: { code: 'SAVE_FAILED', message: 'Pomodoro storage is busy' } };
+        if (!options?.committedOnly) return this.exclusive('readDurableReceipt', () => this.readCurrentReceipt(requestId, fingerprintOf(payload)));
+        const unavailable = (): NativeHostResult<never> => ({ ok: false,
+            error: { code: 'SAVE_FAILED', message: 'The committed receipt could not be proven' } });
+        if (this.documentBusy || this.ordinaryWrites > 0 || this.baselineReads > 0) return unavailable();
+        this.documentBusy = true;
+        try {
+            return await this.exclusive('readDurableReceipt', async () => {
+                let opened = false;
+                try {
+                    // A SELECT inside a failed writer's open transaction is not durable proof.
+                    await this.receiptClient.run('BEGIN DEFERRED'); opened = true;
+                    const result = await this.readCurrentReceipt(requestId, fingerprintOf(payload));
+                    await this.receiptClient.run('ROLLBACK'); opened = false;
+                    return result;
+                } finally {
+                    if (opened) { try { await this.receiptClient.run('ROLLBACK'); } catch { /* Host recovery must reopen the connection. */ } }
+                }
+            });
+        } catch { return unavailable(); }
+        finally { this.documentBusy = false; }
     }
 
     private async readCurrentReceipt(requestId: string, fingerprint: string): Promise<NativeHostResult<unknown | null>> {
@@ -489,11 +790,15 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             || !Number.isFinite(Date.parse(row.saved_at)) || new Date(row.saved_at).toISOString() !== row.saved_at
             || typeof row.reply !== 'string') return changed();
         if (fingerprintCommand(fingerprint) === 'backupDocument' && !validDocumentReceiptRow(row)) return changed();
+        if (fingerprintCommand(fingerprint) === 'pomodoroTransition') {
+            try { pomodoroReceiptPlan(row); } catch { return changed(); }
+        }
         try { return { ok: true, value: JSON.parse(row.reply) as unknown }; } catch { return changed(); }
     }
 
     /** Optional prerequisite for one owned command; absent for every existing caller. */
     armReceiptPrerequisite(requestId: string, payload: string, originId: string, originPayload: string, reply: unknown): void {
+        this.refusePomodoroWriteFence();
         const fingerprint = fingerprintOf(payload);
         if (this.prerequisite && (this.prerequisite.requestId !== requestId || this.prerequisite.fingerprint !== fingerprint))
             throw new Error('Another request owns the receipt prerequisite');
@@ -512,6 +817,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
      * SQL is always the replay authority; the session cache cannot establish a document outcome.
      */
     async saveDocumentWithReceipt(input: NativeDocumentReceiptInput): Promise<NativeDocumentReceiptResult> {
+        this.refusePomodoroWriteFence();
         if (this.documentBusy || this.ordinaryWrites > 0 || this.prerequisite
             || pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) {
             throw new Error('Document receipt write is busy');
@@ -523,8 +829,9 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             throw new Error('Invalid document receipt identity');
         }
         const { requestId, payload } = input;
-        const { maxLibraryBytes } = input;
-        if (maxLibraryBytes !== undefined && !(Number.isSafeInteger(maxLibraryBytes) && maxLibraryBytes >= 0)) {
+        const { maxLibraryBytes, undoLibraryBytes } = input;
+        if (maxLibraryBytes !== undefined && !(Number.isSafeInteger(maxLibraryBytes) && maxLibraryBytes >= 0)
+            || undoLibraryBytes !== undefined && !(Number.isSafeInteger(undoLibraryBytes) && undoLibraryBytes >= 0)) {
             throw new Error('Invalid document receipt input');
         }
         const owner = requestPayloads.get(requestId);
@@ -566,7 +873,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             current = null; expectedCurrent = null;
             if (input.owned === true) (input as { expectedCurrent: AppData | null }).expectedCurrent = null;
             if (pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) throw new Error('Document receipt write is busy');
-            const context = { requestId, payload, data, replyJson, savedAt: new Date().toISOString(), maxLibraryBytes };
+            const context = { requestId, payload, data, replyJson, savedAt: new Date().toISOString(), maxLibraryBytes, undoLibraryBytes };
             this.documentReceipt = context;
             try { await this.saveDataNow(data); }
             catch (error) {
@@ -575,6 +882,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 if (error instanceof Error && error.message === UNDO_LIMIT_EXCEEDED) throw error;
                 throw new Error('Document receipt persistence failed');
             }
+            replyJson = context.replyJson;
             durableReceipts!.set(requestId, { fingerprint: payload, reply: JSON.parse(replyJson) as unknown, savedAt: context.savedAt });
             succeeded = true;
             try {
@@ -629,6 +937,15 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             if (context.maxLibraryBytes !== undefined && await this.libraryBytesNow() > context.maxLibraryBytes) {
                 throw new Error(UNDO_LIMIT_EXCEEDED);
             }
+            if (context.undoLibraryBytes !== undefined && await this.libraryBytesNow() > context.undoLibraryBytes) {
+                const replyJson = JSON.stringify({ ...(JSON.parse(context.replyJson) as object), undo: false });
+                try {
+                    await this.receiptClient.run('UPDATE native_request_receipts SET reply = ? WHERE request_id = ?', [replyJson, context.requestId]);
+                } catch {
+                    throw new Error('Document receipt insert failed');
+                }
+                context.replyJson = replyJson;
+            }
             return;
         }
         // A single task's save runs only while no receipt is pending (see saveTask above).
@@ -658,6 +975,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     // The public saves keep only their synchronous busy refusal and the bookkeeping after the commit here; their SQL runs in
     // the base class's locked body.
     override async saveData(data: AppData, options?: Parameters<SqliteAdapter['saveData']>[1]): Promise<void> {
+        this.refusePomodoroWriteFence();
         if (this.documentBusy) throw new Error('Document receipt write is busy');
         this.ordinaryWrites += 1;
         try {
@@ -676,6 +994,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     }
 
     override async saveTask(task: Task): Promise<void> {
+        this.refusePomodoroWriteFence();
         if (this.documentBusy) throw new Error('Document receipt write is busy');
         this.ordinaryWrites += 1;
         try { await super.saveTask(task); }
@@ -684,8 +1003,12 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
 
     /** Complete a receipt after its data was already proven saved, without rewriting projected memory. */
     async commitReceiptOnly(requestId: string, payload: string): Promise<boolean> {
+        this.refusePomodoroWriteFence();
+        if (commandOf(payload) === 'pomodoroTransition') throw new Error('Pomodoro requires its atomic receipt transaction');
         if (this.documentBusy) throw new Error('Document receipt write is busy');
-        return this.exclusive('commitReceiptOnly', () => this.commitReceiptOnlyNow(requestId, payload));
+        this.ordinaryWrites += 1;
+        try { return await this.exclusive('commitReceiptOnly', () => this.commitReceiptOnlyNow(requestId, payload)); }
+        finally { this.ordinaryWrites -= 1; }
     }
 
     private async commitReceiptOnlyNow(requestId: string, payload: string): Promise<boolean> {
@@ -801,6 +1124,10 @@ export function createNativeRequestReceipts(options: {
             return stored ? { ok: true, value: stored.reply as T } : null;
         },
         run<T>(requestId: unknown, payload: string, write: () => Promise<NativeHostResult<T> | NativeUnsavedWrite<T>>): Promise<NativeHostResult<T>> {
+            if (pomodoroStoreWriteFences.has(getStorageAdapter() as SqliteAdapter)) return Promise.resolve({ ok: false,
+                error: { code: 'ACTION_FAILED', message: 'Pomodoro canonical storage is busy' } });
+            if (commandOf(payload) === 'pomodoroTransition') return Promise.resolve({ ok: false,
+                error: { code: 'ACTION_FAILED', message: 'Pomodoro requires its atomic receipt transaction' } });
             const identity = checkIdentity(requestId, payload);
             if (!identity.ok) return Promise.resolve(identity);
             // checkIdentity established the UUID shape without reserving it.

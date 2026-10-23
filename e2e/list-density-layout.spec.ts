@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { dismissOnboarding, seedAppData, seedTasks } from './seed';
 
-// Each width is an independent case: fifteen full reloads in one test exhausted
-// the default budget on CI, interrupting a healthy page during navigation.
+// Each width is independent; change density through Settings so layout checks
+// do not repeatedly reload Vite's module graph. Keep one persistence reload.
 for (const locale of [
     { language: 'en', title: 'Someday/Maybe' },
     { language: 'de', title: 'Irgendwann/Vielleicht' },
@@ -23,19 +23,15 @@ for (const locale of [
         await page.evaluate(() => document.fonts.ready);
 
         const setDensity = async (density: 'comfortable' | 'compact' | 'condensed') => {
-            await page.evaluate((nextDensity) => {
-                const data = JSON.parse(localStorage.getItem('mindwtr-data') ?? '{}');
-                data.settings = {
-                    ...(data.settings ?? {}),
-                    appearance: { ...(data.settings?.appearance ?? {}), density: nextDensity },
-                };
-                localStorage.setItem('mindwtr-data', JSON.stringify(data));
-            }, density);
-            await page.reload();
-            await expect(header).toBeVisible();
+            await page.evaluate(() => {
+                window.dispatchEvent(new CustomEvent('mindwtr:navigate', { detail: { view: 'settings' } }));
+            });
+            await page.locator('[data-settings-key="density"] select').selectOption(density);
             await expect.poll(() => page.evaluate(() => (
                 JSON.parse(localStorage.getItem('mindwtr-data') ?? '{}').settings?.appearance?.density
             ))).toBe(density);
+            await page.locator('[data-sidebar-item][data-view="someday"]').click();
+            await expect(header).toBeVisible();
         };
 
         // Wait for the responsive sidebar's matchMedia update before taking
@@ -53,6 +49,14 @@ for (const locale of [
                 .toBe(width < 1024 ? 64 : 256);
             expect(await boxes(), `toolbar geometry at ${width}px in ${density}`).toEqual(before);
         }
+        await page.reload();
+        await expect(header).toBeVisible();
+        await expect.poll(() => page.evaluate(() => (
+            JSON.parse(localStorage.getItem('mindwtr-data') ?? '{}').settings?.appearance?.density
+        ))).toBe('comfortable');
+        await expect.poll(async () => Math.round((await page.getByRole('complementary').boundingBox())?.width ?? 0))
+            .toBe(width < 1024 ? 64 : 256);
+        expect(await boxes(), `toolbar geometry after reload at ${width}px`).toEqual(before);
         const bounds = await header.boundingBox();
         expect(bounds).not.toBeNull();
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);

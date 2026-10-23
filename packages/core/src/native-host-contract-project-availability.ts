@@ -7,7 +7,7 @@ import { getAttachmentDownloadFileName } from './mobile-attachment-availability'
 import { getStorageAdapter, getPersistenceStatus, useTaskStore } from './store';
 import { gateStoreCommands, runOutsideStoreGate } from './store-write-gate';
 import { rawReadProjectSnapshot, rawReadRow, rememberRawReadRow } from './sqlite-raw-snapshot';
-import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from './project-sync-schema';
+import { PROJECT_SQLITE_COLUMNS, padProjectSqliteCells, projectFromSqliteRow, projectToSqliteRow } from './project-sync-schema';
 import { ensureDeviceId } from './store-helpers';
 import { taskEditValuesEqual as same } from './json-value-equality';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
@@ -203,10 +203,10 @@ const fileAvailabilityTarget = (attachment: Attachment, directory: string, webda
 // Rebuild only from exact SQL cells. Object-key ordering in a native journal
 // never rewrites the opaque raw attachment string or changes its frozen plan.
 const fileAvailabilityRawBefore = (value: unknown): Project | null => {
-    if (!Array.isArray(value) || value.length !== PROJECT_SQLITE_COLUMNS.length
-        || !value.every(cell => cell === null || typeof cell === 'string' || typeof cell === 'number' && Number.isFinite(cell))) return null;
+    const cells = Array.isArray(value) ? padProjectSqliteCells(value) : null;
+    if (!cells || !cells.every(cell => cell === null || typeof cell === 'string' || typeof cell === 'number' && Number.isFinite(cell))) return null;
     try {
-        const row = Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) => [column, value[index]]));
+        const row = Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) => [column, cells[index]]));
         const project = projectFromSqliteRow(row);
         rememberRawReadRow(project, row, PROJECT_SQLITE_COLUMNS, projectToSqliteRow(project));
         return projectFileAddScalarCellsMatchWriter(project) && iso(project.createdAt) && iso(project.updatedAt)

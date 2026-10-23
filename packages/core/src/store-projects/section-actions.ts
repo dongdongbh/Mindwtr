@@ -5,7 +5,7 @@ import { generateUUID as uuidv4 } from '../uuid';
 import { sectionToSqliteRow } from '../section-sync-schema';
 import { TASK_SQLITE_COLUMNS, taskToSqliteRow } from '../task-sync-schema';
 import { toStableSyncJson } from '../sync-helpers';
-import { sameProjectSqliteRow } from './project-actions';
+import { logProjectFlowModeSaved, sameProjectSqliteRow } from './project-actions';
 import type { PreparedProjectSectionCreate, PreparedProjectSectionDelete, PreparedProjectSectionRename, PreparedTaskEditResult } from '../store-types';
 import type { ProjectActionContext, Section, SectionActions, Task } from './shared';
 import { actionFail, actionOk, mutateEntities } from './shared';
@@ -23,6 +23,7 @@ export const buildNewSection = (input: { id: string; projectId: string; title: s
     description: input.initialProps?.description,
     order: Number.isFinite(input.initialProps?.order) ? input.initialProps!.order! : input.orderMax + 1,
     isCollapsed: input.initialProps?.isCollapsed ?? false,
+    ...(typeof input.initialProps?.isSequential === 'boolean' ? { isSequential: input.initialProps.isSequential } : {}),
     rev: 1,
     revBy: input.deviceId,
     createdAt: input.initialProps?.createdAt ?? input.now,
@@ -89,6 +90,7 @@ export const sectionDeleteEffect = (section: Section, tasks: readonly Task[], de
 export const createSectionActions = ({
     set,
     debouncedSave,
+    flushPendingSave,
 }: ProjectActionContext): SectionActions => ({
     addSection: async (projectId: string, title: string, initialProps?: Partial<Section>) => {
         const trimmedTitle = typeof title === 'string' ? title.trim() : '';
@@ -280,6 +282,10 @@ export const createSectionActions = ({
             const message = 'Section title is required';
             set({ error: message });
             return actionFail(message);
+        }
+        if (typeof updates.isSequential === 'boolean') {
+            await flushPendingSave();
+            logProjectFlowModeSaved(updates.isSequential ? 'sectionSequential' : 'sectionParallel', 0);
         }
         return result;
     },

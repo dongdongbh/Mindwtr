@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react-native';
@@ -98,7 +99,7 @@ export function DeferredProjectRow({
           ? (event) => { if (event.nativeEvent.actionName === 'moveToSection') onMoveToSection(project); }
           : undefined}
       >
-        <Folder size={18} color={project.color || tc.secondaryText} />
+        <Folder size={18} color={getProjectAccentColor(project, areaById) || tc.secondaryText} />
         <View style={styles.projectText}>
           <Text style={[styles.projectTitle, { color: tc.text }]} numberOfLines={1}>
             {project.title}

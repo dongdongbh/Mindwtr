@@ -216,13 +216,12 @@ private fun StatusPill(status: String, label: String, enabled: Boolean, open: ()
 }
 
 /**
- * The View tab's checklist: core's items (bullets for a reference list), a tap ticks one (core's toggle by its position) where
+ * The View tab's checklist: core's items (a reference list too), a tap ticks one (core's toggle by its position) where
  * core makes them tappable, core's add input (append on Done), and More while core has more items than read.
  */
 @Composable
 private fun ViewChecklist(model: InboxViewModel, row: JSONObject, labels: JSONObject, locked: Boolean, follow: (JSONObject) -> Unit) = with(model) {
     val c = LocalTheme.current.colors
-    val bullets = row.getBoolean("bullets")
     val tappable = row.getBoolean("tappable") && !locked
     val items = row.menuObjects("items")
     Column(Modifier.padding(bottom = 16.dp)) {
@@ -238,9 +237,8 @@ private fun ViewChecklist(model: InboxViewModel, row: JSONObject, labels: JSONOb
                         if (tappable) onClick { editChecklist(JSONObject().put("kind", "toggle").put("itemId", item.getString("id"))); true } else disabled()
                     }.clickable(enabled = tappable) { editChecklist(JSONObject().put("kind", "toggle").put("itemId", item.getString("id"))) }
                     else if (spoken != null) Modifier.clearAndSetSemantics { contentDescription = spoken } else Modifier)
-                    .padding(vertical = 6.dp), verticalAlignment = if (bullets) Alignment.Top else Alignment.CenterVertically) {
-                    if (bullets) Text("•", style = rnText(18, 400, 20), color = c.secondaryText)
-                    else Icon(if (done) SettingsLucide.CheckSquare else SettingsLucide.Square, null, tint = if (done) c.tint else c.secondaryText, modifier = Modifier.size(18.dp))
+                    .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (done) SettingsLucide.CheckSquare else SettingsLucide.Square, null, tint = if (done) c.tint else c.secondaryText, modifier = Modifier.size(18.dp))
                     Text(inline(item.menuObjects("inline"), labels, c.tint, c.secondaryText, c.cardBg, follow), style = rnText(14, 400), color = c.text,
                         modifier = Modifier.weight(1f).padding(start = 8.dp))
                 }
@@ -442,19 +440,15 @@ private fun ChecklistItemRow(model: InboxViewModel, editor: TaskEditor, field: J
     LaunchedEffect(checklistFocus) { if (checklistFocus == id) { runCatching { focus.requestFocus() }; checklistFocused() } }
     val struck = item.getBoolean("struck")
     Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (field.getBoolean("bullets")) {
-            Text("•", style = rnText(18, 400, 24), color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.width(28.dp).clearAndSetSemantics { })
-        } else {
-            val done = item.getBoolean("completed")
-            val label = item.getString("checkboxLabel")
-            Box(Modifier.size(44.dp).clearAndSetSemantics {
-                contentDescription = label; role = Role.Checkbox; toggleableState = ToggleableState(done)
-                if (!locked) onClick { editChecklist(JSONObject().put("kind", "toggle").put("itemId", id)); true } else disabled()
-            }.clickable(enabled = !locked) { editChecklist(JSONObject().put("kind", "toggle").put("itemId", id)) }, contentAlignment = Alignment.Center) {
-                val box = RoundedCornerShape(6.dp)
-                Box(Modifier.size(28.dp).clip(box).border(2.dp, c.tint, box).background(if (done) c.tint else c.cardBg), contentAlignment = Alignment.Center) {
-                    if (done) Icon(Lucide.CheckBold, null, tint = c.onTint, modifier = Modifier.size(12.dp))
-                }
+        val done = item.getBoolean("completed")
+        val label = item.getString("checkboxLabel")
+        Box(Modifier.size(44.dp).clearAndSetSemantics {
+            contentDescription = label; role = Role.Checkbox; toggleableState = ToggleableState(done)
+            if (!locked) onClick { editChecklist(JSONObject().put("kind", "toggle").put("itemId", id)); true } else disabled()
+        }.clickable(enabled = !locked) { editChecklist(JSONObject().put("kind", "toggle").put("itemId", id)) }, contentAlignment = Alignment.Center) {
+            val box = RoundedCornerShape(6.dp)
+            Box(Modifier.size(28.dp).clip(box).border(2.dp, c.tint, box).background(if (done) c.tint else c.cardBg), contentAlignment = Alignment.Center) {
+                if (done) Icon(Lucide.CheckBold, null, tint = c.onTint, modifier = Modifier.size(12.dp))
             }
         }
         val inputLabel = item.getString("inputLabel")

@@ -1,3 +1,4 @@
+import { taskMatchesAreaFilterSelection } from './area-filter';
 import { format } from 'date-fns';
 import {
     createDateFormatter,
@@ -185,6 +186,9 @@ export interface AndroidQuickCaptureLabels {
     save: string;
     cancel: string;
     added: string;
+    statusLabel: string;
+    statusLabels: Record<'inbox' | 'next' | 'waiting' | 'someday', string>;
+    queued: string;
     audioEnabled: boolean;
     audioRecord: string;
     audioStop: string;
@@ -219,7 +223,10 @@ export function buildAndroidQuickCaptureLabels(language: Language, audioEnabled 
     return {
         descriptionPlaceholder: t('taskEdit.descriptionPlaceholder'),
         title: resolveI18nText(t, 'widget.capture', { fallback: 'Quick capture' }),
-        placeholder: resolveI18nText(t, 'inbox.addPlaceholder', { fallback: 'Add task to inbox...' }),
+        placeholder: t('quickAdd.placeholder'),
+        statusLabel: t('taskEdit.statusLabel'),
+        statusLabels: { inbox: t('nav.inbox'), next: t('nav.next'), waiting: t('nav.waiting'), someday: t('nav.someday') },
+        queued: t('quickAdd.textQueued'),
         save: resolveI18nText(t, 'common.save', { fallback: 'Save' }),
         cancel: resolveI18nText(t, 'common.cancel', { fallback: 'Cancel' }),
         added: resolveI18nText(t, 'obsidian.bringIntoMindwtrSuccess', { fallback: 'Task added to Mindwtr.' }),
@@ -463,7 +470,7 @@ export interface WidgetPayloadBuildOptions {
     listIds?: readonly string[];
     /** Include every bounded saved-filter list offered by the platform chooser. */
     includeSavedFilterLists?: boolean;
-    /** Android offers every known token and caches each list before selection. */
+    /** Android's chooser offers every known context and tag (names only: their lists come with `listIds`). */
     includeTokenLists?: boolean;
     /** What the Focus screen is filtering and sorting by right now (#1173). */
     focusFilter?: FocusWidgetFilter;
@@ -584,13 +591,12 @@ export function createWidgetPayloadProjection(
         return { ...item, upcomingDate, upcomingLabel, dueLabel: `${upcomingLabel} ${label}`, dueTone: 'normal', dueEmphasis: false };
     };
     // The Focus screen's own pools through the shared derivation (#1173),
-    // narrowed by exactly what the screen is filtering and sorting by. Today's
-    // Focus keeps drawing from every starred task, as it does on the screen:
-    // area visibility and start times must never eat one of its slots.
+    // narrowed by the screen's area selection, filters and sort.
     const focusFilter = options?.focusFilter ?? NO_FOCUS_WIDGET_FILTER;
     const pools = buildFocusPools({
         tasks: undeletedActionableTasks,
         visibleTasks: activeTasks,
+        isAreaVisible: (task) => taskMatchesAreaFilterSelection(task, areaVisibility.resolvedAreaFilter, projectById, areaVisibility.areaById),
         projects,
         criteria: focusFilter.criteria,
         now,
@@ -613,8 +619,8 @@ export function createWidgetPayloadProjection(
         .filter((section) => section.key === 'focus' || section.key === 'schedule');
     const inboxCount = activeTasks.filter((task) => task.status === 'inbox').length;
     const dateLabel = formatDateLabel(now, language, 'long');
-    const listContext = { data, activeTasks, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
-        tokenTaskIndex: options?.includeTokenLists || options?.listIds?.some((id) => id.startsWith('context:') || id.startsWith('tag:'))
+    const listContext = { data, activeTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
+        tokenTaskIndex: options?.listIds?.some((id) => id.startsWith('context:') || id.startsWith('tag:'))
             ? buildWidgetTokenTaskIndex(activeTasks) : undefined };
     const listTitles = widgetListTitles(tr);
     const savedFilters = buildWidgetSavedFilterOptions(data);
@@ -627,7 +633,6 @@ export function createWidgetPayloadProjection(
     if (options?.includeSavedFilterLists) {
         for (const { id } of savedFilters) requestedListIds.add(`${WIDGET_SAVED_FILTER_LIST_PREFIX}${id}`);
     }
-    for (const option of [...(contexts || []), ...(tags || [])]) requestedListIds.add(option.id);
     for (const listId of requestedListIds) {
         if (listId === 'focus') continue;
         const projectId = listId.startsWith(WIDGET_PROJECT_LIST_PREFIX)
@@ -722,7 +727,7 @@ export function createWidgetPayloadProjection(
                 subtitle: subtitleParts.join(' · '),
                 inboxLabel: tr['nav.inbox'] ?? 'Inbox',
                 inboxCount,
-                focusedCount: lists.focusedTasks.length,
+                focusedCount: pools.selection.globalCount,
                 items,
                 sections,
                 lists: listPayloads,
@@ -792,9 +797,12 @@ export interface WidgetPublicationInput {
  * switches lists with no app running, so it can only show a list the payload
  * already holds. Publish all bounded GTD lists even before placement:
  * Compact needs Next Actions as its empty-today fallback, and a new Tasks
- * widget can switch to Inbox without an extra app opening (#1211). Saved
- * filters and every context/tag offered by the chooser are cached too. Legacy
- * project lists are built when a placed widget asks for them.
+ * widget can switch to Inbox without an extra app opening (#1211). The chooser
+ * offers every saved filter, context and tag by name, but their lists (and
+ * legacy project lists) are built only for what placed widgets chose
+ * (`listSelections`): one list per label made every refresh grow with the
+ * labels (#1399). A newly chosen one shows under its name, empty, until the
+ * app's next publication.
  */
 export function androidWidgetProjectionOptions(
     input: WidgetPublicationInput & { listSelections: readonly string[] },
@@ -804,7 +812,6 @@ export function androidWidgetProjectionOptions(
         focusFilter: input.focusFilter,
         systemLocale: input.systemLocale,
         listIds: [...WIDGET_FIXED_LIST_IDS, ...input.listSelections],
-        includeSavedFilterLists: true,
         includeTokenLists: true,
     };
 }

@@ -41,11 +41,17 @@ import {
     type BoardFilterState,
     type BoardStatus,
 } from './board-view-model';
+import { canCompleteNativeBoardTask } from './native-host-contract-task-checklist';
 import { matchesPickerQuery } from './native-host-contract-menu-views';
 import { createProjectOrderReserver, ensureDeviceId, matchesDuplicateSource, nextRevision } from './store-helpers';
-import { buildDuplicateTask, sanitizeRestoredTaskContainerReferences, taskEditValuesEqual } from './store-tasks';
+import { boardMoveEffect, boardMoveScope, boardReactivationContainerAllowed, samePreparedTask, buildDuplicateTask, sanitizeRestoredTaskContainerReferences, taskEditValuesEqual } from './store-tasks';
 import { TASK_SYNC_FIELD_SCHEMA } from './task-sync-schema';
-import { boardOrderForDuplicate } from './task-utils';
+import { boardOrderForDuplicate, projectFocusDateValues } from './task-utils';
+import { validFrozenFocusDate } from './native-host-contract-task-focus';
+import type { PreparedAreaAuthority, PreparedBoardMove, PreparedNativeSaveBoundary, TaskStore } from './store-types';
+import { PROJECT_SYNC_FIELD_SCHEMA } from './project-sync-schema';
+import { SECTION_SYNC_FIELD_SCHEMA } from './section-sync-schema';
+import { AREA_SYNC_FIELD_SCHEMA } from './area-sync-schema';
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
 import {
     NATIVE_HOST_CONTRACT_VERSION,
@@ -54,15 +60,19 @@ import {
     type NativeHostResult,
     type NativeTaskRow,
 } from './native-host-contract';
-import { createNativeRequestReceipts, isRevision, refuseStale, runStoreWrite, settleWrite, taskRevisionOf, type NativeUnsavedWrite } from './native-request-receipts';
+import { createNativeRequestReceipts, isRevision, refuseStale, runStoreWrite, settleWrite, taskRevisionOf, NativeReceiptSqliteAdapter, isNativeRequestReceiptDurable, type NativeUnsavedWrite } from './native-request-receipts';
 import { isProjectedRecurringTaskId } from './recurrence';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { resolveFeatureFlags } from './resolve-feature-flags';
-import { useTaskStore } from './store';
+import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
+import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { validRawTask } from './native-host-contract-task-save';
-import type { Area, Project, Section, Task } from './types';
+import type { AppData, Area, Project, Section, Task } from './types';
 import { resolveI18nText } from './i18n';
+import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { logInfo } from './logger';
+import { boardOrderWritability, createBoardOrderMethods,
+    type NativeBoardOrderRequest, type NativePreparedBoardOrder, type NativeBoardOrderActions, type NativeBoardColumnOrder } from './native-host-contract-board-order';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
 type Translate = (key: string) => string;
@@ -81,9 +91,10 @@ export type BoardViewDeps = {
 /** The Board's filter state; missing keys are the empty state's. */
 export type NativeBoardFilters = Partial<BoardFilterState>;
 export type NativeBoardWindow<T> = { total: number; items: T[] };
-export type NativeBoardCard = { row: NativeTaskRow; card: BoardCard; boardOrder: number | null };
+export type NativeBoardCard = { row: NativeTaskRow; card: BoardCard; boardOrder: number | null; moveAllowed: boolean; completeAllowed: boolean; orderActions?: NativeBoardOrderActions };
 export type NativeBoardColumn = {
     status: BoardStatus;
+    order?: NativeBoardColumnOrder;
     label: string;
     tone: BoardColumnTone;
     /** The header badge: every card in the column. */
@@ -131,6 +142,8 @@ export type NativeBoardView = {
         swipes: Record<'left' | 'right', { label: string; actions: readonly BoardCardAction[] }>;
         /** A failed duplicate's error toast: this title, the error's message. */
         errorTitle: string;
+        complete: { label: string };
+        moveTo: { label: string; destinations: { status: NativeBoardMoveStatus; label: string }[] };
     };
 };
 
@@ -148,10 +161,13 @@ export type NativeBoardAction =
     | { type: 'duplicateTask'; taskId: string }
     | { type: 'trashTask'; taskId: string; taskRevision: string };
 
-/** Durable native stage: Move needs a separate frozen lifecycle/order planner. */
+export type NativeBoardMoveStatus = Extract<BoardStatus, 'inbox' | 'next' | 'waiting' | 'someday'>;
+
+/** Durable native stage: Move admits only the frozen one-row status planner. */
 export type NativeBoardWriteRequest = {
     requestId: string;
-    action: { type: 'duplicateTask' | 'trashTask'; taskId: string };
+    action: { type: 'duplicateTask' | 'trashTask'; taskId: string }
+        | { type: 'moveCard'; taskId: string; status: NativeBoardMoveStatus; taskRevision: string; filters: NativeBoardFilters };
 };
 export type NativePreparedBoardAction = {
     version: 1;
@@ -161,6 +177,8 @@ export type NativePreparedBoardAction = {
     /** The sole row written and checked before mutable source/container guards. */
     after: Task;
     deviceIdToInitialize: string | null;
+    /** Present only on Move; old Duplicate/Trash envelopes keep exactly six fields. */
+    move?: PreparedBoardMove;
     result: NativeBoardActionResult;
 };
 export type NativeBoardPrepareResult =
@@ -317,8 +335,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
     let cache: { key: string; value: ReturnType<typeof buildBoard> } | null = null;
 
     /** The Board for a filter state, as mobile derives it from the store. */
-    function buildBoard(input: BoardFilterState, now: Date) {
-        const state = useTaskStore.getState();
+    function buildBoard(input: BoardFilterState, now: Date, state = useTaskStore.getState(), includeOrdering = true) {
         const t = deps.t();
         const areas = sortAreasForDisplay(state.areas);
         const areaById = new Map(areas.map((area) => [area.id, area]));
@@ -378,10 +395,40 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                     right: { label: cardText.delete, actions: BOARD_CARD_SWIPES.right.actions },
                 },
                 errorTitle: cardText.errorTitle,
+                complete: { label: resolveI18nText(t, 'common.done') },
+                moveTo: { label: t('task.moveTo'), destinations: columns
+                    .filter(column => ['inbox', 'next', 'waiting', 'someday'].includes(column.status))
+                    .map(column => ({ status: column.status as NativeBoardMoveStatus, label: column.label })) },
             },
         };
-        return { view, columns, lists, search, badges, timeEstimatesEnabled };
+        const ordering = new Map<BoardStatus, { order: NativeBoardColumnOrder; actions: Map<string, NativeBoardOrderActions> }>();
+        if (includeOrdering) for (const column of columns) {
+            const actions = new Map<string, NativeBoardOrderActions>();
+            let token: string | null = null;
+            try {
+                const snapshot = orderMethods.snapshot(filters, column.status, now, state, { filters, columns });
+                const scope = snapshot?.scope;
+                // A complete snapshot is optional metadata; its failure never blocks browsing.
+                token = snapshot?.token ?? null;
+                if (token && scope && typeof state.settings.deviceId === 'string' && state.settings.deviceId.trim()) {
+                    const writable = boardOrderWritability(scope);
+                    for (let index = 0; index < column.tasks.length; index++) {
+                        const row = column.tasks[index];
+                        if (!writable(row)) continue;
+                        actions.set(row.id, { up: index === 0 ? null : { afterId: index === 1 ? null : column.tasks[index - 2].id },
+                            down: index === column.tasks.length - 1 ? null : { afterId: column.tasks[index + 1].id } });
+                    }
+                }
+            } catch { token = null; }
+            ordering.set(column.status, { order: { available: token !== null, expectedOrder: token,
+                moveUpLabel: resolveI18nText(t, 'projects.moveUp'), moveDownLabel: resolveI18nText(t, 'projects.moveDown') }, actions });
+        }
+        return { view, columns, lists, search, badges, timeEstimatesEnabled, ordering };
     }
+
+    const orderMethods = createBoardOrderMethods({ ...deps, readFilters,
+        snapshot: (filters, now, state) => { const board = buildBoard(filters, now, state, false);
+            return { filters: board.view.filters, columns: board.columns }; } });
 
     /** The Board for these filters (after an edit), with its revision; null for invalid input. */
     const readBoard = (input: Record<string, unknown>) => {
@@ -397,12 +444,37 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         return { now, board: cache.value, revision: `${base}:${paramsKey(cache.value.view.filters)}` };
     };
 
+    const moveAllowed = (task: Task): boolean => {
+        const state = useTaskStore.getState();
+        const inferred = task.projectId ?? state._sectionsById.get(task.sectionId ?? '')?.projectId;
+        const parent = inferred ? state._projectsById.get(inferred) : undefined;
+        return ['inbox', 'next', 'waiting', 'someday', 'done'].includes(task.status) && !task.deletedAt && !task.purgedAt
+            && (task.status !== 'done' || state._allTasks.filter(row => row.id === task.id).length === 1
+                && boardReactivationContainerAllowed(task, state._allProjects, state._allSections))
+            && !isProjectedRecurringTaskId(task.id) && typeof state.settings.deviceId === 'string' && Boolean(state.settings.deviceId.trim())
+            && !isStatusListTaskReadOnly({ ...task, projectId: inferred }, parent ? [parent] : []);
+    };
     const cards = (board: ReturnType<typeof buildBoard>, tasks: readonly Task[], now: Date): NativeBoardCard[] => {
         const rows = deps.rows(tasks, now);
+        const state = useTaskStore.getState();
+        // Index once for this bounded page, retaining duplicates so admission
+        // fails closed instead of hiding them behind the store's ID maps.
+        const projects = new Map<string, Project[]>(); const sections = new Map<string, Section[]>();
+        for (const row of state._allProjects) projects.set(row.id, [...(projects.get(row.id) ?? []), row]);
+        for (const row of state._allSections) sections.set(row.id, [...(sections.get(row.id) ?? []), row]);
+        const completeAllowed = (task: Task) => {
+            const sourceSections = sections.get(task.sectionId ?? '') ?? [];
+            const parentId = task.projectId ?? sourceSections[0]?.projectId;
+            return canCompleteNativeBoardTask(task, projects.get(parentId ?? '') ?? [], sourceSections);
+        };
         return tasks.map((task, index) => ({
             row: rows[index],
             card: getBoardCard(task, { badges: board.badges, timeEstimatesEnabled: board.timeEstimatesEnabled, t: deps.t() }),
             boardOrder: Number.isFinite(task.boardOrder) ? task.boardOrder as number : null,
+            moveAllowed: moveAllowed(task),
+            completeAllowed: completeAllowed(task),
+            ...(board.ordering.get(task.status as BoardStatus)?.actions.has(task.id)
+                ? { orderActions: board.ordering.get(task.status as BoardStatus)!.actions.get(task.id)! } : {}),
         }));
     };
 
@@ -513,22 +585,58 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
     const readWriteRequest = (input: unknown): NativeBoardWriteRequest | null => {
         if (!isObjectRecord(input) || !exactKeys(input, ['requestId', 'action'])
             || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
-            || !isObjectRecord(input.action) || !exactKeys(input.action, ['type', 'taskId'])
-            || !['duplicateTask', 'trashTask'].includes(input.action.type as string)
-            || !isText(input.action.taskId) || !input.action.taskId) return null;
-        return input as unknown as NativeBoardWriteRequest;
+            || !isObjectRecord(input.action) || !isText(input.action.taskId) || !input.action.taskId) return null;
+        const action = input.action;
+        const valid = action.type === 'moveCard'
+            ? exactKeys(action, ['type', 'taskId', 'status', 'taskRevision', 'filters'])
+                && typeof action.status === 'string' && ['inbox', 'next', 'waiting', 'someday'].includes(action.status)
+                && isRevision(action.taskRevision) && isObjectRecord(action.filters) && readFilters(action.filters) !== null
+            : exactKeys(action, ['type', 'taskId']) && typeof action.type === 'string' && ['duplicateTask', 'trashTask'].includes(action.type);
+        return valid ? input as unknown as NativeBoardWriteRequest : null;
     };
     const taskRecord = (input: unknown): input is Task => isObjectRecord(input)
         && isText(input.id) && Boolean(input.id) && typeof input.title === 'string'
         && ['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'].includes(input.status as string)
         && typeof input.createdAt === 'string' && typeof input.updatedAt === 'string'
         && Object.keys(input).every((name) => TASK_SYNC_FIELD_SCHEMA.some((field) => field.name === name));
+    const moveDates = (before: Task, scope: PreparedBoardMove['scope']): string[] => [...new Set([before, ...scope.focused]
+        .flatMap(row => [row.startTime, row.dueDate, row.reviewAt]).filter((value): value is string => typeof value === 'string' && value.length > 0))].sort();
+    const readMove = (value: unknown, before: Task, at: string): value is PreparedBoardMove => {
+        if (!isObjectRecord(value) || !exactKeys(value, ['deviceIdBefore', 'clock', 'scope'])
+            || typeof value.deviceIdBefore !== 'string' || !value.deviceIdBefore.trim() || value.deviceIdBefore.length > 500
+            || !isObjectRecord(value.clock) || !exactKeys(value.clock, ['preparedLocalDay', 'preparedOffsetMinutes', 'boundaryOffsetMinutes', 'futureBoundary', 'dates'])
+            || !isObjectRecord(value.scope) || !exactKeys(value.scope, ['projects', 'sections', 'areas', 'focused', 'focusLimit'])) return false;
+        const move = value as unknown as PreparedBoardMove; const { clock, scope } = move;
+        const collections = [[scope.projects, PROJECT_SYNC_FIELD_SCHEMA], [scope.sections, SECTION_SYNC_FIELD_SCHEMA], [scope.areas, AREA_SYNC_FIELD_SCHEMA]] as const;
+        if (collections.some(([rows, schema]) => !Array.isArray(rows) || rows.some((row, index) => !isObjectRecord(row)
+            || typeof row.id !== 'string' || !row.id || typeof row.title !== 'string' && typeof row.name !== 'string'
+            || Object.keys(row).some(key => !schema.some(field => field.name === key))
+            || index > 0 && rows[index - 1].id >= row.id))
+            || scope.projects.length > 2 || scope.sections.length > 1 || scope.areas.length > 1
+            || scope.sections.some(row => row.id !== before.sectionId)
+            || scope.projects.some(row => row.id !== before.projectId && row.id !== scope.sections[0]?.projectId)
+            || scope.areas.some(row => row.id !== before.areaId)
+            || !Array.isArray(scope.focused) || scope.focused.some((row, index) => !isObjectRecord(row)
+                || !exactKeys(row, ['id', 'status', 'createdAt', 'projectId', 'sectionId', 'startTime', 'dueDate', 'reviewAt', 'order', 'orderNum', 'isFocusedToday', 'recurrence'])
+                || row.isFocusedToday !== true || !validRawTask({ ...row, title: '', updatedAt: row.createdAt, tags: [], contexts: [] }, row.id)
+                || index > 0 && scope.focused[index - 1].id >= row.id)
+            || !Number.isInteger(scope.focusLimit) || scope.focusLimit < 1) return false;
+        try {
+            return /^\d{4}-\d{2}-\d{2}$/.test(clock.preparedLocalDay)
+                && Number.isInteger(clock.preparedOffsetMinutes) && Math.abs(clock.preparedOffsetMinutes) <= 840
+                && Number.isInteger(clock.boundaryOffsetMinutes) && Math.abs(clock.boundaryOffsetMinutes) <= 840
+                && new Date(Date.parse(at) - clock.preparedOffsetMinutes * 60_000).toISOString().slice(0, 10) === clock.preparedLocalDay
+                && new Date(Date.parse(clock.preparedLocalDay + 'T23:59:59.999Z') + clock.boundaryOffsetMinutes * 60_000).toISOString() === clock.futureBoundary
+                && Array.isArray(clock.dates) && clock.dates.every(validFrozenFocusDate)
+                && taskEditValuesEqual(clock.dates.map(row => row.value), moveDates(before, scope));
+        } catch { return false; }
+    };
     const readPrepared = (input: unknown): NativePreparedBoardAction | null => {
         const detached = detach(input);
-        if (!isObjectRecord(detached) || !exactKeys(detached, ['version', 'request', 'before', 'after', 'deviceIdToInitialize', 'result'])
-            || detached.version !== 1 || !taskRecord(detached.before) || !taskRecord(detached.after)) return null;
+        if (!isObjectRecord(detached) || detached.version !== 1 || !taskRecord(detached.before) || !taskRecord(detached.after)) return null;
         const request = readWriteRequest(detached.request);
-        if (!request) return null;
+        if (!request || !exactKeys(detached, ['version', 'request', 'before', 'after', 'deviceIdToInitialize', 'result',
+            ...(request.action.type === 'moveCard' ? ['move'] : [])])) return null;
         const prepared = detached as unknown as NativePreparedBoardAction;
         const { before, after, deviceIdToInitialize } = prepared;
         try {
@@ -537,7 +645,13 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 || (deviceIdToInitialize !== null && (deviceIdToInitialize !== after.revBy || !deps.requestIdPattern.test(deviceIdToInitialize)))) return null;
             let expected: Task;
             let result: NativeBoardActionResult;
-            if (request.action.type === 'trashTask') {
+            if (request.action.type === 'moveCard') {
+                if (deviceIdToInitialize !== null || !validRawTask(before, before.id) || !validRawTask(after, before.id)
+                    || taskRevisionOf(before) !== request.action.taskRevision || !readMove(prepared.move, before, after.updatedAt)
+                    || after.revBy !== prepared.move!.deviceIdBefore) return null;
+                expected = boardMoveEffect(before, request.action.status, prepared.move!, after.updatedAt);
+                result = { changed: true, open: null };
+            } else if (request.action.type === 'trashTask') {
                 expected = { ...before, deletedAt: after.updatedAt, updatedAt: after.updatedAt, rev: nextRevision(before.rev), revBy: after.revBy };
                 result = { changed: true, open: null };
             } else {
@@ -754,8 +868,32 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         if (!request) return fail('INVALID_INPUT', 'A request UUID and a supported Board action are required');
         const state = useTaskStore.getState();
         const source = state._tasksById.get(request.action.taskId);
-        if (!source || source.purgedAt || (source.deletedAt && request.action.type === 'duplicateTask')) return fail('TASK_NOT_FOUND', 'Task not found');
+        if (!source || source.purgedAt || (source.deletedAt && request.action.type !== 'trashTask')) return fail('TASK_NOT_FOUND', 'Task not found');
         if (source.deletedAt) return { ok: true, value: { kind: 'noop', result: { changed: false, open: null } } };
+        if (request.action.type === 'moveCard') {
+            if (!moveAllowed(source)) return fail('INVALID_INPUT', 'This card is read-only or needs an unsupported lifecycle/device identity; Board Move supports one task only');
+            const shown = readBoard({ filters: request.action.filters });
+            if (!shown || !shown.board.columns.some(column => column.tasks.some(row => row.id === source.id)))
+                return fail('INVALID_INPUT', 'The card is not shown under the current Board filters');
+            if (taskRevisionOf(source) !== request.action.taskRevision) return fail('STALE_REVISION', 'The card changed since the Board showed it');
+            if (source.status === request.action.status) return { ok: true, value: { kind: 'noop', result: { changed: false, open: null } } };
+            const before = detach(source); if (!taskRecord(before)) return fail('INVALID_INPUT', 'Task cannot fit a valid bounded Board journal');
+            const now = new Date(); const at = now.toISOString(); const end = new Date(now); end.setHours(23, 59, 59, 999);
+            const scope = boardMoveScope(state, before); const offset = now.getTimezoneOffset();
+            const move: PreparedBoardMove = { deviceIdBefore: state.settings.deviceId!, scope, clock: {
+                preparedLocalDay: new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10),
+                preparedOffsetMinutes: offset, boundaryOffsetMinutes: end.getTimezoneOffset(), futureBoundary: end.toISOString(),
+                dates: projectFocusDateValues(moveDates(before, scope)),
+            } };
+            try {
+                const after = boardMoveEffect(before, request.action.status, move, at);
+                const prepared = readPrepared({ version: 1, request, before, after, deviceIdToInitialize: null,
+                    result: { changed: true, open: null }, move });
+                return prepared ? { ok: true, value: { kind: 'prepared', prepared } }
+                    : fail('INVALID_INPUT', 'Board Move cannot produce a valid frozen one-task journal');
+            } catch (error) { return fail('INVALID_INPUT', error instanceof Error ? error.message : 'Board Move scope refused'); }
+        }
+
         if (request.action.type === 'duplicateTask' && state._tasksById.has(request.requestId)) {
             return fail('INVALID_INPUT', 'The duplicate request ID is already in use; retry its prepared command');
         }
@@ -780,12 +918,145 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             const result = await useTaskStore.getState().commitPreparedBoardTask({
                 kind: prepared.request.action.type, before: prepared.before, after: prepared.after,
                 deviceIdToInitialize: prepared.deviceIdToInitialize,
+                ...(prepared.request.action.type === 'moveCard' ? { move: prepared.move,
+                    admitMove: () => {
+                        const current = useTaskStore.getState()._tasksById.get(prepared.before.id);
+                        const shown = readBoard({ filters: (prepared.request.action as Extract<NativeBoardWriteRequest['action'], { type: 'moveCard' }>).filters });
+                        return Boolean(current && moveAllowed(current) && shown?.board.columns.some(column => column.tasks.some(row => row.id === current.id)));
+                    } } : {}),
                 ...(respectReadOnly ? { respectReadOnly: true as const } : {}),
             });
             if (!result.success) return fail(result.reason === 'conflict' ? 'STALE_REVISION' : 'INVALID_INPUT', result.error ?? 'Prepared Board action refused');
             return { ok: true as const, value: prepared.result };
         })
     );
+
+    // Done-only sibling to the existing history-row save owner. Retained for
+    // this contract's lifetime so exact warm Retry owns the failed raw overlay.
+    // The real native host creates its contract before boot installs SQLite.
+    // Bind only after activation validates storage; never rebind this owner.
+    let reactivationAdapter: NativeReceiptSqliteAdapter | null = null;
+    const boundReactivationAdapter = (): NativeReceiptSqliteAdapter | null => {
+        if (!deps.readiness().ok) return null;
+        const adapter = getStorageAdapter();
+        if (!(adapter instanceof NativeReceiptSqliteAdapter) || !adapter.concurrentWritesGuarded
+            || !isNativeRequestReceiptDurable('boardTaskReactivate')) return null;
+        if (reactivationAdapter === null) reactivationAdapter = adapter;
+        return reactivationAdapter === adapter ? adapter : null;
+    };
+    const reactivationSaves = createAreaSaveGuard(deps.save);
+    let pendingReactivation: { prepared: NativePreparedBoardAction; adapter: ReturnType<typeof getStorageAdapter>;
+        boundary: PreparedNativeSaveBoundary | undefined } | null = null;
+    const reactivationPayload = (prepared: NativePreparedBoardAction) => canonicalJSON(['boardTaskReactivate', prepared]);
+    const reactivationState = (data: AppData): TaskStore => ({ ...useTaskStore.getState(),
+        _allTasks: data.tasks, _allProjects: data.projects, _allSections: data.sections ?? [], _allAreas: data.areas ?? [],
+        tasks: data.tasks.filter(row => !row.deletedAt && !row.purgedAt),
+        projects: data.projects.filter(row => !row.deletedAt && !row.purgedAt),
+        areas: (data.areas ?? []).filter(row => !row.deletedAt), settings: data.settings });
+    const checkReactivation = (prepared: NativePreparedBoardAction, authority: PreparedAreaAuthority): NativeHostResult<null> => {
+        const data = authority.snapshot; const source = data.tasks.filter(row => row.id === prepared.before.id);
+        const state = reactivationState(data); const move = prepared.move!;
+        if (source.length !== 1 || !samePreparedTask(source[0], prepared.before)
+            || data.settings.deviceId !== move.deviceIdBefore
+            || !boardReactivationContainerAllowed(source[0], data.projects, data.sections ?? [])
+            || !taskEditValuesEqual(boardMoveScope(state, source[0]), move.scope))
+            return fail('STALE_REVISION', 'Board reactivation source or dependencies changed');
+        const action = prepared.request.action as Extract<NativeBoardWriteRequest['action'], { type: 'moveCard' }>;
+        const shown = buildBoard({ ...EMPTY_BOARD_FILTER_STATE, ...action.filters }, new Date(prepared.after.updatedAt), state);
+        if (!shown.columns.some(column => column.tasks.some(row => row.id === source[0].id)))
+            return fail('STALE_REVISION', 'Board reactivation source is no longer visible');
+        try { return samePreparedTask(boardMoveEffect(source[0], action.status, move, prepared.after.updatedAt), prepared.after)
+            ? { ok: true, value: null } : fail('STALE_REVISION', 'Board reactivation effect changed'); }
+        catch { return fail('STALE_REVISION', 'Board reactivation dependencies refused'); }
+    };
+    const applyReactivation = (prepared: NativePreparedBoardAction, authority: PreparedAreaAuthority) =>
+        useTaskStore.getState().commitPreparedTaskDraftV2({ request: { id: prepared.before.id },
+            deviceIdBefore: prepared.move!.deviceIdBefore, deviceIdToInitialize: null,
+            effect: { task: { before: prepared.before, after: prepared.after } } }, authority);
+    const reactivationReceipts = createNativeRequestReceipts({ save: async requestId => {
+        const pending = pendingReactivation;
+        if (!pending || pending.prepared.request.requestId !== requestId)
+            return fail('SAVE_FAILED', 'Board reactivation has no owned raw save');
+        if (useTaskStore.getState().persistenceFailure) {
+            if (!reactivationSaves.mayApply(pending.prepared, pending.adapter))
+                return fail('SAVE_FAILED', 'Board reactivation has an unrelated persistence failure');
+            const read = await readAreaDurableData(true, true); if (!read.ok) return read;
+            if (read.value.adapter !== pending.adapter) return fail('STALE_REVISION', 'Board reactivation storage changed');
+            const checked = checkReactivation(pending.prepared, read.value.authority); if (!checked.ok) return checked;
+            const applied = await applyReactivation(pending.prepared, read.value.authority);
+            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', 'Board reactivation raw retry was superseded');
+            pending.boundary = read.value.authority.saveBoundary;
+        }
+        const saved = await reactivationSaves.finish(pending.prepared, pending.adapter, false, pending.boundary);
+        if (saved.ok) pendingReactivation = null;
+        return saved;
+    } });
+    const reactivationOutcome = async (prepared: NativePreparedBoardAction): Promise<NativeHostResult<NativeBoardActionResult | null>> => {
+        const ready = deps.readiness(); if (!ready.ok) return ready;
+        const adapter = boundReactivationAdapter(); const state = useTaskStore.getState(); const status = getPersistenceStatus();
+        const settled = () => {
+            const current = useTaskStore.getState(); const persistence = getPersistenceStatus();
+            return deps.readiness().ok && getStorageAdapter() === adapter && !current.persistenceFailure
+                && !persistence.queued && !persistence.inFlight && !persistence.immediate && !persistence.retrying
+                && persistence.generation === status.generation && current._allTasks === state._allTasks
+                && current._allProjects === state._allProjects && current._allSections === state._allSections
+                && current._allAreas === state._allAreas && current._allPeople === state._allPeople
+                && current.settings === state.settings && current.lastDataChangeAt === state.lastDataChangeAt;
+        };
+        // Readiness means this contract's activation initialized this exact
+        // adapter. A replacement must activate a new host before proof reads.
+        if (!adapter || !settled())
+            return fail('SAVE_FAILED', 'Board reactivation saved outcome is not available');
+        try {
+            // No flush/save/retry. getData and readRowBaseline refresh the
+            // existing read-baseline cache but never mutate domain rows.
+            const data = await adapter.getData({ rawTasks: true });
+            if (!settled()) return fail('STALE_REVISION', 'Board reactivation changed during saved outcome read');
+            const receipt = await adapter.readDurableReceipt(prepared.request.requestId, reactivationPayload(prepared), { committedOnly: true });
+            if (!receipt.ok) return receipt;
+            // This keeps the raw row and committed receipt in one accepted
+            // external epoch; a later read must not silently adopt a new one.
+            const baseline = await adapter.readRowBaseline();
+            if (!baseline || !settled()) return fail('STALE_REVISION', 'Board reactivation durable proof changed');
+            if (receipt.value === null) return { ok: true, value: null };
+            if (!taskEditValuesEqual(receipt.value, prepared.result)) return fail('INVALID_INPUT', 'Board reactivation saved receipt does not match');
+            const rows = data.tasks.filter(row => row.id === prepared.after.id);
+            return { ok: true, value: rows.length === 1 && samePreparedTask(rows[0], prepared.after) ? prepared.result : null };
+        } catch { return fail('SAVE_FAILED', 'Board reactivation saved outcome could not be read'); }
+    };
+    const commitReactivation = async (prepared: NativePreparedBoardAction): Promise<NativeHostResult<NativeBoardActionResult>> => {
+        const adapter = boundReactivationAdapter();
+        if (!adapter) return fail('SAVE_FAILED', 'Board reactivation requires guarded receipt ownership');
+        const payload = reactivationPayload(prepared);
+        const saved = reactivationReceipts.saved<NativeBoardActionResult>(prepared.request.requestId, payload);
+        if (saved) {
+            if (!saved.ok) return saved;
+            const outcome = await reactivationOutcome(prepared);
+            return !outcome.ok ? outcome : outcome.value === null
+                ? fail('STALE_REVISION', 'Board reactivation saved row changed') : { ok: true, value: outcome.value };
+        }
+        let readFailure: NativeHostResult<never> | null = null;
+        const result = await reactivationReceipts.run(prepared.request.requestId, payload, async () => {
+            // SAVE_FAILED would mean an effect landed to the receipt engine.
+            // Remove a prewrite reservation through ACTION_FAILED instead.
+            if (useTaskStore.getState().persistenceFailure) {
+                readFailure = fail('SAVE_FAILED', 'Board reactivation has an unresolved persistence failure');
+                return fail('ACTION_FAILED', 'Board reactivation has an unresolved persistence failure');
+            }
+            const read = await readAreaDurableData(false, true);
+            if (!read.ok) {
+                if (read.error.code === 'SAVE_FAILED') { readFailure = read; return fail('ACTION_FAILED', read.error.message); }
+                return read;
+            }
+            if (read.value.adapter !== adapter) return fail('STALE_REVISION', 'Board reactivation storage changed');
+            const checked = checkReactivation(prepared, read.value.authority); if (!checked.ok) return checked;
+            const applied = await applyReactivation(prepared, read.value.authority);
+            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', 'Board reactivation raw write was superseded');
+            pendingReactivation = { prepared, adapter, boundary: read.value.authority.saveBoundary };
+            return { ok: true, value: prepared.result };
+        });
+        return readFailure ?? result;
+    };
 
     // Request IDs that entered the receipts, with their payloads, so a retry reaches its receipt first.
     const entered = new Map<string, string>();
@@ -802,9 +1073,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
             if (!read) return fail('INVALID_INPUT', 'Valid filters, a filter edit and a bounded limit are required');
             const { now, board, revision } = read;
             const limit = input.limit;
-            return {
-                ok: true,
-                value: {
+            const value: NativeBoardView = {
                     version: NATIVE_HOST_CONTRACT_VERSION,
                     revision,
                     ...board.view,
@@ -812,12 +1081,17 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                         status: column.status,
                         label: column.label,
                         tone: column.tone,
+                        order: board.ordering.get(column.status)?.order,
                         count: column.tasks.length,
                         cards: cards(board, column.tasks.slice(0, limit), now),
                         empty: column.empty,
                     })),
-                },
             };
+            if (!isNativeJsonWithinBytes(value)) for (const column of value.columns) {
+                delete column.order;
+                for (const card of column.cards) delete card.orderActions;
+            }
+            return { ok: true, value };
         },
 
         /**
@@ -856,27 +1130,46 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 total = list.total;
                 items = list.page(input.offset, input.limit);
             }
-            return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: read.revision, list: input.list, total, items } };
+            const value = { version: NATIVE_HOST_CONTRACT_VERSION, revision: read.revision, list: input.list, total, items } as const;
+            if (input.list === 'cards' && !isNativeJsonWithinBytes(value)) for (const card of items as NativeBoardCard[]) delete card.orderActions;
+            return { ok: true, value };
         },
 
         /** Pure planning for the bounded native Trash/Duplicate journal. */
-        prepareBoardAction(input: NativeBoardWriteRequest): NativeHostResult<NativeBoardPrepareResult> {
-            return prepareBoardActionBody(input);
+        prepareBoardAction(input: NativeBoardWriteRequest | NativeBoardOrderRequest) {
+            return input?.action?.type === 'orderCard' ? orderMethods.prepare(input) : prepareBoardActionBody(input as NativeBoardWriteRequest);
         },
 
         /** Pure immutable authority check, including before activation/SQLite open.
          * Terminal cleanup must never rerun a mutation or mutable source checks. */
-        validatePreparedBoardAction(input: { request: NativeBoardWriteRequest; prepared: NativePreparedBoardAction }): NativeHostResult<NativeBoardActionResult> {
+        validatePreparedBoardAction(input: { request: NativeBoardWriteRequest; prepared: NativePreparedBoardAction } | { request: NativeBoardOrderRequest; prepared: NativePreparedBoardOrder }): NativeHostResult<NativeBoardActionResult> {
+            if (input?.request?.action?.type === 'orderCard') {
+                const envelope = orderMethods.readEnvelope(input);
+                return envelope ? { ok: true, value: envelope.prepared.result } : fail('INVALID_INPUT', 'Prepared Board order does not match');
+            }
             const prepared = readPreparedCommand(input);
             return prepared ? { ok: true, value: prepared.result } : fail('INVALID_INPUT', 'Prepared Board request or journal does not match');
         },
 
-        async commitPreparedBoardAction(input: { request: NativeBoardWriteRequest; prepared: NativePreparedBoardAction }): Promise<NativeHostResult<NativeBoardActionResult>> {
+        /** Pure Done-only durable effect/owner proof for native terminal retirement. */
+        async boardMoveOutcome(input: { request: NativeBoardWriteRequest; prepared: NativePreparedBoardAction }): Promise<NativeHostResult<NativeBoardActionResult | null>> {
+            const prepared = readPreparedCommand(input);
+            return prepared && prepared.request.action.type === 'moveCard' && prepared.before.status === 'done'
+                ? reactivationOutcome(prepared) : fail('INVALID_INPUT', 'A prepared Done Board move is required');
+        },
+
+        async boardOrderOutcome(input: { request: NativeBoardOrderRequest; prepared: NativePreparedBoardOrder }): Promise<NativeHostResult<NativeBoardActionResult | null>> {
+            return orderMethods.outcome(input);
+        },
+
+        async commitPreparedBoardAction(input: { request: NativeBoardWriteRequest; prepared: NativePreparedBoardAction } | { request: NativeBoardOrderRequest; prepared: NativePreparedBoardOrder }): Promise<NativeHostResult<NativeBoardActionResult>> {
+            if (input?.request?.action?.type === 'orderCard') return orderMethods.commit(input);
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const prepared = readPreparedCommand(input);
             if (!prepared) return fail('INVALID_INPUT', 'Prepared Board request or journal does not match');
-            return commitPreparedBoard(prepared, 'preparedBoard');
+            return prepared.request.action.type === 'moveCard' && prepared.before.status === 'done'
+                ? commitReactivation(prepared) : commitPreparedBoard(prepared, 'preparedBoard');
         },
 
         /** Calendar's Delete uses the Board Trash journal, with a visible-row revision and read-only parent guard. */

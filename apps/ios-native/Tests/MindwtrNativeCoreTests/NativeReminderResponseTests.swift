@@ -84,6 +84,47 @@ final class NativeReminderResponseTests: XCTestCase {
         assertForeground(request, selection: rehearsal, options: [])
     }
 
+    func testForegroundPomodoroRequiresExactOwnershipAndNeverCapturesTaskActions() throws {
+        let container = URL(fileURLWithPath: "/synthetic586", isDirectory: true)
+        let standard = NativeLaunchSelection.standard(databaseURL: container.appendingPathComponent("mindwtr.sqlite"),
+            containerURL: container, namespace: namespace)
+        let isolated = NativeLaunchSelection.isolated(databaseURL: container.appendingPathComponent("mindwtr.sqlite"),
+            containerURL: container, namespace: namespace, identifier: try XCTUnwrap(UUID(uuidString: publication)))
+        let rehearsal = NativeLaunchSelection.rehearsal(containerURL: container,
+            databaseURL: container.appendingPathComponent("mindwtr.sqlite"), bundleIdentifier: namespace)
+        for phase in ["focus", "break"] {
+            for sounding in [false, true] {
+                let request = try NativePomodoroRequest.make(intent: [
+                    "kind": "schedule", "sessionID": publication, "phase": phase,
+                    "fireAtMs": 1_900_000_000_123, "observedAtMs": 1_899_999_000_123, "immediate": false,
+                    "details": ["title": "Pomodoro", "message": "Finished", "play_sound": sounding,
+                        "has_button": false, "has_complete_action": false,
+                        "data": ["kind": "pomodoro", "phase": phase + "-complete"]],
+                ], namespace: namespace, libraryID: "synthetic586")
+                for selection in [standard, isolated] {
+                    assertForeground(request, selection: selection, options: sounding ? [.banner, .list, .sound] : [.banner, .list])
+                    assertForeground(changing(request, { _ in }, identifier: request.identifier + "0"), selection: selection, options: [])
+                    for (field, value) in [("namespace", namespace + ".other" as Any), ("version", true),
+                                           ("sessionID", publication.uppercased()), ("phase", "other"),
+                                           ("fireAtMs", 1_900_000_000_124), ("libraryDigest", "foreign"), ("extra", 1)] {
+                        assertForeground(changing(request) { content in
+                            var metadata = content.userInfo["mindwtrNativePomodoro"] as! [String: Any]
+                            metadata[field] = value; content.userInfo["mindwtrNativePomodoro"] = metadata
+                        }, selection: selection, options: [])
+                    }
+                    assertForeground(changing(request) { $0.userInfo.removeValue(forKey: "mindwtrNativePomodoro") },
+                                     selection: selection, options: [])
+                }
+                assertForeground(request, selection: nil, options: [])
+                assertForeground(request, selection: rehearsal, options: [])
+                for action in [UNNotificationDefaultActionIdentifier, NativeReminderResponse.completeActionIdentifier,
+                               NativeReminderResponse.snoozeActionIdentifier, UNNotificationDismissActionIdentifier] {
+                    XCTAssertNil(capture(request, action))
+                }
+            }
+        }
+    }
+
     func testForegroundPresentationRequiresExactClosedNativeOwnership() throws {
         let container = URL(fileURLWithPath: "/synthetic453", isDirectory: true)
         let selection = NativeLaunchSelection.standard(databaseURL: container.appendingPathComponent("mindwtr.sqlite"),

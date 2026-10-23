@@ -179,7 +179,11 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
         });
         void logInfo('Android widget context and tag snapshots published', {
             scope: 'widget', force: true,
-            extra: { releaseCheck: 'v1.3.7/widget-context-selection', count: (payload.contexts?.length ?? 0) + (payload.tags?.length ?? 0) },
+            extra: {
+                releaseCheck: 'v1.3.7/widget-context-selection', count: (payload.contexts?.length ?? 0) + (payload.tags?.length ?? 0),
+                // Lists built for placed widgets' context, tag and saved-filter choices only.
+                lists: Object.keys(payload.lists).filter((id) => /^(context|tag|filter):/.test(id)).length,
+            },
         });
         void logInfo('Upcoming widget snapshot published', {
             scope: 'widget',
@@ -386,6 +390,7 @@ type WidgetRenderContext = {
     localDayKey: string;
     systemColorScheme: ReturnType<typeof getSystemColorSchemeForWidget>;
     focusFilterKey: string;
+    listSelectionsKey: string;
 };
 let lastRenderContext: WidgetRenderContext | null = null;
 
@@ -507,6 +512,10 @@ export async function updateMobileWidgetFromStore(): Promise<boolean> {
     // Changing a filter on the Focus screen moves no task data, so without this
     // the gate below would skip the republish that shows the new selection.
     const currentFocusFilterKey = focusWidgetFilterKey(getFocusWidgetFilter());
+    // The Android payload carries context, tag and saved-filter lists only for placed widgets' choices (core's
+    // androidWidgetProjectionOptions), so a list picked in the widget's chooser moves no task data either.
+    const listSelectionsKey = Platform.OS === 'android' && AndroidWidget.isSupported()
+        ? JSON.stringify(AndroidWidget.getWidgetListSelections()) : '';
     if (
         lastRenderContext
         && lastRenderContext.lastDataChangeAt === lastDataChangeAt
@@ -514,6 +523,7 @@ export async function updateMobileWidgetFromStore(): Promise<boolean> {
         && lastRenderContext.localDayKey === localDayKey
         && lastRenderContext.systemColorScheme === systemColorScheme
         && lastRenderContext.focusFilterKey === currentFocusFilterKey
+        && lastRenderContext.listSelectionsKey === listSelectionsKey
     ) {
         return true;
     }
@@ -523,7 +533,7 @@ export async function updateMobileWidgetFromStore(): Promise<boolean> {
     // (native call threw, iOS widget API unavailable) must not disable the
     // callers' retry (immediate + 800ms) via gate 0 (correction #1, blocking).
     if (result) {
-        lastRenderContext = { lastDataChangeAt, language, localDayKey, systemColorScheme, focusFilterKey: currentFocusFilterKey };
+        lastRenderContext = { lastDataChangeAt, language, localDayKey, systemColorScheme, focusFilterKey: currentFocusFilterKey, listSelectionsKey };
     }
     return result;
 }

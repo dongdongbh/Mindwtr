@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { androidHostEntry } from './android-host-table.mjs';
 
@@ -71,7 +71,18 @@ const result = await build({
     // Android never sets the host platform: its iOS-only branches fold away, and the modules only they import with them.
     define: { 'globalThis.__mindwtrHostPlatform': '"android"' },
     plugins: [traceModules ? moduleTrace : androidHostTable],
+    metafile: true,
 });
+// Every source outside node_modules must be this tree's own. A node_modules symlinked to another worktree resolves
+// @mindwtr/core to that tree's packages/core, and the APK silently bundles its core instead of this commit's (the D9b
+// bisect of 2026-10-19 measured change 5's core under every commit).
+const root = realpathSync(repo);
+const foreign = Object.keys(result.metafile.inputs).map((input) => resolve(input)).filter((path) => existsSync(path))
+    .map((path) => realpathSync(path)).filter((path) => !path.split(sep).includes('node_modules') && relative(root, path).startsWith('..'));
+if (foreign.length) {
+    console.error(`build-bundle: refused: ${foreign.length} source(s) from outside ${root}, first ${foreign[0]}. Is node_modules a symlink to another tree?`);
+    process.exit(1);
+}
 // The bundle's first line is the SHA-256 of the rest: the key of the app's bytecode cache (BytecodeCache.kt). Both go in one
 // file, written under a name of its own and renamed into place, so a bundle and a hash from two builds can never pair up
 // (verify-bundle.mjs checks every variant's packaged copy).

@@ -1401,6 +1401,8 @@ describe('notification-service-local', () => {
         data: {
           kind: 'pomodoro',
           phase: 'focus-complete',
+          // The library stamps the alert with the phase's end (setWhen), so a late one never reads as new.
+          endsAtMs: String(fireAt.getTime()),
         },
       })
     );
@@ -1408,6 +1410,47 @@ describe('notification-service-local', () => {
       'mindwtr:local:pomodoro-alarm:v1',
       JSON.stringify({ id: 99, fireAtMs: fireAt.getTime(), phase: 'focus-complete' })
     );
+  });
+
+  it('arms the pomodoro alarm again when its record matches but the alarm library no longer holds it', async () => {
+    // An RN recovery build over the native app: the native app cancelled RN's alarms and dropped the library's alarm table,
+    // but kept RN's Pomodoro record, which still names that alarm.
+    const fireAt = new Date('2099-05-22T12:30:00.000Z');
+    const storage = installPomodoroStorage(JSON.stringify({ id: 41, fireAtMs: fireAt.getTime(), phase: 'focus-complete' }));
+    mockAlarmGetScheduledAlarms.mockResolvedValue([{ id: 7, data: 'kind==>task;;taskId==>task-1;;' }]);
+
+    await scheduleLocalPomodoroCompletionNotification('Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' });
+
+    expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+    expect(storage.getPomodoro()).toBe(JSON.stringify({ id: 99, fireAtMs: fireAt.getTime(), phase: 'focus-complete' }));
+    // The old id names no Pomodoro alarm any more: the library may have given it to a task reminder since.
+    expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(41);
+    expect(mockAlarmRemoveFiredNotification).not.toHaveBeenCalledWith(41);
+  });
+
+  it('keeps a matching pomodoro record inside the immediate window even when the library no longer lists it', async () => {
+    // iOS can deliver up to a second early and then drops the request: that must not read as missing and show it twice.
+    const fireAt = new Date(Date.now() + 500);
+    installPomodoroStorage(JSON.stringify({ id: 41, fireAtMs: fireAt.getTime(), phase: 'focus-complete' }));
+
+    await scheduleLocalPomodoroCompletionNotification('Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' });
+
+    expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+    expect(mockAlarmSendNotification).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the library still holds it', async () => [{ id: '41', data: 'kind==>pomodoro;;phase==>focus-complete;;' }]],
+    ['the library cannot be read', async () => { throw new Error('alarm database locked'); }],
+  ])('keeps a matching pomodoro alarm when %s', async (_case, inventory) => {
+    const fireAt = new Date('2099-05-22T12:30:00.000Z');
+    installPomodoroStorage(JSON.stringify({ id: 41, fireAtMs: fireAt.getTime(), phase: 'focus-complete' }));
+    mockAlarmGetScheduledAlarms.mockImplementation(inventory as () => Promise<Record<string, unknown>[]>);
+
+    await scheduleLocalPomodoroCompletionNotification('Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' });
+
+    expect(mockAlarmScheduleAlarm).not.toHaveBeenCalled();
+    expect(mockAlarmDeleteAlarm).not.toHaveBeenCalled();
   });
 
   it('cancels the superseded pomodoro alarm only after its replacement is scheduled', async () => {
@@ -1632,6 +1675,8 @@ describe('notification-service-local', () => {
   it('does not reschedule the same future phase and deadline', async () => {
     installPomodoroStorage();
     const fireAt = new Date('2099-05-22T12:30:00.000Z');
+    // The library lists the alarm it scheduled (id 99).
+    mockAlarmGetScheduledAlarms.mockResolvedValue([{ id: 99, data: { kind: 'pomodoro', phase: 'focus-complete' } }]);
 
     await scheduleLocalPomodoroCompletionNotification(
       'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },
@@ -1641,6 +1686,17 @@ describe('notification-service-local', () => {
     );
 
     expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('stamps an already-due completion alert with the phase end, not the time it is shown', async () => {
+    installPomodoroStorage();
+    const fireAt = new Date(Date.now() - 90_000);
+
+    await scheduleLocalPomodoroCompletionNotification('Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' });
+
+    expect(mockAlarmSendNotification).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ kind: 'pomodoro', endsAtMs: String(fireAt.getTime()) }),
+    }));
   });
 
   it('does not send the same already-due completion alert twice', async () => {
@@ -1677,6 +1733,7 @@ describe('notification-service-local', () => {
   it('treats a legacy same-deadline record without phase as idempotent', async () => {
     const fireAt = new Date('2099-05-22T12:30:00.000Z');
     installPomodoroStorage(JSON.stringify({ id: 41, fireAtMs: fireAt.getTime() }));
+    mockAlarmGetScheduledAlarms.mockResolvedValue([{ id: 41, data: { kind: 'pomodoro' } }]);
 
     await scheduleLocalPomodoroCompletionNotification(
       'Pomodoro Focus', 'Take a break.', fireAt, { phase: 'focus-complete' },

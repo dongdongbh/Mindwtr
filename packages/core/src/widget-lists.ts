@@ -3,6 +3,7 @@ import { getUsedTaskTokens } from './task-token-usage';
 import type { FocusTaskLists } from './focus-sections';
 import { compareSomedayTasks, compareWaitingTasks } from './menu-views-model';
 import { applyFilter, normalizeSavedFilters } from './saved-filters';
+import { logInfo } from './logger';
 import { sortTasksBy, sortTasksBySavedPreference } from './task-utils';
 import type { AppData, SavedFilter, Task, TaskSortBy } from './types';
 
@@ -29,9 +30,15 @@ export function normalizeWidgetTokenListId(value: string): string | null {
 
 export function buildWidgetTokenOptions(data: AppData, field: BulkTaskTokenField): { id: string; name: string }[] {
     const prefix = field === 'contexts' ? WIDGET_CONTEXT_LIST_PREFIX : WIDGET_TAG_LIST_PREFIX;
-    // Retained records keep unused labels available; deleted records contribute nothing.
-    const tokens = getUsedTaskTokens(data.tasks || [], (task) => (task[field] || [])
-        .map((token) => normalizeBulkTaskTokenInput(token, field)), { includeAncestors: true });
+    // Retained records keep unused labels available; deleted records contribute nothing. Every Android widget refresh runs
+    // this over the whole store, where a few labels repeat thousands of times: each is normalized once.
+    const normalized = new Map<string, string>();
+    const normalize = (token: string): string => {
+        let value = normalized.get(token);
+        if (value === undefined) normalized.set(token, value = normalizeBulkTaskTokenInput(token, field));
+        return value;
+    };
+    const tokens = getUsedTaskTokens(data.tasks || [], (task) => (task[field] || []).map(normalize), { includeAncestors: true });
     return tokens.flatMap((name) => {
         const id = normalizeWidgetTokenListId(`${prefix}${name}`);
         return id ? [{ id, name }] : [];
@@ -95,6 +102,7 @@ export interface WidgetListContext {
     focusLists: FocusTaskLists;
     sortBy: TaskSortBy;
     prioritiesEnabled: boolean;
+    now?: Date;
     tr: Record<string, string>;
     tokenTaskIndex?: Map<string, Task[]>;
 }
@@ -125,7 +133,14 @@ function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): 
     const status = savedFilterStatus[filter.view];
     const pool = status ? activeTasks.filter((task) => task.status === status) : activeTasks;
     const projects = data.projects || [];
-    const matched = applyFilter(pool, filter.criteria, { projects, tokenMatchMode: 'all' });
+    const matched = applyFilter(pool, filter.criteria, { projects, tokenMatchMode: 'all', now: context.now });
+    if (filter.criteria.anyDateRange) {
+        logInfo('Task date filter projected for widget', {
+            scope: 'widget-lists',
+            category: 'unknown',
+            context: { releaseCheck: 'v1.3.7/task-date-filter', count: matched.length, outcome: 'projected' },
+        });
+    }
     const tasks = filter.sortBy && filter.sortBy !== 'default'
         ? sortTasksBySavedPreference(matched, filter.sortBy, {
             projects,

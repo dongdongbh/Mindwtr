@@ -16,6 +16,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import { noopStorage } from './storage';
 import type { AppSettings, Area, Person, Project, Task } from './types';
 import { generateUUID } from './uuid';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 
 /**
  * The frozen React Native Settings screens (settings-screens-parity.fixtures.json,
@@ -69,7 +70,7 @@ const normalize = (entry: unknown): unknown => JSON.parse(JSON.stringify(entry, 
 
 const RECORDED = [
     'updateSettings', 'addArea', 'updateArea', 'deleteArea', 'addPerson', 'updatePerson', 'renamePerson', 'deletePerson',
-    'renameContext', 'deleteContext', 'renameTag', 'deleteTag',
+    'addContext', 'addTag', 'renameContext', 'deleteContext', 'renameTag', 'deleteTag',
 ] as const;
 const writes: unknown[][] = [];
 let realActions: Record<string, (...args: unknown[]) => Promise<unknown>> | null = null;
@@ -196,6 +197,7 @@ function generalDriver(host: Host, scenario: Scenario) {
         if (control === 'theme') return { title: model.appearance.theme.pickerTitle, groups: model.appearance.theme.groups };
         const controls = {
             quickAccess: model.appearance.quickAccess,
+            appLockRelock: model.privacy.appLockRelockDelay!,
             language: model.language,
             weekStart: model.regional.weekStart,
             dateFormat: model.regional.dateFormat,
@@ -216,6 +218,9 @@ function generalDriver(host: Host, scenario: Scenario) {
             } else if (write.key === 'mindwtr-language') {
                 log.device.push(['setLanguage', write.value]);
                 value(await host.setLanguage({ storedLanguage: write.value, systemLocale: device.systemLocale ?? 'en-US' }));
+            } else if (write.key === 'mindwtr:appSearchWipeOwed') {
+                // RN's writeAppSearchIndexingEnabled(false) stores it first, inside the same call (pass O2c).
+                expect(write.value).toBe('true');
             } else if (write.key === 'mindwtr:appSearchIndexingEnabled') {
                 const enabled = write.value === 'true';
                 log.device.push(['writeAppSearchIndexingEnabled', enabled]);
@@ -241,6 +246,7 @@ function generalDriver(host: Host, scenario: Scenario) {
                     ...rows(appearance.quickAccess),
                     privacy.title, privacy.appLock.label, privacy.appLock.description,
                     ...(appLockError ? [privacy.appLock.errors[appLockError]] : []),
+                    ...rows(privacy.appLockRelockDelay),
                     ...(privacy.appSearch ? [privacy.appSearch.label, privacy.appSearch.description] : []),
                     language.title, language.description, ...rows(language),
                     regional.label, regional.summary,
@@ -378,13 +384,16 @@ function manageDriver(host: Host, scenario: Scenario) {
                     const list = view[section.key];
                     texts.push(...(list.empty ? [list.empty] : list.rows.items.map((row) => row.value)));
                     labels.push(...list.rows.items.flatMap((row) => rowButtons(row.value)));
+                    texts.push(list.create.label, list.create.addLabel);
+                    labels.push([list.create.label, false]);
                 }
             }
             let editorView: unknown = null;
             if (editor) {
                 const text = view.editor.text[editor.type as keyof NativeManageSettings['editor']['text']];
                 const nameTestId = editor.type === 'newArea' ? 'manage-area-name-input'
-                    : editor.type === 'newPerson' || editor.type === 'person' ? 'manage-person-name-input' : null;
+                    : editor.type === 'newPerson' || editor.type === 'person' ? 'manage-person-name-input'
+                        : editor.type === 'newContext' || editor.type === 'newTag' ? 'manage-token-name-input' : null;
                 editorView = {
                     title: text.title,
                     inputs: [
@@ -569,6 +578,46 @@ describe('native host contract: Settings', () => {
         expect(manage.tags.rows.items.map((row) => row.value)).toEqual(state.getDerivedState().allTags);
     });
 
+    it.each(['context', 'tag'] as const)('creates an unused %s from Manage, keeps it durable, and rejects forged create targets', async (kind) => {
+        await seed({ data: 'none', settings: 'base' });
+        const host = await openHost();
+        const type = kind === 'context' ? 'newContext' : 'newTag';
+        const list = kind === 'context' ? 'contexts' : 'tags';
+        const create = value(host.getManageSettings())[list].create;
+        expect(create.edit.target).toEqual({ type });
+        expect(create.edit.draft.name).toBe('');
+        expect(value(host.checkManageEditor({ target: { type }, name: '#@' })).saveDisabled).toBe(true);
+        expect(await host.saveManageEditor({ requestId: generateUUID(), target: { type }, name: '#' }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.saveManageEditor({ requestId: generateUUID(), target: { type, revision: 'forged' } as never, name: 'unused' }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const requestId = generateUUID();
+        expect(value(await host.saveManageEditor({ requestId, target: create.edit.target, name: 'unused' })).changed).toBe(true);
+        expect(getSavedTaxonomyTokens(useTaskStore.getState().settings, kind)).toEqual([kind === 'context' ? '@unused' : '#unused']);
+        expect(value(host.getManageSettings())[list].rows.items.map(row => row.value)).toEqual([kind === 'context' ? '@unused' : '#unused']);
+        await useTaskStore.getState().fetchData({ throwOnError: true });
+        const restarted = await openHost();
+        expect(value(await restarted.saveManageEditor({ requestId, target: create.edit.target, name: 'unused' })).changed).toBe(false);
+        expect(getSavedTaxonomyTokens(useTaskStore.getState().settings, kind)).toHaveLength(1);
+    });
+
+    it.each(['context', 'tag'] as const)('renames and deletes saved unused %s with a catalogue revision guard', async (kind) => {
+        await seed({ data: 'none', settings: 'base' });
+        const host = await openHost();
+        const list = kind === 'context' ? 'contexts' : 'tags';
+        value(await host.saveManageEditor({ requestId: generateUUID(), target: { type: kind === 'context' ? 'newContext' : 'newTag' }, name: 'unused' }));
+        const row = value(host.getManageSettings())[list].rows.items[0];
+        expect(value(await host.saveManageEditor({ requestId: generateUUID(), target: row.edit.target, name: 'renamed' })).changed).toBe(true);
+        const renamed = value(host.getManageSettings())[list].rows.items[0];
+        expect(renamed.value).toBe(kind === 'context' ? '@renamed' : '#renamed');
+        expect(value(await host.saveManageEditor({ requestId: generateUUID(), target: row.edit.target, name: 'stale' })).changed).toBe(false);
+        expect(value(await host.saveManageEditor({ requestId: generateUUID(), target: renamed.edit.target, name: 'Renamed' })).changed).toBe(true);
+        expect(await host.deleteManageItem({ requestId: generateUUID(), target: renamed.delete }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(value(await host.deleteManageItem({ requestId: generateUUID(), target: value(host.getManageSettings())[list].rows.items[0].delete })).changed).toBe(true);
+        expect(getSavedTaxonomyTokens(useTaskStore.getState().settings, kind)).toEqual([]);
+    });
+
     it('pages Manage lists under one revision and refuses a stale page', async () => {
         freezeClock();
         await seed({ data: 'manage', settings: 'manage' });
@@ -600,6 +649,9 @@ describe('native host contract: Settings', () => {
         expect({ ...after, appearance: before.appearance, syncPreferencesUpdatedAt: before.syncPreferencesUpdatedAt }).toEqual(before);
         expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'appSearch', value: true } })))
             .toEqual({ changed: false, deviceWrites: [{ key: 'mindwtr:appSearchIndexingEnabled', value: 'true' }] });
+        // Off: the owed wipe is stored before the switch goes, so a start finishes a wipe that never landed (pass O2c).
+        expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'appSearch', value: false } })))
+            .toEqual({ changed: false, deviceWrites: [{ key: 'mindwtr:appSearchWipeOwed', value: 'true' }, { key: 'mindwtr:appSearchIndexingEnabled', value: null }] });
         expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'theme', value: 'material3-dark' } })).deviceWrites)
             .toEqual([{ key: '@mindwtr_theme', value: 'material3-dark' }, { key: '@mindwtr_theme_style', value: 'material3' }]);
         expect(writes).toHaveLength(2);
@@ -628,7 +680,7 @@ describe('native host contract: Settings', () => {
         const text = value(host.getManageSettings()).editor.text;
         // The rows' own targets (with their revisions), and the same without one.
         const targets = [
-            { type: 'newArea' }, shown(host, 'area', 'a-work').edit, { type: 'area', id: 'a-work' }, { type: 'unassignedArea' }, { type: 'newPerson' },
+            { type: 'newArea' }, shown(host, 'area', 'a-work').edit, { type: 'area', id: 'a-work' }, { type: 'unassignedArea' }, { type: 'newPerson' }, { type: 'newContext' }, { type: 'newTag' },
             shown(host, 'person', 'pe-alex').edit, shown(host, 'context', '@home').edit, { type: 'tag', name: '#web' }, shown(host, 'tag', '#web').edit,
         ] as NativeManageEditorTarget[];
         for (const target of targets) {
@@ -701,7 +753,7 @@ describe('native host contract: Settings', () => {
             const host = await openHost();
             const requestId = generateUUID();
             saveData.mockRejectedValue(new Error('disk unavailable'));
-            expect(await run(host, requestId)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED', message: 'disk unavailable' } });
+            expect(await run(host, requestId)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED', message: expect.stringContaining('disk unavailable') } });
             const count = writes.length;
             expect(count).toBeGreaterThan(0);
             saveData.mockResolvedValue(undefined);
@@ -746,6 +798,10 @@ describe('native host contract: Settings', () => {
         });
 
         it.each([
+            ['saveManageEditor: new context', { target: { type: 'newContext' }, name: 'unused' },
+                (saved: { settings: AppSettings }) => expect(getSavedTaxonomyTokens(saved.settings, 'context')).toContain('@unused')],
+            ['saveManageEditor: new tag', { target: { type: 'newTag' }, name: 'unused' },
+                (saved: { settings: AppSettings }) => expect(getSavedTaxonomyTokens(saved.settings, 'tag')).toContain('#unused')],
             ['saveManageEditor: unassigned color', { target: { type: 'unassignedArea' }, color: '#f97316' },
                 (saved: { settings: AppSettings }) => expect(saved.settings.appearance).toEqual({ density: 'compact', unassignedAreaColor: '#f97316' })],
             ['saveManageEditor: new area', { target: { type: 'newArea' }, name: ' Garden ', color: '#14b8a6' },

@@ -52,8 +52,8 @@ const FOREGROUND_MIN_INTERVAL_MS = 5 * 60_000;
  * RN's widget service on the engine: core builds the whole Android payload (buildAndroidWidgetPublication) from the store, with
  * the device's inputs and the device language passed every time (QuickJS cannot detect either), and Kotlin writes it where RN's
  * module reads it and redraws the widgets. A store change publishes after a short delay (at most once per five minutes while the
- * app is in front, as RN); the host publishes at once after its boot, after a CoreWork job, and when the app comes to the front
- * or leaves it (RN publishes on resume and flushes on leaving). A payload equal to the last one is
+ * app is in front, as RN); the host publishes at once after its boot, after a CoreWork job and when the app comes to the front,
+ * and flushes a waiting change when the app leaves (RN publishes on resume and flushes on leaving). A payload equal to the last one is
  * not sent again, unless Kotlin says that one never reached the widgets.
  */
 export const createWidgetPublisher = (bridge: WidgetBridge) => {
@@ -86,7 +86,11 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
         last = payload;
         logInfo('Android widget context and tag snapshots published', {
             scope: 'widget', force: true,
-            context: { releaseCheck: 'v1.3.7/widget-context-selection', count: (publication.contexts?.length ?? 0) + (publication.tags?.length ?? 0) },
+            context: {
+                releaseCheck: 'v1.3.7/widget-context-selection', count: (publication.contexts?.length ?? 0) + (publication.tags?.length ?? 0),
+                // Lists built for placed widgets' context, tag and saved-filter choices only.
+                lists: Object.keys(publication.lists).filter((id) => /^(context|tag|filter):/.test(id)).length,
+            },
         });
         logInfo('Upcoming widget snapshot published', {
             scope: 'widget',
@@ -131,6 +135,15 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
 
     return {
         publish,
+        /**
+         * Leaving the app (ProcessCoreHost's "background"): RN flushes a refresh still waiting. With none waiting, and the last
+         * publication stored and drawn, nothing is built: the whole payload costs about 300 ms of the engine at 5,000 tasks,
+         * right when a leave-time sync starts its read.
+         */
+        flush(): boolean {
+            if (timer === null && !storeChangePending && !bridge.inputs().stale) return false;
+            return publish();
+        },
         /**
          * The Focus screen's current filter and sort (core's `controls.widgetFilter`), as RN's Focus screen hands it to
          * setFocusWidgetFilter: a change republishes at once, as RN's Focus screen does. Core's null sortOrder is RN's absent one.

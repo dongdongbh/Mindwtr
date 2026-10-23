@@ -6,6 +6,7 @@ import {
     createBulkOrganizeProject,
     ensureBulkOrganizeDestinationSaved,
     getRetainedTaskContexts,
+    getSavedTaxonomyTokens,
     getUsedTaskTokens,
     isSelectableProjectForTaskAssignment,
     parseBulkOrganizeTokenInput,
@@ -97,9 +98,10 @@ export function TaskBulkOrganizeModal({
     const { nativeDateInputLocale, dateFormatSetting } = useNativeDateInputLocale();
     const tokenInputId = useId();
     const retainedTasks = useTaskStore((state) => isOpen ? state._allTasks : null);
-    const allContexts = useMemo(() => retainedTasks ? getRetainedTaskContexts(retainedTasks) : [], [retainedTasks]);
+    const settings = useTaskStore((state) => state.settings);
+    const allContexts = useMemo(() => retainedTasks ? Array.from(new Set([...getRetainedTaskContexts(retainedTasks), ...getSavedTaxonomyTokens(settings, 'context')])) : [], [retainedTasks, settings]);
     const tasks = useTaskStore((state) => isOpen ? state.tasks : null);
-    const allTags = useMemo(() => tasks ? getUsedTaskTokens(tasks, (task) => task.tags) : [], [tasks]);
+    const allTags = useMemo(() => tasks ? Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.tags), ...getSavedTaxonomyTokens(settings, 'tag')])) : [], [tasks, settings]);
 
     useEffect(() => {
         createSessionRef.current += 1;

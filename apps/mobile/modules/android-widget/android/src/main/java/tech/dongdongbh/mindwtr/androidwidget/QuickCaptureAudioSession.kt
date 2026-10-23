@@ -10,7 +10,18 @@ internal class QuickCaptureAudioSession(
   private val publishAudio: (QuickCaptureAudioDraft, String, String, (Boolean) -> Unit) -> Unit,
   private val discardAudio: (QuickCaptureAudioDraft) -> Unit,
   private val onTerminal: () -> Unit = {},
+  val defaultStatus: String = "inbox",
+  initialCaptureStatus: String? = null,
+  initialTitle: String = "",
 ) {
+  var captureStatus: String? = PendingCaptureWriter.creationStatus(initialCaptureStatus)
+    private set
+
+  fun selectCaptureStatus(value: String) {
+    if (state == State.SAVING || state == State.SAVED || state == State.CLOSED) return
+    captureStatus = PendingCaptureWriter.creationStatus(value) ?: return
+    notifyChanged()
+  }
   internal interface RecordingControl {
     val id: String?
     fun stop()
@@ -33,7 +44,7 @@ internal class QuickCaptureAudioSession(
 
   private var state = State.IDLE
   private var status = Status.RECORD
-  private var title = ""
+  private var title = initialTitle
   private var note = ""
   private var recorder: RecordingControl? = null
   private var draft: QuickCaptureAudioDraft? = null
@@ -160,7 +171,7 @@ internal class QuickCaptureAudioSession(
     }
   }
 
-  /** Returns true only once so Inbox count/toast side effects cannot duplicate. */
+  /** Returns true only once so queued feedback cannot duplicate. */
   fun consumeSaved(): Boolean {
     if (state != State.SAVED || savedConsumed) return false
     savedConsumed = true
@@ -325,19 +336,22 @@ internal class QuickCapturePermissionOwner {
  * next native quick-capture open; terminal sessions remove themselves.
  */
 internal object QuickCaptureAudioSessionStore {
-  private var retained: QuickCaptureAudioSession? = null
+  private val retained = mutableMapOf<String, QuickCaptureAudioSession>()
 
   @Synchronized
-  fun acquire(factory: () -> QuickCaptureAudioSession): QuickCaptureAudioSession =
-    retained ?: factory().also { retained = it }
+  fun acquire(owner: String = "standalone", factory: () -> QuickCaptureAudioSession): QuickCaptureAudioSession =
+    retained.getOrPut(owner, factory)
 
   @Synchronized
   fun release(session: QuickCaptureAudioSession) {
-    if (retained === session) retained = null
+    retained.entries.removeAll { it.value === session }
   }
 
   @Synchronized
+  fun activeIds(): Set<String> = retained.values.flatMap { it.activeIds }.toSet()
+
+  @Synchronized
   fun clearForTests() {
-    retained = null
+    retained.clear()
   }
 }

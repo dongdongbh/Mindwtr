@@ -941,6 +941,33 @@ describe('cloud server utils', () => {
         expect(invalid.error).toContain('viewSectionIds');
     });
 
+    test('validates the Per section flow fields and keeps them off REST writes (#1429)', () => {
+        const iso = '2024-01-01T00:00:00.000Z';
+        const project = {
+            id: 'trip', title: 'Camping Trip', status: 'active' as const, color: '#6B7280',
+            order: 0, tagIds: [], createdAt: iso, updatedAt: iso,
+        };
+        const section = { id: 'book', projectId: 'trip', title: 'Book campsite', order: 0, createdAt: iso, updatedAt: iso };
+        expect(validateAppData({ tasks: [], projects: [{ ...project, perSectionFlow: true }],
+            sections: [{ ...section, isSequential: true }, { ...section, id: 'prep', isSequential: false }, { ...section, id: 'later' }] }).ok).toBe(true);
+        expect(validateAppData({ tasks: [], projects: [{ ...project, perSectionFlow: null }], sections: [{ ...section, isSequential: null }] }).ok).toBe(true);
+        const badProject = validateAppData({ tasks: [], projects: [{ ...project, perSectionFlow: 'yes' }] });
+        expect(badProject.ok).toBe(false);
+        if (badProject.ok) throw new Error('Expected invalid project perSectionFlow');
+        expect(badProject.error).toContain('perSectionFlow');
+        const badSection = validateAppData({ tasks: [], projects: [project], sections: [{ ...section, isSequential: 1 }] });
+        expect(badSection.ok).toBe(false);
+        if (badSection.ok) throw new Error('Expected invalid section isSequential');
+        expect(badSection.error).toContain('isSequential');
+        // Managed like sequentialScope: REST create/patch cannot write them.
+        for (const keys of [CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS, CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS]) {
+            expect((keys as ReadonlySet<string>).has('perSectionFlow')).toBe(false);
+        }
+        for (const keys of [CLOUD_SECTION_CREATION_ALLOWED_PROP_KEYS, CLOUD_SECTION_PATCH_ALLOWED_PROP_KEYS]) {
+            expect((keys as ReadonlySet<string>).has('isSequential')).toBe(false);
+        }
+    });
+
     test('validates Project.viewSectionIds like the task field (#1319)', () => {
         const iso = '2024-01-01T00:00:00.000Z';
         const project = {
@@ -2049,8 +2076,10 @@ describe('cloud server api', () => {
         const body = JSON.stringify({ tasks, projects: [], sections: [], areas: [], people: [], settings: {} });
         expect(body.length).toBeGreaterThan(3_000_000);
 
+        // Keep limit checks independent of Bun's pooled sockets after an early body rejection.
         const dataResponse = await fetch(`${baseUrl}/v1/data`, {
             method: 'PUT',
+            keepalive: false,
             headers: { ...authHeaders, 'content-type': 'application/json' },
             body,
         });
@@ -2058,6 +2087,7 @@ describe('cloud server api', () => {
 
         const taskResponse = await fetch(`${baseUrl}/v1/tasks`, {
             method: 'POST',
+            keepalive: false,
             headers: { ...authHeaders, 'content-type': 'application/json' },
             body: JSON.stringify({ title: 'Too big', description: 'x'.repeat(3_000_000) }),
         });
@@ -2066,12 +2096,36 @@ describe('cloud server api', () => {
 
         const captureResponse = await fetch(`${baseUrl}/v1/capture`, {
             method: 'POST',
+            keepalive: false,
             headers: { ...authHeaders, 'content-type': 'application/json' },
             // A short transcription: only the small JSON cap refuses this, not the attachment cap.
             body: JSON.stringify({ transcription: 'Short note', pad: 'x'.repeat(3_000_000) }),
         });
         expect(captureResponse.status).toBe(413);
         expect(await captureResponse.json()).toEqual({ error: 'Payload too large: the limit is 2000000 bytes' });
+    });
+
+    test('a refusal that leaves the body unread tells the client to close the connection', async () => {
+        // A 413 answered from Content-Length leaves the body on the socket. A keep-alive client that
+        // reuses the connection sends its next request after those bytes (CI saw 431 for the capture above).
+        const { hostname, port } = new URL(baseUrl);
+        const body = JSON.stringify({ title: 'Too big', description: 'x'.repeat(3_000_000) });
+        const head = await new Promise<string>((resolve, reject) => {
+            const socket = connect(Number(port), hostname);
+            let received = '';
+            const timer = setTimeout(() => { socket.destroy(); reject(new Error('no response')); }, 3_000);
+            socket.on('data', (chunk) => {
+                received += chunk.toString('latin1');
+                const end = received.indexOf('\r\n\r\n');
+                if (end >= 0) { clearTimeout(timer); socket.destroy(); resolve(received.slice(0, end)); }
+            });
+            socket.on('error', reject);
+            socket.write(`POST /v1/tasks HTTP/1.1\r\nHost: ${hostname}\r\nAuthorization: ${authHeaders.Authorization}\r\n`
+                + `Content-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n`);
+            socket.write(body);
+        });
+        expect(head.split('\r\n')[0]).toBe('HTTP/1.1 413 Payload Too Large');
+        expect(head.toLowerCase().split('\r\n')).toContain('connection: close');
     });
 
     test('uses the configured sync document limit for the data write only', async () => {
@@ -4150,6 +4204,30 @@ describe('cloud server api', () => {
         expect((await projectsList.json()).total).toBe(1);
         expect((await sectionsList.json()).total).toBe(1);
         expect((await areasList.json()).total).toBe(1);
+    });
+
+    test('persists Project color override intent and null reset while rejecting invalid colors', async () => {
+        const headers = { ...authHeaders, 'content-type': 'application/json' };
+        const create = await fetch(`${baseUrl}/v1/projects`, { method: 'POST', headers,
+            body: JSON.stringify({ title: 'Project color', props: { colorOverride: '#94a3b8' } }) });
+        expect(create.status).toBe(201);
+        const initial = (await create.json()).project;
+        expect(initial.colorOverride).toBe('#94a3b8');
+        const url = `${baseUrl}/v1/projects/${initial.id}`;
+        const unrelated = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ title: 'Renamed' }) });
+        expect((await unrelated.json()).project.colorOverride).toBe('#94a3b8');
+        const reset = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ colorOverride: null }) });
+        expect(reset.status).toBe(200);
+        const cleared = (await reset.json()).project;
+        expect(cleared.colorOverride ?? null).toBeNull();
+        expect(cleared.color).toBe('#94a3b8');
+        expect(cleared.rev).toBeGreaterThan(initial.rev);
+        for (const colorOverride of [false, '', '#fff', '#abcdef00', 'url(private)']) {
+            const invalid = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ colorOverride }) });
+            expect(invalid.status).toBe(400);
+        }
+        const loaded = await fetch(url, { headers: authHeaders });
+        expect((await loaded.json()).project.colorOverride ?? null).toBeNull();
     });
 
     test('creates REST projects with core defaults while honoring explicit props', async () => {

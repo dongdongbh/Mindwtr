@@ -436,6 +436,18 @@ describe('mergeSettingsForSync > savedFilters', () => {
         updatedAt: OLDER,
     };
 
+    it('preserves rolling task date criteria from a peer and converges on the second merge', () => {
+        const filters = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
+            ...localFilter, id: `date-${preset}`, criteria: { anyDateRange: { preset } },
+        })) as NonNullable<Settings['savedFilters']>;
+        const previousPeer: Settings = { savedFilters: [localFilter] };
+        const currentPeer: Settings = { savedFilters: filters };
+        const merged = mergeSettingsForSync(previousPeer, currentPeer);
+        expect(merged.savedFilters).toEqual([...filters, localFilter]);
+        expect(mergeSettingsForSync(merged, currentPeer)).toEqual(merged);
+        expect(mergeSettingsForSync(currentPeer, merged).savedFilters).toEqual(merged.savedFilters);
+    });
+
     it('keeps filters only one side knows about', () => {
         const merged = mergeSettingsForSync(
             { savedFilters: [localFilter] },

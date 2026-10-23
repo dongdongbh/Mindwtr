@@ -43,6 +43,7 @@ export * from './store';
 export { runStoreCommand, runSyncStoreSave } from './store-write-gate';
 export * from './store-latest-updates';
 export * from './native-host-contract';
+export * from './native-host-contract-trash-purge';
 export * from './native-host-contract-calendar';
 export * from './native-host-contract-saved-search-write';
 export * from './native-host-contract-attachments';
@@ -69,7 +70,7 @@ export * from './native-host-contract-task-save';
 export * from './task-creation';
 export { taskRevisionOf, NATIVE_UNJOURNALED_COMMANDS, NativeReceiptSqliteAdapter, loadNativeRequestReceipts, pruneNativeRequestReceipts, setNativeReplayTokens, type NativeReplayTokens } from './native-request-receipts';
 export * from './legacy-json-import';
-export { buildNewProject, MAX_FOCUSED_PROJECTS } from './store-projects/project-actions';
+export { buildNewProject, projectAreaSelection, MAX_FOCUSED_PROJECTS } from './store-projects/project-actions';
 export { nameNotifyListener } from './store-notify-profiler';
 export * from './store-types';
 export * from './project-to-section';
@@ -114,6 +115,9 @@ export * from './mobile-sync-triggers';
 export * from './mobile-reminder-alarms';
 export * from './mobile-notification-open';
 export * from './mobile-attachment-files';
+export * from './mobile-file-sync-remote';
+export * from './mobile-file-sync';
+export * from './mobile-file-sync-lease';
 export * from './mobile-attachment-installer';
 export * from './mobile-attachment-common';
 export * from './mobile-attachment-availability';
@@ -197,6 +201,8 @@ export * from './undo-task-cancellation';
 export * from './undo-project-delete';
 export * from './uuid';
 export * from './date';
+export * from './email-capture';
+export * from './gmail-capture';
 export * from './quick-add';
 export * from './area-filter';
 export * from './area-utils';
@@ -264,6 +270,8 @@ export * from './diagnostics-log';
 export * from './performance-log';
 export * from './log-breadcrumbs';
 export * from './pomodoro';
+export * from './pomodoro-session';
+export * from './native-pomodoro-panel';
 export * from './color-constants';
 export * from './task-accent-color';
 export * from './analytics-heartbeat';
@@ -289,12 +297,15 @@ export * from './context-color';
 export * from './capture';
 export * from './capture-session';
 export * from './quick-capture-model';
+export * from './apple-reminders-import-model';
 export * from './capture-deeplink';
 export * from './dropbox-auth-callback';
 export * from './entry-points';
 export * from './capture-modal-model';
 export * from './share-capture-files';
 export * from './session-restore';
+export * from './app-search-projection';
+export * from './app-search-service';
 export * from './whisper-models';
 export * from './import-apply';
 export * from './import-diagnostics';
@@ -321,6 +332,7 @@ export * from './widget-lists';
 export * from './widget-payload';
 export * from './widget-list-destination';
 export * from './startup-prompts';
+export * from './startup-prompt-run';
 export * from './area-sync-schema';
 export * from './person-sync-schema';
 export * from './import-source-reader';
@@ -334,6 +346,8 @@ export * from './task-editor-schedule';
 export * from './shared-api-write-limits';
 export * from './task-query';
 export * from './onboarding-guidance';
+export * from './first-run-onboarding';
+export * from './mobile-startup-prompts';
 export * from './docs-guidance';
 export { afterPaint } from './after-paint';
 export { isGettingStartedProject } from './getting-started-seed';
@@ -393,3 +407,21 @@ export { checklistProjectBlockReason, prepareChecklistProjectConversion } from '
 export type { ChecklistProjectConversion } from './checklist-project-conversion';
 
 export * from './task-reminder-policy';
+
+export type { NativeInboxTasksMoveRequest, NativeInboxTasksMovePrepared, NativeInboxTasksMoveEnvelope,
+    NativeInboxTasksMoveResult, NativeInboxTasksMovePreparation, NativeInboxTasksMoveParams } from './native-host-contract-inbox-bulk-status';
+
+export type { NativeInboxTasksAddTagRequest, NativeInboxTasksAddTagPrepared, NativeInboxTasksAddTagEnvelope,
+    NativeInboxTasksAddTagResult, NativeInboxTasksAddTagPreparation } from './native-host-contract-inbox-bulk-tag';
+
+export type { NativeInboxTasksRemoveTagRequest, NativeInboxTasksRemoveTagPrepared, NativeInboxTasksRemoveTagEnvelope,
+    NativeInboxTasksRemoveTagResult, NativeInboxTasksRemoveTagPreparation } from './native-host-contract-inbox-bulk-remove-tag';
+
+export type { NativeInboxTasksOrganizeRequest, NativeInboxTasksOrganizePrepared, NativeInboxTasksOrganizeEnvelope,
+    NativeInboxTasksOrganizeResult, NativeInboxTasksOrganizePreparation } from './native-host-contract-inbox-bulk-organize';
+
+export type { NativeInboxOrganizeDestinationCreateRequest, NativeInboxOrganizeDestinationCreatePrepared,
+    NativeInboxOrganizeDestinationCreateEnvelope, NativeInboxOrganizeDestinationCreateResult,
+    NativeInboxOrganizeDestinationCreatePreparation } from './native-host-contract-inbox-organize-create';
+
+export { getSavedTaxonomyTokens, normalizeTaxonomyToken, isTaxonomyCatalog, mergeTaxonomyCatalog } from './taxonomy-catalog';

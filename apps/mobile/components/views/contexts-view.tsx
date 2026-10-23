@@ -18,16 +18,21 @@ import {
   CONTEXTS_BULK_STATUSES,
   editContextsTaskTokens,
   formatListItemCount,
+  getContextsChipLabels,
   getContextsEmptyState,
   getContextsMatchModeLabels,
   getContextsRouteTokens,
   getContextsTokenPicker,
   getContextsTokenPickerTitle,
+  getTaskListHeaderText,
+  getTaskSortByLabel,
   resolveContextsMatchMode,
   runStoreCommand,
   selectContextsRouteTokens,
+  selectContextsToken,
   toggleContextsNoContext,
   toggleContextsToken,
+  TASK_LIST_SORT_OPTIONS,
   type ContextOrTagMatchMode,
   type Task,
   type TaskStatus,
@@ -45,9 +50,12 @@ import { TaskEditModal } from '../task-edit-modal';
 import { TokenPickerModal } from '../token-picker-modal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableTaskItem, type TaskRowActions } from '../swipeable-task-item';
-import { Tag, CheckCircle2 } from 'lucide-react-native';
+import { Tag, CheckCircle2, X } from 'lucide-react-native';
+import { styles as bulkStyles } from '../task-list/task-list.styles';
 import { assertBulkActionSucceeded, useTaskListSelection } from '../use-task-list-selection';
 import { TASK_LIST_WINDOWING_PROPS } from '../task-list-windowing';
+import { TaskListSortButton } from '../task-list/TaskListSortButton';
+import { TaskListSortModal } from '../task-list/TaskListSortModal';
 
 type BulkTokenPickerState = {
   field: 'tags' | 'contexts';
@@ -64,6 +72,7 @@ export function ContextsView() {
     batchDeleteTasks,
     batchUpdateTasks,
     settings,
+    updateSettings,
   } = useTaskStore((state) => ({
     tasks: state.tasks,
     updateTask: state.updateTask,
@@ -73,6 +82,7 @@ export function ContextsView() {
     batchDeleteTasks: state.batchDeleteTasks,
     batchUpdateTasks: state.batchUpdateTasks,
     settings: state.settings,
+    updateSettings: state.updateSettings,
   }), shallow);
   const { isDark } = useTheme();
   const { t } = useLanguage();
@@ -82,6 +92,7 @@ export function ContextsView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [bulkTokenPicker, setBulkTokenPicker] = useState<BulkTokenPickerState>(null);
+  const [sortModalVisible, setSortModalVisible] = useState(false);
 
   const tc = useThemeColors();
   const { showToast } = useToast();
@@ -103,6 +114,8 @@ export function ContextsView() {
     matchMode,
     searchQuery,
   });
+  // Aligned with model.tokenChips: a child chip after its parent shows "/leaf" (#1428).
+  const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
   const tasksById = useMemo(
     () => tasks.reduce((acc, task) => {
       acc[task.id] = task;
@@ -195,6 +208,7 @@ export function ContextsView() {
     ? getContextsTokenPicker({
       ...bulkTokenPicker,
       activeTasks: model.activeTasks,
+      settings,
       selectedIds: selectedIdsArray,
       tasksById,
       t,
@@ -207,6 +221,13 @@ export function ContextsView() {
     : t('taskEdit.contextsPlaceholder');
   const matchModeLabels = getContextsMatchModeLabels(t);
   const emptyState = getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: selectedContexts }, t);
+  // The shared list sort (settings.taskSortBy), as Inbox's direct Sort control shows it (#1415).
+  const sortAccessibilityLabel = getTaskListHeaderText({
+    sortByLabel: getTaskSortByLabel(model.sortBy, t),
+    hasActiveFilters: false,
+    filterActiveCount: 0,
+    t,
+  }).sortAccessibilityLabel;
 
   const handleBulkTokenConfirm = async (values: string[]) => {
     if (!bulkTokenPicker || !hasSelection) return;
@@ -243,6 +264,11 @@ export function ContextsView() {
             placeholderTextColor={tc.secondaryText}
             value={searchQuery}
             onChangeText={setSearchQuery}
+          />
+          <TaskListSortButton
+            accessibilityLabel={sortAccessibilityLabel}
+            onPress={() => setSortModalVisible(true)}
+            themeColors={tc}
           />
         </View>
 
@@ -334,7 +360,7 @@ export function ContextsView() {
                 </Text>
               </View>
             </Pressable>
-            {model.tokenChips.map(({ token: context, count, selected: isActive }) => {
+            {model.tokenChips.map(({ token: context, count, selected: isActive }, chipIndex) => {
               return (
                 <Pressable
                   key={context}
@@ -342,10 +368,15 @@ export function ContextsView() {
                     styles.contextButton,
                     { backgroundColor: isActive ? tc.tint : tc.filterBg, borderColor: tc.border },
                   ]}
-                  onPress={() => setSelectedContexts((prev) => toggleContextsToken(prev, context))}
+                  onPress={() => setSelectedContexts((prev) => selectContextsToken(prev, context))}
+                  onLongPress={() => setSelectedContexts((prev) => toggleContextsToken(prev, context))}
                   accessibilityRole="button"
                   accessibilityLabel={`${context} (${count})`}
                   accessibilityState={{ selected: isActive }}
+                  accessibilityActions={[{ name: 'longpress', label: isActive ? t('filters.remove') : t('common.add') }]}
+                  onAccessibilityAction={(event) => {
+                    if (event.nativeEvent.actionName === 'longpress') setSelectedContexts((prev) => toggleContextsToken(prev, context));
+                  }}
                 >
                   <Text
                     style={[
@@ -353,7 +384,7 @@ export function ContextsView() {
                       { color: isActive ? tc.onTint : tc.text },
                     ]}
                   >
-                    {context}
+                    {chipLabels[chipIndex]?.label ?? context}
                   </Text>
                   <View
                     style={[
@@ -400,16 +431,17 @@ export function ContextsView() {
 
         <View style={styles.content}>
           {selectionMode ? (
-            <View style={[styles.bulkBar, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
-              <View style={styles.bulkHeaderRow}>
-                <Text style={[styles.bulkCount, { color: tc.secondaryText }]}>
+            // Same look as the task lists' bulk bar (TaskListBulkBar); Contexts keeps its own actions.
+            <View style={[bulkStyles.bulkBar, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
+              <View style={bulkStyles.bulkStatusRow}>
+                <Text style={[bulkStyles.bulkCount, { color: tc.secondaryText }]}>
                   {selectedIdsArray.length} {t('bulk.selected')}
                 </Text>
-                <View style={styles.bulkHeaderActions}>
+                <View style={bulkStyles.bulkStatusActions}>
                   {bulkActionLoading ? (
-                    <View style={styles.bulkLoadingRow}>
+                    <View style={bulkStyles.bulkLoadingRow}>
                       <ActivityIndicator size="small" color={tc.tint} />
-                      <Text style={[styles.bulkLoadingText, { color: tc.secondaryText }]}>
+                      <Text style={[bulkStyles.bulkLoadingText, { color: tc.secondaryText }]}>
                         {bulkActionLabel || t('common.loading')}
                       </Text>
                     </View>
@@ -417,112 +449,49 @@ export function ContextsView() {
                   <TouchableOpacity
                     onPress={exitSelectionMode}
                     disabled={bulkActionLoading}
-                    style={[
-                      styles.bulkDoneButton,
-                      {
-                        borderColor: tc.border,
-                        backgroundColor: tc.filterBg,
-                        opacity: bulkActionLoading ? 0.5 : 1,
-                      },
-                    ]}
+                    style={[bulkStyles.bulkExitButton, { backgroundColor: tc.filterBg, opacity: bulkActionLoading ? 0.5 : 1 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('bulk.exitSelect')}
                   >
-                    <Text style={[styles.bulkDoneButtonText, { color: tc.text }]}>
-                      {t('bulk.exitSelect')}
-                    </Text>
+                    <X size={16} color={tc.secondaryText} strokeWidth={2} />
                   </TouchableOpacity>
                 </View>
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkRow}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={bulkStyles.bulkMoveRow}>
                 {CONTEXTS_BULK_STATUSES.map((status) => (
                   <TouchableOpacity
                     key={status}
                     onPress={() => void handleBatchMove(status)}
                     disabled={!hasSelection || bulkActionLoading}
-                    style={[
-                      styles.bulkButton,
-                      {
-                        backgroundColor: tc.filterBg,
-                        borderColor: tc.border,
-                        opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                      },
-                    ]}
+                    style={[bulkStyles.bulkMoveButton, { backgroundColor: tc.filterBg, opacity: hasSelection && !bulkActionLoading ? 1 : 0.5 }]}
+                    accessibilityRole="button"
                   >
-                    <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t(`status.${status}`)}</Text>
+                    <Text style={[bulkStyles.bulkMoveText, { color: tc.text }]}>{t(`status.${status}`)}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkRow}>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'tags', action: 'add' })}
-                  disabled={!hasSelection || bulkActionLoading}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('bulk.addTag')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'tags', action: 'remove' })}
-                  disabled={!hasSelection || bulkActionLoading || removableTagOptions.length === 0}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading && removableTagOptions.length > 0 ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{removeTagLabel}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'contexts', action: 'add' })}
-                  disabled={!hasSelection || bulkActionLoading}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('bulk.addContext')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setBulkTokenPicker({ field: 'contexts', action: 'remove' })}
-                  disabled={!hasSelection || bulkActionLoading || removableContextOptions.length === 0}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading && removableContextOptions.length > 0 ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('bulk.removeContext')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleBatchDelete}
-                  disabled={!hasSelection || bulkActionLoading}
-                  style={[
-                    styles.bulkButton,
-                    {
-                      backgroundColor: tc.filterBg,
-                      borderColor: tc.border,
-                      opacity: hasSelection && !bulkActionLoading ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.bulkButtonText, { color: tc.text }]}>{t('common.delete')}</Text>
-                </TouchableOpacity>
-              </ScrollView>
+              <View style={bulkStyles.bulkActions}>
+                {([
+                  { label: t('bulk.addTag'), onPress: () => setBulkTokenPicker({ field: 'tags', action: 'add' }), canRun: true },
+                  { label: removeTagLabel, onPress: () => setBulkTokenPicker({ field: 'tags', action: 'remove' }), canRun: removableTagOptions.length > 0 },
+                  { label: t('bulk.addContext'), onPress: () => setBulkTokenPicker({ field: 'contexts', action: 'add' }), canRun: true },
+                  { label: t('bulk.removeContext'), onPress: () => setBulkTokenPicker({ field: 'contexts', action: 'remove' }), canRun: removableContextOptions.length > 0 },
+                  { label: t('common.delete'), onPress: handleBatchDelete, canRun: true },
+                ]).map(({ label, onPress, canRun }) => {
+                  const enabled = hasSelection && !bulkActionLoading && canRun;
+                  return (
+                    <TouchableOpacity
+                      key={label}
+                      onPress={onPress}
+                      disabled={!enabled}
+                      style={[bulkStyles.bulkActionButton, { backgroundColor: tc.filterBg, opacity: enabled ? 1 : 0.5 }]}
+                      accessibilityRole="button"
+                    >
+                      <Text style={[bulkStyles.bulkActionText, { color: tc.text }]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           ) : null}
 
@@ -576,6 +545,19 @@ export function ContextsView() {
           }}
         />
 
+        <TaskListSortModal
+          onClose={() => setSortModalVisible(false)}
+          onSelect={(option) => {
+            void updateSettings({ taskSortBy: option });
+            setSortModalVisible(false);
+          }}
+          sortBy={model.sortBy}
+          sortOptions={TASK_LIST_SORT_OPTIONS}
+          t={t}
+          themeColors={tc}
+          visible={sortModalVisible}
+        />
+
         {/* Task Edit Modal */}
         <TaskEditModal
           visible={editingTask !== null}
@@ -598,12 +580,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
   },
   searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     padding: 12,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
   searchInput: {
+    flex: 1,
     height: 40,
     borderRadius: 8,
     paddingHorizontal: 12,
@@ -681,58 +667,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  bulkBar: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 10,
-  },
-  bulkHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  bulkCount: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  bulkHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bulkLoadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bulkLoadingText: {
-    fontSize: 12,
-  },
-  bulkDoneButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  bulkDoneButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  bulkRow: {
-    gap: 8,
-  },
-  bulkButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  bulkButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   taskList: {
     flex: 1,

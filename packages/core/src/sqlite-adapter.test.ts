@@ -154,6 +154,61 @@ describeSqlite('SqliteAdapter', () => {
         return connection;
     };
 
+    it('migrates storage without the Flow mode columns and keeps never-set apart from false (#1429)', async () => {
+        const legacy = SQLITE_BASE_SCHEMA
+            .replace('  viewSectionIds TEXT,\n  perSectionFlow INTEGER\n);', '  viewSectionIds TEXT\n);')
+            .replace('  projectArchivedAt TEXT,\n  isSequential INTEGER\n);', '  projectArchivedAt TEXT\n);');
+        expect(legacy).not.toContain('perSectionFlow');
+        expect(legacy).not.toMatch(/projectArchivedAt TEXT,\n  isSequential/);
+        db.exec(legacy);
+        runSql(db, "INSERT INTO projects (id,title,status,color,createdAt,updatedAt) VALUES ('trip','Camping Trip','active','#6B7280','2026-10-01','2026-10-01')");
+        runSql(db, "INSERT INTO sections (id,projectId,title,createdAt,updatedAt) VALUES ('book','trip','Book campsite','2026-10-01','2026-10-01')");
+        const loaded = await adapter.getData();
+        expect(loaded.projects[0].perSectionFlow).toBeUndefined();
+        expect(loaded.sections[0].isSequential).toBeUndefined();
+        expect(allSql(db, 'SELECT perSectionFlow FROM projects')).toEqual([{ perSectionFlow: null }]);
+
+        const at = '2026-10-21T10:00:00.000Z';
+        await adapter.saveData({ ...loaded, projects: [{ ...loaded.projects[0], perSectionFlow: true, rev: 2, updatedAt: at }],
+            sections: [
+                { ...loaded.sections[0], isSequential: true, rev: 2, updatedAt: at },
+                { id: 'prep', projectId: 'trip', title: 'Prep', order: 1, isSequential: false, rev: 1, createdAt: at, updatedAt: at },
+                { id: 'later', projectId: 'trip', title: 'Later', order: 2, rev: 1, createdAt: at, updatedAt: at },
+            ] });
+        db.close();
+        db = new RuntimeDatabase!(databasePath);
+        adapter = new SqliteAdapter(createClient(db));
+        const reopened = await adapter.getData();
+        expect(reopened.projects[0].perSectionFlow).toBe(true);
+        expect(reopened.sections.map((row) => [row.id, row.isSequential])).toEqual([['book', true], ['prep', false], ['later', undefined]]);
+        expect(allSql(db, 'SELECT id, isSequential FROM sections ORDER BY orderNum')).toEqual([
+            { id: 'book', isSequential: 1 }, { id: 'prep', isSequential: 0 }, { id: 'later', isSequential: null },
+        ]);
+    });
+
+    it('persists a Project color override and a newer reset across SQLite reopen', async () => {
+        const at = '2026-10-20T10:00:00.000Z';
+        const row = { id: 'color', title: 'Color', status: 'active' as const, color: '#3b82f6',
+            colorOverride: '#3b82f6', order: 0, tagIds: [], rev: 1, revBy: 'writer', createdAt: at, updatedAt: at };
+        const source: AppData = { tasks: [], projects: [row], areas: [], sections: [], settings: {} };
+        await adapter.saveData(source);
+        db.close();
+        db = new RuntimeDatabase!(databasePath);
+        adapter = new SqliteAdapter(createClient(db));
+        expect((await adapter.getData()).projects[0].colorOverride).toBe('#3b82f6');
+        await adapter.saveData({ ...source, projects: [{ ...row, colorOverride: null, color: '#94a3b8', rev: 2 }] });
+        db.close();
+        db = new RuntimeDatabase!(databasePath);
+        adapter = new SqliteAdapter(createClient(db));
+        const reset = await adapter.getData();
+        expect(reset.projects[0].colorOverride).toBeUndefined();
+        expect(reset.projects[0].rev).toBe(2);
+        expect(getSql(db, 'SELECT colorOverride FROM projects WHERE id=?', ['color'])).toEqual({ colorOverride: null });
+        await adapter.saveData(source);
+        expect((await adapter.getData()).projects[0].colorOverride).toBeUndefined();
+        expect((await adapter.getData()).projects[0].rev).toBe(2);
+    });
+
     it('persists Someday section moves, clears, and undo across reopen and sync with an older peer', async () => {
         const createdAt = '2026-09-15T10:00:00.000Z';
         const initial: AppData = {
@@ -3272,6 +3327,23 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
 
     afterEach(() => {
         db.close();
+    });
+
+    it('retains rolling task date criteria through settings JSON, table recovery, and a second save', async () => {
+        const filters = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
+            ...older, id: `date-${preset}`, criteria: { anyDateRange: { preset } },
+        })) as NonNullable<AppData['settings']['savedFilters']>;
+        const adapter = new SqliteAdapter(createClient(db));
+        await adapter.saveData(doc(filters));
+        const first = await new SqliteAdapter(createClient(db)).getData();
+        expect(first.settings.savedFilters).toEqual(filters);
+        const row = JSON.parse(getSql<{ data: string }>(db, 'SELECT data FROM settings WHERE id = 1')!.data);
+        delete row.savedFilters;
+        runSql(db, 'UPDATE settings SET data = ? WHERE id = 1', [JSON.stringify(row)]);
+        const recovered = await new SqliteAdapter(createClient(db)).getData();
+        expect(recovered.settings.savedFilters).toEqual(filters);
+        await adapter.saveData(recovered);
+        expect((await new SqliteAdapter(createClient(db)).getData()).settings.savedFilters).toEqual(filters);
     });
 
     it('saves and loads every field, unknown view and value, and the stored order', async () => {

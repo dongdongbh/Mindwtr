@@ -128,7 +128,8 @@ export function projectTaskOrderToken(input: {
     const byId = <T extends { id: string }>(rows: readonly T[]) => [...rows].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     return JSON.stringify({
         project: { id: project.id, status: project.status, isSequential: project.isSequential ?? null,
-            sequentialScope: project.sequentialScope ?? null, taskSortBy: project.taskSortBy ?? null },
+            sequentialScope: project.sequentialScope ?? null, taskSortBy: project.taskSortBy ?? null,
+            ...(project.perSectionFlow !== undefined ? { perSectionFlow: project.perSectionFlow } : {}) },
         sortBy: input.sortBy,
         sections: byId(input.sections).map((row) => ({ id: row.id, order: row.order })),
         tasks: byId(input.tasks).map((row) => ({ id: row.id, sectionId: row.sectionId ?? null,

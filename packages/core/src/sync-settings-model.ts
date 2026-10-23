@@ -447,6 +447,8 @@ export function resolveSyncBadgeState(params: {
     configured: boolean;
     activityState: 'idle' | 'syncing';
     pendingRemoteWriteAt?: AppSettings['pendingRemoteWriteAt'];
+    /** A local change waits in the automatic-sync scheduler (#1431): not yet uploaded. */
+    localChangePending?: boolean;
     lastSyncStatus?: AppSettings['lastSyncStatus'];
     lastSyncAt?: AppSettings['lastSyncAt'];
 }): SyncBadgeState {
@@ -454,6 +456,7 @@ export function resolveSyncBadgeState(params: {
         configured,
         activityState,
         pendingRemoteWriteAt,
+        localChangePending,
         lastSyncStatus,
         lastSyncAt,
     } = params;
@@ -461,7 +464,7 @@ export function resolveSyncBadgeState(params: {
     if (!configured) return 'hidden';
     if (activityState === 'syncing') return 'syncing';
     if (lastSyncStatus === 'error') return 'attention';
-    if (pendingRemoteWriteAt) return 'syncing';
+    if (pendingRemoteWriteAt || localChangePending) return 'syncing';
     if (lastSyncStatus === 'success' || lastSyncStatus === 'conflict') return 'healthy';
     if (lastSyncAt) return 'healthy';
 

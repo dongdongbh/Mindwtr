@@ -20,7 +20,7 @@ export type NativePreparedProjectDelete = PreparedProjectDelete & { version: 1 }
 export type NativeProjectDeleteEnvelope = { request: NativeProjectDeleteRequest; prepared: NativePreparedProjectDelete };
 export type NativeProjectDeletePreparation = { kind: 'prepared'; prepared: NativePreparedProjectDelete };
 export type NativeProjectDeleteUndoRequest = PreparedProjectDeleteUndo['request'];
-export type NativePreparedProjectDeleteUndo = PreparedProjectDeleteUndo & { version: 1 };
+export type NativePreparedProjectDeleteUndo = PreparedProjectDeleteUndo & { version: 1 | 2 };
 export type NativeProjectDeleteUndoEnvelope = { request: NativeProjectDeleteUndoRequest;
     prepared: NativePreparedProjectDeleteUndo };
 export type NativeProjectDeleteUndoPreparation = { kind: 'prepared'; prepared: NativePreparedProjectDeleteUndo };
@@ -142,7 +142,7 @@ const readUndo = (input: unknown): NativeProjectDeleteUndoEnvelope | null => {
     const request = readUndoRequest(envelope.request);
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'delete', 'scope', 'effect', 'deviceIdBefore',
-        'deviceIdToInitialize', 'updateAt', 'result']) || raw.version !== 1 || !same(raw.request, request)
+        'deviceIdToInitialize', 'updateAt', 'result']) || (raw.version !== 1 && raw.version !== 2) || !same(raw.request, request)
         || !record(raw.delete) || !record(raw.scope)
         || !exact(raw.scope, ['project', 'tasks', 'sections', 'area', 'linkedTasks'])
         || !Array.isArray(raw.scope.tasks) || !Array.isArray(raw.scope.sections)
@@ -179,7 +179,7 @@ const readUndo = (input: unknown): NativeProjectDeleteUndoEnvelope | null => {
                 || !validSection(pair.before, pair.before.id, scope.project.id)
                 || !validSection(pair.after, pair.before.id, scope.project.id))) return null;
         return same(projectDeleteUndoEffect(scope, linksFromDelete(deletion),
-            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.updateAt), effect)
+            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.updateAt, prepared.version), effect)
             ? envelope as NativeProjectDeleteUndoEnvelope : null;
     } catch { return null; }
 };
@@ -255,6 +255,11 @@ export function createProjectDeleteMethods(deps: {
                     return applied.success ? { ok: true, value: envelope.prepared.result }
                         : fail('STALE_REVISION', applied.error ?? 'Prepared Project Delete conflicts with saved data');
                 });
+            if (confirmed.ok && !alreadySaved?.ok) {
+                try { logInfo('Native Project delete taxonomy retained', { scope: 'native-host', category: 'storage',
+                    context: { releaseCheck: 'v1.3.7/native-project-delete-taxonomy', operation: 'delete', outcome: 'confirmed' } }); }
+                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            }
             if (confirmed.ok && envelope.request.source === 'archive' && !alreadySaved?.ok) {
                 try { logInfo('Native archived Project delete confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-archive-project-trash', outcome: 'confirmed' } }); }
@@ -292,7 +297,7 @@ export function createProjectDeleteMethods(deps: {
                     ...links.filter(({ id }) => !presentLinkIds.has(id)).map(({ id }) => ({ id, row: null }))] };
             const device = ensureDeviceId(state.settings);
             const updateAt = new Date().toISOString();
-            const prepared = jsonSafe<NativePreparedProjectDeleteUndo>({ version: 1, request, delete: deletion,
+            const prepared = jsonSafe<NativePreparedProjectDeleteUndo>({ version: 2, request, delete: deletion,
                 scope, effect: projectDeleteUndoEffect(scope, links, device.deviceId, updateAt),
                 deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,
@@ -311,12 +316,19 @@ export function createProjectDeleteMethods(deps: {
             if (!envelope) return fail('INVALID_INPUT', 'Prepared Project Delete Undo is malformed');
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            return receipts.run(envelope.request.requestId,
-                canonicalPayload(['preparedProjectDeleteUndo', envelope]), async () => {
+            const payload = canonicalPayload(['preparedProjectDeleteUndo', envelope]);
+            const alreadySaved = receipts.saved<{ id: string }>(envelope.request.requestId, payload);
+            const confirmed = await receipts.run(envelope.request.requestId, payload, async () => {
                     const applied = await useTaskStore.getState().commitPreparedProjectDeleteUndo(envelope.prepared);
                     return applied.success ? { ok: true, value: envelope.prepared.result }
                         : fail('STALE_REVISION', applied.error ?? 'Prepared Project Delete Undo conflicts with saved data');
                 });
+            if (confirmed.ok && !alreadySaved?.ok) {
+                try { logInfo('Native Project delete taxonomy retained', { scope: 'native-host', category: 'storage',
+                    context: { releaseCheck: 'v1.3.7/native-project-delete-taxonomy', operation: 'undo', outcome: 'confirmed' } }); }
+                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            }
+            return confirmed;
         },
     };
 }

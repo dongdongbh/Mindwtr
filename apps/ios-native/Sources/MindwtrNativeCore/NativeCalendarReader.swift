@@ -19,6 +19,11 @@ protocol NativeCalendarRecoveryReading: NativeCalendarReading {
     func event(eventID: String, calendarID: String) throws -> [String: Any]?
 }
 
+/// Removes an exact trailing suffix from one event's current notes and changes nothing else.
+protocol NativeCalendarNotesSuffixClearing {
+    func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) throws
+}
+
 enum NativeCalendarIDs {
     static func selected(_ requested: [String], available: [String]) -> Set<Data> {
         // Swift String equality folds canonically equivalent Unicode IDs.
@@ -273,6 +278,17 @@ private final class EventKitCalendarWriteProvider: NativeCalendarWriteProviding 
         try store.save(event, span: .thisEvent, commit: true)
     }
     func deleteEvent(_ event: EKEvent) throws { try store.remove(event, span: .thisEvent, commit: true) }
+}
+
+extension NativeCalendarReader: NativeCalendarNotesSuffixClearing {
+    func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) throws {
+        guard let event = try NativeCalendarWritePolicy.existingEvent(eventID: eventID, calendarID: calendarID, using: writeProvider()),
+              let notes = event.notes, !suffix.isEmpty, notes.utf8.count >= suffix.utf8.count,
+              notes.utf8.suffix(suffix.utf8.count).elementsEqual(suffix.utf8) else { return }
+        // Only the notes change; the user's current title, dates, alarms and other fields stay.
+        event.notes = String(decoding: notes.utf8.dropLast(suffix.utf8.count), as: UTF8.self)
+        try store.save(event, span: .thisEvent, commit: true)
+    }
 }
 #else
 final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarRecoveryReading {

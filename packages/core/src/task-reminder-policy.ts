@@ -17,3 +17,8 @@ export function shouldSendTaskReminders(
     const policy = getTaskReminderPolicy(task);
     return policy === 'inherit' ? settings.taskReminderDefault !== 'skip' : policy === 'send';
 }
+
+/** The library default as a prepared journal freezes it: anything but Skip sends. */
+export function getTaskReminderDefault(settings: Pick<NotificationSettings, 'taskReminderDefault'> = {}): 'send' | 'skip' {
+    return settings.taskReminderDefault === 'skip' ? 'skip' : 'send';
+}

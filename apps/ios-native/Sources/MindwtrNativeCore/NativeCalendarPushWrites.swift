@@ -110,11 +110,22 @@ final class NativeCalendarPushWrites {
                 try confirm(.mappingAck, entry: entry)
                 guard entry.acknowledgement?.confirmed == true else { throw NativeCalendarWriteError.unavailable }
             }
+            clearCreateMarker(entry, mapping: mapping)
             finish(entry)
         } catch {
             blocked = true; rejectWaiting()
             throw NativeCalendarWriteError.failed
         }
+    }
+
+    /// The create marker witnesses only the interval before the event ID is durable (RN writes no
+    /// marker). After the mapping acknowledgement, the exact marker suffix is removed from the
+    /// event's CURRENT notes; a user edit made meanwhile is kept, and an absent marker is skipped.
+    /// It is not journaled: a crash, refusal or failure leaves the marker as before.
+    private func clearCreateMarker(_ entry: Entry, mapping: NativeCalendarPushMapping?) {
+        guard mapping != nil, !closing, case .createEvent(let calendarID, _)? = entry.request,
+              case .identifier(let eventID)? = entry.effect?.result else { return }
+        jobs.clearNotesSuffix(eventID: eventID, calendarID: calendarID, suffix: NativeCalendarPushWitness.marker(entry.operationID))
     }
 
     func cancel(_ ticket: String) {
