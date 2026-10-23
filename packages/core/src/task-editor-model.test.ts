@@ -273,9 +273,9 @@ describe('task editor model parity with the mobile editor', () => {
                 filledCount: filled[index],
                 open: open[id] || filled[index] > 0,
                 // RN's ContextualHelp sits in Scheduling and Details only (8184ce172), with the mobile guide's section link.
-                help: id === 'scheduling' || id === 'details'
-                    ? expect.objectContaining({ guideUrl: getOnboardingGuideUrl(id, 'mobile', undefined) })
-                    : null,
+                ...(id === 'scheduling' || id === 'details'
+                    ? { help: expect.objectContaining({ guideUrl: getOnboardingGuideUrl(id, 'mobile', undefined) }) }
+                    : {}),
             })).filter((section) => section.fields.length > 0);
             expect(model.layout, key).toEqual({
                 sections: expectedSections,

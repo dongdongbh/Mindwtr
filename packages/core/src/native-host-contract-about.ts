@@ -19,8 +19,9 @@
  *   (null: unchanged) and RN's alert or toast; an alert button with a `url` opens it.
  * - checkAboutFeedback is the modal's state for the draft as typed (Send on or off, the error line); submitAboutFeedback
  *   sends it to the build's feedback endpoint. Neither is a store write.
- * - sendAboutHeartbeat (after the boot), recordAboutPromptActivity (at first paint) and attemptAboutStoreReview (after a
- *   Weekly Review, with whether the store has a review flow) write only RN's AsyncStorage keys.
+ * - sendAboutHeartbeat (after the boot) and attemptAboutStoreReview (after a Weekly Review, with whether the store has a
+ *   review flow) write only RN's AsyncStorage keys. The prompts' active day is the startup prompts' first ask
+ *   (native-host-contract-startup-prompts.ts), its one writer.
  *
  * Nothing here is journaled: the requests write no synced data, and a replay would send feedback or a heartbeat twice. The
  * feedback text and email go only to the endpoint, never to a log, receipt or error text.
@@ -59,7 +60,7 @@ import { resolveI18nText } from './i18n';
 import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import { useTaskStore } from './store';
-import { attemptStoreReviewAfterPositiveMoment, recordLocalPromptActivity } from './user-prompts';
+import { attemptStoreReviewAfterPositiveMoment } from './user-prompts';
 
 /** RN's AsyncStorage on the host. */
 type AboutStorage = {
@@ -397,22 +398,6 @@ export function createAboutMethods(deps: Deps) {
                 try { host.logInfo('Native analytics heartbeat sent', { releaseCheck: 'v1.3.5/native-analytics-heartbeat', channel: config.analyticsHeartbeatChannel || 'fallback' }); } catch { /* best effort */ }
             }
             return { ok: true, value: { sent } };
-        },
-
-        /** Today counts as an active day for the prompts (RN's recordLocalPromptActivity at first paint). */
-        async recordAboutPromptActivity(): Promise<NativeHostResult<null>> {
-            const host = deps.host();
-            if (!host) return unavailable();
-            let outcome = 'stored';
-            try {
-                await recordLocalPromptActivity(host.storage);
-            } catch (error) {
-                outcome = 'failed';
-                host.logWarn('Failed to record local prompt activity', error);
-            }
-            // Once per process (the host's first screen), after the write is on disk.
-            try { host.logInfo('Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome }); } catch { /* best effort */ }
-            return { ok: true, value: null };
         },
 
         /**

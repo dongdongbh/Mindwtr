@@ -1317,7 +1317,6 @@ const ABOUT_REQUESTS: Record<string, (input: never) => Promise<Reply>> = {
     runAboutUpdateCheck: (input) => contract.runAboutUpdateCheck(input),
     submitAboutFeedback: (input) => contract.submitAboutFeedback(input),
     sendAboutHeartbeat: () => contract.sendAboutHeartbeat(),
-    recordAboutPromptActivity: () => contract.recordAboutPromptActivity(),
     attemptAboutStoreReview: (input) => contract.attemptAboutStoreReview(input),
     // The startup prompts (native-host-contract-startup-prompts.ts): the update reminder's GitHub read and the queue's delays
     // wait without holding the engine.

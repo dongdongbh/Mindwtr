@@ -9537,4 +9537,24 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert(names.length > ANDROID_HOST_METHODS.length * 4, 'host-entry.ts keeps every platform\'s methods');
     console.log(`Android host table: ${ANDROID_HOST_METHODS.length} of host-entry.ts's ${names.length} methods, every Kotlin, journal-replay and harness call among them, no unlisted variable dispatch`);
 }
+// Pass O2f: RN's welcome sheet and startup prompts (StartupPrompts.kt), pinned to RN's past fixes.
+{
+    const prompts = source('StartupPrompts.kt');
+    // c4e52382d: while Start seeds, Back, the X, Skip, Set up sync and Import tasks do nothing; a failed seed leaves the sheet usable.
+    assert.match(prompts, /val skip = \{ if \(!prompts\.seeding\) prompts\.close\("dismiss"\) \}/);
+    assert.match(prompts, /fun handoff\(screen: String\) \{\s+if \(seeding\) return/);
+    assert.match(prompts, /fun startFresh\(\) \{\s+val open = prompt\?\.takeIf \{[^}]*\} \?: return\s+if \(seeding\) return/);
+    assert.equal(prompts.match(/, 0\.58f, busy, "welcome-(sync|import)"|disabled = busy, tag = "welcome-start"/g)?.length, 3, 'the three options are off while seeding');
+    assert.match(prompts, /\.clickable\(enabled = !busy, role = Role\.Button, onClick = skip\)/);
+    assert.match(prompts, /shell\.ui \{\s+seeding = false\s+val projectId = result\.getOrNull\(\)/);
+    // 1f84a52c0 (#632): at font scale 1.5 and above the footer note and Skip stack.
+    assert.match(prompts, /val stackFooter = LocalDensity\.current\.fontScale >= 1\.5f/);
+    // The donation ask only in a release built with RN's DONATION_PROMPT_ENABLED (473fed225, 5a3f55e87); off in debug and benchmarks.
+    const gradle = readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8');
+    assert.match(gradle, /val rnDonationPrompt = System\.getenv\("DONATION_PROMPT_ENABLED"\) in setOf\("1", "true"\)/);
+    assert.equal(gradle.match(/buildConfigField\("boolean", "DONATION_PROMPT", "false"\)/g)?.length, 2, 'off in defaultConfig and the benchmarks');
+    assert.equal(gradle.match(/buildConfigField\("boolean", "DONATION_PROMPT", rnDonationPrompt\.toString\(\)\)/g)?.length, 1, 'read only in release');
+    // Prompt activity has one writer: the startup prompts' first ask (review O2e P3-A).
+    assert.doesNotMatch([source('ProcessCoreHost.kt'), hostEntry].join('\n'), /recordAboutPromptActivity/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

@@ -100,12 +100,16 @@ describe('native host contract: startup prompts', () => {
 
     it('opens the welcome sheet for an empty library with sync off, once, and records today first', async () => {
         const bound = device();
+        const lines: unknown[][] = [];
+        bound.host.logInfo = (message, context) => { lines.push([message, context]); };
         const contract = await openContract(bound);
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         const sheet = await begin(contract, {});
         expect(sheet).toMatchObject({ id: 'onboarding', language: 'en', words: { title: 'Welcome to Mindwtr', startFreshTitle: 'Start using Mindwtr', skipForNow: 'Skip for now', toastReady: 'Getting Started is ready in Projects.' } });
         expect(Object.values((sheet as { words: Record<string, string> }).words).every((word) => !word.startsWith('onboarding.'))).toBe(true);
         expect(JSON.parse(bound.storage.get(LOCAL_USER_PROMPT_STATE_KEY)!).activeDayKeys).toHaveLength(1);
+        // The prompts' active day has one writer, logged once per process after the write.
+        expect(lines).toEqual([['Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome: 'stored' }]]);
         expect(value(await contract.startupPromptAction({ id: 'onboarding', action: 'dismiss' }))).toEqual({ shownAt: null });
         expect(bound.storage.get(MOBILE_ONBOARDING_STORAGE_KEY)).toBe('dismissed');
         expect(await begin(contract, {})).toBeNull();
@@ -209,8 +213,12 @@ describe('native host contract: startup prompts', () => {
             const prompt = value(await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, preview: id })).prompt;
             expect(prompt?.id).toBe(id);
         }
+        // RN's update test target: the Play listing for a Play install, View release for an unknown installer.
         const update = value(await contract.beginStartupPrompts({ installerSource: 'play-store', donationEnabled: false, preview: 'update-reminder' })).prompt;
-        expect(update).toMatchObject({ announcement: { id: 'update-reminder-99.99.99', action: { label: 'Update now' } } });
+        expect(update).toMatchObject({ announcement: { id: 'update-reminder-99.99.99',
+            action: { label: 'Update now', url: 'https://play.google.com/store/apps/details?id=tech.dongdongbh.mindwtr' } } });
+        const unknown = value(await contract.beginStartupPrompts({ installerSource: 'unknown', donationEnabled: false, preview: 'update-reminder' })).prompt;
+        expect(unknown).toMatchObject({ announcement: { action: { label: 'View release', url: 'https://github.com/dongdongbh/Mindwtr/releases/latest' } } });
         expect([...bound.storage.keys()]).toEqual([]);
         expect(bound.fetched).toEqual([]);
         expect((await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, preview: 'other' })).ok).toBe(false);

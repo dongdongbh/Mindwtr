@@ -1106,7 +1106,7 @@ private fun ContextualHelp(editorId: String, sectionId: String, help: JSONObject
                 Text(help.getString("readGuide"), style = rnText(14, 400), color = c.tint)
                 Icon(HelpExternalLink, null, tint = c.tint, modifier = Modifier.size(14.dp))
             }
-            if (failed) Text(help.getString("guideError"), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            if (failed) Text(help.getString("guideError"), style = rnText(14, 400), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
     }
 }

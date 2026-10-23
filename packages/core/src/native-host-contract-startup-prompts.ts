@@ -22,6 +22,7 @@ import {
     translateDonationPromptAnnouncement,
     UPDATE_NOW_ACTION_LABEL,
     UPDATE_REMINDER_RELEASES_URL,
+    VIEW_RELEASE_ACTION_LABEL,
     type MobileUpdateReminderInfo,
 } from './mobile-startup-prompts';
 import { coerceSupportedBackend, resolveBackend } from './mobile-sync-utils';
@@ -121,9 +122,15 @@ export function createStartupPromptMethods(deps: Deps) {
             // writes nothing, and the host sends no action for it.
             if (input.preview !== undefined) {
                 if (typeof input.preview !== 'string' || !PROMPT_IDS.has(input.preview)) return fail('INVALID_INPUT', 'preview takes a prompt id');
-                return { ok: true, value: { prompt: view(input.preview as NativeStartupPromptId, {
+                // RN's update test target (getMobileUpdateTestTarget): none on FOSS, the Play listing for a Play install, the release
+                // page otherwise, and "View release" when the installer is unknown.
+                const source = input.installerSource;
+                const target = host.app.isFossBuild ? null
+                    : source === 'play-store' ? { label: UPDATE_NOW_ACTION_LABEL, url: `https://play.google.com/store/apps/details?id=${host.app.packageName}` }
+                        : { label: source === 'sideload' ? UPDATE_NOW_ACTION_LABEL : VIEW_RELEASE_ACTION_LABEL, url: UPDATE_REMINDER_RELEASES_URL };
+                return { ok: true, value: { prompt: view(input.preview as NativeStartupPromptId, target && {
                     currentVersion: host.app.version, latestVersion: '99.99.99', latestReleasedAt: new Date().toISOString(),
-                    releaseUrl: UPDATE_REMINDER_RELEASES_URL, actionLabel: UPDATE_NOW_ACTION_LABEL, testOnly: true,
+                    releaseUrl: target.url, actionLabel: target.label, testOnly: true,
                 }, PROMPT_TEST_ANNOUNCEMENT) } };
             }
             const storage = host.storage;
