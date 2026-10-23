@@ -145,7 +145,7 @@ Mindwtr 适合想在一个应用里用上完整 GTD 方法、并且数据完全�
 
 - Windows：Microsoft Store、Winget、Chocolatey、Scoop 或 GitHub Releases。
 - macOS：Mac App Store、Homebrew、TestFlight 测试版或 GitHub Releases。
-- Linux：Flathub、Snap、AUR、APT/RPM 仓库或 GitHub Releases。
+- Linux：Flathub、Snap、AUR、APT/RPM 仓库、GitHub Releases 或[社区维护的 Nix flake](https://github.com/TheRealGramdalf/mindwtr-flake)。
 - Android：Google Play、F-Droid、IzzyOnDroid 或 GitHub Releases APK。
 - iOS：App Store 或 TestFlight 测试版。
 - Web / 自托管：[云端部署](https://docs.mindwtr.app/data-sync/cloud-deployment)或 [Docker 指南](docker/README.md)。
