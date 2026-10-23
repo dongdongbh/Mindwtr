@@ -821,14 +821,22 @@ const shootR2b = async (prefix, rn) => {
         if (!tabSelected(tabs, 'Focus')) await tap(tab(tabs, 'Focus'));
     }
     const shown = (...texts) => (current) => texts.every((text) => Boolean(labeled(current, text)));
-    await shoot(`${prefix}-pomodoro-idle-light`, shown(en['pomodoro.mobileTitle'], '25:00', en['pomodoro.timerOnly'], en['common.start']));
+    await shoot(`${prefix}-pomodoro-idle-light`, shown(en['pomodoro.mobileTitle'], '25:00', en['common.start']));
     await press(en['pomodoro.selectedTask']);
     await shoot(`${prefix}-pomodoro-picker-light`, shown(T.outline, en['pomodoro.timerOnly']));
     await press(T.outline);
-    await shoot(`${prefix}-pomodoro-linked-light`, shown(en['pomodoro.taskDoneShort'], en['common.change']));
-    await press(en['common.start']);
-    await shoot(`${prefix}-pomodoro-running-light`, shown(en['common.pause']));
-    await press(en['common.pause']);
+    await shoot(`${prefix}-pomodoro-linked-light`, shown(en['pomodoro.markTaskDone']));
+    // A running card redraws each second, so uiautomator never sees the screen idle: the running shot waits a fixed time, and
+    // Pause is tapped where Start was (the same button).
+    const toggle = labeled(await screen(), en['common.start']);
+    await tap(toggle);
+    await sleep(2500);
+    requireAppFront();
+    writeFileSync(resolve(out, `${prefix}-pomodoro-running-light.png`), adbRaw('exec-out', 'screencap', '-p'));
+    shots.push(`${prefix}-pomodoro-running-light`);
+    console.log(`shot ${prefix}-pomodoro-running-light.png`);
+    await tap(toggle);
+    await sleep(1000);
     await shoot(`${prefix}-pomodoro-paused-light`, shown(en['common.start']));
     await press(en['pomodoro.switchToBreak']);
     await shoot(`${prefix}-pomodoro-break-light`, shown('05:00', en['pomodoro.switchToFocus']));
@@ -840,7 +848,7 @@ const shootR2b = async (prefix, rn) => {
     await press(en['common.reset']);
     await press(en['pomodoro.selectedTask']);
     await press(en['pomodoro.timerOnly']);
-    await waitFor('the idle card again', shown('25:00', en['pomodoro.timerOnly'], en['common.start']), 30_000);
+    await waitFor('the idle card again', (current) => shown('25:00', en['common.start'])(current) && !labeled(current, en['pomodoro.markTaskDone']), 30_000);
 };
 const c3FixesOnly = process.env.PARITY_ONLY === 'c3-fixes';
 const originalFontScale = sh('settings get system font_scale');
