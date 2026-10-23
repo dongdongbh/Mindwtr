@@ -27,6 +27,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // quick-capture-description reuses releaseCheck, kind and outcome; no captured text.
     // app-search-owed-wipe reuses releaseCheck and outcome below.
     // native-app-search reuses releaseCheck and outcome below.
+    // onboarding-waits-for-canonical-load reuses releaseCheck and outcome below.
     // restore-attachment-presence reuses releaseCheck and count below; no names or paths.
     // leftover-undo-hold reuses releaseCheck and outcome below.
     // large-library-no-undo reuses releaseCheck, operation and outcome below; no names or paths.

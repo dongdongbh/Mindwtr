@@ -11,3 +11,4 @@ Changes collected since the latest stable release.
 - Desktop and web: Quick Add's syntax help says you can paste images or screenshots with Ctrl+V (⌘V on macOS). The web app shows it only when self-hosted Cloud can take the image (#1433).
 - Desktop: auto sync keeps running while the window is hidden, covered or closed to the menu bar. Before, a sync that started then stopped until you showed the window again, and every later sync waited behind it (#1392).
 - Mobile: the sync dot turns green as soon as a sync has uploaded your change. Before, it could stay amber for up to several minutes while a second sync waited to run, even with nothing left to send (#1435).
+- Mobile: the welcome sheet no longer opens when your tasks failed to load, so "Start using Mindwtr" can no longer add a second Getting Started project to a library that was not empty.

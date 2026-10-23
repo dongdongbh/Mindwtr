@@ -121,7 +121,10 @@ export type MobileStartupPromptInput = {
         getItem: (key: string) => Promise<string | null>;
         setItem: (key: string, value: string) => Promise<void>;
     };
+    /** The first paint has data: a backup snapshot, the canonical load, or a failed load's empty store. */
     dataReady: boolean;
+    /** The canonical load finished without an error. */
+    canonicalDataReady: boolean;
     mobileOnboardingDismissed: boolean;
     visibleDataCount: number;
     /** The sync backend as the app's sync settings read it; a throw counts as off. */
@@ -143,13 +146,16 @@ export type MobileStartupPromptInput = {
 export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptInput): StartupPromptDescriptor[] {
     const {
         storage,
-        dataReady,
+        canonicalDataReady,
         mobileOnboardingDismissed,
         visibleDataCount,
         updateReminderAllowed,
         donationPromptAllowed,
         promptStateSnapshot,
     } = input;
+    // Onboarding waits for the canonical load: after a failed load the store is empty though the library may not be, and
+    // seeding Getting Started there could duplicate it and would dismiss the welcome sheet for good.
+    const dataReady = input.dataReady && canonicalDataReady;
     return [
         {
             // First-run onboarding outranks everything: a brand-new user must not meet

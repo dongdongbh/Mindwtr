@@ -637,10 +637,23 @@ function RootLayoutContentInner() {
   // precedence (onboarding > announcement > update > donation), the startup
   // delays, and session dismissal. See packages/core/src/startup-prompts.ts.
   const startupPromptsEnabled = !sandboxMode && process.env.NODE_ENV !== 'test';
+  // A failed load marks data ready with an empty store; the welcome sheet then waits (core's descriptors), and this line
+  // proves it held.
+  const onboardingHeldLogged = useRef(false);
+  useEffect(() => {
+    if (!startupPromptsEnabled || onboardingHeldLogged.current) return;
+    if (!dataReady || canonicalDataReady || mobileOnboardingDismissed || visibleDataCount !== 0) return;
+    onboardingHeldLogged.current = true;
+    void logWarn('First-run onboarding held: the local data did not load', {
+      scope: 'onboarding',
+      extra: { releaseCheck: 'v1.3.8/onboarding-waits-for-canonical-load', outcome: 'held' },
+    });
+  }, [canonicalDataReady, dataReady, mobileOnboardingDismissed, startupPromptsEnabled, visibleDataCount]);
   const startupPromptGateOpen = isFirstPaintReady && mobileOnboardingDismissalLoaded;
   const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => buildMobileStartupPromptDescriptors({
     storage: AsyncStorage,
     dataReady,
+    canonicalDataReady,
     mobileOnboardingDismissed,
     visibleDataCount,
     readSyncBackend: async () => coerceSupportedBackend(resolveBackend(await AsyncStorage.getItem(SYNC_BACKEND_KEY)), isCloudKitAvailable()),
@@ -661,6 +674,7 @@ function RootLayoutContentInner() {
     getSupportPrompt: () => useTaskStore.getState().settings.supportPrompt,
   }), [
     appVersion,
+    canonicalDataReady,
     dataReady,
     donationPromptAllowed,
     mobileOnboardingDismissed,

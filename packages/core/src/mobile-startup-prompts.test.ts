@@ -86,6 +86,7 @@ describe('buildMobileStartupPromptDescriptors', () => {
         const input: MobileStartupPromptInput = {
             storage,
             dataReady: true,
+            canonicalDataReady: true,
             mobileOnboardingDismissed: false,
             visibleDataCount: 0,
             readSyncBackend: async () => 'off',
@@ -122,6 +123,14 @@ describe('buildMobileStartupPromptDescriptors', () => {
         const failed = build({ readSyncBackend: async () => { throw new Error('read'); } });
         await expect(failed.byId.onboarding.present(live())).resolves.toBe(true);
         expect(failed.input.onSyncBackendReadError).toHaveBeenCalled();
+    });
+
+    it('never opens onboarding over a failed load: the store is empty but the library may not be', async () => {
+        // RN marks data ready after a failed canonical load too (the error screen); seeding Getting Started there could
+        // duplicate it and would dismiss the welcome sheet for good.
+        const failed = build({ canonicalDataReady: false });
+        expect(failed.byId.onboarding.isEligible()).toBe(false);
+        await expect(failed.byId.onboarding.present(live())).resolves.toBe(false);
     });
 
     it('shows no announcement while none is configured', () => {
