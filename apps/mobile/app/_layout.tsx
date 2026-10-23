@@ -29,16 +29,10 @@ import {
   getAnnouncementDismissalStorageKey,
   isSupportedLanguage,
   recordDonationPromptShown,
-  recordUpdateReminderChecked,
   recordUpdateReminderDismissed,
-  recordUpdateReminderShown,
   setSha256HexProvider,
   setLogger,
-  shouldCheckUpdateReminder,
-  shouldShowAppAnnouncement,
-  shouldShowDonationPrompt,
   withSupportPromptShown,
-  shouldShowUpdateReminder,
   translateWithFallback,
   useStartupPromptQueue,
   useTaskStore,
@@ -48,10 +42,7 @@ import {
   resolveMobileUpdateReminderAllowed,
   fetchMobileUpdateReminderInfo,
   buildUpdateReminderAnnouncement,
-  ANNOUNCEMENT_STARTUP_DELAY_MS,
-  DONATION_PROMPT_STARTUP_DELAY_MS,
-  UPDATE_REMINDER_STARTUP_DELAY_MS,
-  UPDATE_REMINDER_FETCH_TIMEOUT_MS,
+  buildMobileStartupPromptDescriptors,
   UPDATE_REMINDER_RELEASES_URL,
   UPDATE_NOW_ACTION_LABEL,
   VIEW_RELEASE_ACTION_LABEL,
@@ -96,7 +87,6 @@ import { MobileWorkspaceSwitchOverlay, SandboxWorkspaceBanner } from '@/componen
 import { applyAndroidSystemBars } from '@/lib/android-system-bars';
 import { isCloudKitAvailable } from '@/lib/cloudkit-sync';
 import {
-  readLocalUserPromptState,
   recordLocalPromptActivity,
   updateLocalUserPromptState,
 } from '@/lib/user-prompt-state';
@@ -104,12 +94,11 @@ import { subscribePromptTest } from '@/lib/prompt-test-controls';
 import { requestStoreReviewForTesting } from '@/lib/store-review-prompt';
 import {
   readMobileOnboardingDismissed,
-  shouldOpenMobileFirstRunOnboarding,
   subscribeMobileOnboardingEvent,
   writeMobileOnboardingDismissed,
 } from '@/lib/mobile-onboarding-events';
 import { SYNC_BACKEND_KEY } from '@/lib/sync-constants';
-import { coerceSupportedBackend, resolveBackend, type SyncBackend } from '@/lib/sync-service-utils';
+import { coerceSupportedBackend, resolveBackend } from '@/lib/sync-service-utils';
 import { persistLastRoute, sanitizeAndroidActivityNavigationState } from '@/lib/session-restore';
 import { useAndroidActivitySession } from '@/hooks/use-android-activity-session';
 import { useIosSceneDiagnostics } from '@/hooks/use-ios-scene-diagnostics';
@@ -649,121 +638,28 @@ function RootLayoutContentInner() {
   // delays, and session dismissal. See packages/core/src/startup-prompts.ts.
   const startupPromptsEnabled = !sandboxMode && process.env.NODE_ENV !== 'test';
   const startupPromptGateOpen = isFirstPaintReady && mobileOnboardingDismissalLoaded;
-  const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => [
-    {
-      // First-run onboarding outranks everything: a brand-new user must not meet
-      // an announcement or a donation ask before the welcome flow.
-      id: 'onboarding',
-      priority: 40,
-      delayMs: 0,
-      isEligible: () => dataReady && !mobileOnboardingDismissed && visibleDataCount === 0,
-      present: async (signal) => {
-        let syncBackend: SyncBackend = 'off';
-        try {
-          const rawBackend = await AsyncStorage.getItem(SYNC_BACKEND_KEY);
-          syncBackend = coerceSupportedBackend(resolveBackend(rawBackend), isCloudKitAvailable());
-        } catch (error) {
-          void logError(error, { scope: 'onboarding', extra: { step: 'readMobileSyncBackend' } });
-        }
-        if (signal.aborted) return false;
-        return shouldOpenMobileFirstRunOnboarding({
-          dataReady,
-          dismissed: mobileOnboardingDismissed,
-          syncBackend,
-          visibleDataCount,
-        });
-      },
+  const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => buildMobileStartupPromptDescriptors({
+    storage: AsyncStorage,
+    dataReady,
+    mobileOnboardingDismissed,
+    visibleDataCount,
+    readSyncBackend: async () => coerceSupportedBackend(resolveBackend(await AsyncStorage.getItem(SYNC_BACKEND_KEY)), isCloudKitAvailable()),
+    onSyncBackendReadError: (error) => {
+      void logError(error, { scope: 'onboarding', extra: { step: 'readMobileSyncBackend' } });
     },
-    {
-      // Maintainer announcement: when one is configured it also blocks the
-      // donation and update prompts (see their isEligible).
-      id: 'announcement',
-      priority: 30,
-      delayMs: ANNOUNCEMENT_STARTUP_DELAY_MS,
-      isEligible: () => shouldShowAppAnnouncement(ACTIVE_APP_ANNOUNCEMENT, null),
-      present: async (signal) => {
-        const announcement = ACTIVE_APP_ANNOUNCEMENT;
-        if (!shouldShowAppAnnouncement(announcement, null)) return false;
-        let dismissedValue: string | null = null;
-        try {
-          dismissedValue = await AsyncStorage.getItem(getAnnouncementDismissalStorageKey(announcement.id));
-        } catch {
-          dismissedValue = null;
-        }
-        if (signal.aborted) return false;
-        return shouldShowAppAnnouncement(announcement, dismissedValue);
-      },
+    updateReminderAllowed,
+    donationPromptAllowed,
+    promptStateSnapshot,
+    onUpdateCheckRecordError: (error) => {
+      void logWarn('Failed to record update reminder check', {
+        scope: 'prompt-state',
+        extra: { error: error instanceof Error ? error.message : String(error) },
+      });
     },
-    {
-      // Update reminder: records the check on selection, then confirms an update
-      // actually exists before opening (declines otherwise).
-      id: 'update-reminder',
-      priority: 20,
-      delayMs: UPDATE_REMINDER_STARTUP_DELAY_MS,
-      presentTimeoutMs: UPDATE_REMINDER_FETCH_TIMEOUT_MS,
-      isEligible: () => {
-        if (updateReminderAllowed !== true) return false;
-        if (ACTIVE_APP_ANNOUNCEMENT) return false;
-        if (!promptStateSnapshot) return false;
-        return shouldCheckUpdateReminder({
-          nowMs: Date.now(),
-          promptState: promptStateSnapshot,
-          updateReminderAllowed: true,
-        });
-      },
-      onSelect: () => {
-        // Safe here and only here: the queue runs onSelect after this descriptor
-        // has won the slot, so the once-a-day check is never burned by a prompt
-        // that never ran.
-        void updateLocalUserPromptState((state) => recordUpdateReminderChecked(state, Date.now()))
-          .catch((error) => {
-            void logWarn('Failed to record update reminder check', {
-              scope: 'prompt-state',
-              extra: { error: error instanceof Error ? error.message : String(error) },
-            });
-          });
-      },
-      present: async (signal) => {
-        const info = await fetchMobileUpdateReminderInfo(appVersion, fetch);
-        if (signal.aborted) return false;
-        const latestPromptState = await readLocalUserPromptState();
-        if (signal.aborted) return false;
-        if (!shouldShowUpdateReminder({
-          nowMs: Date.now(),
-          promptState: latestPromptState,
-          updateReminderAllowed: true,
-          currentVersion: info.currentVersion,
-          latestVersion: info.latestVersion,
-          latestReleasedAt: info.latestReleasedAt,
-        })) {
-          return false;
-        }
-        await updateLocalUserPromptState((state) => recordUpdateReminderShown(state, Date.now()));
-        if (signal.aborted) return false;
-        setUpdateReminderInfo(info);
-        return true;
-      },
-    },
-    {
-      // Donation ask: lowest precedence; suppressed whenever an announcement is
-      // configured or an update reminder is showing (via the queue).
-      id: 'donation',
-      priority: 10,
-      delayMs: DONATION_PROMPT_STARTUP_DELAY_MS,
-      isEligible: () => {
-        if (donationPromptAllowed !== true) return false;
-        if (ACTIVE_APP_ANNOUNCEMENT) return false;
-        if (!promptStateSnapshot) return false;
-        return shouldShowDonationPrompt({
-          nowMs: Date.now(),
-          promptState: promptStateSnapshot,
-          supportPrompt: useTaskStore.getState().settings.supportPrompt,
-          donationAllowed: true,
-        });
-      },
-      present: () => true,
-    },
-  ], [
+    fetchUpdateInfo: () => fetchMobileUpdateReminderInfo(appVersion, fetch),
+    onUpdateReminderInfo: setUpdateReminderInfo,
+    getSupportPrompt: () => useTaskStore.getState().settings.supportPrompt,
+  }), [
     appVersion,
     dataReady,
     donationPromptAllowed,

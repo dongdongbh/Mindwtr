@@ -3,11 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     UPDATE_REMINDER_RELEASES_API,
     UPDATE_REMINDER_RELEASES_URL,
+    buildMobileStartupPromptDescriptors,
     buildUpdateReminderAnnouncement,
     fetchMobileUpdateReminderInfo,
     resolveMobileDonationPromptAllowed,
     resolveMobileUpdateReminderAllowed,
+    type MobileStartupPromptInput,
 } from './mobile-startup-prompts';
+import { LOCAL_USER_PROMPT_STATE_KEY } from './user-prompts';
 
 const reply = (body: unknown, ok = true, status = 200) => vi.fn(async () => ({ ok, status, json: async () => body }));
 
@@ -66,5 +69,86 @@ describe('mobile startup prompt rules', () => {
             body: 'Mindwtr 1.3.8 is available. You are using 1.3.7. Update when you have a minute to keep fixes and improvements current.',
             action: { type: 'url', label: 'View release', url: 'https://example.test/r' },
         });
+    });
+});
+
+describe('buildMobileStartupPromptDescriptors', () => {
+    const memoryStorage = () => {
+        const values = new Map<string, string>();
+        return {
+            values,
+            getItem: vi.fn(async (key: string) => values.get(key) ?? null),
+            setItem: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
+        };
+    };
+    const build = (overrides: Partial<MobileStartupPromptInput> = {}) => {
+        const storage = memoryStorage();
+        const input: MobileStartupPromptInput = {
+            storage,
+            dataReady: true,
+            mobileOnboardingDismissed: false,
+            visibleDataCount: 0,
+            readSyncBackend: async () => 'off',
+            onSyncBackendReadError: vi.fn(),
+            updateReminderAllowed: true,
+            donationPromptAllowed: true,
+            promptStateSnapshot: {},
+            onUpdateCheckRecordError: vi.fn(),
+            fetchUpdateInfo: async () => ({ currentVersion: '1.3.7', latestVersion: '1.3.8', latestReleasedAt: null, releaseUrl: 'u' }),
+            onUpdateReminderInfo: vi.fn(),
+            getSupportPrompt: () => undefined,
+            ...overrides,
+        };
+        const byId = Object.fromEntries(buildMobileStartupPromptDescriptors(input).map((descriptor) => [descriptor.id, descriptor]));
+        return { input, storage, byId };
+    };
+    const live = () => new AbortController().signal;
+
+    it('keeps RN precedence and delays: onboarding > announcement > update (15 s present timeout) > donation', () => {
+        const { byId } = build();
+        expect(Object.values(byId).map(({ id, priority, delayMs, presentTimeoutMs }) => [id, priority, delayMs, presentTimeoutMs])).toEqual([
+            ['onboarding', 40, 0, undefined],
+            ['announcement', 30, 250, undefined],
+            ['update-reminder', 20, 1750, 15000],
+            ['donation', 10, 2000, undefined],
+        ]);
+    });
+
+    it('opens onboarding only for an empty, undismissed library with sync off', async () => {
+        expect(build({ visibleDataCount: 1 }).byId.onboarding.isEligible()).toBe(false);
+        expect(build({ mobileOnboardingDismissed: true }).byId.onboarding.isEligible()).toBe(false);
+        await expect(build().byId.onboarding.present(live())).resolves.toBe(true);
+        await expect(build({ readSyncBackend: async () => 'webdav' }).byId.onboarding.present(live())).resolves.toBe(false);
+        const failed = build({ readSyncBackend: async () => { throw new Error('read'); } });
+        await expect(failed.byId.onboarding.present(live())).resolves.toBe(true);
+        expect(failed.input.onSyncBackendReadError).toHaveBeenCalled();
+    });
+
+    it('shows no announcement while none is configured', () => {
+        expect(build().byId.announcement.isEligible()).toBe(false);
+    });
+
+    it('records the update check only when the reminder is selected, and nothing shown after an abort', async () => {
+        const { byId, storage } = build();
+        expect(byId['update-reminder'].isEligible()).toBe(true);
+        expect(build({ updateReminderAllowed: false }).byId['update-reminder'].isEligible()).toBe(false);
+        expect(build({ promptStateSnapshot: null }).byId['update-reminder'].isEligible()).toBe(false);
+        byId['update-reminder'].onSelect?.();
+        await vi.waitFor(() => expect(storage.setItem).toHaveBeenCalledTimes(1));
+        expect(JSON.parse(storage.values.get(LOCAL_USER_PROMPT_STATE_KEY) ?? '{}').update.lastCheckedAt).toEqual(expect.any(String));
+
+        const aborted = new AbortController();
+        aborted.abort();
+        const later = build();
+        await expect(later.byId['update-reminder'].present(aborted.signal)).resolves.toBe(false);
+        expect(later.storage.setItem).not.toHaveBeenCalled();
+        expect(later.input.onUpdateReminderInfo).not.toHaveBeenCalled();
+    });
+
+    it('asks for a donation only when allowed and the synced ask is not recent', () => {
+        expect(build({ donationPromptAllowed: false }).byId.donation.isEligible()).toBe(false);
+        expect(build({ donationPromptAllowed: null }).byId.donation.isEligible()).toBe(false);
+        const recent = build({ getSupportPrompt: () => ({ lastShownAt: new Date().toISOString() }) as never });
+        expect(recent.byId.donation.isEligible()).toBe(false);
     });
 });

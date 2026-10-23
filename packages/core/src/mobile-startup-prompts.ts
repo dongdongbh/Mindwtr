@@ -1,5 +1,23 @@
 import type { AndroidInstallerSource } from './about-settings-model';
-import type { AppAnnouncement } from './announcements';
+import {
+    ACTIVE_APP_ANNOUNCEMENT,
+    getAnnouncementDismissalStorageKey,
+    shouldShowAppAnnouncement,
+    type AppAnnouncement,
+} from './announcements';
+import { shouldOpenMobileFirstRunOnboarding } from './first-run-onboarding';
+import type { StartupPromptDescriptor } from './startup-prompts';
+import type { SyncBackend } from './sync-service-utils';
+import {
+    readLocalUserPromptState,
+    recordUpdateReminderChecked,
+    recordUpdateReminderShown,
+    shouldCheckUpdateReminder,
+    shouldShowDonationPrompt,
+    shouldShowUpdateReminder,
+    updateLocalUserPromptState,
+    type UserPromptState,
+} from './user-prompts';
 
 // The mobile apps' startup prompts beyond the shared queue (moved from React Native's app/_layout.tsx so the native app shows
 // the same prompts on the same rules): which builds may ask for a donation or remind about an update, the delays, and the
@@ -96,3 +114,149 @@ export const buildUpdateReminderAnnouncement = (info: MobileUpdateReminderInfo):
         url: info.releaseUrl,
     },
 });
+
+export type MobileStartupPromptInput = {
+    /** The device's key-value store (RN's AsyncStorage; the native app's RKStorage). */
+    storage: {
+        getItem: (key: string) => Promise<string | null>;
+        setItem: (key: string, value: string) => Promise<void>;
+    };
+    dataReady: boolean;
+    mobileOnboardingDismissed: boolean;
+    visibleDataCount: number;
+    /** The sync backend as the app's sync settings read it; a throw counts as off. */
+    readSyncBackend: () => Promise<SyncBackend>;
+    onSyncBackendReadError: (error: unknown) => void;
+    updateReminderAllowed: boolean | null;
+    donationPromptAllowed: boolean | null;
+    promptStateSnapshot: UserPromptState | null;
+    onUpdateCheckRecordError: (error: unknown) => void;
+    fetchUpdateInfo: () => Promise<MobileUpdateReminderInfo>;
+    onUpdateReminderInfo: (info: MobileUpdateReminderInfo) => void;
+    getSupportPrompt: () => Parameters<typeof shouldShowDonationPrompt>[0]['supportPrompt'];
+};
+
+/**
+ * The mobile apps' four startup prompts for the shared queue (startup-prompts.ts), highest first: first-run onboarding,
+ * the maintainer announcement, the update reminder, and the donation ask.
+ */
+export function buildMobileStartupPromptDescriptors(input: MobileStartupPromptInput): StartupPromptDescriptor[] {
+    const {
+        storage,
+        dataReady,
+        mobileOnboardingDismissed,
+        visibleDataCount,
+        updateReminderAllowed,
+        donationPromptAllowed,
+        promptStateSnapshot,
+    } = input;
+    return [
+        {
+            // First-run onboarding outranks everything: a brand-new user must not meet
+            // an announcement or a donation ask before the welcome flow.
+            id: 'onboarding',
+            priority: 40,
+            delayMs: 0,
+            isEligible: () => dataReady && !mobileOnboardingDismissed && visibleDataCount === 0,
+            present: async (signal) => {
+                let syncBackend: SyncBackend = 'off';
+                try {
+                    syncBackend = await input.readSyncBackend();
+                } catch (error) {
+                    input.onSyncBackendReadError(error);
+                }
+                if (signal.aborted) return false;
+                return shouldOpenMobileFirstRunOnboarding({
+                    dataReady,
+                    dismissed: mobileOnboardingDismissed,
+                    syncBackend,
+                    visibleDataCount,
+                });
+            },
+        },
+        {
+            // Maintainer announcement: when one is configured it also blocks the
+            // donation and update prompts (see their isEligible).
+            id: 'announcement',
+            priority: 30,
+            delayMs: ANNOUNCEMENT_STARTUP_DELAY_MS,
+            isEligible: () => shouldShowAppAnnouncement(ACTIVE_APP_ANNOUNCEMENT, null),
+            present: async (signal) => {
+                const announcement = ACTIVE_APP_ANNOUNCEMENT;
+                if (!shouldShowAppAnnouncement(announcement, null)) return false;
+                let dismissedValue: string | null = null;
+                try {
+                    dismissedValue = await storage.getItem(getAnnouncementDismissalStorageKey(announcement.id));
+                } catch {
+                    dismissedValue = null;
+                }
+                if (signal.aborted) return false;
+                return shouldShowAppAnnouncement(announcement, dismissedValue);
+            },
+        },
+        {
+            // Update reminder: records the check on selection, then confirms an update
+            // actually exists before opening (declines otherwise).
+            id: 'update-reminder',
+            priority: 20,
+            delayMs: UPDATE_REMINDER_STARTUP_DELAY_MS,
+            presentTimeoutMs: UPDATE_REMINDER_FETCH_TIMEOUT_MS,
+            isEligible: () => {
+                if (updateReminderAllowed !== true) return false;
+                if (ACTIVE_APP_ANNOUNCEMENT) return false;
+                if (!promptStateSnapshot) return false;
+                return shouldCheckUpdateReminder({
+                    nowMs: Date.now(),
+                    promptState: promptStateSnapshot,
+                    updateReminderAllowed: true,
+                });
+            },
+            onSelect: () => {
+                // Safe here and only here: the queue runs onSelect after this descriptor
+                // has won the slot, so the once-a-day check is never burned by a prompt
+                // that never ran.
+                void updateLocalUserPromptState(storage, (state) => recordUpdateReminderChecked(state, Date.now()))
+                    .catch(input.onUpdateCheckRecordError);
+            },
+            present: async (signal) => {
+                const info = await input.fetchUpdateInfo();
+                if (signal.aborted) return false;
+                const latestPromptState = await readLocalUserPromptState(storage);
+                if (signal.aborted) return false;
+                if (!shouldShowUpdateReminder({
+                    nowMs: Date.now(),
+                    promptState: latestPromptState,
+                    updateReminderAllowed: true,
+                    currentVersion: info.currentVersion,
+                    latestVersion: info.latestVersion,
+                    latestReleasedAt: info.latestReleasedAt,
+                })) {
+                    return false;
+                }
+                await updateLocalUserPromptState(storage, (state) => recordUpdateReminderShown(state, Date.now()));
+                if (signal.aborted) return false;
+                input.onUpdateReminderInfo(info);
+                return true;
+            },
+        },
+        {
+            // Donation ask: lowest precedence; suppressed whenever an announcement is
+            // configured or an update reminder is showing (via the queue).
+            id: 'donation',
+            priority: 10,
+            delayMs: DONATION_PROMPT_STARTUP_DELAY_MS,
+            isEligible: () => {
+                if (donationPromptAllowed !== true) return false;
+                if (ACTIVE_APP_ANNOUNCEMENT) return false;
+                if (!promptStateSnapshot) return false;
+                return shouldShowDonationPrompt({
+                    nowMs: Date.now(),
+                    promptState: promptStateSnapshot,
+                    supportPrompt: input.getSupportPrompt(),
+                    donationAllowed: true,
+                });
+            },
+            present: () => true,
+        },
+    ];
+}
