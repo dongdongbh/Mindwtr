@@ -1,3 +1,5 @@
+import type { Task } from './types';
+
 export type PomodoroPhase = 'focus' | 'break';
 export type PomodoroEvent = 'focus-finished' | 'break-finished';
 
@@ -270,7 +272,7 @@ export function advancePomodoroState(
     options: PomodoroAutoStartOptions = {},
 ): PomodoroAdvanceResult {
     const safeElapsedSeconds = Math.max(0, Math.floor(elapsedSeconds));
-    if (safeElapsedSeconds <= 0) {
+    if (!Number.isFinite(elapsedSeconds) || safeElapsedSeconds <= 0 || !state.isRunning) {
         return {
             state,
             lastEvent: null,
@@ -279,15 +281,49 @@ export function advancePomodoroState(
 
     let nextState = state;
     let lastEvent: PomodoroEvent | null = null;
+    let remainingElapsedSeconds = safeElapsedSeconds;
 
-    for (let i = 0; i < safeElapsedSeconds; i += 1) {
-        const next = tickPomodoroState(nextState, durations, options);
-        nextState = next.state;
-        if (next.switchedPhase) {
-            lastEvent = next.completedFocusSession ? 'focus-finished' : 'break-finished';
-            if (!nextState.isRunning) break;
-        } else if (!nextState.isRunning) {
+    while (remainingElapsedSeconds > 0 && nextState.isRunning) {
+        // A fractional, zero or negative initial countdown still finishes on
+        // exactly the tick where tickPomodoroState would switch phases.
+        const countdownSeconds = nextState.remainingSeconds > 1
+            ? Math.ceil(nextState.remainingSeconds) - 1
+            : 0;
+        if (remainingElapsedSeconds <= countdownSeconds) {
+            nextState = { ...nextState, remainingSeconds: nextState.remainingSeconds - remainingElapsedSeconds };
             break;
+        }
+
+        const next = tickPomodoroState({
+            ...nextState,
+            remainingSeconds: nextState.remainingSeconds - countdownSeconds,
+        }, durations, options);
+        nextState = next.state;
+        remainingElapsedSeconds -= countdownSeconds + 1;
+        lastEvent = next.completedFocusSession ? 'focus-finished' : 'break-finished';
+
+        if (nextState.isRunning && options.autoStartFocus === true && options.autoStartBreaks === true) {
+            // The first partial phase is now settled. Full focus/break cycles
+            // return to this same full phase; the remaining tail spans at most
+            // two boundaries, regardless of how long the timer was inactive.
+            const cycleSeconds = getPomodoroPhaseSeconds('focus', durations) + getPomodoroPhaseSeconds('break', durations);
+            const fullCycles = Math.floor(remainingElapsedSeconds / cycleSeconds);
+            if (fullCycles > 0) {
+                const count = nextState.completedFocusSessions;
+                const incremented = count + 1;
+                // Counts from stored sessions are nonnegative integers. Keep
+                // repeated +1's IEEE fixed point without truncating the input.
+                // shortcut: fractional direct-call counts use arithmetic addition;
+                // revisit if a caller stops normalizing completed counts to integers.
+                const completedFocusSessions = incremented === count
+                    ? count
+                    : count >= Number.MAX_SAFE_INTEGER + 1
+                        ? incremented
+                        : Math.min(count + fullCycles, Number.MAX_SAFE_INTEGER + 1);
+                nextState = { ...nextState, completedFocusSessions };
+                remainingElapsedSeconds %= cycleSeconds;
+                lastEvent = nextState.phase === 'focus' ? 'break-finished' : 'focus-finished';
+            }
         }
     }
 
@@ -309,4 +345,14 @@ export function formatPomodoroClock(totalSeconds: number): string {
 
     const totalMinutes = Math.floor(safeSeconds / 60);
     return `${String(totalMinutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+export function getPomodoroTaskChoices(pools: {
+    focusedTasks: readonly Task[]; schedule: readonly Task[]; nextActions: readonly Task[]; reviewDue: readonly Task[];
+}): Task[] {
+    const byId = new Map<string, Task>();
+    for (const task of [...pools.focusedTasks, ...pools.schedule, ...pools.nextActions, ...pools.reviewDue]) {
+        if (!task.deletedAt) byId.set(task.id, task);
+    }
+    return Array.from(byId.values());
 }

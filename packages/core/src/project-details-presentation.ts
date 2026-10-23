@@ -1,5 +1,6 @@
 import { safeParseDate } from './date';
 import { tFallback, type TranslateFn } from './i18n';
+import { getProjectFlowMode } from './task-utils';
 import type { Project, Section } from './types';
 
 export type ProjectDetailsMetadata = {
@@ -47,9 +48,12 @@ export function getProjectDetailsPresentation(
             : displayStatus === 'waiting' ? t('status.waiting')
                 : displayStatus === 'someday' ? t('status.someday')
                     : tFallback(t, 'status.archived', 'Archived');
-    const typeLabel = project.isSequential
+    const flowMode = getProjectFlowMode(project);
+    const typeLabel = flowMode === 'sequential'
         ? tFallback(t, 'projects.sequential', 'Sequential')
-        : tFallback(t, 'projects.parallel', 'Parallel');
+        : flowMode === 'perSection'
+            ? tFallback(t, 'projects.perSection', 'Per section')
+            : tFallback(t, 'projects.parallel', 'Parallel');
     const noAreaLabel = tFallback(t, 'projects.noArea', 'No Area');
     const areaLabel = input.areaName || noAreaLabel;
     const sections = input.sections.map(({ id, title }) => ({ id, title }));

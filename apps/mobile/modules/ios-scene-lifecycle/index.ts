@@ -28,9 +28,15 @@ type IosSceneDiagnosticsSubscription = { remove(): void };
 
 interface MindwtrIosSceneLifecycleNativeModule extends NativeModule {
   drainDiagnostics?: () => unknown;
+  beginBackgroundTask?: (name: string) => unknown;
+  endBackgroundTask?: (id: number) => void;
   addListener(
     eventName: 'onDiagnosticsChanged',
     listener: () => void,
+  ): IosSceneDiagnosticsSubscription;
+  addListener(
+    eventName: 'onBackgroundTaskExpired',
+    listener: (event: { id?: unknown } | undefined) => void,
   ): IosSceneDiagnosticsSubscription;
 }
 
@@ -105,4 +111,49 @@ export function subscribeIosSceneDiagnostics(
   } catch {
     return { remove: () => undefined };
   }
+}
+
+/**
+ * Asks iOS to keep the app running in the background until the returned release is called
+ * (#1432). Returns null off iOS, on an older build without the native function, or when iOS
+ * grants no time. `onExpire` runs at most once, when iOS ends the time first; native has
+ * already ended the task then, so a later release only cleans up.
+ */
+export function beginIosBackgroundTask(
+  name: string,
+  onExpire: () => void,
+): (() => void) | null {
+  const nativeModule = getNativeModule();
+  if (!nativeModule?.beginBackgroundTask || !nativeModule.endBackgroundTask) return null;
+  let id: unknown;
+  try {
+    id = nativeModule.beginBackgroundTask(name);
+  } catch {
+    return null;
+  }
+  if (typeof id !== 'number' || !Number.isInteger(id) || id <= 0) return null;
+  const taskId = id;
+  let subscription: IosSceneDiagnosticsSubscription | null = null;
+  let finished = false;
+  const finish = (): boolean => {
+    if (finished) return false;
+    finished = true;
+    subscription?.remove();
+    return true;
+  };
+  try {
+    subscription = nativeModule.addListener('onBackgroundTaskExpired', (event) => {
+      if (event?.id === taskId && finish()) onExpire();
+    });
+  } catch {
+    // Without the event, iOS still ends the task itself when the time runs out.
+  }
+  return () => {
+    if (!finish()) return;
+    try {
+      nativeModule.endBackgroundTask?.(taskId);
+    } catch {
+      // Native ignores an id it no longer holds; nothing else to release.
+    }
+  };
 }

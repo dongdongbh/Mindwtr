@@ -35,6 +35,24 @@ const makeData = (tasks: Task[], projects: Project[] = []): AppData => ({
 });
 
 describe('buildMacWidgetPayload', () => {
+    it('filters direct and inherited area stars while preserving the global occupied count', () => {
+        const data = makeData([
+            makeTask({ id: 'direct', isFocusedToday: true, areaId: 'work' }),
+            makeTask({ id: 'inherited', isFocusedToday: true, projectId: 'project-1' }),
+            makeTask({ id: 'home', isFocusedToday: true, areaId: 'home' }),
+        ], [makeProject({ areaId: 'work' })]);
+        data.areas = ['work', 'home', 'empty'].map((id, order) => ({ id, name: id, order,
+            createdAt: '2026-01-01T08:00:00.000Z', updatedAt: '2026-01-01T08:00:00.000Z' }));
+        data.settings.filters = { areaIds: ['work'] };
+        const selected = buildMacWidgetPayload(data, 'en', false);
+        expect(selected.items.map((item) => item.id)).toEqual(['direct', 'inherited']);
+        expect(selected.focusedCount).toBe(3);
+        data.settings.filters = { areaIds: ['empty'] };
+        expect(buildMacWidgetPayload(data, 'en', false)).toMatchObject({ items: [], focusedCount: 3 });
+        data.settings.filters = {};
+        expect(buildMacWidgetPayload(data, 'en', false).items.map((item) => item.id)).toEqual(['direct', 'inherited', 'home']);
+    });
+
     it('reports the empty state with no actionable tasks', () => {
         const payload = buildMacWidgetPayload(makeData([]), 'en', false);
         expect(payload.items).toEqual([]);

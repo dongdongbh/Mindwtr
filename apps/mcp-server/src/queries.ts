@@ -146,6 +146,7 @@ type SectionSqliteRow = Record<string, unknown> & {
   description?: string | null;
   orderNum?: number | null;
   isCollapsed?: number | null;
+  isSequential?: number | null;
   rev?: number | null;
   revBy?: string | null;
   createdAt: string;
@@ -377,6 +378,7 @@ const BASE_SECTION_COLUMNS = [
   'description',
   'orderNum',
   'isCollapsed',
+  'isSequential',
   'rev',
   'revBy',
   'createdAt',
@@ -393,12 +395,14 @@ const getSectionColumns = (db: DbClient) => {
     const columns = db.prepare('PRAGMA table_info(sections)').all<ColumnInfoRow>();
     const names = new Set<string>(columns.map((col) => String(col.name)));
     const hasOrderNum = names.has('orderNum');
-    const selectColumns = BASE_SECTION_COLUMNS.filter((name) => hasOrderNum || name !== 'orderNum');
+    // isSequential (#1429) is read-only here and missing from databases an older app wrote.
+    const selectColumns = BASE_SECTION_COLUMNS.filter((name) => (hasOrderNum || name !== 'orderNum')
+      && (name !== 'isSequential' || names.has(name)));
     const resolved = { hasOrderNum, selectColumns };
     sectionColumnsCache.set(db, resolved);
     return resolved;
   } catch {
-    const fallback = { hasOrderNum: true, selectColumns: BASE_SECTION_COLUMNS };
+    const fallback = { hasOrderNum: true, selectColumns: BASE_SECTION_COLUMNS.filter((name) => name !== 'isSequential') };
     sectionColumnsCache.set(db, fallback);
     return fallback;
   }

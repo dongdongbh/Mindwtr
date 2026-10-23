@@ -1,0 +1,418 @@
+{
+  "input": {
+    "tasks": [
+      {
+        "id": "t1",
+        "title": "Task t1 🦉 & <x>",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t2",
+        "title": "Task t2 🦉 & <x>",
+        "status": "done",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t3",
+        "title": "Task t3 🦉 & <x>",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "deletedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t4",
+        "title": "Task t4 🦉 & <x>",
+        "status": "archived",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t/5 ?&=",
+        "title": "Task t/5 ?&= 🦉 & <x>",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "projectId": "p1",
+        "dueDate": "2026-11-01"
+      },
+      {
+        "id": "t6",
+        "title": "Task t6 🦉 & <x>",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "areaId": "a1"
+      },
+      {
+        "id": "t7",
+        "title": "Task t7 🦉 & <x>",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "projectId": "p1",
+        "areaId": "a1"
+      },
+      {
+        "id": "t8",
+        "title": "Task t8 🦉 & <x>",
+        "status": "waiting",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t9",
+        "title": "Task t9 🦉 & <x>",
+        "status": "someday",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t10",
+        "title": "Task t10 🦉 & <x>",
+        "status": "reference",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      }
+    ],
+    "projects": [
+      {
+        "id": "p1",
+        "title": "Project p1",
+        "status": "active",
+        "color": "#000",
+        "order": 0,
+        "tagIds": [],
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "p2",
+        "title": "Project p2",
+        "status": "archived",
+        "color": "#000",
+        "order": 0,
+        "tagIds": [],
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "p3",
+        "title": "Project p3",
+        "status": "active",
+        "color": "#000",
+        "order": 0,
+        "tagIds": [],
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "deletedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "p4",
+        "title": "Project p4",
+        "status": "someday",
+        "color": "#000",
+        "order": 0,
+        "tagIds": [],
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "areaId": "a1"
+      }
+    ],
+    "areas": [
+      {
+        "id": "a1",
+        "name": "Area a1",
+        "order": 0,
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "a2",
+        "name": "Area a2",
+        "order": 0,
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "deletedAt": "2026-10-21T12:00:00.000Z"
+      }
+    ],
+    "nextTasks": [
+      {
+        "id": "t1",
+        "title": "renamed",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t/5 ?&=",
+        "title": "Task t/5 ?&= 🦉 & <x>",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z",
+        "projectId": "p1",
+        "dueDate": "2026-11-01"
+      },
+      {
+        "id": "t8",
+        "title": "Task t8 🦉 & <x>",
+        "status": "done",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "t11",
+        "title": "Task t11 🦉 & <x>",
+        "status": "next",
+        "tags": [
+          "secret"
+        ],
+        "contexts": [
+          "@home"
+        ],
+        "description": "private",
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      }
+    ],
+    "nextProjects": [
+      {
+        "id": "p1",
+        "title": "Project p1",
+        "status": "active",
+        "color": "#000",
+        "order": 0,
+        "tagIds": [],
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      },
+      {
+        "id": "p4",
+        "title": "Project p4",
+        "status": "archived",
+        "color": "#000",
+        "order": 0,
+        "tagIds": [],
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      }
+    ],
+    "nextAreas": [
+      {
+        "id": "a1",
+        "name": "Renamed area",
+        "order": 0,
+        "createdAt": "2026-10-21T12:00:00.000Z",
+        "updatedAt": "2026-10-21T12:00:00.000Z"
+      }
+    ]
+  },
+  "full": [
+    {
+      "id": "task:t1",
+      "kind": "task",
+      "title": "Task t1 🦉 & <x>",
+      "status": "next",
+      "deepLink": "mindwtr://open?task=t1"
+    },
+    {
+      "id": "task:t/5 ?&=",
+      "kind": "task",
+      "title": "Task t/5 ?&= 🦉 & <x>",
+      "status": "next",
+      "dueDate": "2026-11-01",
+      "parentId": "p1",
+      "deepLink": "mindwtr://open?task=t%2F5%20%3F%26%3D"
+    },
+    {
+      "id": "task:t6",
+      "kind": "task",
+      "title": "Task t6 🦉 & <x>",
+      "status": "next",
+      "parentId": "a1",
+      "deepLink": "mindwtr://open?task=t6"
+    },
+    {
+      "id": "task:t7",
+      "kind": "task",
+      "title": "Task t7 🦉 & <x>",
+      "status": "next",
+      "parentId": "p1",
+      "deepLink": "mindwtr://open?task=t7"
+    },
+    {
+      "id": "task:t8",
+      "kind": "task",
+      "title": "Task t8 🦉 & <x>",
+      "status": "waiting",
+      "deepLink": "mindwtr://open?task=t8"
+    },
+    {
+      "id": "task:t9",
+      "kind": "task",
+      "title": "Task t9 🦉 & <x>",
+      "status": "someday",
+      "deepLink": "mindwtr://open?task=t9"
+    },
+    {
+      "id": "task:t10",
+      "kind": "task",
+      "title": "Task t10 🦉 & <x>",
+      "status": "reference",
+      "deepLink": "mindwtr://open?task=t10"
+    },
+    {
+      "id": "project:p1",
+      "kind": "project",
+      "title": "Project p1",
+      "status": "active",
+      "deepLink": "mindwtr://open?project=p1"
+    },
+    {
+      "id": "project:p4",
+      "kind": "project",
+      "title": "Project p4",
+      "status": "someday",
+      "parentId": "a1",
+      "deepLink": "mindwtr://open?project=p4"
+    },
+    {
+      "id": "area:a1",
+      "kind": "area",
+      "title": "Area a1",
+      "deepLink": "mindwtr://open?area=a1"
+    }
+  ],
+  "delta": {
+    "upserts": [
+      {
+        "id": "task:t1",
+        "kind": "task",
+        "title": "renamed",
+        "status": "next",
+        "deepLink": "mindwtr://open?task=t1"
+      },
+      {
+        "id": "task:t11",
+        "kind": "task",
+        "title": "Task t11 🦉 & <x>",
+        "status": "next",
+        "deepLink": "mindwtr://open?task=t11"
+      },
+      {
+        "id": "area:a1",
+        "kind": "area",
+        "title": "Renamed area",
+        "deepLink": "mindwtr://open?area=a1"
+      }
+    ],
+    "removeIds": [
+      "task:t8",
+      "task:t2",
+      "task:t3",
+      "task:t4",
+      "task:t6",
+      "task:t7",
+      "task:t9",
+      "task:t10",
+      "project:p4",
+      "project:p2",
+      "project:p3",
+      "area:a2"
+    ]
+  }
+}

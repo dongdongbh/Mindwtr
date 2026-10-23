@@ -40,7 +40,7 @@ export function isSandboxMode(): boolean {
 
 const themes: readonly AppTheme[] = [
     'light', 'dark', 'system', 'eink', 'nord', 'sepia', 'material3-light',
-    'material3-dark', 'oled', 'catppuccin-macchiato', 'dracula',
+    'material3-dark', 'oled', 'catppuccin-macchiato', 'dracula', 'gruvbox-light', 'gruvbox-dark',
 ];
 
 /** Do not spread personal settings: they include credentials, custom labels and external paths. */

@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
@@ -33,12 +34,15 @@ import {
   buildFocusAdvancedFilterChips,
   buildFocusNextItems,
   buildFocusPools,
+  taskMatchesAreaFilterSelection,
   buildFocusScheduleItems,
   buildFocusTaskSections,
   canReorderFocusTasks,
   DEFAULT_FOCUS_SORT_BY,
   deriveFocusTaskLists,
   getFocusEmptyState,
+  getFocusHiddenByAreaLabel,
+  logInfo,
   getFocusFilterTokens,
   getFocusGroupByLabel,
   getFocusGroupByOptions,
@@ -51,6 +55,7 @@ import {
   getFocusSortOptions,
   getFocusStarBlockedText,
   getProjectDeadlineBoostLabel,
+  getPomodoroTaskChoices,
   getReviewDueProjects,
   moveFocusReorderTask,
   planFocusFilterCriterionRemoval,
@@ -341,6 +346,7 @@ export default function FocusScreen() {
     t,
     visibility: metadataFilterVisibility,
     savedFilters: savedFocusFilters,
+    rawSavedFilters: settings?.savedFilters,
     retainTokens: tokenOptions,
     retainProjects: projectFilterOptionIds,
     getProjectLabel: getProjectFilterLabel,
@@ -372,10 +378,7 @@ export default function FocusScreen() {
   });
   const focusSortOptions = getFocusSortOptions(prioritiesEnabled);
   const focusGroupByOptions = getFocusGroupByOptions(prioritiesEnabled);
-  // Every Focus pool at once, from the shared core derivation: the starred
-  // pool (never area- or start-hidden, so a hidden star cannot eat one of the
-  // cap's slots), the time-granularity pool behind Next actions and Review
-  // Due, the day-granularity Today pool, and the Upcoming forecast.
+  // Area-visible pools share the derivation; occupied slots are counted globally.
   // futureStartTick makes a later-today start leave the Next actions pool the
   // moment its time arrives; localDayKey covers the day rollover.
   const actionableTasks = useMemo(() => tasks.filter(isTaskActionable), [tasks]);
@@ -385,11 +388,12 @@ export default function FocusScreen() {
     return buildFocusPools({
       tasks: actionableTasks,
       visibleTasks: baseActiveTasks,
+      isAreaVisible: (task) => taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById),
       projects,
       criteria: selections.criteria,
       now: new Date(),
     });
-  }, [actionableTasks, baseActiveTasks, futureStartTick, localDayKey, projects, selections.criteria]);
+  }, [actionableTasks, areaById, baseActiveTasks, futureStartTick, localDayKey, projectById, projects, resolvedAreaFilter, selections.criteria]);
   const upcomingEntries = focusPools.upcoming;
   // The date a deferred row surfaces on is the section's whole point, so it rides
   // the row itself rather than the meta line. Built once per list so the footer
@@ -764,6 +768,15 @@ export default function FocusScreen() {
     void import('@/lib/widget-service').then((widgets) => widgets.updateMobileWidgetFromStore()).catch(() => {});
   }, [activeSavedFilter?.sortOrder, effectiveFocusSortBy, selections.criteria]);
 
+  const focusHiddenByAreaLabel = getFocusHiddenByAreaLabel(focusPools.selection, t);
+  useEffect(() => {
+    if (!focusPools.selection.hiddenByAreaCount) return;
+    void logInfo('Focus area selection projected', { scope: 'focus', force: true, context: {
+      releaseCheck: 'v1.3.7/focus-area-selection',
+      globalCount: focusPools.selection.globalCount, hiddenByAreaCount: focusPools.selection.hiddenByAreaCount,
+    } });
+  }, [focusPools.selection.globalCount, focusPools.selection.hiddenByAreaCount]);
+
   const { focusedTasks, schedule, nextActions, upcoming, reviewDue, projectDeadlineBoosts } = useMemo(() => {
     void localDayKey;
     return deriveFocusTaskLists(focusPools, {
@@ -924,6 +937,7 @@ export default function FocusScreen() {
     const nextSections: FocusSection[] = buildFocusTaskSections(
       { focusedTasks, schedule, reviewDue, nextActions, upcoming },
       t,
+      focusPools.selection.globalCount,
     ).map((section) => ({
       title: section.title,
       data: section.key === 'next'
@@ -931,7 +945,7 @@ export default function FocusScreen() {
         : section.key === 'schedule'
           ? buildScheduleItems()
         : (expandedSections[section.key] ? buildTaskItems(section.items) : []),
-      totalCount: section.items.length,
+      totalCount: section.key === 'focus' ? focusPools.selection.globalCount : section.items.length,
       expanded: expandedSections[section.key],
       type: section.key,
     }));
@@ -950,6 +964,7 @@ export default function FocusScreen() {
     effectiveFocusGroupBy,
     expandedSections,
     focusViewStateHydrated,
+    focusPools.selection.globalCount,
     focusedTasks,
     nextActions,
     upcoming,
@@ -1046,7 +1061,7 @@ export default function FocusScreen() {
       offset: FOCUS_ESTIMATED_TASK_HEIGHT * index,
     };
   }, [focusItemLayouts]);
-  const hasTasks = focusedTasks.length > 0 || schedule.length > 0 || nextActions.length > 0 || upcoming.length > 0 || reviewDue.length > 0 || reviewDueProjects.length > 0;
+  const hasTasks = focusPools.selection.globalCount > 0 || schedule.length > 0 || nextActions.length > 0 || upcoming.length > 0 || reviewDue.length > 0 || reviewDueProjects.length > 0;
   const activeFilterCount = selections.activeCount;
   // Criteria an applied saved filter carries that no picker can express; they
   // are removed from the saved filter itself rather than from the selections.
@@ -1054,7 +1069,7 @@ export default function FocusScreen() {
     if (!activeSavedFilter) return [];
     return buildFocusAdvancedFilterChips({
       activeSavedFilter,
-      criteria: selections.criteria,
+      criteria: { ...selections.criteria, anyDateRange: undefined },
       areaById,
       t,
     }).map((chip) => ({
@@ -1085,14 +1100,8 @@ export default function FocusScreen() {
     hasAnyTasks: tasks.length > 0,
     t,
   });
-  const pomodoroTasks = useMemo(() => {
-    const byId = new Map<string, Task>();
-    [...focusedTasks, ...schedule, ...nextActions, ...reviewDue].forEach((task) => {
-      if (task.deletedAt) return;
-      byId.set(task.id, task);
-    });
-    return Array.from(byId.values());
-  }, [focusedTasks, schedule, nextActions, reviewDue]);
+  const pomodoroTasks = useMemo(() => getPomodoroTaskChoices({ focusedTasks, schedule, nextActions, reviewDue }),
+    [focusedTasks, schedule, nextActions, reviewDue]);
 
   const onEdit = useCallback((task: Task) => {
     setTaskModalDefaultTab('view');
@@ -1231,7 +1240,7 @@ export default function FocusScreen() {
             <View
               style={[
                 styles.projectReviewIcon,
-                { backgroundColor: tc.filterBg, borderColor: project.color || tc.border },
+                { backgroundColor: tc.filterBg, borderColor: getProjectAccentColor(project, areaById) || tc.border },
               ]}
             >
               <Folder size={18} color={tc.text} />
@@ -1688,7 +1697,7 @@ export default function FocusScreen() {
               <CompactText
                 style={[styles.sectionCount, { color: tc.secondaryText }]}
               >
-                ({section.totalCount})
+                ({section.totalCount}{section.type === 'focus' ? `/${normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit)}` : ''})
               </CompactText>
             </Pressable>
             {section.type === 'focus' && canReorderFocus ? (
@@ -1709,6 +1718,9 @@ export default function FocusScreen() {
               </TouchableOpacity>
             ) : null}
             </View>
+            {section.type === 'focus' && focusHiddenByAreaLabel ? (
+              <Text testID="focus-hidden-by-area" style={{ color: tc.secondaryText, marginBottom: 10 }}>{focusHiddenByAreaLabel}</Text>
+            ) : null}
             </View>
           ) : null
         )}

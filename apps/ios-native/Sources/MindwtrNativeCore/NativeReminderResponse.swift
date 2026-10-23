@@ -50,7 +50,10 @@ public struct NativeReminderResponse: Codable, Equatable, Sendable {
         }
         guard NativeReminderRequest.ownedID(identifier: request.identifier,
                                             metadata: request.content.userInfo["mindwtrNativeReminder"],
-                                            namespace: namespace) != nil else { return [] }
+                                            namespace: namespace) != nil
+            || NativePomodoroRequest.ownedIdentity(identifier: request.identifier,
+                                                   metadata: request.content.userInfo["mindwtrNativePomodoro"],
+                                                   namespace: namespace) != nil else { return [] }
         return request.content.sound == nil ? [.banner, .list] : [.banner, .list, .sound]
     }
 

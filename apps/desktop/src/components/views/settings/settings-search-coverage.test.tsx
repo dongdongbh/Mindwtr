@@ -1,5 +1,5 @@
-import { fireEvent, render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import {
     SETTINGS_SEARCH_PAGE_IDS,
@@ -22,6 +22,15 @@ import { SettingsMainPage } from './SettingsMainPage';
 import { SettingsManagePage } from './SettingsManagePage';
 import { SettingsNotificationsPage } from './SettingsNotificationsPage';
 import { SettingsSyncPage } from './SettingsSyncPage';
+
+vi.mock('../../../lib/gmail-capture', async (original) => ({
+    ...(await original<typeof import('../../../lib/gmail-capture')>()),
+    getGmailCaptureConfig: async () => ({
+        available: true, connected: true, account: 'designated@example.test',
+        accountId: 'mailbox-hash', labelId: 'Label_1', enabled: false,
+    }),
+    getGmailCaptureLabels: async () => [{ id: 'Label_1', name: 'Mindwtr' }],
+}));
 
 // Both directions of the search index contract (#884):
 //
@@ -53,8 +62,10 @@ function isPageLevelEntry(pageId: SettingsSearchPageId, key: string): boolean {
     return resolveSettingsSearchI18nKey(key) === SETTINGS_SEARCH_PAGE_TITLE_KEYS[pageId];
 }
 
-function collectRenderedKeys(ui: ReactElement): Set<string> {
+async function collectRenderedKeys(ui: ReactElement, settleConnection: boolean): Promise<Set<string>> {
     const { container, unmount } = render(ui);
+    // Gmail's label picker appears after the native connection and labels load.
+    if (settleConnection) await act(async () => {});
     // Disclosure contents are absent from the DOM until opened, and a few
     // disclosures nest, so keep opening until nothing is collapsed.
     for (let pass = 0; pass < 6; pass += 1) {
@@ -458,11 +469,17 @@ const PAGE_VARIANTS: Record<SettingsSearchPageId, ReactElement[]> = {
 };
 
 describe('desktop settings search coverage', () => {
-    it.each(SETTINGS_SEARCH_PAGE_IDS)('indexes every rendered row on the %s page', (pageId) => {
+    const collectPageKeys = async (pageId: SettingsSearchPageId): Promise<Set<string>> => {
+        const keys = new Set<string>();
+        for (const variant of PAGE_VARIANTS[pageId]) {
+            (await collectRenderedKeys(variant, pageId === 'integrations')).forEach((key) => keys.add(key));
+        }
+        return keys;
+    };
+
+    it.each(SETTINGS_SEARCH_PAGE_IDS)('indexes every rendered row on the %s page', async (pageId) => {
         const rosterKeys = new Set(getSettingsSearchEntryKeys(pageId));
-        const renderedKeys = new Set(
-            PAGE_VARIANTS[pageId].flatMap((variant) => [...collectRenderedKeys(variant)]),
-        );
+        const renderedKeys = await collectPageKeys(pageId);
 
         const unindexed = [...renderedKeys].filter((key) => !rosterKeys.has(key)).sort();
         expect(
@@ -474,10 +491,8 @@ describe('desktop settings search coverage', () => {
         ).toEqual([]);
     });
 
-    it.each(SETTINGS_SEARCH_PAGE_IDS)('renders a row for every indexed setting on the %s page', (pageId) => {
-        const renderedKeys = new Set(
-            PAGE_VARIANTS[pageId].flatMap((variant) => [...collectRenderedKeys(variant)]),
-        );
+    it.each(SETTINGS_SEARCH_PAGE_IDS)('renders a row for every indexed setting on the %s page', async (pageId) => {
+        const renderedKeys = await collectPageKeys(pageId);
 
         const missing = getSettingsSearchEntryKeys(pageId)
             .filter((key) => !renderedKeys.has(key))

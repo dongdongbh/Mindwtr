@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createReferenceTasksMoveMethods, type NativeReferenceTasksMoveEnvelope } from './native-host-contract-reference-bulk-status';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { openScratchSqlite, openSqliteHost as openHost } from './screen-parity.replay';
 const openSqliteHost: typeof openHost = (seed, wrap, bindings) => openHost(seed, wrap, bindings, { rejectConcurrentWrites: true });
 import { NativeReceiptSqliteAdapter, taskRevisionOf } from './native-request-receipts';
@@ -67,6 +68,24 @@ const ids = () => {
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.restoreAllMocks(); vi.useRealTimers(); if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ; });
 
 describe('guarded Reference bulk Move status', () => {
+    it('preserves the legacy V1 envelope and canonical receipt payload bytes', async () => {
+        process.env.TZ = 'America/New_York'; clock();
+        const sqlite = await openSqliteHost({ tasks: [task('golden', { title: 'Golden' })],
+            settings: { deviceId: DEVICE, analyticsProfileId: REQUEST_ID } });
+        try {
+            const host = methods(); const command = await prepare(host, request('waiting', ['golden']));
+            const payload = JSON.stringify(['referenceTasksMove', command], (_name, item) => item && typeof item === 'object' && !Array.isArray(item)
+                ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+            // Captured from the unmodified baseline controller with this same SQLite fixture/clock.
+            expect(createHash('sha256').update(payload).digest('hex')).toBe('500190e913caf6573e8776bdb0b962cba9cc4a24981da3b9251fa8d833d920ca');
+            expect(command.request).not.toHaveProperty('source');
+            value(await host.commitPreparedReferenceTasksMove(command));
+            const fingerprint = deterministicHash128(payload).map((part) => part.toString(16).padStart(8, '0')).join('');
+            expect(await sqlite.sql('SELECT method,reply FROM native_request_receipts')).toEqual([
+                { method: 'referenceTasksMove:' + fingerprint, reply: '{"count":1,"status":"waiting"}' }]);
+        } finally { await sqlite.close(); }
+    });
+
     it.each(getBulkMoveStatusOptions('reference'))('matches actual RN batchMoveTasks complete AppData and nine SQLite domains for %s', async (status) => {
         clock(); const rn = await openSqliteHost(seed()); let expected; let expectedRaw;
         try {

@@ -11,6 +11,7 @@
  */
 import type { ReviewSnapshotItem, ReviewSuggestion } from './ai/types';
 import { filterReviewSuggestionsToKnownIds } from './ai/utils';
+import { getProjectAccentColor } from './task-accent-color';
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
 import { createDateFormatter, hasTimeComponent, isDueForReview, safeParseDate, type DateFormatter } from './date';
 import { formatFocusTaskLimitText, normalizeFocusTaskLimit } from './focus-utils';
@@ -621,7 +622,7 @@ const PROJECT_BADGES: Record<ProjectNextActionState, { label: keyof WeeklyReview
 };
 
 export type WeeklyReviewProject = WeeklyReviewProjectEntry & {
-    /** The area's color; null means the theme tint. */
+    /** Project identity color; the historical field name is retained for native compatibility. */
     areaColor: string | null;
     badge: { label: string; color: string; background: string };
     countLabel: string;
@@ -636,7 +637,7 @@ export function getWeeklyReviewProjects(
         const badge = PROJECT_BADGES[entry.nextActionState];
         return {
             ...entry,
-            areaColor: (entry.project.areaId ? areaById.get(entry.project.areaId)?.color : undefined) || null,
+            areaColor: getProjectAccentColor(entry.project, areaById) || null,
             badge: { label: labels[badge.label], color: badge.color, background: badge.background },
             countLabel: `${entry.tasks.length} ${entry.tasks.length === 1 ? labels.activeTask : labels.activeTasks}`,
         };

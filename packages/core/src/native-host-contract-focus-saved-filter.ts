@@ -72,7 +72,7 @@ const validRawFilter = (value: unknown): value is SavedFilter => {
             && criteria[key] !== 'any' && criteria[key] !== 'all')
         || ['hasDescription', 'isStarred'].some((key) => criteria[key] != null
             && typeof criteria[key] !== 'boolean')
-        || ['dueDateRange', 'startDateRange', 'timeEstimateRange'].some((key) =>
+        || ['dueDateRange', 'startDateRange', 'anyDateRange', 'timeEstimateRange'].some((key) =>
             criteria[key] != null && !record(criteria[key]))) return false;
     return normalizeSavedFilter(value) !== null;
 };
@@ -147,12 +147,12 @@ const readPrepared = (value: unknown): PreparedFocusSavedFilter | null => {
             || !isSavedFilterSortField(scope.creation.effectiveSortBy)
             || !GROUP.has(String(scope.creation.effectiveGroupBy))) return null;
         const selections = request.controls.filters;
-        const visibleMaximum = criteriaFromSelections({ tokens: selections.tokens,
+        const visibleMaximum = { ...criteriaFromSelections({ tokens: selections.tokens,
             excludedTokens: selections.excludedTokens, projects: selections.projects,
             locations: selections.location.trim() ? [selections.location.trim()] : [],
             priorities: selections.priorities, energyLevels: selections.energyLevels,
             timeEstimates: selections.timeEstimates, contextMatchMode: selections.contextMatchMode,
-            tagMatchMode: selections.tagMatchMode });
+            tagMatchMode: selections.tagMatchMode, anyDateRange: selections.anyDateRange }), ...request.controls.preservedCriteria };
         if (!same(scope.creation.currentCriteria, visibleMaximum)
             || !resolveTaskPerspectiveForFeatures({
                 sortBy: scope.creation.effectiveSortBy,

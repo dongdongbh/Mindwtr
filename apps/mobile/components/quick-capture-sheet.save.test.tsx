@@ -111,6 +111,7 @@ vi.mock('@mindwtr/core', async () => {
   getQuickCaptureBulkFailedNotice: actual.getQuickCaptureBulkFailedNotice,
   getQuickCaptureContextChoices: quickCaptureSpies.getQuickCaptureContextChoices,
   getQuickCaptureContextPicker: actual.getQuickCaptureContextPicker,
+  getSavedTaxonomyTokens: actual.getSavedTaxonomyTokens,
   getQuickCaptureLabels: actual.getQuickCaptureLabels,
   parseQuickCaptureContextQuery: actual.parseQuickCaptureContextQuery,
   planQuickCaptureSave: actual.planQuickCaptureSave,
@@ -693,6 +694,7 @@ describe('QuickCaptureSheet save handling', () => {
     const deleted = { id: 'deleted', title: 'Deleted', status: 'next', contexts: ['@deleted-only'], tags: [], deletedAt: '2026-09-27T00:00:00.000Z' };
     selectStore.getState().tasks = [active, done] as never;
     selectStore.getState()._allTasks = [active, done, archived, bare, deleted] as never;
+    selectStore.getState().settings = { taxonomy: { contexts: [{ token: '@unused', rev: 1, revBy: 'test', updatedAt: '2026-10-20T00:00:00.000Z' }] } };
 
     let tree!: ReturnType<typeof create>;
     await act(async () => {
@@ -726,7 +728,7 @@ describe('QuickCaptureSheet save handling', () => {
     expect(contextScans()).toBe(1);
     const pickers = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetPickers')[0];
     if (!pickers) throw new Error('QuickCaptureSheetPickers not found');
-    expect(pickers.props.filteredContexts).toEqual(['@active-only', '@done-only']);
+    expect(pickers.props.filteredContexts).toEqual(['@active-only', '@done-only', '@unused']);
     expect(pickers.props.contextOptionsLoading).toBe(false);
     await act(async () => {
       pickers.props.onContextQueryChange('arch');

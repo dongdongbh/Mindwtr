@@ -767,6 +767,23 @@ describe('task-utils', () => {
     });
 
     describe('sortTasksBySavedPreference', () => {
+        it('falls through to the next key when both tasks lack the sorted date or estimate', () => {
+            // Two missing values are both +Infinity; Infinity - Infinity is NaN, which used to
+            // skip every fallback and leave undated tasks in input order.
+            const undated = (id: string, createdAt: string, extra: Partial<Task> = {}): Task => ({
+                id, title: id, status: 'next', tags: [], contexts: [], createdAt, updatedAt: createdAt, ...extra,
+            });
+            const newer = undated('newer', '2026-02-02T08:00:00.000Z');
+            const older = undated('older', '2026-02-01T08:00:00.000Z');
+            for (const sortBy of ['due', 'start', 'review', 'timeEstimate'] as const) {
+                expect(sortTasksBySavedPreference([newer, older], sortBy).map((task) => task.id)).toEqual(['older', 'newer']);
+            }
+            const dueLater = undated('due-later', '2026-02-01T07:00:00.000Z', { startTime: '2026-02-05T09:00:00.000Z' });
+            const dueSooner = undated('due-sooner', '2026-02-01T09:00:00.000Z', { startTime: '2026-02-03T09:00:00.000Z' });
+            expect(sortTasksBySavedPreference([dueLater, dueSooner], 'priority', { prioritizeByPriority: true })
+                .map((task) => task.id)).toEqual(['due-sooner', 'due-later']);
+        });
+
         it('sorts start-date perspectives before priority and creation fallbacks', () => {
             const sorted = sortTasksBySavedPreference([
                 {

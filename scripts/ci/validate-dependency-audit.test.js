@@ -292,10 +292,10 @@ test("Bun exceptions reject new runtime consumers, nested copies, and changed ve
 
 test("Hono is pinned to the patched version throughout the Bun lock", () => {
   const manifest = JSON.parse(readFileSync("package.json", "utf8"));
-  expect(manifest.overrides.hono).toBe("4.13.7");
-  expect(manifest.resolutions.hono).toBe("4.13.7");
+  expect(manifest.overrides.hono).toBe("4.13.13");
+  expect(manifest.resolutions.hono).toBe("4.13.13");
   const versions = Object.values(bunLock().packages).filter((metadata) => metadata[0].startsWith("hono@"));
-  expect(versions.map((metadata) => metadata[0])).toEqual(["hono@4.13.7"]);
+  expect(versions.map((metadata) => metadata[0])).toEqual(["hono@4.13.13"]);
 });
 
 const buildToolImportNames = [

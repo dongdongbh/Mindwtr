@@ -7,7 +7,7 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { projectTaskSortEffect, sameProjectSqliteRow } from './store-projects/project-actions';
-import { resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
+import { getVisibleTaskSortOptions, PROJECT_TASK_SORT_OPTIONS, resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import type { PreparedProjectTaskSort } from './store-types';
 import type { Project, TaskSortBy } from './types';
 
@@ -39,7 +39,7 @@ const readRequest = (value: unknown): NativeProjectTaskSortRequest | null => {
     if (!input || !exact(input, ['requestId', 'projectId', 'sortBy', 'expected'])
         || typeof input.requestId !== 'string' || !UUID.test(input.requestId)
         || typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 500
-        || !TASK_LIST_SORT_OPTIONS.includes(input.sortBy as TaskSortBy)
+        || !PROJECT_TASK_SORT_OPTIONS.includes(input.sortBy as TaskSortBy)
         || !record(input.expected)
         || !exact(input.expected, ['title', 'status', 'taskSortBy', 'rev', 'revBy', 'updatedAt'])) return null;
     const expected = input.expected;
@@ -107,10 +107,9 @@ export function createProjectTaskSortMethods(deps: {
             if (!project || project.deletedAt || project.purgedAt)
                 return fail('STALE_REVISION', 'Project is unavailable; refresh before changing task sort');
             const effectiveSortBy = resolveNonDoneTaskSortBy(project.taskSortBy, state.settings);
-            const timeEstimates = resolveFeatureFlags(state.settings).timeEstimates;
             const value = { revision: deps.revision(), project: { id: project.id, ...token(project) },
                 canEdit: project.status !== 'archived', effectiveSortBy,
-                choices: TASK_LIST_SORT_OPTIONS.filter((id) => id !== 'timeEstimate' || timeEstimates)
+                choices: getVisibleTaskSortOptions(PROJECT_TASK_SORT_OPTIONS, state.settings)
                     .map((id) => ({ id, label: deps.t(`sort.${id}`), selected: id === effectiveSortBy })),
                 label: deps.t('sort.label') };
             return isNativeJsonWithinBytes(value) ? { ok: true, value }

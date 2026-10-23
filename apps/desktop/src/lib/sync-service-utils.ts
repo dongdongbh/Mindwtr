@@ -51,12 +51,26 @@ export const fallbackHashString = (value: string): string => {
     return (hash >>> 0).toString(16);
 };
 
-export const yieldToRenderer = async (): Promise<void> => {
+// A hidden or covered window gets no animation frames, so a timer ends the wait there;
+// otherwise a sync run started while the window is hidden never continues (#1392).
+const RENDERER_YIELD_TIMEOUT_MS = 100;
+
+export const yieldToRenderer = async (): Promise<'frame' | 'timer'> => {
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-        return;
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (by: 'frame' | 'timer') => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve(by);
+            };
+            const timer = setTimeout(() => finish('timer'), RENDERER_YIELD_TIMEOUT_MS);
+            window.requestAnimationFrame(() => finish('frame'));
+        });
     }
     await sleep(0);
+    return 'timer';
 };
 
 export const createCooperativeYield = (every = 8) => {

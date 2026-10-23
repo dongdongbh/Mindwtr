@@ -93,6 +93,7 @@ import {
     buildGeneralSettingsUpdate,
     getGeneralSettingsDeviceWrites,
     isGeneralSettingStored,
+    MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS,
     MOBILE_QUICK_ACCESS_VIEW_OPTIONS,
     resolveGeneralThemeMode,
     SETTINGS_LANGUAGE_OPTIONS,
@@ -117,6 +118,7 @@ import { formatLocalDate } from './import-source-reader';
 import { tFallback } from './i18n';
 import type { Language } from './i18n/i18n-types';
 import { logInfo } from './logger';
+import { getSavedTaxonomyTokens, normalizeTaxonomyToken } from './taxonomy-catalog';
 import { isSupportedLanguage } from './i18n/i18n-constants';
 import {
     buildManagePersonRow,
@@ -239,6 +241,7 @@ export type NativeManageEditorTarget =
     | { type: 'newArea' }
     | { type: 'unassignedArea' }
     | { type: 'newPerson' }
+    | { type: 'newContext' | 'newTag' }
     | { type: 'person'; id: string; revision: string }
     | { type: 'context' | 'tag'; name: string; revision: string };
 
@@ -289,8 +292,8 @@ export type NativeManageSettings = {
         newPerson: { label: string; hint: string; addLabel: string; edit: NativeManageEdit };
         text: { openReference: string; openReferenceFailed: string; editLabel: string; deleteLabel: string; countHint: string };
     };
-    contexts: { rows: NativeWindow<NativeManageValueRow>; empty: string | null };
-    tags: { rows: NativeWindow<NativeManageValueRow>; empty: string | null };
+    contexts: { rows: NativeWindow<NativeManageValueRow>; empty: string | null; create: { label: string; addLabel: string; edit: NativeManageEdit } };
+    tags: { rows: NativeWindow<NativeManageValueRow>; empty: string | null; create: { label: string; addLabel: string; edit: NativeManageEdit } };
     /** The editor dialog's texts by target type, and the color swatches it offers. */
     editor: {
         text: Record<ManageEditorTarget['type'], ReturnType<typeof getManageEditorText>>;
@@ -298,7 +301,7 @@ export type NativeManageSettings = {
     };
 };
 
-const EDITOR_TYPES: ManageEditorTarget['type'][] = ['area', 'newArea', 'unassignedArea', 'newPerson', 'person', 'context', 'tag'];
+const EDITOR_TYPES: ManageEditorTarget['type'][] = ['area', 'newArea', 'unassignedArea', 'newPerson', 'person', 'context', 'tag', 'newContext', 'newTag'];
 const WEEK_STARTS = new Set(['system', 'sunday', 'monday', 'saturday']);
 const DATE_FORMATS = new Set(['system', 'dmy', 'mdy', 'ymd']);
 const TIME_FORMATS = new Set(['system', '12h', '24h']);
@@ -314,6 +317,7 @@ function readGeneralEdit(value: unknown, calendarSystemShown: boolean): GeneralS
         switch (value.type) {
             case 'theme': return SETTINGS_THEME_VALUE_SET.has(v as never);
             case 'quickAccessView': return MOBILE_QUICK_ACCESS_VIEW_OPTIONS.includes(v as never);
+            case 'appLockRelockDelay': return MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS.includes(v as never);
             case 'language': return LANGUAGES.has(v as string);
             case 'weekStart': return WEEK_STARTS.has(v as string);
             case 'dateFormat': return DATE_FORMATS.has(v as string);
@@ -444,14 +448,19 @@ export function createSettingsMethods(deps: SettingsDeps) {
 
     // Carriers of a context or tag, as the store's rename and delete match them.
     const contextCarried = (name: string, except?: string) => {
-        const key = name.trim().toLowerCase();
-        return useTaskStore.getState()._allTasks.some((task) => (task.contexts ?? []).some((ctx) => ctx.trim().toLowerCase() === key && ctx !== except));
+        const key = normalizeTaxonomyToken('context', name).toLowerCase();
+        const state = useTaskStore.getState();
+        const match = (ctx: string) => normalizeTaxonomyToken('context', ctx).toLowerCase() === key
+            && (except === undefined || normalizeTaxonomyToken('context', ctx) !== normalizeTaxonomyToken('context', except));
+        return state._allTasks.some((task) => (task.contexts ?? []).some(match))
+            || getSavedTaxonomyTokens(state.settings, 'context').some(match);
     };
     const tagCarried = (name: string, except?: string) => {
         const key = normalizeTagId(name);
-        const { _allTasks, _allProjects } = useTaskStore.getState();
+        const { _allTasks, _allProjects, settings } = useTaskStore.getState();
         const match = (tag: string) => normalizeTagId(tag) === key && tag !== except;
-        return _allTasks.some((task) => (task.tags ?? []).some(match)) || _allProjects.some((project) => (project.tagIds ?? []).some(match));
+        return _allTasks.some((task) => (task.tags ?? []).some(match)) || _allProjects.some((project) => (project.tagIds ?? []).some(match))
+            || getSavedTaxonomyTokens(settings, 'tag').some(match);
     };
 
     /**
@@ -460,8 +469,8 @@ export function createSettingsMethods(deps: SettingsDeps) {
      * carrier's revision. A new carrier, or a change to one, changes it.
      */
     const carriersRevisions = (type: 'context' | 'tag') => {
-        const { _allTasks, _allProjects } = useTaskStore.getState();
-        const keyOf = type === 'context' ? (name: string) => name.trim().toLowerCase() : normalizeTagId;
+        const { _allTasks, _allProjects, settings } = useTaskStore.getState();
+        const keyOf = type === 'context' ? (name: string) => normalizeTaxonomyToken('context', name).toLowerCase() : normalizeTagId;
         const byKey = new Map<string, string[]>();
         const add = (row: Task | Project, names: readonly string[] | undefined) => {
             for (const key of new Set((names ?? []).map(keyOf))) {
@@ -475,7 +484,8 @@ export function createSettingsMethods(deps: SettingsDeps) {
         if (type === 'tag') _allProjects.forEach((project) => add(project, project.tagIds));
         return (name: string) => {
             const carriers = byKey.get(keyOf(name)) ?? [];
-            return revisionsToken([...carriers].sort());
+            const entries = (type === 'context' ? settings.taxonomy?.contexts : settings.taxonomy?.tags) ?? [];
+            return revisionsToken([...carriers, ...entries.filter((entry) => keyOf(entry.token) === keyOf(name)).map((entry) => JSON.stringify(entry))].sort());
         };
     };
 
@@ -502,6 +512,10 @@ export function createSettingsMethods(deps: SettingsDeps) {
         const state = useTaskStore.getState();
         return writes.filter((write) => {
             switch (write.kind) {
+                case 'addContext':
+                case 'addTag':
+                    return !getSavedTaxonomyTokens(state.settings, write.kind === 'addContext' ? 'context' : 'tag')
+                        .some((token) => token.toLowerCase() === write.name.trim().toLowerCase());
                 // The editor's only settings write: the unassigned color.
                 case 'updateSettings':
                     return state.settings.appearance?.unassignedAreaColor !== write.updates.appearance?.unassignedAreaColor;
@@ -529,6 +543,10 @@ export function createSettingsMethods(deps: SettingsDeps) {
         switch (write.kind) {
             case 'updateSettings':
                 return state.updateSettings(write.updates);
+            case 'addContext':
+                return state.addContext(write.name);
+            case 'addTag':
+                return state.addTag(write.name);
             case 'addArea': {
                 const named = state._allAreas.some((area) => area.name?.trim().toLowerCase() === write.name.trim().toLowerCase());
                 return (await state.addArea(write.name, named ? write.props : { ...write.props, id: newId })) ? undefined : { success: false, error: 'Area creation failed' };
@@ -582,6 +600,8 @@ export function createSettingsMethods(deps: SettingsDeps) {
         switch (value.type) {
             case 'newArea':
             case 'newPerson':
+            case 'newContext':
+            case 'newTag':
             case 'unassignedArea':
                 return Object.keys(value).length === 1 ? { type: value.type } : null;
             case 'area':
@@ -597,7 +617,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
     /** A write's target: an area, person, context or tag carries the revision its row showed. */
     const readWriteTarget = (value: unknown): NativeManageEditorTarget | null => {
         const target = readEditorTarget(value);
-        return target && (target.type === 'newArea' || target.type === 'newPerson' || target.type === 'unassignedArea' || 'revision' in target)
+        return target && (target.type === 'newArea' || target.type === 'newPerson' || target.type === 'newContext' || target.type === 'newTag' || target.type === 'unassignedArea' || 'revision' in target)
             ? target as NativeManageEditorTarget
             : null;
     };
@@ -713,8 +733,12 @@ export function createSettingsMethods(deps: SettingsDeps) {
                     { openReference, openReferenceFailed, editLabel, deleteLabel, countHint }
                 ))(text.people),
             },
-            contexts: { rows: firstWindow(contextRows), empty: allContexts.length === 0 ? text.contexts.empty : null },
-            tags: { rows: firstWindow(tagRows), empty: allTags.length === 0 ? text.tags.empty : null },
+            contexts: { rows: firstWindow(contextRows), empty: allContexts.length === 0 ? text.contexts.empty : null,
+                create: { label: text.contexts.newLabel, addLabel: text.contexts.addLabel,
+                    edit: { target: { type: 'newContext' }, draft: getManageEditorDraft({ type: 'newContext' }) } } },
+            tags: { rows: firstWindow(tagRows), empty: allTags.length === 0 ? text.tags.empty : null,
+                create: { label: text.tags.newLabel, addLabel: text.tags.addLabel,
+                    edit: { target: { type: 'newTag' }, draft: getManageEditorDraft({ type: 'newTag' }) } } },
             editor: {
                 text: Object.fromEntries(EDITOR_TYPES.map((type) => [type, getManageEditorText(t, type, untranslated)])) as NativeManageSettings['editor']['text'],
                 colors: AREA_PRESET_COLORS.map((color) => ({ color, label: `${changeColor}: ${color}` })),
@@ -922,11 +946,14 @@ export function createSettingsMethods(deps: SettingsDeps) {
             const { areas } = useTaskStore.getState();
             const t = deps.t();
             const nameTaken = isManageAreaNameTaken(target.type, input.name, areas);
+            const tokenKind = target.type === 'newContext' || target.type === 'context' ? 'context'
+                : target.type === 'newTag' || target.type === 'tag' ? 'tag' : null;
             return {
                 ok: true,
                 value: {
                     nameTaken,
-                    saveDisabled: isManageEditorSaveDisabled(target.type, input.name, areas),
+                    saveDisabled: isManageEditorSaveDisabled(target.type, input.name, areas)
+                        || (tokenKind !== null && !normalizeTaxonomyToken(tokenKind, input.name)),
                     message: nameTaken ? getManageEditorText(t, target.type, manageUntranslated(t)).nameTaken : null,
                 },
             };
@@ -959,6 +986,9 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 return fail('INVALID_INPUT', 'A request UUID, an editor target (with the revision its row showed) and text fields are required');
             }
             const fields = { name: input.name ?? '', color: input.color ?? null, note: input.note ?? '', referenceLink: input.referenceLink ?? '' };
+            const tokenKind = target.type === 'newContext' || target.type === 'context' ? 'context'
+                : target.type === 'newTag' || target.type === 'tag' ? 'tag' : null;
+            if (tokenKind && !normalizeTaxonomyToken(tokenKind, fields.name)) return fail('INVALID_INPUT', 'A context or tag name is required');
             const { requestId } = input;
             return receipts.run<{ changed: boolean }>(requestId, JSON.stringify(['manageEditor', target, fields]), async () => {
                 // A new area or person takes the request UUID as its ID: a replay after a restart

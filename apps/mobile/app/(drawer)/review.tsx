@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, BackHandler, View, Text, FlatList, Pressable, StyleSheet, TouchableOpacity, Modal, TextInput, Share } from 'react-native';
+import { AppState, View, Text, FlatList, Pressable, StyleSheet, TouchableOpacity, Modal, TextInput, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -130,6 +130,8 @@ export default function ReviewScreen() {
     tagModalVisible,
     toggleMultiSelect,
   } = useTaskListSelection({
+    // The hook gates its own tag dialogs; these are the screen's.
+    backExitsSelection: !(isModalVisible || moveModalVisible || bulkOrganizeVisible || showReviewModal || reviewPickerVisible),
     batchDeleteTasks,
     batchMoveTasks,
     batchUpdateTasks,
@@ -152,38 +154,6 @@ export default function ReviewScreen() {
       return undefined;
     }, []),
   );
-
-  useEffect(() => {
-    const handleBackPress = () => {
-      if (
-        isModalVisible
-        || tagModalVisible
-        || removeTagPickerVisible
-        || moveModalVisible
-        || bulkOrganizeVisible
-        || showReviewModal
-        || reviewPickerVisible
-      ) {
-        return false;
-      }
-      if (!selectionMode) return false;
-      exitSelectionMode();
-      return true;
-    };
-
-    const subscription = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
-    return () => subscription.remove();
-  }, [
-    selectionMode,
-    exitSelectionMode,
-    isModalVisible,
-    tagModalVisible,
-    removeTagPickerVisible,
-    moveModalVisible,
-    bulkOrganizeVisible,
-    showReviewModal,
-    reviewPickerVisible,
-  ]);
 
   const handleBatchShare = useCallback(async () => {
     if (!hasSelection) return;

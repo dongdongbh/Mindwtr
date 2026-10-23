@@ -64,6 +64,8 @@ const shot = (name) => {
 const start = (intent) => {
     const current = front();
     if (!current.includes(`${PKG}/`) && !current.includes(`${home}/`)) throw new Stopped(`another app is in front; not launching over it: ${current.trim()}`);
+    // The Inbox start this check was written for, with no last-screen restore (device.mjs launch does the same; pass O2b).
+    sh(`setprop debug.mindwtr.native.start_tab 'inbox'`);
     sh(`am start ${intent}`);
 };
 const launcher = `-a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n ${ACTIVITY}`;

@@ -750,7 +750,7 @@ describe('prepared native checklist Save and Reset', () => {
         }
     });
 
-    it('keeps a manual final status override and Reference bullets', async () => {
+    it('keeps a manual final status override and a Reference list', async () => {
         const { host } = await open(source({ status: 'reference', checklist: [item('one', 'Bullet')] }));
         const request = { id: 'checklist-task', requestId: id, base: {}, patch: {}, scheduleBase,
             checklist: { base: savedTask().checklist!, value: [item('one', 'Edited bullet')] } };
@@ -771,6 +771,20 @@ describe('prepared native checklist Save and Reset', () => {
         if (planned.kind !== 'prepared') return;
         unwrap(await normal.host.commitPreparedTaskChecklistWrite({ request: override, prepared: planned.prepared }));
         expect(savedTask().status).toBe('next');
+    });
+
+    it('saves a Reference list task with every entry ticked as a reference, never Done (#1416)', async () => {
+        const { host } = await open(source({ status: 'reference', taskMode: 'list', checklist: [item('one', 'Alien', true), item('two', 'Brazil')] }));
+        const value = [item('one', 'Alien', true), item('two', 'Brazil', true)];
+        const request = { id: 'checklist-task', requestId: id, base: {}, patch: {}, scheduleBase,
+            checklist: { base: savedTask().checklist!, value } };
+        const prepared = unwrap(host.prepareTaskChecklistSave(request));
+        expect(prepared.kind).toBe('prepared');
+        if (prepared.kind !== 'prepared') return;
+        expect(unwrap(await host.commitPreparedTaskChecklistWrite({ request, prepared: prepared.prepared }))).toEqual({ id: request.id });
+        expect(savedTask()).toMatchObject({ status: 'reference', checklist: value });
+        expect(savedTask().completedAt).toBeUndefined();
+        expect(savedTask().isFocusedToday).toBeFalsy();
     });
 
     it('refuses a coherently rebound Reference priority even when status is omitted', async () => {

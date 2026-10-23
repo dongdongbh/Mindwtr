@@ -1,29 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  readMobileOnboardingDismissed as readCoreMobileOnboardingDismissed,
+  writeMobileOnboardingDismissed as writeCoreMobileOnboardingDismissed,
+} from '@mindwtr/core';
 
-import type { SyncBackend } from './sync-service-utils';
-
-export const MOBILE_ONBOARDING_STORAGE_KEY = 'mindwtr:mobile:first-run-onboarding:v1';
-
-type MobileFirstRunOnboardingState = {
-  dataReady: boolean;
-  dismissed: boolean;
-  syncBackend: SyncBackend;
-  visibleDataCount: number;
-};
+// When the welcome sheet opens and its dismissal live in core (first-run-onboarding.ts), so the native app follows the
+// same rule under the same key; this app binds them to AsyncStorage and keeps the manual-trigger events.
+export { MOBILE_ONBOARDING_STORAGE_KEY, shouldOpenMobileFirstRunOnboarding } from '@mindwtr/core';
 
 const listeners = new Set<() => void>();
-
-export function shouldOpenMobileFirstRunOnboarding({
-  dataReady,
-  dismissed,
-  syncBackend,
-  visibleDataCount,
-}: MobileFirstRunOnboardingState): boolean {
-  return dataReady
-    && !dismissed
-    && visibleDataCount === 0
-    && syncBackend === 'off';
-}
 
 export function dispatchMobileOnboardingEvent(): void {
   Array.from(listeners).forEach((listener) => listener());
@@ -36,18 +21,10 @@ export function subscribeMobileOnboardingEvent(handler: () => void): () => void 
   };
 }
 
-export async function readMobileOnboardingDismissed(): Promise<boolean> {
-  try {
-    return await AsyncStorage.getItem(MOBILE_ONBOARDING_STORAGE_KEY) === 'dismissed';
-  } catch {
-    return false;
-  }
+export function readMobileOnboardingDismissed(): Promise<boolean> {
+  return readCoreMobileOnboardingDismissed(AsyncStorage);
 }
 
-export async function writeMobileOnboardingDismissed(): Promise<void> {
-  try {
-    await AsyncStorage.setItem(MOBILE_ONBOARDING_STORAGE_KEY, 'dismissed');
-  } catch {
-    // Onboarding is convenience UI; storage failures should not block the app.
-  }
+export function writeMobileOnboardingDismissed(): Promise<void> {
+  return writeCoreMobileOnboardingDismissed(AsyncStorage);
 }

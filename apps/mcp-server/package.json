@@ -1,7 +1,7 @@
 {
   "name": "mindwtr-mcp",
   "description": "MCP server for Mindwtr SQLite, desktop Local API, and self-hosted Cloud task access.",
-  "version": "1.1.12",
+  "version": "1.1.13",
   "license": "AGPL-3.0-only",
   "type": "module",
   "mcpName": "io.github.dongdongbh/mindwtr",

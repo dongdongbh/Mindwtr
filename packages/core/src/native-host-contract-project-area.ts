@@ -1,3 +1,5 @@
+import { AREA_PRESET_COLORS, DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from './color-constants';
+import { logInfo } from './logger';
 import type { NativeHostResult } from './native-host-contract';
 import type { TranslateFn } from './i18n';
 import { taskEditValuesEqual } from './json-value-equality';
@@ -14,9 +16,9 @@ export type NativeProjectAreaToken = { title: string; status: Project['status'];
     rev: number | null; revBy: string | null; updatedAt: string };
 export type NativeProjectAreaWitness = { id: string; name: string };
 export type NativeProjectAreaRequest = { requestId: string; projectId: string; areaId: string | null;
-    expected: NativeProjectAreaToken; selectedArea: NativeProjectAreaWitness | null };
-export type NativeProjectAreaResult = { id: string; areaId: string | null; areaTitle: string | null; order: number };
-export type NativePreparedProjectArea = PreparedProjectArea & { version: 1;
+    colorOverride?: string | null; expected: NativeProjectAreaToken; selectedArea: NativeProjectAreaWitness | null };
+export type NativeProjectAreaResult = { id: string; areaId: string | null; areaTitle: string | null; order: number; colorOverride?: string | null };
+export type NativePreparedProjectArea = PreparedProjectArea & { version: 1 | 2;
     request: NativeProjectAreaRequest; result: NativeProjectAreaResult };
 export type NativeProjectAreaPreparation = { kind: 'noop'; result: NativeProjectAreaResult }
     | { kind: 'blocked'; result: { blocked: '' } }
@@ -37,12 +39,17 @@ const token = (project: Project): NativeProjectAreaToken => ({
     areaTitle: project.areaTitle ?? null, order: project.order, rev: project.rev ?? null,
     revBy: project.revBy ?? null, updatedAt: project.updatedAt,
 });
-const result = (project: Project): NativeProjectAreaResult => ({ id: project.id,
-    areaId: project.areaId ?? null, areaTitle: project.areaTitle ?? null, order: project.order });
+const colorUpdate = (request: NativeProjectAreaRequest): Pick<Project, 'colorOverride'> | undefined =>
+    Object.prototype.hasOwnProperty.call(request, 'colorOverride') ? { colorOverride: request.colorOverride } : undefined;
+const result = (project: Project, request: NativeProjectAreaRequest): NativeProjectAreaResult => ({ id: project.id,
+    areaId: project.areaId ?? null, areaTitle: project.areaTitle ?? null, order: project.order,
+    ...(colorUpdate(request) ? { colorOverride: project.colorOverride ?? null } : {}) });
 /** Native No Area treats nullable SQLite metadata as already clear without rewriting it. */
-const nativeNoop = (project: Project, areaId: string | null, selectedArea: NativeProjectAreaWitness | null): boolean =>
-    (project.areaId ?? null) === areaId
-    && (project.areaTitle ?? null) === (selectedArea?.name.trim() || null);
+const nativeNoop = (project: Project, request: NativeProjectAreaRequest): boolean =>
+    (project.areaId ?? null) === request.areaId
+    && (project.areaTitle ?? null) === (request.selectedArea?.name.trim() || null)
+    && (!colorUpdate(request) || (project.colorOverride ?? null) === request.colorOverride
+        && (request.colorOverride !== null || Boolean(project.areaId) || project.color === DEFAULT_PROJECT_COLOR || project.color === '#6B7280'));
 
 const validAreaProject = (value: unknown, projectId: string): value is Project => {
     if (!record(value)) return false;
@@ -67,7 +74,8 @@ const validToken = (value: unknown): value is NativeProjectAreaToken =>
     && canonicalISO(value.updatedAt);
 const readRequest = (value: unknown): NativeProjectAreaRequest | null => {
     const input = detach<Record<string, unknown>>(value);
-    return input && exact(input, ['requestId', 'projectId', 'areaId', 'expected', 'selectedArea'])
+    return input && exact(input, ['requestId', 'projectId', 'areaId', 'expected', 'selectedArea', ...(Object.prototype.hasOwnProperty.call(input, 'colorOverride') ? ['colorOverride'] : [])])
+        && (!Object.prototype.hasOwnProperty.call(input, 'colorOverride') || input.colorOverride !== undefined && isValidProjectColorOverride(input.colorOverride))
         && typeof input.requestId === 'string' && UUID.test(input.requestId)
         && id(input.projectId) && nullableId(input.areaId) && validToken(input.expected)
         && (input.areaId === null ? input.selectedArea === null
@@ -82,10 +90,13 @@ const readPrepared = (value: unknown): NativePreparedProjectArea | null => {
     const request = readRequest(envelope.request);
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'scope', 'effect', 'deviceIdBefore',
-        'deviceIdToInitialize', 'updateAt', 'result']) || raw.version !== 1 || !same(raw.request, request)
+        'deviceIdToInitialize', 'updateAt', 'result']) || ![1, 2].includes(Number(raw.version)) || raw.version === 1 && Boolean(colorUpdate(request)) || !same(raw.request, request)
         || !record(raw.scope) || !exact(raw.scope, ['project', 'selectedArea', 'orderMax'])
-        || !(raw.scope.selectedArea === null || validWitness(raw.scope.selectedArea))
-        || !same(raw.scope.selectedArea, request.selectedArea)
+        || !(raw.scope.selectedArea === null || record(raw.scope.selectedArea)
+            && (raw.version === 1 ? validWitness(raw.scope.selectedArea)
+                : exact(raw.scope.selectedArea, ['id', 'name', 'color']) && validWitness({ id: raw.scope.selectedArea.id, name: raw.scope.selectedArea.name })
+                    && (raw.scope.selectedArea.color === null || typeof raw.scope.selectedArea.color === 'string')))
+        || !same(raw.scope.selectedArea && { id: raw.scope.selectedArea.id, name: raw.scope.selectedArea.name }, request.selectedArea)
         || typeof raw.scope.orderMax !== 'number' || !Number.isFinite(raw.scope.orderMax)
         || raw.scope.orderMax < -1 || !record(raw.scope.project)
         || !record(raw.effect) || !exact(raw.effect, ['project']) || !record(raw.effect.project)
@@ -95,7 +106,7 @@ const readPrepared = (value: unknown): NativePreparedProjectArea | null => {
             ? typeof raw.deviceIdToInitialize !== 'string' || !UUID.test(raw.deviceIdToInitialize)
             : raw.deviceIdToInitialize !== null)
         || !canonicalISO(raw.updateAt) || !record(raw.result)
-        || !exact(raw.result, ['id', 'areaId', 'areaTitle', 'order'])
+        || !exact(raw.result, ['id', 'areaId', 'areaTitle', 'order', ...(colorUpdate(request) ? ['colorOverride'] : [])])
         || raw.result.id !== request.projectId || !nullableId(raw.result.areaId)
         || !nullableTitle(raw.result.areaTitle) || typeof raw.result.order !== 'number'
         || !Number.isFinite(raw.result.order)) return null;
@@ -107,13 +118,13 @@ const readPrepared = (value: unknown): NativePreparedProjectArea | null => {
             || !validAreaProject(prepared.effect.project.after, request.projectId)
             || before.status === 'archived' || !same(token(before), request.expected)
             || !same(before, prepared.effect.project.before)) return null;
-        if (nativeNoop(before, request.areaId, prepared.scope.selectedArea)) return null;
+        if (nativeNoop(before, request)) return null;
         const witnessProject = { id: 'native-area-order-witness', areaId: request.areaId ?? undefined,
             order: prepared.scope.orderMax } as Project;
         const planned = projectAreaEffect(before, request.areaId, [witnessProject],
             prepared.scope.selectedArea ? [prepared.scope.selectedArea as Area] : [],
-            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.updateAt);
-        return same(planned, prepared.effect) && same(result(planned.project.after), prepared.result)
+            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.updateAt, colorUpdate(request), prepared.version);
+        return same(planned, prepared.effect) && same(result(planned.project.after, request), prepared.result)
             && !sameProjectSqliteRow(before, planned.project.after) ? prepared : null;
     } catch { return null; }
 };
@@ -128,6 +139,7 @@ export function createProjectAreaMethods(deps: {
     return {
         getProjectAreaOptions(input: { projectId: string }): NativeHostResult<{ revision: string;
             project: { id: string } & NativeProjectAreaToken; canEdit: boolean; noAreaLabel: string;
+            colorOverride: string | null; colors: string[];
             areas: Array<{ id: string; label: string; color: string | null }> }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -138,6 +150,7 @@ export function createProjectAreaMethods(deps: {
             const expected = token(project);
             if (!validToken(expected)) return fail('INVALID_INPUT', 'Project Area token exceeds the bounded native response');
             const value = { revision: deps.revision(), project: { id: project.id, ...expected },
+                colorOverride: project.colorOverride ?? null, colors: [DEFAULT_PROJECT_COLOR, ...AREA_PRESET_COLORS],
                 canEdit: project.status !== 'archived', noAreaLabel: deps.t()('projects.noArea'),
                 areas: deps.sortedAreas().filter((area) => !area.deletedAt)
                     .map((area) => ({ id: area.id, label: area.name, color: area.color ?? null })) };
@@ -167,18 +180,18 @@ export function createProjectAreaMethods(deps: {
             const selected = request.selectedArea ? state._areasById.get(request.selectedArea.id) : null;
             if (request.selectedArea && (!selected || selected.deletedAt || selected.name !== request.selectedArea.name))
                 return fail('STALE_REVISION', 'Selected Area changed; refresh before assigning it');
-            if (nativeNoop(project, request.areaId, request.selectedArea))
-                return { ok: true, value: { kind: 'noop', result: result(project) } };
+            if (nativeNoop(project, request))
+                return { ok: true, value: { kind: 'noop', result: result(project, request) } };
             const device = ensureDeviceId(state.settings);
             const updateAt = new Date().toISOString();
             const effect = projectAreaEffect(project, request.areaId, state._allProjects, state._allAreas,
-                device.deviceId, updateAt);
-            const prepared: NativePreparedProjectArea = { version: 1, request,
-                scope: { project, selectedArea: request.selectedArea,
+                device.deviceId, updateAt, colorUpdate(request));
+            const prepared: NativePreparedProjectArea = { version: 2, request,
+                scope: { project, selectedArea: request.selectedArea ? { ...request.selectedArea, color: selected?.color ?? null } : null,
                     orderMax: projectAreaOrderMax(state._allProjects, request.areaId) },
                 effect, deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,
-                updateAt, result: result(effect.project.after) };
+                updateAt, result: result(effect.project.after, request) };
             const frozen = detach<NativePreparedProjectArea>(JSON.parse(JSON.stringify(prepared)));
             return frozen && readPrepared({ request, prepared: frozen })
                 ? { ok: true, value: { kind: 'prepared', prepared: frozen } }
@@ -204,6 +217,8 @@ export function createProjectAreaMethods(deps: {
                 if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
             } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
             const saved = await deps.save();
+            if (saved.ok && colorUpdate(prepared.request)) logInfo('Project color saved', { scope: 'native-host',
+                context: { releaseCheck: 'v1.3.7/project-color', mode: prepared.request.colorOverride ? 'override' : 'area' } });
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
     };

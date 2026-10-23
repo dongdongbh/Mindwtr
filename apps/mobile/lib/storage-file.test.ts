@@ -4,7 +4,9 @@ import { Directory } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
 
+import * as Sharing from 'expo-sharing';
 import {
+  exportData,
   FileSyncRetainedGenerationError,
   pickAndParseSyncFolder,
   readSyncFile,
@@ -196,6 +198,11 @@ describe('storage-file sync writes', () => {
     await writeSyncArtifactBytes(syncFileUri, bytes);
 
     expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).toHaveBeenCalledTimes(2);
+    // The stream error quotes the document's URI; the log line keeps only the error's name.
+    const { logWarn } = await import('./app-log');
+    const retry = vi.mocked(logWarn).mock.calls.find(([message]) => message.startsWith('SAF encrypted output-stream write failed'));
+    expect(retry?.[1]).toEqual({ scope: 'sync', extra: { error: 'Error' } });
+    expect(JSON.stringify(vi.mocked(logWarn).mock.calls)).not.toContain('primary%3AMindwtr');
   }, 10_000);
 
   it('fails closed when the encrypted-sibling discovery listing is unavailable', async () => {
@@ -339,5 +346,34 @@ describe('iOS sync file bookmarks', () => {
 
     await expect(readSyncFile('file:///gdrive/Mindwtr/backup.json', { bookmark: 'bm-token' }))
       .resolves.toBeNull();
+  });
+});
+
+describe('backup export logs', () => {
+  const privateTree = 'content://com.android.externalstorage.documents/tree/primary%3Aprivate-folder';
+  const data: AppData = { tasks: [], projects: [], sections: [], areas: [], settings: {} };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fileSystemMock.StorageAccessFramework.requestDirectoryPermissionsAsync.mockResolvedValue({ granted: true, directoryUri: privateTree });
+    fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockResolvedValue(undefined);
+  });
+
+  it('never carry the picked folder\'s URI when the export is saved there', async () => {
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockResolvedValue(`${privateTree}/document/primary%3Aprivate-folder%2Fbackup.json`);
+    await exportData(data);
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).toHaveBeenCalledTimes(1);
+    const { logInfo, logWarn } = await import('./app-log');
+    expect(JSON.stringify([vi.mocked(logInfo).mock.calls, vi.mocked(logWarn).mock.calls])).not.toContain('private-folder');
+  });
+
+  it('log a failed save by the error name and never the cache path, then share', async () => {
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockRejectedValue(new Error(`Location '${privateTree}' isn't writable.`));
+    vi.mocked(Sharing.isAvailableAsync).mockResolvedValue(true);
+    await exportData(data);
+    const { logInfo, logWarn } = await import('./app-log');
+    expect(vi.mocked(logWarn).mock.calls.find(([message]) => message.startsWith('Export SAF unavailable'))?.[1])
+      .toEqual({ scope: 'sync', extra: { error: 'Error' } });
+    expect(JSON.stringify([vi.mocked(logInfo).mock.calls, vi.mocked(logWarn).mock.calls])).not.toMatch(/private-folder|file:\/\/cache/);
   });
 });

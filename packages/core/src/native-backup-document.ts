@@ -1,3 +1,5 @@
+import { findLiveAttachmentResourceReferences, holdRestoreUndoAttachments, markMissingLocalAttachmentFiles } from './attachment-cleanup';
+import type { LocalAttachmentPresence } from './attachment-transfer';
 import { MAX_BACKUP_SOURCE_BYTES, serializeBackupData } from './backup-transfer';
 import { base64ToBytes } from './base64-bytes';
 import { runSerializedSyncDocumentWriteOperation } from './data-transfer-transaction';
@@ -21,6 +23,7 @@ import { formatRecoverySnapshotLabel } from './recovery-snapshot-names';
 import { flushPendingSave, useTaskStore } from './store';
 import { markNextLoadAsDocumentReplacement } from './store-settings';
 import { stripSensitiveSettings } from './store-helpers';
+import { logInfo } from './logger';
 import { validateMergedSyncData } from './sync-normalization';
 import type { AppData } from './types';
 
@@ -35,7 +38,8 @@ export type NativeBackupTodoistImportResult = Omit<TodoistImportExecutionResult,
 export type NativeBackupTickTickImportResult = Omit<TickTickImportExecutionResult, 'data'>;
 export type NativeBackupDgtImportResult = Omit<DgtImportExecutionResult, 'data'>;
 export type NativeBackupOmniFocusImportResult = Omit<OmniFocusImportExecutionResult, 'data'>;
-export type NativeBackupDocumentReply = NativeBackupJsonDocumentReply | {
+/** `undo: false`: the operation ran without Undo, its library too large to undo (large-library pass b; never a snapshot restore). */
+export type NativeBackupDocumentReply = (NativeBackupJsonDocumentReply | {
     version: 1; operation: 'csv'; snapshotName: string; result: NativeBackupCsvImportResult;
 } | {
     version: 1; operation: 'todoist'; snapshotName: string; result: NativeBackupTodoistImportResult;
@@ -45,7 +49,7 @@ export type NativeBackupDocumentReply = NativeBackupJsonDocumentReply | {
     version: 1; operation: 'dgt'; snapshotName: string; result: NativeBackupDgtImportResult;
 } | {
     version: 1; operation: 'omnifocus'; snapshotName: string; result: NativeBackupOmniFocusImportResult;
-};
+}) & { undo?: false };
 type Operation = 'merge' | 'restore' | 'replace' | 'csv' | 'todoist' | 'ticktick' | 'dgt' | 'omnifocus';
 export type NativeBackupDocumentPrepareInput = {
     requestId: string; mode: Operation; snapshotName: string;
@@ -63,14 +67,29 @@ type Plan = {
     expectedCurrent: AppData; data: AppData; reply: NativeBackupDocumentReply;
     /**
      * The library's SQLite bytes the commit may leave, its receipt included: the limit less the recovery snapshot's bytes, or for a
-     * snapshot restore (no recovery snapshot) the limit itself.
+     * snapshot restore (no recovery snapshot) the limit itself. A plan from before large-library pass b may carry it for any mode.
      */
     maxLibraryBytes?: number;
+    /** The library's SQLite bytes the commit may leave while its Undo still fits: past them it lands without Undo (pass b). */
+    undoLibraryBytes?: number;
 };
 class BackupInputError extends Error {}
 function invalid(message = 'Invalid backup document input'): never { throw new BackupInputError(`INVALID_INPUT: ${message}`); }
 function tooLarge(message: string): never { throw new BackupInputError(`TOO_LARGE: ${message}`); }
 const UNDO_TOO_LARGE = 'TOO_LARGE: The imported library would be too large to undo';
+// The commit decides Undo from the real bytes, on the line the admission before pass b used: the recovery snapshot and the
+// saved library fit the limit together. Prepare only estimates it, to ask "Undo may not be available" first.
+// ponytail: the estimate is today's SQLite bytes (SQLite keeps its pages when rows go) plus the planned compact JSON's growth at
+// 1.8 SQLite bytes per compact JSON byte (step 0 run 6: 1.3 per pretty byte; compact JSON is 0.74 of pretty). Measured against
+// the real library after: 0.92x to 1.35x, so a question can come and Undo still stay, or none come and Undo go (its toast says so).
+const SQLITE_BYTES_PER_JSON_BYTE = 1.8;
+const logUndoUnavailable = (operation: string, outcome: 'estimate' | 'after-save'): void => {
+    try {
+        logInfo(outcome === 'estimate' ? 'Native data transfer may run without Undo: the library may be too large to undo'
+            : 'Native data transfer ran without Undo: the library is too large to undo', { scope: 'transfer', category: 'storage',
+            context: { releaseCheck: 'v1.3.7/large-library-no-undo', operation, outcome } });
+    } catch { /* Logging must not change the transfer. */ }
+};
 const RESTORE_TOO_LARGE = 'TOO_LARGE: The restored library would exceed the transfer limit';
 function saveFailed(): never { throw new Error('SAVE_FAILED: Backup document outcome could not be verified'); }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -296,23 +315,31 @@ function* planParts(plan: Plan): Generator<string> {
     yield JSON.stringify(plan.expectedCurrent);
     yield ',"data":';
     yield JSON.stringify(plan.data);
-    yield `,"reply":${JSON.stringify(plan.reply)}${plan.maxLibraryBytes === undefined ? '' : `,"maxLibraryBytes":${JSON.stringify(plan.maxLibraryBytes)}`}}`;
+    yield `,"reply":${JSON.stringify(plan.reply)}${plan.maxLibraryBytes === undefined ? '' : `,"maxLibraryBytes":${JSON.stringify(plan.maxLibraryBytes)}`}${plan.undoLibraryBytes === undefined ? '' : `,"undoLibraryBytes":${JSON.stringify(plan.undoLibraryBytes)}`}}`;
 }
 
 /** Freeze shared RN policy against a fresh durable base; this performs no document write (a [sink] only receives its texts). */
-export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, input: NativeBackupDocumentPrepareInput): Promise<{ planJSON: string; recoveryJSON: string | null }>;
-export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, input: NativeBackupDocumentPrepareInput, sink: NativeBackupPrepareSink): Promise<{ written: true; recovery: boolean }>;
-export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, input: NativeBackupDocumentPrepareInput, sink?: NativeBackupPrepareSink): Promise<{ planJSON: string; recoveryJSON: string | null } | { written: true; recovery: boolean }> {
+/**
+ * [undo] (only with an admission and a recovery snapshot): whether prepare's estimate says Undo fits (large-library pass b). It
+ * only decides whether to ask first; the commit decides Undo from the real bytes (its reply's `undo: false`).
+ */
+type PreparedUndo = { undo?: boolean };
+export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, input: NativeBackupDocumentPrepareInput): Promise<{ planJSON: string; recoveryJSON: string | null } & PreparedUndo>;
+export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, input: NativeBackupDocumentPrepareInput, sink: NativeBackupPrepareSink): Promise<{ written: true; recovery: boolean } & PreparedUndo>;
+export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, input: NativeBackupDocumentPrepareInput, sink?: NativeBackupPrepareSink): Promise<({ planJSON: string; recoveryJSON: string | null } | { written: true; recovery: boolean }) & PreparedUndo> {
     releaseNativeBackupDocumentWarnings();
     const fields = ['requestId', 'mode', 'snapshotName', 'text', 'metadata'];
     const admission: unknown = (input as { admission?: unknown }).admission;
     const admitted = admission === undefined ? exact(input, fields) : exact(input, [...fields, 'admission'])
         && exact(admission, ['sourceBytes', 'maxTransferBytes']) && count(admission.sourceBytes) && count(admission.maxTransferBytes);
     if (!admitted || !uuid(input.requestId) || !mode(input.mode) || !snapshot(input.snapshotName)) invalid();
-    const admit = async () => {
-        if (input.admission && input.admission.sourceBytes + await adapter.libraryBytes() > input.admission.maxTransferBytes) {
+    const admit = async (): Promise<number> => {
+        if (!input.admission) return 0;
+        const libraryBytes = await adapter.libraryBytes();
+        if (input.admission.sourceBytes + libraryBytes > input.admission.maxTransferBytes) {
             tooLarge('The selected file and the library exceed the transfer limit');
         }
+        return libraryBytes;
     };
     await admit();
     // Parse owned bytes before admission; no untrusted thrown details escape.
@@ -339,7 +366,7 @@ export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAd
         return await runSerializedSyncDocumentWriteOperation(async () => {
             await flush();
             // Again in the lane: a write queued ahead of this one may have grown the library since the first check.
-            await admit();
+            const libraryBytes = await admit();
             // A legacy settings.ai.apiKey (an older build saved it) never reaches the plan, the recovery snapshot or the saved
             // result; the commit's baseline check ignores it the same way (NativeReceiptSqliteAdapter.saveDocumentWithReceipt).
             const raw = await adapter.getData();
@@ -407,10 +434,10 @@ export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAd
                 if (!withinUtf8Limit(recoveryJSON, MAX_BACKUP_SOURCE_BYTES)) invalid('Recovery snapshot exceeds 128 MiB');
                 if (!parseSource(recoveryJSON, { fileName: snapshotName, lastModified: Date.now(), appVersion }).valid) invalid('Recovery snapshot is not a valid backup');
             }
-            if (input.admission && recoveryJSON !== null) {
-                plan.maxLibraryBytes = input.admission.maxTransferBytes - utf8Bytes(recoveryJSON);
-                if (plan.maxLibraryBytes < 0) tooLarge('The library is too large to undo an import');
-            } else if (input.admission) {
+            // Undo restores the recovery snapshot over the library left after: both must fit the limit together. When they cannot,
+            // the operation still runs, without Undo, as RN's does (large-library pass b); its recovery snapshot is still written.
+            const undoRoom = input.admission && recoveryJSON !== null ? input.admission.maxTransferBytes - utf8Bytes(recoveryJSON) : null;
+            if (input.admission && recoveryJSON === null) {
                 // A snapshot restore has no recovery snapshot to admit: its result library itself stays within the limit.
                 plan.maxLibraryBytes = input.admission.maxTransferBytes;
             }
@@ -418,16 +445,30 @@ export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAd
             if (sink && recoveryJSON !== null) { const text = recoveryJSON; sinkCall(() => sink.recovery(text)); recoveryJSON = null; }
             let planJSON = '';
             let planBytes = 0;
+            let undo: boolean | undefined;
+            const partBytes: number[] = [];
             for (const part of planParts(plan)) {
-                planBytes += utf8Bytes(part, MAX_NATIVE_BACKUP_PLAN_BYTES - planBytes);
+                const bytes = utf8Bytes(part, MAX_NATIVE_BACKUP_PLAN_BYTES - planBytes);
+                planBytes += bytes;
+                partBytes.push(bytes);
                 if (planBytes > MAX_NATIVE_BACKUP_PLAN_BYTES) invalid('Prepared backup plan exceeds 512 MiB');
                 if (sink) sinkCall(() => sink.plan(part)); else planJSON += part;
+                // The documents' parts are out (expectedCurrent, then data): decide the Undo before the last part writes the reply.
+                if (undoRoom !== null && partBytes.length === 4) {
+                    const estimate = Math.ceil(libraryBytes + Math.max(0, partBytes[3] - partBytes[1]) * SQLITE_BYTES_PER_JSON_BYTE);
+                    undo = undoRoom >= 0 && estimate <= undoRoom;
+                    // A recovery snapshot past the limit alone can never be undone; otherwise the commit measures.
+                    if (undoRoom >= 0) plan.undoLibraryBytes = undoRoom;
+                    else plan.reply = { ...plan.reply, undo: false };
+                    if (!undo) logUndoUnavailable(operation, 'estimate');
+                }
             }
             const diagnostics = createImportDiagnostics(rawWarnings, 'warning');
             if (diagnostics.some((diagnostic) => diagnostic.code === 'renamed-container')) {
                 liveWarnings = { snapshotName, tokens: [...(reply as { result: { warnings: string[] } }).result.warnings], diagnostics };
             }
-            return sink ? { written: true as const, recovery } : { planJSON, recoveryJSON };
+            const prepared = undo === undefined ? {} : { undo };
+            return sink ? { written: true as const, recovery, ...prepared } : { planJSON, recoveryJSON, ...prepared };
         });
     } catch (error) {
         if (error instanceof BackupInputError) throw error;
@@ -437,6 +478,13 @@ export async function prepareNativeBackupDocument(adapter: NativeReceiptSqliteAd
 }
 
 const validateReply = (value: unknown, snapshotName?: string, operation?: Operation): NativeBackupDocumentReply => {
+    if (record(value) && 'undo' in value) {
+        // An operation that ran without Undo; a snapshot restore never offers one.
+        if (value.undo !== false || value.operation === 'restore') invalid();
+        const { undo: _undo, ...body } = value;
+        validateReply(body, snapshotName, operation);
+        return value as NativeBackupDocumentReply;
+    }
     if (!record(value) || value.version !== 1 || !mode(value.operation) || !snapshot(value.snapshotName)
         || snapshotName !== undefined && value.snapshotName !== snapshotName || operation !== undefined && value.operation !== operation) invalid();
     if (value.operation === 'csv' || value.operation === 'todoist' || value.operation === 'ticktick' || value.operation === 'dgt' || value.operation === 'omnifocus') {
@@ -461,7 +509,8 @@ const readPlan = (reference: NativeBackupOperationReference, planJSON: string, s
     let value: unknown;
     try { value = JSON.parse(planJSON); } catch { return invalid(); }
     const fields = ['version', 'requestId', 'mode', 'preparedAt', 'expectedCurrent', 'data', 'reply'];
-    if (!(exact(value, fields) || exact(value, [...fields, 'maxLibraryBytes']) && count(value.maxLibraryBytes))
+    if (!(exact(value, fields) || exact(value, [...fields, 'maxLibraryBytes']) && count(value.maxLibraryBytes)
+        || exact(value, [...fields, 'undoLibraryBytes']) && count(value.undoLibraryBytes))
         || value.version !== 1 || value.requestId !== reference.id || !mode(value.mode)
         || typeof value.preparedAt !== 'string' || !Number.isFinite(Date.parse(value.preparedAt))
         || new Date(value.preparedAt).toISOString() !== value.preparedAt
@@ -476,7 +525,10 @@ const payload = (reference: NativeBackupOperationReference, plan: Pick<Plan, 'mo
 const matchedReply = (reply: unknown, plan: Pick<Plan, 'mode' | 'reply'>): NativeBackupDocumentReply => {
     try {
         const validated = storedReply(validateReply(reply, plan.reply.snapshotName, plan.mode));
-        if (!taskEditValuesEqual(validated, plan.reply)) saveFailed();
+        // The commit may add `undo: false` (its library ended larger than the plan's estimate); it never takes one away.
+        const { undo, ...body } = validated;
+        const { undo: planned, ...expected } = plan.reply;
+        if (!taskEditValuesEqual(body, expected) || planned === false && undo !== false) saveFailed();
         return validated;
     } catch { return saveFailed(); }
 };
@@ -494,9 +546,11 @@ export async function readNativeBackupDocumentOutcome(adapter: NativeReceiptSqli
 /** Commit only the frozen plan, or reload after an exact durable replay. */
 /** A host's plan text, handed over once (Android's file channel): no caller's frame keeps the text while the commit runs. */
 export type NativeBackupPlanSource = { take(): string };
-export async function commitNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, reference: NativeBackupOperationReference, planJSON: string | NativeBackupPlanSource, snapshotName: string): Promise<NativeBackupDocumentReply> {
+/** [options.getLocalAttachmentPresence]: the host's local file check; a live file attachment whose file is gone is saved as 'missing'. */
+export type NativeBackupCommitOptions = { getLocalAttachmentPresence?: (uri: string) => Promise<LocalAttachmentPresence> };
+export async function commitNativeBackupDocument(adapter: NativeReceiptSqliteAdapter, reference: NativeBackupOperationReference, planJSON: string | NativeBackupPlanSource, snapshotName: string, options: NativeBackupCommitOptions = {}): Promise<NativeBackupDocumentReply> {
     try {
-        return await commitPlan(adapter, reference, planJSON, snapshotName);
+        return await commitPlan(adapter, reference, planJSON, snapshotName, options);
     } catch (error) {
         // A stale, refused or failed commit shows its failure, never this operation's result: its names go now.
         releaseNativeBackupDocumentWarnings();
@@ -504,20 +558,26 @@ export async function commitNativeBackupDocument(adapter: NativeReceiptSqliteAda
     }
 }
 
-async function commitPlan(adapter: NativeReceiptSqliteAdapter, reference: NativeBackupOperationReference, planJSON: string | NativeBackupPlanSource, snapshotName: string): Promise<NativeBackupDocumentReply> {
+async function commitPlan(adapter: NativeReceiptSqliteAdapter, reference: NativeBackupOperationReference, planJSON: string | NativeBackupPlanSource, snapshotName: string, options: NativeBackupCommitOptions): Promise<NativeBackupDocumentReply> {
     // The plan's two documents are held only until the adapter took them (cut g, pass D1c); its small fields stay.
     let plan: Plan | null = readPlan(reference, typeof planJSON === 'string' ? planJSON : planJSON.take(), snapshotName);
-    const kept = { mode: plan.mode, reply: plan.reply, maxLibraryBytes: plan.maxLibraryBytes };
+    const kept = { mode: plan.mode, reply: plan.reply, maxLibraryBytes: plan.maxLibraryBytes, undoLibraryBytes: plan.undoLibraryBytes };
     const ownedReference = { ...reference };
     try {
         return await runSerializedSyncDocumentWriteOperation(async () => {
             await flush();
+            // Every mode but a snapshot restore wrote a recovery snapshot of expectedCurrent: the result toast's Undo. Only its
+            // attachments' paths and keys stay, never the document.
+            const undoReferences = kept.mode !== 'restore' ? findLiveAttachmentResourceReferences(plan!.expectedCurrent) : null;
             let result;
             try {
                 // This plan was parsed here and nobody else holds it, so the adapter may keep its objects without a copy.
                 const saving = adapter.saveDocumentWithReceipt({ requestId: ownedReference.id, payload: payload(ownedReference, kept),
-                    expectedCurrent: plan!.expectedCurrent, data: plan!.data, reply: kept.reply, owned: true,
-                    ...(kept.maxLibraryBytes === undefined ? {} : { maxLibraryBytes: kept.maxLibraryBytes }) });
+                    expectedCurrent: plan!.expectedCurrent, reply: kept.reply, owned: true,
+                    data: options.getLocalAttachmentPresence
+                        ? await markMissingLocalAttachmentFiles(plan!.data, options.getLocalAttachmentPresence) : plan!.data,
+                    ...(kept.maxLibraryBytes === undefined ? {} : { maxLibraryBytes: kept.maxLibraryBytes }),
+                    ...(kept.undoLibraryBytes === undefined ? {} : { undoLibraryBytes: kept.undoLibraryBytes }) });
                 plan = null;
                 result = await saving;
             } catch (error) {
@@ -528,6 +588,9 @@ async function commitPlan(adapter: NativeReceiptSqliteAdapter, reference: Native
                 return saveFailed();
             }
             const reply = matchedReply(result.reply, kept);
+            if (reply.undo === false && kept.reply.undo !== false && !result.replayed) logUndoUnavailable(kept.mode, 'after-save');
+            // An operation that ran without Undo offers none: nothing to hold.
+            if (undoReferences && reply.undo !== false) holdRestoreUndoAttachments(undoReferences);
             try {
                 markNextLoadAsDocumentReplacement();
                 // Maintenance resumes only after the native journal has been cleared.
@@ -586,19 +649,41 @@ type ImportReplyWithDiagnostics = NativeBackupDocumentReply extends infer R
     : never;
 function importResult(reply: ImportReplyWithDiagnostics, t: ImportDiagnosticTranslator) {
     const durationMs = reply.operation === 'restore' ? null : DATA_TRANSFER_TOAST_MS[reply.operation];
-    const imported = (message: string) => ({ title: t('settings.backupMobile.importComplete'), message,
-        undoLabel: t('settings.undoImport'), doneLabel: t('common.done'), durationMs });
+    // Without Undo (large-library pass b) the toast says so plainly instead of only dropping the button.
+    const noUndo = reply.undo === false;
+    const withUndoNote = (message: string) => (noUndo ? `${message}\n\n${t('settings.backupMobile.undoUnavailableResult')}` : message);
+    const imported = (message: string) => ({ title: t('settings.backupMobile.importComplete'), message: withUndoNote(message),
+        undoLabel: noUndo ? '' : t('settings.undoImport'), doneLabel: t('common.done'), durationMs });
     if (reply.operation === 'omnifocus') return imported(buildOmniFocusResultMessage(reply.result, reply.snapshotName, t));
     if (reply.operation === 'ticktick' || reply.operation === 'dgt') return imported(buildAreaImportResultMessage(reply.result, reply.snapshotName, t));
     if (reply.operation === 'todoist') return imported(buildTodoistResultMessage(reply.result, reply.snapshotName, t));
     if (reply.operation === 'csv') return imported(buildMindwtrCsvResultMessage(reply.result, reply.snapshotName, t));
     return {
         title: t(reply.operation === 'merge' ? 'settings.mergeBackup' : 'settings.backupMobile.restoreComplete'),
-        message: reply.operation === 'merge' ? buildMergeResultMessage(reply, reply.snapshotName, t)
+        message: withUndoNote(reply.operation === 'merge' ? buildMergeResultMessage(reply, reply.snapshotName, t)
             : reply.operation === 'replace' ? t('settings.backupMobile.backupRestoredWithSnapshot', { snapshotName: reply.snapshotName })
-                : t('settings.backupMobile.recoverySnapshotRestored'),
-        undoLabel: reply.operation !== 'restore' ? t('settings.undoImport') : '', doneLabel: t('common.done'), durationMs,
+                : t('settings.backupMobile.recoverySnapshotRestored')),
+        undoLabel: reply.operation !== 'restore' && !noUndo ? t('settings.undoImport') : '', doneLabel: t('common.done'), durationMs,
     };
+}
+
+/**
+ * Android's leftover result (a death after its commit, before its toast) offers Undo again at the next start: its recovery
+ * snapshot's attachments are held again first, as the commit held them (attachment-cleanup.ts holdRestoreUndoAttachments).
+ * Parsing the snapshot costs what the Undo's own prepare costs, and the transfer limit admitted that. Answers whether it held.
+ */
+export function holdNativeBackupUndoAttachments(snapshotText: string, snapshotName: string): boolean {
+    if (!snapshot(snapshotName)) invalid();
+    const validation = parseSource(snapshotText, { fileName: snapshotName, lastModified: 0, appVersion: '0.0.0' });
+    if (!validation.valid || !validation.data) return false;
+    holdRestoreUndoAttachments(findLiveAttachmentResourceReferences(validation.data));
+    return true;
+}
+
+/** The question before an operation that may run without Undo (large-library pass b; RN has no such limit, so no such question). */
+export function buildNativeBackupNoUndoConfirmation(t: ImportDiagnosticTranslator) {
+    return { title: t('settings.backupMobile.undoUnavailableTitle'), message: t('settings.backupMobile.undoUnavailableConfirm'),
+        confirmLabel: t('settings.backupMobile.undoUnavailableContinue'), cancelLabel: t('common.cancel') };
 }
 
 /** RN's question before a snapshot restore: the Undo words after an import or restore, else the Recovery snapshots row's. */

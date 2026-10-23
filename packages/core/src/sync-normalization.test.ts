@@ -265,6 +265,53 @@ describe('sync normalization', () => {
         expect(again.data.projects[0]).toEqual(forward.data.projects[0]);
     });
 
+    it('keeps Per section flow fields when an old client edits the project and section (#1429)', () => {
+        const project: Project = {
+            ...createMockProject('trip', '2026-01-01T00:00:00.000Z'),
+            rev: 1, revBy: 'new-client', isSequential: false, perSectionFlow: true,
+        };
+        const book = { ...createMockSection('book', 'trip', '2026-01-01T00:00:00.000Z'), rev: 1, revBy: 'new-client', isSequential: true };
+        const prep = { ...createMockSection('prep', 'trip', '2026-01-01T00:00:00.000Z'), rev: 1, revBy: 'new-client', isSequential: false };
+        const later = { ...createMockSection('later', 'trip', '2026-01-01T00:00:00.000Z'), rev: 1, revBy: 'new-client' };
+        // An old client renames everything; it never carried the new fields.
+        const { perSectionFlow: _p, ...oldProject } = { ...project, title: 'Renamed', rev: 2, revBy: 'old-client', updatedAt: '2026-01-01T00:01:00.000Z' };
+        const strip = (section: typeof book) => {
+            const { isSequential: _s, ...rest } = { ...section, title: 'Renamed', rev: 2, revBy: 'old-client', updatedAt: '2026-01-01T00:01:00.000Z' };
+            return rest;
+        };
+        const local = JSON.parse(JSON.stringify(mockAppData([], [project], [book, prep, later]))) as AppData;
+        const incoming = JSON.parse(JSON.stringify(mockAppData([], [oldProject as Project], [strip(book), strip(prep), strip(later)]))) as AppData;
+
+        const forward = mergeAppDataWithStats(local, incoming, { nowIso: NOW });
+        const reverse = mergeAppData(incoming, local, { nowIso: NOW });
+        expect(forward.data.projects[0]).toMatchObject({ title: 'Renamed', isSequential: false, perSectionFlow: true });
+        expect(forward.data.sections.map((row) => [row.id, row.title, row.isSequential])).toEqual([
+            ['book', 'Renamed', true], ['prep', 'Renamed', false], ['later', 'Renamed', undefined],
+        ]);
+        expect(reverse.projects[0]).toEqual(forward.data.projects[0]);
+        expect(reverse.sections).toEqual(forward.data.sections);
+        const again = mergeAppDataWithStats(forward.data, JSON.parse(JSON.stringify(forward.data)) as AppData, { nowIso: NOW });
+        expect(again.stats.projects.conflicts).toBe(0);
+        expect(again.stats.sections.conflicts).toBe(0);
+        expect(again.data).toEqual(forward.data);
+    });
+
+    it('lets a newer explicit Flow mode change win over the stored one (#1429)', () => {
+        const project: Project = { ...createMockProject('trip', '2026-01-01T00:00:00.000Z'), rev: 1, perSectionFlow: true };
+        const off: Project = { ...project, rev: 2, updatedAt: '2026-01-01T00:01:00.000Z', isSequential: true, perSectionFlow: false };
+        const book = { ...createMockSection('book', 'trip', '2026-01-01T00:00:00.000Z'), rev: 1, isSequential: true };
+        const parallel = { ...book, rev: 2, updatedAt: '2026-01-01T00:01:00.000Z', isSequential: false };
+        const roundTrip = (data: AppData) => JSON.parse(JSON.stringify(data)) as AppData;
+        const merged = mergeAppData(roundTrip(mockAppData([], [project], [book])), roundTrip(mockAppData([], [off], [parallel])), { nowIso: NOW });
+        expect(merged.projects[0]).toMatchObject({ isSequential: true, perSectionFlow: false });
+        expect(merged.sections[0].isSequential).toBe(false);
+        // A macOS CloudKit bridge boxes booleans as numbers; the merge reads them back as booleans.
+        const boxed = mergeAppData(mockAppData([], [{ ...project, perSectionFlow: 1 as unknown as boolean }], [{ ...book, isSequential: 0 as unknown as boolean }]),
+            mockAppData([], [], []), { nowIso: NOW });
+        expect(boxed.projects[0].perSectionFlow).toBe(true);
+        expect(boxed.sections[0].isSequential).toBe(false);
+    });
+
     it('keeps an intentional project section clear ({}) over an older assignment (#1319)', () => {
         const base: Project = {
             ...createMockProject('project-clear', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),

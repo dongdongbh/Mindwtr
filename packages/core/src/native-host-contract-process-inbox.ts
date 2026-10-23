@@ -26,6 +26,7 @@ import { projectNextRecurringTask, type RecurrenceProjection } from './recurrenc
 import { findSelectableProjectByTitleAndArea } from './project-utils';
 import { buildNewProject } from './store-projects/project-actions';
 import { buildNewTask } from './task-creation';
+import { getTaskReminderDefault } from './task-reminder-policy';
 import { createProjectOrderReserver, ensureDeviceId, getNextProjectOrder, getTaskOrder, nextRevision } from './store-helpers';
 import { planTaskUpdateEffects, prepareTaskUpdatesForStore, taskEditValuesEqual } from './store-tasks';
 import type { PreparedInboxEffect, TaskStore } from './store-types';
@@ -193,6 +194,8 @@ type PlanningContext = {
     parseTitle: (input: string) => ProcessInboxParsedTitle;
     nextId: () => string;
     allowMembershipDiscovery?: boolean;
+    /** Created actions inherit it. Validation reads it back from their frozen rows, so the witness keeps its shape. */
+    taskReminderDefault: 'send' | 'skip';
 };
 type Planned = { effect: PreparedInboxEffect; result: NativeInboxDurableResult;
     decisionRequest?: NativeInboxWitness['decisionRequest']; preparedDecision?: PreparedProcessInboxCommit;
@@ -220,7 +223,7 @@ const dateRequest = (witness: NativeInboxWitness, kind: ProcessInboxCommitKind) 
     now: new Date(witness.preparedAt),
 });
 
-const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscovery = false }: PlanningContext): Planned | Refused => {
+const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscovery = false, taskReminderDefault }: PlanningContext): Planned | Refused => {
     const { source, draft, plan, lists } = witness;
     const kind: NativeInboxDurableResult['kind'] = witness.decisionKind === null ? 'projectCreate'
         : witness.decisionKind === 'skip' ? 'skip' : 'decision';
@@ -277,7 +280,7 @@ const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscov
                 const id = nextId();
                 const built = buildNewTask({ title: action.title, initialTaskProps: { status: 'inbox', projectId: newProject.id },
                     id, now: witness.preparedAt, deviceId: witness.deviceIdBefore ?? witness.deviceIdToInitialize!,
-                    state: { settings: witness.settings, _allProjects: projects, _allSections: sections, _allAreas: lists.areas },
+                    state: { settings: { ...witness.settings, taskReminderDefault }, _allProjects: projects, _allSections: sections, _allAreas: lists.areas },
                     tasks, focusedCount: witness.focusCount, focusTaskLimit: witness.focusLimit,
                     projectOrderReserver: reserveOrder, endOfTodayIso: witness.futureBoundary });
                 if (!built.ok) throw new Error(built.error);
@@ -471,7 +474,8 @@ export function prepareNativeInboxWrite(input: {
         focusCount: countFocusedTasksBeforeBoundary(state.tasks, boundary),
         focusLimit: normalizeFocusTaskLimit(state.settings.gtd?.focusTaskLimit),
     };
-    const planned = planWrite({ request, witness, parseTitle, nextId, allowMembershipDiscovery: true });
+    const taskReminderDefault = getTaskReminderDefault(state.settings);
+    const planned = planWrite({ request, witness, parseTitle, nextId, allowMembershipDiscovery: true, taskReminderDefault });
     if (planned.reason !== undefined) return { kind: 'notice', reason: planned.reason,
         ...('invalidDateCommands' in planned ? { invalidDateCommands: planned.invalidDateCommands } : {}) };
     if (planned.decisionRequest) witness.decisionRequest = planned.decisionRequest;
@@ -526,7 +530,7 @@ export function prepareNativeInboxWrite(input: {
             || planned.effect.tasks.some((row) => row.after.areaId === area.id)),
     };
     let idIndex = 0;
-    const check = planWrite({ request, witness, parseTitle: (title) => {
+    const check = planWrite({ request, witness, taskReminderDefault, parseTitle: (title) => {
         const record = parser.find((entry) => entry.input === title);
         if (!record) throw new Error('Missing frozen Inbox parser result');
         return record.parsed;
@@ -612,7 +616,10 @@ export function readNativePreparedInboxWrite(input: unknown): NativePreparedInbo
     try {
         const seen = new Set<string>();
         let idIndex = 0;
+        const createdActionIds = new Set(prepared.result.createdActionIds ?? []);
         const recomputed = planWrite({ request: envelope.request, witness,
+            taskReminderDefault: prepared.effect.tasks.some((row) => !row.before && createdActionIds.has(row.after.id)
+                && row.after.suppressMindwtrReminders === true) ? 'skip' : 'send',
             parseTitle: (title) => {
                 const records = witness.parser.filter((record) => record.input === title);
                 if (records.length !== 1) throw new Error('Invalid Inbox parser witness');

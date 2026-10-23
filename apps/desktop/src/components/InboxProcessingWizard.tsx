@@ -6,7 +6,7 @@ import { INCUBATE_ICON as IncubateIcon, START_LATER_ICON as StartLaterIcon, TASK
 const SomedayIcon = TASK_STATUS_ICONS.someday;
 const ReferenceIcon = TASK_STATUS_ICONS.reference;
 const NextIcon = TASK_STATUS_ICONS.next;
-import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { getProjectAccentColor, DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -1278,7 +1278,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                                 >
                                                     <div
                                                         className="w-3 h-3 rounded-full"
-                                                        style={{ backgroundColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || 'hsl(var(--muted-foreground))' }}
+                                                        style={{ backgroundColor: getProjectAccentColor(project, areaById) || 'hsl(var(--muted-foreground))' }}
                                                     />
                                                     <span>{project.title}</span>
                                                 </button>

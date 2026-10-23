@@ -98,10 +98,10 @@ export function TaskEditContentField({
     const [checklistOrderMode, setChecklistOrderMode] = React.useState(false);
     const isReference = (draft?.status ?? task?.status) === 'reference';
     const editChecklist = React.useCallback((edit: TaskChecklistEdit) => {
-        const result = applyTaskChecklistEdit(checklist, edit, { isReference, newId: generateUUID });
+        const result = applyTaskChecklistEdit(checklist, edit, { newId: generateUUID });
         if (result) applyChecklistUpdate(result.checklist);
         return result;
-    }, [applyChecklistUpdate, checklist, isReference]);
+    }, [applyChecklistUpdate, checklist]);
     const combinedText = `${titleDraft ?? ''}\n${descriptionDraft ?? ''}`.trim();
     const resolvedDirection = resolveAutoTextDirection(combinedText, language);
     const textDirectionStyle = {
@@ -267,9 +267,7 @@ export function TaskEditContentField({
     // return key just ends editing.
     const handleChecklistSubmit = React.useCallback((index: number, key: string) => {
         if (!(checklist || [])[index]) return;
-        const result = applyTaskChecklistEdit(checklist, { kind: 'insertAfter', index, text: checklistTitleRefs.current[key] }, {
-            isReference,
-            newId: generateUUID,
+        const result = applyTaskChecklistEdit(checklist, { kind: 'insertAfter', index, text: checklistTitleRefs.current[key] }, { newId: generateUUID,
         });
         if (!result) {
             checklistInputRefs.current[key]?.blur();
@@ -277,7 +275,7 @@ export function TaskEditContentField({
         }
         if (result.focusId) requestChecklistInsertionFocus(result.focusId);
         applyChecklistUpdate(result.checklist);
-    }, [applyChecklistUpdate, checklist, isReference, requestChecklistInsertionFocus]);
+    }, [applyChecklistUpdate, checklist, requestChecklistInsertionFocus]);
 
     const updateChecklistTitle = React.useCallback((index: number, key: string, title: string) => {
         checklistTitleRefs.current[key] = title;
@@ -334,7 +332,7 @@ export function TaskEditContentField({
         if (/[\r\n]/.test(text)) {
             // Multi-line paste: split into one checklist item per line. The
             // first line replaces this item's title; the rest insert after it.
-            const result = applyTaskChecklistEdit(checklist, { kind: 'rename', index, text }, { isReference, newId: generateUUID });
+            const result = applyTaskChecklistEdit(checklist, { kind: 'rename', index, text }, { newId: generateUUID });
             if (!result) return;
             const updatedTitle = result.checklist[index].title;
             checklistTitleRefs.current[key] = updatedTitle;
@@ -387,7 +385,7 @@ export function TaskEditContentField({
 
         lastChecklistRangeRefs.current[key] = null;
         updateChecklistTitle(index, key, text);
-    }, [applyChecklistUpdate, checklist, getChecklistSelection, isReference, restoreChecklistSelection, updateChecklistTitle]);
+    }, [applyChecklistUpdate, checklist, getChecklistSelection, restoreChecklistSelection, updateChecklistTitle]);
 
     // Checklist auto-pairing intentionally lives only in handleChecklistTitleChange. On
     // Android the keyPress event is synthesized from the same native edit as the text
@@ -750,36 +748,21 @@ export function TaskEditContentField({
                                                 { borderBottomColor: tc.border },
                                             ]}
                                         >
-                                            {field.bullets ? (
-                                                <Text
-                                                    style={{
-                                                        width: 28,
-                                                        color: tc.secondaryText,
-                                                        fontSize: 18,
-                                                        lineHeight: 24,
-                                                        textAlign: 'center',
-                                                    }}
-                                                    accessible={false}
-                                                >
-                                                    •
-                                                </Text>
-                                            ) : (
-                                                <TouchableOpacity
-                                                    accessibilityRole="checkbox"
-                                                    accessibilityLabel={item.checkboxLabel}
-                                                    accessibilityState={{ checked: item.completed }}
-                                                    onPress={() => editChecklist({ kind: 'toggle', index })}
-                                                    style={styles.checkboxTouch}
-                                                >
-                                                    <View style={[
-                                                        styles.checkbox,
-                                                        { borderColor: tc.tint },
-                                                        item.completed && { backgroundColor: tc.tint },
-                                                    ]}>
-                                                        {item.completed && <Check size={12} color={tc.onTint} strokeWidth={3} />}
-                                                    </View>
-                                                </TouchableOpacity>
-                                            )}
+                                            <TouchableOpacity
+                                                accessibilityRole="checkbox"
+                                                accessibilityLabel={item.checkboxLabel}
+                                                accessibilityState={{ checked: item.completed }}
+                                                onPress={() => editChecklist({ kind: 'toggle', index })}
+                                                style={styles.checkboxTouch}
+                                            >
+                                                <View style={[
+                                                    styles.checkbox,
+                                                    { borderColor: tc.tint },
+                                                    item.completed && { backgroundColor: tc.tint },
+                                                ]}>
+                                                    {item.completed && <Check size={12} color={tc.onTint} strokeWidth={3} />}
+                                                </View>
+                                            </TouchableOpacity>
                                             <TextInput
                                                 ref={getChecklistInputRef(checklistItemKey)}
                                                 onLayout={() => handleChecklistRowLayout(checklistItemKey)}
@@ -828,7 +811,7 @@ export function TaskEditContentField({
                                 <TouchableOpacity
                                     style={[styles.addChecklistBtn, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
                                     onPress={() => {
-                                        const result = applyTaskChecklistEdit(checklist, { kind: 'add' }, { isReference, newId: generateUUID });
+                                        const result = applyTaskChecklistEdit(checklist, { kind: 'add' }, { newId: generateUUID });
                                         if (!result) return;
                                         if (result.focusId) requestChecklistInsertionFocus(result.focusId);
                                         applyChecklistUpdate(result.checklist);

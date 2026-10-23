@@ -6,11 +6,13 @@ import { readAreaDurableData } from './native-host-contract-area-durable';
 import { buildSaveSnapshot } from './store-helpers';
 import { buildBulkTaskTokenUpdates } from './bulk-task-tokens';
 import type { AppData, Task } from './types';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 import type { NativeReferenceTasksRemoveTagEnvelope } from './native-host-contract-reference-bulk-remove-tag';
 import { deterministicHash128 } from './uuid';
 import * as uuid from './uuid';
 import * as logger from './logger';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 const openSqliteHost: typeof openHost = (seed, wrap, bindings) => openHost(seed, wrap, bindings, { rejectConcurrentWrites: true });
 const NOW = '2026-10-03T13:00:00.000Z';
 const BEFORE = '2026-10-02T12:34:56.789Z';
@@ -247,7 +249,11 @@ describe('Reference Remove tag exact authority and durable replay', () => {
             await sqlite.restart(undefined, { recoveryLoad: true });
             if (label === 'settings' || label === 'unrelated row') {
                 value(await host(sqlite).commitPreparedReferenceTasksRemoveTag(command)); const final = await raw(sqlite);
-                expect(final.settings).toEqual(after.settings);
+                // The successful RN-equivalent write also retains this exact prepared token effect.
+                const expectedSettings = clone(after.settings);
+                expectedSettings.rows[0].data = JSON.stringify(retainTaxonomyEffects(JSON.parse(expectedSettings.rows[0].data),
+                    command.prepared.effect.tasks, command.prepared.effect.projects));
+                expect(final.settings).toEqual(expectedSettings);
                 expect(final.tasks.rows.find((r: { id: string }) => r.id === 'unrelated')).toEqual(after.tasks.rows.find((r: { id: string }) => r.id === 'unrelated'));
             } else { expect(await host(sqlite).commitPreparedReferenceTasksRemoveTag(command)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } }); expect(await raw(sqlite)).toEqual(after); }
         } finally { other.close(); await sqlite.close(); }
@@ -422,4 +428,19 @@ describe('Reference Remove tag exact authority and durable replay', () => {
             expect(await host(sqlite).commitPreparedReferenceTasksRemoveTag(command)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } }); expect(await raw(sqlite)).toEqual(before); expect(await receipts(sqlite)).toEqual([]); }
         finally { await sqlite.close(); }
     });
+});
+
+// Captured from the exact pre-742 production prepare/commit under the same clock/zone.
+it('keeps the complete pre-742 Reference envelope/reply/fingerprint/receipt bytes', async () => {
+    process.env.TZ = 'UTC'; clock();
+    const sqlite = await openSqliteHost({ tasks: ['a', 'b'].map(id => ({ id, title: id, status: 'reference' as const,
+        tags: ['#new', '#keep'], contexts: [], createdAt: BEFORE, updatedAt: BEFORE, rev: 3, revBy: DEVICE })), settings: { deviceId: DEVICE } });
+    try {
+        const input = request(['  @@## new  ', 'not-carried']); const envelope = await prepare(sqlite, input);
+        const reply = await host(sqlite).commitPreparedReferenceTasksRemoveTag(envelope);
+        const saved = await sqlite.sql('SELECT request_id,method,reply,saved_at FROM native_request_receipts ORDER BY rowid');
+        const bytes = JSON.stringify({ envelope, reply, receipts: saved }) + '\n';
+        expect(Buffer.byteLength(bytes)).toBe(2936);
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe('b9f27e11f9f91d065aaefc09e5f487af686f3f02718e5de7a633095072260f21');
+    } finally { await sqlite.close(); }
 });

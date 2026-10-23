@@ -182,6 +182,7 @@ export const TaskItem = memo(function TaskItem({
         activeTasksByStatus,
         sequentialProjectIds,
         sequentialWithinSectionProjectIds,
+        sequentialSectionKeys,
     } = useTaskItemStoreState({
         task,
         propProject,
@@ -234,6 +235,11 @@ export const TaskItem = memo(function TaskItem({
         appendRetainedAttachment,
         removeAttachment,
         openAttachment,
+        prepareAttachmentsForSave,
+        getAttachmentDraftGeneration,
+        retainWebAttachmentsBeforeStore,
+        isImportingFiles,
+        setAttachmentError,
         beginAttachmentSave,
         cancelAttachmentSaveBeforeStoreUpdate,
         resetAttachmentState,
@@ -387,8 +393,9 @@ export const TaskItem = memo(function TaskItem({
         focusTaskLimit,
         sequentialProjectIds,
         sectionScopedProjectIds: sequentialWithinSectionProjectIds,
+        sequentialSectionKeys,
         allowUnclarified: options?.allowUnclarified,
-    }), [activeTasksByStatus, focusTaskLimit, focusedCount, projectMap, sections, sequentialProjectIds, sequentialWithinSectionProjectIds, task]);
+    }), [activeTasksByStatus, focusTaskLimit, focusedCount, projectMap, sections, sequentialProjectIds, sequentialSectionKeys, sequentialWithinSectionProjectIds, task]);
     const toggleTaskFocus = useCallback(() => {
         if (effectiveReadOnly) return;
         const action = resolveFocusStar();
@@ -675,6 +682,7 @@ export const TaskItem = memo(function TaskItem({
         attachmentError,
         visibleEditAttachments,
         addFileAttachment,
+        addDroppedFileAttachments,
         addLinkAttachment,
         addFolderLinkAttachment,
         addObsidianNoteAttachment,
@@ -686,6 +694,7 @@ export const TaskItem = memo(function TaskItem({
         attachmentError,
         visibleEditAttachments,
         addFileAttachment,
+        addDroppedFileAttachments,
         addLinkAttachment,
         addFolderLinkAttachment,
         addObsidianNoteAttachment,
@@ -806,6 +815,11 @@ export const TaskItem = memo(function TaskItem({
         showToast,
         t,
         task,
+        prepareAttachmentsForSave,
+        getAttachmentDraftGeneration,
+        retainWebAttachmentsBeforeStore,
+        isImportingFiles,
+        setAttachmentError,
         beginAttachmentSave,
         cancelAttachmentSaveBeforeStoreUpdate,
         settlePersistedAttachmentSave,
@@ -961,6 +975,7 @@ export const TaskItem = memo(function TaskItem({
             completedTask,
             storeState._allTasks,
             storeState._allProjects,
+            storeState._allSections,
         );
         if (!promptData) return;
         setProjectNextActionTitle('');

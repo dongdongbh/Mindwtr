@@ -9,7 +9,9 @@ import { generateUUID as uuidv4 } from '../uuid';
 import { taskEditValuesEqual } from '../json-value-equality';
 import { normalizeTaskForLoad } from '../task-status';
 import { normalizeProjectLifecycleFields } from '../project-status';
-import { getPersistenceStatus } from '../store';
+import { getPersistenceStatus, getStorageAdapter } from '../store';
+import { referenceBatchModules } from '../store-reference-batch-modules';
+import { rawReadTaskSnapshot, rawReadProjectSnapshot, rawReadAreaSnapshot } from '../sqlite-raw-snapshot';
 import type { AppData } from '../types';
 import type { PreparedAreaAuthority, TaskStore, PreparedAreaColor, PreparedAreaCreate, PreparedAreaDelete, PreparedAreaOrder, PreparedTaskEditResult } from '../store-types';
 import type { Area, AreaActions, Project, ProjectActionContext, Section, Task } from './shared';
@@ -18,13 +20,14 @@ import { actionFail, actionOk, mutateEntities } from './shared';
 export type AreaAdditionRows = { areas: Area[]; projects: Project[]; sections: Section[]; tasks: Task[] };
 
 /** The existing deleteArea detach policy, including trashed directly linked Tasks. */
-export function planAreaDeletion(area: Area, projects: Project[], tasks: Task[], deviceId: string, now: string):
+export function planAreaDeletion(area: Area, projects: Project[], tasks: Task[], deviceId: string, now: string, version: 1 | 2 = 2):
     { area: Area; projects: Project[]; tasks: Task[] } {
     return {
         area: { ...area, deletedAt: now, updatedAt: now,
             rev: nextRevision(area.rev), revBy: deviceId },
         projects: projects.map((project) => project.areaId === area.id && !project.deletedAt
-            ? { ...project, areaId: undefined, areaTitle: undefined, updatedAt: now,
+            ? { ...project, areaId: undefined, areaTitle: undefined,
+                ...(version === 2 ? { color: project.colorOverride ?? DEFAULT_PROJECT_COLOR } : {}), updatedAt: now,
                 rev: nextRevision(project.rev), revBy: deviceId } : project),
         tasks: tasks.map((task) => task.areaId === area.id
             ? { ...task, areaId: undefined, updatedAt: now,
@@ -40,8 +43,8 @@ export function selectAreaDeleteScope(areas: Area[], projects: Project[], tasks:
 }
 
 export function areaDeleteEffect(scope: PreparedAreaDelete['scope'], deviceId: string,
-    now: string, detachProjects = false): PreparedAreaDelete['effect'] {
-    const planned = planAreaDeletion(scope.area, detachProjects ? scope.liveProjects : [], scope.tasks, deviceId, now);
+    now: string, detachProjects = false, version: 1 | 2 = 2): PreparedAreaDelete['effect'] {
+    const planned = planAreaDeletion(scope.area, detachProjects ? scope.liveProjects : [], scope.tasks, deviceId, now, version);
     return { area: { before: scope.area, after: planned.area },
         tasks: scope.tasks.map((before, index) => ({ before, after: planned.tasks[index] })),
         ...(detachProjects ? { projects: scope.liveProjects.map((before, index) =>
@@ -80,8 +83,8 @@ export function selectAreaColorScope(areas: Area[], projects: Project[], areaId:
 }
 
 export function areaColorEffect(scope: PreparedAreaColor['scope'], color: string | undefined,
-    deviceId: string, now: string): PreparedAreaColor['effect'] {
-    const planned = planAreaColorChange(scope.area, scope.projects, color, deviceId, now);
+    deviceId: string, now: string, version: 1 | 2 = 2): PreparedAreaColor['effect'] {
+    const planned = planAreaColorChange(scope.area, scope.projects, color, deviceId, now, version);
     return { area: { before: scope.area, after: planned.area },
         projects: scope.projects.flatMap((before, index) => {
             const after = planned.projects[index];
@@ -91,7 +94,7 @@ export function areaColorEffect(scope: PreparedAreaColor['scope'], color: string
 
 /** The final rows of addArea, including restoreArea followed by updateArea for a tombstone. */
 export function planAreaAddition(rows: AreaAdditionRows, name: string, props: Partial<Area> | undefined,
-    id: string, deviceId: string, restoreAt: string, updateAt: string):
+    id: string, deviceId: string, restoreAt: string, updateAt: string, version: 1 | 2 = 2):
     { kind: 'live' | 'fresh' | 'restored'; area: Area; rows: AreaAdditionRows } | null {
     const trimmed = typeof name === 'string' ? name.trim() : '';
     if (!trimmed) return null;
@@ -149,7 +152,7 @@ export function planAreaAddition(rows: AreaAdditionRows, name: string, props: Pa
         if (repaintColor || title !== restored.name?.trim()) {
             projects = projects.map((project) => {
                 if (project.areaId !== deleted.id) return project;
-                const wantsColor = repaintColor && project.color !== color;
+                const wantsColor = repaintColor && (version === 1 || project.colorOverride == null) && project.color !== color;
                 const wantsTitle = project.areaTitle !== title;
                 return wantsColor || wantsTitle ? { ...project,
                     ...(wantsColor ? { color } : {}), ...(wantsTitle ? { areaTitle: title } : {}),
@@ -277,6 +280,48 @@ export const createAreaActions = ({
         return area;
     },
 
+    /** A first raw creation effect only; a completed retry is answered by its typed receipt, never target equality. */
+    commitPreparedInboxOrganizeDestinationCreate: async (input, authority): Promise<PreparedTaskEditResult> => {
+        let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: 'Inbox destination creation conflicts with saved data' };
+        const adapter = getStorageAdapter();
+        // Match the existing registered prepared-batch seam and recheck every authority after yielding.
+        await Promise.resolve();
+        const shared = referenceBatchModules.shared;
+        const checks = referenceBatchModules.inboxOrganizeCreate?.(input);
+        if (!shared || !checks || getStorageAdapter() !== adapter
+            || !(adapter instanceof shared.NativeReceiptSqliteAdapter) || !adapter.concurrentWritesGuarded
+            || !checks.validateEnvelope()) return result;
+        set(memory => {
+            if (!areaAuthorityMatches(memory, authority) || getStorageAdapter() !== adapter) return memory;
+            const durable = authority.snapshot;
+            try { if (!checks.authorityMatches(durable)) return memory; } catch { return memory; }
+            const bind = <T extends { id: string }>(rows: T[], pairs: { before: T | null; after: T }[],
+                snapshot: (row: T) => T | null): T[] | null => {
+                const current = new Map(rows.map(row => [row.id, row]));
+                const updates = new Map<string, T>(); const created: T[] = [];
+                for (const pair of pairs) {
+                    const id = pair.after.id; const before = current.get(id);
+                    if (updates.has(id) || (pair.before === null ? Boolean(before)
+                        : !before || pair.before.id !== id || !taskEditValuesEqual(snapshot(before), pair.before))) return null;
+                    updates.set(id, pair.after); if (pair.before === null) created.push(pair.after);
+                }
+                return [...rows.map(row => updates.get(row.id) ?? row), ...created];
+            };
+            const tasks = bind(durable.tasks, input.effect.tasks, rawReadTaskSnapshot);
+            const projects = bind(durable.projects, input.effect.projects, rawReadProjectSnapshot);
+            const sections = bind(durable.sections ?? [], input.effect.sections, row => row);
+            const areas = bind(durable.areas ?? [], input.effect.areas, rawReadAreaSnapshot);
+            if (!tasks || !projects || !sections || !areas) return memory;
+            const settings = input.deviceIdToInitialize ? { ...durable.settings, deviceId: input.deviceIdToInitialize } : durable.settings;
+            clearDerivedCache();
+            result = { success: true, id: input.result.id, outcome: 'applied' };
+            return persistPreparedArea(memory, durable, { ...durable, tasks, projects, sections,
+                areas: input.request.kind === 'area' ? areas.sort((a, b) => a.order - b.order) : areas, settings },
+            input.effect.tasks.flatMap(pair => pair.before ? [{ before: pair.before, after: pair.after }] : []), authority);
+        });
+        return result;
+    },
+
     commitPreparedAreaCreate: async (input, authority): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: 'Prepared Area conflicts with current data' };
         set((memory) => {
@@ -311,7 +356,7 @@ export const createAreaActions = ({
             const scope = selectAreaAdditionScope(rows, selected);
             if (!taskEditValuesEqual(scope, input.scope)) return memory;
             const planned = planAreaAddition(rows, request.name, { color: request.color }, request.requestId,
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.restoreAt, input.updateAt);
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.restoreAt, input.updateAt, input.version ?? 1);
             if (!planned || planned.kind !== input.kind || planned.area.id !== request.expectedAreaId
                 || !taskEditValuesEqual(areaAdditionEffect(scope, planned.rows, request.expectedAreaId), effect)) return memory;
             const settings = input.deviceIdToInitialize
@@ -347,7 +392,7 @@ export const createAreaActions = ({
             })) return state;
             // SQLite defaults can hide omitted fields; derive the write only from live rows.
             const planned = areaColorEffect({ area: target, projects: linked }, request.color ?? undefined,
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, input.version ?? 1);
             if (!taskEditValuesEqual(planned, effect)) return state;
             const nextAreas = state._allAreas.map((row) => row.id === request.areaId ? planned.area.after : row)
                 .sort((left, right) => left.order - right.order);
@@ -404,7 +449,7 @@ export const createAreaActions = ({
                 !sameAreaAdditionRow.area(row, scope.areas[index]))) return memory;
             const planned = planAreaEditorSave({ areas: state._allAreas, projects: state._allProjects,
                 tasks: state._allTasks }, request.areaId, request.name, request.manageColor,
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, input.version ?? 1);
             if (!planned || !taskEditValuesEqual(planned.result, input.result)) return memory;
             const currentScope = selectAreaRenameScope({ areas: state._allAreas,
                 projects: state._allProjects, tasks: state._allTasks }, request.areaId, planned.result.areaId);
@@ -413,7 +458,7 @@ export const createAreaActions = ({
             if (!sameRows(currentScope.projects, scope.projects, sameAreaAdditionRow.project)
                 || !sameRows(currentScope.tasks, scope.tasks, sameAreaAdditionRow.task)) return memory;
             const replanned = areaRenameEffect(currentScope, request.areaId, request.name,
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, request.manageColor);
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, request.manageColor, input.version ?? 1);
             if (!replanned || !taskEditValuesEqual(replanned.effect, effect)
                 || !taskEditValuesEqual(replanned.result, input.result)) return memory;
             const settings = input.deviceIdToInitialize
@@ -535,7 +580,7 @@ export const createAreaActions = ({
             } else if (repaintColor || nextAreaTitle !== area.name?.trim()) {
                 newAllProjects = state._allProjects.map((project) => {
                     if (project.areaId !== id) return project;
-                    const wantsColor = repaintColor && project.color !== nextAreaColor;
+                    const wantsColor = repaintColor && project.colorOverride == null && project.color !== nextAreaColor;
                     const wantsTitle = project.areaTitle !== nextAreaTitle;
                     if (!wantsColor && !wantsTitle) return project;
                     projectsChanged = true;
@@ -643,7 +688,7 @@ export const createAreaActions = ({
                 return !before || !sameAreaAdditionRow.task(task, before);
             })) return memory;
             const planned = areaDeleteEffect({ area: target, tasks: linkedTasks, liveProjects: linkedProjects },
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, request.detachProjects);
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, request.detachProjects, input.version ?? 1);
             if (!taskEditValuesEqual(planned, effect)) return memory;
             const nextAreas = state._allAreas.map((row) => row.id === request.areaId ? planned.area.after : row)
                 .sort((left, right) => left.order - right.order);

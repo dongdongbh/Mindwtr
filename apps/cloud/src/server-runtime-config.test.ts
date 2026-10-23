@@ -76,7 +76,7 @@ describe('resolveCloudRuntimeConfig', () => {
             // null = name without a value: Docker leaves the variable unset in the container.
             expect(render(file)).toBeNull();
         }
-    });
+    }, 30_000); // Includes five Docker Compose process launches on shared CI runners.
 
     test('keeps the deployed defaults and rate-dependent attachment default', () => {
         expect(resolveCloudRuntimeConfig({})).toEqual({

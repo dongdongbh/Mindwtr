@@ -346,19 +346,6 @@ export const projectsScreenStyles = StyleSheet.create({
         color: '#1D4ED8',
         fontWeight: '500',
     },
-    sequentialToggle: {
-        minHeight: 30,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 8,
-        borderWidth: 1,
-        backgroundColor: '#F3F4F6',
-    },
-    projectTypeControls: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
     projectTypeHelpButton: {
         width: 30,
         height: 30,
@@ -366,11 +353,6 @@ export const projectsScreenStyles = StyleSheet.create({
         borderWidth: 1,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    sequentialToggleText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#6B7280',
     },
     sequentialScopeOptions: {
         flexDirection: 'row',

@@ -184,8 +184,10 @@ export function AttachmentsField({
                         // Same three states the mobile editor and the desktop
                         // list rows already show, so a synced-but-not-downloaded
                         // file no longer reads as a dead link.
+                        // Browser drafts can own a File in memory before a cloud key exists.
+                        const stagedInBrowser = !isTauriRuntime() && attachment.localStatus === 'available';
                         const isMissing = attachment.kind === 'file'
-                            && (!attachment.uri || attachment.localStatus === 'missing');
+                            && ((!attachment.uri && !stagedInBrowser) || attachment.localStatus === 'missing');
                         const isDownloading = attachment.localStatus === 'downloading';
                         const statusLabel = isDownloading
                             ? t('common.loading')

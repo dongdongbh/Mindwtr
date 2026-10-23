@@ -49,7 +49,8 @@ import org.json.JSONObject
  * each drawn before the row at its `start`.
  */
 data class FocusSection(val key: String, val title: String, val total: Int, val rows: List<TaskRow>, val focusBlockedLabel: String?,
-                        val rowTotal: Int = total, val groups: List<JSONObject> = emptyList())
+                        val rowTotal: Int = total, val groups: List<JSONObject> = emptyList(),
+                        val countLabel: String = total.toString(), val hiddenByAreaLabel: String? = null)
 /** One of core's "Projects to review" rows: the project, its status, and core's review date text. */
 data class ReviewProject(val id: String, val title: String, val status: String, val color: String?, val reviewDate: String?)
 
@@ -84,7 +85,9 @@ data class FocusView(val revision: String, val dateLabel: String, val sections: 
                 items.getJSONObject(index).let {
                     FocusSection(it.getString("key"), it.getString("title"), it.getInt("total"), it.taskRows(),
                         if (it.isNull("focusBlockedLabel")) null else it.getString("focusBlockedLabel"),
-                        it.optInt("rowTotal", it.getInt("total")), it.menuObjects("groups"))
+                        it.optInt("rowTotal", it.getInt("total")), it.menuObjects("groups"),
+                        it.optString("countLabel", it.getInt("total").toString()),
+                        if (it.isNull("hiddenByAreaLabel")) null else it.getString("hiddenByAreaLabel"))
                 }
             }, List(review.length()) { index ->
                 review.getJSONObject(index).let {
@@ -170,8 +173,14 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                 item(key = "title:${section.key}") {
                     Row(Modifier.fillMaxWidth().padding(top = top, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FocusSectionTitle(section.title, section.total, open) { toggleFocusSection(section.key) }
+                        FocusSectionTitle(section.title, section.total, open, section.countLabel) { toggleFocusSection(section.key) }
                         reorderable?.let { ReorderToggle(model, it.getString("label")) }
+                    }
+                }
+                section.hiddenByAreaLabel?.let { label ->
+                    item(key = "area-hidden:${section.key}") {
+                        Text(label, style = rnText(12, 400), color = c.secondaryText,
+                            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
                     }
                 }
                 first = false
@@ -220,10 +229,10 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
 
 /** RN's Focus section header: ▾ or ▸, the title in capitals, and the count. TalkBack hears core's title and count. */
 @Composable
-private fun RowScope.FocusSectionTitle(title: String, count: Int, open: Boolean, onToggle: () -> Unit) {
+private fun RowScope.FocusSectionTitle(title: String, count: Int, open: Boolean, countLabel: String = count.toString(), onToggle: () -> Unit) {
     val c = LocalTheme.current.colors
     val state = t(if (open) "markdown.collapse" else "markdown.expand")
-    val spoken = "$title · $count"
+    val spoken = "$title · $countLabel"
     Row(
         Modifier.weight(1f)
             .clearAndSetSemantics {
@@ -236,7 +245,7 @@ private fun RowScope.FocusSectionTitle(title: String, count: Int, open: Boolean,
         Text(if (open) "▾" else "▸", style = rnText(12, 400), color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.width(14.dp))
         Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 1f), color = c.secondaryText, maxLines = 2,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp).weight(1f, fill = false))
-        Text("($count)", style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(start = 10.dp))
+        Text("($countLabel)", style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(start = 10.dp))
     }
 }
 

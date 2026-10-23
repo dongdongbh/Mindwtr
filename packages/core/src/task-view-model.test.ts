@@ -98,7 +98,7 @@ const readViewTab = (rows: TaskViewRow[], handlers: Handlers) => rows.map((row) 
         case 'checklist': return ['checklist', row.label, [
             ...row.items.map((item) => [
                 row.tappable ? 'tap' : 'static',
-                row.bullets ? '•' : item.completed ? 'CheckSquare' : 'Square',
+                item.completed ? 'CheckSquare' : 'Square',
                 readInline(resolveMarkdownInline(item.title, lookup)),
                 item.accessibilityLabel,
                 row.tappable ? 'checkbox' : null,
@@ -131,7 +131,7 @@ const readChecklistField = (checklist: ChecklistItem[] | undefined, isReference:
         label: model.label,
         orderToggle: toggle,
         items: model.items.map((item) => [
-            model.bullets ? ['bullet', '•'] : ['checkbox', item.checkboxLabel, item.completed, item.completed],
+            ['checkbox', item.checkboxLabel, item.completed, item.completed],
             item.title,
             color(item.struck),
             item.struck,
@@ -191,7 +191,7 @@ describe('task view parity with the frozen React Native editor', () => {
         const checklist = rows.find((row) => row.type === 'checklist');
         const actions = scenario.actions.map((action) => {
             const [kind, arg] = action as [string, unknown];
-            const edit = (change: TaskChecklistEdit) => applyTaskChecklistEdit(scenario.task.checklist, change, { isReference: scenario.task.status === 'reference', newId: ids() });
+            const edit = (change: TaskChecklistEdit) => applyTaskChecklistEdit(scenario.task.checklist, change, { newId: ids() });
             if (kind === 'tick') {
                 const item = checklist?.type === 'checklist' && checklist.tappable ? checklist.items[arg as number] : undefined;
                 const result = item ? edit({ kind: 'toggle', index: item.index }) : null;
@@ -216,7 +216,7 @@ describe('task view parity with the frozen React Native editor', () => {
         const actions = scenario.actions.map((action) => {
             const [kind, index, value] = action as [string, number, string];
             const apply = (edit: TaskChecklistEdit, onNull: unknown[][] = []) => {
-                const result = applyTaskChecklistEdit(scenario.checklist, edit, { isReference, newId: ids() });
+                const result = applyTaskChecklistEdit(scenario.checklist, edit, { newId: ids() });
                 return [action, result ? [['applyChecklistUpdate', result.checklist]] : onNull, null];
             };
             switch (kind) {
@@ -249,7 +249,7 @@ describe('task view parity with the frozen React Native editor', () => {
         if (draftChecklist.length > 0) {
             calls.push(['resetTaskChecklist', 'task-actions']);
             if (scenario.storeResult.success) {
-                const result = applyTaskChecklistEdit(draftChecklist, { kind: 'uncheckAll' }, { isReference: false, newId: ids() });
+                const result = applyTaskChecklistEdit(draftChecklist, { kind: 'uncheckAll' }, { newId: ids() });
                 const next = getChecklistEditStatus({ taskMode: scenario.taskMode, status: scenario.draftStatus, checklist: result!.checklist });
                 calls = [...calls, ['setChecklist', result!.checklist], ...(next !== scenario.draftStatus ? [['setDraftField', 'status', next]] : [])];
             } else {
@@ -277,13 +277,13 @@ describe('checklist edits', () => {
     });
     it('makes no change where React Native makes none', () => {
         const newId = ids();
-        expect(applyTaskChecklistEdit(list, { kind: 'move', from: 0, to: -1 }, { isReference: false, newId })).toBeNull();
-        expect(applyTaskChecklistEdit(list, { kind: 'move', from: 1, to: 1 }, { isReference: false, newId })).toBeNull();
-        expect(applyTaskChecklistEdit(list, { kind: 'append', title: '  ' }, { isReference: false, newId })).toBeNull();
-        expect(applyTaskChecklistEdit(list, { kind: 'rename', index: 5, text: 'a\nb' }, { isReference: false, newId })).toBeNull();
+        expect(applyTaskChecklistEdit(list, { kind: 'move', from: 0, to: -1 }, { newId })).toBeNull();
+        expect(applyTaskChecklistEdit(list, { kind: 'move', from: 1, to: 1 }, { newId })).toBeNull();
+        expect(applyTaskChecklistEdit(list, { kind: 'append', title: '  ' }, { newId })).toBeNull();
+        expect(applyTaskChecklistEdit(list, { kind: 'rename', index: 5, text: 'a\nb' }, { newId })).toBeNull();
     });
     it('focuses the new empty item', () => {
-        expect(applyTaskChecklistEdit(list, { kind: 'add' }, { isReference: false, newId: () => 'new' })).toEqual({
+        expect(applyTaskChecklistEdit(list, { kind: 'add' }, { newId: () => 'new' })).toEqual({
             checklist: [...list, { id: 'new', title: '', isCompleted: false }],
             focusId: 'new',
         });
@@ -296,6 +296,39 @@ describe('checklist edits', () => {
     });
 });
 
+
+describe('a Reference list ticks like a checklist (#1416)', () => {
+    const list: ChecklistItem[] = [{ id: 'a', title: 'Alien', isCompleted: true }, { id: 'b', title: 'Brazil', isCompleted: false }];
+    const viewRow = (readOnly: boolean) => buildTaskViewModel({
+        task: { status: 'reference', checklist: list }, projects: [], sections: [], areas: [], attachments: [],
+        prioritiesEnabled: false, timeEstimatesEnabled: false, showStatusField: false, readOnly,
+        t: (key) => key, formatDate: (value) => value, formatDueDate: (value) => value, formatTimeEstimateLabel: (value) => value,
+    }).find((row) => row.type === 'checklist');
+
+    it('gives the Form tab field checkboxes, strikes a checked entry and offers Reset', () => {
+        const field = buildTaskChecklistFieldModel({ checklist: list, isReference: true, t: (key) => key });
+        expect(field).not.toHaveProperty('bullets');
+        expect(field.label).toBe('taskEdit.tab.list');
+        expect(field.canReset).toBe(true);
+        expect(field.items.map((item) => [item.completed, item.struck])).toEqual([[true, true], [false, false]]);
+        expect(buildTaskChecklistFieldModel({ checklist: [], isReference: true, t: (key) => key }).canReset).toBe(false);
+    });
+
+    it('makes the View tab entries tappable, and a read-only list still names each state', () => {
+        const editable = viewRow(false);
+        expect(editable).not.toHaveProperty('bullets');
+        expect(editable).toMatchObject({ type: 'checklist', tappable: true, add: { label: 'taskEdit.addItem' } });
+        const readOnly = viewRow(true);
+        expect(readOnly).toMatchObject({ tappable: false, add: null });
+        expect(readOnly?.type === 'checklist' && readOnly.items.map((item) => item.accessibilityLabel))
+            .toEqual(['Alien. common.done', 'Brazil. status.active']);
+    });
+
+    it('keeps pasted - [x] entries checked', () => {
+        const result = applyTaskChecklistEdit([{ id: 'a', title: '', isCompleted: false }], { kind: 'rename', index: 0, text: '- [x] Alien\n- [ ] Brazil\n- [x] Casablanca' }, { newId: ids() });
+        expect(result?.checklist.map((item) => [item.title, item.isCompleted])).toEqual([['Alien', true], ['Brazil', false], ['Casablanca', true]]);
+    });
+});
 
 describe('effective reminders in the task View tab', () => {
     it.each([['inherit', 'skip', true], ['inherit', 'send', false], ['send', 'skip', false], ['skip', 'send', true]] as const)(

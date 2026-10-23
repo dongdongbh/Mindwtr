@@ -82,7 +82,7 @@ function derivedRowKeys(row: SettingsMenuRowId): string[] {
 // silently contributing nothing.
 const MOBILE_ROW_EXTRA_KEYS: Record<SettingsMenuRowId, readonly string[]> = {
     general: ['settings.theme', 'settings.mobile.appLock', 'settings.privacy', 'settings.appSearchLabel'],
-    gtd: ['settings.gtdMobile.pomodoroSettings', 'settings.dailyReviewConfig'],
+    gtd: ['settings.gtdMobile.pomodoroSettings', 'settings.dailyReviewConfig', 'settings.gmailCapture', 'settings.gmailCaptureLabel'],
     // The Manage screen renders areas/contexts/tags via non-settings keys.
     // People has no dedicated title key in en.ts, so it is intentionally omitted.
     manage: ['areas.manage', 'contexts.title', 'tags.title', 'settings.unassignedAreaColor'],

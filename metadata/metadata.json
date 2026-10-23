@@ -30,7 +30,7 @@
           "列表、日历与看板视图，支持提醒与重复任务",
           "免费开源、无广告"
         ],
-        "ReleaseNotes": "时间线支持按状态筛选、显示已完成工作、拖动和调整日期并撤销。批量整理自动补全情境与标签，支持将任务拖到情境。复制任务链接，用 /estimate:45m 输入估算，将清单转换为项目任务。Obsidian 导入支持指定行内标签。内置 MCP 直接在应用中运行，改进 HTTP 连接信息，Local API 支持编辑领域。附件同步、加密及归档保留更安全。",
+        "ReleaseNotes": "项目新增「按分区」流程模式。可设置默认任务提醒、勾选参考清单、按优先级排序、为项目设置颜色，并新增 Gruvbox 主题。单击情境即可切换，Ctrl 单击可组合；嵌套情境按组显示。弹出式编辑器空间更大，任务子菜单悬停即开，时间线行可重新排序。可按任务日期筛选。MCP 可分别授权编辑、归档和删除，可设置端口并复制 Codex 配置。同步期间编辑会保留其他设备的更改。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "List, calendar, and kanban views with reminders and repeating tasks",
           "Free and open source, no ads"
         ],
-        "ReleaseNotes": "Filter Timeline by status, show completed work, and drag or resize dates with Undo. Autocomplete contexts and tags in bulk organize; drag tasks onto contexts. Copy task links, add /estimate:45m, and turn checklists into project tasks. Filter Obsidian imports by an inline tag. Built-in MCP runs inside the app with improved HTTP connection details and Area edits through the Local API. Safer attachment sync, encryption and archive retention.",
+        "ReleaseNotes": "Projects get a Per section flow mode. Set default task reminders, tick Reference checklists, sort by Priority, give projects a color and try Gruvbox themes. Click a context to switch to it, Ctrl-click to combine; nested contexts show as groups. The pop-up editor has more room, task submenus open on hover, and Timeline rows can be reordered. Filter by task dates. MCP gets separate edit, archive and delete permissions, a port setting and Copy for Codex. Editing during a sync keeps other devices' changes.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -131,7 +131,7 @@
           "Listen-, Kalender- und Kanban-Ansichten mit Erinnerungen und Wiederholungen",
           "Kostenlos und Open Source, ohne Werbung"
         ],
-        "ReleaseNotes": "Timeline nach Status filtern, erledigte Aufgaben zeigen und Termine mit Rückgängig verschieben. Autovervollständigung für Kontexte und Tags; Aufgaben auf Kontexte ziehen. Aufgabenlinks, /estimate:45m und Checklisten als Projektaufgaben. Obsidian-Import nach Inline-Tag filtern. MCP läuft direkt in der App, mit verbesserten HTTP-Verbindungsdaten und Bereichsänderungen über die Local API. Sicherere Anhänge, Verschlüsselung und Archivaufbewahrung.",
+        "ReleaseNotes": "Projekte erhalten den Ablauf „Pro Abschnitt“. Standard-Erinnerungen, abhakbare Referenzlisten, Sortierung nach Priorität, Projektfarben und Gruvbox-Designs. Klick wechselt den Kontext, Strg-Klick kombiniert; verschachtelte Kontexte erscheinen als Gruppen. Größerer Pop-up-Editor, Untermenüs per Hover und Sortieren in Timeline. Filter nach Aufgabendaten. MCP mit getrennten Rechten für Bearbeiten, Archivieren und Löschen, Port-Einstellung und Kopieren für Codex. Bearbeiten während der Synchronisierung behält Änderungen anderer Geräte.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -161,7 +161,7 @@
           "Vues liste, calendrier et kanban, rappels et tâches répétées",
           "Gratuit et open source, sans publicité"
         ],
-        "ReleaseNotes": "Filtrez Timeline par statut, affichez le travail terminé et déplacez les dates avec Annuler. Autocomplétion des contextes et tags ; glissez les tâches vers un contexte. Liens de tâches, /estimate:45m et checklists converties en projets. Filtrez les imports Obsidian par tag. MCP intégré à l’app, connexion HTTP améliorée et modification des domaines via Local API. Pièces jointes, chiffrement et archives plus sûrs.",
+        "ReleaseNotes": "Les projets ont le flux Par section. Rappels par défaut, listes Référence à cocher, tri par Priorité, couleurs de projet et thèmes Gruvbox. Cliquez sur un contexte pour changer, Ctrl+clic pour combiner ; les contextes imbriqués sont groupés. Éditeur contextuel plus spacieux, sous-menus au survol et lignes réordonnables dans Timeline. Filtre par dates. MCP avec droits séparés pour modifier, archiver et supprimer, port réglable et Copier pour Codex. Modifier pendant une synchro garde les changements des autres appareils.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -190,7 +190,7 @@
           "Vistas de lista, calendario y kanban, con recordatorios y tareas repetidas",
           "Gratis y de código abierto, sin anuncios"
         ],
-        "ReleaseNotes": "Filtra Timeline por estado, muestra tareas completadas y arrastra fechas con Deshacer. Autocompleta contextos y etiquetas; arrastra tareas a contextos. Enlaces de tareas, /estimate:45m y listas convertidas en tareas de proyecto. Filtra importaciones de Obsidian por etiqueta. MCP integrado en la app, conexión HTTP mejorada y edición de áreas por Local API. Mejoras en adjuntos, cifrado y conservación del archivo.",
+        "ReleaseNotes": "Los proyectos tienen el flujo Por sección. Recordatorios por defecto, listas de Referencia marcables, orden por Prioridad, colores de proyecto y temas Gruvbox. Haz clic en un contexto para cambiar y Ctrl+clic para combinar; los contextos anidados se agrupan. Editor emergente más amplio, submenús al pasar el ratón y filas reordenables en Timeline. Filtra por fechas. MCP con permisos separados para editar, archivar y eliminar, puerto configurable y Copiar para Codex. Editar durante la sincronización conserva cambios de otros dispositivos.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

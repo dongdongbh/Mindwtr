@@ -14,6 +14,7 @@ import {
     retainOpenedWebAttachmentUrl,
 } from '../../lib/web-attachment-source';
 import { logInfo, logWarn } from '../../lib/app-log';
+import { createWebAttachmentDraft, getWebAttachmentUploadTarget, pickBrowserAttachmentFiles, webAttachmentUploadMessage } from '../../lib/web-attachment-upload';
 import { getManagedDataDir, getManagedPath } from '../../lib/managed-paths';
 import { ATTACHMENTS_DIR_NAME } from '../../lib/sync-service-utils';
 import { processAudioCapture, resolveSpeechCapture } from '../../lib/speech-to-text';
@@ -78,6 +79,10 @@ const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<vo
 
 export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps) {
     const sandboxMode = isSandboxMode();
+    const webDraftRef = useRef(createWebAttachmentDraft());
+    const importGenerationRef = useRef(0);
+    const preparedGenerationRef = useRef<number | null>(null);
+    const [pendingFileImports, setPendingFileImports] = useState(0);
     const [editAttachments, setEditAttachments] = useState<Attachment[]>(task.attachments || []);
     // Mirrors editAttachments for resetAttachmentState (a useCallback) to read
     // the latest value without depending on it — StrictMode double-invokes a
@@ -369,6 +374,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, [audioAttachment, closeAudio, closeImage, closeText, imageAttachment, textAttachment]);
 
     const openAttachment = useCallback((attachment: Attachment) => {
+        if (!isTauriRuntime() && !attachment.cloudKey && webDraftRef.current.has([attachment])) {
+            setAttachmentError(t('attachments.webUploadRetry'));
+            return;
+        }
         if (sandboxMode) {
             setAttachmentError(t('sandbox.unavailable'));
             return;
@@ -443,54 +452,81 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         };
     }, []);
 
-    const addFileAttachment = useCallback(async () => {
+    const addDroppedFileAttachments = useCallback(async (files: File[]): Promise<Attachment[] | null> => {
         if (sandboxMode) {
             setAttachmentError(t('sandbox.unavailable'));
-            return;
+            return [];
         }
-        if (!isTauriRuntime()) {
-            setAttachmentError(t('attachments.fileNotSupported'));
-            return;
-        }
+        const generation = importGenerationRef.current;
+        const webDraft = webDraftRef.current;
         setAttachmentError(null);
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const selected = await open({
-            multiple: false,
-            directory: false,
-            title: t('attachments.addFile'),
-        });
-        if (!selected || typeof selected !== 'string') return;
-        const result = await importPickedFileAttachment(selected);
-        if ('errorKey' in result) {
-            setAttachmentError(t(result.errorKey));
-            return;
+        if (!isTauriRuntime()) {
+            const imported = files.map((file) => webDraft.stage(file));
+            setEditAttachments((prev) => [...prev, ...imported]);
+            void getWebAttachmentUploadTarget().catch((error) => {
+                if (generation === importGenerationRef.current) setAttachmentError(webAttachmentUploadMessage(error, t));
+            });
+            return imported;
         }
-        setEditAttachments((prev) => [...prev, result.attachment]);
+        setPendingFileImports((count) => count + 1);
+        const imported: Attachment[] = [];
+        try {
+            for (const file of files) {
+                const result = await importDroppedFileAttachment(file);
+                if (generation !== importGenerationRef.current) {
+                    if ('attachment' in result) void deleteOrphanedAttachmentFiles([result.attachment]);
+                    return null;
+                }
+                if ('errorKey' in result) { setAttachmentError(t(result.errorKey)); continue; }
+                imported.push(result.attachment);
+                setEditAttachments((prev) => [...prev, result.attachment]);
+            }
+            return imported;
+        } finally {
+            if (generation === importGenerationRef.current) setPendingFileImports((count) => Math.max(0, count - 1));
+        }
     }, [sandboxMode, t]);
 
-    // Attachments stay in editor-local state until the task is saved, same
-    // as addFileAttachment above; removing a chip before saving is the undo.
-    const addDroppedFileAttachments = useCallback(async (files: File[]) => {
-        if (sandboxMode) {
-            setAttachmentError(t('sandbox.unavailable'));
-            return;
-        }
+    const addFileAttachment = useCallback(async () => {
+        if (sandboxMode) { setAttachmentError(t('sandbox.unavailable')); return; }
         if (!isTauriRuntime()) {
-            setAttachmentError(t('attachments.fileNotSupported'));
+            const generation = importGenerationRef.current;
+            pickBrowserAttachmentFiles((files) => {
+                if (generation === importGenerationRef.current) void addDroppedFileAttachments(files);
+            });
             return;
         }
         setAttachmentError(null);
-        let firstErrorKey: string | null = null;
-        for (const file of files) {
-            const result = await importDroppedFileAttachment(file);
-            if ('errorKey' in result) {
-                firstErrorKey ??= result.errorKey;
-                continue;
+        const generation = importGenerationRef.current;
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const selected = await open({ multiple: false, directory: false, title: t('attachments.addFile') });
+        if (!selected || typeof selected !== 'string' || generation !== importGenerationRef.current) return;
+        setPendingFileImports((count) => count + 1);
+        try {
+            const result = await importPickedFileAttachment(selected);
+            if (generation !== importGenerationRef.current) {
+                if ('attachment' in result) void deleteOrphanedAttachmentFiles([result.attachment]);
+                return;
             }
+            if ('errorKey' in result) { setAttachmentError(t(result.errorKey)); return; }
             setEditAttachments((prev) => [...prev, result.attachment]);
+        } finally {
+            if (generation === importGenerationRef.current) setPendingFileImports((count) => Math.max(0, count - 1));
         }
-        if (firstErrorKey) setAttachmentError(t(firstErrorKey));
-    }, [sandboxMode, t]);
+    }, [addDroppedFileAttachments, sandboxMode, t]);
+
+    const prepareAttachmentsForSave = useCallback(async () => {
+        if (pendingFileImports > 0) throw new Error(t('common.loading'));
+        const generation = importGenerationRef.current;
+        const prepared = await webDraftRef.current.prepareSave(editAttachmentsRef.current, () => generation === importGenerationRef.current);
+        if (generation !== importGenerationRef.current) throw new Error(t('attachments.webUploadChanged'));
+        preparedGenerationRef.current = generation;
+        return prepared;
+    }, [pendingFileImports, t]);
+    const retainWebAttachmentsBeforeStore = useCallback((attachments: Attachment[]) => {
+        if (preparedGenerationRef.current !== importGenerationRef.current) throw new Error(t('attachments.webUploadChanged'));
+        webDraftRef.current.retainBeforeStore(attachments);
+    }, [t]);
 
     const addLinkAttachment = useCallback(() => {
         if (sandboxMode) {
@@ -592,6 +628,8 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, []);
 
     const removeAttachment = useCallback((id: string) => {
+        webDraftRef.current.remove(id);
+        setAttachmentError(null);
         const now = new Date().toISOString();
         setEditAttachments((prev) =>
             prev.map((a) => (a.id === id ? { ...a, deletedAt: now, updatedAt: now } : a))
@@ -672,11 +710,17 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, [settleAttachmentFiles]);
 
     useEffect(() => () => {
+        importGenerationRef.current += 1;
+        webDraftRef.current.discard();
         if (attachmentSaveAwaitingDurabilityRef.current) return;
         settleAttachmentFiles(baselineAttachmentsRef.current, true);
     }, [settleAttachmentFiles]);
 
     const resetAttachmentState = useCallback((attachments: Attachment[] | undefined) => {
+        importGenerationRef.current += 1;
+        webDraftRef.current.discard();
+        webDraftRef.current = createWebAttachmentDraft();
+        setPendingFileImports(0);
         const nextList = attachments || [];
         if (!attachmentSaveAwaitingDurabilityRef.current) {
             settleAttachmentFiles(nextList, true);
@@ -691,6 +735,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
 
     return {
         editAttachments,
+        isImportingFiles: pendingFileImports > 0,
+        prepareAttachmentsForSave,
+        getAttachmentDraftGeneration: () => importGenerationRef.current,
+        retainWebAttachmentsBeforeStore,
         setEditAttachments,
         attachmentError,
         setAttachmentError,

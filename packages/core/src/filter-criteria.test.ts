@@ -96,7 +96,16 @@ describe('filter-criteria', () => {
         expect(selections.tagMatchMode).toBe('all');
     });
 
-    it('handles absent criteria', () => {
+    it('round-trips and counts a rolling task date selection', () => {
+        const anyDateRange = { preset: 'next_14_days' as const };
+        const criteria = criteriaFromSelections({ anyDateRange });
+        expect(criteria).toEqual({ anyDateRange });
+        expect(selectionsFromCriteria(criteria).anyDateRange).toEqual(anyDateRange);
+        expect(countActiveFilterCriteria(criteria)).toBe(1);
+        expect(criteriaFromSelections({ anyDateRange: undefined })).toEqual({});
+    });
+
+    it('handles absent criteria' , () => {
         expect(selectionsFromCriteria(undefined)).toEqual({
             tokens: [],
             excludedTokens: [],

@@ -8,6 +8,8 @@ import { undoTaskCompletion } from './undo-task-completion';
 import type { NativeTaskCompletionEnvelope, NativeTaskCompletionUndoEnvelope } from './native-host-contract-task-checklist';
 import { SqliteAdapter } from './sqlite-adapter';
 import type { AppData, Task } from './types';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
+// Raw-byte preservation cases catalog existing labels before their baseline; legacy RN/native parity cases remain uncatalogued.
 const uuidState = vi.hoisted(() => ({ count: 0 }));
 vi.mock('./uuid', async (original) => ({ ...await original<typeof import('./uuid')>(), generateUUID: () => `00000000-0000-4000-8000-${String(190 + uuidState.count++).padStart(12, '0')}` }));
 const NOW = '2026-10-03T13:00:00.000Z';
@@ -141,7 +143,7 @@ describe('Reference status menu preserves the real RN moves, Completion and Undo
             await sqlite.client().run('UPDATE tasks SET pushCount=NULL, focusOrder=2, attachments=? WHERE id=?',
                 ['[{"id":"legacy","kind":"file","title":"old.txt","uri":"file:///old.txt","createdAt":"2026-10-03T13:00:00.000Z"}]', 'raw-sibling']);
             const [stored] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1');
-            const settings = JSON.parse(stored.data); settings.savedFilters = [{ id: 'raw-filter', name: 'Raw filter', view: 'tasks', criteria: { tags: ['#first'] }, createdAt: NOW, updatedAt: NOW }];
+            const settings = retainTaxonomyEffects(JSON.parse(stored.data), rows().tasks.map(row => ({ before: row, after: row }))); settings.savedFilters = [{ id: 'raw-filter', name: 'Raw filter', view: 'tasks', criteria: { tags: ['#first'] }, createdAt: NOW, updatedAt: NOW }];
             await sqlite.client().run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify(settings, null, 2)]);
             await sqlite.client().run('INSERT INTO saved_filters (id,name,view,criteria,createdAt,updatedAt) VALUES (?,?,?,?,?,?)',
                 ['raw-filter', 'Raw filter', 'tasks', '{ "tags" : [ "#first" ] }', NOW, NOW]);
@@ -315,7 +317,7 @@ describe('Reference status menu preserves the real RN moves, Completion and Undo
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); const sqlite = await openSqliteHost(seed());
         try {
             const envelope = await prepareComplete(sqlite); expect(envelope.prepared.checklist.effect.guards.autoArchiveDays).toBeNull();
-            const [row] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = JSON.parse(row.data);
+            const [row] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = retainTaxonomyEffects(JSON.parse(row.data), rows().tasks.map(row => ({ before: row, after: row })));
             settings.theme = 'light'; settings.gtd.autoArchiveDays = 365; const encoded = JSON.stringify(settings, null, 2);
             await sqlite.client().run('UPDATE settings SET data=? WHERE id=1', [encoded]);
             value(await sqlite.host.commitPreparedTaskCompletion(envelope));

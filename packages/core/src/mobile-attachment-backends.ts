@@ -41,7 +41,7 @@ import {
 } from './dropbox';
 import { isAbortError, isHostResponseTooLargeError, refuseWriteRedirect } from './http-utils';
 import { withRetry } from './retry-utils';
-import { encryptedSyncArtifactByteLength, type SyncKeyMaterial } from './sync-crypto';
+import { encryptedSyncArtifactByteLength, inspectSyncArtifact, type SyncKeyMaterial } from './sync-crypto';
 import { isSyncRemoteMutationFenceError } from './sync-remote-fence';
 import { getErrorStatus, isWebdavRateLimitedError } from './sync-runtime-utils';
 import {
@@ -156,6 +156,10 @@ export type MobileAttachmentBackendsHost = {
   maxWebdavBufferedUploadBytes?: number;
   /** Optional wire-byte admission for Cloud's plaintext buffered PUT. */
   maxCloudBufferedUploadBytes?: number;
+  /** The host's fetch refuses a response body over its ceiling while receiving it (the native hosts' HostIo and
+   *  NativeHTTPJobs). Only then does a WebDAV upload download an unversioned remote copy to compare it; React Native's
+   *  fetch buffers the whole body first, so there it keeps refusing. */
+  boundedWebdavResponses?: boolean;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
 };
 
@@ -468,6 +472,48 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     let uploadLimitLogged = false;
     let downloadCount = 0;
     let downloadLimitLogged = false;
+    const unversionedRemote = { adopted: 0, refused: 0 };
+
+    /**
+     * A remote file at an upload's key that has no strong ETag cannot be overwritten safely (the key is shared by every
+     * version of the attachment). When our own PUT stored it and the save recording it was refused or lost, every later
+     * cycle would refuse again, and sync stayed blocked on "Attachment upload incomplete". So GET it, bounded to the
+     * size our upload of the local file would have, and treat it as uploaded only when its plaintext hashes to the local
+     * file's hash. With encryption on it must be an encrypted artifact: a plaintext copy is never recorded.
+     */
+    const remoteHoldsLocalBytes = async (
+      uploadUrl: string, cloudKey: string, localPath: string, statedLength: string | null,
+    ): Promise<boolean> => {
+      if (!host.boundedWebdavResponses) return false;
+      // The file's own size: the attachment's recorded size can be stale.
+      const size = (await files.statAttachmentFile(localPath))?.size;
+      if (size === undefined) return false;
+      const wireBytes = material ? encryptedSyncArtifactByteLength(size) : size;
+      const stated = statedLength?.trim();
+      if (stated && Number(stated) !== wireBytes) return false;
+      let remote: Uint8Array;
+      try {
+        const body = await core.withRetry(async () => {
+          await waitForSlot();
+          return await core.webdavGetFile(uploadUrl, {
+            ...getMobileWebDavRequestOptions(webDavConfig.allowInsecureHttp),
+            username: webDavConfig.username,
+            password: webDavConfig.password,
+            signal,
+            maxBytes: wireBytes,
+          });
+        }, WEBDAV_ATTACHMENT_RETRY_OPTIONS);
+        remote = new Uint8Array(body);
+        if (remote.byteLength !== wireBytes) return false;
+        if (material && inspectSyncArtifact(remote).kind !== 'encrypted') return false;
+        remote = await common.openAttachmentBytesFromDownload(remote, material, cloudKey);
+      } catch (error) {
+        if (isAttachmentSyncAbortError(error, signal) || isWebdavRateLimitedError(error)) throw error;
+        return false;
+      }
+      const localHash = await files.computeAttachmentFileHash(localPath);
+      return localHash !== null && localHash === await computeSha256Hex(remote);
+    };
 
     const shouldUpload = (): boolean => {
       if (uploadCount >= WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC) {
@@ -564,7 +610,15 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             ? normalizeStrongWebdavEtag(remoteVersion.etag)
             : null;
           if (remoteVersion.exists && !expectedEtag) {
-            throw new Error('WebDAV attachment version is unavailable; refusing an unconditional overwrite');
+            if (!await remoteHoldsLocalBytes(uploadUrl, cloudKey, localPath, remoteVersion.contentLength)) {
+              unversionedRemote.refused += 1;
+              throw new Error('WebDAV attachment version is unavailable; refusing an unconditional overwrite');
+            }
+            unversionedRemote.adopted += 1;
+            attachment.cloudKey = cloudKey;
+            if (!Number.isFinite(attachment.size ?? NaN)) attachment.size = uploadBytes;
+            reportProgress(attachment.id, 'upload', uploadBytes, uploadBytes, 'completed');
+            return true;
           }
           files.logAttachmentInfo('WebDAV attachment upload start', {
             id: attachment.id,
@@ -814,6 +868,13 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
 
     if (abortedByRateLimit) {
       files.logAttachmentWarn('WebDAV attachment sync aborted due to rate limiting');
+    }
+    if (unversionedRemote.adopted || unversionedRemote.refused) {
+      files.logAttachmentInfo('WebDAV attachments without a strong ETag compared by content', {
+        releaseCheck: 'v1.3.7/webdav-weak-etag-adopt',
+        adopted: String(unversionedRemote.adopted),
+        refused: String(unversionedRemote.refused),
+      });
     }
     files.logAttachmentInfo('WebDAV attachment sync done', {
       mutated: didMutate ? 'true' : 'false',

@@ -1,61 +1,8 @@
 {
  "provenance": {
-  "command": "cd apps/mobile && MINDWTR_CAPTURE_MENU_VIEWS=1 bunx vitest run components/views/menu-views-parity.test.tsx",
-  "capturedAt": "4946dca7ab5e9e4375d80e7faaede50c75c76aee",
-  "capturedAtNote": "Captured from HEAD's React Native code before any screen changed: the harness file was the only change in the checkout. The harness was then renamed from list-views-parity.test.tsx; only its file names changed.",
-  "recapturedListScreenFixes": {
-   "sourceBase": "5918b6c98f3d5d245c1462ac4117b9c73e4af521",
-   "sourceState": "Uncommitted rn-list-view-bugs worktree changes. A temporary capture-only bypass of the clean-tree guard was used because this task forbids committing; the guard was restored afterward. The original capturedAt field remains the source of unchanged observations.",
-   "command": "cd apps/mobile && MINDWTR_CAPTURE_MENU_VIEWS=1 MINDWTR_CAPTURE_MENU_VIEWS_COMMIT=5918b6c98f3d5d245c1462ac4117b9c73e4af521 bunx vitest run components/views/menu-views-parity.test.tsx",
-   "changedScenarios": [
-    "someday: filters",
-    "reference: grouping, archived projects, filters and sort",
-    "done: grouping, sort, filters and row actions"
-   ]
-  },
-  "reviewCorrection20260924": {
-   "baseSha": "5918b6c98f3d5d245c1462ac4117b9c73e4af521",
-   "fixBranch": "fix/rn-list-view-bugs",
-   "fixCommitOnBranch": "pending; this worker was instructed not to commit",
-   "sourceState": "Uncommitted fix/rn-list-view-bugs worktree captured from React Native. The menu capture used a temporary capture-only clean-tree bypass; the harness was restored afterward.",
-   "command": "cd apps/mobile && rtk proxy env MINDWTR_CAPTURE_MENU_VIEWS=1 bunx vitest run components/views/menu-views-parity.test.tsx",
-   "changedScenarios": [
-    "someday: filters"
-   ]
-  },
-  "addedAfterFix": {
-   "baseSha": "1efd948b43c7f2d5b47b243dfbf3133f1db5b1ba",
-   "sourceState": "fix commit on branch fix/rn-review-inbox-bugs (uncommitted working tree; no commit created)",
-   "cases": {
-    "waiting": [
-     "waiting: selected person disappears"
-    ]
-   }
-  },
-  "recapturedSomedaySectionsKeepOthers": {
-   "sourceBase": "3788823be",
-   "sourceState": "fix/rn-settings-bugs worktree changes, uncommitted. Observations were read from the harness with the fixes in place; only the observations below were replaced, and the clean-tree capture guard was not bypassed.",
-   "command": "cd apps/mobile && TZ=UTC bunx vitest run components/views/menu-views-parity.test.tsx",
-   "changedScenarios": [
-    "someday sections: rename and reorder"
-   ],
-   "why": "A Someday section edit now keeps the stored list in stored order and changes only the edited entries (someday-sections-model.ts); the written definitions, their titles and order numbers are the same, in stored order."
-  },
-  "referenceGroupByRecapture": {
-   "sourceCommit": "0f599140b121cfaa1db4d2c29d13700a5f5fc6d7",
-   "note": "Captured current React Native Reference grouping preference; only its stored values changed."
-  },
-  "somedayProjectSections1319": {
-   "capturedAt": "6c89c33d0ce53985025d7e573b26bf23c68378f5",
-   "command": "cd apps/mobile && MINDWTR_CAPTURE_MENU_VIEWS=1 MINDWTR_CAPTURE_MENU_VIEWS_COMMIT=$(git rev-parse HEAD) bunx vitest run components/views/menu-views-parity.test.tsx",
-   "changedScenarios": [
-    "someday: sections, moves, undo, add task and new section",
-    "someday: grouping, sort and details",
-    "someday: filters",
-    "someday: a move to a section removed elsewhere fails"
-   ],
-   "why": "Grouped by section, React Native now draws each parked Someday project inside its section group (rows gain [\"project\", id] after the heading) and drops the top Projects block. The native host contract keeps the old shape until native parity lands, so menu-views-model.test.ts expects its replay of these scenarios to differ."
-  }
+  "command": "cd apps/mobile && MINDWTR_CAPTURE_MENU_VIEWS=1 MINDWTR_CAPTURE_MENU_VIEWS_COMMIT=$(git rev-parse HEAD) bunx vitest run components/views/menu-views-parity.test.tsx",
+  "capturedAt": "afb2066e92dc83ae900d1f42bf9b2efe699daf1d",
+  "projectColorPolicy": "#1422 updates only deferred Project identity colors: live Area, then area-less legacy color, then the captured secondaryText fallback. Original capture commit remains above."
  },
  "timeZone": "America/New_York",
  "now": "2026-09-23T14:00:00.000Z",
@@ -1869,13 +1816,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -1926,13 +1873,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -1982,13 +1929,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2044,13 +1991,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2100,13 +2047,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2153,13 +2100,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2209,13 +2156,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2260,13 +2207,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2321,7 +2268,7 @@
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2386,13 +2333,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2443,13 +2390,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2499,13 +2446,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2558,7 +2505,7 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       }
      ]
     },
@@ -2634,13 +2581,13 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       },
       {
        "action": "Reactivate",
        "title": "Tax paperwork",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -2677,7 +2624,7 @@
        "action": "Reactivate",
        "title": "Vendor contract",
        "area": "Work",
-       "color": "#f59e0b"
+       "color": "#2563eb"
       }
      ]
     },
@@ -2750,6 +2697,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -3008,6 +2962,13 @@
            "id": "sort:review",
            "label": "Review date",
            "accessibilityLabel": "Sort: Review date",
+           "value": null,
+           "selected": false
+          },
+          {
+           "id": "sort:priority",
+           "label": "Priority",
+           "accessibilityLabel": "Sort: Priority",
            "value": null,
            "selected": false
           },
@@ -3291,6 +3252,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -3569,6 +3537,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -3838,6 +3813,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -4092,6 +4074,13 @@
            "id": "sort:review",
            "label": "Review date",
            "accessibilityLabel": "Sort: Review date",
+           "value": null,
+           "selected": false
+          },
+          {
+           "id": "sort:priority",
+           "label": "Priority",
+           "accessibilityLabel": "Sort: Priority",
            "value": null,
            "selected": false
           },
@@ -4371,6 +4360,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -4658,6 +4654,13 @@
            "selected": false
           },
           {
+           "id": "sort:priority",
+           "label": "Priority",
+           "accessibilityLabel": "Sort: Priority",
+           "value": null,
+           "selected": false
+          },
+          {
            "id": "sort:timeEstimate",
            "label": "Time estimate",
            "accessibilityLabel": "Sort: Time estimate",
@@ -4933,6 +4936,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -5216,6 +5226,13 @@
            "selected": false
           },
           {
+           "id": "sort:priority",
+           "label": "Priority",
+           "accessibilityLabel": "Sort: Priority",
+           "value": null,
+           "selected": false
+          },
+          {
            "id": "sort:timeEstimate",
            "label": "Time estimate",
            "accessibilityLabel": "Sort: Time estimate",
@@ -5474,6 +5491,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -5759,6 +5783,13 @@
            "selected": false
           },
           {
+           "id": "sort:priority",
+           "label": "Priority",
+           "accessibilityLabel": "Sort: Priority",
+           "value": null,
+           "selected": false
+          },
+          {
            "id": "sort:timeEstimate",
            "label": "Time estimate",
            "accessibilityLabel": "Sort: Time estimate",
@@ -6022,6 +6053,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -6307,6 +6345,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -6631,6 +6676,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -6900,6 +6952,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -7179,6 +7238,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -7442,6 +7508,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -7714,6 +7787,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -7971,6 +8051,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -8158,13 +8245,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -8227,6 +8314,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -8418,13 +8512,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -8487,6 +8581,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -8660,13 +8761,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -8729,6 +8830,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -8902,13 +9010,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -8975,6 +9083,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -9144,13 +9259,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -9213,6 +9328,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -9386,13 +9508,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -9455,6 +9577,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -9628,13 +9757,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -9697,6 +9826,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -9960,6 +10096,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -10216,6 +10359,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -10476,6 +10626,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -10725,6 +10882,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -10989,6 +11153,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -11236,6 +11407,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -11506,6 +11684,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -11757,6 +11942,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -11915,13 +12107,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -11991,6 +12183,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -12158,13 +12357,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -12234,6 +12433,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -12406,13 +12612,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -12482,6 +12688,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -12659,13 +12872,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -12732,6 +12945,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -12996,6 +13216,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -13242,6 +13469,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -13499,6 +13733,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -13751,6 +13992,13 @@
            "id": "sort:review",
            "label": "Review date",
            "accessibilityLabel": "Sort: Review date",
+           "value": null,
+           "selected": false
+          },
+          {
+           "id": "sort:priority",
+           "label": "Priority",
+           "accessibilityLabel": "Sort: Priority",
            "value": null,
            "selected": false
           },
@@ -14019,6 +14267,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -14298,6 +14553,13 @@
            "selected": false
           },
           {
+           "id": "sort:priority",
+           "label": "Priority",
+           "accessibilityLabel": "Sort: Priority",
+           "value": null,
+           "selected": false
+          },
+          {
            "id": "sort:timeEstimate",
            "label": "Time estimate",
            "accessibilityLabel": "Sort: Time estimate",
@@ -14562,6 +14824,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -14840,6 +15109,13 @@
           "selected": false
          },
          {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
+          "value": null,
+          "selected": false
+         },
+         {
           "id": "sort:timeEstimate",
           "label": "Time estimate",
           "accessibilityLabel": "Sort: Time estimate",
@@ -15009,13 +15285,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -15078,6 +15354,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -15251,13 +15534,13 @@
        "action": "Reactivate",
        "title": "Learn Spanish",
        "area": "Home",
-       "color": "#94a3b8"
+       "color": "#16a34a"
       },
       {
        "action": "Reactivate",
        "title": "Build shed",
        "area": null,
-       "color": "#94a3b8"
+       "color": "#64748b"
       }
      ]
     },
@@ -15322,6 +15605,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -15514,6 +15804,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -15723,6 +16020,13 @@
           "id": "sort:review",
           "label": "Review date",
           "accessibilityLabel": "Sort: Review date",
+          "value": null,
+          "selected": false
+         },
+         {
+          "id": "sort:priority",
+          "label": "Priority",
+          "accessibilityLabel": "Sort: Priority",
           "value": null,
           "selected": false
          },
@@ -16716,6 +17020,11 @@
       [
        "review",
        "Review date",
+       false
+      ],
+      [
+       "priority",
+       "Priority",
        false
       ],
       [
@@ -18963,6 +19272,11 @@
       [
        "review",
        "Review date",
+       false
+      ],
+      [
+       "priority",
+       "Priority",
        false
       ],
       [

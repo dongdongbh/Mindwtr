@@ -1,9 +1,11 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Modal } from 'react-native';
 import renderer from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ManageSettingsScreen } from './manage-settings-screen';
+
+vi.mock('../../lib/app-log', () => ({ logInfo: vi.fn().mockResolvedValue(undefined) }));
 
 const routerPushMock = vi.hoisted(() => vi.fn());
 
@@ -46,6 +48,8 @@ const storeState = vi.hoisted(() => ({
     allContexts: ['@office'],
     allTags: ['#design'],
   }),
+  addContext: vi.fn().mockResolvedValue(undefined),
+  addTag: vi.fn().mockResolvedValue(undefined),
   addArea: vi.fn().mockResolvedValue(null),
   deleteArea: vi.fn().mockResolvedValue(undefined),
   updateArea: vi.fn().mockResolvedValue(undefined),
@@ -173,14 +177,16 @@ describe('ManageSettingsScreen', () => {
   beforeEach(() => {
     asyncStorageMocks.getItem.mockReset();
     asyncStorageMocks.setItem.mockClear();
+    storeState.addContext.mockReset().mockResolvedValue(undefined);
+    storeState.addTag.mockReset().mockResolvedValue(undefined);
     storeState.addArea.mockClear();
     storeState.deleteArea.mockClear();
     storeState.updateArea.mockClear();
     storeState.updateSettings.mockClear();
     storeState.deleteTag.mockClear();
     storeState.renameTag.mockClear();
-    storeState.deleteContext.mockClear();
-    storeState.renameContext.mockClear();
+    storeState.deleteContext.mockReset();
+    storeState.renameContext.mockReset();
     storeState.addPerson.mockClear();
     storeState.updatePerson.mockClear();
     storeState.renamePerson.mockClear();
@@ -682,4 +688,82 @@ describe('ManageSettingsScreen', () => {
       },
     });
   });
+
+  it.each([
+    ['context', 'addContext'], ['tag', 'addTag'],
+  ] as const)('creates an unused %s from its editor without changing tasks', async (kind, action) => {
+    asyncStorageMocks.getItem.mockResolvedValue(JSON.stringify({ contexts: true, tags: true }));
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => { tree = renderer.create(<ManageSettingsScreen />); await flushEffects(); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: `manage-${kind}-add` }).props.onPress(); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-token-name-input' }).props.onChangeText('  Garden  '); });
+    expect(storeState[action]).not.toHaveBeenCalled();
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-editor-save' }).props.onPress(); await flushEffects(); });
+    expect(storeState[action]).toHaveBeenCalledWith('Garden');
+    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    expect(storeState.tasks).toEqual([{ id: 'task-1', title: 'Review build', assignedTo: 'Alex' }]);
+  });
+
+  it('retains a failed token draft and cancels without an additional save', async () => {
+    asyncStorageMocks.getItem.mockResolvedValue(JSON.stringify({ contexts: true }));
+    storeState.addContext.mockRejectedValue(new Error('Disk full'));
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => { tree = renderer.create(<ManageSettingsScreen />); await flushEffects(); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-context-add' }).props.onPress(); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-token-name-input' }).props.onChangeText('@garden'); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-editor-save' }).props.onPress(); await flushEffects(); });
+    expect(tree.root.findByProps({ testID: 'manage-token-name-input' }).props.value).toBe('@garden');
+    expect(tree.root.findAllByProps({ accessibilityRole: 'alert' }).length).toBeGreaterThan(0);
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-editor-cancel' }).props.onPress(); });
+    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    expect(storeState.addContext).toHaveBeenCalledTimes(1);
+  });
+
+
+  it('keeps a token editor open until the save finishes and blocks dismissal meanwhile', async () => {
+    asyncStorageMocks.getItem.mockResolvedValue(JSON.stringify({ contexts: true }));
+    let finish!: () => void;
+    storeState.addContext.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => { tree = renderer.create(<ManageSettingsScreen />); await flushEffects(); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-context-add' }).props.onPress(); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-token-name-input' }).props.onChangeText('@garden'); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-editor-save' }).props.onPress(); await flushEffects(); });
+    expect(tree.root.findByType(Modal).props.visible).toBe(true);
+    expect(tree.root.findByProps({ testID: 'manage-editor-save' }).props.disabled).toBe(true);
+    expect(tree.root.findByProps({ testID: 'manage-editor-cancel' }).props.disabled).toBe(true);
+    await renderer.act(async () => { tree.root.findByType(Modal).props.onRequestClose(); });
+    expect(tree.root.findByType(Modal).props.visible).toBe(true);
+    await renderer.act(async () => { finish(); await flushEffects(); });
+    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+  });
+
+
+  it('keeps a rejected context rename open and reports a rejected delete', async () => {
+    asyncStorageMocks.getItem.mockResolvedValue(JSON.stringify({ contexts: true }));
+    storeState.renameContext.mockRejectedValue(new Error('Disk full'));
+    storeState.deleteContext.mockRejectedValue(new Error('Disk full'));
+    const alert = vi.spyOn(Alert, 'alert');
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => { tree = renderer.create(<ManageSettingsScreen />); await flushEffects(); });
+    await renderer.act(async () => { tree.root.findAllByProps({ accessibilityLabel: 'Edit: @office' })[0].props.onPress(); });
+    await renderer.act(async () => { tree.root.findAllByType('TextInput' as any).find((node) => node.props.value === '@office')!.props.onChangeText('@garden'); });
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-editor-save' }).props.onPress(); await flushEffects(); });
+    expect(tree.root.findByType(Modal).props.visible).toBe(true);
+    expect(tree.root.findAllByProps({ accessibilityRole: 'alert' }).length).toBeGreaterThan(0);
+    const failedInput = tree.root.findAllByType('TextInput' as any).find((node) => node.props.value === '@garden')!;
+    expect(failedInput.props.editable).toBe(false);
+    await renderer.act(async () => { failedInput.props.onChangeText('@different'); });
+    storeState.renameContext.mockResolvedValueOnce(undefined);
+    await renderer.act(async () => { tree.root.findByProps({ testID: 'manage-editor-save' }).props.onPress(); await flushEffects(); });
+    expect(storeState.renameContext).toHaveBeenLastCalledWith('@office', '@garden');
+    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    await renderer.act(async () => { tree.root.findAllByProps({ accessibilityLabel: 'Delete: @office' })[0].props.onPress(); });
+    const buttons = alert.mock.calls.at(-1)![2]!;
+    await renderer.act(async () => { buttons[1].onPress!(); await flushEffects(); });
+    expect(storeState.deleteContext).toHaveBeenCalledWith('@office');
+    expect(alert).toHaveBeenLastCalledWith('common.error', 'settings.feedback.saveFailed');
+    alert.mockRestore();
+  });
+
 });

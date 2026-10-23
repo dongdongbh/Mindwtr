@@ -66,15 +66,16 @@ export function buildProjectNextActionPromptState(completedTask: Task): ProjectN
         ...completedTask,
         status: 'done',
     };
+    const allSections = Array.isArray(storeState.sections) ? storeState.sections : [];
     const promptData = getProjectNextActionPromptData(
         completedSnapshot,
         getAllTasksForPrompt(completedSnapshot, allTasks),
         allProjects,
+        allSections,
     );
 
     if (!promptData) return null;
 
-    const allSections = Array.isArray(storeState.sections) ? storeState.sections : [];
     return {
         candidates: promptData.candidates,
         projectId: promptData.project.id,

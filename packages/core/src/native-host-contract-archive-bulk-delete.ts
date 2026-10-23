@@ -17,9 +17,10 @@ import { formatListItemCount } from './list-count';
 import { getTrashUndoLabel } from './trash-view-model';
 import { logInfo } from './logger';
 import { isStatusListTaskReadOnly } from './menu-views-model';
+import { isTaskVisibleInInbox } from './area-filter';
 import { rawReadProjectSnapshot, rawReadTaskSnapshot } from './sqlite-raw-snapshot';
 
-export type NativeArchivedTasksDeleteRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>; source?: 'done' | 'reference' };
+export type NativeArchivedTasksDeleteRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>; source?: 'done' | 'reference' | 'inbox' };
 export type NativeArchivedTasksDeleteResult = { count: number; deletion: { message: string; undoLabel: string; undoEnabled: true } };
 export type NativePreparedArchivedTasksDelete = {
     version: 1; request: NativeArchivedTasksDeleteRequest; before: Task[]; after: Task[];
@@ -72,7 +73,7 @@ const detach = <T>(value: unknown): T | null => {
 const jsonSafe = <T>(value: unknown): T | null => { try { return detach<T>(JSON.parse(JSON.stringify(value))); } catch { return null; } };
 const readDeleteRequest = (input: unknown): NativeArchivedTasksDeleteRequest | null => {
     const request = detach<Record<string, unknown>>(input);
-    if (!request || !exact(request, request.source === 'done' || request.source === 'reference' ? ['requestId', 'taskIds', 'taskRevisions', 'source'] : ['requestId', 'taskIds', 'taskRevisions'])
+    if (!request || !exact(request, request.source === 'done' || request.source === 'reference' || request.source === 'inbox' ? ['requestId', 'taskIds', 'taskRevisions', 'source'] : ['requestId', 'taskIds', 'taskRevisions'])
         || typeof request.requestId !== 'string' || !UUID.test(request.requestId)
         || !Array.isArray(request.taskIds) || !request.taskIds.length || request.taskIds.length > 10_000
         || !request.taskIds.every((id) => text(id, 500)) || new Set(request.taskIds).size !== request.taskIds.length
@@ -103,17 +104,20 @@ const referenceProjects = (projects: readonly Project[]): Project[] | null => {
     const snapshots = projects.map(rawReadProjectSnapshot);
     return snapshots.every((row) => row !== null) ? snapshots as Project[] : null;
 };
-const unreadableReference = (): NativeHostResult<never> => fail('SAVE_FAILED', 'Saved Reference raw JSON could not be bound safely');
+// These sources bind raw JSON and durable origin receipts without sharing source identity.
+const usesRawSnapshots = (source: NativeArchivedTasksDeleteRequest['source']): boolean => source === 'reference' || source === 'inbox';
+const unreadableRaw = (source: string): NativeHostResult<never> => fail('SAVE_FAILED', `Saved ${source} raw JSON could not be bound safely`);
 const deleteProjects = (tasks: readonly Task[], projects: readonly Project[]): Project[] => {
     const ids = new Set(tasks.flatMap((row) => row.projectId ? [row.projectId] : []));
     return projects.filter((row) => ids.has(row.id));
 };
 const selectedSourcesMatch = (request: NativeArchivedTasksDeleteRequest, tasks: Task[], projects: readonly Project[] = []): boolean => {
     if (tasks.length !== request.taskIds.length || !unique(tasks)) return false;
-    const byId = buildEntityMap(tasks);
+    const byId = buildEntityMap(tasks); const projectById = buildEntityMap(projects);
     return request.taskIds.every((id) => { const row = byId.get(id); return row && row.status === (request.source ?? 'archived')
         && !row.deletedAt && !row.purgedAt && !isProjectedRecurringTaskId(id) && taskRevisionOf(row) === request.taskRevisions[id]
-        && (!request.source || !isStatusListTaskReadOnly(row, projects)); });
+        && (!request.source || !isStatusListTaskReadOnly(row, projects))
+        && (request.source !== 'inbox' || isTaskVisibleInInbox(row, { projectById })); });
 };
 const deleteAfter = (prepared: Pick<NativePreparedArchivedTasksDelete, 'before' | 'updateAt' | 'deviceIdBefore' | 'deviceIdToInitialize'>): Task[] =>
     planTaskMutations({ tasks: prepared.before.map((row) => historyRowLoadProjection(row, prepared.updateAt)), state: {},
@@ -165,8 +169,8 @@ const readDelete = (input: unknown): NativeArchivedTasksDeleteEnvelope | null =>
     if (request?.source) keys.push('projects');
     if (!request || !exact(raw, keys)
         || raw.version !== 1 || !same(raw.request, request) || !validDevice(raw)
-        || !Array.isArray(raw.before) || !raw.before.every(request.source === 'reference' ? validReferenceTask : validTask)
-        || (request.source && (!Array.isArray(raw.projects) || !unique(raw.projects) || !raw.projects.every(request.source === 'reference' ? validReferenceContextProject : validContextProject)
+        || !Array.isArray(raw.before) || !raw.before.every(usesRawSnapshots(request.source) ? validReferenceTask : validTask)
+        || (request.source && (!Array.isArray(raw.projects) || !unique(raw.projects) || !raw.projects.every(usesRawSnapshots(request.source) ? validReferenceContextProject : validContextProject)
             || !same(deleteProjects(raw.before, raw.projects), raw.projects)))
         || !selectedSourcesMatch(request, raw.before, request.source ? raw.projects as Project[] : [])
         || !Array.isArray(raw.after) || !raw.after.every(validTask) || !record(raw.result) || !exact(raw.result, ['count', 'deletion'])
@@ -185,7 +189,7 @@ const readUndo = (input: unknown): NativeArchivedTasksDeleteUndoEnvelope | null 
         || !Array.isArray(raw.before) || !raw.before.every(validTask) || !Array.isArray(raw.after) || !raw.after.every(validTask)
         || !record(raw.result) || !exact(raw.result, ['count'])) return null;
     const deletion = readDelete(raw.delete);
-    if (!deletion || !validScope(raw.scope, deletion.request.source === 'reference') || deletion.request.requestId !== request.deleteRequestId || !same(raw.before, deletion.prepared.after)
+    if (!deletion || !validScope(raw.scope, usesRawSnapshots(deletion.request.source)) || deletion.request.requestId !== request.deleteRequestId || !same(raw.before, deletion.prepared.after)
         || raw.result.count !== deletion.prepared.result.count) return null;
     try { const prepared = raw as unknown as NativePreparedArchivedTasksDeleteUndo;
         return same(archivedTasksDeleteUndoScope(prepared.before, prepared.scope), prepared.scope) && same(undoAfter(prepared), prepared.after)
@@ -195,11 +199,15 @@ const readUndo = (input: unknown): NativeArchivedTasksDeleteUndoEnvelope | null 
 const isUndo = (envelope: MutationEnvelope): envelope is NativeArchivedTasksDeleteUndoEnvelope => 'delete' in envelope.prepared;
 const isDone = (envelope: MutationEnvelope): boolean => (isUndo(envelope) ? envelope.prepared.delete.request : envelope.request).source === 'done';
 const isReference = (envelope: MutationEnvelope): boolean => (isUndo(envelope) ? envelope.prepared.delete.request : envelope.request).source === 'reference';
-const sourceName = (envelope: MutationEnvelope): string => isReference(envelope) ? 'Reference' : isDone(envelope) ? 'Done' : 'Archive';
-const requestSourceName = (request: NativeArchivedTasksDeleteRequest): string => request.source === 'reference' ? 'Reference' : request.source === 'done' ? 'Done' : 'Archive';
+const isInbox = (envelope: MutationEnvelope): boolean => (isUndo(envelope) ? envelope.prepared.delete.request : envelope.request).source === 'inbox';
+const requiresRawSnapshots = (envelope: MutationEnvelope): boolean => usesRawSnapshots((isUndo(envelope) ? envelope.prepared.delete.request : envelope.request).source);
+const sourceName = (envelope: MutationEnvelope): string => isInbox(envelope) ? 'Inbox' : isReference(envelope) ? 'Reference' : isDone(envelope) ? 'Done' : 'Archive';
+// Preserve existing Archive wording on Done's legacy raw-safety error branches.
+const rawSourceName = (envelope: MutationEnvelope): string => isInbox(envelope) ? 'Inbox' : isReference(envelope) ? 'Reference' : 'Archive';
+const requestSourceName = (request: NativeArchivedTasksDeleteRequest): string => request.source === 'inbox' ? 'Inbox' : request.source === 'reference' ? 'Reference' : request.source === 'done' ? 'Done' : 'Archive';
 const buildUndo = (request: NativeArchivedTasksDeleteUndoRequest, deletion: NativeArchivedTasksDeleteEnvelope,
     data: Pick<AppData, 'projects' | 'sections' | 'areas' | 'settings'>, updateAt: string): NativeArchivedTasksDeleteUndoEnvelope | null => {
-    const scope = undoScope(deletion.prepared.after, data, isReference(deletion)); if (!scope) return null;
+    const scope = undoScope(deletion.prepared.after, data, requiresRawSnapshots(deletion)); if (!scope) return null;
     const device = ensureDeviceId(data.settings);
     const base = { version: 1 as const, request, delete: deletion, before: deletion.prepared.after,
         scope, deviceIdBefore: data.settings.deviceId ?? null,
@@ -221,7 +229,8 @@ export function createArchivedTasksDeleteMethods(deps: {
     const saves = createAreaSaveGuard(deps.save);
     let pending: { envelope: MutationEnvelope; adapter: ReturnType<typeof getStorageAdapter>; boundary: PreparedNativeSaveBoundary | undefined } | null = null;
     const payload = (envelope: MutationEnvelope) => canonicalPayload([
-        isReference(envelope) ? (isUndo(envelope) ? 'referenceTasksDeleteUndo' : 'referenceTasksDelete')
+        isInbox(envelope) ? (isUndo(envelope) ? 'inboxTasksDeleteUndo' : 'inboxTasksDelete')
+            : isReference(envelope) ? (isUndo(envelope) ? 'referenceTasksDeleteUndo' : 'referenceTasksDelete')
             : isDone(envelope) ? (isUndo(envelope) ? 'doneTasksDeleteUndo' : 'doneTasksDelete')
             : (isUndo(envelope) ? 'archivedTasksDeleteUndo' : 'archivedTasksDelete'), envelope]);
     const savedResult = <T extends MutationResult>(envelope: MutationEnvelope): NativeHostResult<T> | null => {
@@ -235,15 +244,15 @@ export function createArchivedTasksDeleteMethods(deps: {
     };
     const requireDurableDeleteReceipt = async (deletion: NativeArchivedTasksDeleteEnvelope,
         adapter: ReturnType<typeof getStorageAdapter>): Promise<NativeHostResult<null>> => {
-        if (!isReference(deletion)) return requireDeleteReceipt(deletion);
-        if (!(adapter instanceof NativeReceiptSqliteAdapter)) return fail('SAVE_FAILED', 'Reference Undo requires readable durable receipts');
+        if (!requiresRawSnapshots(deletion)) return requireDeleteReceipt(deletion);
+        if (!(adapter instanceof NativeReceiptSqliteAdapter)) return fail('SAVE_FAILED', `${sourceName(deletion)} Undo requires readable durable receipts`);
         const saved = await adapter.readDurableReceipt(deletion.request.requestId, payload(deletion));
         if (!saved.ok) return saved;
         return saved.value !== null && same(saved.value, deletion.prepared.result) ? { ok: true, value: null }
-            : fail('STALE_REVISION', 'Reference Delete has no exact current durable receipt');
+            : fail('STALE_REVISION', `${sourceName(deletion)} Delete has no exact current durable receipt`);
     };
     const armDeleteReceipt = (envelope: MutationEnvelope, adapter: ReturnType<typeof getStorageAdapter>): (() => void) => {
-        if (!isUndo(envelope) || !isReference(envelope)) return () => undefined;
+        if (!isUndo(envelope) || !requiresRawSnapshots(envelope)) return () => undefined;
         if (!(adapter instanceof NativeReceiptSqliteAdapter)) throw new Error('Durable receipt storage changed');
         const deletion = envelope.prepared.delete; const key = payload(envelope);
         adapter.armReceiptPrerequisite(envelope.request.requestId, key, deletion.request.requestId, payload(deletion), deletion.prepared.result);
@@ -253,34 +262,34 @@ export function createArchivedTasksDeleteMethods(deps: {
         adapter: ReturnType<typeof getStorageAdapter>): Promise<NativeHostResult<null>> => {
         const prepared = envelope.prepared; const data = authority.snapshot;
         const selected = selectedRows(prepared.before.map((row) => row.id), data.tasks);
-        const current = isReference(envelope) ? referenceRows(selected) : selected;
-        if (!current) return unreadableReference();
+        const current = requiresRawSnapshots(envelope) ? referenceRows(selected) : selected;
+        if (!current) return unreadableRaw(sourceName(envelope));
         if (!same(current, prepared.before) || (data.settings.deviceId ?? null) !== prepared.deviceIdBefore)
             return fail('STALE_REVISION', `${sourceName(envelope)} tasks changed since preparation`);
         if (isUndo(envelope)) {
             const proven = await requireDurableDeleteReceipt(envelope.prepared.delete, adapter); if (!proven.ok) return proven;
-            const scope = undoScope(current, data, isReference(envelope)); if (!scope) return unreadableReference();
+            const scope = undoScope(current, data, requiresRawSnapshots(envelope)); if (!scope) return unreadableRaw(sourceName(envelope));
             if (!same(scope, envelope.prepared.scope))
-                return fail('STALE_REVISION', isReference(envelope) ? 'Reference Undo containers changed since preparation' : 'Archive Undo containers changed since preparation');
+                return fail('STALE_REVISION', `${rawSourceName(envelope)} Undo containers changed since preparation`);
         } else {
-            if (isDone(envelope) || isReference(envelope)) {
+            if (isDone(envelope) || requiresRawSnapshots(envelope)) {
                 const parents = deleteProjects(current, data.projects);
-                const projects = isReference(envelope) ? referenceProjects(parents) : parents;
-                if (!projects) return unreadableReference();
+                const projects = requiresRawSnapshots(envelope) ? referenceProjects(parents) : parents;
+                if (!projects) return unreadableRaw(sourceName(envelope));
                 if (!same(projects, envelope.prepared.projects)) return fail('STALE_REVISION', `${sourceName(envelope)} parent projects changed since preparation`);
             }
             if (!selectedSourcesMatch(envelope.request, current, data.projects)) return fail('STALE_REVISION', `${sourceName(envelope)} selection changed since it was shown`);
-            if (isReference(envelope) && !undoScope(current, data, true)) return unreadableReference();
-            if (!prospectiveUndoFits(envelope, data)) return fail('INVALID_INPUT', isReference(envelope) ? 'Reference Undo journal would be too large; select fewer tasks' : 'Archive Undo journal would be too large; select fewer tasks');
+            if (requiresRawSnapshots(envelope) && !undoScope(current, data, true)) return unreadableRaw(sourceName(envelope));
+            if (!prospectiveUndoFits(envelope, data)) return fail('INVALID_INPUT', `${rawSourceName(envelope)} Undo journal would be too large; select fewer tasks`);
         }
         return { ok: true, value: null };
     };
     const apply = (envelope: MutationEnvelope, authority: PreparedAreaAuthority) => {
-        if (isReference(envelope)) {
+        if (requiresRawSnapshots(envelope)) {
             // Only operated rows need the exact JSON member snapshot. Preserve
             // every other raw object and its original SQLite-row provenance.
             const snapshots = referenceRows(selectedRows(envelope.prepared.before.map((row) => row.id), authority.snapshot.tasks));
-            if (!snapshots) return Promise.resolve({ success: false as const, reason: 'conflict' as const, error: 'Saved Reference raw JSON could not be bound safely' });
+            if (!snapshots) return Promise.resolve({ success: false as const, reason: 'conflict' as const, error: `Saved ${sourceName(envelope)} raw JSON could not be bound safely` });
             const selected = buildEntityMap(snapshots);
             authority.snapshot = { ...authority.snapshot, tasks: authority.snapshot.tasks.map((row) => selected.get(row.id) ?? row) };
         }
@@ -292,14 +301,14 @@ export function createArchivedTasksDeleteMethods(deps: {
         const owned = pending;
         if (!owned || owned.envelope.request.requestId !== requestId) return fail('SAVE_FAILED', 'Archive Trash has no owned raw save');
         if (useTaskStore.getState().persistenceFailure) {
-            if (!saves.mayApply(owned.envelope, owned.adapter)) return fail('SAVE_FAILED', isReference(owned.envelope) ? 'Reference Trash has an unrelated persistence failure' : 'Archive Trash has an unrelated persistence failure');
+            if (!saves.mayApply(owned.envelope, owned.adapter)) return fail('SAVE_FAILED', `${rawSourceName(owned.envelope)} Trash has an unrelated persistence failure`);
             const read = await readAreaDurableData(true, true); if (!read.ok) return read;
-            if (read.value.adapter !== owned.adapter) return fail('STALE_REVISION', isReference(owned.envelope) ? 'Reference Trash storage changed before retry' : 'Archive Trash storage changed before retry');
+            if (read.value.adapter !== owned.adapter) return fail('STALE_REVISION', `${rawSourceName(owned.envelope)} Trash storage changed before retry`);
             const checked = await checkAuthority(owned.envelope, read.value.authority, read.value.adapter); if (!checked.ok) return checked;
             const applied = await apply(owned.envelope, read.value.authority);
-            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? (isReference(owned.envelope) ? 'Reference Trash retry was superseded' : 'Archive Trash retry was superseded'));
+            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? `${rawSourceName(owned.envelope)} Trash retry was superseded`);
             owned.boundary = read.value.authority.saveBoundary;
-        } else if (isUndo(owned.envelope) && isReference(owned.envelope)) {
+        } else if (isUndo(owned.envelope) && requiresRawSnapshots(owned.envelope)) {
             const proven = await requireDurableDeleteReceipt(owned.envelope.prepared.delete, owned.adapter); if (!proven.ok) return proven;
         }
         const saved = await saves.finish(owned.envelope, owned.adapter, false, owned.boundary);
@@ -314,7 +323,7 @@ export function createArchivedTasksDeleteMethods(deps: {
             prewriteFailure = fail('SAVE_FAILED', message); return { ok: false, error: { code: 'ACTION_FAILED', message } };
         };
         const confirmed = await receipts.run<T>(envelope.request.requestId, payload(envelope), async () => {
-            if (useTaskStore.getState().persistenceFailure) return notLanded(isReference(envelope) ? 'Reference Trash has an unresolved persistence failure' : 'Archive Trash has an unresolved persistence failure');
+            if (useTaskStore.getState().persistenceFailure) return notLanded(`${rawSourceName(envelope)} Trash has an unresolved persistence failure`);
             const read = await readAreaDurableData(false, true);
             if (!read.ok) return read.error.code === 'SAVE_FAILED' ? notLanded(read.error.message) : read;
             const checked = await checkAuthority(envelope, read.value.authority, read.value.adapter);
@@ -322,13 +331,15 @@ export function createArchivedTasksDeleteMethods(deps: {
             const disarm = armDeleteReceipt(envelope, read.value.adapter);
             let applied: Awaited<ReturnType<typeof apply>>;
             try { applied = await apply(envelope, read.value.authority); } catch (error) { disarm(); throw error; }
-            if (!applied.success || applied.outcome !== 'applied') { disarm(); return fail('STALE_REVISION', applied.error ?? (isReference(envelope) ? 'Reference Trash conflicts with saved data' : 'Archive Trash conflicts with saved data')); }
+            if (!applied.success || applied.outcome !== 'applied') { disarm(); return fail('STALE_REVISION', applied.error ?? `${rawSourceName(envelope)} Trash conflicts with saved data`); }
             pending = { envelope, adapter: read.value.adapter, boundary: read.value.authority.saveBoundary };
             return { ok: true, value: envelope.prepared.result as T };
         });
         if (prewriteFailure) return prewriteFailure;
         if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${sourceName(envelope)} Trash result does not match its journal`);
-        if (confirmed.ok) { try { if (isReference(envelope)) logInfo('Native Reference bulk Trash confirmed', { scope: 'native-host', category: 'storage',
+        if (confirmed.ok) { try { if (isInbox(envelope)) logInfo('Native Inbox bulk Trash confirmed', { scope: 'native-host', category: 'storage',
+            context: { releaseCheck: 'v1.3.5/ios-inbox-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
+        else if (isReference(envelope)) logInfo('Native Reference bulk Trash confirmed', { scope: 'native-host', category: 'storage',
             context: { releaseCheck: 'v1.3.4/ios-reference-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
         else logInfo(`Native ${sourceName(envelope)} bulk Trash confirmed`, { scope: 'native-host', category: 'storage',
             context: { releaseCheck: isDone(envelope) ? 'v1.3.4/ios-done-bulk-trash' : 'v1.3.4/ios-archive-bulk-trash', outcome: isUndo(envelope) ? 'restored' : 'deleted' } }); }
@@ -345,11 +356,11 @@ export function createArchivedTasksDeleteMethods(deps: {
                 return fail('STALE_REVISION', `${requestSourceName(request)} selection changed since it was shown`);
             const read = await readAreaDurableData(false, true); if (!read.ok) return read;
             const data = read.value.authority.snapshot; const selected = selectedRows(request.taskIds, data.tasks);
-            const before = request.source === 'reference' ? referenceRows(selected) : selected;
-            if (!before) return unreadableReference();
+            const before = usesRawSnapshots(request.source) ? referenceRows(selected) : selected;
+            if (!before) return unreadableRaw(requestSourceName(request));
             const parents = deleteProjects(before, data.projects);
-            const projects = request.source === 'reference' ? referenceProjects(parents) : parents;
-            if (!projects || (request.source === 'reference' && !undoScope(before, data, true))) return unreadableReference();
+            const projects = usesRawSnapshots(request.source) ? referenceProjects(parents) : parents;
+            if (!projects || (usesRawSnapshots(request.source) && !undoScope(before, data, true))) return unreadableRaw(requestSourceName(request));
             if (!selectedSourcesMatch(request, before, data.projects)) return fail('STALE_REVISION', `Saved ${requestSourceName(request)} selection changed`);
             const device = ensureDeviceId(data.settings); const t = deps.t();
             const base = { version: 1 as const, request, before, ...(request.source ? { projects } : {}),
@@ -361,7 +372,7 @@ export function createArchivedTasksDeleteMethods(deps: {
             try { command = jsonSafe({ request, prepared: { ...base, after: deleteAfter(base) } }); } catch { command = null; }
             return command && readDelete(command) && prospectiveUndoFits(command, data)
                 ? { ok: true, value: { kind: 'prepared', prepared: command.prepared } }
-                : fail('INVALID_INPUT', request.source === 'reference' ? 'Reference Delete or Undo journal is too large; select fewer tasks' : 'Archive Delete or Undo journal is too large; select fewer tasks');
+                : fail('INVALID_INPUT', `${request.source === 'inbox' ? 'Inbox' : request.source === 'reference' ? 'Reference' : 'Archive'} Delete or Undo journal is too large; select fewer tasks`);
         },
         validatePreparedArchivedTasksDelete(input: NativeArchivedTasksDeleteEnvelope): NativeHostResult<NativeArchivedTasksDeleteResult> {
             const envelope = readDelete(input); return envelope ? { ok: true, value: envelope.prepared.result } : fail('INVALID_INPUT', 'Prepared Archive Delete is malformed');
@@ -379,17 +390,17 @@ export function createArchivedTasksDeleteMethods(deps: {
             const request = raw && exact(raw, ['request', 'delete']) ? readUndoRequest(raw.request) : null;
             const deletion = raw ? readDelete(raw.delete) : null;
             if (!request || !deletion || request.deleteRequestId !== deletion.request.requestId) return fail('INVALID_INPUT', 'A confirmed bounded Archive Delete request is required for Undo');
-            const proven = isReference(deletion) ? null : requireDeleteReceipt(deletion); if (proven && !proven.ok) return proven;
+            const proven = requiresRawSnapshots(deletion) ? null : requireDeleteReceipt(deletion); if (proven && !proven.ok) return proven;
             const read = await readAreaDurableData(false, true); if (!read.ok) return read;
             const durableProof = await requireDurableDeleteReceipt(deletion, read.value.adapter); if (!durableProof.ok) return durableProof;
             const data = read.value.authority.snapshot;
             const selected = selectedRows(deletion.request.taskIds, data.tasks);
-            const current = isReference(deletion) ? referenceRows(selected) : selected;
-            if (!current || (isReference(deletion) && !undoScope(deletion.prepared.after, data, true))) return unreadableReference();
-            if (!same(current, deletion.prepared.after)) return fail('STALE_REVISION', isReference(deletion) ? 'Deleted Reference tasks changed before Undo' : 'Deleted Archive tasks changed before Undo');
+            const current = requiresRawSnapshots(deletion) ? referenceRows(selected) : selected;
+            if (!current || (requiresRawSnapshots(deletion) && !undoScope(deletion.prepared.after, data, true))) return unreadableRaw(sourceName(deletion));
+            if (!same(current, deletion.prepared.after)) return fail('STALE_REVISION', `Deleted ${rawSourceName(deletion)} tasks changed before Undo`);
             const command = buildUndo(request, deletion, data, new Date().toISOString());
             return command && readUndo(command) ? { ok: true, value: { kind: 'prepared', prepared: command.prepared } }
-                : fail('INVALID_INPUT', isReference(deletion) ? 'Reference Undo journal is too large; select fewer tasks' : 'Archive Undo journal is too large; select fewer tasks');
+                : fail('INVALID_INPUT', `${rawSourceName(deletion)} Undo journal is too large; select fewer tasks`);
         },
         validatePreparedArchivedTasksDeleteUndo(input: NativeArchivedTasksDeleteUndoEnvelope): NativeHostResult<NativeArchivedTasksDeleteUndoResult> {
             const envelope = readUndo(input); return envelope ? { ok: true, value: envelope.prepared.result } : fail('INVALID_INPUT', 'Prepared Archive Undo is malformed');

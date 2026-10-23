@@ -5,6 +5,7 @@ import { planTaskMutations, sanitizeRestoredTaskContainerReferences } from './st
 import { compactPurgedTaskForLocalStorage } from './tombstone-compaction';
 import { mapSqliteTaskRow, TASK_SQLITE_COLUMNS, taskToSqliteRow } from './sqlite-adapter';
 import { normalizeTaskForLoad } from './task-status';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 import type { AppData, Project, Section, Task } from './types';
 
 const CREATED = '2026-09-01T12:00:00.000Z';
@@ -52,7 +53,11 @@ const legacyRows = <TState>(tasks: readonly Task[], state: TState,
     }));
 const overlay = (initial: AppData, changed: Task[]): AppData => {
     const byId = new Map(changed.map((row) => [row.id, row]));
-    return { ...initial, tasks: initial.tasks.map((row) => byId.get(row.id) ?? row) };
+    // The row-only planner excludes the store writer's independent catalog retention.
+    return { ...initial, tasks: initial.tasks.map((row) => byId.get(row.id) ?? row),
+        settings: retainTaxonomyEffects(initial.settings, changed.map(after => ({
+            before: initial.tasks.find(row => row.id === after.id), after,
+        }))) };
 };
 const restoreContext = (initial: AppData) => ({
     _allProjects: initial.projects, _allSections: initial.sections, _allAreas: initial.areas,

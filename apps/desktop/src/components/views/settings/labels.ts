@@ -739,6 +739,8 @@ export const SETTINGS_LABEL_KEYS = [
     'nord',
     'catppuccinMacchiato',
     'dracula',
+    'gruvboxLight',
+    'gruvboxDark',
     'sepia',
     'oled',
     'close',

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createTaxonomyMethods, type NativeTaxonomyRequest } from './native-host-contract-taxonomy';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Project, Task } from './types';
+import { addSavedTaxonomyToken, getSavedTaxonomyTokens } from './taxonomy-catalog';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 
 const AT = '2026-09-30T12:00:00.000Z';
 const ID = '00000000-0000-4000-8000-000000000096';
@@ -61,6 +63,101 @@ async function request(env: Awaited<ReturnType<typeof open>>, kind: 'context' | 
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
 
 describe('prepared taxonomy', () => {
+    it('logs a private saved-taxonomy proof only after the v2 catalogue save succeeds', async () => {
+        let failSave = false;
+        const env = await open({ ...rows(), tasks: [], projects: [] }, () => failSave);
+        const options = await env.methods.getTaxonomyOptions({ kind: 'context', action: 'create', name: '' });
+        if (!options.ok) throw new Error(JSON.stringify(options));
+        const input: NativeTaxonomyRequest = { requestId: ID, kind: 'context', action: 'create', name: '@PrivateSavedName',
+            to: null, expected: options.value.expected };
+        const plan = await env.methods.prepareTaxonomy(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        const envelope = { request: input, prepared: plan.value.prepared };
+        const logs: LogPayload[] = [];
+        setLogger((payload) => logs.push(payload));
+        try {
+            failSave = true;
+            expect(await env.methods.commitPreparedTaxonomy(envelope)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+            expect(logs.filter(log => log.context?.releaseCheck === 'v1.3.7/saved-taxonomy')).toEqual([]);
+            failSave = false;
+            expect(await env.methods.commitPreparedTaxonomy(envelope)).toMatchObject({ ok: true });
+            const proofs = logs.filter(log => log.context?.releaseCheck === 'v1.3.7/saved-taxonomy');
+            expect(proofs).toHaveLength(1);
+            expect(proofs[0].force).toBe(true);
+            expect(proofs[0].context).toEqual({ releaseCheck: 'v1.3.7/saved-taxonomy', taxonomyKind: 'context', operation: 'create', outcome: 'persisted' });
+            expect(JSON.stringify(proofs)).not.toContain('PrivateSavedName');
+        } finally { setLogger(consoleLogger); }
+    });
+
+    it('durably creates an unused value and cold-replays its complete catalogue receipt', async () => {
+        const initial = { ...rows(), tasks: [], projects: [] };
+        const env = await open(initial);
+        const options = await env.methods.getTaxonomyOptions({ kind: 'context', action: 'create', name: '' });
+        if (!options.ok) throw new Error(JSON.stringify(options));
+        const input: NativeTaxonomyRequest = { requestId: ID, kind: 'context', action: 'create', name: '@Unused',
+            to: null, expected: options.value.expected };
+        const plan = await env.methods.prepareTaxonomy(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        const envelope = { request: input, prepared: plan.value.prepared };
+        expect(envelope.prepared.version).toBe(2);
+        const wrongVersion = structuredClone(envelope);
+        Reflect.set(wrongVersion.prepared, 'version', '2');
+        expect(env.methods.validatePreparedTaxonomy(wrongVersion)).toMatchObject({ ok: false });
+        expect(envelope.prepared.effect.tasks).toEqual([]);
+        expect(envelope.prepared.effect.catalogue?.before).toBeNull();
+        expect(await env.methods.commitPreparedTaxonomy(envelope)).toMatchObject({ ok: true });
+        expect(getSavedTaxonomyTokens(env.data().settings, 'context')).toEqual(['@Unused']);
+        const fresh = await env.reopen();
+        const savedCount = fresh.saves();
+        expect(await fresh.methods.commitPreparedTaxonomy(envelope)).toMatchObject({ ok: true });
+        expect(fresh.saves()).toBe(savedCount);
+    });
+
+    it('rejects stale and forged catalogue effects while allowing unused rename and delete', async () => {
+        const initial = { ...rows(), tasks: [], projects: [],
+            settings: addSavedTaxonomyToken(rows().settings, 'context', '@Unused', 'tax-device', AT) };
+        const env = await open(initial);
+        const options = await env.methods.getTaxonomyOptions({ kind: 'context', name: '@Unused' });
+        if (!options.ok) throw new Error(JSON.stringify(options));
+        const input: NativeTaxonomyRequest = { requestId: ID, kind: 'context', action: 'rename', name: '@Unused',
+            to: '@Renamed', expected: options.value.expected };
+        const plan = await env.methods.prepareTaxonomy(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        const envelope = { request: input, prepared: plan.value.prepared };
+        const forged = structuredClone(envelope);
+        forged.prepared.effect.catalogue!.after.contexts![0].rev += 1;
+        expect(env.methods.validatePreparedTaxonomy(forged)).toMatchObject({ ok: false });
+        env.changeSaved((data) => ({ ...data, settings: addSavedTaxonomyToken(data.settings, 'tag', '#Concurrent', 'peer', AT) }));
+        expect(await env.methods.commitPreparedTaxonomy(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        env.changeSaved(() => initial);
+        expect(await env.methods.commitPreparedTaxonomy(envelope)).toMatchObject({ ok: true });
+        expect(getSavedTaxonomyTokens(env.data().settings, 'context')).toEqual(['@Renamed']);
+        const current = await env.methods.getTaxonomyOptions({ kind: 'context', name: '@Renamed' });
+        if (!current.ok) throw new Error(JSON.stringify(current));
+        const deletion: NativeTaxonomyRequest = { ...input, action: 'delete', name: '@Renamed', to: null, expected: current.value.expected };
+        const removed = await env.methods.prepareTaxonomy(deletion);
+        if (!removed.ok || removed.value.kind !== 'prepared') throw new Error(JSON.stringify(removed));
+        expect(await env.methods.commitPreparedTaxonomy({ request: deletion, prepared: removed.value.prepared })).toMatchObject({ ok: true });
+        expect(getSavedTaxonomyTokens(env.data().settings, 'context')).toEqual([]);
+    });
+
+    it('retains version 1 journal semantics without changing an existing catalogue', async () => {
+        const initial = rows();
+        initial.settings = addSavedTaxonomyToken(initial.settings, 'context', '@Saved', 'tax-device', AT);
+        const env = await open(initial);
+        const input = await request(env, 'tag', 'rename', '#New');
+        const plan = await env.methods.prepareTaxonomy(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        const old = structuredClone({ request: input, prepared: plan.value.prepared });
+        old.prepared.version = 1;
+        delete old.request.expected.catalogue;
+        delete old.prepared.request.expected.catalogue;
+        delete old.prepared.scope.catalogue;
+        delete old.prepared.effect.catalogue;
+        expect(env.methods.validatePreparedTaxonomy(old)).toMatchObject({ ok: true });
+        expect(await env.methods.commitPreparedTaxonomy(old)).toMatchObject({ ok: true });
+        expect(env.data().settings.taxonomy).toEqual(initial.settings.taxonomy);
+    });
     it.each([
         ['context', 'rename', '@New'], ['context', 'delete', null],
         ['tag', 'rename', 'New'], ['tag', 'delete', null],

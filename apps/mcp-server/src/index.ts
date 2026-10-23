@@ -453,6 +453,7 @@ const getSectionSchema = z.object({
 
 const addProjectSchema = z.object({
   title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH),
+  colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().optional(),
   status: projectStatusSchema.optional(),
   cancelledAt: z.string().datetime({ offset: true }).nullable().optional().describe('Cancellation time; closes the project and its unfinished tasks while preserving completed work'),
@@ -468,6 +469,7 @@ const addProjectSchema = z.object({
 const updateProjectSchema = z.object({
   id: z.string(),
   title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH).optional(),
+  colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().nullable().optional(),
   status: projectStatusSchema.optional(),
   cancelledAt: z.string().datetime({ offset: true }).nullable().optional().describe('Cancellation time; closes the project and its unfinished tasks while preserving completed work'),
@@ -743,7 +745,7 @@ export const registerMindwtrTools = (
     'mindwtr_add_project',
     {
       description: options.localApi ? 'Add a project through the desktop Local API with title, color, status, areaId and isSequential.' : 'Add a project to the configured Mindwtr backend.',
-      inputSchema: options.localApi ? addProjectSchema.pick({ title: true, color: true, status: true, areaId: true, isSequential: true }).strict() : addProjectSchema,
+      inputSchema: options.localApi ? addProjectSchema.pick({ title: true, color: true, colorOverride: true, status: true, areaId: true, isSequential: true }).strict() : addProjectSchema,
     },
     withReadonlyMcpErrorHandling('mindwtr_add_project', async (input) => {
       const project = await service.addProject(input);
@@ -754,8 +756,10 @@ export const registerMindwtrTools = (
   server.registerTool(
     'mindwtr_update_project',
     {
-      description: options.localApi ? 'Update a project through the desktop Local API. Attachment replacement is unavailable.' : 'Update a project in the configured Mindwtr backend.',
-      inputSchema: options.localApi ? updateProjectSchema.pick({ id: true, title: true, color: true, status: true, areaId: true, isSequential: true }).extend({ color: z.string().trim().min(1).optional() }).strict() : updateProjectSchema,
+      description: options.localApi
+        ? 'Update a project through the desktop Local API. Attachment replacement is unavailable. Setting isSequential true makes a Per section project Sequential; perSectionFlow and section flow choices are managed by the apps and are read-only here.'
+        : 'Update a project in the configured Mindwtr backend. Setting isSequential true makes a Per section project Sequential; perSectionFlow and section flow choices are managed by the apps and are read-only here.',
+      inputSchema: options.localApi ? updateProjectSchema.pick({ id: true, title: true, color: true, colorOverride: true, status: true, areaId: true, isSequential: true }).extend({ color: z.string().trim().min(1).optional() }).strict() : updateProjectSchema,
     },
     withReadonlyMcpErrorHandling('mindwtr_update_project', async (input) => {
       const project = await service.updateProject(input);

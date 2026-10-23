@@ -877,7 +877,10 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             )}
                             dir={resolvedDirection}
                         >
-                            <InlineMarkdown markdown={descriptionPreview} interactiveLinks={false} />
+                            {/* A sibling of the toggle button, so its links can be real
+                              * controls: they stop propagation and open like the opened
+                              * description's links instead of toggling the row (#1425). */}
+                            <InlineMarkdown markdown={descriptionPreview} />
                         </div>
                     )}
                     {(showCompactMeta || isReference) && !isViewOpen && hasCollapsedMetadata && renderMetadataRow(cn(
@@ -919,7 +922,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                     dir={resolvedDirection}
                                     onMouseDown={(event) => event.stopPropagation()}
                                 >
-                                    <RichMarkdown markdown={task.description} />
+                                    <RichMarkdown markdown={task.description} attachments={task.attachments} />
                                 </div>
                             )}
                             {visibleAttachments.length > 0 && (
@@ -994,24 +997,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                             )}
                             {hasMetadata && renderMetadataRow("gap-3 mt-2", true)}
 
-                            {isReference && (task.checklist || []).length > 0 && (
-                                <ul
-                                    className="mt-3 list-disc space-y-1 pl-6 text-xs text-muted-foreground"
-                                    onPointerDown={(event) => event.stopPropagation()}
-                                    onClick={(event) => event.stopPropagation()}
-                                >
-                                    {(task.checklist || []).map((item, index) => (
-                                        <li
-                                            key={item.id || index}
-                                            className="whitespace-pre-wrap break-words pl-0.5"
-                                        >
-                                            <InlineMarkdown markdown={item.title} />
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-
-                            {!isReference && (task.checklist || []).length > 0 && (
+                            {(task.checklist || []).length > 0 && (
                                 <div
                                     className="mt-3 space-y-1 pl-1"
                                     onPointerDown={(e) => e.stopPropagation()}

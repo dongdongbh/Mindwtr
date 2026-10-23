@@ -60,6 +60,12 @@ const project = (updates: Partial<Project> = {}): Project => ({
 });
 
 describe('sync signatures', () => {
+    it('treats a reset override as missing but preserves explicit grey and same-Area choices', () => {
+        const signature = (value: Project) => toComparableSignature(normalizeProjectForContentComparison(value));
+        expect(signature(project({ colorOverride: null }))).toBe(signature(project()));
+        expect(signature(project({ colorOverride: '#6B7280' }))).not.toBe(signature(project()));
+        expect(signature(project({ colorOverride: '#10b981' }))).not.toBe(signature(project()));
+    });
     it('sorts only present comparable fields, not the absent normalized task schema', () => {
         const normalized = normalizeTaskForContentComparison(task());
         const originalSort = Array.prototype.sort;

@@ -14,10 +14,12 @@ import { planTaxonomyEffect, selectTaxonomyScope, taxonomyDestination,
     type TaxonomyKind, type TaxonomyScope } from './taxonomy-policy';
 import type { PreparedTaxonomy } from './store-types';
 import type { Project, Task } from './types';
+import { getSavedTaxonomyTokens, isTaxonomyCatalog, normalizeTaxonomyToken } from './taxonomy-catalog';
+import { logInfo } from './logger';
 
 export type NativeTaxonomyRequest = PreparedTaxonomy['request'];
 export type NativeTaxonomyResult = PreparedTaxonomy['result'];
-export type NativePreparedTaxonomy = PreparedTaxonomy & { version: 1 };
+export type NativePreparedTaxonomy = PreparedTaxonomy & { version: 1 | 2 };
 export type NativeTaxonomyOptions = { kind: TaxonomyKind; name: string; expected: TaxonomyScope;
     draft: ManageEditorDraft; text: ReturnType<typeof getManageEditorText>; confirmation: ManageConfirm };
 export type NativeTaxonomyPreparation = { kind: 'noop'; result: NativeTaxonomyResult }
@@ -106,6 +108,7 @@ const validProject = (value: unknown): value is Project => {
         || (value.attachments !== undefined && !attachments(value.attachments))
         || (value.isFocused !== undefined && typeof value.isFocused !== 'boolean')
         || (value.isSequential !== undefined && typeof value.isSequential !== 'boolean')
+        || (value.perSectionFlow !== undefined && typeof value.perSectionFlow !== 'boolean')
         || (value.sequentialScope !== undefined && !['project', 'section'].includes(String(value.sequentialScope)))
         || (value.viewSectionIds !== undefined && !(record(value.viewSectionIds)
             && Object.values(value.viewSectionIds).every((sectionId) => typeof sectionId === 'string')))) return false;
@@ -113,14 +116,16 @@ const validProject = (value: unknown): value is Project => {
 };
 
 const validScope = (value: unknown, kind: TaxonomyKind, name: string): value is TaxonomyScope => {
-    if (!record(value) || !exact(value, ['tasks', 'projects']) || !Array.isArray(value.tasks)
+    if (!record(value) || !(exact(value, ['tasks', 'projects']) || exact(value, ['tasks', 'projects', 'catalogue']))
+        || ('catalogue' in value && value.catalogue !== null && !isTaxonomyCatalog(value.catalogue)) || !Array.isArray(value.tasks)
         || !Array.isArray(value.projects) || !value.tasks.every(validTask)
         || !value.projects.every(validProject)
         || new Set(value.tasks.map((row) => row.id)).size !== value.tasks.length
         || new Set(value.projects.map((row) => row.id)).size !== value.projects.length
         || kind === 'context' && value.projects.length !== 0) return false;
-    const selected = selectTaxonomyScope(kind, name, value.tasks, value.projects);
-    return value.tasks.length + value.projects.length > 0 && same(value, selected);
+    const selected = selectTaxonomyScope(kind, name, value.tasks, value.projects,
+        value.catalogue === undefined ? undefined : { taxonomy: value.catalogue ?? undefined });
+    return same({ tasks: value.tasks, projects: value.projects }, { tasks: selected.tasks, projects: selected.projects });
 };
 
 const readRequest = (value: unknown): NativeTaxonomyRequest | null => {
@@ -128,11 +133,18 @@ const readRequest = (value: unknown): NativeTaxonomyRequest | null => {
     if (!input || !exact(input, ['requestId', 'kind', 'action', 'name', 'to', 'expected'])
         || typeof input.requestId !== 'string' || !UUID.test(input.requestId)
         || !['context', 'tag'].includes(String(input.kind))
-        || !['rename', 'delete'].includes(String(input.action)) || !text(input.name, 10_000)
+        || !['create', 'rename', 'delete'].includes(String(input.action)) || !text(input.name, 10_000)
         || !input.name || taxonomyDestination(input.kind as TaxonomyKind, 'delete', input.name, null) === undefined
         || !(input.to === null || text(input.to, 10_000))
-        || (input.action === 'delete' ? input.to !== null : input.to === null)
+        || (input.action !== 'rename' ? input.to !== null : input.to === null)
+        || (input.action === 'create' && (!record(input.expected) || !('catalogue' in input.expected)
+            || !Array.isArray(input.expected.tasks) || input.expected.tasks.length !== 0
+            || !Array.isArray(input.expected.projects) || input.expected.projects.length !== 0))
+        || (input.action === 'create' && !normalizeTaxonomyToken(input.kind as TaxonomyKind, input.name))
         || !validScope(input.expected, input.kind as TaxonomyKind, input.name)) return null;
+    if (input.expected.catalogue !== undefined && (!normalizeTaxonomyToken(input.kind as TaxonomyKind, input.name)
+        || input.action === 'rename' && !normalizeTaxonomyToken(input.kind as TaxonomyKind, input.to as string))) return null;
+    if (input.expected.catalogue === undefined && input.expected.tasks.length + input.expected.projects.length === 0) return null;
     return input as NativeTaxonomyRequest;
 };
 
@@ -143,7 +155,8 @@ const readPrepared = (value: unknown): NativePreparedTaxonomy | null => {
     const request = readRequest(envelope.request);
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'scope', 'effect', 'deviceIdBefore',
-        'deviceIdToInitialize', 'updateAt', 'result']) || raw.version !== 1
+        'deviceIdToInitialize', 'updateAt', 'result']) || raw.version !== 1 && raw.version !== 2
+        || (raw.version === 1 ? 'catalogue' in request.expected || request.action === 'create' : !('catalogue' in request.expected))
         || !same(raw.request, request) || !same(raw.scope, request.expected)
         || !(raw.deviceIdBefore === null || id(raw.deviceIdBefore))
         || (raw.deviceIdBefore === null ? typeof raw.deviceIdToInitialize !== 'string'
@@ -155,7 +168,7 @@ const readPrepared = (value: unknown): NativePreparedTaxonomy | null => {
     if (destination === undefined) return null;
     const effect = planTaxonomyEffect(request.kind, request.action, request.name, request.to,
         request.expected, prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.updateAt);
-    if (!effect || effect.tasks.length + effect.projects.length === 0
+    if (!effect || effect.tasks.length + effect.projects.length === 0 && !effect.catalogue
         || !same(effect, prepared.effect)
         || !same(prepared.result, { kind: request.kind, action: request.action,
             name: request.name, to: destination })) return null;
@@ -172,21 +185,27 @@ export function createTaxonomyMethods(deps: {
         to: taxonomyDestination(request.kind, request.action, request.name, request.to) ?? null,
     });
     return {
-        async getTaxonomyOptions(input: { kind: TaxonomyKind; name: string }): Promise<NativeHostResult<NativeTaxonomyOptions>> {
+        async getTaxonomyOptions(input: { kind: TaxonomyKind; name: string; action?: 'create' }): Promise<NativeHostResult<NativeTaxonomyOptions>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const value = detach<Record<string, unknown>>(input);
-            if (!value || !exact(value, ['kind', 'name']) || !['context', 'tag'].includes(String(value.kind))
-                || !text(value.name, 10_000) || !value.name) return fail('INVALID_INPUT', 'A bounded taxonomy target is required');
+            if (!value || !(exact(value, ['kind', 'name']) || exact(value, ['kind', 'name', 'action']) && value.action === 'create')
+                || !['context', 'tag'].includes(String(value.kind))
+                || !text(value.name, 500) || !value.name && value.action !== 'create') return fail('INVALID_INPUT', 'A bounded taxonomy target is required');
             const read = await readAreaDurableData(); if (!read.ok) return read;
             const kind = value.kind as TaxonomyKind;
+            const name = value.name;
             const expected = selectTaxonomyScope(kind, value.name, read.value.authority.snapshot.tasks,
-                read.value.authority.snapshot.projects);
-            if (expected.tasks.length + expected.projects.length === 0)
+                read.value.authority.snapshot.projects, read.value.authority.snapshot.settings,
+                value.action === 'create' ? 'create' : undefined);
+            if (value.action !== 'create' && expected.tasks.length + expected.projects.length === 0
+                && !getSavedTaxonomyTokens(read.value.authority.snapshot.settings, kind).some((token) => token.toLowerCase() === name.toLowerCase()))
                 return fail('STALE_REVISION', 'Managed value disappeared; refresh Manage');
             const t = deps.t();
+            const editorType = value.action === 'create' ? kind === 'context' ? 'newContext' : 'newTag' : kind;
             const options = detach<NativeTaxonomyOptions>(JSON.parse(JSON.stringify({ kind, name: value.name, expected,
-                draft: getManageEditorDraft({ type: kind, name: value.name }),
-                text: getManageEditorText(t, kind, {} as ManageUntranslatedText),
+                draft: getManageEditorDraft(value.action === 'create' ? { type: kind === 'context' ? 'newContext' : 'newTag' }
+                    : { type: kind, name }),
+                text: getManageEditorText(t, editorType, {} as ManageUntranslatedText),
                 confirmation: getManageDeleteConfirm(t, value.name) })));
             return options && validScope(options.expected, kind, value.name)
                 ? { ok: true, value: options } : fail('INVALID_INPUT', 'Taxonomy options exceed the bounded response');
@@ -196,7 +215,8 @@ export function createTaxonomyMethods(deps: {
             const value = detach<Record<string, unknown>>(input);
             return value && exact(value, ['kind', 'name']) && ['context', 'tag'].includes(String(value.kind))
                 && text(value.name, 10_000)
-                ? { ok: true, value: { saveDisabled: isManageEditorSaveDisabled(value.kind as TaxonomyKind, value.name, []) } }
+                ? { ok: true, value: { saveDisabled: !normalizeTaxonomyToken(value.kind as TaxonomyKind, value.name)
+                    || isManageEditorSaveDisabled(value.kind as TaxonomyKind, value.name, []) } }
                 : fail('INVALID_INPUT', 'A bounded taxonomy name is required');
         },
         probeTaxonomyOutcome(input: NativeTaxonomyRequest): NativeHostResult<NativeTaxonomyResult> {
@@ -211,7 +231,8 @@ export function createTaxonomyMethods(deps: {
             const updateAt = new Date().toISOString();
             const read = await readAreaDurableData(); if (!read.ok) return read;
             const { snapshot } = read.value.authority;
-            const scope = selectTaxonomyScope(request.kind, request.name, snapshot.tasks, snapshot.projects);
+            const scope = selectTaxonomyScope(request.kind, request.name, snapshot.tasks, snapshot.projects,
+                request.expected.catalogue === undefined ? undefined : snapshot.settings, request.action);
             if (!same(scope, request.expected) || (snapshot.settings.deviceId ?? null)
                 !== (read.value.authority.state.settings.deviceId ?? null))
                 return fail('STALE_REVISION', 'Managed value changed; refresh Manage');
@@ -224,9 +245,9 @@ export function createTaxonomyMethods(deps: {
             const device = ensureDeviceId(snapshot.settings);
             const effect = planTaxonomyEffect(request.kind, request.action, request.name, request.to,
                 scope, device.deviceId, updateAt)!;
-            if (!effect.tasks.length && !effect.projects.length)
+            if (!effect.tasks.length && !effect.projects.length && (!effect.catalogue || same(effect.catalogue.before, effect.catalogue.after)))
                 return { ok: true, value: { kind: 'noop', result } };
-            const prepared: NativePreparedTaxonomy = { version: 1, request, scope, effect,
+            const prepared: NativePreparedTaxonomy = { version: scope.catalogue === undefined ? 1 : 2, request, scope, effect,
                 deviceIdBefore: snapshot.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null, updateAt, result };
             const frozen = detach<NativePreparedTaxonomy>(JSON.parse(JSON.stringify(prepared)));
@@ -250,6 +271,9 @@ export function createTaxonomyMethods(deps: {
             if (!applied.success) return fail('STALE_REVISION', applied.error ?? 'Taxonomy changed; refresh Manage');
             const saved = await saves.finish(prepared, read.value.adapter,
                 applied.outcome === 'replayed', read.value.authority.saveBoundary);
+            if (saved.ok && prepared.version === 2) logInfo('Saved context or tag updated', { scope: 'store', category: 'storage', force: true,
+                context: { releaseCheck: 'v1.3.7/saved-taxonomy', taxonomyKind: prepared.request.kind,
+                    operation: prepared.request.action, outcome: 'persisted' } });
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
     };

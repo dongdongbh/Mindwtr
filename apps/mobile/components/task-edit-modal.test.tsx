@@ -1,7 +1,10 @@
 import React from 'react';
-import { Alert, Modal, Platform } from 'react-native';
+import { Alert, AppState, Modal, Platform, type AppStateStatus } from 'react-native';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import renderer, { act } from 'react-test-renderer';
+import { NavigationContext } from '@react-navigation/native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as attachmentSync from '../lib/attachment-sync';
 
 import {
   archiveSectionForProjectArchive,
@@ -18,6 +21,11 @@ import { restoreRecoveredTaskEditInput, TaskEditModal } from './task-edit-modal'
 import { TaskEditCustomRecurrenceModal } from './task-edit/TaskEditCustomRecurrenceModal';
 import { MarkdownFormatToolbar } from './markdown-format-toolbar';
 import { syncTaskEditPagerPosition } from './task-edit/task-edit-modal.utils';
+
+vi.mock('@react-navigation/native', async () => {
+  const { createContext } = await import('react');
+  return { NavigationContext: createContext(undefined) };
+});
 
 const referenceClipboard = vi.hoisted(() => ({ write: vi.fn(), toast: vi.fn() }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: referenceClipboard.write }));
@@ -235,6 +243,144 @@ describe('TaskEditModal', () => {
     }
   });
 
+  describe('owner navigation', () => {
+    const task: Task = {
+      id: 'navigation-task', title: 'Original', description: 'Description', status: 'next', contexts: [], tags: [],
+      createdAt: '2026-10-18T00:00:00.000Z', updatedAt: '2026-10-18T00:00:00.000Z',
+    };
+    const openEditor = async (onSave = vi.fn(), readOnly = false) => {
+      const listeners = new Set<() => void>();
+      const navigation = {
+        addListener: vi.fn((event: string, listener: () => void) => {
+          if (event === 'blur') listeners.add(listener);
+          return () => listeners.delete(listener);
+        }),
+      };
+      const onClose = vi.fn();
+      const Owner = () => {
+        const [selected, setSelected] = React.useState<Task | null>(task);
+        return <NavigationContext.Provider value={navigation as never}>
+          <TaskEditModal visible={Boolean(selected)} task={selected} readOnly={readOnly}
+            onClose={() => { onClose(); setSelected(null); }} onSave={onSave} />
+        </NavigationContext.Provider>;
+      };
+      let tree!: renderer.ReactTestRenderer;
+      await act(async () => { tree = renderer.create(React.createElement(Owner)); });
+      return { tree, onClose, onSave, navigation, blur: () => listeners.forEach((listener) => listener()) };
+    };
+
+    it.each([false, true])('clears a clean selection on owner blur (readOnly=%s)', async (readOnly) => {
+      const editor = await openEditor(vi.fn(), readOnly);
+      expect(editor.onClose).not.toHaveBeenCalled();
+      act(editor.blur);
+      expect(editor.onClose).toHaveBeenCalledTimes(1);
+      expect(editor.tree.toJSON()).toBeNull();
+      act(editor.blur);
+      expect(editor.onClose).toHaveBeenCalledTimes(1);
+      expect(editor.onSave).not.toHaveBeenCalled();
+      await act(async () => editor.tree.unmount());
+    });
+
+    it.each(['title', 'description', 'metadata', 'checklist', 'contexts', 'tags'] as const)(
+      'keeps same-frame %s input through owner blur', async (field) => {
+        const editor = await openEditor();
+        const form = editor.tree.root.findByType('TaskEditFormTab' as any);
+        act(() => {
+          const props = form.props.renderField('description').props;
+          if (field === 'title') form.props.onTitleDraftChange('Unsaved title');
+          if (field === 'description') props.handleDescriptionChange('Unsaved description');
+          if (field === 'metadata') props.setDraftField('priority', 'high');
+          if (field === 'checklist') editor.tree.root.findByType('TaskEditViewTab' as any).props.pendingChecklistDraftRef.current = 'Unsaved item';
+          if (field === 'contexts') props.updateContextInput('@unsaved');
+          if (field === 'tags') props.updateTagInput('#unsaved');
+          editor.blur();
+        });
+        expect(editor.onClose).not.toHaveBeenCalled();
+        act(editor.blur);
+        expect(editor.onClose).not.toHaveBeenCalled();
+        expect(editor.onSave).not.toHaveBeenCalled();
+        await act(async () => editor.tree.unmount());
+      },
+    );
+
+    it('keeps an outstanding attachment picker, then closes after cancellation', async () => {
+      let finish!: (result: DocumentPicker.DocumentPickerResult) => void;
+      vi.mocked(DocumentPicker.getDocumentAsync).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      const editor = await openEditor();
+      let pending!: Promise<void>;
+      act(() => {
+        pending = editor.tree.root.findByType('TaskEditFormTab' as any).props.renderField('attachments').props.addFileAttachment();
+        editor.blur();
+      });
+      expect(editor.onClose).not.toHaveBeenCalled();
+      await act(async () => { finish({ canceled: true, assets: null }); await pending; });
+      act(editor.blur);
+      expect(editor.onClose).toHaveBeenCalledTimes(1);
+      await act(async () => editor.tree.unmount());
+    });
+
+    it('keeps an attachment import until persisted bytes become a draft attachment', async () => {
+      let finish!: (attachment: Awaited<ReturnType<typeof attachmentSync.persistAttachmentLocally>>) => void;
+      const persist = vi.spyOn(attachmentSync, 'persistAttachmentLocally').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      vi.mocked(DocumentPicker.getDocumentAsync).mockResolvedValueOnce({
+        canceled: false, assets: [{ uri: 'file:///picked.txt', name: 'picked.txt', mimeType: 'text/plain', size: 8, lastModified: 0 }],
+      });
+      const editor = await openEditor();
+      let pending!: Promise<void>;
+      await act(async () => {
+        pending = editor.tree.root.findByType('TaskEditFormTab' as any).props.renderField('attachments').props.addFileAttachment();
+      });
+      expect(persist).toHaveBeenCalledTimes(1);
+      act(editor.blur);
+      expect(editor.onClose).not.toHaveBeenCalled();
+      await act(async () => { finish({ ...persist.mock.calls[0][0], uri: 'file:///document/attachments/picked.txt' }); await pending; });
+      act(editor.blur);
+      expect(editor.onClose).not.toHaveBeenCalled();
+      expect(editor.tree.root.findByType('TaskEditFormTab' as any).props.renderField('attachments').props.visibleAttachments).toHaveLength(1);
+      await act(async () => editor.tree.unmount());
+    });
+
+    it('keeps a nested link draft while its task is unchanged', async () => {
+      const editor = await openEditor();
+      act(() => editor.tree.root.findByType('TaskEditFormTab' as any).props.renderField('attachments').props.openAddLinkAttachment());
+      act(() => editor.tree.root.find((node) => typeof node.props.setLinkInput === 'function').props.setLinkInput('https://example.org/draft'));
+      act(editor.blur);
+      expect(editor.onClose).not.toHaveBeenCalled();
+      await act(async () => editor.tree.unmount());
+    });
+
+    it('keeps an in-flight Save even after its submitted draft is reverted', async () => {
+      let finish!: (result: { success: boolean }) => void;
+      const editor = await openEditor(vi.fn(() => new Promise((resolve) => { finish = resolve; })));
+      act(() => editor.tree.root.findByType('TaskEditFormTab' as any).props.renderField('priority').props.setDraftField('priority', 'high', false));
+      act(() => {
+        editor.tree.root.find((node) => typeof node.props.onDone === 'function' && typeof node.props.onDelete === 'function').props.onDone();
+      });
+      act(() => editor.tree.root.findByType('TaskEditFormTab' as any).props.renderField('priority').props.setDraftField('priority', '', false));
+      act(editor.blur);
+      expect(editor.onClose).not.toHaveBeenCalled();
+      await act(async () => finish({ success: false }));
+      act(editor.blur);
+      expect(editor.onClose).toHaveBeenCalledTimes(1);
+      await act(async () => editor.tree.unmount());
+    });
+
+    it('preserves a clean editor through ordinary background/inactive changes', async () => {
+      const appStateListeners: ((state: AppStateStatus) => void)[] = [];
+      vi.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+        appStateListeners.push(listener);
+        return { remove: vi.fn() };
+      });
+      const editor = await openEditor();
+      for (const state of ['inactive', 'background', 'active'] as const) {
+        act(() => appStateListeners.forEach((listener) => listener(state)));
+      }
+      expect(editor.onClose).not.toHaveBeenCalled();
+      expect(editor.tree.root.findAllByType(Modal)[0].props.visible).toBe(true);
+      await act(async () => editor.tree.unmount());
+    });
+  });
+
   it('keeps the native editor mounted until dismissal and updates its dismissal callback', async () => {
     const task: Task = {
       id: 'dismiss-task', title: 'Original', status: 'next', contexts: [], tags: [],
@@ -427,6 +573,7 @@ describe('TaskEditModal', () => {
     const deleted = task('deleted', 'next', ['@deleted-only'], timestamp);
     taskEditStore.current!.tasks = [editing, active, done];
     taskEditStore.current!._allTasks = [editing, active, done, archived, bare, deleted];
+    taskEditStore.current!.settings = { ...taskEditStore.current!.settings, taxonomy: { contexts: [{ token: '@arch-saved', rev: 1, revBy: 'test', updatedAt: timestamp }] } };
     taskEditStore.current!.getDerivedState = () => ({
       allContexts: ['@active-only', '@arch', '@done-only'], allTags: [],
       contextTokenUsage: [{ token: '@active-only', count: 1, lastUsedAt: 0 }], tagTokenUsage: [],
@@ -442,7 +589,7 @@ describe('TaskEditModal', () => {
     });
     const form = tree.root.findByType('TaskEditFormTab' as any);
     const contextField = form.props.renderField('contexts');
-    expect(contextField.props.contextTokenSuggestions).toEqual(['@archived-only']);
+    expect(contextField.props.contextTokenSuggestions).toEqual(['@arch-saved', '@archived-only']);
     expect(contextField.props.frequentContextSuggestions).toEqual(['@active-only']);
   });
 

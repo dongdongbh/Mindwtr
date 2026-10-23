@@ -252,7 +252,9 @@ async function bootstrap() {
         await restoreWebviewZoomState();
     }
 
-    if (!isQuickAddWindow && !isTauriRuntime() && 'serviceWorker' in navigator) {
+    // The Vite dev server serves ~1000 unbundled modules; routing each through
+    // the caching worker can stall a reload's module fetches for good.
+    if (!import.meta.env.DEV && !isQuickAddWindow && !isTauriRuntime() && 'serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     }
 

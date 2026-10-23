@@ -2,11 +2,12 @@ import React from 'react';
 import { Alert, AppState, Modal, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppData, AppSettings, Project, StorageAdapter, Task } from '@mindwtr/core';
+import type { AppData, AppSettings, Area, Project, StorageAdapter, Task } from '@mindwtr/core';
 
 import FocusScreen from '../app/(drawer)/(tabs)/focus';
 import { SwipeableTaskItem } from '@/components/swipeable-task-item';
 
+const areaSelection = vi.hoisted(() => ({ included: [] as string[], excluded: [] as string[] }));
 const routeParams = vi.hoisted(() => ({ current: {} as Record<string, string> }));
 const linkedTasks = new Map<string, Task>();
 const showToastMock = vi.hoisted(() => vi.fn());
@@ -53,6 +54,7 @@ const storeState: {
   tasks: Task[];
   _tasksById: Map<string, Task>;
   projects: Project[];
+  areas: Area[];
   settings: AppSettings;
   updateTask: ReturnType<typeof vi.fn>;
   deleteTask: ReturnType<typeof vi.fn>;
@@ -67,6 +69,7 @@ const storeState: {
     makeTask('next-task'),
   ],
   projects: [],
+  areas: [],
   settings: { appearance: {}, features: {} },
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
@@ -101,6 +104,9 @@ beforeEach(() => {
     makeTask('next-task'),
   ];
   storeState.projects = [];
+  storeState.areas = [];
+  areaSelection.included = [];
+  areaSelection.excluded = [];
   storeState.settings = { appearance: {}, features: {} };
   storeState.updateTask.mockReset();
   storeState.updateTask.mockResolvedValue({ success: true });
@@ -279,7 +285,7 @@ vi.mock('react-native-safe-area-context', () => ({
 }));
 
 vi.mock('@/hooks/use-mobile-area-filter', () => ({
-  useMobileAreaFilter: () => ({ areaById: new Map(), resolvedAreaFilter: { included: [], excluded: [] } }),
+  useMobileAreaFilter: () => ({ areaById: new Map(), resolvedAreaFilter: { included: [...areaSelection.included], excluded: [...areaSelection.excluded] } }),
 }));
 
 vi.mock('@/lib/task-meta-navigation', () => ({
@@ -376,6 +382,33 @@ describe('FocusScreen', () => {
         node.props.accessibilityLabel === "Today's Focus" && typeof node.props.onPress === 'function'
       )
     ).not.toThrow();
+  });
+
+  it('filters direct and project stars by area, retains the global header when none are visible, and restores them', () => {
+    storeState.areas = ['work', 'home', 'empty'].map((id, order) => ({ id, name: id, order,
+      createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z' }));
+    storeState.projects = [makeProject('work-project', { areaId: 'work' })];
+    storeState.tasks = [makeTask('direct', { areaId: 'work', isFocusedToday: true }),
+      makeTask('inherited', { projectId: 'work-project', isFocusedToday: true }),
+      makeTask('home', { areaId: 'home', isFocusedToday: true })];
+    storeState.settings = { gtd: { focusTaskLimit: 3 } };
+    areaSelection.included = ['work'];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen />); });
+    expect(tree.root.findAllByType(SwipeableTaskItem).map((row) => row.props.task.id)).toEqual(['direct', 'inherited']);
+    expect(textContent(tree.root.findByProps({ testID: 'focus-hidden-by-area' }))).toBe('1 selected in other areas');
+    expect(textContent(tree.root)).toContain('(3/3)');
+    areaSelection.included = ['empty'];
+    act(() => { tree.update(<FocusScreen />); });
+    expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(0);
+    expect(textContent(tree.root.findByProps({ testID: 'focus-hidden-by-area' }))).toBe('3 selected in other areas');
+    expect(textContent(tree.root)).toContain('(3/3)');
+    areaSelection.included = [];
+    act(() => { tree.update(<FocusScreen />); });
+    expect(tree.root.findAllByType(SwipeableTaskItem).map((row) => row.props.task.id)).toEqual(['direct', 'inherited', 'home']);
+    expect(tree.root.findAllByProps({ testID: 'focus-hidden-by-area' })).toHaveLength(0);
+    expect(storeState.updateTask).not.toHaveBeenCalled();
+    act(() => tree.unmount());
   });
 
   it('invalidates the Focus list and removes a row after marking it done', async () => {
@@ -2547,6 +2580,56 @@ describe('FocusScreen', () => {
     expect(tree.root.findAllByType(ScrollView).filter((node) => (
       node.props.horizontal && textContent(node).includes('@desk')
     ))).toHaveLength(1);
+  });
+
+  it('saves a rolling task date filter from the Focus sheet and reapplies it after relaunch', async () => {
+    storeState.updateSettings.mockResolvedValue(undefined);
+    storeState.tasks = [makeTask('dated', { dueDate: new Date().toISOString() })];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen />); });
+    act(() => findButtonByLabel(tree, 'Filters').props.onPress());
+    act(() => findButtonByText(tree, 'filters.taskDates').props.onPress());
+    act(() => findButtonByText(tree, 'filters.datePreset.next_14_days').props.onPress());
+    act(() => findButtonByText(tree, 'Save', { last: true }).props.onPress());
+    const inputs = tree.root.findAllByType(TextInput);
+    act(() => inputs[inputs.length - 1].props.onChangeText('Fortnight'));
+    await act(async () => findButtonByText(tree, 'Save', { last: true }).props.onPress());
+    expect(storeState.updateSettings).toHaveBeenCalledWith({ savedFilters: [expect.objectContaining({
+      name: 'Fortnight', criteria: { anyDateRange: { preset: 'next_14_days' } },
+    })] });
+    const saved = storeState.updateSettings.mock.calls.at(-1)?.[0].savedFilters;
+    act(() => tree.unmount());
+    storeState.settings = { ...storeState.settings, savedFilters: JSON.parse(JSON.stringify(saved)) };
+    act(() => { tree = create(<FocusScreen />); });
+    act(() => findButtonByText(tree, 'Fortnight').props.onPress());
+    act(() => findButtonByLabel(tree, 'Filters').props.onPress());
+    act(() => findButtonByText(tree, 'filters.taskDates').props.onPress());
+    expect(findButtonByText(tree, 'filters.datePreset.next_14_days', { last: true }).props.accessibilityState).toEqual({ selected: true });
+    act(() => findButtonByText(tree, 'filters.anyTime', { last: true }).props.onPress());
+    expect(findButtonByText(tree, 'filters.anyTime', { last: true }).props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it('saves only the date edit while preserving hidden metadata and unknown original criteria', async () => {
+    storeState.updateSettings.mockResolvedValue(undefined);
+    const criteria = { contexts: ['@desk'], priority: ['none', 'high'], timeEstimates: ['custom:45'],
+      locations: ['Office', 'Home'], dueDateRange: { preset: 'this_week' }, futureCriterion: 'keep' };
+    const original = { id: 'original-dates', name: 'Original', view: 'focus', criteria,
+      createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z' };
+    storeState.settings = { appearance: {}, features: { priorities: false, timeEstimates: false }, savedFilters: [original] } as unknown as AppSettings;
+    storeState.tasks = [makeTask('desk', { contexts: ['@desk'] })];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen />); });
+    act(() => findButtonByText(tree, 'Original').props.onPress());
+    act(() => findButtonByLabel(tree, 'Filters').props.onPress());
+    act(() => findButtonByText(tree, 'filters.taskDates').props.onPress());
+    act(() => findButtonByText(tree, 'filters.datePreset.next_7_days').props.onPress());
+    act(() => findButtonByText(tree, 'Save', { last: true }).props.onPress());
+    const inputs = tree.root.findAllByType(TextInput);
+    act(() => inputs[inputs.length - 1].props.onChangeText('Original with dates'));
+    await act(async () => findButtonByText(tree, 'Save', { last: true }).props.onPress());
+    expect(storeState.updateSettings).toHaveBeenCalledWith({ savedFilters: [original, expect.objectContaining({
+      name: 'Original with dates', criteria: { ...criteria, anyDateRange: { preset: 'next_7_days' } },
+    })] });
   });
 
   it('saves the current Focus filter from the existing filter sheet', async () => {

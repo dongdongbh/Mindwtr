@@ -45,6 +45,7 @@ type CoreActionResult = {
 
 type CoreModule = {
   setStorageAdapter: (adapter: unknown) => void;
+  markNextLoadAsDocumentReplacement: () => void;
   flushPendingSave: () => Promise<void>;
   runWithImmediateSaveTracking: <T>(operation: () => Promise<T>) => Promise<{ result: T; saveCount: number }>;
   createSerializedAsyncQueue: () => SerializedAsyncQueue;
@@ -100,6 +101,9 @@ let coreService: CoreService | null = null;
 let coreDbPath: string | undefined;
 let coreReadonly = false;
 let coreReady: Promise<void> | null = null;
+// The database the singleton core store last loaded. It outlives closeCoreAdapter because the
+// store keeps those rows; a load from a different database must not be judged against them.
+let coreLoadedDbPath: string | undefined;
 let coreQueue: SerializedAsyncQueue | null = null;
 // The write client's close, kept at module scope (unlike the ensureCoreReady-local
 // `closeClient`, which is only for closing on an init failure) so closeCoreAdapter can
@@ -381,7 +385,11 @@ const ensureCoreReady = async (options: DbOptions) => {
       const sqliteAdapter = new core.SqliteAdapter(client, { rejectConcurrentWrites: !coreReadonly });
       await sqliteAdapter.ensureSchema();
       core.setStorageAdapter(sqliteAdapter);
+      // Same rule as the automation service: a store still holding another database's rows
+      // would read this one as a partial snapshot and refuse it, leaving those stale rows.
+      if (coreLoadedDbPath !== undefined && coreLoadedDbPath !== resolvedPath) core.markNextLoadAsDocumentReplacement();
       await core.useTaskStore.getState().fetchData();
+      coreLoadedDbPath = resolvedPath;
       const runWriteTransaction: WriteTransactionRunner = coreReadonly
         ? runDirectly
         : (operation) => withMcpWriteLock(resolvedPath, operation);

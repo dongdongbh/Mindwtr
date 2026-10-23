@@ -75,6 +75,18 @@ const createProps = (overrides: Partial<Parameters<typeof AgendaFiltersPanel>[0]
 });
 
 describe('AgendaFiltersPanel', () => {
+    it('discloses the task date presets and clears through Any time', () => {
+        const onAnyDateRangeChange = vi.fn();
+        render(<AgendaFiltersPanel {...createProps({ anyDateRange: { preset: 'next_7_days' }, onAnyDateRangeChange })} />);
+        expect(screen.queryByRole('button', { name: 'filters.datePreset.next_14_days' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'filters.taskDates' }));
+        expect(screen.getByRole('button', { name: 'filters.datePreset.next_7_days' })).toHaveAttribute('aria-pressed', 'true');
+        fireEvent.click(screen.getByRole('button', { name: 'filters.datePreset.next_14_days' }));
+        expect(onAnyDateRangeChange).toHaveBeenCalledWith({ preset: 'next_14_days' });
+        fireEvent.click(screen.getByRole('button', { name: 'filters.anyTime' }));
+        expect(onAnyDateRangeChange).toHaveBeenLastCalledWith(undefined);
+    });
+
     it('labels the Focus task query explicitly and starts categories collapsed', () => {
         render(<AgendaFiltersPanel {...createProps({ allTokens: ['@home'] })} />);
 

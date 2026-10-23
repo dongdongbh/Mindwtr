@@ -100,10 +100,15 @@ enum DurableFile {
 #if DEBUG
 // IO boundary only; no fixtures, domain mutation hooks, or release-build knobs.
 final class HostIOFaults {
+    // Weak lifetime observation only; the selected test must not retain these runtime owners.
+    var configureRuntimeLifetime: ((AnyObject, AnyObject, AnyObject?) -> Void)?
+    // Selected ownership regression holds boxed callbacks, with a queue-only fence outside the Engine queue.
+    var configureAIProviderDeviceStateCallbacks: ((AnyObject, AnyObject, @escaping () -> Void) -> Void)?
     var notificationPermissionRead: NativeNotificationPermission.Reader?
     var notificationAuthorizationRequest: NativeNotificationAuthorization.Requester?
     var calendarAuthorizationRequest: NativeCalendarAuthorization.Requester?
     var reminderPort: (any NativeReminderPort)?
+    var pomodoroAlarmPort: (any NativePomodoroAlarmPort)?
     var beforeSQL: ((String) throws -> Void)?
     var afterSQL: ((String) throws -> Void)?
     var checkpoint: (() throws -> Void)?
@@ -115,7 +120,6 @@ final class HostIOFaults {
     var commandDiagnostic: ((String) -> Void)?
     var configureDeviceStorage: ((NativeDeviceKV) -> Void)?
     var httpConfiguration: URLSessionConfiguration?
-    var httpLoopbackOrigin: URL?
     var httpTimeout: TimeInterval?
     var httpByteLimit: Int?
     var configureHTTPJobs: ((NativeHTTPJobs) -> Void)?
@@ -124,6 +128,7 @@ final class HostIOFaults {
     var secretBeforeOperation: ((String, String) -> Void)?
     var secretAfterOperation: ((String, String) -> Void)?
     var configureSecretJobs: ((NativeSecretJobs) -> Void)?
+    var appleRemindersProviderFactory: (() -> NativeAppleRemindersProvider)?
     var calendarReaderFactory: (() -> any NativeCalendarReading)?
     var configureCalendarJobs: ((NativeCalendarJobs) -> Void)?
     var cryptoBeforeOperation: ((String) -> Void)?

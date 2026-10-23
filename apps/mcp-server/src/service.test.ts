@@ -1004,6 +1004,68 @@ describe('mcp service', () => {
     }
   }, REAL_SQLITE_TEST_TIMEOUT_MS);
 
+  test('a core write on a second database reloads the store instead of refusing it as a partial snapshot', async () => {
+    const at = '2026-10-01T09:00:00.000Z';
+    const seed = (dir: string, prefix: string) => writeFileSync(join(dir, 'data.json'), JSON.stringify({
+      tasks: [{ id: `${prefix}-task`, title: `${prefix} task`, status: 'next', tags: [], contexts: [], createdAt: at, updatedAt: at }],
+      projects: [{ id: `${prefix}-project`, title: prefix, status: 'active', color: '#6B7280', order: 0, tagIds: [], createdAt: at, updatedAt: at }],
+      sections: [{ id: `${prefix}-section`, projectId: `${prefix}-project`, title: 'Plan', order: 0, createdAt: at, updatedAt: at }],
+      areas: [], people: [], settings: {},
+    }));
+    const first = createTempDir();
+    seed(first, 'first');
+    const firstService = createService({ dbPath: join(first, 'mindwtr.db'), readonly: false });
+    try {
+      await firstService.updateSection({ id: 'first-section', title: 'Plan A' });
+    } finally {
+      await firstService.close();
+    }
+    const second = createTempDir();
+    seed(second, 'second');
+    const secondService = createService({ dbPath: join(second, 'mindwtr.db'), readonly: false });
+    try {
+      expect((await secondService.updateSection({ id: 'second-section', title: 'Plan B' })).title).toBe('Plan B');
+      expect((await secondService.listTasks({ status: 'all' })).map((task) => task.id)).toEqual(['second-task']);
+    } finally {
+      await secondService.close();
+    }
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
+
+  test('reads Per section Flow mode, keeps it through MCP edits, and blocks only Sequential sections (#1429)', async () => {
+    const dir = createTempDir();
+    const dbPath = join(dir, 'mindwtr.db');
+    const at = '2026-10-01T09:00:00.000Z';
+    const task = (id: string, sectionId: string, order: number) => ({
+      id, title: id, status: 'next', projectId: 'trip', sectionId, order, tags: [], contexts: [], createdAt: at, updatedAt: at,
+    });
+    writeFileSync(join(dir, 'data.json'), JSON.stringify({
+      tasks: [task('find-site', 'book', 1), task('reserve-site', 'book', 2), task('find-tent', 'prep', 1)],
+      projects: [{ id: 'trip', title: 'Camping Trip', status: 'active', color: '#6B7280', order: 0, tagIds: [],
+        isSequential: false, perSectionFlow: true, createdAt: at, updatedAt: at }],
+      sections: [
+        { id: 'book', projectId: 'trip', title: 'Book campsite', order: 0, isSequential: true, createdAt: at, updatedAt: at },
+        { id: 'prep', projectId: 'trip', title: 'Prep', order: 1, isSequential: false, createdAt: at, updatedAt: at },
+      ],
+      areas: [], people: [], settings: {},
+    }));
+    const service = createService({ dbPath, readonly: false });
+    try {
+      expect((await service.getProject({ id: 'trip' })).perSectionFlow).toBe(true);
+      await service.updateSection({ id: 'book', title: 'Book the campsite' });
+      await service.updateProject({ id: 'trip', title: 'Camping' });
+      const sections = await service.listSections({ projectId: 'trip' });
+      expect(sections.map((row) => [row.id, row.title, row.isSequential])).toEqual([
+        ['book', 'Book the campsite', true], ['prep', 'Prep', false],
+      ]);
+      expect((await service.getProject({ id: 'trip' })).perSectionFlow).toBe(true);
+      const ids = async (view: 'available' | 'blocked') => (await service.listTasks({ status: 'all', view })).map((row) => row.id).sort();
+      expect(await ids('available')).toEqual(['find-site', 'find-tent']);
+      expect(await ids('blocked')).toEqual(['reserve-site']);
+    } finally {
+      await service.close();
+    }
+  }, REAL_SQLITE_TEST_TIMEOUT_MS);
+
   test('quickAdd follows the current Priorities setting while explicit priority stays available', async () => {
     const dir = createTempDir();
     const dbPath = join(dir, 'mindwtr.db');

@@ -51,6 +51,39 @@ describe('area actions', () => {
         return saved!;
     };
 
+    it('preserves explicit same-hue overrides through recolor, move, reset and area deletion', async () => {
+        const { addArea, addProject, updateArea, updateProject, deleteArea } = useTaskStore.getState();
+        const work = (await addArea('Work', { color: '#3b82f6' }))!;
+        const home = (await addArea('Home', { color: '#10b981' }))!;
+        const own = (await addProject('Own', '#3b82f6', { areaId: work.id, colorOverride: '#3b82f6' }))!;
+        const inherited = (await addProject('Inherited', '#3b82f6', { areaId: work.id }))!;
+        await updateArea(work.id, { color: '#ef4444' });
+        expect(useTaskStore.getState()._projectsById.get(own.id)).toMatchObject({ colorOverride: '#3b82f6', color: '#3b82f6' });
+        expect(useTaskStore.getState()._projectsById.get(inherited.id)?.color).toBe('#ef4444');
+        await updateProject(own.id, { areaId: home.id });
+        expect(useTaskStore.getState()._projectsById.get(own.id)).toMatchObject({ colorOverride: '#3b82f6', color: '#3b82f6' });
+        await updateProject(own.id, { colorOverride: null });
+        expect(useTaskStore.getState()._projectsById.get(own.id)).toMatchObject({ colorOverride: null, color: '#10b981' });
+        await deleteArea(home.id);
+        await flushPendingSave();
+        expect(latestSavedData().projects.find((row) => row.id === own.id)).toMatchObject({ areaId: undefined, color: '#94a3b8' });
+    });
+
+    it.each([null, '#3b82f6'] as const)('restores a trashed Project after Area deletion with override %s', async (colorOverride) => {
+        const { addArea, addProject, deleteProject, deleteArea, restoreProject } = useTaskStore.getState();
+        const work = (await addArea('Work', { color: '#3b82f6' }))!;
+        const selected = (await addProject('Project', '#3b82f6', { areaId: work.id, colorOverride }))!;
+        await deleteProject(selected.id);
+        await deleteArea(work.id);
+        expect(useTaskStore.getState()._projectsById.get(selected.id)?.areaId).toBe(work.id);
+        await restoreProject(selected.id);
+        await flushPendingSave();
+        const restored = latestSavedData().projects.find((row) => row.id === selected.id)!;
+        expect(restored.areaId).toBeUndefined();
+        expect(restored.color).toBe(colorOverride ?? '#94a3b8');
+        expect(restored.colorOverride).toBe(colorOverride);
+    });
+
     it('saves area tombstones and unassigns linked projects and tasks for sync', async () => {
         const { addArea, addProject, addSection, addTask, deleteArea } = useTaskStore.getState();
         const area = await addArea('Work', { color: '#3b82f6' });
@@ -265,7 +298,7 @@ describe('area actions', () => {
         const restoredProject = state.projects.find((item) => item.id === project.id);
         expect(restoredProject).toMatchObject({
             areaId: undefined,
-            color: '#3b82f6',
+            color: '#94a3b8',
         });
         expect(restoredProject?.deletedAt).toBeUndefined();
         expect(state.sections.find((item) => item.id === section.id)?.deletedAt).toBeUndefined();

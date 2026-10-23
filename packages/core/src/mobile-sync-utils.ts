@@ -13,7 +13,6 @@ import {
   isSyncFilePath as isCoreSyncFilePath,
   LEGACY_SYNC_FILE_NAME,
   resolveSyncBackend,
-  sanitizeSyncErrorMessage,
   SYNC_FILE_NAME,
   type SyncBackend as CoreSyncBackend,
 } from './sync-service-utils';
@@ -63,7 +62,8 @@ const ENCRYPTION_ERROR_PATTERN =
   /SyncEncryptionNoKeyError|SyncEncryptionPartlyEncryptedError|SYNC_ENCRYPTION_PARTLY_ENCRYPTED|SyncEncryptionTerminalError|SyncEncryptionKeyMissingError|SyncEncryptionRemotePlaintextError|SyncEncryptionTransitionIncompleteError|SYNC_ENCRYPTION_TRANSITION_INCOMPLETE|sync passphrase|wrong passphrase or corrupted data|MWENC1|no longer encrypted/i;
 
 export const formatMobileSyncErrorMessage = (error: unknown, backend: SyncBackend): string => {
-  const raw = sanitizeSyncErrorMessage(String(error));
+  // Classified from the raw text: the log sanitizer redacts the path the temporary Inbox pattern reads.
+  const raw = String(error);
   if (backend === 'file') {
     if (IOS_TEMP_INBOX_PATTERN.test(raw) && READONLY_ERROR_PATTERN.test(raw)) {
       return 'Selected iOS sync file is a temporary Files copy. Re-select it in Settings → Sync so Mindwtr can store durable access, or use iCloud Drive or WebDAV instead.';
@@ -74,7 +74,8 @@ export const formatMobileSyncErrorMessage = (error: unknown, backend: SyncBacken
 
 export const classifySyncFailure = (errorOrMessage: unknown): SyncFailureKind => {
   if (isSyncFileGenerationCorruptError(errorOrMessage)) return 'fileGenerationCorrupt';
-  const message = sanitizeSyncErrorMessage(String(errorOrMessage || ''));
+  // Classified from the raw text (only a kind leaves here): the log sanitizer redacts the paths some patterns read.
+  const message = String(errorOrMessage || '');
   if (!message.trim()) return 'unknown';
   if (ENCRYPTION_STATE_ERROR_PATTERN.test(message)) return 'encryptionState';
   if (ENCRYPTION_ERROR_PATTERN.test(message)) return 'encryption';

@@ -119,11 +119,12 @@ describe('native request receipts', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(receipts.saved(otherId, otherPayload)).toBeNull();
         expect(receipts.checkIdentity(otherId, payload)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        expect(writes).toHaveLength(1); // schema creation only; loader never rewrites unknown rows
+        expect(writes).toHaveLength(2); // receipt/local timer schema only; loader never rewrites unknown rows
+        expect(writes.every((write) => write.sql.startsWith('CREATE TABLE IF NOT EXISTS'))).toBe(true);
         expect(await pruneNativeRequestReceipts(client, new Date('2026-12-01T00:00:00.000Z'))).toBe(1);
-        expect(writes).toHaveLength(2);
-        expect(writes[1].sql).toBe('DELETE FROM native_request_receipts WHERE request_id = ? AND saved_at < ?');
-        expect(writes[1].params?.[0]).toBe(appId); // unknown other row remains on disk
+        expect(writes).toHaveLength(3);
+        expect(writes[2].sql).toBe('DELETE FROM native_request_receipts WHERE request_id = ? AND saved_at < ?');
+        expect(writes[2].params?.[0]).toBe(appId); // unknown other row remains on disk
         resetNativeRequestReceipts();
         expect(await loadNativeRequestReceipts(client)).toBe(2); // Android default still reads all
         expect(createNativeRequestReceipts({ save }).saved(otherId, otherPayload)).toEqual(ok({ legacy: true }));

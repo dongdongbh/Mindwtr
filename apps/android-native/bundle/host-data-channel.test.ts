@@ -89,6 +89,18 @@ const fixture = (bundle = source, onSql: (sql: string) => void = () => undefined
     return { state, open, poll, handles, written: (id: string) => Buffer.concat((handles.get(id) ?? closed.get(id))?.written ?? []) };
 };
 
+// Hold the requested timer's callback so pending/completed assertions do not depend on wall-clock rounding or runner load.
+const holdDelay = (f: ReturnType<typeof fixture>, delay: number) => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+        f.state.setTimeout = (callback: () => void, ms: number) => setTimeout(() => {
+            if (ms === delay) { release = callback; resolve(); }
+            else callback();
+        }, ms);
+    });
+    return { ready, release: () => release() };
+};
+
 // The second 1 MiB read starts with the bridge's error marker; the first 512 Ki-unit write ends inside a surrogate pair.
 const head = 'a'.repeat(512 * 1024 - 1) + '🦉';
 const text = head + 'b'.repeat(CHUNK_BYTES - Buffer.byteLength(head)) + `${MARKER}tail`;
@@ -198,9 +210,12 @@ describe('the data channel through the shipped bundle (D1c)', () => {
         expect(String(failed.error)).toContain('Storage request timed out');
         const roomy = fixture();
         roomy.state.debugProps = { sql_read_delay_ms: '300' };
-        const started = Date.now();
-        expect((await roomy.poll(roomy.state.MindwtrHost.boot('', '', 'journaled', JSON.stringify({ baseMs: 1000, msPerMiB: 10, storageTimeoutMs: 5000 })))).ok).toBe(true);
-        expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+        const delay = holdDelay(roomy, 300);
+        const ticket = roomy.state.MindwtrHost.boot('', '', 'journaled', JSON.stringify({ baseMs: 1000, msPerMiB: 10, storageTimeoutMs: 5000 }));
+        await delay.ready;
+        expect(roomy.state.MindwtrHost.poll(ticket)).toBeNull();
+        delay.release();
+        expect((await roomy.poll(ticket)).ok).toBe(true);
     });
 
     it('a debug write delay pauses an export across engine turns: its call is still open on the first poll', async () => {
@@ -208,12 +223,13 @@ describe('the data channel through the shipped bundle (D1c)', () => {
         expect((await f.poll(f.state.MindwtrHost.boot('', '', 'journaled'))).ok).toBe(true);
         f.state.debugProps = { channel_write_delay_ms: '300' };
         const handle = f.open({});
-        const started = Date.now();
+        const delay = holdDelay(f, 300);
         const ticket = f.state.MindwtrHost.dataExportFile('json', handle, 512 * 1024 * 1024);
-        await new Promise((done) => setTimeout(done, 20));
         expect(f.state.MindwtrHost.poll(ticket)).toBeNull();
+        await delay.ready;
+        expect(f.state.MindwtrHost.poll(ticket)).toBeNull();
+        delay.release();
         const answer = await f.poll(ticket);
         expect(answer.ok).toBe(true);
-        expect(Date.now() - started).toBeGreaterThanOrEqual(300);
     });
 });

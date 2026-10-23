@@ -1,4 +1,6 @@
 import { normalizeTaskReminderPolicy } from './task-reminder-policy';
+import { DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from './color-constants';
+import { isTaxonomyCatalog } from './taxonomy-catalog';
 import { runToEnd, SLICE_ITEMS, type CooperativePass } from './cooperative';
 import type { AppData, Area, Attachment, Person, Project, Section, Task } from './types';
 import { isSha256Hex } from './attachment-hash';
@@ -186,6 +188,19 @@ export const normalizeRevisionMetadata = <T extends RevisionMetadata>(item: T): 
 // tolerate that shape so a numeric `true` never gets coerced to `false` (#902).
 const normalizeSyncedBoolean = (value: unknown): boolean => value === true || value === 1;
 
+/**
+ * Flow mode booleans (#1429) keep three states: true, false, and absent (never set).
+ * The old-client keep rule in sync.ts reads absent as "this writer never carried
+ * the field", so false must stay false. Only a present key is touched, which keeps
+ * the record identical when the field is absent.
+ */
+const normalizeFlowBoolean = <T extends object>(item: T, key: keyof T & string): T => {
+    if (!hasOwnKey(item, key)) return item;
+    const value = (item as Record<string, unknown>)[key];
+    const normalized = value === true || value === 1 ? true : value === false || value === 0 ? false : undefined;
+    return normalized === value ? item : { ...item, [key]: normalized };
+};
+
 const normalizeProjectStatusForMerge = (value: unknown): Project['status'] => {
     if (value === 'active' || value === 'someday' || value === 'waiting' || value === 'archived') {
         return value;
@@ -200,10 +215,11 @@ const normalizeProjectStatusForMerge = (value: unknown): Project['status'] => {
 };
 
 /** Older clients uploaded `deletedAtBeforeProjectArchive: null`; absent is canonical (#1156). */
-export const normalizeSectionForSyncMerge = (section: Section): Section => (
+export const normalizeSectionForSyncMerge = (section: Section): Section => normalizeFlowBoolean(
     section.deletedAtBeforeProjectArchive === null
         ? { ...section, deletedAtBeforeProjectArchive: undefined }
-        : section
+        : section,
+    'isSequential',
 );
 
 export const normalizeTaskForSyncMerge = (
@@ -304,6 +320,7 @@ export const normalizeProjectForSyncMerge = (
         ...project,
         status: normalizeProjectStatusForMerge(project.status),
         color: normalizeOptionalString(project.color) ?? '#6B7280',
+        colorOverride: isValidProjectColorOverride(project.colorOverride) ? project.colorOverride : undefined,
         tagIds: normalizeStringArray(project.tagIds),
         isSequential: normalizeSyncedBoolean(project.isSequential),
         sequentialScope: normalizeProjectSequentialScope(project.sequentialScope),
@@ -318,8 +335,9 @@ export const normalizeProjectForSyncMerge = (
         areaId: normalizeOptionalString(project.areaId),
         areaTitle: normalizeOptionalString(project.areaTitle),
     };
-    const normalized = normalizeProjectLifecycleFields(candidate);
-    if (normalized !== candidate) {
+    const flowNormalized = normalizeFlowBoolean(candidate, 'perSectionFlow');
+    const normalized = normalizeProjectLifecycleFields(flowNormalized);
+    if (normalized !== flowNormalized) {
         logInfo('Project lifecycle normalized for sync', {
             scope: 'sync',
             context: { releaseCheck: 'v1.3.0/project-lifecycle-sync', count: 1 },
@@ -423,6 +441,7 @@ export const repairMergedSyncReferences = (data: AppData, nowIso: string): AppDa
             ...withRepairRevision(project),
             areaId: undefined,
             areaTitle: undefined,
+            color: project.colorOverride ?? DEFAULT_PROJECT_COLOR,
             updatedAt: nowIso,
         };
     });
@@ -637,6 +656,8 @@ export function* validateMergedSyncDataPass(data: AppData): CooperativePass<stri
     if (!Array.isArray(data.areas)) errors.push('areas must be an array');
     if (data.people !== undefined && !Array.isArray(data.people)) errors.push('people must be an array');
     if (!isObjectRecord(data.settings)) errors.push('settings must be an object');
+    else if (data.settings.taxonomy !== undefined && !isTaxonomyCatalog(data.settings.taxonomy))
+        errors.push('settings.taxonomy must contain valid saved contexts and tags');
 
     if (Array.isArray(data.tasks)) yield* validateEntityShape(data.tasks as unknown[], 'tasks', errors);
     if (Array.isArray(data.projects)) yield* validateEntityShape(data.projects as unknown[], 'projects', errors);
@@ -781,6 +802,9 @@ export function* validateMergedSyncDataPass(data: AppData): CooperativePass<stri
     if (Array.isArray(data.projects)) {
         data.projects.forEach((project, index) => {
             if (!isObjectRecord(project)) return;
+            if (!isValidProjectColorOverride(project.colorOverride)) {
+                errors.push(`projects[${index}].colorOverride must be a six-digit hex color or null`);
+            }
             if (isNonEmptyString(project.areaId) && !allAreaIds.has(project.areaId)) {
                 errors.push(`projects[${index}].areaId must reference an existing area`);
                 return;
@@ -889,5 +913,7 @@ export const validateSyncPayloadShape = (data: unknown, source: 'local' | 'remot
     if (record.settings !== undefined && !isObjectRecord(record.settings)) {
         errors.push(`${source} payload field "settings" must be an object when present`);
     }
+    if (isObjectRecord(record.settings) && record.settings.taxonomy !== undefined && !isTaxonomyCatalog(record.settings.taxonomy))
+        errors.push(`${source} payload field "settings.taxonomy" must contain valid saved contexts and tags`);
     return errors;
 };

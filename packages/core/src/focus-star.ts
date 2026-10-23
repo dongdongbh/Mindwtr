@@ -29,6 +29,7 @@ export type FocusStarContext = {
     focusTaskLimit: number;
     sequentialProjectIds?: Set<string>;
     sectionScopedProjectIds?: Set<string>;
+    sequentialSectionKeys?: Set<string>;
     now?: Date;
     endOfTodayIso?: string;
     frozenDates?: FocusDateLookup;
@@ -82,6 +83,7 @@ export function resolveFocusStarAction(task: Task, context: FocusStarContext): F
         frozenDates: context.frozenDates,
         sequentialProjectIds: context.sequentialProjectIds,
         sectionScopedProjectIds: context.sectionScopedProjectIds,
+        sequentialSectionKeys: context.sequentialSectionKeys,
         sections: context.sections,
         allowFutureStart: queued,
     });

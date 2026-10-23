@@ -1,9 +1,27 @@
 import Foundation
+import CoreFoundation
 import MindwtrNativeCore
 import SwiftUI
 import UIKit
 import Combine
 import AVFoundation
+
+// MARK: Board drag capture (Foundation-only seam)
+struct BoardOrderDragCapture: Equatable {
+    let nonce: String
+    let generation: Int
+    let hostID: ObjectIdentifier
+    let moveAllowed: Bool
+    let completionAllowed: Bool
+    let taskID: String
+    let status: String
+    let displayedJSON: String
+    let columnJSON: String
+    let filtersJSON: String
+    let ids: [String]
+    let headID: String?
+}
+// MARK: End Board drag capture
 
 #if DEBUG && targetEnvironment(simulator)
 private struct SimulatedSomedayDeleteRefusal: LocalizedError {
@@ -213,12 +231,27 @@ final class CoreModel: ObservableObject {
     @Published private(set) var selectedSurface: Surface = .inbox {
         didSet {
             if selectedSurface != .inbox { foregroundSyncIntent = nil }
+            if oldValue != selectedSurface && (oldValue == .inbox || selectedSurface == .inbox) {
+                clearInboxTaskSelection()
+                inboxGeneration += 1
+                inboxCurrent = false
+                inboxGroupPresented = false
+                retireInboxFilterPresentation()
+            }
+            if referenceSortRequest == nil, let caller = taskListSortCaller,
+               selectedSurface != taskListSortSurface(caller) { retireTaskListSort() }
             if oldValue == .project && selectedSurface != .project {
                 invalidateProjectAttachmentOpen()
                 cancelProjectFileImport()
             }
             if oldValue == .calendar && selectedSurface != .calendar { retireCalendarFeed() }
+            if oldValue == .trash && selectedSurface != .trash { retireTrashPresentation(clearSelection: true) }
             if oldValue == .settings && selectedSurface != .settings {
+                retireAppleRemindersSettings()
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                settingsAIProofTask?.cancel()
+                #endif
+                retireAISettingsPage()
                 retireNotificationSettingsPage()
                 retireCalendarSettingsPage()
                 calendarSubscriptionRuntimeRecovery = nil
@@ -234,13 +267,135 @@ final class CoreModel: ObservableObject {
             }
         }
     }
-    @Published private(set) var inbox: CoreObject = [:]
+    @Published private(set) var inbox: CoreObject = [:] { didSet { inboxItemIndexCache = nil } }
+    private var inboxItemIndexCache: [[String]: Int]?
+    @Published private(set) var inboxCurrent = false
+    @Published private(set) var inboxGroupPresented = false
+    @Published private(set) var inboxReadError: String?
+    private var inboxParams: CoreObject = ["groupBy": "none", "collapsedGroupIds": [String](), "filters": CoreObject()]
+    @Published private(set) var inboxFiltersPresented = false
+    @Published private(set) var inboxFilterPresentation = UUID()
+    @Published private(set) var inboxSearchText = ""
+    @Published private(set) var inboxLocationText = ""
+    @Published private(set) var inboxFilterPickerName = ""
+    @Published private(set) var inboxFilterPickerQuery = ""
+    @Published private(set) var inboxFilterPicker: CoreObject = [:]
+    @Published private(set) var inboxFilterPickerCurrent = false
+    @Published private(set) var inboxFilterPickerError: String?
+    private var inboxFilterSequence: UInt64 = 0
+    private var inboxFilterTextEdits: [String: (sequence: UInt64, value: String)] = [:]
+    private struct InboxFilterIntent {
+        let id: UInt64
+        let edit: CoreObject
+        let base: CoreObject
+        let textType: String?
+        let textSequence: UInt64?
+    }
+    private var inboxPendingFilterEdit: InboxFilterIntent?
+    private var inboxFilterNeedsRead = false
+    private var inboxFilterReadTask: Task<Void, Never>?
+    private var inboxFilterReadID: UUID?
+    private var inboxFilterPickerGeneration: UInt64 = 0
+    private var inboxFilterPickerDepth = 100
+    private var inboxFilterPickerNeedsRead = false
+    private var inboxGeneration = 0
+    @Published private(set) var inboxSelectionMode = false
+    @Published private(set) var inboxSelectedIDs: [String] = [] {
+        didSet { inboxSelectedIDBytes = Set(inboxSelectedIDs.map { Data($0.utf8) }) }
+    }
+    private var inboxSelectedIDBytes: Set<Data> = []
+    /// Byte-exact, as the former linear `utf8.elementsEqual` scan.
+    func inboxTaskSelected(_ id: String) -> Bool { inboxSelectedIDBytes.contains(Data(id.utf8)) }
+    @Published private(set) var inboxBulk: CoreObject = [:]
+    private var inboxSelectedRevisions: CoreObject = [:]
+    private var inboxAnchorID: String?
+    private var inboxRangeSelectMode = false
+    private var inboxSelectionGeneration = 0
+    private var inboxSelectionReading = false
+    private var inboxSelectionReadOwner: UUID?
+    private struct InboxBulkConfirmation {
+        let host: CoreHost
+        let params: String
+        let revision: String
+        let selectionGeneration: Int
+        let filterSequence: UInt64
+        let foregroundGeneration: Int
+    }
+    private var inboxBulkConfirmation: InboxBulkConfirmation?
+    private var inboxBulkDeleteOwner: (host: CoreHost, request: String)?
+    private var inboxBulkUndoOwner: (host: CoreHost, request: String)?
+    private var inboxTasksMoveOwner: (host: CoreHost, request: String)?
+    private var inboxTasksRemoveTagOwner: (host: CoreHost, request: String)?
+    @Published private(set) var inboxBulkRemovePresented = false
+    @Published private(set) var inboxBulkRemoveOptions: CoreObject = [:]
+    @Published private(set) var inboxBulkRemoveQuery = ""
+    @Published private(set) var inboxBulkRemovePicks: [String] = []
+    @Published private(set) var inboxBulkRemoveItems: [CoreObject] = []
+    @Published private(set) var inboxBulkRemoveTotal = 0
+    @Published private(set) var inboxBulkRemoveCurrent = false
+    @Published private(set) var inboxBulkRemoveReading = false
+    @Published private(set) var inboxBulkRemoveReadError: String?
+    private var inboxBulkRemoveTask: Task<Void, Never>?
+    private var inboxBulkRemoveGeneration = 0
+    private var inboxBulkRemoveContext: InboxBulkConfirmation?
+    private var inboxBulkRemoveIDs: [String] = []
+    private var inboxBulkRemoveRevisions: CoreObject = [:]
+    private var inboxBulkRemoveParams: CoreObject = [:]
+    private var inboxBulkRemoveRevision = ""
+    private var inboxTasksAddTagOwner: (host: CoreHost, request: String)?
+    // Task743: core-owned Organize draft; separate immutable Apply/create debts.
+    @Published private(set) var inboxBulkOrganizePresented = false
+    @Published private(set) var inboxBulkOrganizeView: CoreObject = [:]
+    @Published private(set) var inboxBulkOrganizeInputs: [String: String] = [:]
+    @Published private(set) var inboxBulkOrganizeCurrent = false
+    @Published private(set) var inboxBulkOrganizeReading = false
+    @Published private(set) var inboxBulkOrganizeReadError: String?
+    @Published private(set) var inboxBulkOrganizePickerKind: String?
+    @Published private(set) var inboxBulkOrganizePickerQuery = ""
+    @Published private(set) var inboxBulkOrganizePicker: CoreObject = [:]
+    @Published private(set) var inboxBulkOrganizePickerItems: [CoreObject] = []
+    @Published private(set) var inboxBulkOrganizePickerReading = false
+    @Published private(set) var inboxBulkOrganizePickerCurrent = false
+    @Published private(set) var inboxBulkOrganizePickerError: String?
+    private var inboxBulkOrganizeContext: InboxBulkConfirmation?
+    private var inboxBulkOrganizeIDs: [String] = []
+    private var inboxBulkOrganizeRevisions: CoreObject = [:]
+    private var inboxBulkOrganizeParams: CoreObject = [:]
+    private var inboxBulkOrganizeRevision = ""
+    private var inboxBulkOrganizeGeneration = 0
+    private var inboxBulkOrganizeTask: Task<Void, Never>?
+    private var inboxBulkOrganizePendingEdits: [CoreObject] = []
+    private var inboxBulkOrganizePickerGeneration = 0
+    private var inboxBulkOrganizePickerTask: Task<Void, Never>?
+    private var inboxTasksOrganizeOwner: (host: CoreHost, request: String)?
+    private var inboxOrganizeDestinationCreateOwner: (host: CoreHost, request: String)?
+
+    @Published private(set) var inboxBulkTagPresented = false
+    @Published private(set) var inboxBulkTagText = ""
+    @Published private(set) var inboxBulkTagOptions: CoreObject = [:]
+    @Published private(set) var inboxBulkTagCanSave = false
+    @Published private(set) var inboxBulkTagReadError: String?
+    @Published private(set) var inboxBulkTagWriteError = false
+    private var inboxBulkTagReadTask: Task<Void, Never>?
+    private var inboxBulkTagReadGeneration = 0
+    private var inboxBulkTagContext: InboxBulkConfirmation?
+    private var inboxBulkTagIDs: [String] = []
+    private var inboxBulkTagRevisions: CoreObject = [:]
+    private var inboxBulkNoticeHost: CoreHost?
+    private var inboxCollapsedGroups: CoreObject = [:]
+    private var initialInboxCollapsedGroupsRaw: String?
+    private var inboxPreferencesLoaded = false
+    private var inboxFoldPreferenceWritable = true
+    private var inboxPendingFold: (axis: String, ids: [String])?
+    private var inboxGroupingOperation: String?
+    private var inboxAutomaticPageAttempt: (generation: Int, offset: Int)?
     @Published private(set) var processInboxPresented = false {
         didSet { if processInboxPresented { foregroundSyncIntent = nil } }
     }
     @Published private(set) var processInboxView: CoreObject = [:]
     @Published private(set) var processInboxNotice: CoreObject = [:]
     @Published private(set) var processInboxToast = ""
+    @Published private(set) var processInboxUndoLabel = ""
     @Published private(set) var processInboxError: String?
     @Published private(set) var processInboxReadError: String?
     @Published private(set) var processInboxInputs: [String: String] = [:]
@@ -259,6 +414,35 @@ final class CoreModel: ObservableObject {
     @Published private(set) var focusCurrent = false
     @Published private(set) var focusLoading = false
     @Published private(set) var focusError: String?
+    @Published private(set) var pomodoroPanel: CoreObject = [:]
+    @Published private(set) var pomodoroError: String?
+    @Published private(set) var pomodoroPickerPresented = false
+    @Published private(set) var pomodoroTasks: [CoreObject] = []
+    @Published private(set) var pomodoroTaskCount = 0
+    private var pomodoroFeedback: CoreObject?
+    private var pomodoroCollapsed = false
+    private var initialPomodoroCollapsed = false
+    private var pomodoroCollapsePreference = "nativeFoundation.pomodoro.collapsed"
+    private var pomodoroNeedsRead = true
+    private var pomodoroWorkHost: CoreHost?
+    private var pomodoroActionsWaiting = 0
+    private var pomodoroWork: Task<Void, Never>?
+    private var pomodoroWake: Task<Void, Never>?
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private(set) var pomodoroAlarmTestEnabled = false
+    private var pomodoroAlarmTestRetired = false
+    @Published private(set) var pomodoroAlarmTestState = ""
+    private var pomodoroAlarmTestOutcome = ""
+    private var pomodoroAlarmTestHost: CoreHost?
+    #endif
+    private var pomodoroPickerRevision = ""
+    private struct PomodoroCommand {
+        let host: CoreHost
+        let request: String
+        let action: String
+        let before: CoreObject
+    }
+    private var pomodoroCommand: PomodoroCommand?
     @Published private(set) var reviewOverview: CoreObject = [:]
     @Published private(set) var reviewGuide: CoreObject = [:]
     @Published private(set) var reviewKind = ""
@@ -315,6 +499,67 @@ final class CoreModel: ObservableObject {
     @Published private(set) var settingsMenu: CoreObject = [:]
     @Published private(set) var settingsSearch = ""
     @Published private(set) var settingsManagePresented = false
+    @Published private(set) var settingsAIPresented = false
+    @Published private(set) var settingsAIProjection: NativeAISettingsProjection?
+    @Published private(set) var settingsAILoading = false
+    @Published private(set) var settingsAIReadFailed = false
+    @Published private(set) var settingsAIAdvanced = false
+    @Published private(set) var settingsAIOptions: NativeAIRequestTimeoutOptions?
+    @Published private(set) var settingsAIOptionsFailed = false
+    @Published private(set) var settingsAISaveFailed = false
+    private var settingsAITimeoutRequest: NativeAIRequestTimeoutRequest?
+    private var settingsAITimeoutHost: CoreHost?
+    private var settingsAITimeoutOperationID: UUID?
+    @Published private(set) var settingsAIEffortOptions: NativeAIReasoningEffortOptions?
+    @Published private(set) var settingsAIEffortOptionsFailed = false
+    @Published private(set) var settingsAIEffortSaveFailed = false
+    private var settingsAIEffortRequest: NativeAIReasoningEffortRequest?
+    private var settingsAIEffortHost: CoreHost?
+    private var settingsAIEffortOperationID: UUID?
+    @Published private(set) var settingsAIGeminiOptions: NativeAIGeminiThinkingBudgetOptions?
+    @Published private(set) var settingsAIGeminiOptionsFailed = false
+    @Published private(set) var settingsAIGeminiSaveFailed = false
+    private var settingsAIGeminiRequest: NativeAIGeminiThinkingBudgetRequest?
+    private var settingsAIGeminiHost: CoreHost?
+    private var settingsAIGeminiOperationID: UUID?
+    private var settingsAISession = UUID()
+    private var settingsAIReadID: UUID?
+    @Published private var settingsAITask: Task<Void, Never>?
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var settingsAITestDelayOnce = false
+    private var settingsAITestFailureOnce = false
+    private var settingsAIOptionsTestFailureOnce = false
+    private var settingsAITimeoutTestHoldOnce = false
+    private var settingsAITimeoutRefreshTestFailureOnce = false
+    private var settingsAITimeoutFixtureConfigured = false
+    private var settingsAIEffortOptionsTestFailureOnce = false
+    private var settingsAIEffortTestHoldOnce = false
+    private var settingsAIEffortRefreshTestFailureOnce = false
+    private var settingsAIEffortFixtureConfigured = false
+    @Published private(set) var settingsAIEffortTestHeld = false
+    @Published private(set) var settingsAIEffortFixtureState = ""
+    private var settingsAIGeminiOptionsTestFailureOnce = false
+    private var settingsAIGeminiTestHoldOnce = false
+    private var settingsAIGeminiRefreshTestFailureOnce = false
+    private var settingsAIGeminiFixtureConfigured = false
+    @Published private(set) var settingsAIGeminiTestHeld = false
+    @Published private(set) var settingsAIGeminiFixtureState = ""
+    @Published private(set) var settingsAIGeminiRetryAdmissionState = "not-invoked"
+    var settingsAIGeminiRetryFixtureValue: String {
+        guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
+              NativeAppLaunch.arguments.filter({ $0 == "--native-ai-gemini-fixture" }).count == 1,
+              let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return "" }
+        return settingsAIGeminiRetryAdmissionState
+    }
+    @Published private(set) var settingsAITimeoutTestHeld = false
+    @Published private(set) var settingsAITimeoutFixtureState = ""
+    @Published private(set) var settingsAITestHeld = false
+    @Published private(set) var settingsAIProofState = ""
+    private var settingsAIProofTask: Task<Void, Never>?
+    private var settingsAIProofID: UUID?
+    private var settingsAIProofReadAttempts = 0
+    private var settingsAIProofSearchInFlight = 0
+    #endif
     @Published private(set) var settingsAdvancedPresented = false
     @Published private(set) var settingsAboutPresented = false
     @Published private(set) var settingsAboutOpening = false
@@ -397,12 +642,39 @@ final class CoreModel: ObservableObject {
         SettingsSyncFormKind(rawValue: settingsSync.object("panel").text("kind"))
     }
     private var settingsSyncTokenDraft: String? { settingsSyncTokenEdited ? settingsSyncToken : nil }
+    @Published private(set) var settingsRemindersPresented = false
+    @Published private(set) var appleRemindersSettings: CoreObject = [:]
+    @Published private(set) var appleRemindersLists: [CoreObject] = []
+    @Published private(set) var appleRemindersError: String?
+    @Published private(set) var appleRemindersStatus: String?
+    @Published private var appleRemindersPendingEdit: (json: String, expected: String?, host: CoreHost)?
+    @Published private var appleRemindersImportRetry = false
+    @Published private(set) var appleRemindersAutoNotice: String?
+    private var appleRemindersAutoRequested = false
+    private var appleRemindersAutoActive = false
+    private var appleRemindersAutoToken: UUID?
+    private var appleRemindersAutoOwner: UUID?
+    private var appleRemindersAutoTask: Task<Void, Never>?
+    private var appleRemindersAutoLastRun: TimeInterval = -.infinity
+    private var appleRemindersNoticeID = UUID()
+    private var appleRemindersRaw: String?
+    private var appleRemindersSession = UUID()
+    private var appleRemindersOwner: UUID?
+    private var appleRemindersTask: Task<Void, Never>?
+    private var appleRemindersActive = false
+    private var appleRemindersWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
+    var appleRemindersNeedsRetry: Bool { appleRemindersPendingEdit != nil || appleRemindersImportRetry }
+    var appleRemindersCanEdit: Bool {
+        ready && settingsSyncPresented && settingsRemindersPresented && !busy && !retryNeeded
+            && !settingsSyncChecking && !settingsSyncRestartRequired && !appLock.concealed
+            && !appleRemindersSettings.isEmpty && !appleRemindersNeedsRetry
+    }
     var settingsSyncCanEdit: Bool {
-        ready && settingsSyncPresented && !busy && !retryNeeded && !settingsSyncNeedsReload
+        ready && settingsSyncPresented && !settingsRemindersPresented && !busy && !retryNeeded && !settingsSyncNeedsReload
             && !settingsSyncRestartRequired && !appLock.concealed && settingsSyncAvailable && !settingsSync.isEmpty
             && settingsSyncEncryptionOwner == nil
     }
-    var settingsSyncCanClose: Bool { !busy && !settingsSyncChecking && !settingsSyncRestartRequired && settingsSyncEncryptionOwner == nil }
+    var settingsSyncCanClose: Bool { !settingsRemindersPresented && !busy && !settingsSyncChecking && !settingsSyncRestartRequired && settingsSyncEncryptionOwner == nil }
     func settingsSyncActionEnabled(_ action: String) -> Bool {
         settingsSyncCanEdit && !settingsSyncChecking && settingsSyncURL == settingsSyncValidatedURL
             && (settingsSyncFormKind == .webdav || (settingsSyncFormKind == .selfhosted
@@ -547,6 +819,17 @@ final class CoreModel: ObservableObject {
     @Published private(set) var gtdInbox: CoreObject = [:]
     @Published private(set) var settingsGtdCapturePresented = false
     @Published private(set) var gtdCapture: CoreObject = [:]
+    @Published private(set) var settingsGtdPomodoroPresented = false
+    @Published private(set) var gtdPomodoro: CoreObject = [:]
+    @Published private(set) var gtdPomodoroFocusDraft = ""
+    @Published private(set) var gtdPomodoroBreakDraft = ""
+    @Published private(set) var gtdPomodoroNotice: String?
+    private var gtdPomodoroNoticeShown = false
+    private var gtdPomodoroNoticeTask: Task<Void, Never>?
+    private var gtdPomodoroDraftDirty: Bool {
+        settingsGtdPomodoroPresented && (gtdPomodoroFocusDraft != gtdPomodoro.object("minutes").text("focus")
+            || gtdPomodoroBreakDraft != gtdPomodoro.object("minutes").text("break"))
+    }
     @Published private(set) var settingsGtdTaskEditorPresented = false
     @Published private(set) var gtdTaskEditor: CoreObject = [:]
     @Published private(set) var gtdTaskEditorPresetError: String?
@@ -570,10 +853,10 @@ final class CoreModel: ObservableObject {
     private var gtdWorkflowRequest: String?
     private var gtdWorkflowEdit: CoreObject = [:]
     var gtdWorkflowPending: Bool { gtdWorkflowRequest != nil || gtdWorkflowAwaitingRefresh }
-    var gtdWorkflowDraftDirty: Bool { settingsGtdPresented && !settingsGtdArchivePresented && !settingsGtdReviewPresented && !settingsGtdInboxPresented && !settingsGtdCapturePresented && !settingsGtdTaskEditorPresented && gtdScheduleDraft != gtdWorkflow.object("defaultScheduleTime").text("value") }
+    var gtdWorkflowDraftDirty: Bool { gtdPomodoroDraftDirty || (settingsGtdPresented && !settingsGtdPomodoroPresented && !settingsGtdArchivePresented && !settingsGtdReviewPresented && !settingsGtdInboxPresented && !settingsGtdCapturePresented && !settingsGtdTaskEditorPresented && gtdScheduleDraft != gtdWorkflow.object("defaultScheduleTime").text("value")) }
     var gtdWorkflowEnabled: Bool {
         ready && selectedSurface == .settings && settingsGtdPresented && !busy && !retryNeeded
-            && !gtdWorkflowPending && gtdWorkflowReadError == nil && !(settingsGtdArchivePresented ? gtdArchive : settingsGtdTaskEditorPresented ? gtdTaskEditor : settingsGtdCapturePresented ? gtdCapture : settingsGtdInboxPresented ? gtdInbox : settingsGtdReviewPresented ? gtdReview : gtdWorkflow).isEmpty
+            && !gtdWorkflowPending && gtdWorkflowReadError == nil && !(settingsGtdPomodoroPresented ? gtdPomodoro : settingsGtdArchivePresented ? gtdArchive : settingsGtdTaskEditorPresented ? gtdTaskEditor : settingsGtdCapturePresented ? gtdCapture : settingsGtdInboxPresented ? gtdInbox : settingsGtdReviewPresented ? gtdReview : gtdWorkflow).isEmpty
     }
     @Published private(set) var settingsDataPresented = false
     @Published private(set) var dataSettings: CoreObject = [:]
@@ -820,7 +1103,7 @@ final class CoreModel: ObservableObject {
     private var settingsTaxonomySaveDisabled = true
     private var settingsTaxonomyNameGeneration = 0
     var settingsTaxonomyActive: Bool { settingsTaxonomyKind != nil }
-    var settingsTaxonomyPresented: Bool { settingsTaxonomyActive && settingsTaxonomyAction == "rename" }
+    var settingsTaxonomyPresented: Bool { settingsTaxonomyActive && settingsTaxonomyAction != "delete" }
     var settingsTaxonomyCanCancel: Bool {
         settingsTaxonomyActive && !busy && !retryNeeded && settingsTaxonomyRequest == nil && !settingsTaxonomyAcknowledged
     }
@@ -1081,6 +1364,10 @@ final class CoreModel: ObservableObject {
     private var referenceBulkRemoveRevision = ""
     private var referenceTasksRemoveTagRequest: String?
     @Published var referencePanel = ""
+    enum TaskListSortCaller: Equatable { case inbox, reference }
+    @Published private(set) var taskListSortCaller: TaskListSortCaller?
+    private var taskListSortPresentationID = UUID()
+    private var taskListSortHost: CoreHost?
     @Published private(set) var referenceSortOptions: CoreObject = [:]
     @Published private(set) var referenceSortError: String?
     private var referenceSortRequest: String?
@@ -1149,6 +1436,60 @@ final class CoreModel: ObservableObject {
     @Published private(set) var trashCurrent = false
     @Published private(set) var trashError: String?
     private var trashRestoreRequest: (project: Bool, json: String)?
+    @Published private(set) var trashSelectionMode = false
+    @Published private(set) var trashSelectedTaskIDs: [String] = []
+    @Published private(set) var trashSelectedProjectIDs: [String] = []
+    private var trashSelectedTaskRevisions: CoreObject = [:]
+    private var trashSelectedProjectRevisions: CoreObject = [:]
+    private var trashPresentationGeneration = 0
+    private var trashReadGeneration = 0
+    private var trashBusyOwner: UUID?
+    private enum TrashBulkOperation {
+        case restore, purge
+        var write: String { self == .restore ? "trashItemsRestoreWrite" : "trashItemsPurgeWrite" }
+        var outcome: String { self == .restore ? "trashItemsRestoreRetryOutcome" : "trashItemsPurgeRetryOutcome" }
+    }
+    private struct TrashBulkRequest {
+        let operation: TrashBulkOperation
+        let selectionMode: Bool
+        let id: UUID
+        let host: CoreHost
+        let json: String
+        let count: Int
+        let presentation: Int
+        var dispatched = false
+    }
+    private var trashBulkRequest: TrashBulkRequest?
+    struct TrashPurgeConfirmation: Identifiable {
+        let id: UUID
+        let host: CoreHost
+        let json: String
+        let count: Int
+        let presentation: Int
+        let selectionMode: Bool
+        let copy: CoreObject
+    }
+    @Published private(set) var trashPurgeConfirmation: TrashPurgeConfirmation?
+    #if DEBUG && targetEnvironment(simulator)
+    @Published private(set) var trashBulkTestState = ""
+    private(set) var trashBulkFixtureEnabled = false
+    private var trashBulkTestMode = ""
+    private var trashBulkTestHeldOnce = false
+    private var trashBulkTestWaiter: CheckedContinuation<Void, Never>?
+    private var trashBulkTestSelectAll = false
+    private var trashBulkTestSubmissions = 0
+    private var trashBulkTestLastRequest = ""
+    private var trashBulkTestConfirmedCount = 0
+    private var trashBulkTestAwaitingRead = false
+    private var trashBulkTestReadFailed = false
+    private var trashBulkTestReplaced = false
+    private(set) var trashPurgeFixtureEnabled = false
+    private var trashPurgeTestMutationStarted = false
+    private var trashPurgeTestMutationCompleted = false
+    private var trashPurgeTestMutationError = ""
+    private var trashPurgeTestRetiredConfirmation: UUID?
+    private var trashPurgeTestRefreshRequest = ""
+    #endif
     @Published private(set) var theme: CoreObject = [:]
     @Published private(set) var area: CoreObject = [:]
     @Published private(set) var strings: CoreObject = [:]
@@ -1175,7 +1516,13 @@ final class CoreModel: ObservableObject {
     @Published private(set) var retryNeeded = false
     @Published private(set) var error: String?
     @Published var capturePresented = false {
-        didSet { if capturePresented { foregroundSyncIntent = nil } }
+        didSet {
+            if capturePresented != oldValue {
+                capturePresentationID = UUID()
+                retireCaptureEditNavigation()
+            }
+            if capturePresented { foregroundSyncIntent = nil }
+        }
     }
     @Published private(set) var areaPickerPresented = false {
         didSet { if areaPickerPresented { foregroundSyncIntent = nil } }
@@ -1360,6 +1707,9 @@ final class CoreModel: ObservableObject {
     private var reminderConfirmedRevision: UInt64 = 0
     private var reminderWakeTicket: UInt64 = 0
     private var reminderAttemptedTicket: UInt64 = 0
+    private var pomodoroAlarmWakeTicket: UInt64 = 0
+    private var pomodoroAlarmAttemptedTicket: UInt64 = 0
+    private var pomodoroAlarmConfirmedTicket: UInt64 = 0
     private var reminderDebounceReady = true
     private var reminderDrainLease: UIBackgroundTaskIdentifier = .invalid
     private var reminderDrainOwner: UUID?
@@ -1501,9 +1851,42 @@ final class CoreModel: ObservableObject {
     private var resumeSyncTestThrowOnce = false
     #endif
 
+    private weak var inboxViewBoundaryRecordedHost: CoreHost?
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                settingsAIProofTask?.cancel(); settingsAIProofState = ""; settingsAIProofReadAttempts = 0
+                #endif
+                // Warm list ownership never crosses a Host replacement; durable recovery routes by source.
+                clearProcessInboxUndoOffer()
+                retireTaskListSortHost()
+                clearInboxTaskSelection()
+                inboxSelectionReadOwner = nil; inboxSelectionReading = false
+                if taskActionNotice.text("source") == "inbox", taskActionUndoRequest == nil {
+                    taskActionNotice = [:]; inboxBulkNoticeHost = nil
+                }
+                inboxGeneration += 1
+                inboxParams = ["groupBy": "none", "collapsedGroupIds": [String](), "filters": CoreObject()]
+                retireInboxFilterPresentation()
+                inboxPendingFilterEdit = nil; inboxFilterTextEdits = [:]; inboxFilterNeedsRead = false
+                inboxSearchText = ""; inboxLocationText = ""
+                inboxCurrent = false; inboxGroupPresented = false; inboxReadError = nil
+                inboxPreferencesLoaded = false; inboxCollapsedGroups = [:]
+                inboxPendingFold = nil; inboxGroupingOperation = nil
+                if oldValue != nil { initialInboxCollapsedGroupsRaw = nil }
+                pomodoroWork?.cancel(); pomodoroWake?.cancel()
+                pomodoroWork = nil; pomodoroWake = nil; pomodoroWorkHost = nil
+                pomodoroCommand = nil; pomodoroFeedback = nil; pomodoroPanel = [:]
+                pomodoroError = nil; pomodoroNeedsRead = true; pomodoroPickerPresented = false
+                cancelAppleRemindersAutoImport()
+                appleRemindersAutoOwner = nil; appleRemindersAutoTask = nil; appleRemindersAutoToken = nil
+                appleRemindersAutoLastRun = -.infinity; appleRemindersAutoNotice = nil
+                retireAppleRemindersSettings()
+                appleRemindersOwner = nil; appleRemindersTask = nil
+                appleRemindersPendingEdit = nil
+                appleRemindersImportRetry = false
+                retireAISettingsPage()
                 retireNotificationSettingsPage()
                 retireCalendarSettingsPage()
                 settingsAdvancedPresented = false
@@ -1593,6 +1976,11 @@ final class CoreModel: ObservableObject {
     private var boardFilters: CoreObject = [:]
     private var boardPendingEdit: CoreObject?
     @Published private var boardActionRequest: String?
+    private var boardActionHost: CoreHost?
+    private var boardActionForeground = 0
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    private var boardMoveFixtureConfigured = false
+    #endif
     private var boardRecoveredResult: CoreObject?
     private var taskPromotionRecoveredResult: CoreObject?
     private var projectDuplicateRecoveredResult: CoreObject?
@@ -1686,6 +2074,60 @@ final class CoreModel: ObservableObject {
     private var previewedText = ""
     private var captureID = UUID().uuidString
     private var capturePending = false
+    private enum CaptureSubmissionKind {
+        case single(next: String)
+        case lines(ids: [String])
+
+        var method: String {
+            switch self {
+            case .single: return "captureSubmit"
+            case .lines: return "captureLinesSubmit"
+            }
+        }
+    }
+    private struct CaptureSubmission {
+        let id: UUID
+        let host: CoreHost
+        let presentationID: UUID
+        let navigationID: UUID
+        let captureID: String
+        let request: String
+        let kind: CaptureSubmissionKind
+    }
+    private struct CaptureLinesConfirmation {
+        let submission: CaptureSubmission
+        let text: String
+        let options: String
+        let count: Int
+    }
+    private struct CaptureEditHandoff {
+        let host: CoreHost
+        let presentationID: UUID
+        let navigationID: UUID
+        let taskID: String
+    }
+    private var capturePresentationID = UUID()
+    private var captureNavigationID = UUID()
+    private var captureSubmission: CaptureSubmission?
+    private var captureLinesConfirmation: CaptureLinesConfirmation?
+    private var captureBusyOwner: UUID?
+    private var captureEditHandoff: CaptureEditHandoff?
+    #if DEBUG && targetEnvironment(simulator)
+    @Published private(set) var captureSaveEditTestState = ""
+    private var captureSaveEditTestMode: String?
+    private var captureSaveEditTestWaiter: CheckedContinuation<Void, Never>?
+    private var captureSaveEditTestHeldOnce = false
+    private var captureSaveEditTestReadHeld = false
+    private var captureSaveEditTestSubmissions = 0
+    private var captureSaveEditTestReplaced = false
+    private var captureLinesTestEnabled = false
+    private var captureLinesTestSubmissions = 0
+    private var captureLinesTestIDs: [String] = []
+    private var captureLinesTestPaste = "basic"
+    var captureSaveEditFixtureEnabled: Bool { captureSaveEditTestMode != nil }
+    var captureLinesFixtureEnabled: Bool { captureLinesTestEnabled }
+    var captureSaveEditPostAckTestHeld: Bool { captureSaveEditTestReadHeld && captureSaveEditTestWaiter != nil }
+    #endif
     private var mindSweepRequest: String?
     private var mindSweepRequestID: String?
     private var mindSweepRequestGroup: String?
@@ -1700,6 +2142,17 @@ final class CoreModel: ObservableObject {
     private var processInboxRequestID: String?
     private var processInboxRequestTaskID: String?
     private var processInboxAfterRequestID: String?
+    private struct ProcessInboxUndoOwner {
+        let host: CoreHost
+        let session: String
+        let decisionID: String
+        let taskID: String
+        let kind: String
+        let expiresAt: TimeInterval
+    }
+    private var processInboxUndoOffer: ProcessInboxUndoOwner?
+    private var processInboxUndoPending: ProcessInboxUndoOwner?
+    private var processInboxUndoExpiry: Task<Void, Never>?
     private var processInboxPendingEdits: [CoreObject] = []
     private var processInboxEditTask: Task<Void, Never>?
     private var processInboxTransitioning = false
@@ -2117,6 +2570,8 @@ final class CoreModel: ObservableObject {
     private var trashCaller: Surface = .inbox
     private var trashLoadedDepth = 50
     private let pageSize = 50
+    /// Rebuild windows after page zero use the host maximum (`NATIVE_HOST_MAX_WINDOW`).
+    private let followUpWindow = 100
     private var preference = "nativeFoundation.capture.addAnother"
     private var storedLanguage = ""
     private var storedTheme = ""
@@ -2183,6 +2638,14 @@ final class CoreModel: ObservableObject {
         return ready && processInboxPresented && selectedSurface == caller && !processInboxView.isEmpty
             && !busy && !retryNeeded && !processInboxTransitioning && processInboxRequest == nil
             && processInboxAfterRequestID == nil && processInboxReadError == nil
+    }
+    var processInboxUndoEnabled: Bool {
+        guard let offer = processInboxUndoOffer else { return false }
+        return ready && processInboxPresented && host === offer.host && processInboxSessionID == offer.session
+            && ProcessInfo.processInfo.systemUptime < offer.expiresAt && !processInboxUndoLabel.isEmpty
+            && !busy && !retryNeeded && !processInboxTransitioning && processInboxRequest == nil
+            && processInboxAfterRequestID == nil && processInboxReadError == nil
+            && !appLock.concealed && UIApplication.shared.applicationState == .active
     }
     var processInboxCloseEnabled: Bool {
         processInboxPresented && !busy && !retryNeeded && processInboxRequest == nil
@@ -2970,8 +3433,19 @@ final class CoreModel: ObservableObject {
             && !historyArchiveSelectedIDs.isEmpty && historyArchiveSelectedRevisions.count == historyArchiveSelectedIDs.count
     }
     var historyPickerActionsEnabled: Bool { historyActionsEnabled && historyPickerCurrent }
-    var trashActionsEnabled: Bool {
+    private var trashOperationAdmissionEnabled: Bool {
         ready && selectedSurface == .trash && trashCurrent && !busy && !retryNeeded && !taskPresented
+            && !capturePresented && !areaPickerPresented && !appLock.concealed && !settingsSyncRestartRequired
+            && trashBulkRequest == nil
+    }
+    var trashActionsEnabled: Bool { trashOperationAdmissionEnabled && trashPurgeConfirmation == nil }
+    var trashClearEnabled: Bool { trashActionsEnabled && trash.number("total") > 0 }
+    var trashRowActionsEnabled: Bool { trashActionsEnabled && !trashSelectionMode }
+    var trashSelectedCount: Int { trashSelectedTaskIDs.count + trashSelectedProjectIDs.count }
+    var trashBulkRestoreEnabled: Bool {
+        trashActionsEnabled && trashSelectionMode && trashSelectedCount > 0
+            && trashSelectedTaskRevisions.count == trashSelectedTaskIDs.count
+            && trashSelectedProjectRevisions.count == trashSelectedProjectIDs.count
     }
     var quickAccessView: String { moreMenu.text("quickAccessView") }
     var quickAccessLabel: String {
@@ -2980,7 +3454,17 @@ final class CoreModel: ObservableObject {
     private var captureIsCurrent: Bool {
         previewedText == draft && capture.object("options").text("note") == noteDraft
     }
-    var canSave: Bool { !busy && !retryNeeded && !contextPickerPresented && captureIsCurrent && capture.flag("canSave") }
+    var canSave: Bool {
+        ready && capturePresented && !appLock.concealed && !appLock.authenticating
+            && UIApplication.shared.applicationState == .active && !busy && !retryNeeded && !capturePending
+            && !contextPickerPresented && !captureLinesConfirmationPresented && captureIsCurrent && capture.flag("canSave")
+    }
+    var captureLinesConfirmationPresented: Bool { captureLinesConfirmation != nil && !bulkConfirm.isEmpty }
+    var canConfirmCaptureLines: Bool {
+        guard let confirmation = captureLinesConfirmation else { return false }
+        return ready && !busy && !retryNeeded && !capturePending && !appLock.concealed && !appLock.authenticating
+            && UIApplication.shared.applicationState == .active && captureLinesConfirmationCurrent(confirmation)
+    }
     var contextPickerReady: Bool {
         !busy && !retryNeeded && captureIsCurrent && capture.object("picker").text("kind") == "context"
             && capture.object("picker").text("query") == contextQuery
@@ -4011,6 +4495,8 @@ final class CoreModel: ObservableObject {
                     }
                 }
                 await previous?.value
+                // A newer queued checkpoint writes the latest snapshot; skip this superseded durable write.
+                guard taskRecoveryCheckpointTaskID == checkpointID else { return }
                 if owned, taskAttachmentCheckpointFailed != nil { return }
                 do {
                     #if DEBUG && targetEnvironment(simulator)
@@ -4712,7 +5198,12 @@ final class CoreModel: ObservableObject {
     private var taskTimeSpentPending: Bool { taskTimeSpentInput != taskTimeSpentResolvedInput }
 
     func start() async {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        // Keep the deliberately retired fixture owner available until its held callback drains.
+        guard !pomodoroAlarmTestEnabled || !pomodoroAlarmTestRetired else { return }
+        #endif
         guard !busy else { return }
+        retireTrashPresentation(clearSelection: true)
         if projectFileAvailabilityPending {
             await retryProjectFileAvailability()
             return
@@ -4823,6 +5314,17 @@ final class CoreModel: ObservableObject {
                     backupExportTestHoldOnce = arguments.contains("--native-backup-export-hold-once")
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     #endif
+                    settingsAITestDelayOnce = arguments.contains("--native-ai-summary-delay-once")
+                    settingsAITestFailureOnce = arguments.contains("--native-ai-summary-read-failure-once")
+                    settingsAIOptionsTestFailureOnce = arguments.contains("--native-ai-timeout-options-failure-once")
+                    settingsAITimeoutTestHoldOnce = arguments.contains("--native-ai-timeout-readmission-hold-once")
+                    settingsAITimeoutRefreshTestFailureOnce = arguments.contains("--native-ai-timeout-refresh-failure-once")
+                    settingsAIEffortOptionsTestFailureOnce = arguments.contains("--native-ai-reasoning-options-failure-once")
+                    settingsAIEffortTestHoldOnce = arguments.contains("--native-ai-reasoning-readmission-hold-once")
+                    settingsAIEffortRefreshTestFailureOnce = arguments.contains("--native-ai-reasoning-refresh-failure-once")
+                    settingsAIGeminiOptionsTestFailureOnce = arguments.contains("--native-ai-gemini-options-failure-once")
+                    settingsAIGeminiTestHoldOnce = arguments.contains("--native-ai-gemini-readmission-hold-once")
+                    settingsAIGeminiRefreshTestFailureOnce = arguments.contains("--native-ai-gemini-refresh-failure-once")
                     settingsAboutTestUnavailable = arguments.contains("--native-about-lookup-unavailable")
                     settingsFeedbackTestUnavailable = arguments.contains("--native-feedback-unavailable")
                     settingsSyncTestThrowOnce = arguments.contains("--native-sync-command-throw-once")
@@ -4839,7 +5341,64 @@ final class CoreModel: ObservableObject {
                     host = CoreHost(databaseURL: database, bundleURL: bundle,
                         deviceStorage: (directory, namespace),
                         isolatedTestID: identifier)
+                    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                    if arguments.contains("--native-board-move-commit-failure-once"), !boardMoveFixtureConfigured {
+                        try await host!.configureIsolatedBoardMoveCommitFailureOnce()
+                        boardMoveFixtureConfigured = true
+                    }
+                    if arguments.contains("--native-ai-summary-proof") { try await host!.configureIsolatedAISummaryCheckpoint() }
+                    if arguments.contains("--native-ai-timeout-fixture"), arguments.contains("--native-ai-timeout-commit-failure-once"),
+                       !settingsAITimeoutFixtureConfigured {
+                        try await host!.configureIsolatedAIRequestTimeoutCommitFailureOnce()
+                        settingsAITimeoutFixtureConfigured = true
+                    }
+                    if arguments.contains("--native-ai-reasoning-fixture"), arguments.contains("--native-ai-reasoning-commit-failure-once"),
+                       !settingsAIEffortFixtureConfigured {
+                        try await host!.configureIsolatedAIReasoningEffortCommitFailureOnce()
+                        settingsAIEffortFixtureConfigured = true
+                    }
+                    if arguments.contains("--native-ai-gemini-fixture"), arguments.contains("--native-ai-gemini-commit-failure-once"),
+                       !settingsAIGeminiFixtureConfigured {
+                        try await host!.configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce()
+                        settingsAIGeminiFixtureConfigured = true
+                    }
+                    if arguments.contains("--native-pomodoro-alarm-fixture") {
+                        pomodoroAlarmTestEnabled = true
+                        try await host!.configureIsolatedPomodoroAlarmFixture(
+                            holdFirstAdd: arguments.contains("--native-pomodoro-alarm-hold-first-add"),
+                            denied: arguments.contains("--native-pomodoro-alarm-denied"),
+                            seedOwned: arguments.contains("--native-pomodoro-alarm-seed-owned"))
+                        pomodoroAlarmTestHost = host
+                    }
+                    #endif
                     #if DEBUG && targetEnvironment(simulator)
+                    if arguments.contains("--native-apple-reminders-fixture") {
+                        try await host!.configureIsolatedAppleRemindersFixture(
+                            denied: arguments.contains("--native-apple-reminders-denied"),
+                            failPreferenceOnce: arguments.contains("--native-apple-reminders-preference-failure-once"))
+                    }
+                    if arguments.contains("--native-trash-bulk-fixture") || arguments.contains("--native-trash-purge-fixture") {
+                        trashBulkFixtureEnabled = true
+                        trashPurgeFixtureEnabled = arguments.contains("--native-trash-purge-fixture")
+                        trashBulkTestMode = ProcessInfo.processInfo.environment["MINDWTR_TRASH_BULK_DELIVERY"] ?? ""
+                        publishTrashBulkTestState()
+                    }
+                    if arguments.contains("--native-capture-save-edit-fixture") {
+                        captureSaveEditTestMode = ProcessInfo.processInfo.environment["MINDWTR_CAPTURE_SAVE_EDIT_DELIVERY"] ?? ""
+                        publishCaptureSaveEditFixtureState()
+                    }
+                    if arguments.contains("--native-capture-lines-fixture") {
+                        captureLinesTestEnabled = true
+                        captureSaveEditTestMode = ProcessInfo.processInfo.environment["MINDWTR_CAPTURE_LINES_DELIVERY"] ?? ""
+                        captureLinesTestPaste = ProcessInfo.processInfo.environment["MINDWTR_CAPTURE_LINES_PASTE"] ?? "basic"
+                        publishCaptureSaveEditFixtureState()
+                    }
+                    if arguments.contains("--native-pomodoro-terminal-failure-once") {
+                        try await host!.configureIsolatedCaptureTerminalFailureOnce(pomodoroOnly: true)
+                    }
+                    if arguments.contains("--native-capture-terminal-failure-once") {
+                        try await host!.configureIsolatedCaptureTerminalFailureOnce()
+                    }
                     startupInventoryReadTestFailureOnce = arguments.contains("--native-startup-inventory-read-failure-once")
                     calendarEventTaskPredispatchTestHoldOnce = arguments.contains("--native-calendar-event-task-predispatch-hold-once")
                     calendarEventTaskDispatchTestState = ""
@@ -4877,6 +5436,8 @@ final class CoreModel: ObservableObject {
                     initialProjectShowCompleted = try legacy.value(forKey: "mindwtr:view:project-detail:show-completed:v1") == "true"
                     projectShowCompletedPreference = "nativeRNRehearsal.project.showCompleted"
                     focusShowDetailsPreference = "nativeRNRehearsal.focus.showDetails"
+                    pomodoroCollapsePreference = "nativeRNRehearsal.pomodoro.collapsed"
+                    initialPomodoroCollapsed = try legacy.value(forKey: "@mindwtr_pomodoro_collapsed") == "true"
                     focusExpandedSectionsPreference = "nativeRNRehearsal.focus.expandedSections"
                     referenceViewPreference = "nativeRNRehearsal.reference.view"
                     historyViewPreferences = ["done": "nativeRNRehearsal.history.done.view",
@@ -4907,6 +5468,7 @@ final class CoreModel: ObservableObject {
                         }
                     }
                     initialReferenceGroupBy = try legacy.value(forKey: "mindwtr:view:reference:groupBy:v1")
+                    initialInboxCollapsedGroupsRaw = try legacy.value(forKey: "mindwtr:view:group-collapse:inbox:v1")
                     if let raw = try legacy.value(forKey: "mindwtr:view:group-collapse:reference:v1"),
                        let data = raw.data(using: .utf8),
                        let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
@@ -4947,6 +5509,7 @@ final class CoreModel: ObservableObject {
                let initialManageOpenSections {
                 preferenceDefaults.set(initialManageOpenSections, forKey: manageOpenSectionsPreference)
             }
+            pomodoroCollapsed = (preferenceDefaults.object(forKey: pomodoroCollapsePreference) as? Bool) ?? initialPomodoroCollapsed
             focusShowDetails = (preferenceDefaults.object(forKey: focusShowDetailsPreference) as? Bool)
                 ?? initialFocusShowDetails
             var expanded = initialFocusExpandedSections
@@ -4958,6 +5521,7 @@ final class CoreModel: ObservableObject {
                 }
             }
             collapsedFocusSections = Set(focusSectionKeys.filter { expanded[$0] == false })
+            loadInboxPreferences()
             if let stored = preferenceDefaults.object(forKey: referenceViewPreference) {
                 let view = stored as? [String: Any] ?? [:]
                 initialReferenceGroupBy = view["groupBy"] as? String
@@ -5031,13 +5595,46 @@ final class CoreModel: ObservableObject {
                 taskRecoveryGateVisible = true
             }
             let recovery = startup.object("recovery")
+            if recovery.text("method") == "iosAIRequestTimeoutCommit" {
+                // CoreHost start validates the durable receipt and retires its journal.
+                let result = recovery.object("result")
+                guard Set(result.keys) == Set(["value", "changed"]),
+                      let value = result["value"] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
+                      [30, 60, 120, 300].contains(value.intValue), value.doubleValue == Double(value.intValue),
+                      let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(), changed.boolValue else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                selectedSurface = .settings; settingsAdvancedPresented = true
+            }
+            if recovery.text("method") == "iosAIReasoningEffortCommit" {
+                // Startup reports only a validated durable receipt after journal retirement.
+                let result = recovery.object("result")
+                guard Set(result.keys) == Set(["value", "changed"]),
+                      let value = result["value"] as? String, NativeAIReasoningEffortValue(rawValue: value) != nil,
+                      let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(), changed.boolValue else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                selectedSurface = .settings; settingsAdvancedPresented = true
+            }
+            if recovery.text("method") == "iosAIGeminiThinkingBudgetCommit" {
+                // CoreHost start validates the durable receipt and retires its journal.
+                let result = recovery.object("result")
+                guard Set(result.keys) == Set(["value", "changed"]),
+                      let value = result["value"] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
+                      NativeAIGeminiThinkingBudgetValue(rawValue: value.intValue) != nil, value.doubleValue == Double(value.intValue),
+                      let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(), changed.boolValue else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                selectedSurface = .settings; settingsAdvancedPresented = true
+            }
             if recovery.text("method") == "checklistPreparedCommit", !recovery.object("result").object("cancellation").isEmpty {
                 selectedSurface = .history
                 historyTabs = ["tab": "archived"]
             }
-            if ["taskDeleteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit"].contains(recovery.text("method")) { selectedSurface = .trash }
+            if ["taskDeleteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "trashItemsRestoreCommit", "trashItemsPurgeCommit"].contains(recovery.text("method")) { selectedSurface = .trash }
             if ["archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "archiveTaskCompletedAtCommit"].contains(recovery.text("method")) {
-                if recovery.text("source") == "reference" { selectedSurface = .reference }
+                if recovery.text("source") == "inbox" { selectedSurface = .inbox }
+                else if recovery.text("source") == "reference" { selectedSurface = .reference }
                 else {
                     selectedSurface = .history
                     historyTabs = ["tab": recovery.text("source") == "done" ? "done" : "archived"]
@@ -5047,12 +5644,34 @@ final class CoreModel: ObservableObject {
             if ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(recovery.text("method")), recovery.text("source") == "reference" {
                 selectedSurface = .reference
             }
+            if ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(recovery.text("method")), recovery.text("source") == "board" {
+                let requestID = recovery.text("requestId"), result = recovery.object("result")
+                guard Set(recovery.keys) == Set(["method", "source", "requestId", "result"]),
+                      UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
+                      !result.text("id").isEmpty, result.text("id").utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
+                selectedSurface = .board
+                taskCompletionRequest = nil; taskActionUndoRequest = nil; retryNeeded = false
+                boardCompletionOwner = nil; boardCompletionUndoOwner = nil; boardCompletionNoticeHost = nil
+                if recovery.text("method") == "taskCompletionCommit" {
+                    guard validBoardCompletionResult(result) else { throw CocoaError(.coderReadCorrupt) }
+                    taskActionRequestID = requestID
+                    showTaskAction(result, operation: "completion", source: "board")
+                } else {
+                    guard Set(result.keys) == Set(["id"]) else { throw CocoaError(.coderReadCorrupt) }
+                    taskActionNotice = [:]; taskActionRequestID = nil
+                }
+            }
             if recovery.text("method") == "referenceProjectNextActionCommit", recovery.text("source") == "reference" {
                 selectedSurface = .reference
                 let result = recovery.object("result")
                 if result.text("action") == "add", result.flag("openAfterSave") {
                     referenceProjectNextActionEditID = result.text("id")
                 }
+            }
+            if ["inboxTasksMoveCommit", "inboxTasksAddTagCommit", "inboxTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit"].contains(recovery.text("method")), recovery.text("source") == "inbox" {
+                selectedSurface = .inbox
+                clearInboxTaskSelection()
+                taskActionNotice = [:]; inboxBulkNoticeHost = nil
             }
             if ["referenceTasksMoveCommit", "referenceTasksAddTagCommit", "referenceTasksRemoveTagCommit"].contains(recovery.text("method")), recovery.text("source") == "reference" {
                 selectedSurface = .reference
@@ -5108,6 +5727,7 @@ final class CoreModel: ObservableObject {
                 settingsGtdReviewPresented = ["dailyReviewFocusStep", "weeklyReviewContextStep"].contains(recovery.object("result").text("type"))
                 settingsGtdInboxPresented = ["inboxTwoMinute", "inboxProjectFirst", "inboxContextStep", "inboxSchedule"].contains(recovery.object("result").text("type"))
                 settingsGtdCapturePresented = ["defaultArea", "quickAddAutoClean", "naturalLanguageDates"].contains(recovery.object("result").text("type"))
+                settingsGtdPomodoroPresented = ["pomodoroLinkTask", "pomodoroAutoStartBreaks", "pomodoroAutoStartFocus", "pomodoroCompletionAlert", "pomodoroDurations"].contains(recovery.object("result").text("type"))
                 settingsGtdTaskEditorPresented = ["taskEditorSectionOpen", "taskEditorPreset", "taskEditorFieldVisible", "taskEditorFieldSection", "taskEditorOrder", "taskEditorReset"].contains(recovery.object("result").text("type"))
                 if ["taskEditorFieldSection", "taskEditorOrder"].contains(recovery.object("result").text("type")) {
                     gtdTaskEditorFieldId = recovery.object("result").text("field")
@@ -5169,7 +5789,8 @@ final class CoreModel: ObservableObject {
             if projectLifecycleRecoveredResult != nil { selectedSurface = .projects }
             try await readSelectedSurface()
             ready = true
-            retryNeeded = projectFileAddPending || projectFileAvailabilityPending
+            retryNeeded = projectFileAddPending || projectFileAvailabilityPending || settingsAITimeoutRequest != nil || settingsAIEffortRequest != nil || settingsAIGeminiRequest != nil
+            if settingsAITimeoutRequest != nil || settingsAIEffortRequest != nil || settingsAIGeminiRequest != nil { error = label("settings.feedback.actionFailed") }
             await reconcileTaskAttachmentPresentation()
             if let reply = backupDocumentRecoveredReply, let currentHost = host {
                 try await acceptBackupDocumentReply(reply, from: currentHost)
@@ -5297,6 +5918,8 @@ final class CoreModel: ObservableObject {
 
     private var operationContextClean: Bool {
         !capturePresented && !capturePending && draft.isEmpty && noteDraft.isEmpty
+            && !inboxGroupPresented && !inboxFiltersPresented && !inboxFilterWorkPending
+            && !inboxSelectionMode && !inboxBulkCompositionBlocked
             && calendarEventOpenPresentation == nil
             && !processInboxPresented && processInboxRequest == nil && !processInboxTransitioning
             && !mindSweepPresented && mindSweepRequest == nil && mindSweepDraft.isEmpty
@@ -5629,6 +6252,16 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    func recordInboxViewBoundaryRendered() async {
+        guard ready, !appLock.concealed, selectedSurface == .inbox, !Task.isCancelled,
+              let currentHost = host, inboxViewBoundaryRecordedHost !== currentHost else { return }
+        inboxViewBoundaryRecordedHost = currentHost
+        _ = try? await currentHost.call("logLine", argumentsJSON: json([
+            "Native iOS Inbox view boundary rendered",
+            #"{"releaseCheck":"v1.3.5/ios-inbox-view-boundary","outcome":"rendered"}"#,
+        ]))
+    }
+
     private func recordEntityLink(_ owner: EntityLinkOwner, kind: String, outcome: String) async {
         guard entityLinkCurrent(owner) else { return }
         if owner.delivery.input.isSearch {
@@ -5842,9 +6475,12 @@ final class CoreModel: ObservableObject {
         if !reminderSceneActive {
             reminderSceneActive = true
             reminderWakeTicket &+= 1; reminderDebounceReady = true
+            pomodoroAlarmWakeTicket &+= 1
+            pomodoroNeedsRead = true
             reminderDebounceTask?.cancel(); reminderDebounceTask = nil
             reminderTopUpTask?.cancel(); reminderTopUpTask = nil
         }
+        admitPomodoroRuntime()
         admitReminderLifecycle()
     }
 
@@ -5877,6 +6513,8 @@ final class CoreModel: ObservableObject {
         reminderObservationClaim = UUID(); reminderObservationToken = nil
         reminderRevision = 0; reminderConfirmedRevision = 0
         reminderWakeTicket &+= 1; reminderAttemptedTicket = reminderWakeTicket
+        pomodoroAlarmWakeTicket &+= 1; pomodoroAlarmAttemptedTicket = pomodoroAlarmWakeTicket
+        pomodoroAlarmConfirmedTicket = 0
         if let previous, observed === previous, let registration {
             Task { await previous.removeReminderObserver(registration.id) }
         }
@@ -5886,6 +6524,8 @@ final class CoreModel: ObservableObject {
     func reminderClockChanged() {
         reminderTopUpTask?.cancel(); reminderTopUpTask = nil
         reminderWakeTicket &+= 1
+        pomodoroAlarmWakeTicket &+= 1
+        pomodoroNeedsRead = true; admitPomodoroRuntime()
         debounceReminderLifecycle()
     }
 
@@ -5896,11 +6536,15 @@ final class CoreModel: ObservableObject {
         case .sourceChanged(let revision):
             guard revision > reminderRevision else { return }
             reminderRevision = revision; reminderWakeTicket &+= 1
+            pomodoroAlarmWakeTicket &+= 1
+            pomodoroNeedsRead = true; admitPomodoroRuntime()
             reminderTopUpTask?.cancel(); reminderTopUpTask = nil
             debounceReminderLifecycle()
         case .admissionReady(let revision):
             reminderRevision = max(reminderRevision, revision)
             reminderWakeTicket &+= 1
+            pomodoroAlarmWakeTicket &+= 1
+            admitPomodoroRuntime()
             admitReminderLifecycle()
         }
     }
@@ -5958,16 +6602,19 @@ final class CoreModel: ObservableObject {
     }
 
     private func admitReminderLifecycle() {
-        guard reminderLifecycleTask == nil, reminderDebounceReady, reminderWakeTicket != reminderAttemptedTicket,
+        guard reminderLifecycleTask == nil, reminderDebounceReady,
+              reminderWakeTicket != reminderAttemptedTicket || pomodoroAlarmWakeTicket != pomodoroAlarmAttemptedTicket,
               let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
               reminderSceneActive, UIApplication.shared.applicationState == .active,
               ready, !retryNeeded, !settingsSyncRestartRequired, !appLockRecoveryPending,
               !appLock.concealed, !appLock.authenticating, !busy, !taskSavePending,
+              pomodoroWork == nil, pomodoroWorkHost == nil, pomodoroCommand == nil,
               !taskRecoverySaving, !taskRecoveryHydrating, !taskRecoveryStartupCorrupt,
               !projectFileAddPending, !projectFileAvailabilityPending, !projectNotesWritePending,
               projectNotesFlushTask == nil, projectAttachmentDownloadOwner == nil else { return }
         let owner = ReminderLifecycleOwner(id: UUID(), host: observed, token: token,
             generation: reminderGeneration)
+        let reconcileTaskReminders = reminderWakeTicket != reminderAttemptedTicket
         reminderAttemptedTicket = reminderWakeTicket
         reminderLifecycleOwner = owner
         reminderLifecycleTask = Task { [weak self] in
@@ -5977,6 +6624,9 @@ final class CoreModel: ObservableObject {
                     self.endReminderDrain(owner.id)
                     self.reminderLifecycleTask = nil; self.reminderLifecycleOwner = nil
                     self.admitReminderLifecycle()
+                    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                    Task { await self.refreshPomodoroAlarmTestState() }
+                    #endif
                 }
             }
             do {
@@ -6000,23 +6650,75 @@ final class CoreModel: ObservableObject {
                     self.reminderRegistration = registration
                     self.reminderRevision = max(self.reminderRevision, registration.revision)
                 }
-                let revision = self.reminderRevision, ticket = self.reminderWakeTicket
-                self.reminderAttemptedTicket = ticket
-                let result = try await owner.host.reconcileReminders()
-                guard self.reminderLifecycleCurrent(owner) else { throw CancellationError() }
-                let deadline = try self.validateReminderLifecycleReply(result)
-                self.reminderConfirmedRevision = max(self.reminderConfirmedRevision, revision)
-                guard self.reminderWakeTicket == ticket else { return }
-                self.installReminderTopUp(deadline, owner: owner)
-                _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
-                    "Native iOS reminder lifecycle reconciled",
-                    #"{"releaseCheck":"v1.3.5/ios-reminder-lifecycle","outcome":"confirmed"}"#,
-                ]))
+                if reconcileTaskReminders {
+                    let revision = self.reminderRevision, ticket = self.reminderWakeTicket
+                    self.reminderAttemptedTicket = ticket
+                    let result = try await owner.host.reconcileReminders()
+                    guard self.reminderLifecycleCurrent(owner) else { throw CancellationError() }
+                    let deadline = try self.validateReminderLifecycleReply(result)
+                    self.reminderConfirmedRevision = max(self.reminderConfirmedRevision, revision)
+                    if self.reminderWakeTicket == ticket {
+                        self.installReminderTopUp(deadline, owner: owner)
+                        _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
+                            "Native iOS reminder lifecycle reconciled",
+                            #"{"releaseCheck":"v1.3.5/ios-reminder-lifecycle","outcome":"confirmed"}"#,
+                        ]))
+                    }
+                }
             } catch {
                 // Retain dirty work, but only a new source/activation/foreign settlement may retry.
             }
+            guard self.reminderLifecycleCurrent(owner), !self.busy, self.pomodoroWork == nil,
+                  self.pomodoroWorkHost == nil, self.pomodoroCommand == nil,
+                  self.pomodoroAlarmWakeTicket != self.pomodoroAlarmAttemptedTicket else { return }
+            let ticket = self.pomodoroAlarmWakeTicket
+            self.pomodoroAlarmAttemptedTicket = ticket
+            do {
+                let result = try self.decode(await owner.host.reconcilePomodoroAlarms())
+                guard self.reminderLifecycleCurrent(owner), Set(result.keys) == Set(["outcome"]),
+                      ["scheduled", "retained", "cancelled", "uncertain", "uninitialized"].contains(result.text("outcome")) else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                if result.text("outcome") != "uncertain" { self.pomodoroAlarmConfirmedTicket = ticket }
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                self.pomodoroAlarmTestOutcome = result.text("outcome")
+                #endif
+            } catch {
+                // SDK uncertainty stays dirty until a new relevant wake; callbacks never spin retries.
+            }
         }
     }
+
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    func refreshPomodoroAlarmTestState() async {
+        guard pomodoroAlarmTestEnabled, let observed = pomodoroAlarmTestHost else { return }
+        do {
+            var state = try decode(await observed.readIsolatedPomodoroAlarmFixture())
+            guard pomodoroAlarmTestHost === observed else { return }
+            state["alarmDirty"] = pomodoroAlarmWakeTicket != pomodoroAlarmConfirmedTicket
+            state["lifecycleActive"] = reminderSceneActive
+            state["lifecycleGeneration"] = reminderGeneration
+            state["ownerGeneration"] = reminderLifecycleOwner?.generation as Any? ?? NSNull()
+            state["draining"] = reminderDrainOwner != nil
+            state["outcome"] = pomodoroAlarmTestOutcome
+            state["hostRetired"] = host !== observed
+            pomodoroAlarmTestState = try json(state)
+        } catch { pomodoroAlarmTestState = "fixture-read-unavailable" }
+    }
+
+    func releasePomodoroAlarmTestAdd() async {
+        guard pomodoroAlarmTestEnabled, let observed = pomodoroAlarmTestHost else { return }
+        try? await observed.releaseIsolatedPomodoroAlarmFixture()
+        await refreshPomodoroAlarmTestState()
+    }
+
+    func retirePomodoroAlarmTestHost() {
+        guard pomodoroAlarmTestEnabled, let observed = pomodoroAlarmTestHost, host === observed else { return }
+        pomodoroAlarmTestRetired = true
+        host = nil; ready = false; busy = false
+        Task { await refreshPomodoroAlarmTestState() }
+    }
+    #endif
 
     func requestCalendarPushLifecycle(token: UUID?, active: Bool) {
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
@@ -6627,6 +7329,7 @@ final class CoreModel: ObservableObject {
     // Observe the actual scene episode before concealment clears presentation.
     // Inactive/authentication alone cannot manufacture a resume opportunity.
     func observeForegroundSyncScene(_ phase: ScenePhase, token: UUID?) {
+        if phase != .active { clearProcessInboxUndoOffer() }
         if phase == .active {
             foregroundSyncBackgroundObserved = false
             return
@@ -6650,7 +7353,9 @@ final class CoreModel: ObservableObject {
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
         let wasActive = foregroundSyncSceneActive
         foregroundSyncSceneActive = active && UIApplication.shared.applicationState == .active
-        guard foregroundSyncSceneActive else { cancelForegroundSync(); return }
+        if foregroundSyncSceneActive { pomodoroNeedsRead = true; admitPomodoroRuntime() }
+        else { pomodoroWake?.cancel(); pomodoroWake = nil }
+        guard foregroundSyncSceneActive else { clearInboxTaskSelection(); cancelForegroundSync(); return }
         if !wasActive && !appLock.concealed, let currentHost = host {
             let generation = foregroundSyncGeneration
             Task { [weak self, weak currentHost] in
@@ -6783,6 +7488,10 @@ final class CoreModel: ObservableObject {
 
     func refresh() async {
         if selectedSurface == .calendar { calendarFeedRefreshRequested = true }
+        // The alert owns its frozen Trash projection until Confirm or Cancel.
+        // Ordinary reads resume on the next refresh; lifecycle/context changes
+        // retire the alert separately before requesting their own reads.
+        guard selectedSurface != .trash || trashPurgeConfirmation == nil else { return }
         guard !appLock.concealed, !savedSearchWritePresented, !settingsSyncRestartRequired,
               calendarSettingsCloseTask == nil else { return }
         if taskStartupSaveReceipt != nil {
@@ -6811,7 +7520,9 @@ final class CoreModel: ObservableObject {
     }
 
     func selectSurface(_ surface: Surface) async {
+        guard !inboxBulkCompositionBlocked else { return }
         guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
+        guard !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending else { return }
         if selectedSurface == .project { guard await flushProjectNotesEdit() else { return } }
         guard ready, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented,
               !calendarComposerPresented, !mindSweepPresented, !processInboxPresented,
@@ -6834,7 +7545,9 @@ final class CoreModel: ObservableObject {
     }
 
     func toggleMore() async {
+        guard !inboxBulkCompositionBlocked else { return }
         guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
+        guard !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending else { return }
         guard ready, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented,
               !calendarComposerPresented, !mindSweepPresented, !processInboxPresented,
               !projectRenameEditing, somedaySectionRenameIndex == nil,
@@ -6902,6 +7615,7 @@ final class CoreModel: ObservableObject {
         settingsManageRequested = false
         settingsReadError = nil
         settingsSearch = ""
+        retireAISettingsPage()
         retireNotificationSettingsPage()
         retireCalendarSettingsPage()
         settingsGeneralPresented = false
@@ -6915,6 +7629,8 @@ final class CoreModel: ObservableObject {
         settingsGtdInboxPresented = false
         settingsGtdCapturePresented = false
         settingsGtdTaskEditorPresented = false
+        settingsGtdPomodoroPresented = false
+        clearGtdPomodoroNotice()
         gtdTaskEditorFieldId = nil
         gtdCaptureAreaPicker = false
         generalPreferencePicker = nil
@@ -6945,9 +7661,744 @@ final class CoreModel: ObservableObject {
         catch { self.error = error.localizedDescription }
     }
 
+    var settingsAICanOpen: Bool { settingsAITask == nil && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil }
+    var settingsAICanCancel: Bool { settingsAIPresented && (settingsAITimeoutRequest != nil || settingsAIEffortRequest != nil || settingsAIGeminiRequest != nil) && !retryNeeded }
+    var settingsAITimeoutCanChoose: Bool {
+        guard let currentHost = host else { return false }
+        return settingsAIAdvanced && settingsAIOptions != nil && settingsAITask == nil
+            && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && !busy && aiSettingsSummaryCurrent(currentHost, session: settingsAISession)
+    }
+
+    func openAISettingsSummary() {
+        guard ready, selectedSurface == .settings, settingsAdvancedPresented, !settingsAIPresented,
+              !busy, !retryNeeded, !appLock.concealed, !settingsCalendarPresented,
+              !settingsSyncPresented, !settingsSyncRestartRequired, settingsAITask == nil,
+              settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil,
+              UIApplication.shared.applicationState == .active else { return }
+        observeDiagnosticsConcealment()
+        settingsSearchTask?.cancel(); settingsSearchGeneration += 1
+        settingsAISession = UUID()
+        settingsAIPresented = true
+        retryAISettingsSummary()
+    }
+
+    func retireAISettingsPage() {
+        settingsAISession = UUID()
+        settingsAITask?.cancel()
+        settingsAIAdvanced = false; settingsAIOptions = nil; settingsAIOptionsFailed = false; settingsAISaveFailed = false
+        settingsAIEffortOptions = nil; settingsAIEffortOptionsFailed = false; settingsAIEffortSaveFailed = false
+        settingsAIGeminiOptions = nil; settingsAIGeminiOptionsFailed = false; settingsAIGeminiSaveFailed = false
+        settingsAIPresented = false
+        settingsAIProjection = nil
+        settingsAIReadFailed = false
+        settingsAILoading = false
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        settingsAITestHeld = false; settingsAITimeoutTestHeld = false; settingsAITimeoutFixtureState = ""
+        settingsAIEffortTestHeld = false; settingsAIEffortFixtureState = ""
+        settingsAIGeminiTestHeld = false; settingsAIGeminiFixtureState = ""
+        #endif
+        // Keep the task until its private read drains before admitting another page read.
+    }
+
+    private func aiSettingsSummaryCurrent(_ capturedHost: CoreHost, session: UUID) -> Bool {
+        host === capturedHost && settingsAISession == session && ready && settingsAIPresented
+            && selectedSurface == .settings && !appLock.concealed && !retryNeeded && !Task.isCancelled
+            && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil
+            && UIApplication.shared.applicationState == .active
+    }
+
+    func retryAISettingsSummary() {
+        guard let currentHost = host, settingsAITask == nil, settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, !busy,
+              aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
+        let session = settingsAISession, id = UUID()
+        settingsAIReadID = id; settingsAILoading = true; settingsAIReadFailed = false
+        settingsAIProjection = nil; settingsAIEffortOptions = nil; settingsAIEffortOptionsFailed = false
+        settingsAIGeminiOptions = nil; settingsAIGeminiOptionsFailed = false
+        settingsAITask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.settingsAIReadID == id {
+                    self.settingsAITask = nil; self.settingsAIReadID = nil; self.settingsAILoading = false
+                }
+            }
+            do {
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if self.settingsAIProofEnabled { self.settingsAIProofReadAttempts += 1 }
+                #endif
+                let projection = try await currentHost.readAISettingsProjection()
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if self.settingsAITestDelayOnce {
+                    self.settingsAITestDelayOnce = false; self.settingsAITestHeld = true
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    self.settingsAITestHeld = false
+                }
+                if self.settingsAITestFailureOnce {
+                    self.settingsAITestFailureOnce = false
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                #endif
+                guard self.aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+                self.settingsAIProjection = projection
+                _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                    "Native iOS AI settings summary published",
+                    #"{"releaseCheck":"v1.3.5/ios-ai-settings-summary","outcome":"confirmed"}"#,
+                ]))
+                if self.aiSettingsSummaryCurrent(currentHost, session: session), projection.aiProvider == .openai {
+                    await self.readAIReasoningEffortOptions(currentHost, session: session)
+                }
+                if self.aiSettingsSummaryCurrent(currentHost, session: session), projection.aiProvider == .gemini {
+                    await self.readAIGeminiThinkingBudgetOptions(currentHost, session: session)
+                }
+                if self.aiSettingsSummaryCurrent(currentHost, session: session), self.settingsAIAdvanced {
+                    await self.readAIRequestTimeoutOptions(currentHost, session: session)
+                }
+            } catch {
+                guard self.aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+                self.settingsAIReadFailed = true
+            }
+        }
+    }
+
+    func toggleAIAdvanced() {
+        guard settingsAITask == nil, settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, !busy, !retryNeeded else { return }
+        settingsAIAdvanced.toggle()
+        settingsAIOptions = nil; settingsAIOptionsFailed = false
+        if settingsAIAdvanced { retryAIRequestTimeoutOptions() }
+    }
+
+    func retryAIRequestTimeoutOptions() {
+        guard let currentHost = host, settingsAIAdvanced, settingsAITask == nil,
+              settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, !busy,
+              aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
+        let session = settingsAISession, id = UUID()
+        settingsAIReadID = id; settingsAIOptions = nil; settingsAIOptionsFailed = false
+        settingsAITask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.settingsAIReadID == id { self.settingsAITask = nil; self.settingsAIReadID = nil }
+            }
+            await self.readAIRequestTimeoutOptions(currentHost, session: session)
+        }
+    }
+
+    private func readAIRequestTimeoutOptions(_ currentHost: CoreHost, session: UUID) async {
+        do {
+            let options = try await currentHost.readAIRequestTimeoutOptions()
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if settingsAIOptionsTestFailureOnce {
+                settingsAIOptionsTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
+            }
+            #endif
+            guard aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced else { return }
+            settingsAIOptions = options; settingsAIOptionsFailed = false
+        } catch {
+            guard aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced else { return }
+            settingsAIOptions = nil; settingsAIOptionsFailed = true
+        }
+    }
+
+    func saveAIRequestTimeout(_ value: Int) {
+        guard settingsAITimeoutCanChoose, let currentHost = host, let options = settingsAIOptions,
+              [30, 60, 120, 300].contains(value) else { return }
+        settingsAITimeoutRequest = .init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected)
+        settingsAITimeoutHost = currentHost
+        settingsAIOptions = nil
+        beginAIRequestTimeoutOperation()
+    }
+
+    private func beginAIRequestTimeoutOperation() {
+        guard !busy, settingsAITask == nil, settingsAITimeoutOperationID == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil,
+              let request = settingsAITimeoutRequest, let currentHost = settingsAITimeoutHost,
+              host === currentHost, ready, settingsAIPresented, selectedSurface == .settings,
+              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        let operation = UUID(), session = settingsAISession, wasUncertain = retryNeeded
+        settingsAITimeoutOperationID = operation; busy = true; settingsAISaveFailed = false
+        settingsAITask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.settingsAITimeoutOperationID == operation {
+                    self.settingsAITimeoutOperationID = nil; self.settingsAITask = nil
+                    self.finishOperation()
+                }
+            }
+            do {
+                let result = try await currentHost.setAIRequestTimeout(request, readmission: { [weak self] in
+                    guard let self else { return false }
+                    return await self.aiRequestTimeoutReadmission(currentHost, request: request, operation: operation, session: session)
+                })
+                guard self.settingsAITimeoutOperationID == operation,
+                      self.settingsAITimeoutRequest == request, self.settingsAITimeoutHost === currentHost,
+                      result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
+                // A durable acknowledgment may win cancellation. Never publish into a retired page.
+                self.settingsAITimeoutRequest = nil; self.settingsAITimeoutHost = nil
+                self.retryNeeded = false; self.error = nil
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                await self.readAIRequestTimeoutFixtureState(currentHost, session: session)
+                #endif
+                if self.aiSettingsSummaryCurrent(currentHost, session: session) {
+                    await self.refreshAISettingsAfterTimeout(currentHost, session: session)
+                }
+            } catch {
+                guard self.settingsAITimeoutOperationID == operation,
+                      self.settingsAITimeoutRequest == request, self.settingsAITimeoutHost === currentHost else { return }
+                // Existing rejection status can precede terminal retirement on a retry.
+                // Preserve an already-uncertain exact owner even for a typed rejection.
+                if self.isDefiniteRejection(error) && !wasUncertain {
+                    self.settingsAITimeoutRequest = nil; self.settingsAITimeoutHost = nil
+                    self.retryNeeded = false; self.error = nil
+                    if self.aiSettingsSummaryCurrent(currentHost, session: session) {
+                        self.settingsAISaveFailed = true
+                        await self.refreshAISettingsAfterTimeout(currentHost, session: session)
+                    }
+                } else {
+                    self.retryNeeded = true
+                    self.error = self.label("settings.feedback.actionFailed")
+                    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                    await self.readAIRequestTimeoutFixtureState(currentHost, session: session)
+                    #endif
+                    if self.host === currentHost && self.settingsAISession == session && self.settingsAIPresented {
+                        self.settingsAISaveFailed = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func aiRequestTimeoutReadmission(_ currentHost: CoreHost, request: NativeAIRequestTimeoutRequest,
+                                            operation: UUID, session: UUID) async -> Bool {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsAITimeoutTestHoldOnce {
+            settingsAITimeoutTestHoldOnce = false; settingsAITimeoutTestHeld = true
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            settingsAITimeoutTestHeld = false
+        }
+        #endif
+        return host === currentHost && settingsAITimeoutHost === currentHost && settingsAITimeoutRequest == request
+            && settingsAITimeoutOperationID == operation && settingsAISession == session && ready
+            && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil
+            && settingsAIPresented && selectedSurface == .settings && !appLock.concealed && !Task.isCancelled
+            && UIApplication.shared.applicationState == .active
+    }
+
+    private func refreshAISettingsAfterTimeout(_ currentHost: CoreHost, session: UUID) async {
+        settingsAIProjection = nil; settingsAIOptions = nil; settingsAIEffortOptions = nil; settingsAIGeminiOptions = nil
+        settingsAILoading = true; settingsAIReadFailed = false
+        defer { if settingsAISession == session { settingsAILoading = false } }
+        do {
+            let projection = try await currentHost.readAISettingsProjection()
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if settingsAITimeoutRefreshTestFailureOnce {
+                settingsAITimeoutRefreshTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
+            }
+            #endif
+            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+            settingsAIProjection = projection
+        } catch {
+            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+            settingsAIReadFailed = true
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai {
+            await readAIReasoningEffortOptions(currentHost, session: session)
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini {
+            await readAIGeminiThinkingBudgetOptions(currentHost, session: session)
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced {
+            await readAIRequestTimeoutOptions(currentHost, session: session)
+        }
+    }
+
+    func retryAIRequestTimeout() {
+        guard !busy, settingsAITask == nil, settingsAITimeoutOperationID == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil,
+              settingsAITimeoutRequest != nil, let capturedHost = settingsAITimeoutHost,
+              host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
+              !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
+              !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
+        // Explicit Retry restores only the retained owner's page. No read or fresh request.
+        if !settingsAIPresented {
+            selectedSurface = .settings; settingsAdvancedPresented = true
+            settingsAISession = UUID(); settingsAIPresented = true; settingsAIAdvanced = true
+        }
+        beginAIRequestTimeoutOperation()
+    }
+
+    var settingsAIReasoningCanChoose: Bool {
+        guard let currentHost = host else { return false }
+        return settingsAIProjection?.aiProvider == .openai && settingsAIEffortOptions != nil && settingsAITask == nil
+            && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && settingsAITimeoutRequest == nil && !busy
+            && aiSettingsSummaryCurrent(currentHost, session: settingsAISession)
+    }
+
+    func aiReasoningEffortLabel(_ value: NativeAIReasoningEffortSavedValue) -> String {
+        switch value {
+        case .minimal: return label("settings.aiEffortMinimalSaved")
+        case .low: return label("settings.aiEffortLow")
+        case .medium: return label("settings.aiEffortMedium")
+        case .high: return label("settings.aiEffortHigh")
+        }
+    }
+
+    func retryAIReasoningEffortOptions() {
+        guard let currentHost = host, settingsAIProjection?.aiProvider == .openai, settingsAITask == nil,
+              settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil, !busy,
+              aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
+        let session = settingsAISession, id = UUID()
+        settingsAIReadID = id; settingsAIEffortOptions = nil; settingsAIEffortOptionsFailed = false
+        settingsAITask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.settingsAIReadID == id { self.settingsAITask = nil; self.settingsAIReadID = nil }
+            }
+            await self.readAIReasoningEffortOptions(currentHost, session: session)
+        }
+    }
+
+    private func readAIReasoningEffortOptions(_ currentHost: CoreHost, session: UUID) async {
+        do {
+            let options = try await currentHost.readAIReasoningEffortOptions()
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if settingsAIEffortOptionsTestFailureOnce {
+                settingsAIEffortOptionsTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
+            }
+            #endif
+            guard aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai else { return }
+            settingsAIEffortOptions = options; settingsAIEffortOptionsFailed = false
+        } catch {
+            guard aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai else { return }
+            settingsAIEffortOptions = nil; settingsAIEffortOptionsFailed = true
+        }
+    }
+
+    func saveAIReasoningEffort(_ value: NativeAIReasoningEffortValue) {
+        guard settingsAIReasoningCanChoose, let currentHost = host, let options = settingsAIEffortOptions else { return }
+        settingsAIEffortRequest = .init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected)
+        settingsAIEffortHost = currentHost
+        settingsAIEffortOptions = nil
+        beginAIReasoningEffortOperation()
+    }
+
+    private func beginAIReasoningEffortOperation() {
+        guard !busy, settingsAITask == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil, settingsAITimeoutOperationID == nil,
+              let request = settingsAIEffortRequest, let currentHost = settingsAIEffortHost,
+              host === currentHost, ready, settingsAIPresented, selectedSurface == .settings,
+              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        let operation = UUID(), session = settingsAISession, wasUncertain = retryNeeded
+        settingsAIEffortOperationID = operation; busy = true; settingsAIEffortSaveFailed = false
+        settingsAITask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.settingsAIEffortOperationID == operation {
+                    self.settingsAIEffortOperationID = nil; self.settingsAITask = nil
+                    self.finishOperation()
+                }
+            }
+            do {
+                let result = try await currentHost.setAIReasoningEffort(request, readmission: { [weak self] in
+                    guard let self else { return false }
+                    return await self.aiReasoningEffortReadmission(currentHost, request: request, operation: operation, session: session)
+                })
+                guard self.settingsAIEffortOperationID == operation,
+                      self.settingsAIEffortRequest == request, self.settingsAIEffortHost === currentHost,
+                      result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
+                // A durable acknowledgment may win cancellation. Never publish into a retired page.
+                self.settingsAIEffortRequest = nil; self.settingsAIEffortHost = nil
+                self.retryNeeded = false; self.error = nil
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                await self.readAIReasoningEffortFixtureState(currentHost, session: session)
+                #endif
+                if self.aiSettingsSummaryCurrent(currentHost, session: session) {
+                    await self.refreshAISettingsAfterReasoningEffort(currentHost, session: session)
+                }
+            } catch {
+                guard self.settingsAIEffortOperationID == operation,
+                      self.settingsAIEffortRequest == request, self.settingsAIEffortHost === currentHost else { return }
+                // Existing rejection status can precede terminal retirement on a retry.
+                // Preserve an already-uncertain exact owner even for a typed rejection.
+                if self.isDefiniteRejection(error) && !wasUncertain {
+                    self.settingsAIEffortRequest = nil; self.settingsAIEffortHost = nil
+                    self.retryNeeded = false; self.error = nil
+                    if self.aiSettingsSummaryCurrent(currentHost, session: session) {
+                        self.settingsAIEffortSaveFailed = true
+                        await self.refreshAISettingsAfterReasoningEffort(currentHost, session: session)
+                    }
+                } else {
+                    self.retryNeeded = true
+                    self.error = self.label("settings.feedback.actionFailed")
+                    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                    await self.readAIReasoningEffortFixtureState(currentHost, session: session)
+                    #endif
+                    if self.host === currentHost && self.settingsAISession == session && self.settingsAIPresented {
+                        self.settingsAIEffortSaveFailed = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func aiReasoningEffortReadmission(_ currentHost: CoreHost, request: NativeAIReasoningEffortRequest,
+                                            operation: UUID, session: UUID) async -> Bool {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsAIEffortTestHoldOnce {
+            settingsAIEffortTestHoldOnce = false; settingsAIEffortTestHeld = true
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            settingsAIEffortTestHeld = false
+        }
+        #endif
+        return host === currentHost && settingsAIEffortHost === currentHost && settingsAIEffortRequest == request
+            && settingsAIEffortOperationID == operation && settingsAISession == session && ready
+            && settingsAITimeoutRequest == nil && settingsAITimeoutOperationID == nil
+            && settingsAIGeminiRequest == nil && settingsAIGeminiOperationID == nil
+            && settingsAIPresented && selectedSurface == .settings && !appLock.concealed && !Task.isCancelled
+            && UIApplication.shared.applicationState == .active
+    }
+
+    private func refreshAISettingsAfterReasoningEffort(_ currentHost: CoreHost, session: UUID) async {
+        settingsAIProjection = nil; settingsAIEffortOptions = nil; settingsAIOptions = nil; settingsAIGeminiOptions = nil
+        settingsAILoading = true; settingsAIReadFailed = false
+        defer { if settingsAISession == session { settingsAILoading = false } }
+        do {
+            let projection = try await currentHost.readAISettingsProjection()
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if settingsAIEffortRefreshTestFailureOnce {
+                settingsAIEffortRefreshTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
+            }
+            #endif
+            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+            settingsAIProjection = projection
+        } catch {
+            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+            settingsAIReadFailed = true
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai {
+            await readAIReasoningEffortOptions(currentHost, session: session)
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini {
+            await readAIGeminiThinkingBudgetOptions(currentHost, session: session)
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced {
+            await readAIRequestTimeoutOptions(currentHost, session: session)
+        }
+    }
+
+    func retryAIReasoningEffort() {
+        guard !busy, settingsAITask == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil, settingsAITimeoutOperationID == nil,
+              settingsAIEffortRequest != nil, let capturedHost = settingsAIEffortHost,
+              host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
+              !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
+              !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
+        // Explicit Retry restores only the retained owner's page. No read or fresh request.
+        if !settingsAIPresented {
+            selectedSurface = .settings; settingsAdvancedPresented = true
+            settingsAISession = UUID(); settingsAIPresented = true
+        }
+        beginAIReasoningEffortOperation()
+    }
+
+    var settingsAIGeminiCanChoose: Bool {
+        guard let currentHost = host else { return false }
+        return settingsAIProjection?.aiProvider == .gemini && settingsAIGeminiOptions != nil && settingsAITask == nil
+            && settingsAIGeminiRequest == nil && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && !busy
+            && aiSettingsSummaryCurrent(currentHost, session: settingsAISession)
+    }
+
+    func aiGeminiThinkingBudgetLabel(_ value: Int) -> String {
+        switch NativeAIGeminiThinkingBudgetValue(rawValue: value) {
+        case .off: return label("settings.aiThinkingOff")
+        case .low: return label("settings.aiThinkingLow")
+        case .medium: return label("settings.aiThinkingMedium")
+        case .high: return label("settings.aiThinkingHigh")
+        case nil: return String(value)
+        }
+    }
+
+    func retryAIGeminiThinkingBudgetOptions() {
+        guard let currentHost = host, settingsAIProjection?.aiProvider == .gemini, settingsAITask == nil,
+              settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil, !busy,
+              aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
+        let session = settingsAISession, id = UUID()
+        settingsAIReadID = id; settingsAIGeminiOptions = nil; settingsAIGeminiOptionsFailed = false
+        settingsAITask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.settingsAIReadID == id { self.settingsAITask = nil; self.settingsAIReadID = nil }
+            }
+            await self.readAIGeminiThinkingBudgetOptions(currentHost, session: session)
+        }
+    }
+
+    private func readAIGeminiThinkingBudgetOptions(_ currentHost: CoreHost, session: UUID) async {
+        do {
+            let options = try await currentHost.readAIGeminiThinkingBudgetOptions()
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if settingsAIGeminiOptionsTestFailureOnce {
+                settingsAIGeminiOptionsTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
+            }
+            #endif
+            guard aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini else { return }
+            settingsAIGeminiOptions = options; settingsAIGeminiOptionsFailed = false
+        } catch {
+            guard aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini else { return }
+            settingsAIGeminiOptions = nil; settingsAIGeminiOptionsFailed = true
+        }
+    }
+
+    func saveAIGeminiThinkingBudget(_ value: NativeAIGeminiThinkingBudgetValue) {
+        guard settingsAIGeminiCanChoose, let currentHost = host, let options = settingsAIGeminiOptions else { return }
+        settingsAIGeminiRequest = .init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected)
+        settingsAIGeminiHost = currentHost
+        settingsAIGeminiOptions = nil
+        beginAIGeminiThinkingBudgetOperation()
+    }
+
+    private func beginAIGeminiThinkingBudgetOperation() {
+        guard !busy, settingsAITask == nil, settingsAIGeminiOperationID == nil, settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil, settingsAITimeoutOperationID == nil && settingsAIEffortOperationID == nil,
+              let request = settingsAIGeminiRequest, let currentHost = settingsAIGeminiHost,
+              host === currentHost, ready, settingsAIPresented, selectedSurface == .settings,
+              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        let operation = UUID(), session = settingsAISession, wasUncertain = retryNeeded
+        settingsAIGeminiOperationID = operation; busy = true; settingsAIGeminiSaveFailed = false
+        settingsAITask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.settingsAIGeminiOperationID == operation {
+                    self.settingsAIGeminiOperationID = nil; self.settingsAITask = nil
+                    self.finishOperation()
+                }
+            }
+            do {
+                let result = try await currentHost.setAIGeminiThinkingBudget(request, readmission: { [weak self] in
+                    guard let self else { return false }
+                    return await self.aiGeminiThinkingBudgetReadmission(currentHost, request: request, operation: operation, session: session)
+                })
+                guard self.settingsAIGeminiOperationID == operation,
+                      self.settingsAIGeminiRequest == request, self.settingsAIGeminiHost === currentHost,
+                      result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
+                // A durable acknowledgment may win cancellation. Never publish into a retired page.
+                self.settingsAIGeminiRequest = nil; self.settingsAIGeminiHost = nil
+                self.retryNeeded = false; self.error = nil
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                await self.readAIGeminiThinkingBudgetFixtureState(currentHost, session: session)
+                #endif
+                if self.aiSettingsSummaryCurrent(currentHost, session: session) {
+                    await self.refreshAISettingsAfterGeminiThinkingBudget(currentHost, session: session)
+                }
+            } catch {
+                guard self.settingsAIGeminiOperationID == operation,
+                      self.settingsAIGeminiRequest == request, self.settingsAIGeminiHost === currentHost else { return }
+                // Existing rejection status can precede terminal retirement on a retry.
+                // Preserve an already-uncertain exact owner even for a typed rejection.
+                if self.isDefiniteRejection(error) && !wasUncertain {
+                    self.settingsAIGeminiRequest = nil; self.settingsAIGeminiHost = nil
+                    self.retryNeeded = false; self.error = nil
+                    if self.aiSettingsSummaryCurrent(currentHost, session: session) {
+                        self.settingsAIGeminiSaveFailed = true
+                        await self.refreshAISettingsAfterGeminiThinkingBudget(currentHost, session: session)
+                    }
+                } else {
+                    self.retryNeeded = true
+                    self.error = self.label("settings.feedback.actionFailed")
+                    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                    await self.readAIGeminiThinkingBudgetFixtureState(currentHost, session: session)
+                    #endif
+                    if self.host === currentHost && self.settingsAISession == session && self.settingsAIPresented {
+                        self.settingsAIGeminiSaveFailed = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func aiGeminiThinkingBudgetReadmission(_ currentHost: CoreHost, request: NativeAIGeminiThinkingBudgetRequest,
+                                            operation: UUID, session: UUID) async -> Bool {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsAIGeminiTestHoldOnce {
+            settingsAIGeminiTestHoldOnce = false; settingsAIGeminiTestHeld = true
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            settingsAIGeminiTestHeld = false
+        }
+        #endif
+        return host === currentHost && settingsAIGeminiHost === currentHost && settingsAIGeminiRequest == request
+            && settingsAIGeminiOperationID == operation && settingsAISession == session && ready
+            && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAITimeoutOperationID == nil && settingsAIEffortOperationID == nil
+            && settingsAIPresented && selectedSurface == .settings && !appLock.concealed && !Task.isCancelled
+            && UIApplication.shared.applicationState == .active
+    }
+
+    private func refreshAISettingsAfterGeminiThinkingBudget(_ currentHost: CoreHost, session: UUID) async {
+        settingsAIProjection = nil; settingsAIGeminiOptions = nil; settingsAIOptions = nil; settingsAIEffortOptions = nil
+        settingsAILoading = true; settingsAIReadFailed = false
+        defer { if settingsAISession == session { settingsAILoading = false } }
+        do {
+            let projection = try await currentHost.readAISettingsProjection()
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if settingsAIGeminiRefreshTestFailureOnce {
+                settingsAIGeminiRefreshTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
+            }
+            #endif
+            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+            settingsAIProjection = projection
+        } catch {
+            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
+            settingsAIReadFailed = true
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini {
+            await readAIGeminiThinkingBudgetOptions(currentHost, session: session)
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai {
+            await readAIReasoningEffortOptions(currentHost, session: session)
+        }
+        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced {
+            await readAIRequestTimeoutOptions(currentHost, session: session)
+        }
+    }
+
+    func retryAIGeminiThinkingBudget() {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsAIGeminiRetryFixtureValue == "dispatch=gemini" {
+            let checks: [(String, Bool)] = [
+                ("busy", !busy), ("ai-task", settingsAITask == nil),
+                ("gemini-operation", settingsAIGeminiOperationID == nil),
+                ("timeout-request", settingsAITimeoutRequest == nil), ("effort-request", settingsAIEffortRequest == nil),
+                ("timeout-operation", settingsAITimeoutOperationID == nil), ("effort-operation", settingsAIEffortOperationID == nil),
+                ("gemini-request-missing", settingsAIGeminiRequest != nil), ("retained-host-missing", settingsAIGeminiHost != nil),
+                ("host-replaced", host === settingsAIGeminiHost), ("not-ready", ready),
+                ("concealed", !appLock.concealed), ("application-inactive", UIApplication.shared.applicationState == .active),
+                ("sync-presented", !settingsSyncPresented), ("calendar-presented", !settingsCalendarPresented),
+                ("data-presented", !settingsDataPresented), ("recovery-visible", !taskRecoveryGateVisible),
+                ("sync-restart-required", !settingsSyncRestartRequired),
+            ]
+            settingsAIGeminiRetryAdmissionState += ";admission=" + (checks.first(where: { !$0.1 })?.0 ?? "admitted")
+        }
+        #endif
+        guard !busy, settingsAITask == nil, settingsAIGeminiOperationID == nil, settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil, settingsAITimeoutOperationID == nil && settingsAIEffortOperationID == nil,
+              settingsAIGeminiRequest != nil, let capturedHost = settingsAIGeminiHost,
+              host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
+              !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
+              !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
+        // Explicit Retry restores only the retained owner's page. No read or fresh request.
+        if !settingsAIPresented {
+            selectedSurface = .settings; settingsAdvancedPresented = true
+            settingsAISession = UUID(); settingsAIPresented = true
+        }
+        beginAIGeminiThinkingBudgetOperation()
+    }
+
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    var settingsAIProofEnabled: Bool {
+        guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
+              NativeAppLaunch.arguments.filter({ $0 == "--native-ai-summary-proof" }).count == 1,
+              let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
+        return true
+    }
+    private var settingsAIProofSettled: Bool {
+        ready && !busy && !retryNeeded && !settingsSyncRestartRequired && !appLockRecoveryPending
+            && !appLock.concealed && !appLock.authenticating && !appLockActive
+            && selectedSurface == .settings && settingsAdvancedPresented && !settingsAIPresented
+            && operationContextClean && notificationResponseContextClean
+            && settingsAITask == nil && settingsAIReadID == nil && !settingsAILoading
+            && settingsAITimeoutRequest == nil && settingsAITimeoutHost == nil && settingsAITimeoutOperationID == nil
+            && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && settingsAIEffortHost == nil && settingsAIGeminiHost == nil && settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil
+            && foregroundSyncOwner == nil && foregroundSyncTask == nil
+            && pomodoroWork == nil && pomodoroWorkHost == nil && pomodoroCommand == nil
+            && reminderLifecycleTask == nil && reminderLifecycleOwner == nil && reminderDebounceTask == nil
+            && calendarPushLifecycleTask == nil && calendarPushLifecycleOwner == nil && calendarPushStopTask == nil
+            && searchLifecycleTask == nil && searchLifecycleOwner == nil
+            && notificationResponseTask == nil && entityLinkTask == nil && appleRemindersAutoTask == nil
+            && calendarReadTask == nil && settingsAIProofSearchInFlight == 0
+            && UIApplication.shared.applicationState == .active
+    }
+    private var settingsAIProofWake: [String] {
+        [String(foregroundSyncGeneration), String(reminderGeneration), String(calendarPushGeneration), String(searchGeneration),
+         String(reminderWakeTicket), String(pomodoroAlarmWakeTicket), String(calendarPushWakeTicket), String(entityLinkWake),
+         String(settingsSearchGeneration)]
+    }
+    func captureAISettingsSummaryFixture(_ phase: NativeAISummaryCheckpointPhase) {
+        guard settingsAIProofEnabled, settingsAIProofTask == nil, let currentHost = host,
+              let token = completedStartupToken, startupSyncCompletedHost === currentHost,
+              phase == .baseline ? settingsAIProofReadAttempts == 0 && settingsAIProofState.isEmpty
+                : settingsAIProofReadAttempts > 0 && settingsAIProofState == "baseline-ready" else { return }
+        let id = UUID(), session = settingsAISession, defaults = preferenceDefaults
+        settingsAIProofID = id; settingsAIProofState = "waiting"
+        settingsAIProofTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if self.settingsAIProofID == id { self.settingsAIProofTask = nil; self.settingsAIProofID = nil } }
+            for _ in 0..<60 {
+                guard !Task.isCancelled, self.host === currentHost, self.completedStartupToken == token,
+                      self.startupSyncCompletedHost === currentHost, self.settingsAISession == session,
+                      self.preferenceDefaults === defaults, self.settingsAIProofID == id else { return }
+                if self.settingsAIProofSettled {
+                    let wake = self.settingsAIProofWake
+                    do {
+                        try await currentHost.captureIsolatedAISummaryCheckpoint(phase, startupToken: token) { [weak self] in
+                            guard let self else { return false }
+                            return self.settingsAIProofEnabled && self.settingsAIProofSettled
+                                && self.host === currentHost && self.completedStartupToken == token
+                                && self.startupSyncCompletedHost === currentHost && self.settingsAISession == session
+                                && self.preferenceDefaults === defaults && self.settingsAIProofID == id
+                                && self.settingsAIProofWake == wake
+                                && (phase == .baseline ? self.settingsAIProofReadAttempts == 0 : self.settingsAIProofReadAttempts > 0)
+                        }
+                        guard self.host === currentHost, self.completedStartupToken == token,
+                              self.startupSyncCompletedHost === currentHost, self.settingsAISession == session,
+                              self.preferenceDefaults === defaults, self.settingsAIProofSettled,
+                              self.settingsAIProofID == id, self.settingsAIProofWake == wake, !Task.isCancelled else { return }
+                        self.settingsAIProofState = phase == .baseline ? "baseline-ready" : "final-ready"
+                        return
+                    } catch { /* Observe natural settlement; never force persistence or clear evidence. */ }
+                }
+                do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return }
+            }
+            if self.host === currentHost, self.completedStartupToken == token, self.settingsAIProofID == id {
+                self.settingsAIProofState = "failed"
+            }
+        }
+    }
+
+    private func readAIRequestTimeoutFixtureState(_ currentHost: CoreHost, session: UUID) async {
+        guard NativeAppLaunch.arguments.contains("--native-ai-timeout-fixture"),
+              let state = try? await currentHost.isolatedAIRequestTimeoutFixtureState(),
+              host === currentHost, settingsAISession == session, settingsAIPresented,
+              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        settingsAITimeoutFixtureState = "failure=\(state.failureInjected);exact=\(state.exactRequestRetried);commits=\(state.commitAttempts);retired=\(state.journalRetired)"
+    }
+
+    private func readAIReasoningEffortFixtureState(_ currentHost: CoreHost, session: UUID) async {
+        guard NativeAppLaunch.arguments.contains("--native-ai-reasoning-fixture"),
+              let state = try? await currentHost.isolatedAIReasoningEffortFixtureState(),
+              host === currentHost, settingsAISession == session, settingsAIPresented,
+              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        settingsAIEffortFixtureState = "failure=\(state.failureInjected);exact=\(state.exactRequestRetried);commits=\(state.commitAttempts);retired=\(state.journalRetired)"
+    }
+
+    private func readAIGeminiThinkingBudgetFixtureState(_ currentHost: CoreHost, session: UUID) async {
+        guard NativeAppLaunch.arguments.contains("--native-ai-gemini-fixture"),
+              let state = try? await currentHost.isolatedAIGeminiThinkingBudgetFixtureState(),
+              host === currentHost, settingsAISession == session, settingsAIPresented,
+              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        settingsAIGeminiFixtureState = "failure=\(state.failureInjected);exact=\(state.exactRequestRetried);commits=\(state.commitAttempts);retired=\(state.journalRetired)"
+    }
+
+    func retireAISettingsSummaryFixture(_ reason: String) {
+        guard settingsAITestHeld || settingsAITimeoutTestHeld || settingsAITimeoutRequest != nil
+                || settingsAIEffortTestHeld || settingsAIEffortRequest != nil
+                || settingsAIGeminiTestHeld || settingsAIGeminiRequest != nil, let selection = try? NativeAppLaunch.selection.get(),
+              case .isolated = selection else { return }
+        if reason == "lock" { appLock.readFailed() }
+        else if reason == "host" {
+            let previous = host
+            host = nil
+            ready = false
+            Task { [weak self] in
+                await previous?.close()
+                await self?.start()
+            }
+        }
+    }
+    #endif
+
     func openAdvancedSettings() {
         guard ready, selectedSurface == .settings, !settingsAdvancedPresented, !busy, !retryNeeded,
-              !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented,
+              !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsAIPresented,
               !settingsAboutPresented, !settingsManagePresented, !settingsGeneralPresented, !settingsGtdPresented,
               !settingsDataPresented, !settingsSyncPresented, !settingsSyncRestartRequired, !appLock.concealed,
               !settingsMenu.object("advanced").text("title").isEmpty else { return }
@@ -6958,7 +8409,7 @@ final class CoreModel: ObservableObject {
     }
 
     func closeAdvancedSettings() {
-        guard selectedSurface == .settings, settingsAdvancedPresented, !settingsCalendarPresented,
+        guard selectedSurface == .settings, settingsAdvancedPresented, !settingsCalendarPresented, !settingsAIPresented,
               !busy, !retryNeeded, !calendarSettingActive, !appLock.concealed else { return }
         settingsSearchTask?.cancel()
         settingsSearchGeneration += 1
@@ -6967,13 +8418,19 @@ final class CoreModel: ObservableObject {
     }
 
     func setSettingsSearch(_ value: String) {
-        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
+        guard !settingsCalendarPresented, !calendarSettingActive, !settingsNotificationsPresented, !settingsAIPresented, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented, !settingsSyncPresented, !settingsSyncRestartRequired, !retryNeeded else { return }
         settingsSearch = value
         settingsReadError = nil
         settingsSearchGeneration += 1
         let generation = settingsSearchGeneration
         settingsSearchTask?.cancel()
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        settingsAIProofSearchInFlight += 1
+        #endif
         settingsSearchTask = Task {
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            defer { settingsAIProofSearchInFlight -= 1 }
+            #endif
             do { try await Task.sleep(nanoseconds: 150_000_000) } catch { return }
             guard !Task.isCancelled, selectedSurface == .settings, !settingsAboutPresented, !settingsManagePresented,
                   settingsSearchGeneration == generation else { return }
@@ -6987,7 +8444,7 @@ final class CoreModel: ObservableObject {
         let search = settingsSearch, capturedGeneration = generation ?? settingsSearchGeneration
         let advanced = settingsAdvancedPresented
         func current() -> Bool {
-            host === currentHost && !settingsAboutPresented && settingsAboutTask == nil
+            host === currentHost && !settingsAIPresented && !settingsAboutPresented && settingsAboutTask == nil
                 && !settingsCalendarPresented && calendarSettingsCloseTask == nil
                 && !settingsSyncPresented && !settingsSyncRestartRequired && selectedSurface == .settings
                 && !appLock.concealed && !Task.isCancelled
@@ -7114,6 +8571,241 @@ final class CoreModel: ObservableObject {
         if !failed.isEmpty { settingsSyncError = failed.map(text).joined(separator: "\n"); return false }
         settingsSyncStatus = toasts.map(text).filter { !$0.isEmpty }.joined(separator: "\n")
         return true
+    }
+
+    func requestAppleRemindersAutoImport(token: UUID?, active: Bool) {
+        guard let token, token == completedStartupToken else { return }
+        let currentActive = active && UIApplication.shared.applicationState == .active
+        let entered = currentActive && (!appleRemindersAutoActive || appleRemindersAutoToken != token)
+        appleRemindersAutoActive = currentActive; appleRemindersAutoToken = token
+        if !currentActive { cancelAppleRemindersAutoImport(); return }
+        if entered { appleRemindersAutoRequested = ProcessInfo.processInfo.systemUptime - appleRemindersAutoLastRun >= 30 }
+        admitAppleRemindersAutoImport()
+    }
+    func cancelAppleRemindersAutoImport() {
+        appleRemindersAutoActive = false; appleRemindersAutoRequested = false
+        appleRemindersAutoTask?.cancel(); appleRemindersAutoNotice = nil
+    }
+    private func admitAppleRemindersAutoImport() {
+        guard appleRemindersAutoRequested, appleRemindersAutoActive, appleRemindersAutoOwner == nil,
+              let token = appleRemindersAutoToken, token == completedStartupToken,
+              ready, !busy, !retryNeeded, !settingsSyncRestartRequired, !appLockRecoveryPending, !appLockActive,
+              !appLock.concealed, UIApplication.shared.applicationState == .active,
+              !settingsSyncPresented, operationContextClean, let currentHost = host else { return }
+        appleRemindersAutoRequested = false
+        guard ProcessInfo.processInfo.systemUptime - appleRemindersAutoLastRun >= 30 else { return }
+        appleRemindersAutoLastRun = ProcessInfo.processInfo.systemUptime
+        let owner = UUID(); appleRemindersAutoOwner = owner; busy = true
+        appleRemindersAutoTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.appleRemindersAutoOwner == owner {
+                    self.appleRemindersAutoOwner = nil; self.appleRemindersAutoTask = nil
+                    if self.host === currentHost { self.finishOperation() }
+                }
+            }
+            guard self.host === currentHost, self.appleRemindersAutoOwner == owner else { return }
+            do {
+                self.appleRemindersImportRetry = true
+                let value = try self.decode(await currentHost.importAppleReminders(automatic: true))
+                guard self.host === currentHost else { return }
+                guard ["noop", "completed", "interrupted"].contains(value.text("kind")) else { throw CocoaError(.coderReadCorrupt) }
+                let count = value.object("result")["importedCount"] as? Int ?? 0
+                guard count >= 0 && count <= 10_000 else { throw CocoaError(.coderReadCorrupt) }
+                // Read admission also proves that no accepted item still owns the journal.
+                _ = try await currentHost.readAppleRemindersSettings()
+                guard self.host === currentHost else { return }
+                self.appleRemindersImportRetry = false
+                if count > 0 { self.refreshRequested = true }
+                if count > 0 && !Task.isCancelled && self.appleRemindersAutoActive && !self.appLock.concealed {
+                    let message = self.label("settings.appleRemindersImport.importedCount").replacingOccurrences(of: "{{taskCount}}", with: String(count))
+                    let noticeID = UUID(); self.appleRemindersNoticeID = noticeID; self.appleRemindersAutoNotice = message
+                    UIAccessibility.post(notification: .announcement, argument: message)
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 4_200_000_000)
+                        if self?.appleRemindersNoticeID == noticeID { self?.appleRemindersAutoNotice = nil }
+                    }
+                }
+            } catch {
+                guard self.host === currentHost else { return }
+                // Cancellation can arrive after an accepted item. A read-only uncancelled probe distinguishes recovery from a harmless stopped read.
+                let healthy = await Task { (try? await currentHost.readAppleRemindersSettings()) != nil }.value
+                guard self.host === currentHost else { return }
+                self.appleRemindersImportRetry = !healthy
+                if !healthy { self.retryNeeded = true; self.error = "Reminders import needs recovery." }
+                _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                    "Native Reminders foreground import stopped",
+                    #"{"releaseCheck":"v1.3.5/ios-reminders-foreground","outcome":"stopped"}"#,
+                ]))
+            }
+        }
+    }
+
+    func openAppleRemindersSettings() async {
+        guard settingsSyncCanEdit, !settingsSyncChecking, !settingsSyncDraftDirty, let currentHost = host else { return }
+        settingsRemindersPresented = true
+        appleRemindersSession = UUID()
+        appleRemindersActive = UIApplication.shared.applicationState == .active
+        appleRemindersError = nil; appleRemindersStatus = nil
+        busy = true; defer { finishOperation() }
+        do { try adoptAppleRemindersOptions(decode(try await currentHost.readAppleRemindersSettings()), from: currentHost) }
+        catch { appleRemindersError = error.localizedDescription }
+    }
+
+    func closeAppleRemindersSettings() {
+        guard settingsRemindersPresented, !busy, !retryNeeded, !appleRemindersNeedsRetry else { return }
+        retireAppleRemindersSettings()
+    }
+    private func retireAppleRemindersSettings() {
+        cancelAppleRemindersIntent()
+        settingsRemindersPresented = false
+        appleRemindersSettings = [:]; appleRemindersLists = []; appleRemindersRaw = nil
+        appleRemindersError = nil; appleRemindersStatus = nil
+    }
+    func cancelAppleRemindersIntent() {
+        appleRemindersSession = UUID(); appleRemindersActive = false
+        appleRemindersTask?.cancel(); appleRemindersLists = []
+        if let waiter = appleRemindersWaiter { appleRemindersWaiter = nil; waiter.continuation.resume(returning: false) }
+    }
+    func appleRemindersWillResignActive() { appleRemindersActive = false }
+    func appleRemindersDidBecomeActive() {
+        appleRemindersActive = true
+        if let waiter = appleRemindersWaiter {
+            appleRemindersWaiter = nil
+            waiter.continuation.resume(returning: appleRemindersCurrent(waiter.owner))
+        }
+    }
+    private func appleRemindersCurrent(_ owner: UUID) -> Bool {
+        appleRemindersOwner == owner && ready && settingsSyncPresented && settingsRemindersPresented
+            && !appLock.concealed && appleRemindersActive && UIApplication.shared.applicationState == .active
+    }
+    private func waitForAppleRemindersReadmission(_ owner: UUID, session: UUID, from currentHost: CoreHost) async -> Bool {
+        guard !Task.isCancelled, host === currentHost, appleRemindersSession == session,
+              appleRemindersOwner == owner, settingsRemindersPresented, !appLock.concealed else { return false }
+        if appleRemindersCurrent(owner) { return true }
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, host === currentHost, appleRemindersSession == session,
+                      appleRemindersOwner == owner, settingsRemindersPresented, !appLock.concealed else {
+                    continuation.resume(returning: false); return
+                }
+                if appleRemindersCurrent(owner) { continuation.resume(returning: true) }
+                else { appleRemindersWaiter = (owner, continuation) }
+            }
+        }, onCancel: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.appleRemindersWaiter?.owner == owner else { return }
+                let waiter = self.appleRemindersWaiter; self.appleRemindersWaiter = nil
+                waiter?.continuation.resume(returning: false)
+            }
+        })
+    }
+    private func adoptAppleRemindersOptions(_ options: CoreObject, from currentHost: CoreHost) throws {
+        guard host === currentHost, Set(options.keys) == Set(["settings", "expectedRaw"]),
+              options["expectedRaw"] is NSNull || options["expectedRaw"] is String,
+              let settings = options["settings"] as? CoreObject,
+              Set(settings.keys).isSubset(of: Set(["selectedListId", "selectedListTitle", "autoImportOnOpen", "deleteImportedReminders"])),
+              settingsSyncWireBool(settings["autoImportOnOpen"]) != nil, settingsSyncWireBool(settings["deleteImportedReminders"]) != nil,
+              ["selectedListId", "selectedListTitle"].allSatisfy({ settings[$0] == nil || settings[$0] is String }) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        if settingsRemindersPresented && !appLock.concealed {
+            appleRemindersSettings = settings; appleRemindersRaw = options["expectedRaw"] as? String
+        }
+    }
+    func chooseAppleRemindersList() { guard appleRemindersCanEdit else { return }; beginAppleRemindersWork(.choose) }
+    func closeAppleRemindersLists() { if !busy { appleRemindersLists = [] } }
+    func saveAppleRemindersPreference(_ edit: CoreObject) {
+        guard appleRemindersCanEdit, let currentHost = host else { return }
+        do {
+            appleRemindersPendingEdit = (try json(edit), appleRemindersRaw, currentHost)
+            beginAppleRemindersWork(.save)
+        } catch { appleRemindersError = error.localizedDescription }
+    }
+    func importAppleRemindersNow() {
+        guard appleRemindersCanEdit else { return }
+        if appleRemindersSettings.text("selectedListId").isEmpty { chooseAppleRemindersList(); return }
+        beginAppleRemindersWork(.importAll)
+    }
+    func retryAppleReminders() {
+        guard !busy, !appLock.concealed else { return }
+        beginAppleRemindersWork(appleRemindersPendingEdit != nil ? .save : appleRemindersImportRetry ? .recover : .reload)
+    }
+    private enum AppleRemindersWork: Equatable { case choose, save, importAll, recover, reload }
+    private func beginAppleRemindersWork(_ work: AppleRemindersWork) {
+        guard ready, ((settingsRemindersPresented && settingsSyncPresented) || (work == .recover && appleRemindersImportRetry) || (work == .save && appleRemindersPendingEdit != nil)),
+              !busy, !settingsSyncChecking, !appLock.concealed, appleRemindersOwner == nil, let currentHost = host else { return }
+        let owner = UUID(), session = appleRemindersSession
+        appleRemindersOwner = owner; appleRemindersError = nil; appleRemindersStatus = nil; busy = true
+        appleRemindersTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.appleRemindersOwner == owner {
+                    self.appleRemindersOwner = nil; self.appleRemindersTask = nil
+                    if let waiter = self.appleRemindersWaiter { self.appleRemindersWaiter = nil; waiter.continuation.resume(returning: false) }
+                    self.finishOperation()
+                }
+            }
+            guard self.host === currentHost, self.appleRemindersOwner == owner else { return }
+            @MainActor func current() -> Bool {
+                self.host === currentHost && self.appleRemindersSession == session
+                    && self.settingsRemindersPresented && !self.appLock.concealed
+            }
+            do {
+                switch work {
+                case .choose:
+                    let result = try self.decode(await currentHost.chooseAppleRemindersLists { [weak self] in
+                        guard let self else { return false }
+                        return await self.waitForAppleRemindersReadmission(owner, session: session, from: currentHost)
+                    })
+                    guard current(), !Task.isCancelled else { return }
+                    guard Set(result.keys) == Set(["permission", "lists"]), let lists = result["lists"] as? [CoreObject],
+                          lists.allSatisfy({ $0["id"] is String && $0["sourceId"] is String && $0["title"] is String }),
+                          Set(lists.map { $0.text("id") }).count == lists.count else { throw CocoaError(.coderReadCorrupt) }
+                    if result.text("permission") != "granted" { self.appleRemindersError = self.label("settings.appleRemindersImport.permissionRequired") }
+                    else if lists.isEmpty { self.appleRemindersError = self.label("settings.appleRemindersImport.noListsFound") }
+                    else { self.appleRemindersLists = lists }
+                case .save:
+                    guard let edit = self.appleRemindersPendingEdit, edit.host === currentHost else { throw CocoaError(.coderInvalidValue) }
+                    let result = try self.decode(await currentHost.setAppleRemindersSetting(editJSON: edit.json, expectedRaw: edit.expected))
+                    try self.adoptAppleRemindersOptions(result, from: currentHost)
+                    self.appleRemindersPendingEdit = nil; self.retryNeeded = false; self.error = nil
+                    if current() { self.appleRemindersLists = [] }
+                case .importAll:
+                    self.appleRemindersImportRetry = true
+                    let result = try self.decode(await currentHost.importAppleReminders())
+                    guard ["completed", "interrupted"].contains(result.text("kind")), let counts = result["result"] as? [String: Int],
+                          Set(counts.keys) == Set(["importedCount", "deletedCount", "deleteFailedCount", "skippedDuplicateCount", "skippedCompletedCount", "skippedEmptyTitleCount", "failedCount"]),
+                          counts.values.allSatisfy({ $0 >= 0 && $0 <= 10_000 }) else { throw CocoaError(.coderReadCorrupt) }
+                    if current() {
+                        let skipped = counts["skippedDuplicateCount"]! + counts["skippedCompletedCount"]! + counts["skippedEmptyTitleCount"]!
+                        self.appleRemindersStatus = [("importedCount", counts["importedCount"]!), ("skippedCount", skipped), ("failedCount", counts["failedCount"]!),
+                            ("deletedCount", counts["deletedCount"]!), ("deleteFailedCount", counts["deleteFailedCount"]!)]
+                            .filter { $0.0 == "importedCount" || $0.1 > 0 }
+                            .map { self.label("settings.appleRemindersImport." + $0.0).replacingOccurrences(of: "{{taskCount}}", with: String($0.1)) }.joined(separator: "\n")
+                    }
+                    try self.adoptAppleRemindersOptions(self.decode(try await currentHost.readAppleRemindersSettings()), from: currentHost)
+                    self.appleRemindersImportRetry = false; self.refreshRequested = true
+                case .recover:
+                    _ = try await currentHost.retryPending()
+                    try self.adoptAppleRemindersOptions(self.decode(try await currentHost.readAppleRemindersSettings()), from: currentHost)
+                    self.appleRemindersImportRetry = false; self.retryNeeded = false; self.error = nil; self.refreshRequested = true
+                    if current() { self.appleRemindersStatus = "Recovery finished. Import again to check the remaining reminders." }
+                case .reload:
+                    try self.adoptAppleRemindersOptions(self.decode(try await currentHost.readAppleRemindersSettings()), from: currentHost)
+                }
+            } catch {
+                guard self.host === currentHost else { return }
+                if current() && !Task.isCancelled { self.appleRemindersError = error.localizedDescription }
+                if work == .save || work == .importAll || work == .recover {
+                    do {
+                        guard !Task.isCancelled else { throw CancellationError() }
+                        try self.adoptAppleRemindersOptions(self.decode(try await currentHost.readAppleRemindersSettings()), from: currentHost)
+                        self.appleRemindersPendingEdit = nil; self.appleRemindersImportRetry = false; self.retryNeeded = false
+                    } catch { self.retryNeeded = true }
+                }
+            }
+        }
     }
 
     func openSyncSettings() async {
@@ -7537,6 +9229,8 @@ final class CoreModel: ObservableObject {
         settingsGtdInboxPresented = false
         settingsGtdCapturePresented = false
         settingsGtdTaskEditorPresented = false
+        settingsGtdPomodoroPresented = false
+        clearGtdPomodoroNotice()
         gtdTaskEditorFieldId = nil
         gtdCaptureAreaPicker = false
         gtdWorkflowError = nil
@@ -7547,10 +9241,10 @@ final class CoreModel: ObservableObject {
     }
 
     func openGtdSubpage(_ page: String) async {
-        guard ["review", "inbox", "capture", "taskEditor", "autoArchive"].contains(page), gtdWorkflowEnabled,
-              !settingsGtdArchivePresented, !settingsGtdReviewPresented, !settingsGtdInboxPresented, !settingsGtdCapturePresented, !settingsGtdTaskEditorPresented else { return }
+        guard ["review", "inbox", "capture", "taskEditor", "autoArchive", "pomodoroSettings"].contains(page), gtdWorkflowEnabled,
+              !settingsGtdArchivePresented, !settingsGtdReviewPresented, !settingsGtdInboxPresented, !settingsGtdCapturePresented, !settingsGtdTaskEditorPresented, !settingsGtdPomodoroPresented else { return }
         if gtdWorkflowDraftDirty {
-            await commitGtdScheduleDraft()
+            await commitGtdSettingsDraft()
             guard gtdWorkflowError == nil else { return }
         }
         guard gtdWorkflowEnabled, !gtdWorkflowDraftDirty else { return }
@@ -7559,6 +9253,8 @@ final class CoreModel: ObservableObject {
         settingsGtdInboxPresented = page == "inbox"
         settingsGtdCapturePresented = page == "capture"
         settingsGtdTaskEditorPresented = page == "taskEditor"
+        settingsGtdPomodoroPresented = page == "pomodoroSettings"
+        clearGtdPomodoroNotice()
         if settingsGtdTaskEditorPresented {
             gtdTaskEditorFieldId = nil
             gtdTaskEditorExpandedResetKey = nil
@@ -7573,14 +9269,20 @@ final class CoreModel: ObservableObject {
 
     func closeGtdSettings() async {
         guard settingsGtdPresented, !busy, !retryNeeded, !gtdWorkflowPending else { return }
+        if gtdPomodoroDraftDirty {
+            await commitGtdSettingsDraft()
+            guard gtdWorkflowEnabled, !gtdWorkflowDraftDirty, gtdWorkflowError == nil else { return }
+        }
         if gtdTaskEditorFieldId != nil { closeGtdTaskEditorField(); return }
         if gtdCaptureAreaPicker { closeGtdCaptureAreaPicker(); return }
-        if settingsGtdArchivePresented || settingsGtdReviewPresented || settingsGtdInboxPresented || settingsGtdCapturePresented || settingsGtdTaskEditorPresented {
+        if settingsGtdPomodoroPresented || settingsGtdArchivePresented || settingsGtdReviewPresented || settingsGtdInboxPresented || settingsGtdCapturePresented || settingsGtdTaskEditorPresented {
             settingsGtdArchivePresented = false
             settingsGtdReviewPresented = false
             settingsGtdInboxPresented = false
             settingsGtdCapturePresented = false
             settingsGtdTaskEditorPresented = false
+            settingsGtdPomodoroPresented = false
+            clearGtdPomodoroNotice()
             gtdTaskEditorFieldId = nil
             gtdCaptureAreaPicker = false
             gtdWorkflowError = nil
@@ -7591,7 +9293,7 @@ final class CoreModel: ObservableObject {
             return
         }
         if gtdWorkflowDraftDirty {
-            await commitGtdScheduleDraft()
+            await commitGtdSettingsDraft()
             guard gtdWorkflowError == nil else { return }
         }
         guard !busy, !retryNeeded, !gtdWorkflowPending, !gtdWorkflowDraftDirty else { return }
@@ -7600,6 +9302,17 @@ final class CoreModel: ObservableObject {
     }
 
     private func readGtdSettings() async throws {
+        if settingsGtdPomodoroPresented {
+            let options = try await query("gtdPomodoroOptions", ["{}"])
+            let content = options.object("pomodoro"), expected = options.object("expected")
+            guard Set(options.keys) == Set(["pomodoro", "expected"]), !content.text("title").isEmpty,
+                  Set(expected.keys) == Set(["pomodoro", "pomodoroLinkTask", "pomodoroAutoStartBreaks", "pomodoroAutoStartFocus", "pomodoroCompletionAlert", "pomodoroDurations"]) else { throw CocoaError(.coderReadCorrupt) }
+            gtdPomodoro = content; gtdWorkflowExpected = expected
+            gtdPomodoroFocusDraft = content.object("minutes").text("focus")
+            gtdPomodoroBreakDraft = content.object("minutes").text("break")
+            gtdWorkflowReadError = nil; gtdWorkflowAwaitingRefresh = false
+            return
+        }
         if settingsGtdArchivePresented {
             let options = try await query("gtdArchiveOptions", ["{}"])
             let content = options.object("archive"), expected = options.object("expected")
@@ -7636,7 +9349,7 @@ final class CoreModel: ObservableObject {
         let options = try await query(editing ? "gtdTaskEditorOpenOptions" : inboxing ? "gtdInboxOptions" : reviewing ? "gtdReviewOptions" : "gtdWorkflowOptions", ["{}"])
         let contentKey = editing ? "taskEditor" : inboxing ? "inbox" : reviewing ? "review" : "hub"
         var content = options.object(contentKey), expected = options.object("expected")
-        let fields = editing ? ["scheduling", "organization", "details"] : inboxing ? ["inboxTwoMinute", "inboxProjectFirst", "inboxContextStep", "inboxSchedule"] : reviewing ? ["dailyReviewFocusStep", "weeklyReviewContextStep"] : ["defaultScheduleTime", "focusTaskLimit", "focusIncludeStartDates", "defaultProjectFlowMode"]
+        let fields = editing ? ["scheduling", "organization", "details"] : inboxing ? ["inboxTwoMinute", "inboxProjectFirst", "inboxContextStep", "inboxSchedule"] : reviewing ? ["dailyReviewFocusStep", "weeklyReviewContextStep"] : ["defaultScheduleTime", "focusTaskLimit", "focusIncludeStartDates", "defaultProjectFlowMode", "pomodoro"]
         guard Set(options.keys) == Set([contentKey, "expected"]), !content.text("title").isEmpty,
               Set(expected.keys) == Set(fields) else { throw CocoaError(.coderReadCorrupt) }
         if editing {
@@ -7762,6 +9475,39 @@ final class CoreModel: ObservableObject {
         if !gtdWorkflowPending && gtdWorkflowError == nil && gtdWorkflowReadError == nil { gtdCaptureAreaPicker = false }
     }
 
+    func gtdWorkflowEditEnabled(_ edit: CoreObject) -> Bool {
+        gtdWorkflowEnabled && gtdWorkflowExpected[edit.text("type") == "taskEditorSectionOpen" ? edit.text("section") : edit.text("type")] is CoreObject
+    }
+
+    private func clearGtdPomodoroNotice() {
+        gtdPomodoroNoticeTask?.cancel(); gtdPomodoroNoticeTask = nil
+        gtdPomodoroNotice = nil; gtdPomodoroNoticeShown = false
+    }
+
+    func setGtdPomodoroDraft(_ field: String, _ value: String) {
+        guard settingsGtdPomodoroPresented, gtdWorkflowEditEnabled(["type": "pomodoroDurations"]) else { return }
+        if field == "focus" { gtdPomodoroFocusDraft = value }
+        else if field == "break" { gtdPomodoroBreakDraft = value }
+        gtdWorkflowError = nil
+    }
+
+    func commitGtdSettingsDraft() async {
+        guard settingsGtdPomodoroPresented else { await commitGtdScheduleDraft(); return }
+        guard gtdWorkflowEnabled, gtdPomodoroDraftDirty, !appLock.concealed,
+              let expected = gtdWorkflowExpected["pomodoroDurations"] as? CoreObject else { return }
+        busy = true
+        do {
+            let normalized = try await query("gtdWorkflowDraft", [try json(["type": "pomodoroDurations",
+                "focusMinutes": gtdPomodoroFocusDraft, "breakMinutes": gtdPomodoroBreakDraft, "expected": expected])])
+            guard normalized.flag("valid"), !normalized.object("value").isEmpty else { throw CocoaError(.coderReadCorrupt) }
+            finishOperation()
+            await saveGtdWorkflow(["type": "pomodoroDurations", "value": normalized.object("value")])
+        } catch {
+            gtdWorkflowError = error.localizedDescription
+            finishOperation()
+        }
+    }
+
     func setGtdScheduleDraft(_ value: String) {
         guard gtdWorkflowEnabled else { return }
         gtdScheduleDraft = value
@@ -7795,7 +9541,7 @@ final class CoreModel: ObservableObject {
     func chooseGtdWorkflow(_ edit: CoreObject) async {
         guard gtdWorkflowEnabled else { return }
         if gtdWorkflowDraftDirty {
-            await commitGtdScheduleDraft()
+            await commitGtdSettingsDraft()
             guard gtdWorkflowError == nil else { return }
         }
         guard gtdWorkflowEnabled, !gtdWorkflowDraftDirty else { return }
@@ -7825,6 +9571,15 @@ final class CoreModel: ObservableObject {
               !fieldEdit || result.text("field") == gtdWorkflowEdit.text("field"),
               result.text("type") == gtdWorkflowEdit.text("type"), result["changed"] is Bool,
               try json(["value": result["value"] ?? NSNull()]) == json(["value": gtdWorkflowEdit["value"] ?? NSNull()]) else { throw CocoaError(.coderReadCorrupt) }
+        if settingsGtdPomodoroPresented, !gtdPomodoroNoticeShown, result.flag("changed"), result.flag("value"),
+           ["pomodoroAutoStartBreaks", "pomodoroAutoStartFocus"].contains(result.text("type")) {
+            gtdPomodoroNoticeShown = true
+            gtdPomodoroNotice = gtdPomodoro.text("autoStartNotice")
+            gtdPomodoroNoticeTask = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
+                self?.gtdPomodoroNotice = nil
+            }
+        }
         gtdWorkflowRequest = nil
         gtdWorkflowAwaitingRefresh = true
         gtdWorkflowError = nil
@@ -7862,9 +9617,15 @@ final class CoreModel: ObservableObject {
         guard diagnosticsLockObserver == nil else { return }
         diagnosticsLockObserver = appLock.$enabled.combineLatest(appLock.$locked).sink { [weak self] enabled, locked in
             if enabled == nil || locked {
+                self?.clearProcessInboxUndoOffer()
+                self?.clearInboxTaskSelection()
+                self?.inboxGeneration += 1
+                self?.inboxCurrent = false
+                self?.retireInboxFilterPresentation()
                 self?.invalidateTaskAttachmentOpen()
                 self?.invalidateProjectAttachmentOpen()
                 self?.cancelProjectFileImport()
+                self?.retireAISettingsPage()
                 self?.invalidateDiagnostics(dropCache: true)
             }
         }
@@ -10055,9 +11816,13 @@ final class CoreModel: ObservableObject {
                     "settings.backupMobile.failedToRestoreBackup", "settings.backupMobile.restoreFailed", "settings.backupMobile.importFailed", "settings.importDiagnostics.limitExceeded", "settings.recoverySnapshotsEmpty",
                     "appLock.title", "appLock.description", "appLock.prompt", "appLock.enablePrompt", "appLock.unlock",
                     "appLock.authenticating", "appLock.useDevicePasscode", "appLock.unavailable", "appLock.cancelled", "appLock.failed",
+                    "settings.ai", "settings.aiEnable", "settings.aiProvider", "settings.aiProviderOpenAI", "settings.aiProviderGemini", "settings.aiProviderAnthropic",
+                    "settings.aiReasoning", "settings.aiReasoningHint", "settings.aiEffortLow", "settings.aiEffortMedium", "settings.aiEffortHigh", "settings.aiEffortMinimalSaved",
+                    "settings.aiThinkingBudget", "settings.aiThinkingHint", "settings.aiThinkingOff", "settings.aiThinkingLow", "settings.aiThinkingMedium", "settings.aiThinkingHigh",
+                    "settings.aiAdvanced", "settings.aiRequestTimeout", "settings.aiRequestTimeoutDesc", "settings.aiRequestTimeoutSeconds", "settings.aiSummaryReadOnly", "settings.on", "settings.off",
                     "settings.iosSearchLabel", "settings.iosSearchDesc", "settings.iosSearchPaused", "settings.iosSearchFailed",
                     "common.all", "common.close", "common.cancel", "common.done", "common.retry", "common.loading", "common.ok", "common.noMatches",
-                    "common.play", "common.pause", "quickAdd.audioNoteTitle", "audio.loading",
+                    "common.play", "common.pause", "quickAdd.audioNoteTitle", "quickAdd.bulkCreateError", "audio.loading",
                     "attachments.title", "attachments.missing", "attachments.download", "attachments.addLink", "attachments.addFile",
                     "settings.attachmentsCleanupPendingDeletesConfirmAction", "persistence.saved",
                     "attachments.remove", "attachments.linkPlaceholder", "attachments.linkBatchHint",
@@ -10099,9 +11864,10 @@ final class CoreModel: ObservableObject {
                     "projects.sortByName", "projects.sortByColor", "projects.moveUp", "projects.moveDown", "projects.areaInUse",
                     "common.delete",
                     "projects.addToFocus", "projects.removeFromFocus", "projects.actionsLabel", "waiting.title",
-                    "someday.title", "common.search", "filters.contexts", "filters.projects", "filters.timeEstimate",
+                    "someday.title", "board.dragTask", "common.search", "filters.contexts", "filters.projects", "filters.timeEstimate",
                     "filters.more", "filters.priority", "filters.remove", "filters.active", "filters.clear", "taskEdit.energyLevel",
                     "taskEdit.locationLabel", "taskEdit.locationPlaceholder", "reference.title", "nav.history", "nav.trash",
+                    "task.trashOutcomeUnknown", "task.updateFailed",
                     "filters.matchAny", "filters.contextMatchMode", "filters.tagMatchMode",
                     "sort.label", "list.groupBy", "taskEdit.moreOptions", "dailyReview.completeDesc",
                     "settings.about", "settings.officialWebsite", "settings.videoTutorials", "settings.privacy", "settings.terms",
@@ -10119,12 +11885,14 @@ final class CoreModel: ObservableObject {
                     "settings.feedbackEmail", "settings.feedbackEmailPlaceholder", "settings.feedbackIncludeDiagnostics", "settings.feedbackIncludeDiagnosticsDesc", "settings.feedbackPrivacy",
                     "settings.feedbackSubmit", "settings.feedbackSending", "settings.feedbackSent", "settings.feedbackFailed", "settings.feedbackUnavailable", "settings.feedbackUnavailableDesc",
                     "settings.feedbackOpenGitHubIssue", "settings.feedbackGitHubDesc", "settings.feedbackOpenGitHubDiscussion", "settings.feedbackRequired", "settings.feedbackInvalidEmail",
+                    "settings.appleRemindersImport.appleReminders", "settings.appleRemindersImport.captureList", "settings.appleRemindersImport.chooseCaptureList", "settings.appleRemindersImport.deleteAfterImport", "settings.appleRemindersImport.deleteAfterImportDescription", "settings.appleRemindersImport.autoImport", "settings.appleRemindersImport.autoImportDescription", "settings.appleRemindersImport.importIncomplete", "settings.appleRemindersImport.importIncompleteDescription", "settings.appleRemindersImport.permissionRequired", "settings.appleRemindersImport.noListsFound", "settings.appleRemindersImport.importedCount", "settings.appleRemindersImport.skippedCount", "settings.appleRemindersImport.failedCount", "settings.appleRemindersImport.deletedCount", "settings.appleRemindersImport.deleteFailedCount",
                     "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "viewSections.updateFailed"]
         let result = try await query("strings", [try json(keys)])
         guard let translated = result["strings"] as? CoreObject, translated.values.allSatisfy({ $0 is String }) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        strings = translated
+        // Equal values must not republish: every view reads strings.
+        if !(translated as NSDictionary).isEqual(to: strings) { strings = translated }
     }
 
     private func readTheme() async throws {
@@ -10151,7 +11919,7 @@ final class CoreModel: ObservableObject {
             if preferenceDefaults.object(forKey: key) as? String != value { preferenceDefaults.set(value, forKey: key) }
         }
         if let value = mirrors["@mindwtr_theme"] { storedTheme = value }
-        theme = next
+        if !(next as NSDictionary).isEqual(to: theme) { theme = next }
     }
 
     func saveGeneralPreference(_ edit: CoreObject) async {
@@ -13075,7 +14843,10 @@ final class CoreModel: ObservableObject {
         for attempt in 0..<2 {
             let options = try await query("projectAreaOptions", [id])
             let project = options.object("project")
-            guard options.count == 5, !options.text("revision").isEmpty,
+            guard options.count == 7,
+                  options["colorOverride"] is NSNull || (options["colorOverride"] as? String).map({ $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil }) == true,
+                  let colors = options["colors"] as? [String], !colors.isEmpty, colors.count <= 32,
+                  colors.allSatisfy({ $0.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil }), !options.text("revision").isEmpty,
                   let canEdit = options["canEdit"] as? NSNumber,
                   CFGetTypeID(canEdit) == CFBooleanGetTypeID(),
                   let noAreaLabel = options["noAreaLabel"] as? String, !noAreaLabel.isEmpty,
@@ -13144,10 +14915,26 @@ final class CoreModel: ObservableObject {
         await performProjectAreaWrite(selectedID, name: selectedName, projectID: id)
     }
 
+    func chooseProjectColor(_ color: String?) async {
+        let id = projectHeader.text("id")
+        guard projectAreaChoiceEnabled, !id.isEmpty,
+              color == nil || projectAreaOptions["colors"] is [String]
+                && (projectAreaOptions["colors"] as? [String])?.contains(color!) == true else { return }
+        let project = projectAreaOptions.object("project")
+        let areaID = project["areaId"] as? String
+        let name = areaID.flatMap { id in projectAreaOptions.objects("areas").first { $0.text("id") == id }?.text("label") }
+        guard (areaID == nil) == (name == nil), await flushProjectNotesEdit(), projectHeader.text("id") == id,
+              projectAreaPresented, !busy, !retryNeeded, projectAreaRequest == nil else { return }
+        busy = true
+        projectAreaError = nil
+        defer { finishOperation() }
+        await performProjectAreaWrite(areaID, name: name, projectID: id, colorOverride: color as Any? ?? NSNull())
+    }
+
     // The Area-create path calls this only after its own durable acknowledgment.
     // The caller owns busy, so a second command cannot bypass the UI guards.
     private func performProjectAreaWrite(_ selectedID: String?, name selectedName: String?,
-                                         projectID id: String) async {
+                                         projectID id: String, colorOverride: Any? = nil) async {
         do {
             // Notes autosave may change the Project revision. Re-read its token,
             // but never silently switch the association or tapped Area witness.
@@ -13174,9 +14961,11 @@ final class CoreModel: ObservableObject {
             if let selectedID, let selectedName {
                 selectedArea = ["id": selectedID, "name": selectedName]
             } else { selectedArea = NSNull() }
-            projectAreaRequest = try json(["requestId": UUID().uuidString.lowercased(),
-                                           "projectId": id, "areaId": areaValue,
-                                           "expected": expected, "selectedArea": selectedArea])
+            var request: CoreObject = ["requestId": UUID().uuidString.lowercased(),
+                                       "projectId": id, "areaId": areaValue,
+                                       "expected": expected, "selectedArea": selectedArea]
+            if let colorOverride { request["colorOverride"] = colorOverride }
+            projectAreaRequest = try json(request)
             projectAreaHasRequestedChoice = true
             projectAreaRequestedID = selectedID
             projectAreaExpectedID = id
@@ -13204,8 +14993,11 @@ final class CoreModel: ObservableObject {
         }
         let blocked = result.count == 1 && result["blocked"] as? String == ""
         if !blocked {
+            let request = try JSONSerialization.jsonObject(with: Data(projectAreaRequest!.utf8)) as? CoreObject ?? [:]
             let actualAreaID = result["areaId"] as? String
-            guard result.count == 4, result.text("id") == id,
+            guard result.count == (request["colorOverride"] == nil ? 4 : 5), result.text("id") == id,
+                  (request["colorOverride"] == nil || (result["colorOverride"] is NSNull && request["colorOverride"] is NSNull)
+                    || result["colorOverride"] as? String == request["colorOverride"] as? String),
                   (actualAreaID == projectAreaExpectedAreaID &&
                     (actualAreaID != nil || result["areaId"] is NSNull)),
                   result["areaTitle"] is NSNull || (result["areaTitle"] as? String)
@@ -13728,13 +15520,13 @@ final class CoreModel: ObservableObject {
         if fromProject { dismissProjectAreaPresentation() }
     }
 
-    func openSettingsTaxonomy(kind: String, index: Int, deleting: Bool) async {
-        guard manageInventoryActionsEnabled, ["context", "tag"].contains(kind),
-              let rows = managedInventoryRows[kind == "context" ? "contexts" : "tags"],
-              rows.indices.contains(index), !rows[index].text("value").isEmpty else { return }
+    func openSettingsTaxonomy(kind: String, index: Int = -1, deleting: Bool = false, creating: Bool = false) async {
+        guard manageInventoryActionsEnabled, ["context", "tag"].contains(kind) else { return }
+        let rows = managedInventoryRows[kind == "context" ? "contexts" : "tags"] ?? []
+        guard creating || (rows.indices.contains(index) && !rows[index].text("value").isEmpty) else { return }
         settingsTaxonomyKind = kind
-        settingsTaxonomyAction = deleting ? "delete" : "rename"
-        settingsTaxonomyOriginalName = rows[index].text("value")
+        settingsTaxonomyAction = creating ? "create" : deleting ? "delete" : "rename"
+        settingsTaxonomyOriginalName = creating ? "" : rows[index].text("value")
         settingsTaxonomyName = settingsTaxonomyOriginalName
         settingsTaxonomyOptions = [:]
         settingsTaxonomyAcknowledged = false
@@ -13752,7 +15544,9 @@ final class CoreModel: ObservableObject {
 
     private func readSettingsTaxonomyOptions(preserveDraft: Bool) async throws {
         guard let kind = settingsTaxonomyKind else { throw CocoaError(.coderReadCorrupt) }
-        let options = try await query("manageTaxonomyOptions", [try json(["kind": kind, "name": settingsTaxonomyOriginalName])])
+        var input: CoreObject = ["kind": kind, "name": settingsTaxonomyOriginalName]
+        if settingsTaxonomyAction == "create" { input["action"] = "create" }
+        let options = try await query("manageTaxonomyOptions", [try json(input)])
         guard options.count == 6, options.text("kind") == kind,
               options.text("name").utf8.elementsEqual(settingsTaxonomyOriginalName.utf8),
               !options.object("expected").isEmpty, options.object("draft")["name"] is String else {
@@ -13829,8 +15623,8 @@ final class CoreModel: ObservableObject {
         let request: String
         do {
             request = try json(["requestId": UUID().uuidString.lowercased(), "kind": kind,
-                "action": settingsTaxonomyAction, "name": settingsTaxonomyOriginalName,
-                "to": settingsTaxonomyAction == "delete" ? NSNull() : settingsTaxonomyName as Any,
+                "action": settingsTaxonomyAction, "name": settingsTaxonomyAction == "create" ? settingsTaxonomyName : settingsTaxonomyOriginalName,
+                "to": settingsTaxonomyAction == "rename" ? settingsTaxonomyName as Any : NSNull(),
                 "expected": settingsTaxonomyOptions.object("expected")])
             settingsTaxonomyRequest = request
         } catch { settingsTaxonomyReadError = error.localizedDescription; return }
@@ -13842,7 +15636,7 @@ final class CoreModel: ObservableObject {
     private func acknowledgeSettingsTaxonomy(_ result: CoreObject) throws {
         guard settingsTaxonomyRequest != nil, let kind = settingsTaxonomyKind,
               result.count == 4, result.text("kind") == kind, result.text("action") == settingsTaxonomyAction,
-              result.text("name").utf8.elementsEqual(settingsTaxonomyOriginalName.utf8),
+              result.text("name").utf8.elementsEqual((settingsTaxonomyAction == "create" ? settingsTaxonomyName : settingsTaxonomyOriginalName).utf8),
               settingsTaxonomyAction == "delete" ? result["to"] is NSNull : result["to"] is String else {
             throw CocoaError(.coderReadCorrupt)
         }
@@ -15519,36 +17313,371 @@ final class CoreModel: ObservableObject {
             request = try json(["requestId": UUID().uuidString,
                                 "action": ["type": action, "taskId": taskID]])
         } catch { self.error = error.localizedDescription; return }
+        await performBoardAction(request)
+    }
+
+    func boardCardCanComplete(_ displayed: CoreObject) -> Bool {
+        let row = displayed.object("row")
+        guard boardActionsEnabled, !morePresented, !capturePresented, !boardActionPending,
+              taskCompletionRequest == nil, taskActionUndoRequest == nil, !referenceProjectNextActionPending,
+              displayed.flag("completeAllowed"), ["inbox", "next", "waiting", "someday"].contains(row.text("status")),
+              !row.text("id").isEmpty, row.text("id").utf16.count <= 500,
+              !row.text("taskRevision").isEmpty, row.text("taskRevision").utf16.count <= 200 else { return false }
+        return boardView.objects("columns").contains { column in
+            column.objects("cards").contains {
+                let current = $0.object("row")
+                return $0.flag("completeAllowed") && current.text("id").utf8.elementsEqual(row.text("id").utf8)
+                    && current.text("taskRevision").utf8.elementsEqual(row.text("taskRevision").utf8)
+                    && current.text("status").utf8.elementsEqual(row.text("status").utf8)
+            }
+        }
+    }
+
+    func completeBoardCard(_ displayed: CoreObject) async {
+        guard boardCardCanComplete(displayed) else { return }
+        let row = displayed.object("row")
+        await saveTaskCompletion(row.text("id"), taskRevision: row.text("taskRevision"), source: "board")
+    }
+
+    func boardMoveDestinations(_ displayed: CoreObject) -> [CoreObject] {
+        let row = displayed.object("row")
+        guard boardActionsEnabled, !morePresented, !capturePresented, !boardActionPending,
+              displayed.flag("moveAllowed"), ["inbox", "next", "waiting", "someday", "done"].contains(row.text("status")),
+              !row.text("id").isEmpty, !row.text("taskRevision").isEmpty,
+              boardView.objects("columns").contains(where: { column in
+                  column.objects("cards").contains(where: {
+                      let current = $0.object("row")
+                      return $0.flag("moveAllowed") && current.text("id") == row.text("id")
+                          && current.text("taskRevision") == row.text("taskRevision") && current.text("status") == row.text("status")
+                  })
+              }) else { return [] }
+        return boardView.object("cardActions").object("moveTo").objects("destinations").filter {
+            ["inbox", "next", "waiting", "someday"].contains($0.text("status"))
+                && $0.text("status") != row.text("status") && !$0.text("label").isEmpty
+        }
+    }
+
+    func moveBoardCard(_ displayed: CoreObject, status: String) async {
+        guard boardMoveDestinations(displayed).contains(where: { $0.text("status") == status }) else { return }
+        let row = displayed.object("row")
+        let request: String
+        do {
+            request = try json(["requestId": UUID().uuidString,
+                "action": ["type": "moveCard", "taskId": row.text("id"), "status": status,
+                           "taskRevision": row.text("taskRevision"), "filters": boardFilters]])
+        } catch { self.error = error.localizedDescription; return }
+        await performBoardAction(request)
+    }
+
+    func boardOrderActions(_ displayed: CoreObject, column: CoreObject, filters: CoreObject) -> [CoreObject] {
+        let row = displayed.object("row"), order = column.object("order")
+        let status = column.text("status"), token = order.text("expectedOrder")
+        guard boardActionsEnabled, !morePresented, !capturePresented, !boardActionPending,
+              taskCompletionRequest == nil, taskActionUndoRequest == nil, !referenceProjectNextActionPending,
+              order.flag("available"), token.utf8.count == 75,
+              token.range(of: "^boardOrder:[0-9a-f]{64}$", options: .regularExpression) != nil, !filters.isEmpty,
+              ["inbox", "next", "waiting", "someday", "done"].contains(status),
+              row.text("status").utf8.elementsEqual(status.utf8),
+              !row.text("id").isEmpty, row.text("id").utf16.count <= 500,
+              !row.text("taskRevision").isEmpty, row.text("taskRevision").utf16.count <= 4096,
+              let capturedFilters = try? json(filters), let currentFilters = try? json(boardView.object("filters")),
+              capturedFilters.utf8.elementsEqual(currentFilters.utf8) else { return [] }
+        let columns = boardView.objects("columns").filter { $0.text("status").utf8.elementsEqual(status.utf8) }
+        guard columns.count == 1 else { return [] }
+        let currentOrder = columns[0].object("order")
+        let cards = columns[0].objects("cards").filter {
+            $0.object("row").text("id").utf8.elementsEqual(row.text("id").utf8)
+        }
+        guard currentOrder.flag("available"), currentOrder.text("expectedOrder").utf8.elementsEqual(token.utf8),
+              cards.count == 1,
+              cards[0].object("row").text("taskRevision").utf8.elementsEqual(row.text("taskRevision").utf8),
+              cards[0].object("row").text("status").utf8.elementsEqual(status.utf8),
+              let capturedActions = try? json(displayed.object("orderActions")),
+              let currentActions = try? json(cards[0].object("orderActions")),
+              capturedActions.utf8.elementsEqual(currentActions.utf8) else { return [] }
+        let intents = displayed.object("orderActions")
+        guard Set(intents.keys) == Set(["up", "down"]) else { return [] }
+        var actions: [CoreObject] = []
+        for direction in ["up", "down"] {
+            let label = order.text(direction == "up" ? "moveUpLabel" : "moveDownLabel")
+            guard !label.isEmpty else { return [] }
+            if intents[direction] is NSNull {
+                actions.append(["direction": direction, "label": label, "enabled": false])
+            } else {
+                guard let intent = intents[direction] as? CoreObject, Set(intent.keys) == Set(["afterId"]),
+                      let after = intent["afterId"], after is NSNull || (after as? String).map({
+                          !$0.isEmpty && $0.utf16.count <= 500 && !$0.utf8.elementsEqual(row.text("id").utf8)
+                      }) == true else { return [] }
+                // The anchor may be beyond the loaded page. Only core supplies it.
+                actions.append(["direction": direction, "label": label, "enabled": true, "afterId": after])
+            }
+        }
+        return actions
+    }
+
+    func orderBoardCard(_ displayed: CoreObject, column: CoreObject, filters: CoreObject, direction: String) async {
+        guard let choice = boardOrderActions(displayed, column: column, filters: filters).first(where: {
+            $0.text("direction") == direction && $0.flag("enabled")
+        }), let after = choice["afterId"] else { return }
+        let row = displayed.object("row")
+        let request: String
+        do {
+            request = try json(["requestId": UUID().uuidString, "action": [
+                "type": "orderCard", "taskId": row.text("id"), "taskRevision": row.text("taskRevision"),
+                "status": column.text("status"), "afterId": after, "filters": filters,
+                "expectedOrder": column.object("order").text("expectedOrder")]])
+        } catch { self.error = error.localizedDescription; return }
+        await performBoardAction(request)
+    }
+
+    func boardDragSnapshotIsCurrent(_ displayed: CoreObject, column: CoreObject, filters: CoreObject) -> Bool {
+        let row = displayed.object("row"), status = column.text("status")
+        guard !appLock.concealed, !Task.isCancelled, UIApplication.shared.applicationState == .active,
+              taskCompletionRequest == nil, taskActionUndoRequest == nil,
+              !referenceProjectNextActionPending, ["inbox", "next", "waiting", "someday", "done"].contains(status),
+              row.text("status").utf8.elementsEqual(status.utf8),
+              !row.text("id").isEmpty, row.text("id").utf16.count <= 500,
+              !row.text("taskRevision").isEmpty, row.text("taskRevision").utf16.count <= 4096,
+              !filters.isEmpty, let frozenFilters = try? json(filters),
+              let currentFilters = try? json(boardView.object("filters")),
+              frozenFilters.utf8.elementsEqual(currentFilters.utf8) else { return false }
+        let columns = boardView.objects("columns").filter { $0.text("status").utf8.elementsEqual(status.utf8) }
+        guard columns.count == 1 else { return false }
+        let ids = column.objects("cards").map { $0.object("row").text("id") }
+        let currentIDs = columns[0].objects("cards").map { $0.object("row").text("id") }
+        let current = columns[0].objects("cards").filter { $0.object("row").text("id").utf8.elementsEqual(row.text("id").utf8) }
+        guard !ids.contains(""), Set(ids).count == ids.count, ids.count == currentIDs.count,
+              zip(ids, currentIDs).allSatisfy({ $0.0.utf8.elementsEqual($0.1.utf8) }), current.count == 1,
+              let frozenCard = try? json(displayed), let currentCard = try? json(current[0]),
+              frozenCard.utf8.elementsEqual(currentCard.utf8) else { return false }
+        return true
+    }
+
+    func boardMoveDragDestinations(_ displayed: CoreObject, column: CoreObject, filters: CoreObject) -> [CoreObject] {
+        guard boardDragSnapshotIsCurrent(displayed, column: column, filters: filters) else { return [] }
+        return boardMoveDestinations(displayed).filter { destination in
+            boardView.objects("columns").filter { $0.text("status") == destination.text("status") }.count == 1
+        }
+    }
+
+    func boardDragAvailable(_ displayed: CoreObject, column: CoreObject, filters: CoreObject) -> Bool {
+        boardOrderActions(displayed, column: column, filters: filters).count == 2
+            || !boardMoveDragDestinations(displayed, column: column, filters: filters).isEmpty
+            || boardDragSnapshotIsCurrent(displayed, column: column, filters: filters) && boardCardCanComplete(displayed)
+    }
+
+    func captureBoardDrag(_ displayed: CoreObject, column: CoreObject, filters: CoreObject) -> BoardOrderDragCapture? {
+        let moveAllowed = !boardMoveDragDestinations(displayed, column: column, filters: filters).isEmpty
+        let completionAllowed = boardDragSnapshotIsCurrent(displayed, column: column, filters: filters) && boardCardCanComplete(displayed)
+        guard let host, !appLock.concealed,
+              moveAllowed || completionAllowed || boardOrderActions(displayed, column: column, filters: filters).count == 2,
+              let displayedJSON = try? json(displayed), let columnJSON = try? json(column),
+              let filtersJSON = try? json(filters) else { return nil }
+        let cards = column.objects("cards"), ids = cards.map { $0.object("row").text("id") }
+        guard !ids.contains(""), Set(ids).count == ids.count else { return nil }
+        let first = cards.first
+        let headID = first.flatMap { item -> String? in
+            guard item.object("orderActions")["up"] is NSNull,
+                  boardOrderActions(item, column: column, filters: filters).count == 2 else { return nil }
+            return item.object("row").text("id")
+        }
+        return BoardOrderDragCapture(nonce: UUID().uuidString, generation: boardGeneration, hostID: ObjectIdentifier(host),
+            moveAllowed: moveAllowed, completionAllowed: completionAllowed,
+            taskID: displayed.object("row").text("id"), status: column.text("status"),
+            displayedJSON: displayedJSON, columnJSON: columnJSON, filtersJSON: filtersJSON, ids: ids, headID: headID)
+    }
+
+    func boardOrderDragIsCurrent(_ capture: BoardOrderDragCapture) -> Bool {
+        guard let host, capture.hostID == ObjectIdentifier(host), !appLock.concealed,
+              capture.generation == boardGeneration,
+              let displayed = try? decode(capture.displayedJSON), let column = try? decode(capture.columnJSON),
+              let filters = try? decode(capture.filtersJSON) else { return false }
+        return boardOrderActions(displayed, column: column, filters: filters).count == 2
+    }
+
+    func boardMoveDragIsCurrent(_ capture: BoardOrderDragCapture, status: String) -> Bool {
+        guard let host, capture.hostID == ObjectIdentifier(host), capture.generation == boardGeneration,
+              capture.moveAllowed, capture.status != status, let displayed = try? decode(capture.displayedJSON),
+              let column = try? decode(capture.columnJSON), let filters = try? decode(capture.filtersJSON),
+              capture.taskID.utf8.elementsEqual(displayed.object("row").text("id").utf8),
+              capture.status.utf8.elementsEqual(column.text("status").utf8) else { return false }
+        return boardMoveDragDestinations(displayed, column: column, filters: filters).contains { $0.text("status") == status }
+    }
+
+    func boardCompletionDragIsCurrent(_ capture: BoardOrderDragCapture) -> Bool {
+        guard let host, capture.hostID == ObjectIdentifier(host), capture.generation == boardGeneration,
+              capture.completionAllowed, let displayed = try? decode(capture.displayedJSON),
+              let column = try? decode(capture.columnJSON), let filters = try? decode(capture.filtersJSON),
+              capture.taskID.utf8.elementsEqual(displayed.object("row").text("id").utf8),
+              capture.status.utf8.elementsEqual(column.text("status").utf8) else { return false }
+        return boardDragSnapshotIsCurrent(displayed, column: column, filters: filters) && boardCardCanComplete(displayed)
+            && boardView.objects("columns").filter { $0.text("status") == "done" }.count == 1
+    }
+
+    @discardableResult
+    func completeBoardCard(_ capture: BoardOrderDragCapture, consume: () -> Bool) -> Bool {
+        let requestID = UUID().uuidString.lowercased()
+        guard boardCompletionDragIsCurrent(capture), let host,
+              let displayed = try? decode(capture.displayedJSON),
+              let request = try? json(["id": capture.taskID, "requestId": requestID,
+                  "taskRevision": displayed.object("row").text("taskRevision"), "source": "board"]),
+              request.utf8.count <= 4096, consume() else { return false }
+        let owner = BoardCompletionOwner(host: host, request: request, requestID: requestID, foreground: foregroundSyncGeneration)
+        retainTaskCompletion(request, requestID: requestID, boardOwner: owner)
+        Task {
+            _ = try? await host.call("logLine", argumentsJSON: json([
+                "Native iOS Board Done cross-drop submitted", #"{"releaseCheck":"v1.3.7/ios-board-done-cross-drop"}"#]))
+            await runTaskCompletion(request, source: "board", boardOwner: owner)
+        }
+        return true
+    }
+
+    /// Consume the gesture and retain its exact Move before any asynchronous work.
+    @discardableResult
+    func moveBoardCard(_ capture: BoardOrderDragCapture, status: String, consume: () -> Bool) -> Bool {
+        guard boardMoveDragIsCurrent(capture, status: status),
+              let displayed = try? decode(capture.displayedJSON), let filters = try? decode(capture.filtersJSON),
+              let request = try? json(["requestId": UUID().uuidString, "action": [
+                "type": "moveCard", "taskId": capture.taskID, "status": status,
+                "taskRevision": displayed.object("row").text("taskRevision"), "filters": filters]]), consume() else { return false }
+        retainBoardAction(request)
+        let submittedHost = host
+        let fromDone = capture.status == "done"
+        Task {
+            // Submission is separate from the existing durable Move acknowledgement.
+            _ = try? await submittedHost?.call("logLine", argumentsJSON: json([
+                fromDone ? "Native iOS Board Done cross-drop submitted" : "Native iOS Board cross-column drag submitted",
+                fromDone ? #"{"releaseCheck":"v1.3.7/ios-board-done-cross-drop"}"# : #"{"releaseCheck":"v1.3.7/ios-board-cross-column-drag"}"#]))
+            await runBoardAction(request)
+        }
+        return true
+    }
+
+    /// Diagnostic-only: never enters the operation owner or changes published UI state.
+    func logBoardDragStage(_ stage: String, reason: String) {
+        let diagnosticHost = host
+        Task {
+            _ = try? await diagnosticHost?.call("logLine", argumentsJSON: json([
+                "Native iOS Board drag stage", json(["releaseCheck": "v1.3.5/ios-board-drag-stage",
+                                                     "stage": stage, "reason": reason])]))
+        }
+    }
+
+    /// Final claim consumption and command retention must remain synchronous.
+    @discardableResult
+    func orderBoardCard(_ capture: BoardOrderDragCapture, afterID: String?, consume: () -> Bool) -> Bool {
+        guard boardOrderDragIsCurrent(capture),
+              let displayed = try? decode(capture.displayedJSON), let column = try? decode(capture.columnJSON),
+              let filters = try? decode(capture.filtersJSON),
+              afterID.map({ $0 != capture.taskID && capture.ids.contains($0) }) ?? (capture.headID != nil) else { return false }
+        if let afterID {
+            let current = boardView.objects("columns").filter { $0.text("status") == capture.status }
+                .flatMap { $0.objects("cards") }.filter { $0.object("row").text("id") == afterID }
+            guard current.count == 1, current[0].object("row").text("status") == capture.status else { return false }
+        }
+        let row = displayed.object("row")
+        guard let request = try? json(["requestId": UUID().uuidString, "action": [
+            "type": "orderCard", "taskId": row.text("id"), "taskRevision": row.text("taskRevision"),
+            "status": column.text("status"), "afterId": afterID as Any? ?? NSNull(), "filters": filters,
+            "expectedOrder": column.object("order").text("expectedOrder")]]), consume() else { return false }
+        retainBoardAction(request)
+        let submittedHost = host
+        Task {
+            // This marker proves submission only, including a later core refusal/no-op.
+            _ = try? await submittedHost?.call("logLine", argumentsJSON: json([
+                "Native iOS Board drag submitted", #"{"releaseCheck":"v1.3.5/ios-board-drag"}"#]))
+            await runBoardAction(request)
+        }
+        return true
+    }
+
+    private func retainBoardAction(_ request: String) {
         boardActionRequest = request
+        boardActionHost = host
+        boardActionForeground = foregroundSyncGeneration
         busy = true
         error = nil
+    }
+
+    private func performBoardAction(_ request: String) async {
+        retainBoardAction(request)
+        await runBoardAction(request)
+    }
+
+    private func runBoardAction(_ request: String) async {
+        guard let actionHost = boardActionHost, boardActionRequest?.utf8.elementsEqual(request.utf8) == true else { return }
+        guard host === actionHost else {
+            boardActionRequest = nil; boardActionHost = nil
+            return
+        }
+        let foreground = boardActionForeground
         var boardTaskOpened = false
+        var dispatched = false
         defer {
-            finishOperation()
-            if boardTaskOpened { Task { await readTaskView() } }
+            if boardActionHost === actionHost,
+               boardActionRequest?.utf8.elementsEqual(request.utf8) == true || boardActionRequest == nil {
+                if host === actionHost { finishOperation() }
+                if boardActionRequest == nil { boardActionHost = nil }
+                if boardTaskOpened, host === actionHost { Task { await readTaskView() } }
+            }
         }
         let result: CoreObject
         do {
-            result = try await query("boardAction", [request])
+            result = try await query("boardAction", [request], beforeDispatch: {
+                guard self.host === actionHost, self.boardActionHost === actionHost, self.boardActionRequest?.utf8.elementsEqual(request.utf8) == true,
+                      self.foregroundSyncGeneration == foreground, !self.appLock.concealed, !Task.isCancelled,
+                      UIApplication.shared.applicationState == .active, self.selectedSurface == .board else { return false }
+                dispatched = true
+                return true
+            })
         } catch {
+            guard boardActionHost === actionHost, boardActionRequest?.utf8.elementsEqual(request.utf8) == true else { return }
             // Only the host's typed, cleaned-up rejection proves no write is owed.
             // Every other failure retains this exact request and its private journal.
-            if isDefiniteRejection(error) { boardActionRequest = nil }
+            if !dispatched || isDefiniteRejection(error) { boardActionRequest = nil }
+            guard host === actionHost else { return }
             retryNeeded = boardActionPending
-            self.error = error.localizedDescription
+            if foregroundSyncGeneration == foreground, !appLock.concealed,
+               UIApplication.shared.applicationState == .active { self.error = error.localizedDescription }
             return
         }
+        guard host === actionHost, boardActionHost === actionHost, boardActionRequest?.utf8.elementsEqual(request.utf8) == true else { return }
         boardTaskOpened = await acknowledgeBoardAction(result)
     }
 
-    private func acknowledgeBoardAction(_ result: CoreObject) async -> Bool {
+    private func acknowledgeBoardAction(_ result: CoreObject, foreground: Int? = nil) async -> Bool {
+        let actionHost = host
+        let presentation = foreground ?? boardActionForeground
+        // Only an acknowledged Move from this exact displayed Done row invalidates its completion notice.
+        if selectedSurface == .board, result.flag("changed"), taskActionUndoRequest == nil,
+           let request = boardActionRequest, let action = try? decode(request).object("action"),
+           action.text("type") == "moveCard", !action.text("taskId").isEmpty,
+           taskActionNotice.text("operation") == "completion",
+           taskActionNotice.text("source") != "board" || boardCompletionNoticeHost === actionHost,
+           taskActionNotice.text("id").utf8.elementsEqual(action.text("taskId").utf8),
+           boardView.objects("columns").contains(where: { column in
+               column.objects("cards").contains(where: {
+                   let row = $0.object("row")
+                   return row.text("status") == "done"
+                       && row.text("id").utf8.elementsEqual(action.text("taskId").utf8)
+                       && row.text("taskRevision").utf8.elementsEqual(action.text("taskRevision").utf8)
+               })
+           }) {
+            taskActionNotice = [:]
+            boardCompletionNoticeHost = nil
+        }
         boardActionRequest = nil
         retryNeeded = false
         error = nil
         // Navigation is blocked while the command is pending. Still never route
         // an acknowledgement onto a different surface if that state has changed.
-        guard selectedSurface == .board else { return false }
-        do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
+        func warm() -> Bool {
+            host === actionHost && selectedSurface == .board && foregroundSyncGeneration == presentation
+                && !appLock.concealed && !Task.isCancelled && UIApplication.shared.applicationState == .active
+        }
+        guard warm() else { return false }
+        do { try await readSelectedSurface() } catch { if warm() { self.error = error.localizedDescription } }
+        guard warm() else { return false }
         return presentAcknowledgedBoardTask(result)
     }
 
@@ -17321,9 +19450,10 @@ final class CoreModel: ObservableObject {
         requestContextsRead()
     }
 
-    func selectContextsChip(_ id: String) {
+    /// A chip tap, or with `additive` a token chip's long-press (#1427).
+    func selectContextsChip(_ id: String, additive: Bool = false) {
         guard contextsControlsEnabled, contexts.objects("chips").contains(where: { $0.text("id") == id }) else { return }
-        contextsIntents.append(["kind": "chip", "value": id])
+        contextsIntents.append(["kind": "chip", "value": id, "additive": additive])
         contextsLoadedDepth = pageSize
         requestContextsRead(delay: 0)
     }
@@ -17420,7 +19550,8 @@ final class CoreModel: ObservableObject {
                     selection = controls.object("selection")
                     if intent.text("kind") == "chip" {
                         if let chip = controls.objects("chips").first(where: { $0.text("id") == intent.text("value") }) {
-                            selection = chip.object("next")
+                            let additive = chip.object("additive")
+                            selection = intent.flag("additive") && !additive.isEmpty ? additive.object("next") : chip.object("next")
                         }
                     } else if let option = controls.object("matchMode").objects("options").first(where: { $0.text("mode") == intent.text("value") }) {
                         selection["matchMode"] = option.text("mode")
@@ -17439,7 +19570,7 @@ final class CoreModel: ObservableObject {
                 var rows = next.objects("rows")
                 let target = min(depth, next.number("total"))
                 while rows.count < target {
-                    let limit = min(pageSize, target - rows.count)
+                    let limit = min(followUpWindow, target - rows.count)
                     let page = try await contextsPage(selection: selection, search: search, offset: rows.count,
                                                       limit: limit, revision: next.text("revision"))
                     guard contextsReadAllowed(generation, ownsOperation: ownsOperation) else { return }
@@ -18433,29 +20564,102 @@ final class CoreModel: ObservableObject {
         await refresh()
     }
 
+    // MARK: Task736 shared list-sort presentation owner
+    var inboxSortPresented: Bool { taskListSortCaller == .inbox }
+    var inboxSortEnabled: Bool { taskListSortCaller == nil && canOpenTaskListSort(.inbox) }
+    var taskListSortActionsEnabled: Bool {
+        guard let caller = taskListSortCaller, let owner = taskListSortHost else { return false }
+        return taskListSortCurrent(caller, presentation: taskListSortPresentationID, host: owner)
+            && !busy && !retryNeeded && referenceSortRequest == nil
+    }
+
+    private func taskListSortSurface(_ caller: TaskListSortCaller) -> Surface {
+        caller == .inbox ? .inbox : .reference
+    }
+
+    private func canOpenTaskListSort(_ caller: TaskListSortCaller) -> Bool {
+        guard ready, host != nil, !busy, !retryNeeded, !appLock.concealed,
+              !inboxBulkCompositionBlocked,
+              !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending, !taskStatusMenuPresented,
+              !capturePresented, !areaPickerPresented, !taskPresented, !morePresented,
+              !mindSweepPresented, !processInboxPresented, !calendarComposerPresented,
+              referenceSortRequest == nil, taskListSortCaller == nil else { return false }
+        if caller == .reference { return referenceActionsEnabled }
+        return selectedSurface == .inbox && inboxCurrent && !inbox.isEmpty && referencePanel.isEmpty
+            && somedayPanel.isEmpty && historyPanel.isEmpty
+    }
+
+    private func taskListSortCurrent(_ caller: TaskListSortCaller, presentation: UUID, host owner: CoreHost) -> Bool {
+        host === owner && taskListSortHost === owner && taskListSortCaller == caller
+            && taskListSortPresentationID == presentation && ready && !appLock.concealed
+            && selectedSurface == taskListSortSurface(caller)
+            && (caller != .reference || referencePanel == "sort")
+            && !capturePresented && !areaPickerPresented && !taskPresented
+    }
+
+    private func retireTaskListSortHost() {
+        referenceSortRequest = nil
+        referenceSortExpectedResult = nil
+        retireTaskListSort()
+    }
+
+    private func retireTaskListSort() {
+        taskListSortPresentationID = UUID()
+        taskListSortCaller = nil
+        taskListSortHost = nil
+        referenceSortOptions = [:]
+        referenceSortError = nil
+        if referencePanel == "sort" { referencePanel = "" }
+    }
+
+    func closeInboxSort() {
+        guard taskListSortCaller == .inbox, !busy, !retryNeeded, referenceSortRequest == nil else { return }
+        retireTaskListSort()
+    }
+
     func closeReferencePanel() {
         guard !busy, !retryNeeded, referenceSortRequest == nil else { return }
+        if taskListSortCaller == .reference { retireTaskListSort() }
         referenceSortOptions = [:]
         referenceSortError = nil
         referencePanel = ""
         closeReferencePicker()
     }
 
-    func openReferenceSort() async {
-        guard referenceActionsEnabled, referenceSortRequest == nil else { return }
-        referencePanel = "sort"
-        await readReferenceSortOptions()
+    func backReferencePanel() {
+        guard !busy, !retryNeeded, referenceSortRequest == nil else { return }
+        if taskListSortCaller == .reference { retireTaskListSort() }
+        referencePanel = "menu"
     }
 
-    private func readReferenceSortOptions() async {
-        guard !busy, !retryNeeded, referencePanel == "sort" else { return }
+    func openReferenceSort() async { await openTaskListSort(.reference) }
+    func openInboxSort() async { await openTaskListSort(.inbox) }
+
+    private func openTaskListSort(_ caller: TaskListSortCaller) async {
+        guard canOpenTaskListSort(caller), let owner = host else { return }
+        taskListSortPresentationID = UUID()
+        taskListSortHost = owner
+        taskListSortCaller = caller
+        if caller == .reference { referencePanel = "sort" }
+        await readTaskListSortOptions()
+    }
+
+    private func readTaskListSortOptions() async {
+        guard let caller = taskListSortCaller, let owner = taskListSortHost,
+              !busy, !retryNeeded, referenceSortRequest == nil else { return }
+        let presentation = taskListSortPresentationID
+        guard taskListSortCurrent(caller, presentation: presentation, host: owner) else { return }
         busy = true
         referenceSortOptions = [:]
         referenceSortError = nil
-        defer { finishOperation() }
+        defer { if host === owner { finishOperation() } }
+        let current = { self.taskListSortCurrent(caller, presentation: presentation, host: owner) }
         do {
-            if !referenceCurrent, !(await readReference()) { throw CocoaError(.fileReadUnknown) }
-            let options = try await query("taskListSortOptions", ["{}"])
+            if caller == .inbox { try await readInbox(ownedGuard: current) }
+            else if !referenceCurrent, !(await readReference(ownedGuard: current)) { throw CocoaError(.fileReadUnknown) }
+            guard current() else { return }
+            let options = try await query("taskListSortOptions", ["{}"], beforeDispatch: current)
+            guard current() else { return }
             let expected = options.object("expected")
             let choices = options.objects("choices")
             guard Set(options.keys) == Set(["revision", "expected", "choices"]), !options.text("revision").isEmpty,
@@ -18466,53 +20670,1721 @@ final class CoreModel: ObservableObject {
                 throw CocoaError(.coderReadCorrupt)
             }
             referenceSortOptions = options
-        } catch { referenceSortError = label("settings.feedback.actionFailed") }
+        } catch {
+            if current() { referenceSortError = label("settings.feedback.actionFailed") }
+        }
     }
 
-    func setReferenceSort(_ sortBy: String) async {
-        guard referenceActionsEnabled, referencePanel == "sort", referenceSortRequest == nil,
+    func setReferenceSort(_ sortBy: String) async { await setTaskListSort(sortBy, caller: .reference) }
+    func setInboxSort(_ sortBy: String) async { await setTaskListSort(sortBy, caller: .inbox) }
+
+    private func setTaskListSort(_ sortBy: String, caller: TaskListSortCaller) async {
+        guard taskListSortActionsEnabled, taskListSortCaller == caller, let owner = taskListSortHost,
               referenceSortOptions.objects("choices").contains(where: { $0.text("value") == sortBy }) else { return }
+        let presentation = taskListSortPresentationID
         busy = true
         referenceSortError = nil
-        defer { finishOperation() }
+        defer { if host === owner { finishOperation() } }
         do {
             let request = try json(["requestId": UUID().uuidString.lowercased(), "sortBy": sortBy,
                                     "expected": referenceSortOptions.object("expected")])
             referenceSortRequest = request
             referenceSortExpectedResult = ["sortBy": sortBy]
-            try acknowledgeReferenceSort(await query("taskListSortWrite", [request]))
-            await readReference()
-        } catch { await handleReferenceSortError(error) }
+            let result = try await query("taskListSortWrite", [request], beforeDispatch: {
+                self.taskListSortCurrent(caller, presentation: presentation, host: owner)
+            })
+            guard host === owner else { return }
+            let acknowledgedCaller = try acknowledgeReferenceSort(result)
+            await refreshTaskListSortCaller(acknowledgedCaller)
+        } catch {
+            if host === owner { await handleReferenceSortError(error) }
+        }
     }
 
-    private func acknowledgeReferenceSort(_ result: CoreObject) throws {
+    private func acknowledgeReferenceSort(_ result: CoreObject) throws -> TaskListSortCaller {
         guard referenceSortRequest != nil, let expected = referenceSortExpectedResult,
+              let caller = taskListSortCaller, host === taskListSortHost,
               try json(result).utf8.elementsEqual(json(expected).utf8) else { throw CocoaError(.coderReadCorrupt) }
         referenceSortRequest = nil
         referenceSortExpectedResult = nil
-        referenceSortOptions = [:]
-        referenceSortError = nil
-        referencePanel = ""
-        referenceLoadedDepth = pageSize
+        retireTaskListSort()
+        if caller == .reference { referenceLoadedDepth = pageSize }
         retryNeeded = false
         error = nil
+        return caller
+    }
+
+    private func refreshTaskListSortCaller(_ caller: TaskListSortCaller) async {
+        guard let owner = host, selectedSurface == taskListSortSurface(caller), !appLock.concealed else { return }
+        let current = { self.host === owner && self.selectedSurface == self.taskListSortSurface(caller) && !self.appLock.concealed }
+        if caller == .reference { await readReference(ownedGuard: current) }
+        else {
+            do { try await readInbox(ownedGuard: current) }
+            catch { if current() { self.error = error.localizedDescription } }
+        }
     }
 
     private func handleReferenceSortError(_ failure: Error) async {
         if referenceSortRequest != nil && isDefiniteRejection(failure) {
+            let caller = taskListSortCaller
             referenceSortRequest = nil
             referenceSortExpectedResult = nil
             referenceSortOptions = [:]
             retryNeeded = false
-            await readReference()
+            if let caller { await refreshTaskListSortCaller(caller) }
         } else { retryNeeded = referenceSortRequest != nil }
         referenceSortError = label(retryNeeded ? "settings.feedback.saveFailed" : "settings.feedback.actionFailed")
     }
 
-    func retryReferenceSort() async {
-        if retryNeeded { await retry() }
-        else { await readReferenceSortOptions() }
+    func retryReferenceSort() async { await retryTaskListSort(.reference) }
+    func retryInboxSort() async { await retryTaskListSort(.inbox) }
+    private func retryTaskListSort(_ caller: TaskListSortCaller) async {
+        guard taskListSortCaller == caller else { return }
+        if referenceSortRequest != nil { await retry() }
+        else { await readTaskListSortOptions() }
     }
+    // MARK: End Task736 shared list-sort presentation owner
+
+    // MARK: Task737 Inbox grouping owner
+    private var inboxFoldPreference: String { devicePreferencePrefix + "mindwtr:view:group-collapse:inbox:v1" }
+    var inboxGroupEnabled: Bool { canOpenTaskListSort(.inbox) }
+    var inboxActionsEnabled: Bool {
+        ready && selectedSurface == .inbox && inboxCurrent && !busy && !retryNeeded && !appLock.concealed
+            && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
+            && !inboxGroupPresented && !inboxSortPresented && !inboxFiltersPresented && !inboxFilterWorkPending
+            && !inboxBulkCompositionBlocked
+    }
+    var inboxGroupActionsEnabled: Bool {
+        inboxGroupPresented && ready && selectedSurface == .inbox && inboxCurrent && !busy && !retryNeeded
+            && !appLock.concealed && !taskPresented && !capturePresented && !areaPickerPresented
+            && !inboxBulkCompositionBlocked
+    }
+
+    func inboxItemIdentity(_ item: CoreObject) -> [String] {
+        [inbox.text("groupBy"), item.text("type"), item.text("id"), item.text("groupId"), item.object("row").text("id")]
+    }
+    /// First index of an identity, as `items.firstIndex`, built once per `inbox` value.
+    private func inboxItemIndex(_ identity: [String]) -> Int? {
+        if inboxItemIndexCache == nil {
+            inboxItemIndexCache = Dictionary(items.enumerated().map { (inboxItemIdentity($1), $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        return inboxItemIndexCache?[identity]
+    }
+
+    private func inboxFoldIDs(_ value: Any?) -> [String]? {
+        guard let ids = value as? [String], ids.count <= 200,
+              ids.allSatisfy({ $0.utf16.count <= 500 }) else { return nil }
+        return ids
+    }
+
+    private func loadInboxPreferences() {
+        guard !inboxPreferencesLoaded else { return }
+        inboxPreferencesLoaded = true
+        let stored = preferenceDefaults.object(forKey: inboxFoldPreference)
+        let raw = stored == nil ? initialInboxCollapsedGroupsRaw : stored as? String
+        if let raw, let data = raw.data(using: .utf8),
+           let map = (try? JSONSerialization.jsonObject(with: data)) as? CoreObject {
+            inboxCollapsedGroups = map
+            inboxFoldPreferenceWritable = true
+        } else {
+            inboxCollapsedGroups = [:]
+            // A malformed root cannot be merged without destroying the retained bytes.
+            inboxFoldPreferenceWritable = stored == nil && raw == nil
+        }
+        inboxParams["collapsedGroupIds"] = inboxFoldIDs(inboxCollapsedGroups[inboxParams.text("groupBy")]) ?? []
+    }
+
+    private func inboxReadCurrent(_ owner: CoreHost, generation: Int, params: CoreObject) -> Bool {
+        host === owner && selectedSurface == .inbox && inboxGeneration == generation
+            && !appLock.concealed && !Task.isCancelled
+            && (try? json(inboxParams)).map { encoded in
+                (try? json(params)).map { encoded.utf8.elementsEqual($0.utf8) } == true
+            } == true
+    }
+
+    func openInboxGroup() async {
+        guard inboxGroupEnabled else { return }
+        inboxGroupPresented = true
+        await retryInboxGrouping()
+    }
+
+    func closeInboxGroup() {
+        guard !busy, !retryNeeded else { return }
+        inboxGroupPresented = false
+    }
+
+    func setInboxGroup(_ axis: String) async {
+        guard inboxGroupActionsEnabled,
+              let choice = inbox.object("toolbar").object("group").objects("options").first(where: { $0.text("value") == axis }),
+              Set(choice.object("edit").keys) == Set(["groupBy"]),
+              choice.object("edit").text("groupBy") == axis, validReferenceGroup(axis) else { return }
+        inboxParams["groupBy"] = axis
+        inboxParams["collapsedGroupIds"] = inboxFoldIDs(inboxCollapsedGroups[axis]) ?? []
+        invalidateInboxFilterPicker()
+        inboxGeneration += 1
+        inboxCurrent = false
+        inboxGroupPresented = false
+        inboxGroupingOperation = "group"
+        await retryInboxGrouping()
+    }
+
+    func toggleInboxSection(_ id: String) async {
+        guard inboxActionsEnabled, inboxFoldPreferenceWritable,
+              inboxCollapsedGroups[inboxParams.text("groupBy")] == nil
+                || inboxFoldIDs(inboxCollapsedGroups[inboxParams.text("groupBy")]) != nil,
+              let section = items.first(where: {
+                  $0.text("type") == "section" && $0.text("id").utf8.elementsEqual(id.utf8) && $0.flag("collapsible")
+              }), Set(section.object("collapseEdit").keys) == Set(["collapsedGroupIds"]),
+              validReferenceGroup(inboxParams.text("groupBy")),
+              let ids = inboxFoldIDs(section.object("collapseEdit")["collapsedGroupIds"]) else { return }
+        inboxParams["collapsedGroupIds"] = ids
+        inboxPendingFold = (inboxParams.text("groupBy"), ids)
+        inboxGroupingOperation = "fold"
+        inboxGeneration += 1
+        inboxCurrent = false
+        await retryInboxGrouping()
+    }
+
+    func retryInboxGrouping() async {
+        guard ready, let owner = host, selectedSurface == .inbox, !busy, !retryNeeded,
+              !inboxBulkCompositionBlocked,
+              !taskPresented, !capturePresented, !areaPickerPresented, !inboxSortPresented, !inboxFiltersPresented else { return }
+        busy = true
+        error = nil
+        defer { if host === owner { finishOperation() } }
+        do { try await readInbox() } catch { /* The read owner retains its params and error. */ }
+    }
+    // MARK: End Task737 Inbox grouping owner
+
+    // MARK: Task738 Inbox session filters
+    private var inboxFilterWorkPending: Bool {
+        inboxPendingFilterEdit != nil || !inboxFilterTextEdits.isEmpty || inboxFilterNeedsRead
+    }
+    var inboxFiltersEnabled: Bool { canOpenTaskListSort(.inbox) }
+    var inboxFilterControlsEnabled: Bool {
+        inboxFiltersPresented && ready && selectedSurface == .inbox && inboxCurrent
+            && !busy && !retryNeeded && !appLock.concealed && !inboxFilterWorkPending
+            && !taskPresented && !capturePresented && !areaPickerPresented && !inboxSortPresented
+            && !inboxBulkCompositionBlocked
+    }
+    var inboxFilterPickerActionsEnabled: Bool {
+        inboxFilterControlsEnabled && inboxFilterPickerCurrent && inboxFilterPickerName == "tokens"
+    }
+
+    func openInboxFilters() {
+        guard inboxFiltersEnabled else { return }
+        observeDiagnosticsConcealment()
+        inboxFilterPresentation = UUID()
+        inboxFiltersPresented = true
+        closeInboxFilterPicker()
+        syncInboxFilterText()
+    }
+
+    func closeInboxFilters() {
+        inboxFiltersPresented = false
+        inboxFilterPresentation = UUID()
+        closeInboxFilterPicker()
+        // Closing dismisses presentation; already admitted list intent still drains.
+        if inboxFilterNeedsRead { scheduleInboxFilterRead(delay: 0) }
+    }
+
+    private func retireInboxFilterPresentation() {
+        inboxFilterNeedsRead = inboxFilterNeedsRead || inboxPendingFilterEdit != nil || !inboxFilterTextEdits.isEmpty
+        closeInboxFilters()
+        inboxFilterReadTask?.cancel()
+        inboxFilterReadTask = nil
+        inboxFilterReadID = nil
+    }
+
+    private func effectiveInboxParams(_ snapshot: CoreObject) -> CoreObject {
+        ["groupBy": snapshot.text("groupBy"), "collapsedGroupIds": snapshot["collapsedGroupIds"] as? [String] ?? [],
+         "filters": snapshot.object("filters").object("state")]
+    }
+
+    private func syncInboxFilterText() {
+        let state = inbox.object("filters").object("state")
+        if inboxFilterTextEdits["setSearch"] == nil { inboxSearchText = state.text("searchQuery") }
+        if inboxFilterTextEdits["setLocation"] == nil { inboxLocationText = state.text("location") }
+    }
+
+    private func inboxOffersFilterEdit(_ edit: CoreObject) -> Bool {
+        guard !edit.isEmpty, let encoded = try? json(edit) else { return false }
+        let filters = inbox.object("filters")
+        var offered = [filters.object("clearEdit"), inbox.object("empty").object("action").object("filterEdit")]
+        offered += inbox.objects("chips").map { $0.object("action").object("filterEdit") }
+        for field in ["priorities", "energyLevels", "timeEstimates"] {
+            offered += filters.objects(field).map { $0.object("edit") }
+        }
+        offered += filters.objects("matchModes").flatMap { $0.objects("options").map { $0.object("edit") } }
+        if inboxFilterPickerActionsEnabled { offered += inboxFilterPicker.objects("items").map { $0.object("edit") } }
+        return offered.contains { (try? json($0)) == encoded }
+    }
+
+    func editInboxFilter(_ edit: CoreObject) async {
+        guard inboxFiltersPresented ? inboxFilterControlsEnabled : inboxActionsEnabled,
+              inboxOffersFilterEdit(edit) else { return }
+        inboxFilterSequence &+= 1
+        inboxPendingFilterEdit = InboxFilterIntent(id: inboxFilterSequence, edit: edit, base: inboxParams,
+                                                   textType: nil, textSequence: nil)
+        inboxCurrent = false
+        inboxFilterNeedsRead = true
+        inboxReadError = nil
+        inboxAutomaticPageAttempt = nil
+        invalidateInboxFilterPicker()
+        scheduleInboxFilterRead(delay: 0)
+    }
+
+    func applyInboxChipAction(_ action: CoreObject) async {
+        guard inbox.objects("chips").contains(where: { (try? json($0.object("action"))) == (try? json(action)) }) else { return }
+        await editInboxFilter(action.object("filterEdit"))
+    }
+
+    func setInboxFilterText(_ text: String, location: Bool = false) {
+        guard inboxFiltersPresented, ready, selectedSurface == .inbox, !appLock.concealed,
+              !inboxBulkCompositionBlocked,
+              !retryNeeded, !taskPresented, !capturePresented, !areaPickerPresented,
+              text.utf16.count <= (location ? 500 : 2000),
+              text != (location ? inboxLocationText : inboxSearchText) else { return }
+        if location { inboxLocationText = text } else { inboxSearchText = text }
+        let type = location ? "setLocation" : "setSearch"
+        inboxFilterSequence &+= 1
+        inboxFilterTextEdits[type] = (inboxFilterSequence, text)
+        inboxFilterNeedsRead = true
+        inboxCurrent = false
+        inboxReadError = nil
+        inboxAutomaticPageAttempt = nil
+        invalidateInboxFilterPicker()
+        scheduleInboxFilterRead()
+    }
+
+    func retryInboxFilters() {
+        guard ready, selectedSurface == .inbox, !busy, !retryNeeded, !appLock.concealed,
+              !inboxBulkCompositionBlocked,
+              !taskPresented, !capturePresented, !areaPickerPresented, !inboxSortPresented else { return }
+        inboxFilterNeedsRead = true
+        inboxReadError = nil
+        scheduleInboxFilterRead(delay: 0)
+    }
+
+    private func scheduleInboxFilterRead(delay: UInt64 = 200_000_000) {
+        guard ready, selectedSurface == .inbox, !busy, !retryNeeded, !appLock.concealed,
+              !inboxBulkCompositionBlocked,
+              !taskPresented, !capturePresented, !areaPickerPresented, !inboxGroupPresented, !inboxSortPresented,
+              inboxFilterNeedsRead || inboxFilterPickerNeedsRead, let owner = host else { return }
+        inboxFilterReadTask?.cancel()
+        let id = UUID()
+        inboxFilterReadID = id
+        inboxFilterReadTask = Task {
+            do { try await Task.sleep(nanoseconds: delay) } catch { return }
+            guard inboxFilterReadID == id, host === owner, selectedSurface == .inbox, ready,
+                  !busy, !retryNeeded, !appLock.concealed, !Task.isCancelled, !inboxBulkCompositionBlocked,
+                  !taskPresented, !capturePresented, !areaPickerPresented, !inboxGroupPresented, !inboxSortPresented else { return }
+            busy = true
+            defer {
+                if inboxFilterReadID == id { inboxFilterReadTask = nil; inboxFilterReadID = nil }
+                if host === owner { finishOperation() }
+            }
+            if inboxFilterNeedsRead {
+                inboxFilterNeedsRead = false
+                repeat {
+                    if inboxPendingFilterEdit == nil, let type = inboxFilterTextEdits.keys.sorted().first,
+                       let latest = inboxFilterTextEdits[type] {
+                        inboxFilterSequence &+= 1
+                        inboxPendingFilterEdit = InboxFilterIntent(id: inboxFilterSequence,
+                            edit: ["type": type, "value": latest.value], base: inboxParams,
+                            textType: type, textSequence: latest.sequence)
+                    }
+                    do { try await readInbox() }
+                    catch { return }
+                    guard host === owner, selectedSurface == .inbox, !appLock.concealed, !Task.isCancelled else { return }
+                } while inboxPendingFilterEdit != nil || !inboxFilterTextEdits.isEmpty
+                inboxFilterNeedsRead = false
+                inboxCurrent = true
+            }
+            if inboxFilterPickerNeedsRead { await readInboxFilterPicker() }
+        }
+    }
+
+    private func invalidateInboxFilterPicker() {
+        inboxFilterPickerGeneration &+= 1
+        inboxFilterPickerCurrent = false
+        inboxFilterPickerError = nil
+        inboxFilterPickerDepth = 100
+        inboxFilterPickerNeedsRead = inboxFiltersPresented && !inboxFilterPickerName.isEmpty
+    }
+
+    func openInboxFilterPicker(_ name: String) {
+        guard inboxFilterControlsEnabled, name == "tokens" else { return }
+        inboxFilterPickerGeneration &+= 1
+        inboxFilterPickerName = name
+        inboxFilterPickerQuery = ""
+        inboxFilterPickerDepth = 100
+        inboxFilterPicker = inbox.object("filters").object("tokens")
+        inboxFilterPickerCurrent = true
+        inboxFilterPickerError = nil
+        inboxFilterPickerNeedsRead = false
+    }
+
+    func closeInboxFilterPicker() {
+        inboxFilterPickerGeneration &+= 1
+        inboxFilterPickerName = ""
+        inboxFilterPickerQuery = ""
+        inboxFilterPickerDepth = 100
+        inboxFilterPicker = [:]
+        inboxFilterPickerCurrent = false
+        inboxFilterPickerError = nil
+        inboxFilterPickerNeedsRead = false
+    }
+
+    func setInboxFilterPickerQuery(_ text: String) {
+        guard inboxFiltersPresented, inboxFilterPickerName == "tokens", !appLock.concealed, !retryNeeded,
+              text.utf16.count <= 500, text != inboxFilterPickerQuery else { return }
+        inboxFilterPickerQuery = text
+        invalidateInboxFilterPicker()
+        scheduleInboxFilterRead()
+    }
+
+    func loadMoreInboxFilterPicker() {
+        guard inboxFilterPickerActionsEnabled,
+              inboxFilterPicker.objects("items").count < inboxFilterPicker.number("total") else { return }
+        inboxFilterPickerDepth = inboxFilterPicker.objects("items").count + 100
+        retryInboxFilterPicker()
+    }
+
+    func retryInboxFilterPicker() {
+        guard inboxFiltersPresented, inboxFilterPickerName == "tokens", !busy, !retryNeeded, !appLock.concealed else { return }
+        inboxFilterPickerGeneration &+= 1
+        inboxFilterPickerCurrent = false
+        inboxFilterPickerError = nil
+        inboxFilterPickerNeedsRead = true
+        scheduleInboxFilterRead(delay: 0)
+    }
+
+    private func readInboxFilterPicker() async {
+        guard let owner = host, inboxFiltersPresented, inboxFilterPickerName == "tokens", !inboxFilterWorkPending else { return }
+        let presentation = inboxFilterPresentation, generation = inboxFilterPickerGeneration, text = inboxFilterPickerQuery
+        let requestedDepth = inboxFilterPickerDepth
+        let pickerCurrent = {
+            self.host === owner && self.ready && self.selectedSurface == .inbox && !self.appLock.concealed && !Task.isCancelled
+                && self.inboxFiltersPresented && self.inboxFilterPresentation == presentation
+                && self.inboxFilterPickerGeneration == generation && self.inboxFilterPickerName == "tokens"
+                && self.inboxFilterPickerQuery == text && !self.inboxFilterWorkPending
+        }
+        inboxFilterPickerNeedsRead = false
+        inboxFilterPickerCurrent = false
+        inboxFilterPickerError = nil
+        for attempt in 0..<2 {
+            guard pickerCurrent() else { return }
+            let params = inboxParams, revision = inbox.text("revision"), listGeneration = inboxGeneration
+            let current = {
+                pickerCurrent() && self.inboxReadCurrent(owner, generation: listGeneration, params: params)
+                    && self.inbox.text("revision") == revision
+            }
+            do {
+                var next = try await inboxFilterTokenPage(params: params, revision: revision, query: text,
+                                                          offset: 0, limit: 100, current: current)
+                var items = next.objects("items")
+                let target = min(requestedDepth, next.number("total"))
+                while items.count < target {
+                    let limit = min(100, target - items.count)
+                    let page = try await inboxFilterTokenPage(params: params, revision: revision, query: text,
+                                                              offset: items.count, limit: limit, current: current)
+                    guard page.number("total") == next.number("total") else { throw CocoaError(.coderReadCorrupt) }
+                    items += page.objects("items")
+                }
+                guard current() else { return }
+                next["items"] = items
+                inboxFilterPicker = next
+                inboxFilterPickerCurrent = true
+                return
+            } catch {
+                guard current() else { return }
+                if attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:") {
+                    do {
+                        try await readInbox(refreshingFilterPicker: true)
+                        guard pickerCurrent() else { return }
+                        continue
+                    } catch {
+                        guard pickerCurrent() else { return }
+                    }
+                }
+                inboxFilterPickerNeedsRead = false
+                inboxFilterPickerError = label("settings.feedback.actionFailed")
+                return
+            }
+        }
+    }
+
+    private func inboxFilterTokenPage(params: CoreObject, revision: String, query text: String,
+                                      offset: Int, limit: Int, current: @escaping @MainActor () -> Bool) async throws -> CoreObject {
+        let page = try await query("menuRead", ["inboxTokens", try json([
+            "params": params, "offset": offset, "limit": limit, "revision": revision, "query": text])], beforeDispatch: current)
+        guard current() else { throw CancellationError() }
+        guard Set(page.keys) == Set(["version", "revision", "total", "items"]), page.number("version") == 1,
+              page.text("revision") == revision, let total = page["total"] as? Int, total >= 0,
+              let items = page["items"] as? [CoreObject],
+              items.count == min(limit, max(0, total - offset)) else { throw CocoaError(.coderReadCorrupt) }
+        return page
+    }
+    // MARK: End Task738 Inbox session filters
+
+    // MARK: Task739 Inbox selection, using the list's complete core-owned scope
+    private var inboxBulkMutationPending: Bool {
+        inboxBulkDeleteOwner != nil || inboxBulkUndoOwner != nil || inboxTasksMoveOwner != nil || inboxTasksAddTagOwner != nil || inboxTasksRemoveTagOwner != nil || inboxTasksOrganizeOwner != nil || inboxOrganizeDestinationCreateOwner != nil
+    }
+    private var inboxBulkMutationHost: CoreHost? {
+        if let owner = inboxOrganizeDestinationCreateOwner?.host { return owner }
+        if let owner = inboxTasksOrganizeOwner?.host { return owner }
+        return inboxTasksRemoveTagOwner?.host ?? inboxTasksAddTagOwner?.host ?? inboxTasksMoveOwner?.host ?? inboxBulkDeleteOwner?.host ?? inboxBulkUndoOwner?.host
+    }
+    private var inboxBulkCompositionBlocked: Bool {
+        inboxBulkMutationPending || inboxBulkConfirmation != nil || inboxBulkTagPresented || inboxBulkRemovePresented || inboxBulkOrganizePresented
+    }
+    var inboxBulkRetryError: String? {
+        guard let owner = inboxBulkMutationHost, host === owner, ready, !busy, !appLock.concealed,
+              UIApplication.shared.applicationState == .active,
+              !taskPresented, !capturePresented, !areaPickerPresented, !morePresented,
+              !inboxGroupPresented, !inboxSortPresented, !inboxFiltersPresented, !taskStatusMenuPresented,
+              !mindSweepPresented, !processInboxPresented, !calendarComposerPresented, !calendarItemPresented else { return nil }
+        if inboxTasksMoveOwner != nil || inboxTasksAddTagOwner != nil || inboxTasksRemoveTagOwner != nil || inboxTasksOrganizeOwner != nil || inboxOrganizeDestinationCreateOwner != nil { return label("task.doneStatusOutcomeUnknown") }
+        return label(inboxBulkUndoOwner == nil ? "task.archiveDeleteOutcomeUnknown" : "task.trashOutcomeUnknown")
+    }
+    private var inboxBulkSelectionEnabled: Bool {
+        inboxActionsEnabled && inboxSelectionMode && !taskStatusMenuPresented
+            && UIApplication.shared.applicationState == .active
+            && !mindSweepPresented && !processInboxPresented && !calendarComposerPresented && !calendarItemPresented
+            && !inboxSelectedIDs.isEmpty && inboxSelectedRevisions.count == inboxSelectedIDs.count
+    }
+    var inboxBulkDeleteEnabled: Bool {
+        inboxActionsEnabled && inboxSelectionMode && !taskStatusMenuPresented
+            && UIApplication.shared.applicationState == .active
+            && !inboxSelectedIDs.isEmpty && inboxSelectedRevisions.count == inboxSelectedIDs.count
+            && inboxBulk.object("bar").object("delete").flag("enabled")
+    }
+    func inboxBulkStatusEnabled(_ status: String) -> Bool {
+        inboxBulkSelectionEnabled && inboxBulk.object("bar").objects("statuses").contains {
+            $0.text("status").utf8.elementsEqual(status.utf8) && $0.flag("enabled")
+        }
+    }
+    var inboxSelectionExitEnabled: Bool {
+        ready && selectedSurface == .inbox && !retryNeeded && !appLock.concealed
+            && !inboxBulkCompositionBlocked && (!busy || inboxSelectionReading)
+    }
+
+    private func inboxTaskBulkInput(params: CoreObject) -> CoreObject {
+        ["list": "inbox", "params": params, "taskIds": inboxSelectedIDs,
+         "anchorId": inboxAnchorID as Any? ?? NSNull(), "rangeSelectMode": inboxRangeSelectMode, "busy": false]
+    }
+
+    private func validateInboxTaskBulk(_ bulk: CoreObject, snapshot: CoreObject,
+                                       subsetOf selected: [String]? = nil) throws {
+        guard bulk.number("version") == 1, bulk.text("list") == "inbox", bulk["selectAll"] is NSNull,
+              bulk.text("revision").utf8.elementsEqual(snapshot.text("revision").utf8),
+              let ids = bulk["selectedIds"] as? [String],
+              let count = bulk["selectedCount"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+              count.doubleValue == Double(ids.count), try json(bulk).utf8.count <= 2_000_000,
+              bulk["anchorId"] is NSNull || (bulk["anchorId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 }) == true else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let revisions = try archiveTaskSelectionRevisions(bulk, ids: ids)
+        guard Set(revisions.keys.map { Data($0.utf8) }) == Set(ids.map { Data($0.utf8) }),
+              selected.map({ previous in ids.allSatisfy { id in previous.contains { $0.utf8.elementsEqual(id.utf8) } } }) != false else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+    }
+
+    private func acceptInboxTaskBulk(_ bulk: CoreObject, range: Bool) throws {
+        guard let ids = bulk["selectedIds"] as? [String] else { throw CocoaError(.coderReadCorrupt) }
+        let revisions = bulk.object("taskRevisions"), anchor = bulk["anchorId"] as? String
+        let changed = try !json(ids).utf8.elementsEqual(json(inboxSelectedIDs).utf8)
+            || !json(revisions).utf8.elementsEqual(json(inboxSelectedRevisions).utf8)
+            || anchor.map({ Data($0.utf8) }) != inboxAnchorID.map({ Data($0.utf8) }) || range != inboxRangeSelectMode
+        if changed {
+            inboxSelectionGeneration += 1
+            if inboxBulkConfirmation != nil { cancelArchiveBulkDeleteConfirmation() }
+            retireInboxBulkOrganize()
+            closeInboxBulkRemove(clearPicks: inboxTasksRemoveTagOwner == nil)
+            closeInboxBulkTag(clearInput: inboxTasksAddTagOwner == nil)
+        }
+        inboxSelectedIDs = ids
+        inboxSelectedRevisions = revisions
+        inboxAnchorID = anchor
+        inboxRangeSelectMode = range
+        inboxBulk = bulk
+    }
+
+    private func clearInboxTaskSelection() {
+        retireInboxBulkOrganize()
+        closeInboxBulkRemove(clearPicks: inboxTasksRemoveTagOwner == nil)
+        closeInboxBulkTag(clearInput: inboxTasksAddTagOwner == nil)
+        inboxSelectionGeneration += 1
+        if inboxBulkConfirmation != nil { cancelArchiveBulkDeleteConfirmation() }
+        inboxSelectionMode = false
+        inboxSelectedIDs = []
+        inboxSelectedRevisions = [:]
+        inboxAnchorID = nil
+        inboxRangeSelectMode = false
+        inboxBulk = [:]
+    }
+
+    func leaveInboxTaskSelection() {
+        guard inboxSelectionExitEnabled else { return }
+        clearInboxTaskSelection()
+    }
+
+    func inboxSelectionOwnerChanged(active: Bool) {
+        if !active || selectedSurface != .inbox || appLock.concealed { clearInboxTaskSelection() }
+    }
+
+    func selectInboxTask(_ displayed: CoreObject) async {
+        guard inboxActionsEnabled, !taskStatusMenuPresented, !displayed.flag("readOnly"),
+              UIApplication.shared.applicationState == .active, let owner = host else { return }
+        let params = inboxParams, selected = inboxSelectedIDs, revisions = inboxSelectedRevisions
+        let anchor = inboxAnchorID, range = inboxRangeSelectMode, mode = inboxSelectionMode
+        let selectionGeneration = inboxSelectionGeneration, sequence = inboxFilterSequence
+        let foreground = foregroundSyncGeneration
+        func current(projection: Bool = true) -> Bool {
+            guard self.host === owner, ready, selectedSurface == .inbox, !appLock.concealed,
+                  UIApplication.shared.applicationState == .active, foregroundSyncGeneration == foreground,
+                  !Task.isCancelled, !retryNeeded, !taskPresented, !capturePresented, !areaPickerPresented,
+                  !morePresented, !inboxSortPresented, !inboxGroupPresented, !inboxFiltersPresented,
+                  !taskStatusMenuPresented, !inboxBulkCompositionBlocked, !inboxFilterWorkPending,
+                  inboxSelectionGeneration == selectionGeneration, inboxFilterSequence == sequence,
+                  inboxSelectionMode == mode, inboxRangeSelectMode == range,
+                  !projection || inboxCurrent else { return false }
+            return inboxExactJSON(inboxParams, params) && inboxExactJSON(inboxSelectedIDs, selected)
+                && inboxExactJSON(inboxSelectedRevisions, revisions)
+                && inboxAnchorID.map({ Data($0.utf8) }) == anchor.map({ Data($0.utf8) })
+        }
+        busy = true
+        let readOwner = UUID()
+        inboxSelectionReadOwner = readOwner
+        inboxSelectionReading = true
+        inboxReadError = nil
+        defer {
+            if inboxSelectionReadOwner == readOwner {
+                inboxSelectionReadOwner = nil
+                inboxSelectionReading = false
+                if host === owner { finishOperation() }
+            }
+        }
+        do {
+            for attempt in 0..<2 {
+                guard current() else { return }
+                guard items.contains(where: { item in
+                    let row = item.object("row")
+                    return item.text("type") == "task" && !row.flag("readOnly") && row.text("status") == "inbox"
+                        && row.text("id").utf8.elementsEqual(displayed.text("id").utf8)
+                        && row.text("taskRevision").utf8.elementsEqual(displayed.text("taskRevision").utf8)
+                }) else { inboxReadError = label("task.updateFailed"); return }
+                let snapshot = inbox, generation = inboxGeneration
+                var input = inboxTaskBulkInput(params: params)
+                input["selectionEdit"] = ["taskId": displayed.text("id"), "range": range]
+                input["rangeSelectMode"] = false
+                let bulk: CoreObject
+                do {
+                    bulk = try await query("menuRead", ["bulk", try json(input)], beforeDispatch: {
+                        current() && self.inboxGeneration == generation
+                    })
+                } catch {
+                    guard attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:"), current() else { throw error }
+                    try await readInbox(ownedGuard: { current(projection: false) })
+                    continue
+                }
+                guard current(), inboxGeneration == generation else { return }
+                if !bulk.text("revision").utf8.elementsEqual(snapshot.text("revision").utf8) {
+                    guard attempt == 0 else { inboxReadError = label("task.updateFailed"); return }
+                    try await readInbox(ownedGuard: { current(projection: false) })
+                    continue
+                }
+                try validateInboxTaskBulk(bulk, snapshot: snapshot)
+                try acceptInboxTaskBulk(bulk, range: false)
+                inboxSelectionMode = true
+                return
+            }
+        } catch {
+            if host === owner, inboxSelectionGeneration == selectionGeneration { inboxReadError = error.localizedDescription }
+        }
+    }
+
+    func toggleInboxTaskRange() async {
+        guard inboxBulkDeleteEnabled, let owner = host else { return }
+        inboxRangeSelectMode.toggle()
+        inboxSelectionGeneration += 1
+        let generation = inboxSelectionGeneration
+        busy = true
+        let readOwner = UUID()
+        inboxSelectionReadOwner = readOwner
+        inboxSelectionReading = true
+        defer {
+            if inboxSelectionReadOwner == readOwner {
+                inboxSelectionReadOwner = nil
+                inboxSelectionReading = false
+                if host === owner { finishOperation() }
+            }
+        }
+        do {
+            try await readInbox(ownedGuard: { self.host === owner && self.inboxSelectionGeneration == generation })
+        } catch { if host === owner { inboxReadError = error.localizedDescription } }
+    }
+
+    func requestDeleteSelectedInboxTasks() {
+        guard inboxBulkDeleteEnabled, let owner = host else { return }
+        let copy = inboxBulk.object("deleteConfirmation")
+        guard !copy.text("title").isEmpty, !copy.text("message").isEmpty,
+              !copy.text("cancelLabel").isEmpty, !copy.text("confirmLabel").isEmpty else {
+            inboxReadError = label("task.updateFailed"); return
+        }
+        do {
+            archiveBulkDeleteConfirmationRequest = try json(["requestId": UUID().uuidString.lowercased(),
+                "taskIds": inboxSelectedIDs, "taskRevisions": inboxSelectedRevisions, "source": "inbox"])
+            inboxBulkConfirmation = InboxBulkConfirmation(host: owner, params: try json(inboxParams),
+                revision: inbox.text("revision"), selectionGeneration: inboxSelectionGeneration,
+                filterSequence: inboxFilterSequence, foregroundGeneration: foregroundSyncGeneration)
+            archiveBulkDeleteConfirmation = copy
+        } catch { inboxReadError = error.localizedDescription }
+    }
+
+    private func inboxBulkConfirmationCurrent(_ context: InboxBulkConfirmation) -> Bool {
+        host === context.host && ready && selectedSurface == .inbox && inboxCurrent && inboxSelectionMode
+            && !appLock.concealed && UIApplication.shared.applicationState == .active
+            && foregroundSyncGeneration == context.foregroundGeneration && !Task.isCancelled
+            && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
+            && !inboxGroupPresented && !inboxSortPresented && !inboxFiltersPresented && !taskStatusMenuPresented
+            && !inboxFilterWorkPending && inboxFilterSequence == context.filterSequence
+            && inboxSelectionGeneration == context.selectionGeneration
+            && inbox.text("revision").utf8.elementsEqual(context.revision.utf8)
+            && (try? json(inboxParams)).map { $0.utf8.elementsEqual(context.params.utf8) } == true
+    }
+
+    private func inboxExactJSON(_ first: Any, _ second: Any) -> Bool {
+        guard let first = try? json(first), let second = try? json(second) else { return false }
+        return first.utf8.elementsEqual(second.utf8)
+    }
+
+    // Task740: one original Host/request debt; no reprepare or status Undo.
+    private func inboxTasksMoveOwned(on owner: CoreHost, request: String) -> Bool {
+        inboxTasksMoveOwner?.host === owner && inboxTasksMoveOwner?.request.utf8.elementsEqual(request.utf8) == true
+    }
+
+    private func inboxTasksMoveWarm(on owner: CoreHost, generation: Int, foreground: Int) -> Bool {
+        host === owner && ready && selectedSurface == .inbox && inboxSelectionGeneration == generation
+            && foregroundSyncGeneration == foreground && !Task.isCancelled && !appLock.concealed
+            && UIApplication.shared.applicationState == .active
+            && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
+            && !inboxGroupPresented && !inboxSortPresented && !inboxFiltersPresented && !taskStatusMenuPresented
+            && !mindSweepPresented && !processInboxPresented && !calendarComposerPresented && !calendarItemPresented
+    }
+
+    func moveSelectedInboxTasks(status: String) async {
+        guard inboxBulkStatusEnabled(status), let owner = host else { return }
+        let ids = inboxSelectedIDs, revisions = inboxSelectedRevisions, options = inboxBulk.object("bar").objects("statuses")
+        let params = inboxParams
+        let context: InboxBulkConfirmation
+        let request: String
+        do {
+            context = InboxBulkConfirmation(host: owner, params: try json(params), revision: inbox.text("revision"),
+                selectionGeneration: inboxSelectionGeneration, filterSequence: inboxFilterSequence,
+                foregroundGeneration: foregroundSyncGeneration)
+            request = try json(["requestId": UUID().uuidString.lowercased(), "source": "inbox", "taskIds": ids,
+                                "taskRevisions": revisions, "status": status, "params": params])
+        } catch { inboxReadError = error.localizedDescription; return }
+        func current() -> Bool {
+            inboxBulkConfirmationCurrent(context)
+                && inboxTasksMoveWarm(on: owner, generation: context.selectionGeneration, foreground: context.foregroundGeneration)
+                && inboxExactJSON(inboxSelectedIDs, ids) && inboxExactJSON(inboxSelectedRevisions, revisions)
+                && inboxExactJSON(inboxBulk.object("bar").objects("statuses"), options)
+        }
+        guard current() else { return }
+        busy = true
+        inboxReadError = nil
+        inboxTasksMoveOwner = (owner, request)
+        var dispatched = false
+        defer { if host === owner { finishOperation() } }
+        do {
+            let result = try await query("inboxTasksMoveWrite", [request], beforeDispatch: {
+                let admitted = current() && self.inboxTasksMoveOwned(on: owner, request: request)
+                if admitted { dispatched = true }
+                return admitted
+            })
+            guard inboxTasksMoveOwned(on: owner, request: request) else { return }
+            let warm = current()
+            try acknowledgeInboxTasksMove(result, on: owner, request: request, warm: warm)
+            guard warm else { return }
+            await publishInboxTasksMove(result, on: owner, foreground: context.foregroundGeneration)
+        } catch {
+            guard inboxTasksMoveOwned(on: owner, request: request) else { return }
+            if !dispatched {
+                // query refused before Host.call; only this undispatched debt can retire.
+                inboxTasksMoveOwner = nil
+                return
+            }
+            handleInboxTasksMoveError(error, on: owner, request: request, warm: current())
+        }
+    }
+
+    private func acknowledgeInboxTasksMove(_ result: CoreObject, on owner: CoreHost, request: String, warm: Bool) throws {
+        guard inboxTasksMoveOwned(on: owner, request: request) else { throw CocoaError(.coderReadCorrupt) }
+        let frozen = try decode(request)
+        guard frozen.text("source") == "inbox", let ids = frozen["taskIds"] as? [String],
+              Set(result.keys) == Set(["count", "status"]),
+              result.text("status").utf8.elementsEqual(frozen.text("status").utf8),
+              let count = result["count"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+              count.doubleValue == Double(ids.count) else { throw CocoaError(.coderReadCorrupt) }
+        inboxTasksMoveOwner = nil
+        guard warm else { return }
+        retryNeeded = false; inboxReadError = nil; error = nil
+        clearInboxTaskSelection()
+    }
+
+    private func publishInboxTasksMove(_ result: CoreObject, on owner: CoreHost, foreground: Int) async {
+        let generation = inboxSelectionGeneration
+        let current = { self.inboxTasksMoveWarm(on: owner, generation: generation, foreground: foreground) }
+        guard current() else { return }
+        try? await readInbox(ownedGuard: current)
+        guard current(), let encoded = try? json(result),
+              let notice = try? await query("inboxTasksMoveNotice", [encoded], beforeDispatch: current), current(),
+              Set(notice.keys) == Set(["message"]), !notice.text("message").isEmpty else { return }
+        showTaskActionNotice(["operation": "inboxBulkMove", "source": "inbox", "undoEnabled": false,
+                              "message": notice.text("message")])
+    }
+
+    private func handleInboxTasksMoveError(_ failure: Error, on owner: CoreHost, request: String, warm: Bool) {
+        guard inboxTasksMoveOwned(on: owner, request: request) else { return }
+        if isDefiniteRejection(failure) { inboxTasksMoveOwner = nil }
+        guard warm else { return }
+        retryNeeded = inboxTasksMoveOwner != nil
+        error = retryNeeded ? failure.localizedDescription : nil
+        inboxReadError = failure.localizedDescription
+    }
+
+    private func retryInboxTasksMove(on owner: CoreHost, acknowledgment: String?, selectionGeneration: Int,
+                                    foreground: Int, surface: Surface) async throws {
+        guard let pending = inboxTasksMoveOwner, pending.host === owner else { throw CocoaError(.coderReadCorrupt) }
+        let request = pending.request
+        let currentDebt = { self.inboxTasksMoveOwned(on: owner, request: request) }
+        let outcome: CoreObject
+        if host === owner {
+            outcome = try await query("inboxTasksMoveRetryOutcome", [request], beforeDispatch: { self.host === owner && currentDebt() })
+        } else {
+            outcome = try decode(await owner.call("inboxTasksMoveRetryOutcome", argumentsJSON: json([request])))
+        }
+        guard currentDebt() else { throw CancellationError() }
+        let warm = surface == .inbox && inboxTasksMoveWarm(on: owner, generation: selectionGeneration, foreground: foreground)
+        if Set(outcome.keys) == Set(["kind"]), outcome.text("kind") == "unproven" {
+            if warm {
+                let unknown = label("task.doneStatusOutcomeUnknown")
+                retryNeeded = true; inboxReadError = unknown; error = unknown
+            }
+            return
+        }
+        guard Set(outcome.keys) == Set(["kind", "result"]), outcome.text("kind") == "confirmed" else { throw CocoaError(.coderReadCorrupt) }
+        let result = outcome.object("result")
+        if let acknowledgment, !inboxExactJSON(result, try decode(acknowledgment)) { throw CocoaError(.coderReadCorrupt) }
+        try acknowledgeInboxTasksMove(result, on: owner, request: request, warm: warm)
+        guard warm else { return }
+        await publishInboxTasksMove(result, on: owner, foreground: foreground)
+    }
+
+    // Task741: preserve one frozen tag request on its original Host through ambiguous retry.
+    private func inboxBulkTagContextCurrent(_ context: InboxBulkConfirmation) -> Bool {
+        inboxBulkConfirmationCurrent(context)
+            && inboxTasksMoveWarm(on: context.host, generation: context.selectionGeneration, foreground: context.foregroundGeneration)
+    }
+
+    var inboxBulkTagEnabled: Bool {
+        inboxBulkSelectionEnabled && inboxBulk.object("bar").object("addTag").flag("enabled")
+    }
+
+    var inboxBulkTagSaveEnabled: Bool {
+        inboxBulkTagPresented && inboxBulkTagCanSave && inboxBulkTagReadError == nil
+            && !busy && !retryNeeded && inboxTasksAddTagOwner == nil
+            && inboxBulkTagContext.map { inboxBulkTagContextCurrent($0) } == true
+    }
+
+    func openInboxBulkTag() {
+        guard inboxBulkTagEnabled, let owner = host else { return }
+        do {
+            inboxBulkTagContext = InboxBulkConfirmation(host: owner, params: try json(inboxParams),
+                revision: inbox.text("revision"), selectionGeneration: inboxSelectionGeneration,
+                filterSequence: inboxFilterSequence, foregroundGeneration: foregroundSyncGeneration)
+        } catch { inboxReadError = label("task.updateFailed"); return }
+        inboxBulkTagIDs = inboxSelectedIDs
+        inboxBulkTagRevisions = inboxSelectedRevisions
+        inboxBulkTagOptions = inboxBulk.object("addTag")
+        inboxBulkTagPresented = true
+        inboxBulkTagWriteError = false
+        setInboxBulkTagText(inboxBulkTagText)
+    }
+
+    func closeInboxBulkTag(clearInput: Bool = true) {
+        inboxBulkTagPresented = false
+        inboxBulkTagReadGeneration += 1
+        inboxBulkTagReadTask?.cancel()
+        inboxBulkTagReadTask = nil
+        inboxBulkTagCanSave = false
+        inboxBulkTagReadError = nil
+        inboxBulkTagContext = nil
+        inboxBulkTagIDs = []
+        inboxBulkTagRevisions = [:]
+        if clearInput { inboxBulkTagText = "" }
+    }
+
+    func setInboxBulkTagText(_ text: String) {
+        guard inboxBulkTagPresented, !busy, !retryNeeded, let context = inboxBulkTagContext,
+              inboxBulkTagContextCurrent(context) else { return }
+        inboxBulkTagText = text
+        inboxBulkTagCanSave = false
+        inboxBulkTagReadError = nil
+        inboxBulkTagReadGeneration += 1
+        let generation = inboxBulkTagReadGeneration
+        inboxBulkTagReadTask?.cancel()
+        func current() -> Bool {
+            inboxBulkTagPresented && generation == inboxBulkTagReadGeneration
+                && inboxBulkTagText.utf8.elementsEqual(text.utf8) && !retryNeeded
+                && inboxBulkTagContextCurrent(context)
+        }
+        inboxBulkTagReadTask = Task {
+            do {
+                let input = try await query("inboxBulkTagInput", [text, 0], beforeDispatch: current)
+                guard current() else { return }
+                guard Set(input.keys) == Set(["canSave", "notice"]), input["notice"] is NSNull,
+                      let canSave = input["canSave"] as? NSNumber, CFGetTypeID(canSave) == CFBooleanGetTypeID() else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                inboxBulkTagCanSave = canSave.boolValue
+            } catch {
+                guard current() else { return }
+                inboxBulkTagReadError = label("task.updateFailed")
+            }
+        }
+    }
+
+    private func inboxTasksAddTagOwned(on owner: CoreHost, request: String) -> Bool {
+        inboxTasksAddTagOwner?.host === owner && inboxTasksAddTagOwner?.request.utf8.elementsEqual(request.utf8) == true
+    }
+
+    func saveInboxBulkTag() async {
+        guard inboxBulkTagSaveEnabled, let context = inboxBulkTagContext else { return }
+        let owner = context.host, ids = inboxBulkTagIDs, revisions = inboxBulkTagRevisions
+        let tag = inboxBulkTagText
+        let request: String
+        do {
+            request = try json(["requestId": UUID().uuidString.lowercased(), "source": "inbox", "taskIds": ids,
+                "taskRevisions": revisions, "tag": tag, "params": try decode(context.params)])
+        } catch { inboxReadError = label("task.updateFailed"); return }
+        func current() -> Bool {
+            inboxBulkTagContextCurrent(context)
+                && inboxExactJSON(inboxSelectedIDs, ids) && inboxExactJSON(inboxSelectedRevisions, revisions)
+                && inboxBulkTagText.utf8.elementsEqual(tag.utf8)
+        }
+        guard current() else { return }
+        closeInboxBulkTag(clearInput: false)
+        busy = true
+        inboxReadError = nil
+        inboxTasksAddTagOwner = (owner, request)
+        var dispatched = false
+        defer { if host === owner { finishOperation() } }
+        do {
+            let result = try await query("inboxTasksAddTagWrite", [request], beforeDispatch: {
+                let admitted = current() && self.inboxTasksAddTagOwned(on: owner, request: request)
+                if admitted { dispatched = true }
+                return admitted
+            })
+            guard inboxTasksAddTagOwned(on: owner, request: request) else { return }
+            let warm = current()
+            try acknowledgeInboxTasksAddTag(result, on: owner, request: request, warm: warm, allowNoop: true)
+            guard warm else { return }
+            await publishInboxTasksAddTag(result, on: owner, foreground: context.foregroundGeneration)
+        } catch {
+            guard inboxTasksAddTagOwned(on: owner, request: request) else { return }
+            if !dispatched { inboxTasksAddTagOwner = nil; return }
+            handleInboxTasksAddTagError(error, on: owner, request: request, warm: current())
+        }
+    }
+
+    private func acknowledgeInboxTasksAddTag(_ result: CoreObject, on owner: CoreHost, request: String,
+                                              warm: Bool, allowNoop: Bool = false) throws {
+        guard inboxTasksAddTagOwned(on: owner, request: request) else { throw CocoaError(.coderReadCorrupt) }
+        let frozen = try decode(request)
+        guard frozen.text("source") == "inbox", let ids = frozen["taskIds"] as? [String],
+              Set(result.keys) == Set(["count", "changed"]),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+              let count = result["count"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+              count.doubleValue.rounded() == count.doubleValue,
+              changed.boolValue ? (count.doubleValue > 0 && count.doubleValue <= Double(ids.count)) : (allowNoop && count.doubleValue == 0) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        inboxTasksAddTagOwner = nil // Durable ACK retires debt before any refresh/notice read.
+        guard warm else { return }
+        retryNeeded = false; inboxReadError = nil; error = nil; inboxBulkTagWriteError = false
+        closeInboxBulkTag()
+        if changed.boolValue { clearInboxTaskSelection() }
+    }
+
+    private func publishInboxTasksAddTag(_ result: CoreObject, on owner: CoreHost, foreground: Int) async {
+        guard result.flag("changed") else { return }
+        let generation = inboxSelectionGeneration
+        let current = { self.inboxTasksMoveWarm(on: owner, generation: generation, foreground: foreground) }
+        guard current() else { return }
+        try? await readInbox(ownedGuard: current)
+        guard current(), let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current),
+              current(), let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
+              !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
+        showTaskActionNotice(["operation": "inboxBulkTag", "source": "inbox", "undoEnabled": false,
+            "message": notice.text("title") + ": " + notice.text("message")])
+    }
+
+    private func handleInboxTasksAddTagError(_ failure: Error, on owner: CoreHost, request: String, warm: Bool) {
+        guard inboxTasksAddTagOwned(on: owner, request: request) else { return }
+        if isDefiniteRejection(failure) { inboxTasksAddTagOwner = nil }
+        guard warm else { return }
+        retryNeeded = inboxTasksAddTagOwner != nil
+        inboxBulkTagWriteError = true
+        error = retryNeeded ? failure.localizedDescription : nil
+        inboxReadError = failure.localizedDescription
+    }
+
+    private func retryInboxTasksAddTag(on owner: CoreHost, acknowledgment: String?, selectionGeneration: Int,
+                                      foreground: Int, surface: Surface) async throws {
+        guard let pending = inboxTasksAddTagOwner, pending.host === owner else { throw CocoaError(.coderReadCorrupt) }
+        let request = pending.request
+        let currentDebt = { self.inboxTasksAddTagOwned(on: owner, request: request) }
+        let outcome: CoreObject
+        if host === owner {
+            outcome = try await query("inboxTasksAddTagRetryOutcome", [request], beforeDispatch: { self.host === owner && currentDebt() })
+        } else {
+            outcome = try decode(await owner.call("inboxTasksAddTagRetryOutcome", argumentsJSON: json([request])))
+        }
+        guard currentDebt() else { throw CancellationError() }
+        let warm = surface == .inbox && inboxTasksMoveWarm(on: owner, generation: selectionGeneration, foreground: foreground)
+        if Set(outcome.keys) == Set(["kind"]), outcome.text("kind") == "unproven" {
+            if warm {
+                let unknown = label("task.doneStatusOutcomeUnknown")
+                retryNeeded = true; inboxReadError = unknown; error = unknown
+            }
+            return
+        }
+        guard Set(outcome.keys) == Set(["kind", "result"]), outcome.text("kind") == "confirmed" else { throw CocoaError(.coderReadCorrupt) }
+        let result = outcome.object("result")
+        if let acknowledgment, !inboxExactJSON(result, try decode(acknowledgment)) { throw CocoaError(.coderReadCorrupt) }
+        try acknowledgeInboxTasksAddTag(result, on: owner, request: request, warm: warm)
+        guard warm else { return }
+        await publishInboxTasksAddTag(result, on: owner, foreground: foreground)
+    }
+
+    // Task742: picker pages are read-only; dispatched removal debt stays on its original Host.
+    var inboxBulkRemoveEnabled: Bool {
+        inboxBulkSelectionEnabled && inboxBulk.object("bar").object("removeTag").flag("enabled")
+    }
+    var inboxBulkRemoveSaveEnabled: Bool {
+        inboxBulkRemovePresented && inboxBulkRemoveCurrent && !inboxBulkRemoveReading && inboxBulkRemoveReadError == nil
+            && !inboxBulkRemovePicks.isEmpty && inboxBulkRemovePicks.count <= 10_000 && !busy && !retryNeeded
+            && inboxTasksRemoveTagOwner == nil && inboxBulkRemoveContextIsCurrent()
+    }
+    var inboxBulkRemoveCanLoadMore: Bool {
+        inboxBulkRemoveCurrent && !inboxBulkRemoveReading && inboxBulkRemoveReadError == nil
+            && !busy && !retryNeeded && inboxBulkRemoveItems.count < inboxBulkRemoveTotal && inboxBulkRemoveContextIsCurrent()
+    }
+    func openInboxBulkRemove() {
+        guard inboxBulkRemoveEnabled, let owner = host else { return }
+        closeInboxBulkRemove()
+        do {
+            inboxBulkRemoveContext = InboxBulkConfirmation(host: owner, params: try json(inboxParams),
+                revision: inbox.text("revision"), selectionGeneration: inboxSelectionGeneration,
+                filterSequence: inboxFilterSequence, foregroundGeneration: foregroundSyncGeneration)
+        } catch { inboxReadError = label("task.updateFailed"); return }
+        inboxBulkRemoveOptions = inboxBulk.object("removeTag")
+        let labels = inboxBulk.object("addTag")
+        inboxBulkRemoveOptions["cancelLabel"] = labels["cancelLabel"]
+        inboxBulkRemoveOptions["saveLabel"] = labels["saveLabel"]
+        inboxBulkRemoveIDs = inboxSelectedIDs
+        inboxBulkRemoveRevisions = inboxSelectedRevisions
+        inboxBulkRemoveParams = inboxParams
+        inboxBulkRemovePresented = true
+        readInboxBulkRemove(reset: true)
+    }
+    func closeInboxBulkRemove(clearPicks: Bool = true) {
+        inboxBulkRemovePresented = false
+        inboxBulkRemoveGeneration += 1
+        inboxBulkRemoveTask?.cancel()
+        inboxBulkRemoveTask = nil
+        inboxBulkRemoveReading = false
+        inboxBulkRemoveCurrent = false
+        inboxBulkRemoveReadError = nil
+        inboxBulkRemoveQuery = ""
+        if clearPicks { inboxBulkRemovePicks = [] }
+        inboxBulkRemoveItems = []
+        inboxBulkRemoveTotal = 0
+        inboxBulkRemoveContext = nil
+        inboxBulkRemoveIDs = []
+        inboxBulkRemoveRevisions = [:]
+        inboxBulkRemoveParams = [:]
+        inboxBulkRemoveRevision = ""
+    }
+    private func inboxBulkRemoveContextIsCurrent() -> Bool {
+        guard inboxBulkRemovePresented, !retryNeeded, inboxTasksRemoveTagOwner == nil,
+              let context = inboxBulkRemoveContext, inboxBulkTagContextCurrent(context),
+              inboxExactJSON(inboxSelectedIDs, inboxBulkRemoveIDs),
+              inboxExactJSON(inboxSelectedRevisions, inboxBulkRemoveRevisions),
+              inboxExactJSON(inboxParams, inboxBulkRemoveParams) else { return false }
+        return true
+    }
+    func setInboxBulkRemoveQuery(_ query: String) {
+        guard inboxBulkRemovePresented, !busy, !retryNeeded else { return }
+        inboxBulkRemoveQuery = query
+        readInboxBulkRemove(reset: true, delay: 200_000_000)
+    }
+
+    func inboxBulkRemovePicked(_ value: String) -> Bool {
+        inboxBulkRemovePicks.contains { $0.utf8.elementsEqual(value.utf8) }
+    }
+
+    func toggleInboxBulkRemove(_ value: String) {
+        guard !busy, !retryNeeded, inboxBulkRemoveCurrent, !inboxBulkRemoveReading, inboxBulkRemoveContextIsCurrent(),
+              inboxBulkRemoveItems.contains(where: { $0.text("value").utf8.elementsEqual(value.utf8) }) else { return }
+        if let index = inboxBulkRemovePicks.firstIndex(where: { $0.utf8.elementsEqual(value.utf8) }) { inboxBulkRemovePicks.remove(at: index) }
+        else if inboxBulkRemovePicks.count < 10_000 { inboxBulkRemovePicks.append(value) }
+    }
+
+    func retryInboxBulkRemoveRead() { readInboxBulkRemove(reset: true) }
+    func loadMoreInboxBulkRemove() {
+        guard inboxBulkRemoveCanLoadMore else { return }
+        readInboxBulkRemove(reset: false)
+    }
+
+    private func readInboxBulkRemove(reset: Bool, delay: UInt64 = 0) {
+        guard !busy, inboxBulkRemoveContextIsCurrent(), let context = inboxBulkRemoveContext else { return }
+        inboxBulkRemoveGeneration += 1
+        let generation = inboxBulkRemoveGeneration, queryText = inboxBulkRemoveQuery
+        let offset = reset ? 0 : inboxBulkRemoveItems.count
+        let revision = inboxBulkRemoveRevision
+        if reset { inboxBulkRemoveItems = []; inboxBulkRemoveTotal = 0; inboxBulkRemoveRevision = "" }
+        inboxBulkRemoveCurrent = false
+        inboxBulkRemoveReading = true
+        inboxBulkRemoveReadError = nil
+        inboxBulkRemoveTask?.cancel()
+        func current() -> Bool {
+            generation == inboxBulkRemoveGeneration && queryText.utf8.elementsEqual(inboxBulkRemoveQuery.utf8)
+                && inboxBulkRemoveContextIsCurrent() && inboxBulkTagContextCurrent(context)
+        }
+        inboxBulkRemoveTask = Task {
+            defer { if generation == inboxBulkRemoveGeneration { inboxBulkRemoveReading = false } }
+            do {
+                if delay > 0 { try await Task.sleep(nanoseconds: delay) }
+                var start = offset
+                for attempt in 0..<2 {
+                    guard !Task.isCancelled, generation == inboxBulkRemoveGeneration, inboxBulkRemoveContextIsCurrent(),
+                          queryText.utf8.elementsEqual(inboxBulkRemoveQuery.utf8) else { return }
+                    var picker: CoreObject = ["kind": "removeTag", "query": queryText, "offset": start, "limit": 100]
+                    if start > 0 { picker["revision"] = revision }
+                    let request: CoreObject = ["list": "inbox", "params": inboxBulkRemoveParams, "taskIds": inboxBulkRemoveIDs, "picker": picker]
+                    do {
+                        let bulk = try await self.query("menuRead", ["bulk", try json(request)], beforeDispatch: current)
+                        guard !Task.isCancelled, generation == inboxBulkRemoveGeneration, inboxBulkRemoveContextIsCurrent(),
+                              queryText.utf8.elementsEqual(inboxBulkRemoveQuery.utf8) else { return }
+                        let acceptedIDs = try json(bulk["selectedIds"] ?? NSNull()), acceptedRevisions = try json(bulk.object("taskRevisions"))
+                        guard acceptedIDs.utf8.elementsEqual(try json(inboxBulkRemoveIDs).utf8),
+                              acceptedRevisions.utf8.elementsEqual(try json(inboxBulkRemoveRevisions).utf8) else {
+                            inboxBulkRemoveReadError = label("task.updateFailed")
+                            return
+                        }
+                        let options = bulk.object("picker")
+                        guard bulk.text("list") == "inbox", !bulk.text("revision").isEmpty, bulk["selectAll"] is NSNull,
+                              try json(bulk).utf8.count <= 2_000_000,
+                              Set(options.keys) == Set(["kind", "total", "items", "create", "submit"]), options.text("kind") == "removeTag",
+                              options["create"] is NSNull, options["submit"] is NSNull,
+                              let total = options["total"] as? NSNumber, CFGetTypeID(total) != CFBooleanGetTypeID(),
+                              total.doubleValue >= Double(start), total.doubleValue <= 9_007_199_254_740_991, total.doubleValue.rounded() == total.doubleValue,
+                              let items = options["items"] as? [CoreObject], items.count == min(100, total.intValue - start),
+                              items.allSatisfy({ Set($0.keys) == Set(["value", "label", "selected", "edit"])
+                                  && ($0["value"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 2_000_000 }) == true
+                                  && $0["label"] is String && $0["edit"] is NSNull
+                                  && ($0["selected"] as? NSNumber).map({ CFGetTypeID($0) == CFBooleanGetTypeID() && !$0.boolValue }) == true }) else { throw CocoaError(.coderReadCorrupt) }
+                        let combined = start == 0 ? items : inboxBulkRemoveItems + items
+                        guard Set(combined.map { Data($0.text("value").utf8) }).count == combined.count,
+                              start == 0 || (bulk.text("revision").utf8.elementsEqual(revision.utf8) && total.intValue == inboxBulkRemoveTotal) else {
+                            throw CocoaError(.coderReadCorrupt)
+                        }
+                        inboxBulkRemoveItems = combined
+                        inboxBulkRemoveTotal = total.intValue
+                        inboxBulkRemoveRevision = bulk.text("revision")
+                        inboxBulkRemoveCurrent = true
+                        return
+                    } catch {
+                        guard start > 0, attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:") else { throw error }
+                        // Replace stale pages under one fresh list revision; hidden picks remain exact.
+                        start = 0
+                    }
+                }
+            } catch {
+                guard current() else { return }
+                inboxBulkRemoveReadError = error.localizedDescription
+            }
+        }
+    }
+
+    private func inboxTasksRemoveTagOwned(on owner: CoreHost, request: String) -> Bool {
+        inboxTasksRemoveTagOwner?.host === owner && inboxTasksRemoveTagOwner?.request.utf8.elementsEqual(request.utf8) == true
+    }
+
+    func saveInboxBulkRemove() async {
+        guard inboxBulkRemoveSaveEnabled, let context = inboxBulkRemoveContext else { return }
+        let owner = context.host, ids = inboxBulkRemoveIDs, revisions = inboxBulkRemoveRevisions
+        let tags = inboxBulkRemovePicks
+        let request: String
+        do {
+            request = try json(["requestId": UUID().uuidString.lowercased(), "source": "inbox", "taskIds": ids,
+                "taskRevisions": revisions, "tags": tags, "params": try decode(context.params)])
+        } catch { inboxReadError = label("task.updateFailed"); return }
+        func current() -> Bool {
+            inboxBulkTagContextCurrent(context)
+                && inboxExactJSON(inboxSelectedIDs, ids) && inboxExactJSON(inboxSelectedRevisions, revisions)
+                && inboxExactJSON(inboxBulkRemovePicks, tags)
+        }
+        guard current() else { return }
+        closeInboxBulkRemove(clearPicks: false)
+        busy = true
+        inboxReadError = nil
+        inboxTasksRemoveTagOwner = (owner, request)
+        var dispatched = false
+        defer { if host === owner { finishOperation() } }
+        do {
+            let result = try await query("inboxTasksRemoveTagWrite", [request], beforeDispatch: {
+                let admitted = current() && self.inboxTasksRemoveTagOwned(on: owner, request: request)
+                if admitted { dispatched = true }
+                return admitted
+            })
+            guard inboxTasksRemoveTagOwned(on: owner, request: request) else { return }
+            let warm = current()
+            try acknowledgeInboxTasksRemoveTag(result, on: owner, request: request, warm: warm, allowNoop: true)
+            guard warm else { return }
+            await publishInboxTasksRemoveTag(result, on: owner, foreground: context.foregroundGeneration)
+        } catch {
+            guard inboxTasksRemoveTagOwned(on: owner, request: request) else { return }
+            if !dispatched { inboxTasksRemoveTagOwner = nil; return }
+            handleInboxTasksRemoveTagError(error, on: owner, request: request, warm: current())
+        }
+    }
+
+    private func acknowledgeInboxTasksRemoveTag(_ result: CoreObject, on owner: CoreHost, request: String,
+                                              warm: Bool, allowNoop: Bool = false) throws {
+        guard inboxTasksRemoveTagOwned(on: owner, request: request) else { throw CocoaError(.coderReadCorrupt) }
+        let frozen = try decode(request)
+        guard frozen.text("source") == "inbox", let ids = frozen["taskIds"] as? [String],
+              Set(result.keys) == Set(["count", "changed"]),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
+              let count = result["count"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+              count.doubleValue.rounded() == count.doubleValue,
+              changed.boolValue ? (count.doubleValue > 0 && count.doubleValue <= Double(ids.count)) : (allowNoop && count.doubleValue == 0) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        inboxTasksRemoveTagOwner = nil // Durable ACK retires debt before any refresh/notice read.
+        guard warm else { return }
+        retryNeeded = false; inboxReadError = nil; error = nil
+        closeInboxBulkRemove()
+        if changed.boolValue { clearInboxTaskSelection() }
+    }
+
+    private func publishInboxTasksRemoveTag(_ result: CoreObject, on owner: CoreHost, foreground: Int) async {
+        guard result.flag("changed") else { return }
+        let generation = inboxSelectionGeneration
+        let current = { self.inboxTasksMoveWarm(on: owner, generation: generation, foreground: foreground) }
+        guard current() else { return }
+        try? await readInbox(ownedGuard: current)
+        guard current(), let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current),
+              current(), let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
+              !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
+        showTaskActionNotice(["operation": "inboxBulkRemoveTag", "source": "inbox", "undoEnabled": false,
+            "message": notice.text("title") + ": " + notice.text("message")])
+    }
+
+    private func handleInboxTasksRemoveTagError(_ failure: Error, on owner: CoreHost, request: String, warm: Bool) {
+        guard inboxTasksRemoveTagOwned(on: owner, request: request) else { return }
+        if isDefiniteRejection(failure) { inboxTasksRemoveTagOwner = nil }
+        guard warm else { return }
+        retryNeeded = inboxTasksRemoveTagOwner != nil
+        error = retryNeeded ? failure.localizedDescription : nil
+        inboxReadError = failure.localizedDescription
+    }
+
+    private func retryInboxTasksRemoveTag(on owner: CoreHost, acknowledgment: String?, selectionGeneration: Int,
+                                      foreground: Int, surface: Surface) async throws {
+        guard let pending = inboxTasksRemoveTagOwner, pending.host === owner else { throw CocoaError(.coderReadCorrupt) }
+        let request = pending.request
+        let currentDebt = { self.inboxTasksRemoveTagOwned(on: owner, request: request) }
+        let outcome: CoreObject
+        if host === owner {
+            outcome = try await query("inboxTasksRemoveTagRetryOutcome", [request], beforeDispatch: { self.host === owner && currentDebt() })
+        } else {
+            outcome = try decode(await owner.call("inboxTasksRemoveTagRetryOutcome", argumentsJSON: json([request])))
+        }
+        guard currentDebt() else { throw CancellationError() }
+        let warm = surface == .inbox && inboxTasksMoveWarm(on: owner, generation: selectionGeneration, foreground: foreground)
+        if Set(outcome.keys) == Set(["kind"]), outcome.text("kind") == "unproven" {
+            if warm {
+                let unknown = label("task.doneStatusOutcomeUnknown")
+                retryNeeded = true; inboxReadError = unknown; error = unknown
+            }
+            return
+        }
+        guard Set(outcome.keys) == Set(["kind", "result"]), outcome.text("kind") == "confirmed" else { throw CocoaError(.coderReadCorrupt) }
+        let result = outcome.object("result")
+        if let acknowledgment, !inboxExactJSON(result, try decode(acknowledgment)) { throw CocoaError(.coderReadCorrupt) }
+        try acknowledgeInboxTasksRemoveTag(result, on: owner, request: request, warm: warm)
+        guard warm else { return }
+        await publishInboxTasksRemoveTag(result, on: owner, foreground: foreground)
+    }
+
+
+    // MARK: Task743 Inbox Organize (core draft edits, exact original write owners)
+    var inboxBulkOrganizeEnabled: Bool {
+        inboxBulkSelectionEnabled && inboxBulk.object("bar").object("organize").flag("enabled")
+    }
+    var inboxBulkOrganizeControlsEnabled: Bool {
+        inboxBulkOrganizePresented && !busy && !retryNeeded && !inboxBulkMutationPending
+            && inboxBulkOrganizeContext.map { inboxOrganizeContextCurrent($0) } == true
+    }
+    var inboxBulkOrganizeApplyEnabled: Bool {
+        inboxBulkOrganizeControlsEnabled && inboxBulkOrganizeCurrent && !inboxBulkOrganizeReading
+            && inboxBulkOrganizePendingEdits.isEmpty && inboxBulkOrganizePickerKind == nil
+            && inboxBulkOrganizeReadError == nil && inboxBulkOrganizeView.flag("canApply")
+    }
+    var inboxBulkOrganizeCloseEnabled: Bool {
+        inboxBulkOrganizePresented && !busy && !retryNeeded && !inboxBulkMutationPending
+    }
+    private func inboxOrganizeContextCurrent(_ context: InboxBulkConfirmation) -> Bool {
+        inboxBulkOrganizePresented && inboxBulkTagContextCurrent(context)
+            && inboxExactJSON(inboxSelectedIDs, inboxBulkOrganizeIDs)
+            && inboxExactJSON(inboxSelectedRevisions, inboxBulkOrganizeRevisions)
+            && inboxExactJSON(inboxParams, inboxBulkOrganizeParams)
+    }
+    func openInboxBulkOrganize() {
+        guard inboxBulkOrganizeEnabled, let owner = host else { return }
+        retireInboxBulkOrganize()
+        do {
+            inboxBulkOrganizeContext = InboxBulkConfirmation(host: owner, params: try json(inboxParams),
+                revision: inbox.text("revision"), selectionGeneration: inboxSelectionGeneration,
+                filterSequence: inboxFilterSequence, foregroundGeneration: foregroundSyncGeneration)
+        } catch { inboxReadError = label("task.updateFailed"); return }
+        inboxBulkOrganizeIDs = inboxSelectedIDs; inboxBulkOrganizeRevisions = inboxSelectedRevisions
+        inboxBulkOrganizeParams = inboxParams; inboxBulkOrganizePresented = true
+        // Empty organize asks core for EMPTY_BULK_ORGANIZE_DRAFT; Swift never authors that schema.
+        inboxBulkOrganizePendingEdits = [[:]]
+        drainInboxBulkOrganizeEdits()
+    }
+    func closeInboxBulkOrganize() {
+        guard inboxBulkOrganizeCloseEnabled else { return }
+        retireInboxBulkOrganize()
+    }
+    private func retireInboxBulkOrganize() {
+        inboxBulkOrganizeGeneration += 1; inboxBulkOrganizeTask?.cancel(); inboxBulkOrganizeTask = nil
+        inboxBulkOrganizePresented = false; inboxBulkOrganizeCurrent = false; inboxBulkOrganizeReading = false
+        inboxBulkOrganizeReadError = nil; inboxBulkOrganizePendingEdits = []
+        inboxBulkOrganizeView = [:]; inboxBulkOrganizeInputs = [:]; inboxBulkOrganizeRevision = ""
+        inboxBulkOrganizeContext = nil; inboxBulkOrganizeIDs = []; inboxBulkOrganizeRevisions = [:]; inboxBulkOrganizeParams = [:]
+        retireInboxOrganizePicker()
+        // Never clear either dispatched original Host/request debt on lifecycle retirement.
+    }
+    private func retireInboxOrganizePicker() {
+        inboxBulkOrganizePickerGeneration += 1; inboxBulkOrganizePickerTask?.cancel(); inboxBulkOrganizePickerTask = nil
+        inboxBulkOrganizePickerKind = nil; inboxBulkOrganizePickerQuery = ""; inboxBulkOrganizePicker = [:]
+        inboxBulkOrganizePickerItems = []; inboxBulkOrganizePickerCurrent = false
+        inboxBulkOrganizePickerReading = false; inboxBulkOrganizePickerError = nil
+    }
+    func editInboxBulkOrganize(_ edit: CoreObject) {
+        guard inboxBulkOrganizeControlsEnabled, inboxBulkOrganizePickerKind == nil, !edit.isEmpty else { return }
+        if edit.text("type") == "setText", let value = edit["value"] as? String {
+            inboxBulkOrganizeInputs[edit.text("field")] = value
+            if inboxBulkOrganizePendingEdits.last?.text("type") == "setText",
+               inboxBulkOrganizePendingEdits.last?.text("field") == edit.text("field") {
+                inboxBulkOrganizePendingEdits[inboxBulkOrganizePendingEdits.count - 1] = edit
+            } else { inboxBulkOrganizePendingEdits.append(edit) }
+        } else { inboxBulkOrganizePendingEdits.append(edit) }
+        inboxBulkOrganizeCurrent = false; inboxBulkOrganizeReadError = nil
+        drainInboxBulkOrganizeEdits()
+    }
+    func setInboxBulkOrganizeText(_ field: String, value: String) {
+        guard inboxBulkOrganizeView.object("draft")[field] is String,
+              inboxBulkOrganizeInputs[field]?.utf8.elementsEqual(value.utf8) != true else { return }
+        editInboxBulkOrganize(["type": "setText", "field": field, "value": value])
+    }
+    private func inboxOrganizeRead(edit: CoreObject? = nil, picker: CoreObject? = nil,
+                                  current: @escaping () -> Bool) async throws -> CoreObject {
+        guard current() else { throw CancellationError() }
+        var organize: CoreObject = [:]
+        if !inboxBulkOrganizeView.isEmpty { organize["draft"] = inboxBulkOrganizeView.object("draft") }
+        if let edit, !edit.isEmpty { organize["edit"] = edit }
+        var request: CoreObject = ["list": "inbox", "params": inboxBulkOrganizeParams,
+            "taskIds": inboxBulkOrganizeIDs, "organize": organize]
+        if let picker { request["picker"] = picker }
+        let result = try await query("menuRead", ["bulk", try json(request)], beforeDispatch: current)
+        guard current(), !result.text("revision").isEmpty else { throw CancellationError() }
+        try validateInboxTaskBulk(result, snapshot: ["revision": result.text("revision")])
+        guard let ids = result["selectedIds"] as? [String], let revisions = result["taskRevisions"] as? CoreObject,
+              inboxExactJSON(ids, inboxBulkOrganizeIDs), inboxExactJSON(revisions, inboxBulkOrganizeRevisions),
+              let view = result["organize"] as? CoreObject, let draft = view["draft"] as? CoreObject,
+              !draft.isEmpty, let canApply = view["canApply"] as? NSNumber,
+              CFGetTypeID(canApply) == CFBooleanGetTypeID() else { throw CocoaError(.coderReadCorrupt) }
+        return result
+    }
+    private func installInboxOrganizeView(_ bulk: CoreObject) {
+        inboxBulkOrganizeView = bulk.object("organize"); inboxBulkOrganizeRevision = bulk.text("revision")
+        for (field, value) in inboxBulkOrganizeView.object("draft") {
+            guard let value = value as? String else { continue }
+            if !inboxBulkOrganizePendingEdits.contains(where: { $0.text("type") == "setText" && $0.text("field") == field }) {
+                inboxBulkOrganizeInputs[field] = value
+            }
+        }
+        inboxBulkOrganizeCurrent = inboxBulkOrganizePendingEdits.isEmpty
+        inboxBulkOrganizeReadError = nil
+    }
+    private func drainInboxBulkOrganizeEdits() {
+        guard inboxBulkOrganizeTask == nil, inboxBulkOrganizeControlsEnabled,
+              !inboxBulkOrganizePendingEdits.isEmpty, let context = inboxBulkOrganizeContext else { return }
+        let generation = inboxBulkOrganizeGeneration
+        let current = { self.inboxBulkOrganizeGeneration == generation && self.inboxOrganizeContextCurrent(context)
+            && !self.busy && !self.retryNeeded && !self.inboxBulkMutationPending }
+        inboxBulkOrganizeReading = true
+        inboxBulkOrganizeTask = Task {
+            defer {
+                if generation == inboxBulkOrganizeGeneration {
+                    inboxBulkOrganizeReading = false; inboxBulkOrganizeTask = nil
+                    // Edits left behind a busy or stale interval keep the dialog not current; show Retry.
+                    if !inboxBulkOrganizeCurrent, inboxBulkOrganizeReadError == nil {
+                        inboxBulkOrganizeReadError = label("settings.feedback.actionFailed")
+                    }
+                }
+            }
+            while current(), !inboxBulkOrganizePendingEdits.isEmpty {
+                let edit = inboxBulkOrganizePendingEdits.removeFirst()
+                do {
+                    let bulk = try await inboxOrganizeRead(edit: edit, current: current)
+                    // The read is a pure projection, so a not-installed edit is safe to replay.
+                    guard !Task.isCancelled, current() else {
+                        // Only the dialog generation that queued the edit may keep it.
+                        if generation == inboxBulkOrganizeGeneration { inboxBulkOrganizePendingEdits.insert(edit, at: 0) }
+                        return
+                    }
+                    installInboxOrganizeView(bulk)
+                } catch {
+                    guard !Task.isCancelled, current() else {
+                        // Only the dialog generation that queued the edit may keep it.
+                        if generation == inboxBulkOrganizeGeneration { inboxBulkOrganizePendingEdits.insert(edit, at: 0) }
+                        return
+                    }
+                    // A rejected partial text edit must not strand a newer correction behind it.
+                    if edit.text("type") == "setText", inboxBulkOrganizePendingEdits.contains(where: {
+                        $0.text("type") == "setText" && $0.text("field") == edit.text("field")
+                    }) { continue }
+                    inboxBulkOrganizePendingEdits.insert(edit, at: 0)
+                    inboxBulkOrganizeCurrent = false; inboxBulkOrganizeReadError = error.localizedDescription
+                    return
+                }
+            }
+        }
+    }
+    func retryInboxBulkOrganizeRead() {
+        guard inboxBulkOrganizeControlsEnabled else { return }
+        if inboxBulkOrganizePickerKind != nil { readInboxOrganizePicker(reset: true); return }
+        if inboxBulkOrganizePendingEdits.isEmpty { inboxBulkOrganizePendingEdits = [[:]] }
+        drainInboxBulkOrganizeEdits()
+    }
+    func openInboxOrganizePicker(_ kind: String) {
+        guard inboxBulkOrganizeControlsEnabled, inboxBulkOrganizeCurrent, !inboxBulkOrganizeReading,
+              ["project", "area"].contains(kind), !inboxBulkOrganizeView.object(kind).flag("disabled") else { return }
+        retireInboxOrganizePicker(); inboxBulkOrganizePickerKind = kind
+        readInboxOrganizePicker(reset: true)
+    }
+    func closeInboxOrganizePicker() {
+        guard inboxBulkOrganizeCloseEnabled else { return }
+        retireInboxOrganizePicker()
+    }
+    func setInboxOrganizePickerQuery(_ text: String) {
+        guard inboxBulkOrganizeControlsEnabled, inboxBulkOrganizePickerKind != nil,
+              !inboxBulkOrganizePickerQuery.utf8.elementsEqual(text.utf8) else { return }
+        inboxBulkOrganizePickerQuery = text; readInboxOrganizePicker(reset: true)
+    }
+    var inboxOrganizePickerCanLoadMore: Bool {
+        inboxBulkOrganizeControlsEnabled && inboxBulkOrganizePickerCurrent && !inboxBulkOrganizePickerReading
+            && inboxBulkOrganizePickerError == nil && inboxBulkOrganizePickerItems.count < inboxBulkOrganizePicker.number("total")
+    }
+    func loadMoreInboxOrganizePicker() {
+        guard inboxOrganizePickerCanLoadMore else { return }; readInboxOrganizePicker(reset: false)
+    }
+    func retryInboxOrganizePicker() { readInboxOrganizePicker(reset: true) }
+    private func readInboxOrganizePicker(reset: Bool) {
+        guard inboxBulkOrganizeControlsEnabled, let context = inboxBulkOrganizeContext,
+              let kind = inboxBulkOrganizePickerKind else { return }
+        inboxBulkOrganizePickerGeneration += 1; let generation = inboxBulkOrganizePickerGeneration
+        let queryText = inboxBulkOrganizePickerQuery, revision = inboxBulkOrganizeRevision
+        let offset = reset ? 0 : inboxBulkOrganizePickerItems.count
+        if reset { inboxBulkOrganizePickerItems = []; inboxBulkOrganizePicker = [:] }
+        inboxBulkOrganizePickerCurrent = false; inboxBulkOrganizePickerReading = true; inboxBulkOrganizePickerError = nil
+        inboxBulkOrganizePickerTask?.cancel()
+        let current = { self.inboxOrganizeContextCurrent(context) && !self.busy && !self.retryNeeded
+            && generation == self.inboxBulkOrganizePickerGeneration && self.inboxBulkOrganizePickerKind == kind
+            && self.inboxBulkOrganizePickerQuery.utf8.elementsEqual(queryText.utf8) }
+        inboxBulkOrganizePickerTask = Task {
+            defer { if generation == inboxBulkOrganizePickerGeneration { inboxBulkOrganizePickerReading = false; inboxBulkOrganizePickerTask = nil } }
+            do {
+                var picker: CoreObject = ["kind": kind, "query": queryText, "offset": offset, "limit": 100]
+                if !reset { picker["revision"] = revision }
+                let bulk = try await inboxOrganizeRead(picker: picker, current: current)
+                guard !Task.isCancelled, current() else { return }
+                let page = bulk.object("picker"), items = page.objects("items")
+                guard page.text("kind") == kind, let total = page["total"] as? NSNumber,
+                      CFGetTypeID(total) != CFBooleanGetTypeID(), total.doubleValue.rounded() == total.doubleValue,
+                      total.intValue >= offset + items.count, items.count <= 100,
+                      !items.isEmpty || offset == total.intValue,
+                      reset || (bulk.text("revision").utf8.elementsEqual(revision.utf8)
+                          && total.intValue == inboxBulkOrganizePicker.number("total")) else { throw CocoaError(.coderReadCorrupt) }
+                let combined = reset ? items : inboxBulkOrganizePickerItems + items
+                guard Set(combined.map { Data($0.text("value").utf8) }).count == combined.count else { throw CocoaError(.coderReadCorrupt) }
+                installInboxOrganizeView(bulk)
+                inboxBulkOrganizePickerItems = combined; inboxBulkOrganizePicker = page
+                inboxBulkOrganizePickerCurrent = true
+            } catch {
+                guard !Task.isCancelled, current() else { return }
+                inboxBulkOrganizePickerError = error.localizedDescription
+            }
+        }
+    }
+    func chooseInboxOrganizePicker(_ item: CoreObject) {
+        guard inboxBulkOrganizeControlsEnabled, inboxBulkOrganizePickerCurrent, !inboxBulkOrganizePickerReading,
+              inboxBulkOrganizePickerItems.contains(where: { inboxExactJSON($0, item) }),
+              let edit = item["edit"] as? CoreObject else { return }
+        retireInboxOrganizePicker(); editInboxBulkOrganize(edit)
+    }
+    func submitInboxOrganizePicker() async {
+        guard inboxBulkOrganizeControlsEnabled, inboxBulkOrganizePickerCurrent, !inboxBulkOrganizePickerReading else { return }
+        let submit = inboxBulkOrganizePicker.object("submit")
+        if let edit = submit["edit"] as? CoreObject {
+            retireInboxOrganizePicker(); editInboxBulkOrganize(edit)
+        } else if let name = submit["create"] as? String { await createInboxOrganizeDestination(name: name) }
+    }
+    func createInboxOrganizePickerChoice() async {
+        let name = inboxBulkOrganizePicker.object("create").text("name")
+        guard !name.isEmpty else { return }; await createInboxOrganizeDestination(name: name)
+    }
+    private func createInboxOrganizeDestination(name: String) async {
+        guard inboxBulkOrganizeControlsEnabled, inboxBulkOrganizePickerCurrent, !inboxBulkOrganizePickerReading,
+              let context = inboxBulkOrganizeContext, let kind = inboxBulkOrganizePickerKind,
+              inboxBulkOrganizePicker.object("create").text("name").utf8.elementsEqual(name.utf8),
+              !inboxBulkOrganizeRevision.isEmpty else { return }
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(), "source": "inbox", "kind": kind,
+                "name": name, "draft": inboxBulkOrganizeView.object("draft"), "offerRevision": inboxBulkOrganizeRevision,
+                "taskIds": inboxBulkOrganizeIDs, "taskRevisions": inboxBulkOrganizeRevisions, "params": inboxBulkOrganizeParams])
+            await performInboxOrganizeWrite(request, creation: true, context: context)
+        } catch { inboxBulkOrganizeReadError = error.localizedDescription }
+    }
+    func applyInboxBulkOrganize() async {
+        guard inboxBulkOrganizeApplyEnabled, let context = inboxBulkOrganizeContext else { return }
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(), "source": "inbox",
+                "taskIds": inboxBulkOrganizeIDs, "taskRevisions": inboxBulkOrganizeRevisions,
+                "draft": inboxBulkOrganizeView.object("draft"), "params": inboxBulkOrganizeParams])
+            await performInboxOrganizeWrite(request, creation: false, context: context)
+        } catch { inboxBulkOrganizeReadError = error.localizedDescription }
+    }
+    private func inboxOrganizeOwned(_ owner: CoreHost, request: String, creation: Bool) -> Bool {
+        let debt = creation ? inboxOrganizeDestinationCreateOwner : inboxTasksOrganizeOwner
+        return debt?.host === owner && debt?.request.utf8.elementsEqual(request.utf8) == true
+    }
+    private func performInboxOrganizeWrite(_ request: String, creation: Bool, context: InboxBulkConfirmation) async {
+        let owner = context.host, generation = inboxBulkOrganizeGeneration
+        let current = { self.inboxBulkOrganizeGeneration == generation && self.inboxOrganizeContextCurrent(context) }
+        guard current(), !inboxBulkMutationPending, !busy, !retryNeeded else { return }
+        if creation { inboxOrganizeDestinationCreateOwner = (owner, request) } else { inboxTasksOrganizeOwner = (owner, request) }
+        busy = true; inboxBulkOrganizeReadError = nil
+        var dispatched = false
+        defer { if host === owner { finishOperation() } }
+        do {
+            let result = try await query(creation ? "inboxOrganizeDestinationCreateWrite" : "inboxTasksOrganizeWrite", [request], beforeDispatch: {
+                let accepted = current() && self.inboxOrganizeOwned(owner, request: request, creation: creation)
+                if accepted { dispatched = true }; return accepted
+            })
+            guard inboxOrganizeOwned(owner, request: request, creation: creation) else { return }
+            let warm = current()
+            try acknowledgeInboxOrganize(result, on: owner, request: request, creation: creation, warm: warm, allowNoop: true)
+            if warm { await publishInboxOrganize(result, request: request, creation: creation, context: context, generation: generation) }
+        } catch {
+            guard inboxOrganizeOwned(owner, request: request, creation: creation) else { return }
+            if !dispatched {
+                if creation { inboxOrganizeDestinationCreateOwner = nil } else { inboxTasksOrganizeOwner = nil }
+                return
+            }
+            handleInboxOrganizeError(error, on: owner, request: request, creation: creation, warm: current())
+        }
+    }
+    private func acknowledgeInboxOrganize(_ result: CoreObject, on owner: CoreHost, request: String,
+                                         creation: Bool, warm: Bool, allowNoop: Bool = false) throws {
+        guard inboxOrganizeOwned(owner, request: request, creation: creation) else { throw CocoaError(.coderReadCorrupt) }
+        let frozen = try decode(request)
+        guard let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID() else { throw CocoaError(.coderReadCorrupt) }
+        if creation {
+            guard Set(result.keys) == Set(["id", "changed"]), changed.boolValue,
+                  let id = result["id"] as? String, !id.isEmpty, id.utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
+            inboxOrganizeDestinationCreateOwner = nil
+        } else {
+            guard Set(result.keys) == Set(["count", "changed"]), let ids = frozen["taskIds"] as? [String],
+                  let count = result["count"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+                  count.doubleValue.rounded() == count.doubleValue,
+                  changed.boolValue ? (count.doubleValue > 0 && count.doubleValue <= Double(ids.count)) : (allowNoop && count.doubleValue == 0) else { throw CocoaError(.coderReadCorrupt) }
+            inboxTasksOrganizeOwner = nil
+        }
+        // Durably acknowledged debt is retired before any option/list/notice read can fail.
+        if warm { retryNeeded = false; inboxReadError = nil; inboxBulkOrganizeReadError = nil; error = nil }
+    }
+    private func publishInboxOrganize(_ result: CoreObject, request: String, creation: Bool,
+                                     context: InboxBulkConfirmation, generation: Int) async {
+        let owner = context.host
+        let current = { self.inboxBulkOrganizeGeneration == generation && self.inboxOrganizeContextCurrent(context) }
+        guard current() else { return }
+        if creation {
+            do {
+                let frozen = try decode(request), kind = frozen.text("kind"), id = result.text("id")
+                let field = kind == "project" ? "projectChoice" : "areaChoice"
+                let bulk = try await inboxOrganizeRead(edit: ["type": kind == "project" ? "setProject" : "setArea", "value": id], current: current)
+                guard current() else { return }
+                guard bulk.object("organize").object("draft").text(field).utf8.elementsEqual(id.utf8) else { throw CocoaError(.coderReadCorrupt) }
+                installInboxOrganizeView(bulk); retireInboxOrganizePicker()
+            } catch {
+                guard current() else { return }
+                // Missing current offered ID never restores/recreates or selects an unproven destination.
+                inboxBulkOrganizeCurrent = false; inboxBulkOrganizePickerCurrent = false
+                inboxBulkOrganizeReadError = error.localizedDescription
+            }
+            return
+        }
+        retireInboxBulkOrganize()
+        guard result.flag("changed") else { return }
+        clearInboxTaskSelection()
+        let selected = inboxSelectionGeneration
+        let warm = { self.inboxTasksMoveWarm(on: owner, generation: selected, foreground: context.foregroundGeneration) }
+        guard warm() else { return }; try? await readInbox(ownedGuard: warm)
+        guard warm(), let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: warm),
+              warm(), let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
+              !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
+        showTaskActionNotice(["operation": "inboxBulkOrganize", "source": "inbox", "undoEnabled": false,
+            "message": notice.text("title") + ": " + notice.text("message")])
+    }
+    private func handleInboxOrganizeError(_ failure: Error, on owner: CoreHost, request: String, creation: Bool, warm: Bool) {
+        guard inboxOrganizeOwned(owner, request: request, creation: creation) else { return }
+        if isDefiniteRejection(failure) {
+            if creation { inboxOrganizeDestinationCreateOwner = nil } else { inboxTasksOrganizeOwner = nil }
+        }
+        guard warm else { return }
+        retryNeeded = inboxOrganizeOwned(owner, request: request, creation: creation)
+        error = retryNeeded ? failure.localizedDescription : nil
+        // An open dialog shows a definite rejection itself (clearing an earlier retry-owed one, as a
+        // successful retry does); an Inbox error would outlive the dialog's Cancel.
+        inboxReadError = retryNeeded || !inboxBulkOrganizePresented ? failure.localizedDescription : nil
+        inboxBulkOrganizeCurrent = false; inboxBulkOrganizePickerCurrent = false
+        inboxBulkOrganizeReadError = failure.localizedDescription
+    }
+    private func retryInboxOrganize(on owner: CoreHost, acknowledgment: String?, creation: Bool,
+                                   selectionGeneration: Int, foreground: Int, surface: Surface) async throws {
+        let debt = creation ? inboxOrganizeDestinationCreateOwner : inboxTasksOrganizeOwner
+        guard let debt, debt.host === owner else { throw CocoaError(.coderReadCorrupt) }
+        let request = debt.request, context = inboxBulkOrganizeContext, generation = inboxBulkOrganizeGeneration
+        let currentDebt = { self.inboxOrganizeOwned(owner, request: request, creation: creation) }
+        let method = creation ? "inboxOrganizeDestinationCreateRetryOutcome" : "inboxTasksOrganizeRetryOutcome"
+        let outcome: CoreObject
+        if host === owner { outcome = try await query(method, [request], beforeDispatch: { self.host === owner && currentDebt() }) }
+        else { outcome = try decode(await owner.call(method, argumentsJSON: json([request]))) }
+        guard currentDebt() else { throw CancellationError() }
+        let warm = surface == .inbox && inboxTasksMoveWarm(on: owner, generation: selectionGeneration, foreground: foreground)
+            && context.map { inboxOrganizeContextCurrent($0) } == true
+        if Set(outcome.keys) == Set(["kind"]), outcome.text("kind") == "unproven" {
+            if warm { let unknown = label("task.doneStatusOutcomeUnknown"); retryNeeded = true; inboxReadError = unknown; error = unknown }
+            return
+        }
+        guard Set(outcome.keys) == Set(["kind", "result"]), outcome.text("kind") == "confirmed" else { throw CocoaError(.coderReadCorrupt) }
+        let result = outcome.object("result")
+        if let acknowledgment, !inboxExactJSON(result, try decode(acknowledgment)) { throw CocoaError(.coderReadCorrupt) }
+        try acknowledgeInboxOrganize(result, on: owner, request: request, creation: creation, warm: warm)
+        if warm, let context { await publishInboxOrganize(result, request: request, creation: creation, context: context, generation: generation) }
+    }
+
+    private func retryInboxBulk(on owner: CoreHost, acknowledgment: String?, selectionGeneration: Int,
+                                foreground: Int, surface: Surface) async throws {
+        if inboxOrganizeDestinationCreateOwner?.host === owner || inboxTasksOrganizeOwner?.host === owner {
+            try await retryInboxOrganize(on: owner, acknowledgment: acknowledgment,
+                creation: inboxOrganizeDestinationCreateOwner?.host === owner,
+                selectionGeneration: selectionGeneration, foreground: foreground, surface: surface)
+            return
+        }
+        if inboxTasksRemoveTagOwner?.host === owner {
+            try await retryInboxTasksRemoveTag(on: owner, acknowledgment: acknowledgment,
+                selectionGeneration: selectionGeneration, foreground: foreground, surface: surface)
+            return
+        }
+        if inboxTasksAddTagOwner?.host === owner {
+            try await retryInboxTasksAddTag(on: owner, acknowledgment: acknowledgment,
+                selectionGeneration: selectionGeneration, foreground: foreground, surface: surface)
+            return
+        }
+        if inboxTasksMoveOwner?.host === owner {
+            try await retryInboxTasksMove(on: owner, acknowledgment: acknowledgment,
+                selectionGeneration: selectionGeneration, foreground: foreground, surface: surface)
+            return
+        }
+        let deleting = inboxBulkDeleteOwner?.host === owner
+        let pending = deleting ? inboxBulkDeleteOwner : inboxBulkUndoOwner
+        guard let pending, pending.host === owner,
+              deleting || (taskActionNotice.text("source") == "inbox" && taskActionNotice.text("operation") == "inboxBulkDelete") else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let request = pending.request
+        let currentDebt = {
+            let pending = deleting ? self.inboxBulkDeleteOwner : self.inboxBulkUndoOwner
+            let owed = deleting ? self.archivedTasksDeleteRequest : self.taskActionUndoRequest
+            return pending?.host === owner && pending?.request.utf8.elementsEqual(request.utf8) == true
+                && owed?.utf8.elementsEqual(request.utf8) == true
+        }
+        guard currentDebt() else { throw CancellationError() }
+        let method = deleting ? "archivedTasksDeleteRetryOutcome" : "archivedTasksDeleteUndoRetryOutcome"
+        let outcome: CoreObject
+        if host === owner {
+            outcome = try await query(method, [request], beforeDispatch: { self.host === owner && currentDebt() })
+        } else {
+            // A replacement Host never receives these bytes. The captured Host
+            // can only prove its own receipt; no write or warm UI crosses over.
+            outcome = try decode(await owner.call(method, argumentsJSON: json([request])))
+        }
+        guard currentDebt() else { throw CancellationError() }
+        let warm = host === owner && selectedSurface == surface && inboxSelectionGeneration == selectionGeneration
+            && foregroundSyncGeneration == foreground && !Task.isCancelled && !appLock.concealed
+            && UIApplication.shared.applicationState == .active
+        if Set(outcome.keys) == Set(["kind"]), outcome.text("kind") == "unproven" {
+            let unknown = label(deleting ? "task.archiveDeleteOutcomeUnknown" : "task.trashOutcomeUnknown")
+            if warm { retryNeeded = true; inboxReadError = unknown; error = unknown }
+            return
+        }
+        guard Set(outcome.keys) == Set(["kind", "result"]), outcome.text("kind") == "confirmed" else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        let result = outcome.object("result")
+        if let acknowledgment, !inboxExactJSON(result, try decode(acknowledgment)) { throw CocoaError(.coderReadCorrupt) }
+        if deleting {
+            let notice = try acknowledgeArchivedTasksDelete(result, inboxWarm: warm)
+            guard warm, surface == .inbox else { return }
+            let noticeGeneration = inboxSelectionGeneration
+            inboxBulkNoticeHost = owner
+            try? await readInbox()
+            guard host === owner, selectedSurface == .inbox, inboxSelectionGeneration == noticeGeneration,
+                  foregroundSyncGeneration == foreground, !Task.isCancelled, !appLock.concealed,
+                  UIApplication.shared.applicationState == .active else { return }
+            showTaskActionNotice(notice)
+        } else {
+            try acknowledgeTaskActionUndo(result, inboxWarm: warm)
+            guard warm else { return }
+            do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
+        }
+    }
+    // MARK: End Task739 Inbox selection
 
     private func validReferenceGroup(_ value: String) -> Bool {
         ["none", "context", "area", "project", "tag"].contains(value)
@@ -18662,7 +22534,7 @@ final class CoreModel: ObservableObject {
         return try await query("menuRead", ["reference", try json(input)])
     }
 
-    @discardableResult private func readReference() async -> Bool {
+    @discardableResult private func readReference(ownedGuard: (() -> Bool)? = nil) async -> Bool {
         referenceCurrent = false
         referencePickerCurrent = false
         referenceError = nil
@@ -18700,7 +22572,7 @@ final class CoreModel: ObservableObject {
                 if referenceSelectionMode {
                     let selected = referenceSelectedIDs
                     let bulk = try await query("menuRead", ["bulk", try json(referenceTaskBulkInput(params: params))])
-                    guard selectedSurface == .reference, referenceSelectionMode else { return false }
+                    guard ownedGuard?() != false, selectedSurface == .reference, referenceSelectionMode else { return false }
                     guard bulk.text("revision").utf8.elementsEqual(next.text("revision").utf8),
                           let ids = bulk["selectedIds"] as? [String],
                           ids.allSatisfy({ id in selected.contains { $0.utf8.elementsEqual(id.utf8) } }) else {
@@ -18719,6 +22591,7 @@ final class CoreModel: ObservableObject {
                         }
                     }
                 }
+                guard ownedGuard?() != false else { return false }
                 referenceParams = params
                 referencePendingEdit = nil
                 reference = next
@@ -18733,6 +22606,7 @@ final class CoreModel: ObservableObject {
                 if !referencePickerName.isEmpty { referencePickerNeedsRead = true }
                 return true
             } catch {
+                guard ownedGuard?() != false else { return false }
                 if attempt == 1 { referenceError = error.localizedDescription }
             }
         }
@@ -19034,7 +22908,7 @@ final class CoreModel: ObservableObject {
                 var rows = next.objects("rows")
                 let target = min(savedSearchLoadedDepth, next.number("total"))
                 while rows.count < target {
-                    let limit = min(pageSize, target - rows.count)
+                    let limit = min(followUpWindow, target - rows.count)
                     let page = try await query("menuRead", ["savedSearch", try json([
                         "id": id, "offset": rows.count, "limit": limit, "revision": next.text("revision")])])
                     guard current() else { return }
@@ -19066,7 +22940,7 @@ final class CoreModel: ObservableObject {
     }
 
     func closeTrash() async {
-        guard selectedSurface == .trash, !busy, !retryNeeded, !taskPresented else { return }
+        guard selectedSurface == .trash, !busy, !retryNeeded, !taskPresented, trashBulkRequest == nil else { return }
         selectedSurface = trashCaller
         await refresh()
     }
@@ -19078,7 +22952,7 @@ final class CoreModel: ObservableObject {
     }
 
     func restoreTrashItem(_ id: String, project: Bool) async {
-        guard trashActionsEnabled, let item = trash.objects("items").first(where: {
+        guard trashRowActionsEnabled, let item = trash.objects("items").first(where: {
             $0.text("type") == (project ? "project" : "task")
                 && (project ? $0.text("id") : $0.object("row").text("id")) == id
         }) else { return }
@@ -19123,27 +22997,430 @@ final class CoreModel: ObservableObject {
     }
 
     func loadMoreTrash() async {
-        guard trashActionsEnabled else { return }
+        guard trashActionsEnabled, let operationHost = host else { return }
         let count = trash.objects("items").count
         guard count < trash.number("total") else { return }
         trashLoadedDepth = count + min(pageSize, trash.number("total") - count)
-        busy = true
-        defer { finishOperation() }
+        let owner = UUID(); trashBusyOwner = owner; busy = true
+        defer { finishTrashOperation(owner, host: operationHost) }
         await readTrash()
     }
 
-    private func trashPage(offset: Int, limit: Int, revision: String? = nil) async throws -> CoreObject {
-        var input: CoreObject = ["offset": offset, "limit": limit]
-        if let revision { input["revision"] = revision }
-        return try await query("menuRead", ["trash", try json(input)])
+    func retireTrashPresentation(clearSelection: Bool = false) {
+        #if DEBUG && targetEnvironment(simulator)
+        if trashPurgeFixtureEnabled, let id = trashPurgeConfirmation?.id { trashPurgeTestRetiredConfirmation = id }
+        #endif
+        trashPurgeConfirmation = nil
+        trashPresentationGeneration += 1
+        trashReadGeneration += 1
+        trashCurrent = false
+        // Retirement invalidates reads and presentation only. An accepted native
+        // request retains its exact payload and original host until settlement.
+        if clearSelection, trashBulkRequest == nil { clearTrashSelection() }
+        #if DEBUG && targetEnvironment(simulator)
+        publishTrashBulkTestState()
+        #endif
     }
 
-    private func readTrash() async {
+    private func clearTrashSelection() {
+        trashPurgeConfirmation = nil
+        trashPresentationGeneration += 1
+        trashSelectionMode = false
+        trashSelectedTaskIDs = []; trashSelectedProjectIDs = []
+        trashSelectedTaskRevisions = [:]; trashSelectedProjectRevisions = [:]
+    }
+
+    var trashSelectionCanClose: Bool {
+        ready && selectedSurface == .trash && !busy && !retryNeeded && !taskPresented && !capturePresented
+            && !areaPickerPresented && !appLock.concealed && !settingsSyncRestartRequired && trashBulkRequest == nil && trashPurgeConfirmation == nil
+    }
+
+    private func finishTrashOperation(_ owner: UUID, host operationHost: CoreHost) {
+        guard host === operationHost, trashBusyOwner == owner else { return }
+        trashBusyOwner = nil
+        finishOperation()
+    }
+
+    func toggleTrashSelectionMode() async {
+        guard trashSelectionMode ? trashSelectionCanClose : trashActionsEnabled, let operationHost = host else { return }
+        if trashSelectionMode { clearTrashSelection() }
+        else { trashPresentationGeneration += 1; trashSelectionMode = true }
+        let owner = UUID(); trashBusyOwner = owner; busy = true
+        defer { finishTrashOperation(owner, host: operationHost) }
+        _ = await readTrash()
+    }
+
+    func trashItemSelected(_ item: CoreObject) -> Bool {
+        let project = item.text("type") == "project"
+        let id = project ? item.text("id") : item.object("row").text("id")
+        return (project ? trashSelectedProjectIDs : trashSelectedTaskIDs).contains { $0.utf8.elementsEqual(id.utf8) }
+    }
+
+    func toggleTrashItemSelection(_ displayed: CoreObject) async {
+        guard trashActionsEnabled, trashSelectionMode, let operationHost = host else { return }
+        let project = displayed.text("type") == "project"
+        let id = project ? displayed.text("id") : displayed.object("row").text("id")
+        let revision = project ? displayed.text("projectRevision") : displayed.object("row").text("taskRevision")
+        guard !id.isEmpty, !revision.isEmpty, trash.objects("items").contains(where: { item in
+            item.text("type") == displayed.text("type")
+                && (project ? item.text("id") : item.object("row").text("id")).utf8.elementsEqual(id.utf8)
+                && (project ? item.text("projectRevision") : item.object("row").text("taskRevision")).utf8.elementsEqual(revision.utf8)
+        }) else { return }
+        var ids = project ? trashSelectedProjectIDs : trashSelectedTaskIDs
+        if ids.contains(where: { $0.utf8.elementsEqual(id.utf8) }) { ids.removeAll { $0.utf8.elementsEqual(id.utf8) } }
+        else {
+            guard trashSelectedCount < 10_000 else { trashError = label("task.updateFailed"); return }
+            ids.append(id)
+        }
+        trashPresentationGeneration += 1
+        let revisionBeforeToggle = trash.text("revision")
+        let proposed: CoreObject = ["taskIds": project ? trashSelectedTaskIDs : ids,
+            "projectIds": project ? ids : trashSelectedProjectIDs]
+        let owner = UUID(); trashBusyOwner = owner; busy = true
+        defer { finishTrashOperation(owner, host: operationHost) }
+        let presentation = trashPresentationGeneration
+        let accepted = await readTrash(requestedSelection: proposed, displayedRevision: revisionBeforeToggle)
+        if !accepted {
+            guard host === operationHost, presentation == trashPresentationGeneration, selectedSurface == .trash,
+                  trashError?.hasPrefix("STALE_REVISION:") == true else { return }
+            let warning = trashError
+            // Refresh the old selection, never adopt a newly toggled row using
+            // a different revision than the row the user actually pressed.
+            _ = await readTrash()
+            if host === operationHost, presentation == trashPresentationGeneration { trashError = warning }
+        }
+    }
+
+    func selectAllTrashItems() async {
+        guard trashActionsEnabled, trashSelectionMode, let operationHost = host else { return }
+        trashPresentationGeneration += 1
+        let owner = UUID(); trashBusyOwner = owner; busy = true
+        defer { finishTrashOperation(owner, host: operationHost) }
+        #if DEBUG && targetEnvironment(simulator)
+        trashBulkTestSelectAll = true
+        defer { trashBulkTestSelectAll = false }
+        #endif
+        _ = await readTrash(selectAll: true)
+    }
+
+    private func trashSelectionRevisions(_ value: CoreObject, ids: [String], project: Bool) throws -> CoreObject {
+        guard let revisions = value[project ? "projectRevisions" : "taskRevisions"] as? CoreObject,
+              ids.count <= 10_000, Set(ids.map { Data($0.utf8) }).count == ids.count,
+              ids.allSatisfy({ !$0.isEmpty && $0.utf16.count <= (project ? 200 : 500) }),
+              revisions.count == ids.count,
+              Set(revisions.keys.map { Data($0.utf8) }) == Set(ids.map { Data($0.utf8) }),
+              revisions.values.allSatisfy({ ($0 as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true }) else {
+            // Swift dictionaries cannot bind canonically equivalent keys to two
+            // distinct UTF-8 IDs. Refuse ambiguity instead of retargeting a row.
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return revisions
+    }
+
+    private func validateTrashSelection(_ selection: CoreObject) throws -> (tasks: [String], projects: [String]) {
+        guard Set(selection.keys) == Set(["taskIds", "taskRevisions", "projectIds", "projectRevisions"]),
+              let tasks = selection["taskIds"] as? [String], let projects = selection["projectIds"] as? [String],
+              tasks.count + projects.count <= 10_000, try json(selection).utf8.count <= 2_000_000 else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        _ = try trashSelectionRevisions(selection, ids: tasks, project: false)
+        _ = try trashSelectionRevisions(selection, ids: projects, project: true)
+        return (tasks, projects)
+    }
+
+    private func ownsTrashBulkRequest(_ request: TrashBulkRequest) -> Bool {
+        host === request.host && trashBulkRequest?.id == request.id
+            && trashBulkRequest?.host === request.host
+    }
+
+    private func trashBulkJSON(_ selection: CoreObject) throws -> String {
+        let all = try validateTrashSelection(selection)
+        guard !all.tasks.isEmpty || !all.projects.isEmpty else { throw CocoaError(.coderInvalidValue) }
+        var value = selection
+        value["requestId"] = UUID().uuidString.lowercased()
+        let encoded = try json(value)
+        guard encoded.utf8.count <= 2_000_000 else { throw CocoaError(.coderInvalidValue) }
+        return encoded
+    }
+
+    private func stageTrashPurge(_ selection: CoreObject, copy: CoreObject, host operationHost: CoreHost,
+                                presentation: Int, readOwner: UUID? = nil) throws {
+        let all = try validateTrashSelection(selection)
+        guard Set(copy.keys) == Set(["title", "message", "cancelLabel", "confirmLabel"]),
+              copy.values.allSatisfy({ ($0 as? String).map { !$0.isEmpty && $0.utf8.count <= 4_096 } == true }) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        guard host === operationHost, presentation == trashPresentationGeneration,
+              trashPurgeConfirmation == nil,
+              (readOwner == nil ? trashOperationAdmissionEnabled : (busy && trashBusyOwner == readOwner && trashBulkRequest == nil)),
+              selectedSurface == .trash, !appLock.concealed,
+              UIApplication.shared.applicationState == .active, !Task.isCancelled else { throw CancellationError() }
+        trashPurgeConfirmation = TrashPurgeConfirmation(id: UUID(), host: operationHost,
+            json: try trashBulkJSON(selection), count: all.tasks.count + all.projects.count,
+            presentation: presentation, selectionMode: trashSelectionMode, copy: copy)
+        #if DEBUG && targetEnvironment(simulator)
+        publishTrashBulkTestState()
+        if let confirmation = trashPurgeConfirmation { runTrashPurgeFixtureMutation(confirmation) }
+        #endif
+    }
+
+    func requestTrashItemPurge(_ displayed: CoreObject) {
+        guard trashRowActionsEnabled, let operationHost = host else { return }
+        let project = displayed.text("type") == "project"
+        let id = project ? displayed.text("id") : displayed.object("row").text("id")
+        let revision = project ? displayed.text("projectRevision") : displayed.object("row").text("taskRevision")
+        guard !id.isEmpty, !revision.isEmpty, trash.objects("items").contains(where: {
+            $0.text("type") == displayed.text("type")
+                && (project ? $0.text("id") : $0.object("row").text("id")).utf8.elementsEqual(id.utf8)
+                && (project ? $0.text("projectRevision") : $0.object("row").text("taskRevision")).utf8.elementsEqual(revision.utf8)
+        }) else { return }
+        do {
+            try stageTrashPurge(["taskIds": project ? [] : [id], "taskRevisions": project ? [:] : [id: revision],
+                "projectIds": project ? [id] : [], "projectRevisions": project ? [id: revision] : [:]],
+                copy: trash.object("confirmations").object("purgeItem"), host: operationHost,
+                presentation: trashPresentationGeneration)
+        } catch { trashError = error.localizedDescription }
+    }
+
+    func requestSelectedTrashPurge() {
+        guard trashBulkRestoreEnabled, let operationHost = host else { return }
+        do {
+            try stageTrashPurge(["taskIds": trashSelectedTaskIDs, "taskRevisions": trashSelectedTaskRevisions,
+                "projectIds": trashSelectedProjectIDs, "projectRevisions": trashSelectedProjectRevisions],
+                copy: trash.object("confirmations").object("purgeSelection"), host: operationHost,
+                presentation: trashPresentationGeneration)
+        } catch { trashError = error.localizedDescription }
+    }
+
+    func requestClearTrashPurge() async {
+        guard trashClearEnabled, let operationHost = host else { return }
+        let presentation = trashPresentationGeneration, mode = trashSelectionMode
+        trashReadGeneration += 1
+        let generation = trashReadGeneration
+        let owner = UUID(); trashBusyOwner = owner; busy = true; trashError = nil
+        defer { finishTrashOperation(owner, host: operationHost) }
+        func current() -> Bool {
+            host === operationHost && trashBusyOwner == owner && presentation == trashPresentationGeneration
+                && generation == trashReadGeneration && mode == trashSelectionMode && selectedSurface == .trash
+                && ready && !retryNeeded && trashCurrent && trashBulkRequest == nil && trashPurgeConfirmation == nil && !appLock.concealed
+                && !areaPickerPresented && !taskPresented && !capturePresented && !settingsSyncRestartRequired
+                && UIApplication.shared.applicationState == .active && !Task.isCancelled
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        trashBulkTestSelectAll = true
+        defer { trashBulkTestSelectAll = false }
+        #endif
+        for attempt in 0..<2 {
+            do {
+                let page = try await trashPage(offset: 0, limit: pageSize, current: current)
+                guard current(), !page.text("revision").isEmpty else { return }
+                let selection = try await query("trashSelection", [try json(["revision": page.text("revision")])], beforeDispatch: current)
+                guard current() else { return }
+                let all = try validateTrashSelection(selection), clear = page.object("emptyTrash")
+                guard all.tasks.count == page.number("taskCount"), all.projects.count == page.number("projectCount"),
+                      page.number("total") == all.tasks.count + all.projects.count,
+                      page.objects("items").count == min(pageSize, page.number("total")),
+                      clear.number("taskCount") == all.tasks.count, clear.number("projectCount") == all.projects.count else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                try stageTrashPurge(selection, copy: clear.object("confirmation"), host: operationHost,
+                    presentation: presentation, readOwner: owner)
+                return
+            } catch {
+                guard current() else { return }
+                if attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:") { continue }
+                trashError = error.localizedDescription
+                return
+            }
+        }
+    }
+
+    func cancelTrashPurge(_ id: UUID) {
+        guard trashPurgeConfirmation?.id == id else { return }
+        trashPurgeConfirmation = nil
+        #if DEBUG && targetEnvironment(simulator)
+        publishTrashBulkTestState()
+        #endif
+    }
+
+    func confirmTrashPurge(_ id: UUID) {
+        guard let confirmation = trashPurgeConfirmation, confirmation.id == id else { return }
+        guard trashOperationAdmissionEnabled, host === confirmation.host,
+              confirmation.presentation == trashPresentationGeneration,
+              confirmation.selectionMode == trashSelectionMode,
+              UIApplication.shared.applicationState == .active, !Task.isCancelled else {
+            cancelTrashPurge(id); return
+        }
+        // Consume this alert before awaiting. Its later dismissal can only cancel
+        // this ID and cannot erase the retained write or a replacement alert.
+        cancelTrashPurge(id)
+        let request = TrashBulkRequest(operation: .purge, selectionMode: confirmation.selectionMode,
+            id: confirmation.id, host: confirmation.host, json: confirmation.json,
+            count: confirmation.count, presentation: confirmation.presentation)
+        trashBusyOwner = request.id; busy = true; trashError = nil
+        trashBulkRequest = request
+        Task { await performTrashBulkRequest(request) }
+    }
+
+    func restoreSelectedTrashItems() async {
+        guard trashBulkRestoreEnabled, let operationHost = host else { return }
+        do {
+            let encoded = try trashBulkJSON(["taskIds": trashSelectedTaskIDs, "taskRevisions": trashSelectedTaskRevisions,
+                "projectIds": trashSelectedProjectIDs, "projectRevisions": trashSelectedProjectRevisions])
+            let request = TrashBulkRequest(operation: .restore, selectionMode: true, id: UUID(), host: operationHost,
+                json: encoded, count: trashSelectedCount, presentation: trashPresentationGeneration)
+            await performTrashBulkRequest(request)
+        } catch { trashError = error.localizedDescription }
+    }
+
+    private func performTrashBulkRequest(_ request: TrashBulkRequest) async {
+        let owner = request.id, operationHost = request.host, presentation = request.presentation
+        trashBusyOwner = owner; busy = true; trashError = nil
+        trashBulkRequest = request
+        defer { finishTrashOperation(owner, host: operationHost) }
+        do {
+            let result = try await query(request.operation.write, [request.json], beforeDispatch: {
+                guard self.ownsTrashBulkRequest(request), self.trashPresentationGeneration == presentation,
+                      self.selectedSurface == .trash, self.trashSelectionMode == request.selectionMode, self.trashCurrent,
+                      !self.areaPickerPresented, !self.taskPresented, !self.capturePresented, !self.settingsSyncRestartRequired,
+                      !self.appLock.concealed, UIApplication.shared.applicationState == .active, !Task.isCancelled else { return false }
+                self.trashBulkRequest?.dispatched = true
+                #if DEBUG && targetEnvironment(simulator)
+                if self.trashBulkFixtureEnabled {
+                    self.trashBulkTestSubmissions += 1; self.trashBulkTestLastRequest = request.json
+                    self.publishTrashBulkTestState()
+                }
+                #endif
+                return true
+            })
+            guard ownsTrashBulkRequest(request) else { return }
+            let canRead = trashPresentationGeneration == presentation && selectedSurface == .trash
+                && !appLock.concealed && UIApplication.shared.applicationState == .active && !Task.isCancelled
+            try acknowledgeTrashBulkRequest(result, request: request)
+            if canRead { _ = await readTrash() }
+            else { refreshRequested = true }
+        } catch {
+            if let current = trashBulkRequest, current.id == owner {
+                await handleTrashBulkError(error, request: current, retry: false)
+            } else if host === operationHost, trashBusyOwner == owner { trashError = error.localizedDescription }
+        }
+    }
+
+    private func acknowledgeTrashBulkRequest(_ result: CoreObject, request: TrashBulkRequest) throws {
+        guard ownsTrashBulkRequest(request), Set(result.keys) == Set(["count"]),
+              let count = result["count"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+              count.doubleValue.isFinite, count.doubleValue.rounded(.towardZero) == count.doubleValue,
+              count.doubleValue == Double(request.count) else { throw CocoaError(.coderReadCorrupt) }
+        trashBulkRequest = nil
+        Task {
+            _ = try? await request.host.call("logLine", argumentsJSON: self.json([
+                "Native iOS bulk operation acknowledged",
+                self.json(["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": request.operation == .restore ? "restore" : "purge", "outcome": "confirmed"]),
+            ]))
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        if trashBulkFixtureEnabled {
+            trashBulkTestConfirmedCount = request.count
+            trashBulkTestAwaitingRead = trashBulkTestMode == "read-failure"
+            publishTrashBulkTestState()
+        }
+        #endif
+        retryNeeded = false; error = nil; trashError = nil
+        clearTrashSelection()
+        trashCurrent = false
+    }
+
+    private func handleTrashBulkError(_ failure: Error, request: TrashBulkRequest, retry: Bool) async {
+        guard ownsTrashBulkRequest(request) else { return }
+        if !request.dispatched || (!retry && isDefiniteRejection(failure)) {
+            trashBulkRequest = nil
+            retryNeeded = false; error = nil
+            if !request.dispatched, failure is CancellationError { return }
+            if trashPresentationGeneration == request.presentation, selectedSurface == .trash, !appLock.concealed {
+                _ = await readTrash()
+                guard host === request.host, trashBulkRequest == nil, selectedSurface == .trash,
+                      trashPresentationGeneration == request.presentation else { return }
+                trashError = failure.localizedDescription
+            }
+        } else {
+            retryNeeded = true; error = failure.localizedDescription
+            if selectedSurface == .trash { trashError = failure.localizedDescription }
+        }
+    }
+
+    private func retryTrashBulkRequest() async {
+        guard !busy, ready, let request = trashBulkRequest, ownsTrashBulkRequest(request) else { return }
+        let owner = UUID(); trashBusyOwner = owner; busy = true
+        defer { finishTrashOperation(owner, host: request.host) }
+        do {
+            let acknowledgment = try await request.host.retryPending()
+            guard ownsTrashBulkRequest(request) else { return }
+            let outcome = try await query(request.operation.outcome, [request.json], beforeDispatch: {
+                self.ownsTrashBulkRequest(request) && !Task.isCancelled
+            })
+            guard ownsTrashBulkRequest(request) else { return }
+            if Set(outcome.keys) == Set(["kind"]), outcome.text("kind") == "unproven" {
+                let unknown = label("task.trashOutcomeUnknown")
+                retryNeeded = true; error = unknown
+                if selectedSurface == .trash { trashError = unknown }
+                return
+            }
+            guard Set(outcome.keys) == Set(["kind", "result"]), outcome.text("kind") == "confirmed" else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            let result = outcome.object("result")
+            if let acknowledgment, !(try json(result)).utf8.elementsEqual((try json(decode(acknowledgment))).utf8) {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            let canRead = selectedSurface == .trash && !appLock.concealed
+                && UIApplication.shared.applicationState == .active && !Task.isCancelled
+            try acknowledgeTrashBulkRequest(result, request: request)
+            if canRead { _ = await readTrash() }
+            else { refreshRequested = true }
+        } catch { await handleTrashBulkError(error, request: request, retry: true) }
+    }
+
+    private func trashPage(offset: Int, limit: Int, revision: String? = nil, selected: CoreObject = [:],
+                           current: @escaping @MainActor () -> Bool) async throws -> CoreObject {
+        var input: CoreObject = ["offset": offset, "limit": limit]
+        if !selected.isEmpty { input["selected"] = selected }
+        if let revision { input["revision"] = revision }
+        return try await query("menuRead", ["trash", try json(input)], beforeDispatch: current)
+    }
+
+    @discardableResult private func readTrash(selectAll: Bool = false, requestedSelection: CoreObject? = nil,
+                                              displayedRevision: String? = nil) async -> Bool {
+        guard let readHost = host, selectedSurface == .trash, trashBulkRequest == nil else { return false }
+        trashReadGeneration += 1
+        let generation = trashReadGeneration, presentation = trashPresentationGeneration, mode = trashSelectionMode
+        let requestedTasks = mode ? (requestedSelection?["taskIds"] as? [String] ?? trashSelectedTaskIDs) : []
+        let requestedProjects = mode ? (requestedSelection?["projectIds"] as? [String] ?? trashSelectedProjectIDs) : []
+        func current() -> Bool {
+            host === readHost && generation == trashReadGeneration && presentation == trashPresentationGeneration
+                && selectedSurface == .trash && mode == trashSelectionMode && trashBulkRequest == nil
+                && !appLock.concealed && !Task.isCancelled && UIApplication.shared.applicationState == .active
+        }
         trashCurrent = false
         trashError = nil
         for attempt in 0..<2 {
             do {
-                var next = try await trashPage(offset: 0, limit: pageSize)
+                var selected: CoreObject = ["taskIds": requestedTasks, "projectIds": requestedProjects]
+                var next = try await trashPage(offset: 0, limit: pageSize, revision: displayedRevision, selected: selected, current: current)
+                guard current() else { return false }
+                var metadata: CoreObject = [:]
+                if mode {
+                    metadata = try await query("trashSelection", [try json(["revision": next.text("revision")])], beforeDispatch: current)
+                    guard current() else { return false }
+                    let all = try validateTrashSelection(metadata)
+                    guard all.tasks.count == next.number("taskCount"), all.projects.count == next.number("projectCount") else {
+                        throw CocoaError(.coderReadCorrupt)
+                    }
+                    if selectAll {
+                        selected = ["taskIds": all.tasks, "projectIds": all.projects]
+                        next = try await trashPage(offset: 0, limit: pageSize, revision: next.text("revision"), selected: selected, current: current)
+                        guard current() else { return false }
+                    }
+                }
                 guard !next.text("revision").isEmpty, next.number("total") >= 0,
                       next.number("taskCount") >= 0, next.number("projectCount") >= 0,
                       next.number("total") == next.number("taskCount") + next.number("projectCount"),
@@ -19154,29 +23431,189 @@ final class CoreModel: ObservableObject {
                 let target = min(trashLoadedDepth, next.number("total"))
                 while items.count < target {
                     let limit = min(pageSize, target - items.count)
-                    let page = try await trashPage(offset: items.count, limit: limit, revision: next.text("revision"))
-                    guard page.text("revision") == next.text("revision"), page.number("total") == next.number("total"),
+                    let page = try await trashPage(offset: items.count, limit: limit, revision: next.text("revision"), selected: selected, current: current)
+                    guard current() else { return false }
+                    guard page.text("revision").utf8.elementsEqual(next.text("revision").utf8), page.number("total") == next.number("total"),
                           page.number("taskCount") == next.number("taskCount"), page.number("projectCount") == next.number("projectCount"),
                           page.text("summary") == next.text("summary"), page.text("retentionHint") == next.text("retentionHint"),
-                          page.objects("items").count == limit else { throw CocoaError(.coderReadCorrupt) }
+                          page.objects("items").count == limit,
+                          (try json(page.object("selected"))).utf8.elementsEqual((try json(next.object("selected"))).utf8),
+                          (try json(page.object("labels"))).utf8.elementsEqual((try json(next.object("labels"))).utf8) else { throw CocoaError(.coderReadCorrupt) }
                     items += page.objects("items")
                 }
-                var identities: Set<String> = []
+                var identities: Set<Data> = []
                 for item in items {
                     let kind = item.text("type")
                     let id = kind == "task" ? item.object("row").text("id") : item.text("id")
                     guard ["task", "project"].contains(kind), !id.isEmpty,
-                          identities.insert(kind + ":" + id).inserted else { throw CocoaError(.coderReadCorrupt) }
+                          identities.insert(Data((kind + ":" + id).utf8)).inserted else { throw CocoaError(.coderReadCorrupt) }
                 }
+                let membership = next.object("selected")
+                guard Set(membership.keys).isSubset(of: Set(["taskIds", "projectIds", "taskRevisions", "projectRevisions"])),
+                      let tasks = membership["taskIds"] as? [String], let projects = membership["projectIds"] as? [String] else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                var taskRevisions: CoreObject = [:], projectRevisions: CoreObject = [:]
+                if mode {
+                    let all = try validateTrashSelection(metadata)
+                    let allTasks = Set(all.tasks.map { Data($0.utf8) }), allProjects = Set(all.projects.map { Data($0.utf8) })
+                    let expectedTasks = (selected["taskIds"] as? [String] ?? []).filter { allTasks.contains(Data($0.utf8)) }
+                    let expectedProjects = (selected["projectIds"] as? [String] ?? []).filter { allProjects.contains(Data($0.utf8)) }
+                    guard tasks.map({ Data($0.utf8) }) == expectedTasks.map({ Data($0.utf8) }),
+                          projects.map({ Data($0.utf8) }) == expectedProjects.map({ Data($0.utf8) }) else {
+                        throw CocoaError(.coderReadCorrupt)
+                    }
+                    for item in items {
+                        let project = item.text("type") == "project"
+                        let id = project ? item.text("id") : item.object("row").text("id")
+                        let displayedRevision = project ? item.text("projectRevision") : item.object("row").text("taskRevision")
+                        guard (project ? allProjects : allTasks).contains(Data(id.utf8)),
+                              let revision = metadata.object(project ? "projectRevisions" : "taskRevisions")[id] as? String,
+                              displayedRevision.utf8.elementsEqual(revision.utf8) else { throw CocoaError(.coderReadCorrupt) }
+                    }
+                    for id in tasks { taskRevisions[id] = metadata.object("taskRevisions")[id] }
+                    for id in projects { projectRevisions[id] = metadata.object("projectRevisions")[id] }
+                    _ = try trashSelectionRevisions(["taskRevisions": taskRevisions], ids: tasks, project: false)
+                    _ = try trashSelectionRevisions(["projectRevisions": projectRevisions], ids: projects, project: true)
+                } else if !tasks.isEmpty || !projects.isEmpty { throw CocoaError(.coderReadCorrupt) }
+                for project in [false, true] {
+                    let field = project ? "projectRevisions" : "taskRevisions"
+                    if membership[field] != nil {
+                        let returned = try trashSelectionRevisions(membership, ids: project ? projects : tasks, project: project)
+                        guard (try json(returned)).utf8.elementsEqual((try json(project ? projectRevisions : taskRevisions)).utf8) else {
+                            throw CocoaError(.coderReadCorrupt)
+                        }
+                    }
+                }
+                guard current() else { return false }
                 next["items"] = items
+                trashSelectedTaskIDs = tasks; trashSelectedProjectIDs = projects
+                trashSelectedTaskRevisions = taskRevisions; trashSelectedProjectRevisions = projectRevisions
                 trash = next
                 trashCurrent = true
-                return
+                #if DEBUG && targetEnvironment(simulator)
+                publishTrashBulkTestState()
+                #endif
+                return true
             } catch {
-                if attempt == 1 { trashError = error.localizedDescription }
+                guard current() else { return false }
+                if displayedRevision == nil, attempt == 0, error.localizedDescription.hasPrefix("STALE_REVISION:") { continue }
+                trashError = error.localizedDescription
+                return false
             }
         }
+        return false
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private func publishTrashBulkTestState() {
+        guard trashBulkFixtureEnabled else { return }
+        trashBulkTestState = (try? json(["held": trashBulkTestWaiter != nil, "busy": busy, "retry": retryNeeded,
+            "submissions": trashBulkTestSubmissions, "requestId": (try? decode(trashBulkTestLastRequest).text("requestId")) ?? "",
+            "requestBytes": trashBulkTestLastRequest.utf8.count, "requestJSON": trashBulkTestLastRequest,
+            "pending": trashBulkRequest != nil, "confirmedCount": trashBulkTestConfirmedCount,
+            "confirmation": trashPurgeConfirmation != nil, "confirmationCount": trashPurgeConfirmation?.count ?? 0,
+            "confirmationRequest": trashPurgeConfirmation?.json ?? "",
+            "selectedCount": trashSelectedCount, "selectionMode": trashSelectionMode,
+            "loaded": trash.objects("items").count, "total": trash.number("total"),
+            "readFailed": trashBulkTestReadFailed, "replaced": trashBulkTestReplaced,
+            "mutationCompleted": trashPurgeTestMutationCompleted, "mutationError": trashPurgeTestMutationError,
+            "refreshConfirmationRequest": trashPurgeTestRefreshRequest,
+            "retiredConfirmation": trashPurgeTestRetiredConfirmation != nil])) ?? ""
+    }
+
+    var trashPurgeFixtureCanConfirm: Bool {
+        !trashPurgeFixtureEnabled || !["arrival", "stale-target"].contains(trashBulkTestMode)
+            || (trashPurgeTestMutationCompleted && trashPurgeTestMutationError.isEmpty)
+    }
+
+    private func runTrashPurgeFixtureMutation(_ confirmation: TrashPurgeConfirmation) {
+        guard trashPurgeFixtureEnabled else { return }
+        if trashBulkTestMode == "late-replacement" {
+            guard let retired = trashPurgeTestRetiredConfirmation else { return }
+            confirmTrashPurge(retired)
+            cancelTrashPurge(retired)
+            trashPurgeTestMutationCompleted = true
+            publishTrashBulkTestState()
+            return
+        }
+        guard !trashPurgeTestMutationStarted,
+              ["arrival", "stale-target", "area-retire", "navigate-retire", "ordinary-refresh"].contains(trashBulkTestMode) else { return }
+        trashPurgeTestMutationStarted = true
+        let mode = trashBulkTestMode
+        Task { [weak self] in
+            guard let self, self.host === confirmation.host, self.trashPurgeConfirmation?.id == confirmation.id else { return }
+            do {
+                if mode == "ordinary-refresh" {
+                    self.trashPurgeTestRefreshRequest = confirmation.json
+                    self.publishTrashBulkTestState()
+                    await self.refresh()
+                } else if mode == "area-retire" {
+                    await self.openAreaPicker()
+                    guard let next = self.area.objects("options").first(where: { $0.text("id") == "task503-area-a" })?.object("next"),
+                          !next.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+                    await self.selectArea(next)
+                    self.closeAreaPicker()
+                } else if mode == "navigate-retire" {
+                    await self.closeTrash()
+                } else if mode == "arrival" {
+                    // A staged live Reference task becomes a real saved Trash
+                    // arrival after the alert froze its IDs. No projection fake.
+                    let editor = try self.decode(try await confirmation.host.call("editorModel",
+                        argumentsJSON: try self.json(["task508-arrival"])))
+                    let request = try self.json(["requestId": UUID().uuidString.lowercased(),
+                        "taskId": "task508-arrival", "taskRevision": editor.text("taskRevision"), "source": "reference"])
+                    _ = try await confirmation.host.call("taskDelete", argumentsJSON: try self.json([request]))
+                } else {
+                    let frozen = try self.decode(confirmation.json)
+                    guard let id = (frozen["taskIds"] as? [String])?.first,
+                          let revision = frozen.object("taskRevisions")[id] as? String else { throw CocoaError(.coderReadCorrupt) }
+                    let request = try self.json(["requestId": UUID().uuidString.lowercased(),
+                        "taskId": id, "taskRevision": revision])
+                    _ = try await confirmation.host.call("trashTaskRestoreWrite", argumentsJSON: try self.json([request]))
+                }
+                guard self.host === confirmation.host else { return }
+                self.trashPurgeTestMutationCompleted = true
+            } catch { self.trashPurgeTestMutationError = error.localizedDescription }
+            self.publishTrashBulkTestState()
+        }
+    }
+
+    func exerciseRetiredTrashPurgeFixtureConfirmation() {
+        guard trashPurgeFixtureEnabled, let id = trashPurgeTestRetiredConfirmation else { return }
+        confirmTrashPurge(id)
+    }
+
+    func releaseTrashBulkFixtureResponse() {
+        guard trashBulkFixtureEnabled else { return }
+        let waiter = trashBulkTestWaiter; trashBulkTestWaiter = nil
+        waiter?.resume(); publishTrashBulkTestState()
+    }
+
+    func replaceTrashBulkFixtureReadHost() {
+        guard trashBulkFixtureEnabled, trashBulkTestMode == "hold-selection", trashBulkTestWaiter != nil,
+              trashBulkRequest == nil, let originalHost = host,
+              let selection = try? NativeAppLaunch.selection.get(),
+              case let .isolated(database, directory, namespace, identifier) = selection,
+              let bundle = Bundle.main.url(forResource: "core-host", withExtension: "js") else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                await originalHost.close()
+                let replacement = CoreHost(databaseURL: database, bundleURL: bundle,
+                    deviceStorage: (directory, namespace), isolatedTestID: identifier)
+                _ = try await replacement.start()
+                guard self.host === originalHost else { await replacement.close(); return }
+                self.retireTrashPresentation(clearSelection: true)
+                self.host = replacement; self.startupSyncCompletedHost = replacement; self.completedStartupToken = UUID()
+                self.trashBusyOwner = nil; self.busy = false; self.retryNeeded = false; self.ready = true
+                self.trashBulkTestReplaced = true
+                self.releaseTrashBulkFixtureResponse()
+                await self.refresh()
+            } catch { self.error = error.localizedDescription; self.releaseTrashBulkFixtureResponse() }
+        }
+    }
+    #endif
 
     func openHistory() async {
         guard ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !taskPresented, !capturePresented else { return }
@@ -20301,17 +24738,25 @@ final class CoreModel: ObservableObject {
     func cancelArchiveBulkDeleteConfirmation() {
         archiveBulkDeleteConfirmationRequest = nil
         referenceBulkDeleteConfirmationContext = nil
+        inboxBulkConfirmation = nil
         archiveBulkDeleteConfirmation = [:]
     }
 
     func confirmDeleteSelectedArchiveTasks() async {
         guard let request = archiveBulkDeleteConfirmationRequest else { return }
         let referenceContext = referenceBulkDeleteConfirmationContext
+        let inboxContext = inboxBulkConfirmation
         cancelArchiveBulkDeleteConfirmation()
         do {
             let frozen = try decode(request)
             let done = frozen.text("source") == "done"
-            if frozen.text("source") == "reference" {
+            if frozen.text("source") == "inbox" {
+                guard let inboxContext, inboxBulkDeleteEnabled, inboxBulkConfirmationCurrent(inboxContext),
+                      inboxExactJSON(frozen["taskIds"] ?? NSNull(), inboxSelectedIDs),
+                      inboxExactJSON(frozen.object("taskRevisions"), inboxSelectedRevisions) else {
+                    inboxReadError = label("task.updateFailed"); return
+                }
+            } else if frozen.text("source") == "reference" {
                 guard referenceBulkDeleteEnabled,
                       referenceContext?.utf8.elementsEqual((try json(referenceParams)).utf8) == true,
                       (try json(frozen["taskIds"] ?? NSNull())).utf8.elementsEqual((try json(referenceSelectedIDs)).utf8),
@@ -20327,22 +24772,63 @@ final class CoreModel: ObservableObject {
                 }
             }
         } catch {
-            if referenceContext != nil { referenceError = error.localizedDescription } else { historyError = error.localizedDescription }
+            if inboxContext != nil { inboxReadError = error.localizedDescription }
+            else if referenceContext != nil { referenceError = error.localizedDescription } else { historyError = error.localizedDescription }
             return
         }
         busy = true
-        if referenceContext != nil { referenceError = nil } else { historyError = nil }
-        defer { finishOperation() }
+        if inboxContext != nil { inboxReadError = nil }
+        else if referenceContext != nil { referenceError = nil } else { historyError = nil }
+        defer { if inboxContext == nil || host === inboxContext?.host { finishOperation() } }
+        var inboxDispatched = false
         do {
             archivedTasksDeleteRequest = request
-            let result = try await query("archivedTasksDeleteWrite", [request])
-            let notice = try acknowledgeArchivedTasksDelete(result)
-            if notice.text("source") == "reference" { _ = await readReference() } else { _ = await readHistory() }
+            if let inboxContext { inboxBulkDeleteOwner = (inboxContext.host, request) }
+            let result = try await query("archivedTasksDeleteWrite", [request], beforeDispatch: {
+                guard let inboxContext else { return true }
+                let admitted = self.inboxBulkConfirmationCurrent(inboxContext)
+                    && self.inboxBulkDeleteOwner?.host === inboxContext.host
+                    && self.inboxBulkDeleteOwner?.request.utf8.elementsEqual(request.utf8) == true
+                if admitted { inboxDispatched = true }
+                return admitted
+            })
+            if let inboxContext {
+                guard inboxBulkDeleteOwner?.host === inboxContext.host,
+                      archivedTasksDeleteRequest?.utf8.elementsEqual(request.utf8) == true else { return }
+            }
+            let warmInbox = inboxContext.map { inboxBulkConfirmationCurrent($0) } == true
+            let notice = try acknowledgeArchivedTasksDelete(result, inboxWarm: warmInbox)
+            if let inboxContext {
+                guard warmInbox else { return }
+                let noticeGeneration = inboxSelectionGeneration
+                inboxBulkNoticeHost = inboxContext.host
+                try? await readInbox()
+                guard host === inboxContext.host, selectedSurface == .inbox,
+                      inboxSelectionGeneration == noticeGeneration,
+                      foregroundSyncGeneration == inboxContext.foregroundGeneration, !Task.isCancelled, !appLock.concealed,
+                      UIApplication.shared.applicationState == .active else { return }
+            } else if notice.text("source") == "reference" { _ = await readReference() } else { _ = await readHistory() }
             showTaskActionNotice(notice)
-        } catch { await handleArchivedTasksDeleteError(error) }
+        } catch {
+            if let inboxContext, !inboxDispatched,
+               inboxBulkDeleteOwner?.host === inboxContext.host,
+               inboxBulkDeleteOwner?.request.utf8.elementsEqual(request.utf8) == true,
+               archivedTasksDeleteRequest?.utf8.elementsEqual(request.utf8) == true {
+                // This attempt never reached host.call; retain no unprovable debt.
+                let warm = inboxBulkConfirmationCurrent(inboxContext)
+                archivedTasksDeleteRequest = nil; inboxBulkDeleteOwner = nil
+                if warm { retryNeeded = false }
+                return
+            }
+            if let inboxContext {
+                guard inboxBulkDeleteOwner?.host === inboxContext.host,
+                      archivedTasksDeleteRequest?.utf8.elementsEqual(request.utf8) == true else { return }
+                await handleArchivedTasksDeleteError(error, inboxWarm: inboxBulkConfirmationCurrent(inboxContext))
+            } else { await handleArchivedTasksDeleteError(error) }
+        }
     }
 
-    private func acknowledgeArchivedTasksDelete(_ result: CoreObject) throws -> CoreObject {
+    private func acknowledgeArchivedTasksDelete(_ result: CoreObject, inboxWarm: Bool = true) throws -> CoreObject {
         guard let request = archivedTasksDeleteRequest,
               let ids = (try decode(request))["taskIds"] as? [String],
               Set(result.keys) == Set(["count", "deletion"]),
@@ -20355,31 +24841,45 @@ final class CoreModel: ObservableObject {
               let enabled = notice["undoEnabled"] as? NSNumber,
               CFGetTypeID(enabled) == CFBooleanGetTypeID(), enabled.boolValue else { throw CocoaError(.coderReadCorrupt) }
         let source = (try decode(request)).text("source")
-        let done = source == "done", referenceSource = source == "reference"
+        let done = source == "done", referenceSource = source == "reference", inboxSource = source == "inbox"
+        let inboxOwner = inboxBulkDeleteOwner
+        if inboxSource {
+            guard inboxOwner?.request.utf8.elementsEqual(request.utf8) == true else { throw CocoaError(.coderReadCorrupt) }
+        }
         let presentation: CoreObject = ["requestId": (try decode(request)).text("requestId"), "count": ids.count,
-            "operation": referenceSource ? "referenceBulkDelete" : done ? "doneBulkDelete" : "archiveBulkDelete",
-            "source": referenceSource ? "reference" : done ? "done" : "archive"]
+            "operation": inboxSource ? "inboxBulkDelete" : referenceSource ? "referenceBulkDelete" : done ? "doneBulkDelete" : "archiveBulkDelete",
+            "source": inboxSource ? "inbox" : referenceSource ? "reference" : done ? "done" : "archive"]
         archivedTasksDeleteRequest = nil
-        retryNeeded = false
-        error = nil
-        historyError = nil
-        if referenceSource { clearReferenceTaskSelection(); referenceCurrent = false; referenceError = nil }
+        if !inboxSource || (inboxWarm && host === inboxOwner?.host) {
+            retryNeeded = false; error = nil
+            if !inboxSource { historyError = nil }
+        }
+        if inboxSource {
+            inboxBulkDeleteOwner = nil
+            if inboxWarm, host === inboxOwner?.host { clearInboxTaskSelection(); inboxCurrent = false; inboxReadError = nil }
+        } else if referenceSource { clearReferenceTaskSelection(); referenceCurrent = false; referenceError = nil }
         else { if done { clearDoneTaskSelection() } else { clearArchiveTaskSelection() }; historyCurrent = false }
         return notice.merging(presentation) { _, new in new }
     }
 
-    private func handleArchivedTasksDeleteError(_ failure: Error) async {
+    private func handleArchivedTasksDeleteError(_ failure: Error, inboxWarm: Bool = true) async {
         let referenceSource = archivedTasksDeleteRequest.flatMap { try? decode($0).text("source") } == "reference"
+        let inboxSource = archivedTasksDeleteRequest.flatMap { try? decode($0).text("source") } == "inbox"
+        let inboxOwner = inboxBulkDeleteOwner?.host
         if isDefiniteRejection(failure) {
             archivedTasksDeleteRequest = nil
-            retryNeeded = false
-            error = nil
-            if referenceSource { _ = await readReference() } else { _ = await readHistory() }
+            if inboxSource { inboxBulkDeleteOwner = nil }
+            if !inboxSource || inboxWarm { retryNeeded = false; error = nil }
+            if inboxSource { if inboxWarm, host === inboxOwner, selectedSurface == .inbox { try? await readInbox() } }
+            else if referenceSource { _ = await readReference() } else { _ = await readHistory() }
         } else {
-            retryNeeded = archivedTasksDeleteRequest != nil
-            error = failure.localizedDescription
+            if !inboxSource || inboxWarm {
+                retryNeeded = archivedTasksDeleteRequest != nil
+                error = failure.localizedDescription
+            }
         }
-        if referenceSource { referenceError = failure.localizedDescription } else { historyError = failure.localizedDescription }
+        if inboxSource { if inboxWarm { inboxReadError = failure.localizedDescription } }
+        else if referenceSource { referenceError = failure.localizedDescription } else { historyError = failure.localizedDescription }
     }
 
     private func acknowledgeArchivedTasksRestore(_ result: CoreObject, allowNoop: Bool = false) throws {
@@ -21611,7 +26111,7 @@ final class CoreModel: ObservableObject {
                 let personChanged = next.text("person") != waitingPerson
                 let target = min(personChanged ? pageSize : waitingLoadedDepth, next.number("total"))
                 while rows.count < target {
-                    let limit = min(pageSize, target - rows.count)
+                    let limit = min(followUpWindow, target - rows.count)
                     let page = try await query("menuRead", ["waiting", try json([
                         "person": next.text("person"), "offset": rows.count, "limit": limit, "revision": next.text("revision")])])
                     try validateWaitingPage(page, against: next, count: limit)
@@ -24257,6 +28757,8 @@ final class CoreModel: ObservableObject {
     }
 
     func openSearch() {
+        guard !inboxBulkCompositionBlocked else { return }
+        guard !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending else { return }
         guard !savedSearchWritePresented, ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented,
               !calendarComposerPresented, !mindSweepPresented, selectedSurface != .search else { return }
         if selectedSurface == .savedSearch {
@@ -24382,7 +28884,9 @@ final class CoreModel: ObservableObject {
     }
 
     func openAreaPicker() async {
+        guard !inboxBulkCompositionBlocked else { return }
         guard ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !capturePresented, !taskPresented,
+              !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending,
               !projectRenameEditing,
               !calendarComposerPresented, !mindSweepPresented else { return }
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -24404,6 +28908,7 @@ final class CoreModel: ObservableObject {
 
     func selectArea(_ next: CoreObject) async {
         guard ready, areaPickerPresented, !busy, !retryNeeded else { return }
+        if selectedSurface == .trash { retireTrashPresentation() }
         busy = true
         error = nil
         defer { finishOperation() }
@@ -24419,18 +28924,104 @@ final class CoreModel: ObservableObject {
         do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
     }
 
-    func loadMore() async {
-        guard ready, selectedSurface == .inbox, !busy, !retryNeeded, items.count < inbox.number("total") else { return }
+    func loadMore(automaticRow: [String]? = nil) async {
+        guard inboxActionsEnabled, let owner = host,
+              items.count < inbox.number("total") else { return }
+        let snapshot = inbox, offset = items.count
+        let params = inboxParams, generation = inboxGeneration
+        let selectionGeneration = inboxSelectionGeneration, selected = inboxSelectedIDs
+        if let automaticRow {
+            guard let index = inboxItemIndex(automaticRow),
+                  index >= max(0, offset - 5),
+                  inboxAutomaticPageAttempt?.generation != generation || inboxAutomaticPageAttempt?.offset != offset else { return }
+            // Busy callbacks rearm a missed appearance, but a failed admitted window waits for More.
+            inboxAutomaticPageAttempt = (generation, offset)
+        }
+        let target = offset + min(pageSize, snapshot.number("total") - offset)
+        let current = {
+            self.inboxReadCurrent(owner, generation: generation, params: params) && self.ready && !self.retryNeeded
+                && self.inbox.text("revision") == snapshot.text("revision") && self.items.count == offset
+                && self.inboxSelectionGeneration == selectionGeneration
+        }
         busy = true
-        defer { finishOperation() }
+        defer { if host === owner { finishOperation() } }
         do {
-            let next = try await query("inboxView", [try json([
-                "offset": items.count, "limit": pageSize, "revision": inbox.text("revision")])])
-            guard next.text("revision") == inbox.text("revision") else { try await readInbox(); return }
-            inbox["items"] = items + next.objects("items")
+            let next = try await query("inboxView", [try json(params.merging([
+                "offset": offset, "limit": target - offset, "revision": snapshot.text("revision")]) { _, next in next })], beforeDispatch: current)
+            guard current() else { return }
+            try validateInboxPage(next, revision: snapshot.text("revision"), total: snapshot.number("total"), count: target - offset, against: snapshot)
+            var staged = snapshot
+            staged["items"] = snapshot.objects("items") + next.objects("items")
+            inbox = staged
+            error = nil
         } catch {
-            // A minute or data revision can expire between windows. Restart the query, never mix revisions.
-            do { try await readInbox() } catch { self.error = error.localizedDescription }
+            guard current() else { return }
+            do {
+                // Rebuild the requested depth once against a fresh minute/data revision.
+                // Keep both windows local until they agree; a second failure leaves the saved projection intact.
+                var staged = try await query("inboxView", [try json(params.merging(["offset": 0, "limit": pageSize]) { _, next in next })], beforeDispatch: current)
+                guard current() else { return }
+                let total = staged.number("total"), revision = staged.text("revision")
+                try validateInboxPage(staged, revision: revision, total: total, count: min(pageSize, total))
+                let freshParams = effectiveInboxParams(staged)
+                guard freshParams.text("groupBy") == params.text("groupBy"),
+                      try json(freshParams["collapsedGroupIds"] ?? NSNull()) == json(params["collapsedGroupIds"] ?? NSNull()) else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                var rows = staged.objects("items")
+                let freshTarget = min(target, total)
+                while rows.count < freshTarget {
+                    let limit = min(pageSize, freshTarget - rows.count)
+                    let page = try await query("inboxView", [try json(freshParams.merging([
+                        "offset": rows.count, "limit": limit, "revision": revision]) { _, next in next })], beforeDispatch: current)
+                    guard current() else { return }
+                    try validateInboxPage(page, revision: revision, total: total, count: limit, against: staged)
+                    rows += page.objects("items")
+                }
+                guard current() else { return }
+                staged["items"] = rows
+                var nextBulk: CoreObject?
+                if inboxSelectionMode {
+                    let bulk = try await query("menuRead", ["bulk", try json(inboxTaskBulkInput(params: freshParams))], beforeDispatch: current)
+                    guard current() else { return }
+                    try validateInboxTaskBulk(bulk, snapshot: staged, subsetOf: selected)
+                    nextBulk = bulk
+                }
+                guard current() else { return }
+                if let nextBulk { try acceptInboxTaskBulk(nextBulk, range: inboxRangeSelectMode) }
+                if inboxBulkConfirmation != nil { cancelArchiveBulkDeleteConfirmation() }
+                inboxParams = freshParams
+                inbox = staged
+                syncInboxFilterText()
+                inboxGeneration += 1
+                inboxAutomaticPageAttempt = nil
+                invalidateInboxFilterPicker()
+                self.error = nil
+                let count = rows.count
+                Task {
+                    _ = try? await owner.call("logLine", argumentsJSON: self.json([
+                        "Native iOS Inbox paging recovered", self.json([
+                            "releaseCheck": "v1.3.5/ios-inbox-paging", "outcome": "recovered", "count": count])]))
+                }
+            } catch { if current() { self.error = error.localizedDescription } }
+        }
+    }
+
+    private func validateInboxPage(_ page: CoreObject, revision: String, total: Int, count: Int,
+                                   against snapshot: CoreObject? = nil) throws {
+        guard page.number("version") == 1, !revision.isEmpty, page.text("revision") == revision, total >= 0,
+              let returnedTotal = page["total"] as? Int, returnedTotal == total,
+              let taskCount = page["count"] as? Int, taskCount >= 0,
+              let rows = page["items"] as? [CoreObject], rows.count == count,
+              validReferenceGroup(page.text("groupBy")), inboxFoldIDs(page["collapsedGroupIds"]) != nil,
+              page.object("filters")["state"] is CoreObject, !page.text("sortBy").isEmpty else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        if let snapshot {
+            guard page.number("count") == snapshot.number("count"), page.text("sortBy") == snapshot.text("sortBy"),
+                  try json(effectiveInboxParams(page)) == json(effectiveInboxParams(snapshot)) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
         }
     }
 
@@ -24463,6 +29054,10 @@ final class CoreModel: ObservableObject {
     }
 
     func openTask(_ id: String, descriptionSourceID: String? = nil) async {
+        guard !inboxBulkCompositionBlocked else { return }
+        guard selectedSurface != .inbox || !inboxSelectionMode else { return }
+        guard !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending else { return }
+        if selectedSurface == .inbox { guard inboxActionsEnabled else { return } }
         if selectedSurface == .project { guard await flushProjectNotesEdit() else { return } }
         guard ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented,
               !projectRenameEditing, selectedSurface != .trash else { return }
@@ -24570,6 +29165,17 @@ final class CoreModel: ObservableObject {
     }
 
     func closeTask() {
+        guard taskPresented else {
+            if taskRecoveryAvailable, let currentHost = host {
+                Task {
+                    _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                        "Native iOS retained editor draft protected from late close",
+                        #"{"releaseCheck":"v1.3.5/ios-editor-retained-close","outcome":"ignored"}"#,
+                    ]))
+                }
+            }
+            return
+        }
         guard !busy, !retryNeeded, !taskReferenceOpening, !taskAttachmentOpening, !taskPersonCreateOwed, !taskSavePending, taskChecklistWriteKind == nil,
               !taskChecklistReadPending, !taskScheduleUpdating else { return }
         guard !taskDirty else { return }
@@ -24583,7 +29189,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func discardCleanTaskSnapshotAndClose(refreshCaller: Bool = true) async {
-        guard !taskDirty else { return }
+        guard taskPresented, !taskDirty else { return }
         if taskHasActiveAttachmentOwner {
             await saveTask()
             return
@@ -25435,13 +30041,27 @@ final class CoreModel: ObservableObject {
     private var taskActionRequestID: String?
     private var taskActionUndoRequest: String?
     private var taskCompletionRequest: String?
+    private struct BoardCompletionOwner {
+        let host: CoreHost
+        let request: String
+        let requestID: String
+        let foreground: Int
+    }
+    private var boardCompletionOwner: BoardCompletionOwner?
+    private var boardCompletionNoticeHost: CoreHost?
+    private struct BoardCompletionUndoOwner {
+        let host: CoreHost
+        let request: String
+        let completionRequestID: String
+    }
+    private var boardCompletionUndoOwner: BoardCompletionUndoOwner?
     private var taskActionNoticeGeneration = 0
     private var taskActionCompleteCancellation = false
 
     private var taskActionUndoMethod: String {
         switch taskActionNotice.text("operation") {
         case "archiveBulkDelete": return "archivedTasksDeleteUndoWrite"
-        case "doneBulkDelete", "referenceBulkDelete": return "archivedTasksDeleteUndoWrite"
+        case "doneBulkDelete", "referenceBulkDelete", "inboxBulkDelete": return "archivedTasksDeleteUndoWrite"
         case "delete": return "taskDeleteUndo"
         case "completion": return "taskCompletionUndo"
         default: return "taskCancellationUndo"
@@ -25456,6 +30076,7 @@ final class CoreModel: ObservableObject {
         taskActionCompleteCancellation = operation == "cancel" && completeCancellation
         var presentation: CoreObject = ["requestId": requestID, "id": result.text("id"), "operation": operation]
         if let source { presentation["source"] = source }
+        boardCompletionNoticeHost = source == "board" && operation == "completion" ? host : nil
         showTaskActionNotice(notice.merging(presentation) { _, new in new })
     }
 
@@ -25467,64 +30088,193 @@ final class CoreModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 5_200_000_000)
             if taskActionNoticeGeneration == generation && taskActionUndoRequest == nil {
                 taskActionNotice = [:]
+                boardCompletionNoticeHost = nil
             }
         }
+    }
+
+    private func boardCompletionUndoOwned(_ owner: BoardCompletionUndoOwner) -> Bool {
+        boardCompletionUndoOwner?.host === owner.host && boardCompletionUndoOwner?.request.utf8.elementsEqual(owner.request.utf8) == true
+            && boardCompletionUndoOwner?.completionRequestID == owner.completionRequestID
+    }
+
+    private func boardCompletionUndoPending(_ owner: BoardCompletionUndoOwner) -> Bool {
+        boardCompletionUndoOwned(owner) && host === owner.host && taskActionUndoRequest?.utf8.elementsEqual(owner.request.utf8) == true
+            && taskActionNotice.text("source") == "board" && taskActionNotice.text("operation") == "completion"
+            && taskActionNotice.text("requestId") == owner.completionRequestID
+    }
+
+    private func boardCompletionUndoWarm(_ owner: BoardCompletionUndoOwner, foreground: Int) -> Bool {
+        boardCompletionUndoOwned(owner) && host === owner.host && selectedSurface == .board
+            && foregroundSyncGeneration == foreground && !Task.isCancelled && !appLock.concealed
+            && UIApplication.shared.applicationState == .active && !taskPresented && !capturePresented
     }
 
     func undoTaskAction() async {
         guard !busy, !retryNeeded, !taskPresented, !capturePresented,
               archiveBulkDeleteConfirmation.isEmpty,
               !referenceProjectNextActionPending, taskActionNotice.flag("undoEnabled"), taskActionUndoRequest == nil else { return }
+        let boardUndo = taskActionNotice.text("source") == "board" && taskActionNotice.text("operation") == "completion"
+        let boardHost = boardCompletionNoticeHost, boardForeground = foregroundSyncGeneration
+        if boardUndo {
+            guard let boardHost, host === boardHost, selectedSurface == .board, !appLock.concealed,
+                  !Task.isCancelled, UIApplication.shared.applicationState == .active else { return }
+        }
+        let inboxUndo = taskActionNotice.text("source") == "inbox"
+        let inboxOwner = inboxBulkNoticeHost
+        let inboxSelection = inboxSelectionGeneration, inboxForeground = foregroundSyncGeneration, inboxSurface = selectedSurface
+        if inboxUndo {
+            guard let inboxOwner, host === inboxOwner, !inboxBulkMutationPending, !inboxSelectionMode,
+                  !inboxFilterWorkPending, !inboxFiltersPresented, !inboxGroupPresented, !inboxSortPresented,
+                  !areaPickerPresented, !morePresented, !taskStatusMenuPresented,
+                  !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        }
         if taskActionNotice.text("operation") == "completion", taskActionNotice.text("source") == "reference",
            taskActionNotice.text("requestId") == referenceProjectNextActionOrigin.text("requestId") {
             invalidateReferenceProjectNextAction()
         }
         busy = true
         error = nil
-        defer { finishOperation() }
+        var boardAttempt: BoardCompletionUndoOwner?
+        defer {
+            if let owner = boardAttempt {
+                if boardCompletionUndoOwned(owner) {
+                    if host === owner.host { finishOperation() }
+                    if taskActionUndoRequest == nil { boardCompletionUndoOwner = nil }
+                }
+            } else if !inboxUndo || host === inboxOwner { finishOperation() }
+        }
+        var boardDispatched = false
+        var inboxDispatched = false
+        var inboxAttemptRequest: String?
         do {
-            let proofField = ["delete", "archiveBulkDelete", "doneBulkDelete", "referenceBulkDelete"].contains(taskActionNotice.text("operation")) ? "deleteRequestId"
+            let proofField = ["delete", "archiveBulkDelete", "doneBulkDelete", "referenceBulkDelete", "inboxBulkDelete"].contains(taskActionNotice.text("operation")) ? "deleteRequestId"
                 : taskActionNotice.text("operation") == "completion" ? "completionRequestId" : "cancelRequestId"
             var fields: CoreObject = ["requestId": UUID().uuidString.lowercased(),
                                      proofField: taskActionNotice.text("requestId")]
             if taskActionNotice.text("operation") == "cancel", taskActionCompleteCancellation { fields["version"] = 2 }
             let request = try json(fields)
+            if inboxUndo { inboxAttemptRequest = request }
             taskActionUndoRequest = request
-            let result = try await query(taskActionUndoMethod, [request])
-            try acknowledgeTaskActionUndo(result)
-            do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
+            if boardUndo, let boardHost {
+                let owner = BoardCompletionUndoOwner(host: boardHost, request: request,
+                    completionRequestID: taskActionNotice.text("requestId"))
+                boardAttempt = owner; boardCompletionUndoOwner = owner
+            }
+            if let inboxOwner, inboxUndo { inboxBulkUndoOwner = (inboxOwner, request) }
+            let result = try await query(taskActionUndoMethod, [request], beforeDispatch: {
+                if let owner = boardAttempt {
+                    guard self.boardCompletionUndoPending(owner),
+                          self.boardCompletionUndoWarm(owner, foreground: boardForeground) else { return false }
+                    boardDispatched = true
+                    return true
+                }
+                guard inboxUndo else { return true }
+                let admitted = self.host === inboxOwner && !self.appLock.concealed
+                    && UIApplication.shared.applicationState == .active && !Task.isCancelled
+                    && self.selectedSurface == inboxSurface && self.inboxSelectionGeneration == inboxSelection
+                    && self.foregroundSyncGeneration == inboxForeground && !self.inboxFilterWorkPending
+                    && !self.taskPresented && !self.capturePresented && !self.areaPickerPresented && !self.morePresented
+                    && !self.inboxFiltersPresented && !self.inboxGroupPresented && !self.inboxSortPresented && !self.taskStatusMenuPresented
+                    && self.inboxBulkUndoOwner?.request.utf8.elementsEqual(request.utf8) == true
+                if admitted { inboxDispatched = true }
+                return admitted
+            })
+            if inboxUndo {
+                guard inboxBulkUndoOwner?.host === inboxOwner,
+                      taskActionUndoRequest?.utf8.elementsEqual(request.utf8) == true else { return }
+            }
+            if let owner = boardAttempt { guard boardCompletionUndoPending(owner) else { return } }
+            let warmBoard = boardAttempt.map { boardCompletionUndoWarm($0, foreground: boardForeground) } ?? true
+            let warmInbox = warmBoard && (!inboxUndo || (host === inboxOwner && selectedSurface == inboxSurface
+                && inboxSelectionGeneration == inboxSelection && foregroundSyncGeneration == inboxForeground
+                && !Task.isCancelled && !appLock.concealed && UIApplication.shared.applicationState == .active))
+            try acknowledgeTaskActionUndo(result, inboxWarm: warmInbox)
+            guard warmInbox else { return }
+            do { try await readSelectedSurface() } catch {
+                if boardAttempt.map({ boardCompletionUndoWarm($0, foreground: boardForeground) }) ?? true {
+                    self.error = error.localizedDescription
+                }
+            }
         } catch {
+            if let owner = boardAttempt {
+                guard boardCompletionUndoOwned(owner), taskActionUndoRequest?.utf8.elementsEqual(owner.request.utf8) == true,
+                      taskActionNotice.text("requestId") == owner.completionRequestID else { return }
+                if !boardDispatched || isDefiniteRejection(error) {
+                    taskActionUndoRequest = nil
+                    taskActionNotice = [:]
+                    boardCompletionNoticeHost = nil
+                }
+                guard host === owner.host else { return }
+                retryNeeded = taskActionUndoRequest != nil
+                if boardCompletionUndoWarm(owner, foreground: boardForeground) { self.error = error.localizedDescription }
+                return
+            }
+            if inboxUndo, !inboxDispatched, let request = inboxAttemptRequest,
+               inboxBulkUndoOwner?.host === inboxOwner,
+               inboxBulkUndoOwner?.request.utf8.elementsEqual(request.utf8) == true,
+               taskActionUndoRequest?.utf8.elementsEqual(request.utf8) == true {
+                let warm = host === inboxOwner && selectedSurface == inboxSurface
+                    && inboxSelectionGeneration == inboxSelection && foregroundSyncGeneration == inboxForeground
+                    && !Task.isCancelled && !appLock.concealed && UIApplication.shared.applicationState == .active
+                taskActionUndoRequest = nil; inboxBulkUndoOwner = nil
+                if warm { inboxBulkNoticeHost = nil; taskActionNotice = [:]; retryNeeded = false }
+                return
+            }
             let historyUndo = ["done", "archive"].contains(taskActionNotice.text("source"))
             let referenceUndo = taskActionNotice.text("source") == "reference"
+            if inboxUndo, let request = inboxAttemptRequest {
+                guard inboxBulkUndoOwner?.host === inboxOwner,
+                      taskActionUndoRequest?.utf8.elementsEqual(request.utf8) == true else { return }
+            }
             if isDefiniteRejection(error) {
                 taskActionUndoRequest = nil
                 taskActionNotice = [:]
+                if inboxUndo { inboxBulkUndoOwner = nil; inboxBulkNoticeHost = nil }
             }
+            if inboxUndo, host !== inboxOwner || selectedSurface != inboxSurface
+                || inboxSelectionGeneration != inboxSelection || foregroundSyncGeneration != inboxForeground
+                || Task.isCancelled || appLock.concealed || UIApplication.shared.applicationState != .active { return }
             retryNeeded = taskActionUndoRequest != nil
             self.error = error.localizedDescription
             if historyUndo { historyError = error.localizedDescription }
             if referenceUndo { referenceError = error.localizedDescription }
+            if inboxUndo { inboxReadError = error.localizedDescription }
         }
     }
 
-    private func acknowledgeTaskActionUndo(_ result: CoreObject) throws {
+    private func acknowledgeTaskActionUndo(_ result: CoreObject, inboxWarm: Bool = true) throws {
         guard taskActionUndoRequest != nil else { throw CocoaError(.coderReadCorrupt) }
-        if ["archiveBulkDelete", "doneBulkDelete", "referenceBulkDelete"].contains(taskActionNotice.text("operation")) {
+        let inboxUndo = taskActionNotice.text("source") == "inbox"
+        let inboxOwner = inboxBulkUndoOwner?.host
+        if inboxUndo {
+            guard let request = taskActionUndoRequest,
+                  inboxBulkUndoOwner?.request.utf8.elementsEqual(request.utf8) == true else { throw CocoaError(.coderReadCorrupt) }
+        }
+        if ["archiveBulkDelete", "doneBulkDelete", "referenceBulkDelete", "inboxBulkDelete"].contains(taskActionNotice.text("operation")) {
             guard Set(result.keys) == Set(["count"]), let count = result["count"] as? NSNumber,
                   CFGetTypeID(count) != CFBooleanGetTypeID(),
                   count.doubleValue == Double(taskActionNotice.number("count")) else { throw CocoaError(.coderReadCorrupt) }
         } else {
-            let idMatches = taskActionNotice.text("source") == "reference"
+            let idMatches = ["reference", "board"].contains(taskActionNotice.text("source"))
                 ? result.text("id").utf8.elementsEqual(taskActionNotice.text("id").utf8)
                 : result.text("id") == taskActionNotice.text("id")
             guard idMatches else { throw CocoaError(.coderReadCorrupt) }
+            if taskActionNotice.text("source") == "board" {
+                guard let owner = boardCompletionUndoOwner, boardCompletionUndoPending(owner),
+                      Set(result.keys) == Set(["id"]) else { throw CocoaError(.coderReadCorrupt) }
+            }
         }
         if ["done", "archive"].contains(taskActionNotice.text("source")) { historyError = nil }
         if taskActionNotice.text("source") == "reference" { referenceError = nil }
+        if inboxUndo {
+            if inboxWarm, host === inboxOwner { inboxReadError = nil }
+            inboxBulkUndoOwner = nil; inboxBulkNoticeHost = nil
+        }
         taskActionUndoRequest = nil
         taskActionNotice = [:]
-        retryNeeded = false
-        error = nil
+        boardCompletionNoticeHost = nil
+        if !inboxUndo || (inboxWarm && host === inboxOwner) { retryNeeded = false; error = nil }
     }
 
     private var taskDeleteRequest: String?
@@ -27111,6 +31861,14 @@ final class CoreModel: ObservableObject {
     }
 
     func openCapture() async {
+        guard !inboxBulkCompositionBlocked else { return }
+        guard selectedSurface != .inbox || !inboxSelectionMode else { return }
+        guard !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending else { return }
+        if let submitted = captureSubmission, host !== submitted.host {
+            captureSubmission = nil; capturePending = false; captureBusyOwner = nil
+            retryNeeded = false
+            retireCaptureEditNavigation()
+        }
         guard ready, !busy, !retryNeeded, !areaPickerPresented, !taskPresented,
               !unassignedAreaColorActive, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !settingsAreaCreatePresented, !settingsAreaEditActive,
               !projectRenameEditing,
@@ -27140,8 +31898,11 @@ final class CoreModel: ObservableObject {
     }
 
     func openProcessInbox() async {
+        guard !inboxBulkCompositionBlocked else { return }
+        observeDiagnosticsConcealment()
+        guard selectedSurface != .inbox || !inboxSelectionMode else { return }
         let caller = selectedSurface
-        let fromInbox = caller == .inbox && !inbox.object("process").text("label").isEmpty
+        let fromInbox = caller == .inbox && inboxActionsEnabled && !inbox.object("process").text("label").isEmpty
         let reviewInbox = reviewGuide.object("content")
         let fromReview = caller == .review && reviewGuidePresented && reviewActionsEnabled
             && reviewInbox.text("step") == "inbox"
@@ -27162,6 +31923,7 @@ final class CoreModel: ObservableObject {
             guard !view.isEmpty ? view.text("sessionId") == session && !session.isEmpty : true else {
                 throw CocoaError(.coderReadCorrupt)
             }
+            clearProcessInboxUndoOffer()
             processInboxCaller = caller
             processInboxSessionID = session.isEmpty ? nil : session
             processInboxView = view
@@ -27369,6 +32131,7 @@ final class CoreModel: ObservableObject {
             processInboxRequestMethod = nil
             processInboxRequestID = nil
             processInboxRequestTaskID = nil
+            processInboxUndoPending = nil
             retryNeeded = false
             processInboxError = failure.localizedDescription
         } else {
@@ -27387,6 +32150,7 @@ final class CoreModel: ObservableObject {
         processInboxView = next
         processInboxNotice = result.object("notice")
         processInboxToast = result.object("toast").text("message")
+        try installProcessInboxUndoOffer(result.object("toast"))
         processInboxError = nil
         processInboxReadError = nil
         processInboxPendingEdits = []
@@ -27423,13 +32187,122 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    private func clearProcessInboxUndoOffer() {
+        processInboxUndoExpiry?.cancel()
+        processInboxUndoExpiry = nil
+        processInboxUndoOffer = nil
+        processInboxUndoLabel = ""
+    }
+
+    private func installProcessInboxUndoOffer(_ toast: CoreObject) throws {
+        let descriptor = toast.object("undo")
+        guard !descriptor.isEmpty else { clearProcessInboxUndoOffer(); return }
+        let decisionID = descriptor.text("decisionRequestId"), taskID = descriptor.text("taskId")
+        let kind = descriptor.text("kind")
+        guard Set(descriptor.keys) == Set(["decisionRequestId", "taskId", "kind"]),
+              UUID(uuidString: decisionID)?.uuidString.lowercased() == decisionID,
+              decisionID == processInboxAfterRequestID,
+              !taskID.isEmpty, ["filed", "completed", "discarded"].contains(kind),
+              !toast.text("undoLabel").isEmpty,
+              let ownerHost = host, let session = processInboxSessionID else { throw CocoaError(.coderReadCorrupt) }
+        if processInboxUndoOffer?.decisionID == decisionID { return }
+        clearProcessInboxUndoOffer()
+        guard !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        let offer = ProcessInboxUndoOwner(host: ownerHost, session: session, decisionID: decisionID,
+            taskID: taskID, kind: kind, expiresAt: ProcessInfo.processInfo.systemUptime + 5.2)
+        processInboxUndoOffer = offer
+        processInboxUndoLabel = toast.text("undoLabel")
+        processInboxUndoExpiry = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 5_200_000_000) } catch { return }
+            guard let self, self.processInboxUndoOffer?.decisionID == decisionID,
+                  self.processInboxUndoOffer?.host === ownerHost else { return }
+            self.clearProcessInboxUndoOffer()
+        }
+    }
+
+    func undoProcessInboxDecision() async {
+        guard processInboxUndoEnabled, let offer = processInboxUndoOffer else { return }
+        processInboxTransitioning = true
+        busy = true
+        defer {
+            if host === offer.host {
+                processInboxTransitioning = false
+                finishOperation()
+            }
+        }
+        guard await waitForProcessInboxEdits(), host === offer.host,
+              processInboxSessionID == offer.session, processInboxUndoOffer?.decisionID == offer.decisionID,
+              ProcessInfo.processInfo.systemUptime < offer.expiresAt,
+              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        do {
+            let requestID = UUID().uuidString.lowercased()
+            let request = try json(["requestId": requestID, "decisionRequestId": offer.decisionID, "taskId": offer.taskID])
+            processInboxUndoPending = offer
+            processInboxRequest = request
+            processInboxRequestMethod = "inboxUndo"
+            processInboxRequestID = requestID
+            processInboxRequestTaskID = offer.taskID
+            processInboxError = nil
+            clearProcessInboxUndoOffer()
+            let result = try await query("inboxUndo", [request], beforeDispatch: {
+                self.host === offer.host && self.processInboxSessionID == offer.session
+                    && !self.appLock.concealed && UIApplication.shared.applicationState == .active
+            })
+            guard host === offer.host, processInboxRequest == request else { return }
+            try await acknowledgeProcessInboxUndo(result)
+        } catch {
+            guard host === offer.host else { return }
+            handleProcessInboxWriteError(error)
+        }
+    }
+
+    private func acknowledgeProcessInboxUndo(_ result: CoreObject) async throws {
+        guard processInboxRequestMethod == "inboxUndo", processInboxRequest != nil,
+              let owner = processInboxUndoPending, host === owner.host,
+              Set(result.keys) == Set(["taskId", "decisionRequestId", "kind"]),
+              result.text("taskId").utf8.elementsEqual(owner.taskID.utf8),
+              result.text("decisionRequestId").utf8.elementsEqual(owner.decisionID.utf8),
+              result.text("kind") == owner.kind else { throw CocoaError(.coderReadCorrupt) }
+        processInboxRequest = nil
+        processInboxRequestMethod = nil
+        processInboxRequestID = nil
+        processInboxRequestTaskID = nil
+        processInboxUndoPending = nil
+        retryNeeded = false
+        processInboxError = nil
+        processInboxToast = ""
+        guard processInboxPresented, processInboxSessionID == owner.session,
+              !processInboxView.isEmpty, !appLock.concealed else { return }
+        do {
+            // Refresh the current step; Undo does not rewind the queue or discard its draft.
+            let next = try await query("inboxStep", [try processInboxStepInput()])
+            guard host === owner.host, processInboxSessionID == owner.session,
+                  next.text("sessionId") == owner.session,
+                  next.text("taskId") == processInboxView.text("taskId") else { return }
+            processInboxView = next
+            syncProcessInboxInputs()
+        } catch {
+            guard host === owner.host, processInboxSessionID == owner.session else { return }
+            processInboxReadError = error.localizedDescription
+        }
+    }
+
     private func readProcessInboxAfterCommit() async {
-        guard let session = processInboxSessionID, let requestID = processInboxAfterRequestID else { return }
+        guard let ownerHost = host, let session = processInboxSessionID,
+              let requestID = processInboxAfterRequestID else { return }
+        func current() -> Bool {
+            host === ownerHost && processInboxPresented && processInboxSessionID == session
+                && processInboxAfterRequestID == requestID
+        }
         do {
             let result = try await query("inboxAfterCommit", [try json(["sessionId": session, "requestId": requestID])])
+            guard current() else { return }
             try installProcessInboxResult(result)
             processInboxAfterRequestID = nil
-        } catch { processInboxReadError = error.localizedDescription }
+        } catch {
+            guard current() else { return }
+            processInboxReadError = error.localizedDescription
+        }
     }
 
     func retryProcessInboxRead() async {
@@ -27472,6 +32345,7 @@ final class CoreModel: ObservableObject {
                 catch { if !isDefiniteRejection(error) { throw error } }
             }
             let caller = processInboxCaller
+            clearProcessInboxUndoOffer()
             processInboxPresented = false
             processInboxCaller = nil
             processInboxSessionID = nil
@@ -27492,10 +32366,12 @@ final class CoreModel: ObservableObject {
     }
 
     func openMindSweep() async {
+        guard !inboxBulkCompositionBlocked else { return }
+        guard selectedSurface != .inbox || !inboxSelectionMode else { return }
         let entry = inbox.object("mindSweep")
         let caller = selectedSurface
         let reviewStep = reviewGuide.object("content").text("step")
-        let fromInbox = caller == .inbox && !entry.text("label").isEmpty
+        let fromInbox = caller == .inbox && inboxActionsEnabled && !entry.text("label").isEmpty
             && ["accessory", "primary"].contains(entry.text("placement"))
         let fromWeeklyReview = caller == .review && reviewGuidePresented && reviewKind == "weekly"
             && reviewActionsEnabled && ["inbox", "completed"].contains(reviewStep)
@@ -27664,7 +32540,7 @@ final class CoreModel: ObservableObject {
         let options = capture.object("options")
         let picker = contextPickerPresented ? ["kind": "context", "query": contextQuery] : nil
         previewTask?.cancel()
-        guard !busy, !retryNeeded, capturePresented else { return }
+        guard !busy, !retryNeeded, capturePresented, !captureLinesConfirmationPresented else { return }
         previewTask = Task {
             do {
                 try await Task.sleep(nanoseconds: 120_000_000)
@@ -27680,7 +32556,7 @@ final class CoreModel: ObservableObject {
     }
 
     func openContextPicker() {
-        guard capturePresented, !busy, !retryNeeded else { return }
+        guard capturePresented, !busy, !retryNeeded, !captureLinesConfirmationPresented else { return }
         contextQuery = ""
         contextPickerPresented = true
         textChanged()
@@ -27702,7 +32578,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func applyCaptureEdit(_ edit: CoreObject?, clearContextQuery: Bool = false, closeContextPicker: Bool = false) async {
-        guard !busy, !retryNeeded else { return }
+        guard !busy, !retryNeeded, !captureLinesConfirmationPresented else { return }
         busy = true
         invalidatePreview()
         defer { finishOperation() }
@@ -27753,22 +32629,104 @@ final class CoreModel: ObservableObject {
         return try await query("captureView", [try json(input)])
     }
 
-    func saveCapture() async {
-        guard canSave else { return }
-        busy = true
-        invalidatePreview()
-        defer { finishOperation() }
+    func saveCapture(openAfterSave: Bool = false) async {
+        guard canSave, let currentHost = host else { return }
         do {
             let payload = try json(["text": draft, "options": capture.object("options"),
-                                    "captureId": captureID, "openAfterSave": false])
+                                    "captureId": captureID, "openAfterSave": openAfterSave])
+            let next = openAfterSave ? "open" : capture.object("options").flag("addAnother") ? "addAnother" : "close"
+            let submission = CaptureSubmission(id: UUID(), host: currentHost, presentationID: capturePresentationID,
+                navigationID: captureNavigationID, captureID: captureID, request: payload, kind: .single(next: next))
+            await submitCapture(submission)
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func requestCaptureClose() {
+        guard !busy, !retryNeeded else { return }
+        if captureLinesConfirmationPresented { cancelCaptureLinesConfirmation() }
+        else { capturePresented = false }
+    }
+
+    func cancelCaptureLinesConfirmation() {
+        captureLinesConfirmation = nil
+        bulkConfirm = [:]
+    }
+
+    private func captureLinesConfirmationCurrent(_ confirmation: CaptureLinesConfirmation) -> Bool {
+        let submitted = confirmation.submission
+        guard host === submitted.host, capturePresentationCurrent(submitted),
+              captureNavigationID == submitted.navigationID,
+              draft.utf8.elementsEqual(confirmation.text.utf8),
+              noteDraft == capture.object("options").text("note"),
+              let options = try? json(capture.object("options")) else { return false }
+        return options.utf8.elementsEqual(confirmation.options.utf8)
+    }
+
+    func confirmCaptureLines() async {
+        guard canConfirmCaptureLines, let confirmation = captureLinesConfirmation else { return }
+        cancelCaptureLinesConfirmation()
+        guard (2...1000).contains(confirmation.count) else {
+            notice = label("quickAdd.bulkCreateError") + "\n≤ 1000 " + label("common.tasks")
+            return
+        }
+        do {
+            let ids = (0..<confirmation.count).map { _ in UUID().uuidString.lowercased() }
+            #if DEBUG && targetEnvironment(simulator)
+            if captureLinesTestEnabled { captureLinesTestIDs = ids }
+            #endif
+            let request = try json(["text": confirmation.text, "options": try decode(confirmation.options), "captureIds": ids])
+            let original = confirmation.submission
+            let submission = CaptureSubmission(id: UUID(), host: original.host, presentationID: original.presentationID,
+                navigationID: original.navigationID, captureID: original.captureID, request: request, kind: .lines(ids: ids))
+            await submitCapture(submission)
+        } catch { notice = error.localizedDescription }
+    }
+
+    private func submitCapture(_ submission: CaptureSubmission) async {
+        let currentHost = submission.host
+        captureSubmission = submission
+        captureBusyOwner = submission.id
+        var dispatched = false
+        busy = true
+        invalidatePreview()
+        defer {
+            if host === currentHost, captureBusyOwner == submission.id {
+                captureBusyOwner = nil
+                finishOperation()
+                #if DEBUG && targetEnvironment(simulator)
+                publishCaptureSaveEditFixtureState()
+                #endif
+            }
+        }
+        do {
             capturePending = true
-            let result = try await query("captureSubmit", [payload])
-            capturePending = false
-            handleCaptureResult(result)
+            #if DEBUG && targetEnvironment(simulator)
+            if captureSaveEditFixtureEnabled { captureSaveEditTestSubmissions += 1; publishCaptureSaveEditFixtureState() }
+            if captureLinesTestEnabled, case .lines = submission.kind { captureLinesTestSubmissions += 1; publishCaptureSaveEditFixtureState() }
+            #endif
+            let result = try await query(submission.kind.method, [submission.request], beforeDispatch: {
+                guard self.captureSubmissionCurrent(submission), self.capturePresentationCurrent(submission),
+                      self.captureNavigationID == submission.navigationID, !self.appLock.concealed,
+                      UIApplication.shared.applicationState == .active else { return false }
+                dispatched = true
+                return true
+            })
+            #if DEBUG && targetEnvironment(simulator)
+            if result.text("kind") == "saved" { await holdCaptureSaveEditAcknowledgementIfNeeded(submission) }
+            #endif
+            guard captureSubmissionCurrent(submission) else { return }
+            try acknowledgeCaptureResult(result, submission: submission)
+            #if DEBUG && targetEnvironment(simulator)
+            if result.text("kind") == "saved", captureSaveEditTestMode == "read-failure" {
+                captureSaveEditTestMode = ""
+                throw CocoaError(.fileReadUnknown)
+            }
+            #endif
             try await readSelectedSurface()
         } catch {
+            guard host === currentHost, captureBusyOwner == submission.id else { return }
             // The host owns the durable request. Freeze this exact draft until its outcome is known.
-            if isDefiniteRejection(error) { capturePending = false }
+            if !dispatched || isDefiniteRejection(error) { capturePending = false; captureSubmission = nil }
             retryNeeded = capturePending
             self.error = error.localizedDescription
         }
@@ -27776,7 +32734,7 @@ final class CoreModel: ObservableObject {
 
     private var referenceCompletionPending: Bool {
         guard let request = taskCompletionRequest, let submitted = try? decode(request) else { return false }
-        return submitted.text("source") == "reference"
+        return selectedSurface == .reference && submitted.text("source") == "reference"
     }
 
     private func completeReferenceTask(_ displayed: CoreObject) async {
@@ -27818,6 +32776,10 @@ final class CoreModel: ObservableObject {
     }
 
     func complete(_ id: String, taskRevision: String) async {
+        guard !inboxBulkCompositionBlocked else { return }
+        guard selectedSurface != .inbox || !inboxSelectionMode else { return }
+        guard !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending else { return }
+        if selectedSurface == .inbox { guard inboxActionsEnabled else { return } }
         if selectedSurface == .project { guard await flushProjectNotesEdit() else { return } }
         guard ready, !busy, !retryNeeded, !taskPresented, !projectRenameEditing,
               !taskRevision.isEmpty, taskRevision.utf16.count <= 200,
@@ -27865,35 +32827,119 @@ final class CoreModel: ObservableObject {
                 $0.text("id") == id && !$0.flag("readOnly") && !$0.object("meta").text("statusLabel").isEmpty
             }) else { return }
         }
+        await saveTaskCompletion(id, taskRevision: taskRevision)
+    }
+
+    private func boardCompletionOwned(_ owner: BoardCompletionOwner) -> Bool {
+        boardCompletionOwner?.host === owner.host && boardCompletionOwner?.request.utf8.elementsEqual(owner.request.utf8) == true
+            && boardCompletionOwner?.requestID == owner.requestID
+    }
+
+    private func boardCompletionPending(_ owner: BoardCompletionOwner) -> Bool {
+        boardCompletionOwned(owner) && host === owner.host && taskCompletionRequest?.utf8.elementsEqual(owner.request.utf8) == true
+            && taskActionRequestID == owner.requestID
+    }
+
+    private func boardCompletionWarm(_ owner: BoardCompletionOwner, foreground: Int? = nil) -> Bool {
+        boardCompletionOwned(owner) && host === owner.host && selectedSurface == .board
+            && foregroundSyncGeneration == (foreground ?? owner.foreground)
+            && !Task.isCancelled && !appLock.concealed && UIApplication.shared.applicationState == .active
+            && !taskPresented && !capturePresented && !morePresented && !areaPickerPresented
+    }
+
+    private func retainTaskCompletion(_ request: String, requestID: String, boardOwner: BoardCompletionOwner?) {
+        taskActionRequestID = requestID
+        taskCompletionRequest = request
+        boardCompletionOwner = boardOwner
         busy = true
+        error = nil
         invalidatePreview()
-        defer { finishOperation() }
-        var acknowledgment: CoreObject?
+    }
+
+    private func saveTaskCompletion(_ id: String, taskRevision: String, reference: Bool = false, source: String? = nil) async {
+        guard source == nil || source == "board", !reference || source == nil else { return }
         do {
             let requestID = UUID().uuidString.lowercased()
-            let request = try json(["id": id, "requestId": requestID, "taskRevision": taskRevision])
-            taskActionRequestID = requestID
-            taskCompletionRequest = request
-            let result = try await query("taskCompletion", [request])
-            try acknowledgeTaskCompletion(result)
-            acknowledgment = result
-        } catch {
-            if isDefiniteRejection(error) {
-                taskCompletionRequest = nil
-                taskActionRequestID = nil
+            var input: CoreObject = ["id": id, "requestId": requestID, "taskRevision": taskRevision]
+            if reference { input["source"] = "reference" }
+            else if let source { input["source"] = source }
+            let request = try json(input)
+            let owner: BoardCompletionOwner?
+            if source == "board" {
+                guard let host else { return }
+                owner = BoardCompletionOwner(host: host, request: request, requestID: requestID, foreground: foregroundSyncGeneration)
+            } else { owner = nil }
+            retainTaskCompletion(request, requestID: requestID, boardOwner: owner)
+            await runTaskCompletion(request, source: source, boardOwner: owner)
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func runTaskCompletion(_ request: String, source: String?, boardOwner: BoardCompletionOwner?) async {
+        defer {
+            if let owner = boardOwner {
+                if boardCompletionOwned(owner) {
+                    if host === owner.host { finishOperation() }
+                    if taskCompletionRequest == nil { boardCompletionOwner = nil }
+                }
+            } else { finishOperation() }
+        }
+        var dispatched = false
+        let acknowledgment: CoreObject
+        do {
+            if let owner = boardOwner {
+                guard boardCompletionOwned(owner), taskCompletionRequest?.utf8.elementsEqual(owner.request.utf8) == true,
+                      taskActionRequestID == owner.requestID else { return }
+                guard host === owner.host else { throw CancellationError() }
             }
-            retryNeeded = taskCompletionRequest != nil
-            self.error = error.localizedDescription
+            acknowledgment = try await query("taskCompletion", [request], beforeDispatch: {
+                if let owner = boardOwner {
+                    guard self.boardCompletionPending(owner), self.boardCompletionWarm(owner) else { return false }
+                }
+                dispatched = true
+                return true
+            })
+            if let owner = boardOwner { guard boardCompletionPending(owner) else { return } }
+            try acknowledgeTaskCompletion(acknowledgment)
+        } catch {
+            if let owner = boardOwner {
+                guard boardCompletionOwned(owner), taskCompletionRequest?.utf8.elementsEqual(owner.request.utf8) == true,
+                      taskActionRequestID == owner.requestID else { return }
+                if !dispatched || isDefiniteRejection(error) {
+                    taskCompletionRequest = nil
+                    taskActionRequestID = nil
+                }
+                guard host === owner.host else { return }
+                retryNeeded = taskCompletionRequest != nil
+                if boardCompletionWarm(owner) { self.error = error.localizedDescription }
+            } else {
+                if isDefiniteRejection(error) { taskCompletionRequest = nil; taskActionRequestID = nil }
+                retryNeeded = taskCompletionRequest != nil
+                self.error = error.localizedDescription
+            }
             return
         }
-        do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
-        if let acknowledgment { showTaskAction(acknowledgment, operation: "completion") }
+        if let owner = boardOwner {
+            await publishBoardCompletion(acknowledgment, owner: owner, foreground: owner.foreground)
+        } else {
+            do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
+            showTaskAction(acknowledgment, operation: "completion", source: source)
+        }
+    }
+
+    private func publishBoardCompletion(_ result: CoreObject, owner: BoardCompletionOwner, foreground: Int) async {
+        guard boardCompletionOwned(owner), taskActionRequestID == owner.requestID else { return }
+        defer { if boardCompletionOwned(owner), taskActionRequestID == owner.requestID { taskActionRequestID = nil } }
+        guard boardCompletionWarm(owner, foreground: foreground) else { return }
+        do { try await readSelectedSurface() }
+        catch { if boardCompletionWarm(owner, foreground: foreground) { self.error = error.localizedDescription } }
+        guard boardCompletionWarm(owner, foreground: foreground), taskActionRequestID == owner.requestID else { return }
+        showTaskAction(result, operation: "completion", source: "board")
     }
 
     private func acknowledgeTaskCompletion(_ result: CoreObject) throws {
         guard let request = taskCompletionRequest,
               let submitted = try? decode(request),
-              (submitted.text("source") == "reference"
+              (["reference", "board"].contains(submitted.text("source"))
                   ? result.text("id").utf8.elementsEqual(submitted.text("id").utf8)
                   : result.text("id") == submitted.text("id")),
               taskActionRequestID == submitted.text("requestId"),
@@ -27903,12 +32949,47 @@ final class CoreModel: ObservableObject {
             referenceError = nil
             queueReferenceProjectNextAction(kind: "completion", submitted: submitted)
         }
+        if submitted.text("source") == "board" {
+            guard let owner = boardCompletionOwner, boardCompletionPending(owner),
+                  validBoardCompletionResult(result) else { throw CocoaError(.coderReadCorrupt) }
+        }
         taskCompletionRequest = nil
         retryNeeded = false
         error = nil
     }
 
+    private func validBoardCompletionResult(_ result: CoreObject) -> Bool {
+        let completed = result.object("completion")
+        return Set(result.keys) == Set(["id", "completion"])
+            && Set(completed.keys) == Set(["completedAt", "undoEnabled", "message", "undoLabel"])
+            && !completed.text("completedAt").isEmpty && completed.text("completedAt").utf16.count <= 100
+            && completed.flag("undoEnabled") && !completed.text("message").isEmpty && completed.text("message").utf16.count <= 512
+            && !completed.text("undoLabel").isEmpty && completed.text("undoLabel").utf16.count <= 80
+    }
+
     func retry() async {
+        if let owner = inboxBulkMutationHost {
+            guard host === owner, !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
+        }
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsAIGeminiRetryFixtureValue == "not-invoked" {
+            let owners: [(String, Bool)] = [
+                ("effort", settingsAIEffortRequest != nil), ("gemini", settingsAIGeminiRequest != nil),
+                ("timeout", settingsAITimeoutRequest != nil), ("pomodoro", pomodoroCommand != nil),
+                ("reminders", appleRemindersNeedsRetry), ("trash", trashBulkRequest != nil),
+                ("notification-response", notificationResponseRetry != nil), ("notification-setting", notificationSettingRequest != nil),
+                ("calendar-setting", calendarSettingRequest != nil), ("project-file-availability", projectFileAvailabilityPending),
+                ("project-file-add", projectFileAddPending), ("task-attachment", taskAttachmentSaveRequest != nil),
+            ]
+            settingsAIGeminiRetryAdmissionState = "dispatch=" + (owners.first(where: { $0.1 })?.0 ?? "generic")
+        }
+        #endif
+        if settingsAIEffortRequest != nil { retryAIReasoningEffort(); return }
+        if settingsAIGeminiRequest != nil { retryAIGeminiThinkingBudget(); return }
+        if settingsAITimeoutRequest != nil { retryAIRequestTimeout(); return }
+        if pomodoroCommand != nil { await retryPomodoro(); return }
+        if appleRemindersNeedsRetry { retryAppleReminders(); return }
+        if trashBulkRequest != nil { await retryTrashBulkRequest(); return }
         if notificationResponseRetry != nil { await retryNotificationResponses(); return }
         if notificationSettingRequest != nil { retryNotificationSettings(); return }
         if calendarSettingRequest != nil { retryCalendarSettings(); return }
@@ -27927,6 +33008,27 @@ final class CoreModel: ObservableObject {
         guard !busy, !projectRenameEditing || projectRenameRequest != nil else { return }
         guard ready else { await start(); return }
         guard let retryHost = host else { return }
+        let boardActionRetry = boardActionRequest
+        if boardActionRetry != nil { guard boardActionHost === retryHost else { return } }
+        let completionRetry = boardCompletionOwner, boardUndoRetry = boardCompletionUndoOwner
+        let boardRetryForeground = foregroundSyncGeneration
+        if let request = taskCompletionRequest, (try? decode(request).text("source")) == "board" {
+            guard let owner = completionRetry, boardCompletionPending(owner) else { return }
+        }
+        if taskActionUndoRequest != nil, taskActionNotice.text("source") == "board" {
+            guard let owner = boardUndoRetry, boardCompletionUndoPending(owner) else { return }
+        }
+        guard processInboxUndoPending == nil || processInboxUndoPending?.host === retryHost else { return }
+        let inboxRetryHost = inboxBulkMutationHost
+        let inboxRetrySelection = inboxSelectionGeneration, inboxRetryForeground = foregroundSyncGeneration
+        let inboxRetrySurface = selectedSurface
+        let inboxRetryWarm = {
+            self.host === retryHost && self.selectedSurface == inboxRetrySurface
+                && self.inboxSelectionGeneration == inboxRetrySelection && self.foregroundSyncGeneration == inboxRetryForeground
+                && !Task.isCancelled && !self.appLock.concealed && UIApplication.shared.applicationState == .active
+        }
+        let captureRetry = capturePending ? captureSubmission : nil
+        guard !capturePending || captureRetry?.host === retryHost else { return }
         let eventRetry = calendarEventTaskPending
         guard eventRetry == nil || eventRetry?.host === retryHost else { return }
         let attachmentRetryRequest = projectAttachmentWriteRequest
@@ -27947,13 +33049,38 @@ final class CoreModel: ObservableObject {
         }
         guard attachmentRetryCurrent() else { return }
         busy = true
+        if let captureRetry { captureBusyOwner = captureRetry.id }
         var boardTaskOpened = false
         defer {
-            finishOperation()
-            if boardTaskOpened { Task { await readTaskView() } }
+            if (inboxRetryHost == nil || host === inboxRetryHost)
+                && (captureRetry == nil || (host === retryHost && captureBusyOwner == captureRetry?.id))
+                && (completionRetry == nil && boardUndoRetry == nil && boardActionRetry == nil || host === retryHost)
+                && (completionRetry.map { boardCompletionOwned($0) } ?? true)
+                && (boardUndoRetry.map { boardCompletionUndoOwned($0) } ?? true)
+                && (boardActionRetry == nil || boardActionHost === retryHost) {
+                if boardActionRetry != nil, boardActionRequest == nil { boardActionHost = nil }
+                if completionRetry != nil, taskCompletionRequest == nil { boardCompletionOwner = nil }
+                if boardUndoRetry != nil, taskActionUndoRequest == nil { boardCompletionUndoOwner = nil }
+                if captureRetry != nil { captureBusyOwner = nil }
+                finishOperation()
+                #if DEBUG && targetEnvironment(simulator)
+                publishCaptureSaveEditFixtureState()
+                #endif
+            }
+            if boardTaskOpened, host === retryHost, foregroundSyncGeneration == boardRetryForeground {
+                Task {
+                    guard self.host === retryHost, self.foregroundSyncGeneration == boardRetryForeground else { return }
+                    await readTaskView()
+                }
+            }
         }
         do {
             let acknowledgment = try await retryHost.retryPending()
+            if inboxRetryHost === retryHost {
+                try await retryInboxBulk(on: retryHost, acknowledgment: acknowledgment,
+                    selectionGeneration: inboxRetrySelection, foreground: inboxRetryForeground, surface: inboxRetrySurface)
+                return
+            }
             guard host === retryHost else { throw CancellationError() }
             guard attachmentRetryCurrent() else { throw CancellationError() }
             if let pending = eventRetry {
@@ -28006,6 +33133,7 @@ final class CoreModel: ObservableObject {
                 return
             }
             if let request = taskActionUndoRequest {
+                if let owner = boardUndoRetry { guard boardCompletionUndoPending(owner) else { return } }
                 let result: CoreObject
                 if ["archiveBulkDelete", "doneBulkDelete", "referenceBulkDelete"].contains(taskActionNotice.text("operation"))
                     || (taskActionNotice.text("operation") == "delete" && ["done", "reference"].contains(taskActionNotice.text("source"))) {
@@ -28030,17 +33158,22 @@ final class CoreModel: ObservableObject {
                     if let acknowledgment, try json(result) != json(decode(acknowledgment)) {
                         throw CocoaError(.coderReadCorrupt)
                     }
-                } else if taskActionUndoMethod == "taskCompletionUndo", acknowledgment == nil || taskActionNotice.text("source") == "reference" {
+                } else if taskActionUndoMethod == "taskCompletionUndo", acknowledgment == nil || ["reference", "board"].contains(taskActionNotice.text("source")) {
                     let outcome = try await query("taskCompletionUndoRetryOutcome", [request])
+                    if let owner = boardUndoRetry { guard boardCompletionUndoPending(owner) else { return } }
                     guard outcome.text("kind") == "confirmed" else {
                         let unknown = label("task.completionUndoOutcomeUnknown")
+                        if let owner = boardUndoRetry {
+                            if boardCompletionUndoWarm(owner, foreground: boardRetryForeground) { self.error = unknown }
+                            return
+                        }
                         try? await readSelectedSurface()
                         if taskActionNotice.text("source") == "reference" { referenceError = unknown }
                         self.error = unknown
                         return
                     }
                     result = outcome.object("result")
-                    if taskActionNotice.text("source") == "reference" {
+                    if ["reference", "board"].contains(taskActionNotice.text("source")) {
                         guard Set(outcome.keys) == Set(["kind", "result"]) else { throw CocoaError(.coderReadCorrupt) }
                         if let acknowledgment, !(try json(result)).utf8.elementsEqual((try json(decode(acknowledgment))).utf8) {
                             throw CocoaError(.coderReadCorrupt)
@@ -28048,17 +33181,33 @@ final class CoreModel: ObservableObject {
                     }
                 } else if let acknowledgment { result = try decode(acknowledgment) }
                 else { result = try await query(taskActionUndoMethod, [request]) }
+                if let owner = boardUndoRetry { guard boardCompletionUndoPending(owner) else { return } }
                 try acknowledgeTaskActionUndo(result)
-                do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
+                if let owner = boardUndoRetry {
+                    guard boardCompletionUndoWarm(owner, foreground: boardRetryForeground) else { return }
+                }
+                do { try await readSelectedSurface() } catch {
+                    if boardUndoRetry.map({ boardCompletionUndoWarm($0, foreground: boardRetryForeground) }) ?? true {
+                        self.error = error.localizedDescription
+                    }
+                }
                 return
             }
             if let request = taskCompletionRequest {
+                if let owner = completionRetry { guard boardCompletionPending(owner) else { return } }
                 let result: CoreObject
-                let referenceCompletion = (try decode(request)).text("source") == "reference"
-                if let acknowledgment, !referenceCompletion { result = try decode(acknowledgment) }
+                let completionSource = (try decode(request)).text("source")
+                let referenceCompletion = completionSource == "reference"
+                let scopedCompletion = ["reference", "board"].contains(completionSource)
+                if let acknowledgment, !scopedCompletion { result = try decode(acknowledgment) }
                 else {
                     let outcome = try await query("taskCompletionRetryOutcome", [request])
+                    if let owner = completionRetry { guard boardCompletionPending(owner) else { return } }
                     guard outcome.text("kind") == "confirmed" else {
+                        if let owner = completionRetry {
+                            if boardCompletionWarm(owner, foreground: boardRetryForeground) { self.error = label("task.completionOutcomeUnknown") }
+                            return
+                        }
                         // No matching durable receipt: preserve the UUID and block a new write.
                         let unknown = label("task.completionOutcomeUnknown")
                         try? await readSelectedSurface()
@@ -28067,16 +33216,21 @@ final class CoreModel: ObservableObject {
                         return
                     }
                     result = outcome.object("result")
-                    if referenceCompletion {
+                    if scopedCompletion {
                         guard Set(outcome.keys) == Set(["kind", "result"]) else { throw CocoaError(.coderReadCorrupt) }
                         if let acknowledgment, !(try json(result)).utf8.elementsEqual((try json(decode(acknowledgment))).utf8) {
                             throw CocoaError(.coderReadCorrupt)
                         }
                     }
                 }
+                if let owner = completionRetry { guard boardCompletionPending(owner) else { return } }
                 try acknowledgeTaskCompletion(result)
-                do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
-                showTaskAction(result, operation: "completion", source: referenceCompletion ? "reference" : nil)
+                if let owner = completionRetry {
+                    await publishBoardCompletion(result, owner: owner, foreground: boardRetryForeground)
+                } else {
+                    do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
+                    showTaskAction(result, operation: "completion", source: scopedCompletion ? completionSource : nil)
+                }
                 return
             }
             if let request = projectDeleteUndoRequest {
@@ -28251,9 +33405,13 @@ final class CoreModel: ObservableObject {
                 let wrapper: CoreObject
                 if let acknowledgment { wrapper = try decode(acknowledgment) }
                 else if let method = processInboxRequestMethod, let request = processInboxRequest {
-                    wrapper = try await query(method, [request])
+                    wrapper = try await query(method == "inboxUndo" ? "inboxUndoRetryOutcome" : method, [request])
                 } else { throw CocoaError(.coderValueNotFound) }
-                try await acceptProcessInboxResponse(wrapper)
+                if processInboxRequestMethod == "inboxUndo" {
+                    try await acknowledgeProcessInboxUndo(wrapper)
+                } else {
+                    try await acceptProcessInboxResponse(wrapper)
+                }
                 return
             }
             if let request = projectRenameRequest {
@@ -28458,8 +33616,8 @@ final class CoreModel: ObservableObject {
                 let result: CoreObject
                 if let acknowledgment { result = try decode(acknowledgment) }
                 else { result = try await query("taskListSortRetryOutcome", [request]) }
-                try acknowledgeReferenceSort(result)
-                await readReference()
+                let caller = try acknowledgeReferenceSort(result)
+                await refreshTaskListSortCaller(caller)
                 return
             }
             if let request = somedaySectionCreateRequest {
@@ -29030,8 +34188,9 @@ final class CoreModel: ObservableObject {
                 return
             }
             if boardActionPending {
+                guard boardActionHost === retryHost, boardActionRetry.map { boardActionRequest?.utf8.elementsEqual($0.utf8) == true } == true else { return }
                 guard let acknowledgment else { throw CocoaError(.coderValueNotFound) }
-                boardTaskOpened = await acknowledgeBoardAction(try decode(acknowledgment))
+                boardTaskOpened = await acknowledgeBoardAction(try decode(acknowledgment), foreground: boardRetryForeground)
                 return
             }
             if mindSweepRequest != nil {
@@ -29045,10 +34204,11 @@ final class CoreModel: ObservableObject {
                 acknowledgeReviewTaskWrite()
             }
             if capturePending {
-                guard let acknowledgment else { throw CocoaError(.coderValueNotFound) }
+                guard let acknowledgment, let captureRetry, captureSubmissionCurrent(captureRetry) else {
+                    throw CocoaError(.coderValueNotFound)
+                }
                 let result = try decode(acknowledgment)
-                capturePending = false
-                handleCaptureResult(result)
+                try acknowledgeCaptureResult(result, submission: captureRetry)
             }
             if taskSavePending {
                 guard acknowledgment != nil else { throw CocoaError(.coderValueNotFound) }
@@ -29072,7 +34232,56 @@ final class CoreModel: ObservableObject {
             }
             if !calendarPreferencePending { calendarComposerNavigation = nil }
         } catch {
+            if let owner = completionRetry {
+                guard boardCompletionPending(owner) else { return }
+                if isDefiniteRejection(error) { taskCompletionRequest = nil; taskActionRequestID = nil }
+                retryNeeded = taskCompletionRequest != nil
+                if boardCompletionWarm(owner, foreground: boardRetryForeground) { self.error = error.localizedDescription }
+                return
+            }
+            if let owner = boardUndoRetry {
+                guard boardCompletionUndoPending(owner) else { return }
+                if isDefiniteRejection(error) {
+                    taskActionUndoRequest = nil; taskActionNotice = [:]; boardCompletionNoticeHost = nil
+                }
+                retryNeeded = taskActionUndoRequest != nil
+                if boardCompletionUndoWarm(owner, foreground: boardRetryForeground) { self.error = error.localizedDescription }
+                return
+            }
+            if let inboxRetryHost {
+                if let pending = inboxOrganizeDestinationCreateOwner, pending.host === inboxRetryHost {
+                    handleInboxOrganizeError(error, on: pending.host, request: pending.request, creation: true,
+                        warm: inboxTasksMoveWarm(on: pending.host, generation: inboxRetrySelection, foreground: inboxRetryForeground))
+                } else if let pending = inboxTasksOrganizeOwner, pending.host === inboxRetryHost {
+                    handleInboxOrganizeError(error, on: pending.host, request: pending.request, creation: false,
+                        warm: inboxTasksMoveWarm(on: pending.host, generation: inboxRetrySelection, foreground: inboxRetryForeground))
+                } else if let pending = inboxTasksRemoveTagOwner, pending.host === inboxRetryHost {
+                    handleInboxTasksRemoveTagError(error, on: pending.host, request: pending.request,
+                        warm: inboxTasksMoveWarm(on: pending.host, generation: inboxRetrySelection, foreground: inboxRetryForeground))
+                } else if let pending = inboxTasksAddTagOwner, pending.host === inboxRetryHost {
+                    handleInboxTasksAddTagError(error, on: pending.host, request: pending.request,
+                        warm: inboxTasksMoveWarm(on: pending.host, generation: inboxRetrySelection, foreground: inboxRetryForeground))
+                } else if let pending = inboxTasksMoveOwner, pending.host === inboxRetryHost {
+                    handleInboxTasksMoveError(error, on: pending.host, request: pending.request,
+                        warm: inboxTasksMoveWarm(on: pending.host, generation: inboxRetrySelection, foreground: inboxRetryForeground))
+                } else if let pending = inboxBulkDeleteOwner, pending.host === inboxRetryHost,
+                   archivedTasksDeleteRequest?.utf8.elementsEqual(pending.request.utf8) == true {
+                    await handleArchivedTasksDeleteError(error, inboxWarm: inboxRetryWarm())
+                } else if let pending = inboxBulkUndoOwner, pending.host === inboxRetryHost,
+                          taskActionUndoRequest?.utf8.elementsEqual(pending.request.utf8) == true {
+                    let warm = inboxRetryWarm()
+                    if isDefiniteRejection(error) {
+                        taskActionUndoRequest = nil; inboxBulkUndoOwner = nil; inboxBulkNoticeHost = nil; taskActionNotice = [:]
+                    }
+                    if warm {
+                        retryNeeded = taskActionUndoRequest != nil
+                        self.error = error.localizedDescription; inboxReadError = error.localizedDescription
+                    }
+                }
+                return
+            }
             guard host === retryHost else { return }
+            guard captureRetry == nil || captureBusyOwner == captureRetry?.id else { return }
             if let pending = eventRetry {
                 guard calendarEventTaskPending?.requestId == pending.requestId else { return }
                 if isDefiniteRejection(error) { calendarEventTaskPending = nil }
@@ -29201,12 +34410,17 @@ final class CoreModel: ObservableObject {
                 await handleTrashRestoreError(error)
                 return
             }
-            if taskActionUndoRequest != nil, ["archiveBulkDelete", "doneBulkDelete", "referenceBulkDelete"].contains(taskActionNotice.text("operation")) {
+            if taskActionUndoRequest != nil, ["archiveBulkDelete", "doneBulkDelete", "referenceBulkDelete", "inboxBulkDelete"].contains(taskActionNotice.text("operation")) {
                 let referenceUndo = taskActionNotice.text("source") == "reference"
-                if isDefiniteRejection(error) { taskActionUndoRequest = nil; taskActionNotice = [:] }
+                let inboxUndo = taskActionNotice.text("source") == "inbox"
+                if isDefiniteRejection(error) {
+                    taskActionUndoRequest = nil; taskActionNotice = [:]
+                    if inboxUndo { inboxBulkUndoOwner = nil; inboxBulkNoticeHost = nil }
+                }
                 retryNeeded = taskActionUndoRequest != nil
                 self.error = error.localizedDescription
-                if referenceUndo { referenceError = error.localizedDescription }
+                if inboxUndo { inboxReadError = error.localizedDescription }
+                else if referenceUndo { referenceError = error.localizedDescription }
                 else { historyError = error.localizedDescription }
                 return
             }
@@ -29360,10 +34574,12 @@ final class CoreModel: ObservableObject {
                     processInboxRequestMethod = nil
                     processInboxRequestID = nil
                     processInboxRequestTaskID = nil
+                    processInboxUndoPending = nil
                     processInboxError = error.localizedDescription
                 }
                 reviewTaskWritePending = false
                 capturePending = false
+                captureSubmission = nil
                 taskSavePending = false
                 boardActionRequest = nil
                 if taskActionUndoRequest != nil {
@@ -29451,6 +34667,117 @@ final class CoreModel: ObservableObject {
         }
     }
 
+    private func captureSubmissionCurrent(_ submission: CaptureSubmission) -> Bool {
+        host === submission.host && captureSubmission?.id == submission.id
+    }
+
+    private func capturePresentationCurrent(_ submission: CaptureSubmission) -> Bool {
+        capturePresented && capturePresentationID == submission.presentationID
+            && captureID.utf8.elementsEqual(submission.captureID.utf8)
+    }
+
+    func retireCaptureEditNavigation() {
+        captureNavigationID = UUID()
+        captureEditHandoff = nil
+        cancelCaptureLinesConfirmation()
+    }
+
+    private func acknowledgeCaptureResult(_ result: CoreObject, submission: CaptureSubmission) throws {
+        guard captureSubmissionCurrent(submission), ["saved", "refused", "confirmLines"].contains(result.text("kind")) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        switch submission.kind {
+        case .single(let next):
+            if result.text("kind") == "saved" {
+                guard result.text("taskId").utf8.elementsEqual(submission.captureID.lowercased().utf8),
+                      result.text("next") == next else { throw CocoaError(.coderReadCorrupt) }
+            }
+        case .lines(let ids):
+            if result.text("kind") == "saved" {
+                guard Set(result.keys) == Set(["kind", "taskIds"]), let returned = result["taskIds"] as? [String],
+                      returned.count == ids.count, zip(returned, ids).allSatisfy({ $0.0.utf8.elementsEqual($0.1.utf8) }) else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                Task {
+                    _ = try? await submission.host.call("logLine", argumentsJSON: self.json([
+                        "Native iOS bulk operation acknowledged",
+                        #"{"releaseCheck":"v1.3.5/ios-bulk-ui","operation":"capture","outcome":"confirmed"}"#,
+                    ]))
+                }
+            } else if result.text("kind") != "refused" || Set(result.keys) != Set(["kind", "notice"])
+                || result.object("notice").text("message").isEmpty {
+                throw CocoaError(.coderReadCorrupt)
+            }
+        }
+        // Receipt settlement belongs to the submitted host; presentation belongs to this sheet episode.
+        capturePending = false
+        captureSubmission = nil
+        retryNeeded = false
+        guard capturePresentationCurrent(submission) else { return }
+        if case .lines = submission.kind {
+            if result.text("kind") == "saved" {
+                notice = nil
+                capturePresented = false; capture = [:]; draft = ""; noteDraft = ""
+                captureID = UUID().uuidString
+            } else if captureNavigationID == submission.navigationID, !appLock.concealed,
+                      UIApplication.shared.applicationState == .active, !Task.isCancelled {
+                notice = result.object("notice").text("message")
+            }
+            return
+        }
+        if result.text("kind") == "confirmLines" {
+            let copy = result.object("confirm")
+            guard Set(result.keys) == Set(["kind", "confirm", "lineCount"]),
+                  let count = result["lineCount"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
+                  count.doubleValue.rounded(.towardZero) == count.doubleValue, count.doubleValue >= 2,
+                  count.doubleValue < Double(Int.max),
+                  Set(copy.keys) == Set(["title", "message", "confirmLabel", "cancelLabel"]),
+                  copy.values.allSatisfy({ ($0 as? String)?.isEmpty == false }) else { throw CocoaError(.coderReadCorrupt) }
+            guard captureNavigationID == submission.navigationID, !appLock.concealed,
+                  UIApplication.shared.applicationState == .active, !Task.isCancelled else { return }
+            let original = try decode(submission.request)
+            let confirmation = CaptureLinesConfirmation(submission: submission, text: original.text("text"),
+                options: try json(original.object("options")), count: count.intValue)
+            guard captureLinesConfirmationCurrent(confirmation) else { return }
+            captureLinesConfirmation = confirmation
+            bulkConfirm = copy
+            return
+        }
+        let open = result.text("kind") == "saved" && result.text("next") == "open"
+            && captureNavigationID == submission.navigationID && !appLock.concealed
+            && UIApplication.shared.applicationState == .active && !Task.isCancelled
+        handleCaptureResult(result)
+        if open {
+            captureEditHandoff = CaptureEditHandoff(host: submission.host, presentationID: capturePresentationID,
+                navigationID: captureNavigationID, taskID: result.text("taskId"))
+        }
+    }
+
+    private func presentAcknowledgedCaptureEdit() {
+        guard let handoff = captureEditHandoff else { return }
+        captureEditHandoff = nil
+        guard host === handoff.host, capturePresentationID == handoff.presentationID,
+              captureNavigationID == handoff.navigationID, ready, !busy, !retryNeeded,
+              !settingsSyncRestartRequired, !capturePresented, !taskPresented, !appLock.concealed,
+              UIApplication.shared.applicationState == .active, !Task.isCancelled else { return }
+        if taskRecoverySnapshot != nil || taskRecoveryCorrupt
+            || (taskAttachmentState != .none && taskAttachmentState != .discardedCleanup) {
+            taskRecoveryConflict = taskRecoverySnapshot?.taskID == handoff.taskID
+                ? nil : "A saved task draft needs a decision before another task can open."
+            taskRecoveryGateVisible = true
+            return
+        }
+        prepareTaskPresentation(handoff.taskID, initialTab: "task")
+        let session = taskRecoverySession
+        Task { [weak self] in
+            guard let self else { return }
+            await self.readTaskView(ownedGuard: {
+                self.host === handoff.host && self.taskPresented && self.viewedTaskID == handoff.taskID
+                    && self.taskRecoverySession == session && !self.appLock.concealed && !Task.isCancelled
+            })
+        }
+    }
+
     private func handleCaptureResult(_ result: CoreObject) {
         switch result.text("kind") {
         case "saved":
@@ -29469,31 +34796,248 @@ final class CoreModel: ObservableObject {
             }
         case "refused": notice = result.object("notice").text("message")
         case "confirmLines":
-            // Bulk import requires the snapshot/file IO contract, outside this foundation.
-            bulkConfirm = result.object("confirm")
+            break // The owning submission installs the in-sheet question and its frozen input.
         default: notice = capture.object("failureNotices").object("save").text("message")
         }
     }
 
-    private func readInbox(foregroundSyncOwner ownerID: UUID? = nil) async throws {
-        if let ownerID {
-            guard let owner = foregroundSyncOwner, owner.id == ownerID, foregroundSyncCurrent(owner) else {
-                throw CancellationError()
-            }
-            // Inbox shares these cached projections with navigation. Publish
-            // them together only while the admitted foreground owner holds.
-            let nextArea = try await query("areaFilter")
-            guard foregroundSyncCurrent(owner) else { throw CancellationError() }
-            let nextMore = try await query("menuRead", ["more", "{}"])
-            guard foregroundSyncCurrent(owner) else { throw CancellationError() }
-            let nextInbox = try await query("inboxView", [try json(["offset": 0, "limit": pageSize])])
-            guard foregroundSyncCurrent(owner) else { throw CancellationError() }
-            area = nextArea
-            moreMenu = nextMore
-            inbox = nextInbox
-            return
+    #if DEBUG && targetEnvironment(simulator)
+    private func publishCaptureSaveEditFixtureState() {
+        guard captureSaveEditFixtureEnabled else { return }
+        captureSaveEditTestState = (try? json(["submissions": captureSaveEditTestSubmissions,
+            "held": captureSaveEditTestWaiter != nil, "replaced": captureSaveEditTestReplaced,
+            "readHeld": captureSaveEditTestReadHeld, "retry": retryNeeded, "busy": busy,
+            "linesSubmissions": captureLinesTestSubmissions, "linesIds": captureLinesTestIDs])) ?? ""
+    }
+
+    func pasteCaptureLinesFixture() {
+        guard captureLinesTestEnabled, capturePresented, !busy, !retryNeeded, !capturePending,
+              !captureLinesConfirmationPresented else { return }
+        switch captureLinesTestPaste {
+        case "invalid": draft = "Task500 planned +Task500 project\nTask500 bad /due:whenever"
+        case "paragraph": draft = "Task500 paragraph first\n\nparagraph second"
+        case "count": draft = (0...1000).map { "Task500 row \($0)" }.joined(separator: "\n")
+        case "bytes":
+            draft = (0..<500).map { "Task500 row \($0)" }.joined(separator: "\n")
+            noteDraft = String(repeating: "é", count: 10_000)
+        default: draft = "Task500 first @home\nTask500 second"
         }
-        inbox = try await query("inboxView", [try json(["offset": 0, "limit": pageSize])])
+        textChanged()
+    }
+
+    private func holdCaptureSaveEditAcknowledgementIfNeeded(_ submission: CaptureSubmission) async {
+        guard captureSaveEditTestMode == "hold", !captureSaveEditTestHeldOnce,
+              captureSubmissionCurrent(submission) else { return }
+        captureSaveEditTestHeldOnce = true
+        await withCheckedContinuation { continuation in
+            captureSaveEditTestWaiter = continuation
+            publishCaptureSaveEditFixtureState()
+        }
+    }
+
+    func releaseCaptureSaveEditFixtureAcknowledgement() {
+        let waiter = captureSaveEditTestWaiter
+        captureSaveEditTestWaiter = nil
+        captureSaveEditTestReadHeld = false
+        waiter?.resume()
+        publishCaptureSaveEditFixtureState()
+    }
+
+    func replaceCaptureSaveEditFixtureSheet() {
+        guard captureSaveEditFixtureEnabled, captureSaveEditTestWaiter != nil else { return }
+        capturePresented = false
+        captureID = UUID().uuidString
+        draft = "Task497 newer draft"
+        capture["options"] = capture.object("options").merging(["note": ""]) { _, next in next }
+        noteDraft = ""
+        previewedText = "\u{0}"
+        capturePresented = true
+        publishCaptureSaveEditFixtureState()
+    }
+
+    func replaceCaptureSaveEditFixtureHost() {
+        guard captureSaveEditFixtureEnabled, captureSaveEditTestWaiter != nil, let originalHost = host,
+              let selection = try? NativeAppLaunch.selection.get(),
+              case let .isolated(_, directory, namespace, identifier) = selection,
+              let bundle = Bundle.main.url(forResource: "core-host", withExtension: "js") else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                await originalHost.close()
+                let replacement = CoreHost(databaseURL: directory.appendingPathComponent("capture-replacement.sqlite"),
+                    bundleURL: bundle, deviceStorage: (directory, namespace + ".capture-replacement"), isolatedTestID: identifier)
+                _ = try await replacement.start()
+                guard self.host === originalHost else { await replacement.close(); return }
+                self.host = replacement
+                self.startupSyncCompletedHost = replacement
+                self.completedStartupToken = UUID()
+                self.captureSubmission = nil; self.capturePending = false; self.captureBusyOwner = nil
+                self.capturePresented = false; self.capture = [:]; self.draft = ""; self.noteDraft = ""
+                self.busy = false; self.retryNeeded = false; self.ready = true
+                await self.openCapture()
+                self.draft = "Task497 replacement draft"
+                self.textChanged()
+                self.captureSaveEditTestReplaced = true
+                self.publishCaptureSaveEditFixtureState()
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+    #endif
+
+    private func readInbox(foregroundSyncOwner ownerID: UUID? = nil, ownedGuard: (() -> Bool)? = nil,
+                           refreshingFilterPicker: Bool = false) async throws {
+        guard let owner = host, selectedSurface == .inbox, !appLock.concealed, !Task.isCancelled,
+              ownedGuard?() != false,
+              ownerID == nil || foregroundSyncOwner.map({
+                  $0.id == ownerID && foregroundSyncCurrent($0)
+              }) == true else { throw CancellationError() }
+        observeDiagnosticsConcealment()
+        loadInboxPreferences()
+        let intent = inboxPendingFilterEdit
+        let params = intent?.base ?? inboxParams
+        let fold = inboxPendingFold
+        let selectionMode = inboxSelectionMode, selectionGeneration = inboxSelectionGeneration
+        let selected = inboxSelectedIDs, range = inboxRangeSelectMode
+        let depth = selectionMode || inboxSelectionReading ? max(pageSize, items.count) : pageSize
+        inboxGeneration += 1
+        let generation = inboxGeneration
+        let defaults = preferenceDefaults, preference = inboxFoldPreference
+        let current = {
+            self.inboxReadCurrent(owner, generation: generation, params: params)
+                && self.inboxPendingFilterEdit?.id == intent?.id
+                && self.inboxPendingFold?.axis == fold?.axis && self.inboxPendingFold?.ids == fold?.ids
+                && self.inboxSelectionMode == selectionMode && self.inboxSelectionGeneration == selectionGeneration
+                && self.preferenceDefaults === defaults && self.inboxFoldPreference == preference
+                && ownedGuard?() != false
+                && (ownerID == nil || self.foregroundSyncOwner.map {
+                    $0.id == ownerID && self.foregroundSyncCurrent($0)
+                } == true)
+        }
+        guard current() else { throw CancellationError() }
+        inboxCurrent = false
+        do {
+            var nextArea: CoreObject?, nextMore: CoreObject?
+            if ownerID != nil {
+                nextArea = try await query("areaFilter", beforeDispatch: current)
+                guard current() else { throw CancellationError() }
+                nextMore = try await query("menuRead", ["more", "{}"], beforeDispatch: current)
+            }
+            var input = params.merging(["offset": 0, "limit": pageSize]) { _, next in next }
+            if let intent { input["filterEdit"] = intent.edit }
+            var nextInbox = try await query("inboxView", [try json(input)], beforeDispatch: current)
+            guard current() else { throw CancellationError() }
+            try validateInboxPage(nextInbox, revision: nextInbox.text("revision"), total: nextInbox.number("total"),
+                                  count: min(pageSize, nextInbox.number("total")))
+            let acceptedParams = effectiveInboxParams(nextInbox)
+            var rows = nextInbox.objects("items")
+            while rows.count < min(depth, nextInbox.number("total")) {
+                let limit = min(pageSize, min(depth, nextInbox.number("total")) - rows.count)
+                let page = try await query("inboxView", [try json(acceptedParams.merging([
+                    "offset": rows.count, "limit": limit, "revision": nextInbox.text("revision")]) { _, next in next })], beforeDispatch: current)
+                guard current() else { throw CancellationError() }
+                try validateInboxPage(page, revision: nextInbox.text("revision"), total: nextInbox.number("total"), count: limit, against: nextInbox)
+                rows += page.objects("items")
+            }
+            nextInbox["items"] = rows
+            var nextBulk: CoreObject?
+            if selectionMode {
+                let bulk = try await query("menuRead", ["bulk", try json(inboxTaskBulkInput(params: acceptedParams))], beforeDispatch: current)
+                guard current() else { throw CancellationError() }
+                try validateInboxTaskBulk(bulk, snapshot: nextInbox, subsetOf: selected)
+                nextBulk = bulk
+            }
+            let tokens = nextInbox.object("filters").object("tokens")
+            guard acceptedParams.text("groupBy") == params.text("groupBy"),
+                  try json(acceptedParams["collapsedGroupIds"] ?? NSNull()) == json(params["collapsedGroupIds"] ?? NSNull()),
+                  nextInbox.object("filters")["state"] is CoreObject,
+                  let tokenTotal = tokens["total"] as? Int, tokenTotal >= 0,
+                  let tokenItems = tokens["items"] as? [CoreObject], tokenItems.count == min(100, tokenTotal) else {
+                throw CocoaError(.coderReadCorrupt)
+            }
+            var acceptedFold: (map: CoreObject, encoded: String)?
+            if let fold {
+                guard inboxFoldPreferenceWritable, fold.axis == params.text("groupBy"),
+                      let ids = inboxFoldIDs(params["collapsedGroupIds"]), ids == fold.ids else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                var map = inboxCollapsedGroups
+                map[fold.axis] = ids
+                acceptedFold = (map, try json(map))
+            }
+            let acceptedParamsJSON = try json(acceptedParams)
+            guard current() else { throw CancellationError() }
+            if let nextBulk { try acceptInboxTaskBulk(nextBulk, range: range) }
+            if let context = inboxBulkConfirmation,
+               !context.params.utf8.elementsEqual(acceptedParamsJSON.utf8)
+                || !context.revision.utf8.elementsEqual(nextInbox.text("revision").utf8) {
+                cancelArchiveBulkDeleteConfirmation()
+            }
+            if let acceptedFold {
+                defaults.set(acceptedFold.encoded, forKey: preference)
+                inboxCollapsedGroups = acceptedFold.map
+                inboxPendingFold = nil
+            }
+            // Validate against the captured base before core normalization changes the accepted params.
+            inboxParams = acceptedParams
+            if let intent {
+                inboxPendingFilterEdit = nil
+                if let type = intent.textType, inboxFilterTextEdits[type]?.sequence == intent.textSequence {
+                    inboxFilterTextEdits.removeValue(forKey: type)
+                }
+            }
+            if let nextArea, let nextMore { area = nextArea; moreMenu = nextMore }
+            inbox = nextInbox
+            if !inboxFilterTextEdits.isEmpty { inboxFilterNeedsRead = true }
+            syncInboxFilterText()
+            inboxCurrent = !inboxFilterWorkPending
+            inboxReadError = nil
+            if !refreshingFilterPicker { invalidateInboxFilterPicker() }
+            let groupingOperation = inboxGroupingOperation
+            inboxGroupingOperation = nil
+            let acceptedCurrent = {
+                self.inboxReadCurrent(owner, generation: generation, params: acceptedParams)
+                    && self.preferenceDefaults === defaults && self.inboxFoldPreference == preference
+                    && self.inbox.text("revision") == nextInbox.text("revision")
+            }
+            if let operation = groupingOperation {
+                let axis = acceptedParams.text("groupBy")
+                let collapsedCount = inboxFoldIDs(acceptedParams["collapsedGroupIds"])?.count ?? 0
+                Task {
+                    guard acceptedCurrent() else { return }
+                    _ = try? await owner.call("logLine", argumentsJSON: self.json([
+                        "Native iOS Inbox grouping applied", self.json([
+                            "releaseCheck": "v1.3.5/ios-inbox-group", "operation": operation,
+                            "axis": axis, "collapsedCount": collapsedCount])]))
+                }
+            }
+            if intent != nil {
+                let count = nextInbox.number("filterActiveCount")
+                if (0...1000).contains(count), acceptedCurrent() {
+                    _ = try? await owner.call("logLine", argumentsJSON: self.json([
+                        "Native iOS Inbox filters applied", self.json([
+                            "releaseCheck": "v1.3.5/ios-inbox-filters", "operation": "edit", "count": count])]))
+                }
+            }
+        } catch {
+            if current() {
+                inboxReadError = label("settings.feedback.actionFailed")
+                inboxFilterNeedsRead = false
+                inboxFilterPickerNeedsRead = false
+                if let intent, error.localizedDescription.hasPrefix("INVALID_INPUT:") {
+                    // A refused pure edit cannot succeed on Retry; retain only newer desired text.
+                    inboxPendingFilterEdit = nil
+                    if let type = intent.textType, inboxFilterTextEdits[type]?.sequence == intent.textSequence {
+                        inboxFilterTextEdits.removeValue(forKey: type)
+                    }
+                    inboxFilterNeedsRead = !inboxFilterTextEdits.isEmpty
+                    syncInboxFilterText()
+                    let projectionMatches = !inbox.isEmpty && (try? json(effectiveInboxParams(inbox))) == (try? json(params))
+                    inboxCurrent = projectionMatches && !inboxFilterWorkPending
+                    inboxFilterPickerNeedsRead = projectionMatches && inboxFiltersPresented && !inboxFilterPickerName.isEmpty
+                }
+            }
+            throw error
+        }
     }
 
     func openFocusSavedFilter(_ operation: CoreObject, message: String = "") async {
@@ -29719,6 +35263,239 @@ final class CoreModel: ObservableObject {
             await readFocus(ownsOperation: true)
         } else { retryNeeded = focusOrderRequest != nil }
         focusOrderError = label("settings.feedback.actionFailed")
+    }
+
+    var pomodoroInputsEnabled: Bool {
+        ready && !busy && !retryNeeded && !appLock.concealed && !taskPresented
+            && !settingsSyncRestartRequired && pomodoroPanel.text("kind") == "ready"
+            && UIApplication.shared.applicationState == .active
+    }
+
+    private func readPomodoroPanel(_ owner: CoreHost) async throws -> CoreObject {
+        let value = try decode(await owner.readPomodoroPanel(presentationJSON: json([
+            "collapsed": pomodoroCollapsed, "lastEvent": pomodoroFeedback as Any? ?? NSNull()])))
+        guard host === owner, !Task.isCancelled else { throw CancellationError() }
+        guard ["ready", "uninitialized"].contains(value.text("kind")), value["visible"] is Bool,
+              value["completionAlert"] is Bool, value.object("observation")["nowMs"] is NSNumber,
+              !value.object("observation").text("localDayKey").isEmpty else { throw CocoaError(.coderReadCorrupt) }
+        pomodoroPanel = value
+        if !value.flag("linkTaskEnabled") { pomodoroPickerPresented = false }
+        return value
+    }
+
+    private func admitPomodoroRuntime() {
+        guard pomodoroNeedsRead, pomodoroActionsWaiting == 0, pomodoroWork == nil, pomodoroWorkHost == nil, pomodoroCommand == nil,
+              ready, !busy, !retryNeeded, !taskPresented, !capturePresented, !projectRenameEditing,
+              !appLock.concealed, !settingsSyncRestartRequired, completedStartupToken != nil,
+              UIApplication.shared.applicationState == .active, let owner = host else { return }
+        pomodoroWork = Task { [weak self, weak owner] in
+            guard let self, let owner, self.host === owner else { return }
+            await self.performPomodoroAction(nil)
+            guard self.host === owner else { return }
+            self.pomodoroWork = nil
+            self.admitPomodoroRuntime()
+            self.admitReminderLifecycle()
+        }
+    }
+
+    private func armPomodoroDeadline() {
+        pomodoroWake?.cancel(); pomodoroWake = nil
+        guard !retryNeeded, pomodoroError == nil, UIApplication.shared.applicationState == .active,
+              pomodoroPanel.flag("isRunning"), let owner = host,
+              let deadline = pomodoroPanel["phaseEndsAtMs"] as? NSNumber else { return }
+        let seconds = min(86_400, max(0.05, deadline.doubleValue / 1000 - Date().timeIntervalSince1970))
+        pomodoroWake = Task { [weak self, weak owner] in
+            do { try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) } catch { return }
+            guard let self, let owner, self.host === owner else { return }
+            self.pomodoroWake = nil; self.pomodoroNeedsRead = true
+            self.admitPomodoroRuntime()
+        }
+    }
+
+    func performPomodoroAction(_ requestedAction: String?, values: CoreObject = [:]) async {
+        // A tapped action waits for the in-flight read instead of being dropped by the owner guard.
+        // While it waits, automatic reads are not re-admitted, so the action takes the owner next.
+        if requestedAction != nil {
+            pomodoroActionsWaiting += 1
+            var awaited: Task<Void, Never>?
+            while pomodoroCommand == nil, let reading = pomodoroWork, reading != awaited { awaited = reading; await reading.value }
+            pomodoroActionsWaiting -= 1
+        }
+        func writable() -> Bool {
+            ready && !busy && !retryNeeded && !appLock.concealed && !taskPresented && !settingsSyncRestartRequired
+        }
+        guard writable(), pomodoroWorkHost == nil, let owner = host else {
+            if requestedAction != nil { admitPomodoroRuntime() }
+            return
+        }
+        // A panel read never holds `busy`, so a tap right after another operation is not dropped.
+        // pomodoroWorkHost still serializes Pomodoro work; only a write holds `busy`.
+        var holdsBusy = requestedAction != nil
+        if holdsBusy { busy = true }
+        pomodoroWorkHost = owner; pomodoroNeedsRead = false; pomodoroError = nil
+        defer {
+            if host === owner, pomodoroWorkHost === owner {
+                pomodoroAlarmWakeTicket &+= 1
+                if holdsBusy { finishOperation() }
+                pomodoroWorkHost = nil; armPomodoroDeadline()
+                admitPomodoroRuntime()
+                admitReminderLifecycle()
+            }
+        }
+        do {
+            let before = try await readPomodoroPanel(owner)
+            let action: String?
+            if before.text("kind") == "uninitialized" { action = "adoptLegacy" }
+            else if let requestedAction { action = requestedAction }
+            else if before.flag("selectionMissing") { action = "selectTask" }
+            else { action = before.flag("needsReconcile") ? "reconcile" : nil }
+            if let action {
+                if !holdsBusy {
+                    // Another operation may have started during the read; write after it finishes.
+                    guard host === owner, writable() else { pomodoroNeedsRead = true; return }
+                    busy = true; holdsBusy = true
+                }
+                guard ["adoptLegacy", "reconcile", "toggle", "reset", "switchPhase", "setDurations", "selectTask"].contains(action) else { throw CocoaError(.coderInvalidValue) }
+                var input: CoreObject = ["action": action, "requestId": UUID().uuidString.lowercased(),
+                    "observedAtMs": before.object("observation")["nowMs"] ?? NSNull(),
+                    "localDayKey": before.object("observation").text("localDayKey"), "autoStart": before.object("autoStart")]
+                if action == "setDurations" { input["durations"] = values.object("durations") }
+                if action == "selectTask" { input["taskId"] = values["taskId"] ?? NSNull() }
+                let command = PomodoroCommand(host: owner, request: try json(input), action: action, before: before)
+                pomodoroCommand = command
+                try await settlePomodoroCommand(command)
+            }
+        } catch {
+            guard host === owner else { return }
+            if isDefiniteRejection(error) { pomodoroCommand = nil }
+            if pomodoroCommand != nil { retryNeeded = true; self.error = error.localizedDescription }
+            pomodoroError = error.localizedDescription
+        }
+    }
+
+    private func settlePomodoroCommand(_ command: PomodoroCommand) async throws {
+        let raw = try await command.host.writePomodoroTransition(requestJSON: command.request)
+        guard host === command.host, pomodoroCommand?.request == command.request else { throw CancellationError() }
+        let confirmation = try decode(raw)
+        let result: CoreObject
+        if confirmation.text("kind") == "noop" {
+            result = [:]
+            guard Set(confirmation.keys) == Set(["kind"]), command.action == "reconcile" else { throw CocoaError(.coderReadCorrupt) }
+            pomodoroFeedback = nil
+        } else {
+            guard Set(confirmation.keys) == Set(["kind", "result", "projectionReloaded"]),
+                  confirmation.text("kind") == "confirmed", let projected = confirmation["projectionReloaded"] as? NSNumber,
+                  CFGetTypeID(projected) == CFBooleanGetTypeID() else { throw CocoaError(.coderReadCorrupt) }
+            result = confirmation.object("result")
+            guard Set(result.keys) == Set(["sessionID", "generation", "completedFocusSessions", "creditedMinutes", "creditDisposition"]),
+                  let id = UUID(uuidString: result.text("sessionID")), id.uuidString.lowercased() == result.text("sessionID"),
+                  let generation = result["generation"] as? NSNumber, generation.doubleValue >= 0,
+                  generation.doubleValue.rounded() == generation.doubleValue, generation.doubleValue <= 9_007_199_254_740_991,
+                  command.action == "adoptLegacy" || result.text("sessionID") == command.before.text("sessionID") else { throw CocoaError(.coderReadCorrupt) }
+            for field in ["generation", "completedFocusSessions", "creditedMinutes"] {
+                guard let number = result[field] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      number.doubleValue.isFinite, number.doubleValue >= 0,
+                      number.doubleValue.rounded() == number.doubleValue, number.doubleValue <= 9_007_199_254_740_991 else { throw CocoaError(.coderReadCorrupt) }
+            }
+            guard ["credited", "unlinked", "unavailable", "capped", "none"].contains(result.text("creditDisposition")) else { throw CocoaError(.coderReadCorrupt) }
+            pomodoroFeedback = nil
+            let event = command.before.text("completionEvent")
+            if ["reconcile", "toggle", "selectTask"].contains(command.action), ["focus-finished", "break-finished"].contains(event),
+               generation.doubleValue == Double(command.before.number("generation")) + 1 {
+                pomodoroFeedback = ["sessionID": result.text("sessionID"), "generation": generation, "value": event]
+            }
+        }
+        // SQL proof can precede canonical projection; keep the exact request until this read is admitted.
+        let saved = try await readPomodoroPanel(command.host)
+        guard saved.text("kind") == "ready" else { throw CocoaError(.coderReadCorrupt) }
+        if !result.isEmpty {
+            guard saved.text("sessionID") == result.text("sessionID"),
+                  saved.number("generation") >= result.number("generation") else { throw CocoaError(.coderReadCorrupt) }
+        }
+        pomodoroCommand = nil; retryNeeded = false
+        _ = try? await command.host.call("logLine", argumentsJSON: json(["Native iOS Pomodoro panel transition acknowledged",
+            try json(["releaseCheck": "v1.3.5/ios-pomodoro-ui", "outcome": "confirmed"])]))
+    }
+
+    func retryPomodoro() async {
+        guard let command = pomodoroCommand else { pomodoroNeedsRead = true; admitPomodoroRuntime(); return }
+        guard ready, !busy, host === command.host, !appLock.concealed else { return }
+        busy = true; pomodoroWorkHost = command.host; pomodoroError = nil
+        defer {
+            if host === command.host, pomodoroWorkHost === command.host {
+                pomodoroAlarmWakeTicket &+= 1
+                finishOperation(); pomodoroWorkHost = nil; armPomodoroDeadline()
+                admitReminderLifecycle()
+            }
+        }
+        do {
+            try await settlePomodoroCommand(command)
+            self.error = nil
+        } catch {
+            guard host === command.host else { return }
+            if isDefiniteRejection(error) { pomodoroCommand = nil }
+            pomodoroError = error.localizedDescription
+            retryNeeded = pomodoroCommand != nil
+            if retryNeeded { self.error = error.localizedDescription }
+        }
+    }
+
+    func togglePomodoroCollapsed() {
+        pomodoroCollapsed.toggle()
+        preferenceDefaults.set(pomodoroCollapsed, forKey: pomodoroCollapsePreference)
+        pomodoroPanel["collapsed"] = pomodoroCollapsed
+        pomodoroNeedsRead = true; admitPomodoroRuntime()
+    }
+
+    func closePomodoroPicker() { pomodoroPickerPresented = false }
+    func openPomodoroPicker() async {
+        guard pomodoroInputsEnabled, pomodoroPanel.flag("linkTaskEnabled"), focusCurrent else { return }
+        pomodoroPickerPresented = true; pomodoroTasks = []; pomodoroTaskCount = 0
+        pomodoroPickerRevision = focus.text("revision")
+        await loadMorePomodoroTasks()
+    }
+    func loadMorePomodoroTasks() async {
+        guard pomodoroInputsEnabled, pomodoroPickerPresented, !pomodoroPickerRevision.isEmpty,
+              pomodoroTasks.isEmpty || pomodoroTasks.count < pomodoroTaskCount else { return }
+        busy = true
+        defer { finishOperation() }
+        // One fresh Focus snapshot may replace stale pages; never mix revisions.
+        for attempt in 0..<2 {
+            let revision = pomodoroPickerRevision, offset = pomodoroTasks.count
+            do {
+                let page = try await query("pomodoroTasks", [try json(["offset": offset, "limit": 100,
+                    "revision": revision, "controls": focus.object("controls").object("state")])])
+                guard pomodoroPickerPresented, revision == pomodoroPickerRevision, revision == focus.text("revision"),
+                      page.text("revision") == revision, page.number("total") >= offset,
+                      page.objects("rows").count == min(100, page.number("total") - offset),
+                      offset == 0 || page.number("total") == pomodoroTaskCount else { throw CocoaError(.coderReadCorrupt) }
+                pomodoroTaskCount = page.number("total"); pomodoroTasks += page.objects("rows")
+                pomodoroError = nil
+                return
+            } catch {
+                pomodoroError = error.localizedDescription
+                guard attempt == 0, pomodoroPickerPresented, !Task.isCancelled else { return }
+                await readFocus(ownsOperation: true)
+                guard pomodoroPickerPresented, focusCurrent else { return }
+                pomodoroPickerRevision = focus.text("revision")
+                pomodoroTasks = []; pomodoroTaskCount = 0
+            }
+        }
+    }
+    func choosePomodoroTask(_ id: String?) async {
+        guard pomodoroInputsEnabled, id == nil || (pomodoroPickerRevision == focus.text("revision")
+            && pomodoroTasks.contains(where: { $0.text("id") == id })) else { return }
+        pomodoroPickerPresented = false
+        await performPomodoroAction("selectTask", values: ["taskId": id as Any? ?? NSNull()])
+    }
+    func completePomodoroTask() async {
+        guard pomodoroInputsEnabled else { return }
+        let selected = pomodoroPanel.object("selectedTask")
+        guard !selected.text("id").isEmpty, !selected.text("taskRevision").isEmpty,
+              selected.text("taskRevision").utf16.count <= 200 else { return }
+        await saveTaskCompletion(selected.text("id"), taskRevision: selected.text("taskRevision"),
+                                 reference: selected.text("completionSource") == "reference")
+        pomodoroFeedback = nil; pomodoroNeedsRead = true; admitPomodoroRuntime()
     }
 
     func openFocusPanel(_ name: String) {
@@ -30043,7 +35820,7 @@ final class CoreModel: ObservableObject {
                           rows.count == min(pageSize, total) else { throw CocoaError(.coderReadCorrupt) }
                     let target = min(max(pageSize, loaded[key] ?? pageSize), total)
                     while rows.count < target {
-                        let limit = min(pageSize, target - rows.count)
+                        let limit = min(followUpWindow, target - rows.count)
                         let window = try await query("menuRead", ["focusSection", try json([
                             "key": key, "offset": rows.count, "limit": limit, "revision": revision, "controls": state])])
                         guard focusReadAllowed(generation, ownsOperation: ownsOperation) else { return }
@@ -30323,7 +36100,7 @@ final class CoreModel: ObservableObject {
             generalPreferenceThemeTestReadFailures -= 1
             throw CocoaError(.fileReadUnknown)
         }
-        if ["gtdWorkflowOptions", "gtdArchiveOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureParseOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions"].contains(method), gtdWorkflowAwaitingRefresh, gtdWorkflowTestReadFailures > 0 {
+        if ["gtdWorkflowOptions", "gtdPomodoroOptions", "gtdArchiveOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureParseOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions"].contains(method), gtdWorkflowAwaitingRefresh, gtdWorkflowTestReadFailures > 0 {
             gtdWorkflowTestReadFailures -= 1
             throw CocoaError(.fileReadUnknown)
         }
@@ -30504,6 +36281,34 @@ final class CoreModel: ObservableObject {
         guard beforeDispatch?() != false else { throw CancellationError() }
         let result = try await host.call(method, argumentsJSON: json(args))
         #if DEBUG && targetEnvironment(simulator)
+        if trashBulkFixtureEnabled {
+            let holdSelection = method == "trashSelection" && trashBulkTestMode == "hold-selection" && trashBulkTestSelectAll
+            let holdAck = ["trashItemsRestoreWrite", "trashItemsPurgeWrite"].contains(method) && trashBulkTestMode == "hold-ack"
+            let holdRefresh = method == "areaFilter" && trashBulkTestMode == "ordinary-refresh"
+                && trashPurgeTestMutationStarted && trashPurgeConfirmation != nil
+            if (holdSelection || holdAck || holdRefresh), !trashBulkTestHeldOnce {
+                // The real Host has already returned this response. This delays
+                // App delivery only and never substitutes a storage failure.
+                trashBulkTestHeldOnce = true
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    trashBulkTestWaiter = continuation; publishTrashBulkTestState()
+                }
+            }
+            if method == "menuRead", args.first as? String == "trash", trashBulkTestAwaitingRead {
+                trashBulkTestAwaitingRead = false; trashBulkTestReadFailed = true
+                publishTrashBulkTestState()
+                throw CocoaError(.fileReadUnknown)
+            }
+        }
+        if method == "areaFilter", captureSaveEditTestMode == "hold-read", !captureSaveEditTestHeldOnce,
+           !capturePresented, !capturePending, captureEditHandoff?.host === host {
+            captureSaveEditTestHeldOnce = true
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                captureSaveEditTestReadHeld = true
+                captureSaveEditTestWaiter = continuation
+                publishCaptureSaveEditFixtureState()
+            }
+        }
         if method == "taskView", entityLinkPreview != nil, !entityLinkTestHeldOnce,
            let encoded = args.first as? String, try decode(encoded).text("id") == "task454-a",
            let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection {
@@ -30584,9 +36389,20 @@ final class CoreModel: ObservableObject {
         return error is CoreHostRejection
     }
     private func finishOperation() {
+        if pomodoroWorkHost == nil {
+            // A hidden ready panel (Pomodoro off) re-reads on source, clock and scene changes;
+            // an ordinary operation does not need another read.
+            if pomodoroPanel.text("kind") != "ready" || pomodoroPanel.flag("visible") { pomodoroNeedsRead = true }
+            pomodoroAlarmWakeTicket &+= 1
+        }
         defer {
+            admitPomodoroRuntime()
             admitReminderLifecycle(); admitCalendarPushLifecycle(); admitSearchLifecycle(); admitNotificationResponses()
             if entityLinkTask == nil { requestEntityLinks() }
+            admitAppleRemindersAutoImport()
+            #if DEBUG && targetEnvironment(simulator)
+            publishTrashBulkTestState()
+            #endif
         }
         busy = false
         if projectFileAvailabilityPending {
@@ -30596,6 +36412,7 @@ final class CoreModel: ObservableObject {
         }
         if settingsSyncRestartRequired { refreshRequested = false; return }
         if resumeFeedbackConfigurationIfNeeded() { return }
+        presentAcknowledgedCaptureEdit()
         admitForegroundSync()
         if foregroundSyncOwner != nil { return }
         presentQueuedReferenceProjectNextAction()
@@ -30631,6 +36448,9 @@ final class CoreModel: ObservableObject {
         }
         if selectedSurface == .history && (historyNeedsRead || historyPickerNeedsRead) && !retryNeeded && !taskPresented {
             scheduleHistoryRead()
+        }
+        if selectedSurface == .inbox && (inboxFilterNeedsRead || inboxFilterPickerNeedsRead) {
+            scheduleInboxFilterRead()
         }
         if selectedSurface == .reference && (referenceTextNeedsRead || referencePickerNeedsRead) && !retryNeeded && !taskPresented {
             scheduleReferenceRead()

@@ -106,8 +106,9 @@ node apps/android-native/scripts/check-startup-device.mjs <adb-serial> \
 
 For each database it seeds the app, makes one first start (the recovery checkpoint, then the bytecode cache written after
 first content), and measures 10 cold and 10 warm starts with ART at `verify`, as a sideload leaves it. **TTID** is
-`am start -W` TotalTime (the first frame). **First content** is the system's Fully drawn time, which the Inbox reports on
-the frame that first draws core's rows (`ReportDrawnWhen` in `InboxScreen.kt`). `large-5000` is core's
+`am start -W` TotalTime (the first frame). **First content** is the system's Fully drawn time, which the app reports on
+the frame that first draws the first screen's data (`ReportDrawnWhen` in `MainActivity.kt`, `firstContentReady`): Focus's on a
+fresh start, as RN opens Focus (pass O2b), and the Inbox's rows (`InboxScreen.kt`) when the Inbox is the first screen. `large-5000` is core's
 `scripts/performance/fixture.mjs` store with 5,000 tasks (`mixed-v1-5000`), made once by `measure-startup-device.mjs fixture`.
 
 | Database | Cold TTID median | Cold first content median | Cold first content p90 | Warm first content median |

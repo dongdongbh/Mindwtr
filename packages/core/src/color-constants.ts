@@ -1,6 +1,8 @@
 import type { TaskPriority } from './types';
 export const DEFAULT_PROJECT_COLOR = '#94a3b8';
 export const DEFAULT_AREA_COLOR = DEFAULT_PROJECT_COLOR;
+export const isValidProjectColorOverride = (value: unknown): value is string | null | undefined =>
+    value == null || typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
 /**
  * Area swatches, tailwind-500 family so light/dark contrast is uniform.
  * The first six are the original palette and must keep their order: the exact

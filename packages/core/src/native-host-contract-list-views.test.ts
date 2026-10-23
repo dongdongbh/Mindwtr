@@ -27,6 +27,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import { noopStorage } from './storage';
 import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
 import { buildTrashTimeline } from './task-utils';
+import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import { generateUUID } from './uuid';
 
 const fixture = loadListViewsFixture();
@@ -122,6 +123,34 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(second.ok && second.value.rows.map((row) => row.id)).toEqual(model.tasks.slice(2, 4).map((task) => task.id));
         expect(host.getContextsView({ offset: 2, limit: 2 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getContextsView({ offset: 0, limit: 101 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    // RN's Contexts shows the shared list sort beside its search (#1415).
+    it('offers Contexts the shared list sort, with Priority while Priorities is on', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const read = () => {
+            const result = host.getContextsView({ offset: 0, limit: 100 });
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        const selected = () => read().sort.options.filter((option) => option.selected).map((option) => option.value);
+        expect(read().sort.options.map((option) => option.value)).toContain('priority');
+        expect(read().sort.options.find((option) => option.value === 'priority')?.label).toBe('Priority');
+        expect(selected()).toEqual([resolveNonDoneTaskSortBy(useTaskStore.getState().settings.taskSortBy, useTaskStore.getState().settings)]);
+
+        expect(await host.setTaskListSort({ sortBy: 'priority' })).toMatchObject({ ok: true, value: { sortBy: 'priority' } });
+        expect(selected()).toEqual(['priority']);
+        expect(read().sort.accessibilityLabel).toBe('Sort: Priority');
+        const state = useTaskStore.getState();
+        const ranked = buildContextsViewModel({ index: buildContextsTokenIndex(state.tasks), settings: state.settings, selectedTokens: [], matchMode: 'all', searchQuery: '' });
+        expect(ranked.sortBy).toBe('priority');
+        // The host leaves out parked projects' tasks (mobile's visible tasks); the rest keep core's priority order.
+        const rows = read().rows.map((row) => row.id);
+        expect(rows).toEqual(ranked.tasks.map((task) => task.id).filter((id) => rows.includes(id)));
+
+        await useTaskStore.getState().updateSettings({ features: { ...useTaskStore.getState().settings.features, priorities: false } });
+        expect(read().sort.options.map((option) => option.value)).not.toContain('priority');
+        expect(selected()).toEqual(['default']);
     });
 
     it('builds Archive groups and rows with core\'s functions and the host date formatter', async () => {
@@ -320,6 +349,34 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const saved = saveData.mock.lastCall?.[0] as { tasks: { id: string; status: string }[]; projects: { id: string; status: string }[] };
         expect(saved.tasks.find(({ id }) => id === 'c-reopen')?.status).toBe('next');
         expect(saved.projects.find(({ id }) => id === 'p-shelved')?.status).toBe('active');
+    });
+
+    // RN's chip accessibility action is the additive press, labelled Add or Remove filter (#1427).
+    it('labels a token chip\'s additive press Add or Remove filter, and gives All and No context none', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const view = value(host.getContextsView({ tokens: ['@phone'], offset: 0, limit: 100 }));
+        const chip = (id: string) => view.chips.find((entry) => entry.id === id)!;
+        expect(chip('all').additive).toBeUndefined();
+        expect(chip('none').additive).toBeUndefined();
+        expect(chip('@phone').additive).toEqual({ label: 'Remove filter', next: { tokens: [], matchMode: 'all' } });
+        expect(chip('#work').additive).toEqual({ label: 'Add', next: { tokens: ['@phone', '#work'], matchMode: 'all' } });
+        expect(chip('#work').next).toEqual({ tokens: ['#work'], matchMode: 'all' });
+    });
+
+    it('forwards saved unused tokens to Contexts Add and keeps Remove selected-only', async () => {
+        const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
+        const stamp = '2026-10-20T00:00:00.000Z';
+        useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, taxonomy: {
+            contexts: [{ token: '@unused', rev: 1, revBy: 'test', updatedAt: stamp }],
+            tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: stamp }],
+        } } });
+        const view = value(host.getContextsView({ selectedIds: ['c-call'], offset: 0, limit: 100 }));
+        for (const [field, token] of [['contexts', '@unused'], ['tags', '#unused']] as const) {
+            expect(view.bulk?.tokenActions.find((action) => action.field === field && action.mode === 'add')?.tokens).toContain(token);
+            expect(view.bulk?.tokenActions.find((action) => action.field === field && action.mode === 'remove')?.tokens)
+                .toEqual(useTaskStore.getState()._tasksById.get('c-call')![field]);
+            expect(view.chips.map((chip) => chip.id)).not.toContain(token);
+        }
     });
 
     it('searches the bulk bar\'s token pickers as mobile\'s token picker does, one window at a time under the view\'s revision', async () => {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openSqliteHost } from './screen-parity.replay';
 import { taskRevisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
+import { normalizeTaskForLoad } from './task-status';
 import type { AppData, Project, Task } from './types';
 
 const NOW = '2026-10-03T13:00:00.000Z';
@@ -92,6 +93,27 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
             expect(rows().tasks).toHaveLength(1);
             expect(rows().tasks[0].checklist).toEqual(source.checklist);
             expect((await receipts(native)).rows).toHaveLength(1);
+        } finally { await native.close(); }
+    });
+
+    it('turns a Reference list with every entry ticked into Next, not Done, and keeps the ticks (#1416)', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const ticked = [{ id: 'one', title: 'Alien', isCompleted: true }, { id: 'two', title: 'Brazil', isCompleted: true }];
+        const source = task({ taskMode: 'list', checklist: ticked });
+        const rn = await openSqliteHost(seed(source));
+        try {
+            expect(await useTaskStore.getState().updateTask(ID, { status: 'next' })).toEqual({ success: true });
+            const moved = useTaskStore.getState()._tasksById.get(ID)!;
+            expect(moved).toMatchObject({ status: 'next', checklist: ticked });
+            expect(moved.completedAt).toBeUndefined();
+        } finally { await rn.close(); }
+        const native = await openSqliteHost(seed(source));
+        try {
+            const command = await prepare(native);
+            expect(value(await native.host.commitPreparedDoneTaskStatus(command))).toEqual({ id: ID });
+            const moved = useTaskStore.getState()._tasksById.get(ID)!;
+            expect(moved).toMatchObject({ status: 'next', checklist: ticked });
+            expect(moved.completedAt).toBeUndefined();
         } finally { await native.close(); }
     });
 
@@ -235,17 +257,26 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
         } finally { await sqlite.close(); }
     });
 
-    it('preserves harmless unrelated settings and permits a limit change when conversion fills no slot', async () => {
+    it('matches RN taxonomy retention while preserving unrelated settings and a limit change when conversion fills no slot', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const changeSettings = (settings: AppData['settings']) => {
+            settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 };
+        };
+        const rn = await openSqliteHost(seed()); let expectedSettings: ReturnType<typeof rows>['settings'];
+        try {
+            await editSettings(rn, changeSettings); await rn.restart(undefined, { recoveryLoad: true });
+            expect(await useTaskStore.getState().updateTask(ID, { status: 'next' })).toEqual({ success: true });
+            await flushPendingSave(); expectedSettings = rows().settings;
+            expect(expectedSettings).toMatchObject({ theme: 'dark', gtd: { focusTaskLimit: 1, autoArchiveDays: 1 } });
+        } finally { await rn.close(); }
         const sqlite = await openSqliteHost(seed());
         try {
             const command = await prepare(sqlite);
             expect(command.prepared.checklist.effect.guards).toMatchObject({ focusCount: null, focusLimit: null, focusBoundary: null, autoArchiveDays: null });
-            await editSettings(sqlite, (settings) => { settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 }; });
+            await editSettings(sqlite, changeSettings);
             await sqlite.restart(undefined, { recoveryLoad: true });
-            const settings = rows().settings;
             expect(value(await sqlite.host.commitPreparedDoneTaskStatus(command))).toEqual({ id: ID });
-            expect(rows().settings).toEqual(settings);
+            expect(rows().settings).toEqual(expectedSettings!);
         } finally { await sqlite.close(); }
     });
 
@@ -290,10 +321,15 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
     it('cold replays the frozen raw source after two COMMIT failures with exact all-nine RN parity and receipt', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         const initial = seed(task({ isFocusedToday: true }), 1, 3);
+        // Isolate legacy source recovery; unrelated raw-NULL preservation has its own test above.
+        initial.tasks = initial.tasks!.map(row => normalizeTaskForLoad(row, NOW));
         const legacy = async (sqlite: Sqlite) => {
             const attachment = { id: 'raw-link', kind: 'link', title: 'Fixture', uri: 'https://example.com', createdAt: NOW };
             await sqlite.client().run('UPDATE tasks SET focusOrder = 2, pushCount = NULL, attachments = ? WHERE id = ?', [JSON.stringify([attachment]), ID]);
-            await sqlite.client().run('UPDATE tasks SET pushCount = NULL WHERE id = ?', ['peer-0']); await sqlite.restart();
+            await sqlite.restart();
+            expect(await sqlite.sql('SELECT id, pushCount FROM tasks ORDER BY id')).toEqual([
+                { id: 'peer-0', pushCount: 0 }, { id: ID, pushCount: null },
+            ]);
         };
         const rn = await openSqliteHost(initial); let expected: Awaited<ReturnType<typeof raw>>;
         try { await legacy(rn); expect((await useTaskStore.getState().updateTask(ID, { status: 'next' })).success).toBe(true); await flushPendingSave(); expected = await raw(rn); }

@@ -179,12 +179,9 @@ object WidgetRenderer {
   private fun buildViews(context: Context, appWidgetId: Int, kind: WidgetKind, payload: WidgetPayload): RenderedViews {
     val views = RemoteViews(context.packageName, kind.layoutRes)
     val palette = payload.resolvedPalette(context)
-    val captureIntent = Intent(context, QuickCaptureActivity::class.java).apply {
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
     views.setOnClickPendingIntent(
       R.id.mindwtr_widget_capture,
-      PendingIntent.getActivity(context, REQUEST_CAPTURE, captureIntent, immutableFlags()),
+      capturePendingIntent(context, appWidgetId, kind),
     )
 
     val collectionStats = when (kind) {
@@ -202,6 +199,19 @@ object WidgetRenderer {
     }
     return RenderedViews(views, collectionStats)
   }
+
+  internal fun capturePendingIntent(context: Context, appWidgetId: Int, kind: WidgetKind): PendingIntent {
+    return PendingIntent.getActivity(context, REQUEST_CAPTURE, captureIntent(context, appWidgetId, kind), immutableFlags())
+  }
+
+  internal fun captureIntent(context: Context, appWidgetId: Int, kind: WidgetKind): Intent =
+    Intent(context, QuickCaptureActivity::class.java).apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      // Extras do not distinguish PendingIntents; each widget must own its capture route.
+      data = Uri.parse("mindwtr-widget://capture/${kind.name}/$appWidgetId")
+      putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+      putExtra(EXTRA_KIND, kind.name)
+    }
 
   private fun bindCompact(
     context: Context,

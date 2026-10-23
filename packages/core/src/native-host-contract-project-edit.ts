@@ -1,3 +1,4 @@
+import { isValidProjectColorOverride } from './color-constants';
 import type { NativeHostResult } from './native-host-contract';
 import { projectReviewPickerValue } from './project-details-presentation';
 import { normalizeProjectTag } from './project-tags';
@@ -13,6 +14,7 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'type'; sequential: boolean }
     | { kind: 'scope'; scope: 'project' | 'section' }
     | { kind: 'area'; areaId: string | null }
+    | { kind: 'color'; colorOverride: string | null }
     | { kind: 'tag'; tag: string; present: boolean }
     | { kind: 'notes'; text: string }
     | { kind: 'date'; field: 'startDate' | 'dueDate' | 'reviewAt'; value: string | null; opened: string | null }
@@ -45,6 +47,7 @@ const valid = (input: unknown): input is NativeProjectEdit => {
         case 'status': return keys(edit, ['status']) && ['active', 'waiting', 'someday'].includes(edit.status as string);
         case 'type': return keys(edit, ['sequential']) && typeof edit.sequential === 'boolean';
         case 'scope': return keys(edit, ['scope']) && (edit.scope === 'project' || edit.scope === 'section');
+        case 'color': return keys(edit, ['colorOverride']) && edit.colorOverride !== undefined && isValidProjectColorOverride(edit.colorOverride);
         case 'area': return keys(edit, ['areaId']) && (edit.areaId === null || id(edit.areaId));
         case 'tag': return keys(edit, ['tag', 'present']) && text(edit.tag) && typeof edit.present === 'boolean';
         case 'notes': return keys(edit, ['text']) && text(edit.text, 2_000_000);
@@ -120,13 +123,14 @@ export function createProjectEditMethods(deps: {
                 const action = edit.kind === 'type' ? { kind: 'toggleType' } : { kind: 'setScope', scope: edit.scope };
                 return { ok: true, value: { command: 'ProjectFlow', request: { ...base, action, expected: token(read.value) } } };
             }
-            case 'area': {
+            case 'color': case 'area': {
                 const read = await options('getProjectAreaOptions');
                 if (!read.ok) return read;
                 if (read.value.canEdit === false) return { ok: true, value: { outcome: 'blocked' } };
-                const area = edit.areaId === null ? null : (read.value.areas as Json[]).find((row) => row.id === edit.areaId);
+                const areaId = edit.kind === 'area' ? edit.areaId : (read.value.project as Json).areaId;
+                const area = areaId === null ? null : (read.value.areas as Json[]).find((row) => row.id === areaId);
                 if (area === undefined) return { ok: true, value: { conflict: 'The Area is no longer there' } };
-                return { ok: true, value: { command: 'ProjectArea', request: { ...base, areaId: edit.areaId, expected: token(read.value),
+                return { ok: true, value: { command: 'ProjectArea', request: { ...base, areaId, ...(edit.kind === 'color' ? { colorOverride: edit.colorOverride } : {}), expected: token(read.value),
                     selectedArea: area === null ? null : { id: area.id, name: area.label } } } };
             }
             case 'tag': {

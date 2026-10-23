@@ -77,12 +77,20 @@ describe('applyThemeMode', () => {
         ['nord', 'theme-nord'],
         ['catppuccin-macchiato', 'theme-catppuccin-macchiato'],
         ['dracula', 'theme-dracula'],
+        ['gruvbox-dark', 'theme-gruvbox-dark'],
         ['oled', 'theme-oled'],
     ] as const)('marks %s as a dark theme and applies its class', (mode, className) => {
         applyThemeMode(mode, 'light');
 
         expect(document.documentElement.classList.contains('dark')).toBe(true);
         expect(document.documentElement.classList.contains(className)).toBe(true);
+    });
+
+    it('keeps gruvbox-light light and applies its class under a dark system', () => {
+        applyThemeMode('gruvbox-light', 'dark');
+
+        expect(document.documentElement.classList.contains('dark')).toBe(false);
+        expect(document.documentElement.classList.contains('theme-gruvbox-light')).toBe(true);
     });
 
     it('drops the previous theme class when switching between preset themes', () => {

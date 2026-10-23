@@ -44,6 +44,14 @@ const promptTestControlsEnabled = process.env.PROMPT_TEST_CONTROLS_ENABLED === '
 // hits CloudKit's Development environment anyway, only widget payloads collide.
 const isDevVariant = (process.env.APP_VARIANT ?? '').trim() === 'development';
 const isBenchmarkVariant = (process.env.APP_VARIANT ?? '').trim() === 'benchmark';
+const gmailEnabled = !isFossBuild && !isBenchmarkVariant && (isDevVariant
+  ? process.env.MINDWTR_GMAIL_DEV_ENABLED === '1'
+  : process.env.MINDWTR_GMAIL_PRODUCTION_VERIFIED === '1');
+const configuredGmailIosClientId = (process.env.MINDWTR_GMAIL_IOS_CLIENT_ID ?? '').trim();
+const gmailIosClientId = /^\d+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(configuredGmailIosClientId)
+  ? configuredGmailIosClientId
+  : '';
+const gmailIosEnabled = gmailEnabled && Boolean(gmailIosClientId);
 const pccEvaluationOptIn = (process.env.MINDWTR_PCC_EVALUATION_ENABLED ?? '').trim() === '1';
 const applePccEvaluationEnabled = isDevVariant && pccEvaluationOptIn;
 const PCC_ENTITLEMENT = 'com.apple.developer.private-cloud-compute';
@@ -101,6 +109,25 @@ const withAppVariant = (base: ExpoConfig): ExpoConfig => {
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const base = config as ExpoConfig;
+  const inheritedIosInfoPlist = { ...(base.ios?.infoPlist ?? {}) };
+  const previousGmailClientId = String(inheritedIosInfoPlist.MindwtrGmailClientId ?? '');
+  delete inheritedIosInfoPlist.MindwtrGmailClientId;
+  delete inheritedIosInfoPlist.MindwtrGmailEnabled;
+  const previousGmailScheme = previousGmailClientId.split('.').reverse().join('.');
+  const inheritedUrlTypes = Array.isArray(inheritedIosInfoPlist.CFBundleURLTypes)
+    ? inheritedIosInfoPlist.CFBundleURLTypes as { CFBundleURLName?: string; CFBundleURLSchemes?: string[] }[]
+    : [];
+  const gmailUrlTypes = inheritedUrlTypes.map((entry) => ({
+    ...entry,
+    CFBundleURLSchemes: (entry.CFBundleURLSchemes ?? []).filter((scheme) => scheme !== previousGmailScheme),
+  })).filter((entry) => entry.CFBundleURLSchemes.length > 0);
+  const appSchemes = typeof base.scheme === 'string' ? [base.scheme] : (base.scheme ?? []);
+  const firstSchemes = [...appSchemes, ...(gmailUrlTypes[0]?.CFBundleURLSchemes ?? [])];
+  if (gmailIosEnabled) firstSchemes.push(gmailIosClientId.split('.').reverse().join('.'));
+  if (firstSchemes.length > 0) {
+    const firstEntry = gmailUrlTypes.shift();
+    gmailUrlTypes.unshift({ ...firstEntry, CFBundleURLSchemes: [...new Set(firstSchemes)] });
+  }
   const inheritedIosEntitlements = { ...(base.ios?.entitlements ?? {}) };
   delete inheritedIosEntitlements[PCC_ENTITLEMENT];
   const iosEntitlements = applePccEvaluationEnabled
@@ -131,7 +158,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       ...base.ios,
       infoPlist: {
-        ...base.ios?.infoPlist,
+        ...inheritedIosInfoPlist,
+        ...(gmailUrlTypes.length > 0 ? { CFBundleURLTypes: gmailUrlTypes } : { CFBundleURLTypes: [] }),
+        MindwtrGmailEnabled: gmailIosEnabled,
+        ...(gmailIosEnabled ? { MindwtrGmailClientId: gmailIosClientId } : {}),
         CFBundleSpokenName: isDevVariant ? 'Mind Water Dev' : 'Mind Water',
         INAlternativeAppNames: [{
           INAlternativeAppName: isDevVariant ? 'Mind Water Dev' : 'Mind Water',
@@ -147,6 +177,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         (base.plugins ?? []).filter((entry) => pluginName(entry) !== './plugins/ios-watch'),
       ),
       ['./plugins/ios-watch', { enabled: watchEnabled }],
+      ['./plugins/android-gmail-authorization', { enabled: gmailEnabled }],
     ],
   });
 };

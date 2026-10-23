@@ -81,7 +81,7 @@ export function useProjectAttachmentActions({
         if (!projectAtStart) return;
         if (isProjectAttachmentBusy) return;
         if (!isTauriRuntime()) {
-            setAttachmentError(t('attachments.fileNotSupported'));
+            setAttachmentError(t('attachments.webProjectUploadUnsupported'));
             return;
         }
         setIsProjectAttachmentBusy(true);

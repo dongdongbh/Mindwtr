@@ -2,7 +2,7 @@ import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { AppRegistry, AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { flushPendingSave } from '@mindwtr/core';
+import { flushPendingSave, getStorageAdapter, noopStorage, setStorageAdapter, useTaskStore } from '@mindwtr/core';
 import {
   createMobileBackgroundSyncRunner,
   MOBILE_BACKGROUND_SYNC_INTERVAL,
@@ -19,7 +19,7 @@ import { logInfo, logWarn } from './app-log';
 import { areJsTimersPaused } from './js-timers';
 import { drainPendingCapturesInBackground } from './pending-capture-drain';
 import { reconcileLocalMobileNotificationsInBackground } from './notification-service-local';
-import { quiesceMobileStorage } from './storage-adapter';
+import { mobileStorage, quiesceMobileStorage } from './storage-adapter';
 import { abortMobileSync, getMobileSyncConfigurationStatus, performMobileSync, setMobileSyncRequestDeadline } from './sync-service';
 import {
   BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY,
@@ -140,7 +140,15 @@ const backgroundSyncRunner = (): MobileBackgroundSyncRunner => {
       getConfigurationStatus: () => getMobileSyncConfigurationStatus(),
       performSync: async () => {
         const result = await performMobileSync();
-        if (result.success) await reconcileLocalMobileNotificationsInBackground('sync');
+        if (result.success) {
+          // A cold headless start (app swiped away) still runs on core's no-op storage with
+          // an unloaded store, so the reminder cycle would skip the synced tasks (#1424).
+          if (getStorageAdapter() === noopStorage) {
+            setStorageAdapter(mobileStorage);
+            await useTaskStore.getState().fetchData({ silent: true });
+          }
+          await reconcileLocalMobileNotificationsInBackground('sync');
+        }
         return result;
       },
       abort: () => abortMobileSync('deadline'),

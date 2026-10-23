@@ -15,7 +15,7 @@ import org.json.JSONObject
  * Appends one item to the pending-captures queue (#845 contract): native code
  * never writes the app database. Core's `packages/core/src/pending-captures.ts`
  * (`parsePendingCapture`) reads `<filesDir>/pending-captures/<uuid>.json` on
- * the next app start or foreground and creates the Inbox task through the
+ * the next app start or foreground and creates the task through the
  * normal store path.
  */
 object PendingCaptureWriter {
@@ -25,14 +25,22 @@ object PendingCaptureWriter {
   const val CAPTURE_INTENT_SOURCE = "android-capture-intent"
   const val CHECKOFF_SOURCE = "android-widget"
   const val MAX_TITLE_LENGTH = 2000
+  val CREATION_STATUSES = listOf("inbox", "next", "waiting", "someday")
+
+  fun creationStatus(value: String?): String? = value?.takeIf { it in CREATION_STATUSES }
+
+  private fun JSONObject.putDestination(defaultStatus: String?, status: String?) {
+    creationStatus(defaultStatus)?.let { put("defaultStatus", it) }
+    creationStatus(status)?.let { put("status", it) }
+  }
 
   /** Returns the queued file, or null when the trimmed title is empty. */
   @Throws(IOException::class)
-  fun write(filesDir: File, rawTitle: String, now: Date = Date(), note: String = ""): File? {
+  fun write(filesDir: File, rawTitle: String, now: Date = Date(), note: String = "", defaultStatus: String? = null, status: String? = null): File? {
     val title = rawTitle.trim().take(MAX_TITLE_LENGTH).trim()
     if (title.isEmpty()) return null
 
-    return writeCapture(filesDir, title, SOURCE, now, note)
+    return writeCapture(filesDir, title, SOURCE, now, note, defaultStatus, status)
   }
 
   /**
@@ -49,7 +57,7 @@ object PendingCaptureWriter {
     return writeCapture(filesDir, title, CAPTURE_INTENT_SOURCE, now)
   }
 
-  private fun writeCapture(filesDir: File, title: String, source: String, now: Date, note: String = ""): File {
+  private fun writeCapture(filesDir: File, title: String, source: String, now: Date, note: String = "", defaultStatus: String? = null, status: String? = null): File {
     val id = UUID.randomUUID().toString()
     val json = JSONObject()
       .put("id", id)
@@ -57,6 +65,7 @@ object PendingCaptureWriter {
       .put("createdAt", isoTimestamp(now))
       .put("source", source)
       .apply { if (note.isNotBlank()) put("note", note) }
+      .apply { putDestination(defaultStatus, status) }
       .toString()
     return publish(filesDir, id, json)
   }
@@ -104,7 +113,7 @@ object PendingCaptureWriter {
    * failure; an existing distinct WAV or JSON is never overwritten.
    */
   @Throws(IOException::class)
-  fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String, note: String = ""): File {
+  fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String, note: String = "", defaultStatus: String? = null, status: String? = null): File {
     val paths = ownedAudioPaths(filesDir, draft) ?: throw IOException("Invalid audio capture path")
     val staged = paths.first
     val target = paths.second
@@ -131,6 +140,7 @@ object PendingCaptureWriter {
       .put("audioPath", absoluteFileUri(target))
       .put("source", SOURCE)
       .put("createdAt", isoTimestamp(draft.createdAt))
+      .apply { putDestination(defaultStatus, status) }
       .apply {
         if (title.isNotEmpty()) put("title", title)
         if (note.isNotBlank()) put("note", note)

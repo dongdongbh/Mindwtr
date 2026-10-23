@@ -52,6 +52,7 @@ import {
 import { serializeMindwtrCsv } from '@mindwtr/core/mindwtr-csv-export';
 import { buildTaskNotesExportZip } from '@mindwtr/core/tasknotes-export';
 import { logError, logInfo } from './app-log';
+import { getLocalAttachmentPresence } from './attachment-sync-utils';
 import {
     createMobileRecoverySnapshot,
     getLocalChangeAt,
@@ -187,6 +188,7 @@ const mobileDataTransferBoundaries = (): Omit<DataTransferBoundaries, 'createRec
     },
     refreshData: () => useTaskStore.getState().fetchData({ silent: true }),
     onStale: logStaleDataTransfer,
+    getLocalAttachmentPresence: (uri) => getLocalAttachmentPresence(uri),
 });
 
 const mobileBoundaries: DataTransferBoundaries = {

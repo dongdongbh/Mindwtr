@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   nativeModule: {
     drainDiagnostics: vi.fn(),
     addListener: vi.fn(),
+    beginBackgroundTask: vi.fn(),
+    endBackgroundTask: vi.fn(),
   },
   requireOptionalNativeModule: vi.fn(),
 }));
@@ -54,6 +56,55 @@ describe('ios-scene-lifecycle bridge', () => {
     expect(mocks.nativeModule.addListener).toHaveBeenCalledWith('onDiagnosticsChanged', listener);
     subscription.remove();
     expect(mocks.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends a background task exactly once on release', async () => {
+    mocks.nativeModule.beginBackgroundTask.mockReturnValue(7);
+    const bridge = await import('./index');
+    const onExpire = vi.fn();
+
+    const release = bridge.beginIosBackgroundTask('Mindwtr sync', onExpire);
+    expect(mocks.nativeModule.beginBackgroundTask).toHaveBeenCalledWith('Mindwtr sync');
+    expect(mocks.nativeModule.addListener).toHaveBeenCalledWith('onBackgroundTaskExpired', expect.any(Function));
+    release!();
+    release!();
+    expect(mocks.nativeModule.endBackgroundTask).toHaveBeenCalledTimes(1);
+    expect(mocks.nativeModule.endBackgroundTask).toHaveBeenCalledWith(7);
+    expect(mocks.remove).toHaveBeenCalledTimes(1);
+    expect(onExpire).not.toHaveBeenCalled();
+  });
+
+  it('reports only its own expiry once, and a later release does not end it again', async () => {
+    mocks.nativeModule.beginBackgroundTask.mockReturnValue(7);
+    const bridge = await import('./index');
+    const onExpire = vi.fn();
+
+    const release = bridge.beginIosBackgroundTask('Mindwtr sync', onExpire);
+    const listener = mocks.nativeModule.addListener.mock.calls[0][1] as (event: { id: unknown }) => void;
+    listener({ id: 8 });
+    expect(onExpire).not.toHaveBeenCalled();
+    listener({ id: 7 });
+    listener({ id: 7 });
+    expect(onExpire).toHaveBeenCalledTimes(1);
+    release!();
+    expect(mocks.nativeModule.endBackgroundTask).not.toHaveBeenCalled();
+  });
+
+  it('grants no hold when iOS refuses one or the native function is missing', async () => {
+    mocks.nativeModule.beginBackgroundTask.mockReturnValue(0);
+    let bridge = await import('./index');
+    expect(bridge.beginIosBackgroundTask('Mindwtr sync', vi.fn())).toBeNull();
+    expect(mocks.nativeModule.addListener).not.toHaveBeenCalled();
+
+    vi.resetModules();
+    mocks.requireOptionalNativeModule.mockReturnValue({ drainDiagnostics: vi.fn(), addListener: vi.fn() });
+    bridge = await import('./index');
+    expect(bridge.beginIosBackgroundTask('Mindwtr sync', vi.fn())).toBeNull();
+
+    vi.resetModules();
+    mocks.platform.OS = 'android';
+    bridge = await import('./index');
+    expect(bridge.beginIosBackgroundTask('Mindwtr sync', vi.fn())).toBeNull();
   });
 
   it('is nonfatal outside iOS and when an older client lacks the module', async () => {

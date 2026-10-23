@@ -9,6 +9,7 @@ import type { GtdWorkflowEdit, NativeGtdWorkflowRequest } from './native-host-co
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Area, Task } from './types';
 import { generateUUID } from './uuid';
+import { buildGtdSettingsModel, resolveGtdPomodoroDurations } from './gtd-settings-model';
 
 const ID = '00000000-0000-4000-8000-000000000103';
 const AT = '2026-09-01T00:00:00.000Z';
@@ -21,11 +22,16 @@ const initial = (): AppData => ({ tasks: [terminal], projects: [], sections: [],
         syncPreferencesUpdatedAt: { gtd: AT, appearance: AT },
         ai: { apiKey: 'private-value', baseUrl: 'https://private.invalid/x' } } as AppData['settings'] });
 
-async function open(start: AppData, fail?: () => boolean) {
+async function open(start: AppData, fail?: () => boolean, failRead?: () => boolean) {
     await flushPendingSave(); resetForTests();
     let data = structuredClone(start);
     let saves = 0;
-    const adapter = { getData: async () => structuredClone(data), saveData: async (next: AppData) => {
+    let reads = 0;
+    const adapter = { getData: async () => {
+        reads += 1;
+        if (failRead?.()) throw new Error('read unavailable');
+        return structuredClone(data);
+    }, saveData: async (next: AppData) => {
         if (fail?.()) throw new Error('disk unavailable');
         data = structuredClone(next); saves += 1;
     } };
@@ -36,8 +42,8 @@ async function open(start: AppData, fail?: () => boolean) {
     data = structuredClone(start);
     const host = createNativeHostContract();
     expect(await host.activate({ writeSafetyReady: true })).toMatchObject({ ok: true });
-    await flushPendingSave(); data = structuredClone(start); saves = 0;
-    return { host, data: () => data, saves: () => saves,
+    await flushPendingSave(); data = structuredClone(start); saves = 0; reads = 0;
+    return { host, data: () => data, saves: () => saves, reads: () => reads,
         changeSaved: (fn: (data: AppData) => AppData) => { data = fn(data); },
         reopen: async () => open(data, fail) };
 }
@@ -47,6 +53,20 @@ async function planned(env: Awaited<ReturnType<typeof open>>,
     const options = await env.host.getGtdWorkflowOptions({});
     if (!options.ok) throw new Error(JSON.stringify(options));
     const request: NativeGtdWorkflowRequest = { requestId: ID, edit, expected: options.value.expected[edit.type] };
+    const plan = await env.host.prepareGtdWorkflow(request);
+    if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+    return { options: options.value, request, prepared: plan.value.prepared,
+        envelope: { request, prepared: plan.value.prepared } };
+}
+
+async function plannedPomodoro(env: Awaited<ReturnType<typeof open>>,
+    edit: Extract<GtdWorkflowEdit, { type: 'pomodoro' | 'pomodoroLinkTask' | 'pomodoroAutoStartBreaks'
+        | 'pomodoroAutoStartFocus' | 'pomodoroCompletionAlert' | 'pomodoroDurations' }>) {
+    const options = await env.host.getGtdPomodoroOptions({});
+    if (!options.ok) throw new Error(JSON.stringify(options));
+    const expected = options.value.expected[edit.type];
+    if (!expected) throw new Error('Selected Pomodoro setting is unavailable');
+    const request: NativeGtdWorkflowRequest = { requestId: ID, edit, expected };
     const plan = await env.host.prepareGtdWorkflow(request);
     if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
     return { options: options.value, request, prepared: plan.value.prepared,
@@ -1157,7 +1177,7 @@ describe('prepared GTD workflow defaults', () => {
         const env = await open(initial());
         const { options, envelope, prepared } = await planned(env, edit);
         expect(Object.keys(options.expected).sort()).toEqual([
-            'defaultScheduleTime', 'focusTaskLimit', 'focusIncludeStartDates', 'defaultProjectFlowMode'].sort());
+            'defaultScheduleTime', 'focusTaskLimit', 'focusIncludeStartDates', 'defaultProjectFlowMode', 'pomodoro'].sort());
         expect(options.expected[edit.type]).toMatchObject({ present: false, value: null, stampPresent: true, stamp: AT });
         expect(options.hub[edit.type].label).toEqual(expect.any(String));
         expect(env.host.validatePreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: prepared.result });
@@ -2239,5 +2259,265 @@ describe('GTD Capture parser toggles in the original v1 workflow journal', () =>
         const after = cold.host.getQuickCaptureView({ text, options: fresh.value.options });
         if (!after.ok) throw new Error(JSON.stringify(after));
         expect(after.value.preview.some((chip) => chip.kind === 'due')).toBe(false);
+    });
+});
+
+
+const pomodoroFields = {
+    pomodoroLinkTask: 'linkTask', pomodoroAutoStartBreaks: 'autoStartBreaks',
+    pomodoroAutoStartFocus: 'autoStartFocus', pomodoroCompletionAlert: 'completionAlert',
+} as const;
+const pomodoroStart = (): AppData => {
+    const data = initial(); data.settings.features = { pomodoro: true, priorities: true };
+    data.settings.gtd = { ...data.settings.gtd, pomodoro: { legacySibling: 'preserve' } } as AppData['settings']['gtd'];
+    return data;
+};
+
+describe('durable Pomodoro Settings', () => {
+    it('projects absent raw defaults and keeps disabled dependent controls unavailable', async () => {
+        const env = await open(initial());
+        const read = await env.host.getGtdPomodoroOptions({});
+        expect(read.ok).toBe(true); if (!read.ok) return;
+        expect(read.value.pomodoro).toEqual(buildGtdSettingsModel({ settings: initial().settings,
+            areas: [], taskOpenMode: 'automatic', t: (key) => key }).pomodoro);
+        expect(read.value.expected.pomodoro).toEqual({ parentPresent: false, present: false,
+            value: null, stampPresent: true, stamp: AT });
+        for (const type of [...Object.keys(pomodoroFields), 'pomodoroDurations'])
+            expect(read.value.expected[type as keyof typeof read.value.expected]).toBeNull();
+        const hub = await env.host.getGtdWorkflowOptions({});
+        expect(hub.ok && hub.value.expected.pomodoro).toEqual(read.value.expected.pomodoro);
+        const enabled = await plannedPomodoro(env, { type: 'pomodoro', value: true });
+        expect(await env.host.commitPreparedGtdWorkflow(enabled.envelope)).toEqual({ ok: true,
+            value: { type: 'pomodoro', value: true, changed: true } });
+        expect(env.data().settings.features?.pomodoro).toBe(true);
+    });
+
+    it.each(Object.entries(pomodoroFields))('preserves default polarity and exact inverse for %s', async (type, field) => {
+        const env = await open(pomodoroStart());
+        const options = await env.host.getGtdPomodoroOptions({});
+        expect(options.ok).toBe(true); if (!options.ok) return;
+        expect(options.value.expected[type as keyof typeof pomodoroFields]).toMatchObject({
+            parentPresent: true, present: false, value: null,
+            gate: { featuresPresent: true, enabled: { present: true, value: true } } });
+        const value = type !== 'pomodoroCompletionAlert';
+        const edit = { type, value } as { type: keyof typeof pomodoroFields; value: boolean };
+        const frozen = await plannedPomodoro(env, edit);
+        expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toEqual({ ok: true,
+            value: { type, value, changed: true } });
+        expect(env.data().settings.gtd?.pomodoro).toEqual({ legacySibling: 'preserve', [field]: value });
+        expect(env.data().settings.features).toEqual(pomodoroStart().settings.features);
+    });
+
+    it.each(Object.entries(pomodoroFields).flatMap(([type, field]) =>
+        [false, true].map((value) => ({ type: type as keyof typeof pomodoroFields, field, value }))))(
+        'retains explicit raw $type=$value presence and offers its inverse', async ({ type, field, value }) => {
+            const start = pomodoroStart(); Object.assign(start.settings.gtd!.pomodoro!, { [field]: value });
+            const env = await open(start); const read = await env.host.getGtdPomodoroOptions({});
+            expect(read.ok).toBe(true); if (!read.ok) return;
+            expect(read.value.expected[type]).toMatchObject({ parentPresent: true, present: true, value });
+            const frozen = await plannedPomodoro(env, { type, value: !value });
+            expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toMatchObject({ ok: true });
+            expect((env.data().settings.gtd?.pomodoro as Record<string, unknown>)[field]).toBe(!value);
+        });
+
+    it('disables only unsupported selected shapes and never repairs malformed siblings', async () => {
+        const start = pomodoroStart();
+        start.settings.gtd!.pomodoro = { linkTask: 'wrong', customDurations: { focusMinutes: 25, alien: 2 },
+            completionAlert: false } as never;
+        const env = await open(start);
+        const read = await env.host.getGtdPomodoroOptions({});
+        expect(read.ok).toBe(true); if (!read.ok) return;
+        expect(read.value.expected.pomodoroLinkTask).toBeNull();
+        expect(read.value.expected.pomodoroDurations).toBeNull();
+        expect(read.value.expected.pomodoroCompletionAlert).not.toBeNull();
+        const frozen = await plannedPomodoro(env, { type: 'pomodoroCompletionAlert', value: true });
+        expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toMatchObject({ ok: true });
+        expect(env.data().settings.gtd?.pomodoro).toEqual({ ...start.settings.gtd?.pomodoro, completionAlert: true });
+        expect(await env.host.prepareGtdWorkflow({ requestId: ID, edit: { type: 'pomodoroLinkTask', value: true },
+            expected: null })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('reads one durable options snapshot and propagates read failures instead of unavailable witnesses', async () => {
+        let failed = false; const env = await open(pomodoroStart(), undefined, () => failed);
+        expect(await env.host.getGtdPomodoroOptions({})).toMatchObject({ ok: true });
+        expect(env.reads()).toBe(1); expect(env.saves()).toBe(0);
+        expect(await env.host.getGtdPomodoroOptions({ extra: true })).toMatchObject({ ok: false,
+            error: { code: 'INVALID_INPUT' } });
+        expect(env.reads()).toBe(1);
+        failed = true;
+        expect(await env.host.getGtdPomodoroOptions({})).toMatchObject({ ok: false,
+            error: { code: 'SAVE_FAILED' } });
+        expect(env.reads()).toBe(2);
+    });
+
+    it.each([false, { pomodoro: 'bad' }, { pomodoro: false }])('does not grant availability through malformed/off features %j', async (features) => {
+        const start = pomodoroStart(); start.settings.features = features as never;
+        const env = await open(start);
+        const read = await env.host.getGtdPomodoroOptions({});
+        expect(read.ok).toBe(true); if (!read.ok) return;
+        expect(read.value.pomodoro.controls).toBeNull();
+        for (const type of [...Object.keys(pomodoroFields), 'pomodoroDurations'])
+            expect(read.value.expected[type as keyof typeof read.value.expected]).toBeNull();
+        const hub = await env.host.getGtdWorkflowOptions({});
+        expect(hub.ok).toBe(true);
+    });
+
+    it('feature toggles ignore malformed unrelated GTD subpages and preserve their raw bytes', async () => {
+        const start = initial(); start.settings.gtd = 'legacy' as never;
+        const env = await open(start);
+        const frozen = await plannedPomodoro(env, { type: 'pomodoro', value: true });
+        expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toMatchObject({ ok: true });
+        expect(env.data().settings.gtd).toBe('legacy');
+    });
+
+    it.each([
+        [{}, 'bad', '', { focusMinutes: 25, breakMinutes: 5 }],
+        [{ focusMinutes: 41.6 }, 'wrong', '0', { focusMinutes: 42, breakMinutes: 1 }],
+        [{ focusMinutes: 900, breakMinutes: -4 }, '2.9', '999', { focusMinutes: 2, breakMinutes: 180 }],
+        [{ focusMinutes: 11, breakMinutes: 7 }, ' 0012xyz', 'bad', { focusMinutes: 12, breakMinutes: 7 }],
+    ] as const)('normalizes both duration drafts using the captured raw RN baseline %j', async (raw, focusMinutes, breakMinutes, expectedValue) => {
+        const start = pomodoroStart(); start.settings.gtd!.pomodoro!.customDurations = { ...raw } as never;
+        const env = await open(start); const read = await env.host.getGtdPomodoroOptions({});
+        expect(read.ok).toBe(true); if (!read.ok) return;
+        expect(read.value.expected.pomodoroDurations?.value).toEqual(raw);
+        const draft = env.host.normalizeGtdWorkflowDraft({ type: 'pomodoroDurations', focusMinutes,
+            breakMinutes, expected: read.value.expected.pomodoroDurations });
+        expect(draft).toEqual({ ok: true, value: { valid: true, value: expectedValue } });
+        expect(expectedValue).toEqual(resolveGtdPomodoroDurations(start.settings, focusMinutes, breakMinutes));
+        expect(env.saves()).toBe(0);
+    });
+
+    it('leaves absent and partial noncanonical duration rows untouched for a display no-op', async () => {
+        for (const raw of [undefined, { focusMinutes: 25 }, { focusMinutes: 25.2, breakMinutes: 5 }]) {
+            const start = pomodoroStart(); start.settings.gtd!.pomodoro!.customDurations = raw;
+            const env = await open(start); const read = await env.host.getGtdPomodoroOptions({});
+            expect(read.ok).toBe(true); if (!read.ok) return;
+            expect(await env.host.prepareGtdWorkflow({ requestId: ID,
+                edit: { type: 'pomodoroDurations', value: { focusMinutes: 25, breakMinutes: 5 } },
+                expected: read.value.expected.pomodoroDurations })).toEqual({ ok: true,
+                value: { kind: 'noop', result: { type: 'pomodoroDurations',
+                    value: { focusMinutes: 25, breakMinutes: 5 }, changed: false } } });
+            expect(env.saves()).toBe(0); expect(env.data()).toEqual(start);
+        }
+    });
+
+    it('bounds UTF8 drafts independently and preserves the original schedule draft grammar', async () => {
+        const env = await open(pomodoroStart()); const read = await env.host.getGtdPomodoroOptions({});
+        if (!read.ok) throw new Error(JSON.stringify(read));
+        const input = { type: 'pomodoroDurations', focusMinutes: 'a'.repeat(512), breakMinutes: '5',
+            expected: read.value.expected.pomodoroDurations };
+        expect(env.host.normalizeGtdWorkflowDraft(input)).toMatchObject({ ok: true });
+        expect(env.host.normalizeGtdWorkflowDraft({ ...input, focusMinutes: '😀'.repeat(128) })).toMatchObject({ ok: true });
+        for (const extra of [ { focusMinutes: 'a'.repeat(513) }, { breakMinutes: '界'.repeat(171) },
+            { focusMinutes: '😀'.repeat(129) }, { extra: true }, { expected: null }, { focusMinutes: 25 } ])
+            expect(env.host.normalizeGtdWorkflowDraft({ ...input, ...extra })).toMatchObject({ ok: false,
+                error: { code: 'INVALID_INPUT' } });
+        expect(env.host.normalizeGtdWorkflowDraft({ value: '930' })).toEqual({ ok: true,
+            value: { valid: true, value: '09:30' } });
+    });
+
+    it('rejects open duration edits, witnesses, receipts and oversized prepared frames purely', async () => {
+        const env = await open(pomodoroStart());
+        const frozen = await plannedPomodoro(env, { type: 'pomodoroDurations',
+            value: { focusMinutes: 33, breakMinutes: 8 } });
+        expect(env.host.validatePreparedGtdWorkflow(frozen.envelope)).toMatchObject({ ok: true });
+        const mutations = [
+            (v: typeof frozen.envelope) => { v.request.edit = { type: 'pomodoroDurations', value: { focusMinutes: 0, breakMinutes: 8 } }; },
+            (v: typeof frozen.envelope) => { v.request.edit = { type: 'pomodoroDurations', value: { focusMinutes: 1.5, breakMinutes: 8 } }; },
+            (v: typeof frozen.envelope) => { Object.assign(v.request.edit, { alien: true }); },
+            (v: typeof frozen.envelope) => { Object.assign(v.request.expected, { alien: true }); },
+            (v: typeof frozen.envelope) => { Object.assign(v.prepared.result, { alien: true }); },
+            (v: typeof frozen.envelope) => { v.prepared.after.value = { focusMinutes: 34, breakMinutes: 8 }; },
+            (v: typeof frozen.envelope) => { Object.assign(v.prepared.result.value as object, { alien: true }); },
+        ];
+        for (const mutate of mutations) {
+            const invalid = structuredClone(frozen.envelope); mutate(invalid);
+            expect(env.host.validatePreparedGtdWorkflow(invalid)).toMatchObject({ ok: false,
+                error: { code: 'INVALID_INPUT' } });
+        }
+        expect(env.host.validatePreparedGtdWorkflow({ ...frozen.envelope, padding: 'x'.repeat(8193) }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(env.saves()).toBe(0);
+    });
+
+    it('refuses disabled-gate no-ops and closes every gate and raw duration member', async () => {
+        const env = await open(pomodoroStart());
+        const frozen = await plannedPomodoro(env, { type: 'pomodoroDurations', value: { focusMinutes: 33, breakMinutes: 8 } });
+        for (const changed of [
+            { ...frozen.request.expected, gate: { featuresPresent: true, enabled: { present: true, value: false } } },
+            { ...frozen.request.expected, gate: { featuresPresent: true, enabled: { present: false, value: true } } },
+            { ...frozen.request.expected, gate: { featuresPresent: true, enabled: { present: true, value: true }, alien: 1 } },
+            { ...frozen.request.expected, present: true, value: { focusMinutes: 25, alien: 1 } },
+            { ...frozen.request.expected, present: true, value: { focusMinutes: '25' } },
+            { ...frozen.request.expected, parentPresent: false, present: true, value: {} },
+        ]) {
+            const invalid = structuredClone(frozen.envelope);
+            invalid.request.expected = changed as NativeGtdWorkflowRequest['expected'];
+            invalid.prepared.request.expected = invalid.request.expected;
+            expect(env.host.validatePreparedGtdWorkflow(invalid)).toMatchObject({ ok: false,
+                error: { code: 'INVALID_INPUT' } });
+        }
+        env.changeSaved((data) => { data.settings.features!.pomodoro = false; return data; });
+        const disabled = structuredClone(frozen.request);
+        (disabled.expected as { gate: { enabled: { value: boolean } } }).gate.enabled.value = false;
+        disabled.edit = { type: 'pomodoroDurations', value: { focusMinutes: 25, breakMinutes: 5 } };
+        expect(await env.host.prepareGtdWorkflow(disabled)).toMatchObject({ ok: false,
+            error: { code: 'INVALID_INPUT' } });
+        expect(env.saves()).toBe(0);
+    });
+
+    it.each(['gate', 'stamp', 'device', 'selected'] as const)('refuses a selected %s race without a write', async (race) => {
+        const env = await open(pomodoroStart());
+        const frozen = await plannedPomodoro(env, { type: 'pomodoroDurations',
+            value: { focusMinutes: 33, breakMinutes: 8 } });
+        env.changeSaved((data) => {
+            if (race === 'gate') data.settings.features!.pomodoro = false;
+            if (race === 'stamp') data.settings.syncPreferencesUpdatedAt!.gtd = '2026-09-02T00:00:00.000Z';
+            if (race === 'device') data.settings.deviceId = 'other';
+            if (race === 'selected') data.settings.gtd!.pomodoro!.customDurations = { focusMinutes: 12, breakMinutes: 4 };
+            return data;
+        });
+        const before = structuredClone(env.data());
+        expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toMatchObject({ ok: false,
+            error: { code: 'STALE_REVISION' } });
+        expect(env.data()).toEqual(before); expect(env.saves()).toBe(0);
+    });
+
+    it('merges unrelated raw edits and leaves timer/session and task rows untouched', async () => {
+        const start = pomodoroStart(); start.settings.local = { pomodoroSession: 'opaque RN cell',
+            pomodoroTaskId: 'retained selection' } as never;
+        const env = await open(start);
+        const frozen = await plannedPomodoro(env, { type: 'pomodoroDurations',
+            value: { focusMinutes: 33, breakMinutes: 8 } });
+        env.changeSaved((data) => { data.settings.language = 'ko'; data.settings.gtd!.focusGroupBy = 'status';
+            data.tasks[0].title = 'Concurrent raw task'; return data; });
+        const before = structuredClone(env.data());
+        expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toMatchObject({ ok: true });
+        expect(env.data().tasks).toEqual(before.tasks);
+        expect(env.data().settings.local).toEqual(before.settings.local);
+        expect(env.data().settings.gtd).toEqual({ ...before.settings.gtd, pomodoro: {
+            ...before.settings.gtd?.pomodoro, customDurations: { focusMinutes: 33, breakMinutes: 8 } } });
+        expect(env.data().settings.language).toBe('ko');
+        // The existing settings owner strips the API credential on every save.
+        expect(env.data().settings.ai).toEqual({ ...before.settings.ai, apiKey: undefined });
+    });
+
+    it('retains exact failed-save ownership and settles only the frozen retry', async () => {
+        let failed = false; const env = await open(pomodoroStart(), () => failed);
+        const frozen = await plannedPomodoro(env, { type: 'pomodoroDurations',
+            value: { focusMinutes: 33, breakMinutes: 8 } });
+        const before = structuredClone(env.data()); failed = true;
+        expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toMatchObject({ ok: false,
+            error: { code: 'SAVE_FAILED' } });
+        expect(env.data()).toEqual(before);
+        const another = structuredClone(frozen.envelope); another.request.requestId = generateUUID();
+        another.prepared.request.requestId = another.request.requestId;
+        expect(await env.host.commitPreparedGtdWorkflow(another)).toMatchObject({ ok: false,
+            error: { code: 'SAVE_FAILED' } });
+        failed = false;
+        expect(await env.host.commitPreparedGtdWorkflow(frozen.envelope)).toEqual({ ok: true,
+            value: frozen.prepared.result });
+        expect(env.data().settings.gtd?.pomodoro?.customDurations).toEqual({ focusMinutes: 33, breakMinutes: 8 });
+        expect(env.data().tasks).toEqual(before.tasks);
     });
 });

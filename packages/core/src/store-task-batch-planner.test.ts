@@ -5,6 +5,7 @@ import { reserveTaskContainerProjectOrder } from './task-container-rules';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { planTaskBatchUpdateEffects, prepareTaskBatchUpdatesForStore, prepareTaskUpdatesForStore } from './store-tasks';
 import type { AppData, Project, Section, Task } from './types';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 
 const ids = vi.hoisted(() => ({ count: 0 }));
 vi.mock('./uuid', () => ({ generateUUID: () => `batch-followup-${++ids.count}` }));
@@ -150,6 +151,8 @@ describe('shared batch task planner', () => {
         await flushPendingSave();
         expect(helpers.buildSaveSnapshot(useTaskStore.getState())).toEqual({
             ...initial, tasks: planned.tasks, projects: planned.projects, sections: planned.sections,
+            settings: retainTaxonomyEffects(initial.settings, initial.tasks.filter(row => requests.some(request => request.id === row.id))
+                .map(before => ({ before, after: planned.tasks.find(row => row.id === before.id)! }))),
         });
     });
 

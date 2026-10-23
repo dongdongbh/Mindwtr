@@ -27,16 +27,28 @@ const now = (): number => (typeof performance !== 'undefined' && typeof performa
 export type Slicer = {
     due(): boolean;
     yield(): Promise<void>;
+    /** Records one stretch a sliced pass ran without giving the thread back ({@link runSliced} calls it). */
+    ran(ms: number): void;
+    /**
+     * How often the passes gave the thread back, and the longest stretch one of them ran in ms. Only the passes' own work:
+     * a wait between them (the network, the write gate) and the unsliced work around them are not in it.
+     */
+    stats(): { slices: number; longestMs: number };
 };
 
 export const createSlicer = (yieldToHost: () => Promise<void>, budgetMs: number = SLICE_BUDGET_MS): Slicer => {
     let sliceStart = now();
+    let slices = 0;
+    let longestMs = 0;
     return {
         due: () => now() - sliceStart >= budgetMs,
         yield: async () => {
+            slices += 1;
             await yieldToHost();
             sliceStart = now();
         },
+        ran: (ms) => { longestMs = Math.max(longestMs, ms); },
+        stats: () => ({ slices, longestMs }),
     };
 };
 
@@ -47,11 +59,13 @@ export const createSlicer = (yieldToHost: () => Promise<void>, budgetMs: number 
 export const runSliced = async <T>(name: string, pass: CooperativePass<T>, slicer?: Slicer): Promise<T> => {
     if (!slicer) return traceSection(name, () => runToEnd(pass));
     for (;;) {
+        const started = now();
         const step = traceSection(name, () => {
             let next = pass.next();
             while (!next.done && !slicer.due()) next = pass.next();
             return next;
         });
+        slicer.ran(now() - started);
         if (step.done) return step.value;
         await slicer.yield();
     }

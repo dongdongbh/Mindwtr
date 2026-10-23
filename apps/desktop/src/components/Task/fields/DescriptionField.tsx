@@ -1,6 +1,6 @@
 import { type ClipboardEvent, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { AlignLeft, Eye, Loader2, Maximize2, Mic, Pencil, Square } from 'lucide-react';
-import { tFallback, type MarkdownSelection, type MarkdownToolbarActionId, type MarkdownToolbarResult } from '@mindwtr/core';
+import { tFallback, type Attachment, type MarkdownSelection, type MarkdownToolbarActionId, type MarkdownToolbarResult } from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
 import { ExpandedMarkdownEditor } from '../../ExpandedMarkdownEditor';
@@ -16,6 +16,7 @@ type DescriptionFieldProps = {
     t: (key: string) => string;
     taskTitle?: string;
     taskId: string;
+    attachments: Attachment[];
     showDescriptionPreview: boolean;
     editDescription: string;
     isRtl: boolean;
@@ -52,6 +53,7 @@ export function DescriptionField({
     t,
     taskTitle,
     taskId,
+    attachments,
     showDescriptionPreview,
     editDescription,
     isRtl,
@@ -155,7 +157,7 @@ export function DescriptionField({
                     )}
                     dir={resolvedDirection}
                 >
-                    <RichMarkdown markdown={editDescription || ''} />
+                    <RichMarkdown markdown={editDescription || ''} attachments={attachments} />
                 </div>
             ) : (
                 <div className="relative flex flex-col gap-2">
@@ -228,6 +230,7 @@ export function DescriptionField({
                 onEditorKeyDown={onKeyDown}
                 onEditorPaste={onPaste}
                 currentTaskId={taskId}
+                attachments={attachments}
             />
         </div>
     );

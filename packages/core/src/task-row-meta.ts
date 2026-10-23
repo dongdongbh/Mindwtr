@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from './task-accent-color';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import { createDateFormatter, hasTimeComponent, safeParseDate, safeParseDueDate, type DateFormatter, type DateFormattingConfig } from './date';
 import { tFallback, type TranslateFn } from './i18n';
@@ -170,7 +171,7 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
             kind: 'project',
             text: section ? `${project.title} · ${section.title}` : project.title,
             projectId: project.id,
-            dotColor: projectArea?.color || null,
+            dotColor: getProjectAccentColor(project, new Map(projectArea ? [[projectArea.id, projectArea]] : [])) ?? null,
         });
     }
     // A task filed straight under an area names the area; a project already

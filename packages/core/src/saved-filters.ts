@@ -1,4 +1,5 @@
 import {
+    addDays,
     endOfDay,
     endOfMonth,
     endOfWeek,
@@ -68,7 +69,7 @@ const SORT_FIELD_VALUES = new Set<SortField>([
 export const isSavedFilterSortField = (value: unknown): value is SortField =>
     typeof value === 'string' && SORT_FIELD_VALUES.has(value as SortField);
 
-const DATE_PRESET_VALUES = new Set(['today', 'this_week', 'this_month', 'overdue', 'no_date']);
+const DATE_PRESET_VALUES = new Set(['today', 'this_week', 'this_month', 'overdue', 'no_date', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -128,7 +129,7 @@ const normalizeMultiValueFilterMatchMode = (value: unknown): MultiValueFilterMat
 export function normalizeDateRange(value: unknown): DateRange | undefined {
     if (!isRecord(value)) return undefined;
     if (typeof value.preset === 'string' && DATE_PRESET_VALUES.has(value.preset)) {
-        return { preset: value.preset as 'today' | 'this_week' | 'this_month' | 'overdue' | 'no_date' };
+        return { preset: value.preset as Extract<DateRange, { preset: string }>['preset'] };
     }
     const from = typeof value.from === 'string' && value.from.trim() ? value.from.trim() : undefined;
     const to = typeof value.to === 'string' && value.to.trim() ? value.to.trim() : undefined;
@@ -174,8 +175,10 @@ export function normalizeFilterCriteria(value: unknown): FilterCriteria {
 
     const dueDateRange = normalizeDateRange(value.dueDateRange);
     const startDateRange = normalizeDateRange(value.startDateRange);
+    const anyDateRange = normalizeDateRange(value.anyDateRange);
     if (dueDateRange) criteria.dueDateRange = dueDateRange;
     if (startDateRange) criteria.startDateRange = startDateRange;
+    if (anyDateRange) criteria.anyDateRange = anyDateRange;
 
     if (isRecord(value.timeEstimateRange)) {
         const min = typeof value.timeEstimateRange.min === 'number' && Number.isFinite(value.timeEstimateRange.min)
@@ -209,6 +212,7 @@ export function hasActiveFilterCriteria(criteria: FilterCriteria | undefined): b
         || normalized.priority?.length
         || normalized.dueDateRange
         || normalized.startDateRange
+        || normalized.anyDateRange
         || normalized.statuses?.length
         || normalized.assignedTo?.length
         || normalized.locations?.length
@@ -281,6 +285,15 @@ const matchesDateRange = (
                 return (isAfter(date, todayStart) || isEqual(date, todayStart))
                     && (isBefore(date, todayEnd) || isEqual(date, todayEnd));
             }
+            case 'next_7_days':
+            case 'next_14_days':
+            case 'next_30_days': {
+                const days = range.preset === 'next_7_days' ? 7 : range.preset === 'next_14_days' ? 14 : 30;
+                const end = endOfDay(addDays(options.now, days - 1));
+                return date >= todayStart && date <= end;
+            }
+            case 'upcoming':
+                return date >= todayStart;
             case 'this_week': {
                 const start = startOfWeek(options.now, { weekStartsOn: options.weekStartsOn });
                 const end = endOfWeek(options.now, { weekStartsOn: options.weekStartsOn });
@@ -405,6 +418,17 @@ const taskMatchesPreparedFilterCriteria = (
     if (!matchesPriority(normalized.priority, task.priority)) return false;
     if (!matchesDateRange(task.dueDate, normalized.dueDateRange, safeParseDueDate, { now, weekStartsOn })) return false;
     if (!matchesDateRange(task.startTime, normalized.startDateRange, safeParseDate, { now, weekStartsOn })) return false;
+    if (normalized.anyDateRange) {
+        const options = { now, weekStartsOn };
+        const range = normalized.anyDateRange;
+        // No date means none of the task's date fields are set.
+        const matches = 'preset' in range && range.preset === 'no_date'
+            ? !task.startTime && !task.dueDate && !task.reviewAt
+            : matchesDateRange(task.startTime, range, safeParseDate, options)
+                || matchesDateRange(task.dueDate, range, safeParseDueDate, options)
+                || matchesDateRange(task.reviewAt, range, safeParseDate, options);
+        if (!matches) return false;
+    }
     if (!matchesAssignedTo(normalized.assignedTo, task.assignedTo)) return false;
     if (!matchesLocation(normalized.locations, task.location)) return false;
     if (normalized.timeEstimates?.length) {

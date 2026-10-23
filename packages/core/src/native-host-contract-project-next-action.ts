@@ -18,9 +18,10 @@ import { normalizeProjectLifecycleFields } from './project-status';
 import { prepareTaskUpdatesForStore, planTaskUpdateEffects } from './store-tasks';
 import { projectLifecycleEffect } from './store-projects/project-actions';
 import { buildNewTask } from './task-creation';
-import { parseProjectNextActionInput, isNaturalLanguageDatesEnabled } from './quick-add';
-import { normalizeClockTimeInput } from './date';
-import { ensureDeviceId, getNextProjectOrder } from './store-helpers';
+import { getTaskReminderDefault } from './task-reminder-policy';
+import { buildQuickAddParseOptions, parseProjectNextActionInput } from './quick-add';
+import { ensureDeviceId, getNextProjectOrder, selectVisiblePeople, selectVisibleTasks } from './store-helpers';
+import { isTimeEstimate } from './native-host-contract-menu-views';
 import { countFocusedTasksBeforeBoundary, projectFocusDateValues, type FocusDateProjection } from './task-utils';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { generateUUID } from './uuid';
@@ -209,7 +210,7 @@ const trimChooseOperation = (request: Extract<NativeReferenceProjectNextActionRe
 };
 const validDevice = (op: { deviceIdBefore: string | null; deviceIdToInitialize: string | null }) => op.deviceIdBefore === null
     ? typeof op.deviceIdToInitialize === 'string' && UUID.test(op.deviceIdToInitialize) : text(op.deviceIdBefore, 500) && op.deviceIdToInitialize === null;
-const creationKeys = ['status', 'projectId', 'sectionId', 'areaId', 'startTime', 'dueDate', 'reviewAt', 'description', 'contexts', 'tags', 'priority', 'energyLevel', 'assignedTo', 'attachments', 'isFocusedToday'];
+const creationKeys = ['status', 'projectId', 'sectionId', 'areaId', 'startTime', 'dueDate', 'reviewAt', 'description', 'contexts', 'tags', 'priority', 'energyLevel', 'assignedTo', 'attachments', 'isFocusedToday', 'timeEstimate'];
 const validResolvedDate = (v: unknown): boolean => iso(v) || typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
     && Number.isFinite(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const validIntent = (v: unknown, context: NativeProjectNextActionContext): v is NativeProjectNextActionResolvedIntent => {
@@ -226,16 +227,22 @@ const validIntent = (v: unknown, context: NativeProjectNextActionContext): v is 
         || ['tags', 'contexts'].some((k) => p[k] !== undefined && (!Array.isArray(p[k]) || p[k].length > 1000 || !p[k].every((s: unknown) => text(s, 1000))))
         || p.priority !== undefined && !['low', 'medium', 'high', 'urgent'].includes(String(p.priority))
         || p.energyLevel !== undefined && !['low', 'medium', 'high'].includes(String(p.energyLevel))
+        || p.timeEstimate !== undefined && !isTimeEstimate(p.timeEstimate)
         || p.isFocusedToday !== undefined && p.isFocusedToday !== true) return false;
     return p.attachments === undefined || Array.isArray(p.attachments) && p.attachments.length <= 1000 && unique(p.attachments as { id: string }[])
         && p.attachments.every((a) => record(a) && exact(a, ['id', 'kind', 'title', 'uri', 'createdAt', 'updatedAt'])
             && typeof a.id === 'string' && UUID.test(a.id) && a.kind === 'link' && text(a.title, 100_000) && text(a.uri, 100_000)
             && iso(a.createdAt) && a.createdAt === a.updatedAt);
 };
-const addTask = (op: AddOperation): Task => {
+// The intent cannot carry a reminder policy, so the new row inherits the library
+// default and its suppression flag records that default. The journal shape (which
+// Swift checks exactly) stays unchanged: rows written before Skip was honored
+// carry `false`, which replays as Send, exactly as they were prepared.
+const frozenReminderDefault = (task: Task): 'send' | 'skip' => task.suppressMindwtrReminders === true ? 'skip' : 'send';
+const addTask = (op: AddOperation, taskReminderDefault = frozenReminderDefault(op.task)): Task => {
     const { creation: c } = op; const f = c.focus; const props = c.intent.props;
     const built = buildNewTask({ title: c.intent.title, initialTaskProps: props, id: op.task.id, now: op.updateAt,
-        deviceId: op.deviceIdBefore ?? op.deviceIdToInitialize!, state: { settings: {}, _allProjects: [c.containers.project],
+        deviceId: op.deviceIdBefore ?? op.deviceIdToInitialize!, state: { settings: { taskReminderDefault }, _allProjects: [c.containers.project],
             _allSections: c.containers.section ? [c.containers.section] : [], _allAreas: c.containers.areas },
         tasks: f?.lists.tasks ?? [], focusedCount: f?.focusCount ?? 0, focusTaskLimit: f?.focusLimit ?? 1,
         projectOrderReserver: (id) => { if (id !== c.projectOrder.projectId) throw new Error('Unknown creation order'); return c.projectOrder.max + 1; },
@@ -513,9 +520,8 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     rawBefore = rawBeforeOf(data, op.effect.tasks, op.effect.projects, op.effect.sections);
                 } else if (request.action === 'add') {
                     const parsed = parseProjectNextActionInput(request.text, { projectId: context.project.id, sectionId: context.section?.id,
-                        projects: lists.projects, areas: lists.areas, parseOptions: {
-                            defaultScheduleTime: normalizeClockTimeInput(data.settings.gtd?.defaultScheduleTime) || undefined,
-                            preserveText: data.settings.quickAddAutoClean !== true, naturalLanguageDates: isNaturalLanguageDatesEnabled(data.settings) } });
+                        projects: lists.projects, areas: lists.areas, parseOptions: buildQuickAddParseOptions(data.settings,
+                            { tasks: selectVisibleTasks(lists.tasks), _allTasks: lists.tasks, people: selectVisiblePeople(data.people ?? []) }) });
                     const intent = { title: parsed.title, props: parsed.props };
                     if (!validIntent(intent, context)) return fail('INVALID_INPUT', 'Resolved next action cannot be represented safely');
                     const project = lists.projects.find((r) => r.id === intent.props.projectId)!;
@@ -530,7 +536,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     const op: AddOperation = { kind: 'add', creation: { intent, containers: { project, section, areas },
                         projectOrder: { projectId: project.id, max: (getNextProjectOrder(project.id, lists.tasks) ?? 0) - 1 }, focus },
                         task: { id } as Task, ...deviceFields, updateAt: creationAt };
-                    op.task = addTask(op); operation = op; result = { action: 'add', id, openAfterSave: request.openAfterSave };
+                    op.task = addTask(op, getTaskReminderDefault(data.settings)); operation = op; result = { action: 'add', id, openAfterSave: request.openAfterSave };
                     rawBefore = { tasks: [{ id, before: null }], projects: [], sections: [] };
                 } else {
                     if (context.scope !== 'project') return fail('INVALID_INPUT', 'This section prompt cannot complete its project');

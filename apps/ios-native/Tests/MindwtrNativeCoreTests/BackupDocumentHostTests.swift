@@ -28,6 +28,16 @@ final class BackupDocumentHostTests: XCTestCase {
     private func json(_ value: Any) throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self)
     }
+    /// The stored reply keeps `<code>:<count>` warnings, never the file's words (a519ff462), so 40 renamed projects stay small.
+    private func assertWarningCodesOnly(_ reply: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertLessThan(reply.utf8.count, 4096, file: file, line: line)
+        XCTAssertFalse(reply.contains("AAAA"), file: file, line: line)
+        let warnings = try XCTUnwrap((try object(reply)["result"] as? [String: Any])?["warnings"] as? [String], file: file, line: line)
+        XCTAssertFalse(warnings.isEmpty, file: file, line: line)
+        for warning in warnings {
+            XCTAssertNotNil(warning.range(of: "^[a-z]+(-[a-z]+)*:[0-9]+$", options: .regularExpression), warning, file: file, line: line)
+        }
+    }
     private func object(_ value: String) throws -> [String: Any] {
         try XCTUnwrap(NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any])
     }
@@ -212,9 +222,10 @@ final class BackupDocumentHostTests: XCTestCase {
         await core.close()
         let effect = try seedCalendarEffect(saved: true)
         let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
-        let beforeJournal = try Data(contentsOf: journal)
+        let beforeJournal = try json(object(String(contentsOf: journal, encoding: .utf8)))
         let replayFaults = HostIOFaults()
-        var receiptReads = 0, mutations = 0
+        var receiptReads = 0, mutations = 0, journalWrites = 0
+        replayFaults.journalWrite = { journalWrites += 1 }
         replayFaults.beforeSQL = { sql in
             if sql == "SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?" {
                 receiptReads += 1
@@ -229,7 +240,9 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertEqual(receiptReads, 2)
         XCTAssertEqual(mutations, 0)
         XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
-        XCTAssertEqual(try Data(contentsOf: journal), beforeJournal)
+        XCTAssertEqual(journalWrites, 1)
+        // Replay re-encodes the envelope; retain every field and the exact argumentsJSON string.
+        XCTAssertEqual(try json(object(String(contentsOf: journal, encoding: .utf8))), beforeJournal)
         await reopened.close()
         XCTAssertEqual(try calendarEffect(), effect)
     }
@@ -817,7 +830,7 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
-    func testTickTickOversizedWarningsKeepLocalizedReasonBeforeJournalOrSnapshot() async throws {
+    func testTickTickFortyRenamedProjectsStoreWarningCodesWithoutNames() async throws {
         let core = host(); _ = try await core.start()
         _ = try await capture(core, "TickTick capacity baseline")
         let exported = try await core.prepareDataBackup()
@@ -831,24 +844,12 @@ final class BackupDocumentHostTests: XCTestCase {
         try json(document).write(to: baselineURL, atomically: true, encoding: .utf8)
         let baseline = try await core.prepareBackupImport(baselineURL)
         _ = try await core.mergeBackupImport(baseline.id)
-        let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
-        let beforeProjects = try json(rows("SELECT * FROM projects ORDER BY id"))
-        let beforeSnapshots = try json(await snapshots(core))
         let url = root.appendingPathComponent("ticktick-large-result.csv")
         let csv = "List Name,Title,taskId\n" + names.enumerated().map { "\($0.element),Imported,\($0.offset)" }.joined(separator: "\n")
         try csv.write(to: url, atomically: true, encoding: .utf8)
         let preview = try await core.prepareBackupImport(url, action: .ticktick)
         XCTAssertEqual(try object(preview.json)["valid"] as? Bool, true)
-        do {
-            _ = try await core.mergeBackupImport(preview.id)
-            XCTFail("Expected bounded TickTick result refusal")
-        } catch {
-            XCTAssertEqual(error.localizedDescription, "INVALID_INPUT: TickTick import result exceeds 64 KiB")
-        }
-        XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
-        XCTAssertEqual(try json(rows("SELECT * FROM projects ORDER BY id")), beforeProjects)
-        let afterSnapshots = try await snapshots(core)
-        XCTAssertEqual(try json(afterSnapshots), beforeSnapshots)
+        try assertWarningCodesOnly(await core.mergeBackupImport(preview.id))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
@@ -945,7 +946,7 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
-    func testDGTOversizedWarningsKeepLocalizedReasonBeforeJournalOrSnapshot() async throws {
+    func testDGTFortyRenamedProjectsStoreWarningCodesWithoutNames() async throws {
         let core = host(); _ = try await core.start()
         _ = try await capture(core, "DGT capacity baseline")
         let exported = try await core.prepareDataBackup()
@@ -959,25 +960,13 @@ final class BackupDocumentHostTests: XCTestCase {
         try json(document).write(to: baselineURL, atomically: true, encoding: .utf8)
         let baseline = try await core.prepareBackupImport(baselineURL)
         _ = try await core.mergeBackupImport(baseline.id)
-        let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
-        let beforeProjects = try json(rows("SELECT * FROM projects ORDER BY id"))
-        let beforeSnapshots = try json(await snapshots(core))
         let url = root.appendingPathComponent("dgt-large-result.json")
         let dgt: [String: Any] = ["version": 3, "TASK": names.enumerated().map { ["ID": $0.offset + 1, "TITLE": $0.element, "TYPE": 1] as [String: Any] }]
         let input = try json(dgt)
         try input.write(to: url, atomically: true, encoding: .utf8)
         let preview = try await core.prepareBackupImport(url, action: .dgt)
         XCTAssertEqual(try object(preview.json)["valid"] as? Bool, true)
-        do {
-            _ = try await core.mergeBackupImport(preview.id)
-            XCTFail("Expected bounded DGT result refusal")
-        } catch {
-            XCTAssertEqual(error.localizedDescription, "INVALID_INPUT: DGT import result exceeds 64 KiB")
-        }
-        XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
-        XCTAssertEqual(try json(rows("SELECT * FROM projects ORDER BY id")), beforeProjects)
-        let afterSnapshots = try await snapshots(core)
-        XCTAssertEqual(try json(afterSnapshots), beforeSnapshots)
+        try assertWarningCodesOnly(await core.mergeBackupImport(preview.id))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
@@ -1145,7 +1134,7 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertEqual(result["importedTaskCount"] as? Int, 4)
         XCTAssertEqual(result["importedChecklistItemCount"] as? Int, 1)
         XCTAssertEqual(result["importedStandaloneTaskCount"] as? Int, 1)
-        XCTAssertEqual(result["warnings"] as? [String], ["2 nested OmniFocus tasks were flattened because Mindwtr cannot preserve their hierarchy directly."])
+        XCTAssertEqual(result["warnings"] as? [String], ["adjusted-records:2"])
         let area = try XCTUnwrap(rows("SELECT * FROM areas WHERE name = ?", ["Task209 Work"]).first)
         let project = try XCTUnwrap(rows("SELECT * FROM projects WHERE title = ?", ["Task209 Launch"]).first)
         XCTAssertEqual(project["areaId"] as? String, area["id"] as? String)
@@ -1180,7 +1169,7 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
-    func testOmniFocusOversizedCompleteWarningsKeepFixedReasonBeforeJournalOrSnapshot() async throws {
+    func testOmniFocusFortyRenamedProjectsStoreWarningCodesWithoutNames() async throws {
         let core = host(); _ = try await core.start()
         _ = try await capture(core, "OmniFocus capacity baseline")
         let exported = try await core.prepareDataBackup()
@@ -1194,27 +1183,13 @@ final class BackupDocumentHostTests: XCTestCase {
         try json(document).write(to: baselineURL, atomically: true, encoding: .utf8)
         let baseline = try await core.prepareBackupImport(baselineURL)
         _ = try await core.mergeBackupImport(baseline.id)
-        let beforeTasks = try json(rows("SELECT * FROM tasks ORDER BY id"))
-        let beforeProjects = try json(rows("SELECT * FROM projects ORDER BY id"))
-        let beforeSnapshots = try json(await snapshots(core))
         let url = root.appendingPathComponent("omnifocus-large-result.csv")
         let input = "Task ID,Type,Name,Status,Project,Context,Start Date,Planned Date,Due Date,Completion Date,Duration,Flagged,Notes,Tags\n"
             + names.enumerated().map { "\($0.offset + 1),Project,\($0.element),Active,,,,,,,,0,," }.joined(separator: "\n")
         try input.write(to: url, atomically: true, encoding: .utf8)
         let preview = try await core.prepareBackupImport(url, action: .omnifocus)
         XCTAssertEqual(try object(preview.json)["valid"] as? Bool, true)
-        do {
-            _ = try await core.mergeBackupImport(preview.id)
-            XCTFail("Expected bounded complete OmniFocus result refusal")
-        } catch {
-            XCTAssertTrue(error is CoreHostRejection)
-            XCTAssertEqual(error.localizedDescription, "INVALID_INPUT: OmniFocus import result exceeds 64 KiB")
-        }
-        XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
-        XCTAssertEqual(try json(rows("SELECT * FROM projects ORDER BY id")), beforeProjects)
-        let finalSnapshots = try await snapshots(core)
-        XCTAssertEqual(try json(finalSnapshots), beforeSnapshots)
+        try assertWarningCodesOnly(await core.mergeBackupImport(preview.id))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-        await core.discardBackupImport(preview.id)
     }
 }

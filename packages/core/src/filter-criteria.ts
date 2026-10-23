@@ -1,5 +1,6 @@
 import { normalizeFilterCriteria } from './saved-filters';
 import type {
+    DateRange,
     FilterCriteria,
     MultiValueFilterMatchMode,
     TaskEnergyLevel,
@@ -17,6 +18,7 @@ import type {
  * countActiveFilterCriteria. Everything else is implementation.
  */
 export type FilterSelections = {
+    anyDateRange?: DateRange;
     /** Mixed @context / #tag tokens, as shown in one token picker. */
     tokens: string[];
     /** Mixed @context / #tag tokens whose presence excludes a task. */
@@ -43,6 +45,7 @@ export function criteriaFromSelections(selections: Partial<FilterSelections>): F
     const energyLevels = selections.energyLevels ?? [];
     const timeEstimates = selections.timeEstimates ?? [];
     return {
+        ...(selections.anyDateRange ? { anyDateRange: selections.anyDateRange } : {}),
         ...(contexts.length > 0 ? { contexts } : {}),
         // The match mode only means something once several contexts compete.
         ...(contexts.length > 1 && selections.contextMatchMode
@@ -73,6 +76,7 @@ export function criteriaFromSelections(selections: Partial<FilterSelections>): F
 export function selectionsFromCriteria(criteria: FilterCriteria | undefined): FilterSelections {
     const normalized = normalizeFilterCriteria(criteria ?? {});
     return {
+        ...(normalized.anyDateRange ? { anyDateRange: normalized.anyDateRange } : {}),
         tokens: [...(normalized.contexts ?? []), ...(normalized.tags ?? [])],
         excludedTokens: [...(normalized.excludedContexts ?? []), ...(normalized.excludedTags ?? [])],
         projects: normalized.projects ?? [],
@@ -102,6 +106,7 @@ export function countActiveFilterCriteria(criteria: FilterCriteria | undefined):
         + (normalized.assignedTo?.length ?? 0)
         + (normalized.locations?.length ?? 0)
         + (normalized.timeEstimates?.length ?? 0)
+        + (normalized.anyDateRange ? 1 : 0)
         + (normalized.dueDateRange ? 1 : 0)
         + (normalized.startDateRange ? 1 : 0)
         + (normalized.timeEstimateRange ? 1 : 0)

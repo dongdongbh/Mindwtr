@@ -13,10 +13,32 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // auto-archive-converge reuses releaseCheck/count; count = archive-twin task pairs joined in one merge pass.
+    // gmail-capture reuses releaseCheck/count; gmail-capture-storage reuses stage/errorKind. Never account or mail content.
+    // focus-area-selection: aggregate selected slots only.
+    'globalCount', 'hiddenByAreaCount',
+    // project-color reuses releaseCheck and mode; no identity or color values.
+    // section-flow-mode reuses releaseCheck and mode; sectionDefaults is a count. No titles or identifiers.
+    'sectionDefaults',
+
+    // web-attachment-upload reuses releaseCheck, stage and count; only acknowledged PUTs.
+    // android-widget-capture-status: bounded creation status and picker origin; kind/outcome below.
+    'destination', 'selection',
     // quick-capture-description reuses releaseCheck, kind and outcome; no captured text.
+    // app-search-owed-wipe reuses releaseCheck and outcome below.
+    // native-app-search reuses releaseCheck and outcome below.
+    // onboarding-waits-for-canonical-load reuses releaseCheck and outcome below.
+    // restore-attachment-presence reuses releaseCheck and count below; no names or paths.
+    // leftover-undo-hold reuses releaseCheck and outcome below.
+    // large-library-no-undo reuses releaseCheck, operation and outcome below; no names or paths.
     // ios-reminder-actions reuses releaseCheck, stage, action, reason, and appState below.
     // ios-task-badge reuses releaseCheck, count, and enabled below.
     'result',
+    // follow-up-idle-badge reuses releaseCheck and backend below.
+    // ios-native-text-decode: bytes is the response body's size; no content or URL.
+    'bytes',
+    // local-change-upload reuses releaseCheck, source and delayMs; adaptiveWaitMs is the skipped adaptive wait.
+    'adaptiveWaitMs',
     // windowless-sync: existing periodic timer timing and lifecycle gates only.
     'delayMs', 'latenessMs', 'runtimeActive', 'editorPause', 'minIntervalMs', 'success',
     // sync-field-merge reuses entity below; fields is a comma list of task/project field names, never values.
@@ -27,8 +49,10 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // mcp-codex-copy reuses releaseCheck, operation, outcome, backend below.
     // linux-task-link-launcher reuses releaseCheck and outcome below; no executable paths.
     // sync-write-gate reuses backend below; step is the sync step name; gateWaitMs lists each save's wait for the gate.
-    // Sliced cycles add commitPublishMs (each save's time in the gate) and storePublish (prepared or in-gate, per save).
-    'step', 'gateWaitMs', 'commitPublishMs', 'storePublish',
+    'step', 'gateWaitMs',
+    // native-sync-slices reuses backend and gateWaitMs: each save's time in the gate, its publish (prepared or in-gate),
+    // the slices that gave the engine back and the longest, the store's subscribers, and the requeue reason.
+    'commitPublishMs', 'storePublish', 'slices', 'longestSliceMs', 'storeListeners', 'requeue',
     // sync-status-published (v1.2.7 line): storeRefresh=dropped when a sliced cycle skipped its end-of-cycle load.
     'storeRefresh',
     // linux-quick-add-focus reuses backend and outcome below; no window or input content.
@@ -45,6 +69,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'sourceMiB', 'libraryMiB', 'seconds', 'nativePeakMiB', 'javaPeakMiB',
     // native-share-files reuses skipped below; counts only.
     'candidates', 'attached', 'unreadable',
+    // webdav-weak-etag-adopt: per-pass counts only; no URL, cloud key or id.
+    'adopted', 'refused',
     // reminder-boot-recovery: native scheduling acknowledgments, not a DB-row inventory count.
     'requested', 'rearmed', 'skipped', 'failed', 'bootEnabled', 'exactAllowed',
     // renderer-navigation: fixed route categories, a runtime token, and coarse library sizes.
@@ -60,10 +86,18 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'source', 'documentFocused', 'activationSupported', 'activationActive', 'clipboardAvailable', 'errorKind',
     // task-copy-input: click trust and coarse pointer/keyboard-or-assistive classification only.
     'inputTrusted', 'inputKind',
+    // ios-process-inbox-undo reuses releaseCheck, kind, and outcome below.
+    // ios-inbox-filters reuses releaseCheck, operation, and count below.
+    // ios-inbox-bulk-trash reuses releaseCheck, count, and outcome below.
+    // ios-inbox-group: fixed grouping choice and aggregate folded headings.
+    'axis', 'collapsedCount',
     // ios-search-publication reuses releaseCheck, operation, outcome, enabled, and count below.
     // ios-search-snapshot reuses releaseCheck and count below.
-    // widget-context-selection reuses releaseCheck and count below.
+    // pomodoro-alarm-rearm and pomodoro-credit-durable reuse releaseCheck and outcome below.
+    // widget-context-selection reuses releaseCheck and count below; lists counts the built context/tag/filter lists.
+    'lists',
     // widget-upcoming reuses releaseCheck, platform, and count below.
+    // task-date-filter reuses releaseCheck, count, and outcome below; no content or IDs.
     // ios-entity-link reuses releaseCheck, kind, and outcome below.
     // obsidian-inline-tag reuses releaseCheck and count below.
     // webdav-host-upload-limit and webdav-host-download-limit reuse releaseCheck, operation, and outcome below.
@@ -71,6 +105,10 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // automation concurrent-write replay; capture routing reuses outcome below.
     'enabled',
     'retryCount',
+    // ios-reminders-run: aggregate acknowledged items and failures, never reminder content.
+    'importedCount', 'failedCount',
+    // ios-board-order: bounded aggregate affected rows, never identity/order/content.
+    'affectedCount',
     // deferred-attachment-pass: which pass owes the deferred pre-sync phase's work.
     'owed',
     // native-android-calendar-feeds: which screen's external calendars loaded (calendar, weeklyReview, dailyReview); outcome and the counts are below.
@@ -240,9 +278,23 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'waitMs',
     // attachment-remote-winner-pending and attachment-download-reuse (which reuses kind above): the attachment's own id, no title or path.
     'attachmentId',
+    // Saved contexts and tags: catalogue kind only, never names.
+    'taxonomyKind',
+    // ios-background-sync-hold reuses releaseCheck, source and outcome; heldMs is how long iOS kept the app running.
+    'heldMs',
 ];
 
 describe('release diagnostics field names', () => {
+    it('preserves the saved taxonomy persistence proof without token content', () => {
+        const receipt = { releaseCheck: 'v1.3.7/saved-taxonomy', taxonomyKind: 'context', operation: 'create', outcome: 'persisted' };
+        expect(sanitizeLogContext(receipt)).toEqual(receipt);
+    });
+    it('preserves the content-free iOS background sync hold receipt', () => {
+        const started = { releaseCheck: 'v1.3.7/ios-background-sync-hold', source: 'app-left' };
+        const ended = { releaseCheck: 'v1.3.7/ios-background-sync-hold', outcome: 'expired', heldMs: '29000' };
+        expect(sanitizeLogContext(started)).toEqual(started);
+        expect(sanitizeLogContext(ended)).toEqual(ended);
+    });
     it('preserves the content-free windowless sync timer receipt', () => {
         const receipt = {
             releaseCheck: 'v1.3.7/windowless-sync', documentVisibility: 'hidden', delayMs: '900000',
@@ -262,6 +314,15 @@ describe('release diagnostics field names', () => {
         expect(sanitizeLogContext(receipt)).toEqual({ ...receipt, count: '1' });
     });
 
+    it.each(['deleted', 'restored'])('preserves content-free Inbox bulk Trash %s acknowledgement fields', outcome => {
+        const receipt = { releaseCheck: 'v1.3.5/ios-inbox-bulk-trash', count: 2, outcome };
+        expect(sanitizeLogContext(receipt)).toEqual({ ...receipt, count: '2' });
+    });
+
+    it('preserves the content-free native Pomodoro SQL confirmation', () => {
+        const receipt = { releaseCheck: 'v1.3.5/ios-pomodoro-credit', outcome: 'confirmed' };
+        expect(sanitizeLogContext(receipt)).toEqual(receipt);
+    });
     it('preserves the fixed iOS legacy secret retirement receipt', () => {
         const receipt = { releaseCheck: 'v1.3.5/ios-legacy-secret-retirement', operation: 'legacy-secret-retirement', outcome: 'delivered' };
         expect(sanitizeLogContext(receipt)).toEqual(receipt);

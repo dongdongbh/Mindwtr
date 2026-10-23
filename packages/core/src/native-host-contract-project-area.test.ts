@@ -64,7 +64,7 @@ describe('prepared native Project Area assignment', () => {
         expect(options).toMatchObject({ ok: true, value: { revision: 'stable-revision', canEdit: true,
             noAreaLabel: 'No Area', areas: [{ id: 'a', label: 'Area A' }, { id: 'b', label: ' Area B ' }] } });
         if (!options.ok) throw new Error('options failed');
-        expect(Object.keys(options.value).sort()).toEqual(['areas', 'canEdit', 'noAreaLabel', 'project', 'revision']);
+        expect(Object.keys(options.value).sort()).toEqual(['areas', 'canEdit', 'colorOverride', 'colors', 'noAreaLabel', 'project', 'revision']);
         expect(Object.keys(options.value.project).sort()).toEqual([
             'areaId', 'areaTitle', 'id', 'order', 'rev', 'revBy', 'status', 'title', 'updatedAt']);
         const input = request('b');
@@ -109,7 +109,9 @@ describe('prepared native Project Area assignment', () => {
         const tombstone = project('deleted', { areaId: 'b', areaTitle: 'Area B', order: 11, deletedAt: now });
         const initial = { projects: [original, project('other', { areaId: 'b', order: 9 }), tombstone],
             areas: [area('a', 'Area A'), area('b', ' Area B ')], tasks: [task()], sections: [section()],
-            settings: { deviceId: 'area-device', language: 'en' } };
+            settings: { deviceId: 'area-device', language: 'en', taxonomy: { tags: [
+                { token: '#keep', rev: 1, revBy: 'area-device', updatedAt: now },
+            ] } } };
         const { methods, request } = await open(initial);
         const input = request('b');
         const plan = methods.prepareProjectArea(input);
@@ -162,7 +164,7 @@ describe('prepared native Project Area assignment', () => {
         expect(saves()).toBe(0);
     });
 
-    it('ignores selected Area color/revision changes and rejects noncanonical Project timestamps', async () => {
+    it('refuses a changed v2 Area color witness and rejects noncanonical Project timestamps', async () => {
         const { methods, request } = await open({ projects: [project('target', { areaId: 'a' })],
             areas: [area('a', 'Area A'), area('b', 'Area B')] });
         const input = request('b');
@@ -174,7 +176,7 @@ describe('prepared native Project Area assignment', () => {
         useTaskStore.setState({ _allAreas: [area('a', 'Area A'), area('b', 'Area B', {
             color: '#ef4444', rev: 99, updatedAt: '2026-09-28T16:00:00.000Z' })] });
         expect(await methods.commitPreparedProjectArea({ request: input, prepared: plan.value.prepared }))
-            .toEqual({ ok: true, value: plan.value.prepared.result });
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         useTaskStore.setState({ _allProjects: [project('target', { updatedAt: '2026-09-28T15:00:00Z' })] });
         expect(methods.getProjectAreaOptions({ projectId: 'target' })).toMatchObject({ ok: false,
             error: { code: 'INVALID_INPUT' } });
@@ -227,6 +229,48 @@ describe('prepared native Project Area assignment', () => {
         expect(await second.methods.commitPreparedProjectArea(frozen)).toEqual({ ok: true,
             value: plan.value.prepared.result });
         expect(second.saves()).toBe(count);
+    });
+
+    it('replays a retained v1 Area journal with its original compatibility-color policy', async () => {
+        const first = await open();
+        const input = first.request('a');
+        const plan = first.methods.prepareProjectArea(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error('prepare failed');
+        const prepared = structuredClone(plan.value.prepared);
+        prepared.version = 1;
+        delete prepared.scope.selectedArea!.color;
+        prepared.effect.project.after.color = prepared.scope.project.color;
+        const frozen = JSON.parse(JSON.stringify({ request: input, prepared }));
+        expect(first.methods.validatePreparedProjectArea(frozen)).toMatchObject({ ok: true });
+        const cold = await open(structuredClone(first.data()));
+        expect(await cold.methods.commitPreparedProjectArea(frozen)).toMatchObject({ ok: true });
+        expect(cold.data().projects[0].color).toBe('#3b82f6');
+        const after = await open(structuredClone(cold.data()));
+        expect(await after.methods.commitPreparedProjectArea(frozen)).toMatchObject({ ok: true });
+        expect(after.saves()).toBe(0);
+    });
+
+    it('journals an explicit equal-hue choice, retries a failed save, and cold-replays without another write', async () => {
+        let failed = true;
+        const initial = { projects: [project('target', { areaId: 'a', areaTitle: 'Area A', color: '#10b981' })] };
+        const first = await open(initial, () => failed);
+        const input = { ...first.request('a'), colorOverride: '#10b981' };
+        const plan = first.methods.prepareProjectArea(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error('prepare failed');
+        const frozen = JSON.parse(JSON.stringify({ request: input, prepared: plan.value.prepared }));
+        expect(await first.methods.commitPreparedProjectArea(frozen)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(first.data().projects[0].colorOverride).toBeUndefined();
+        failed = false;
+        expect(await first.methods.commitPreparedProjectArea(frozen)).toMatchObject({ ok: true, value: { colorOverride: '#10b981' } });
+        const cold = await open(structuredClone(first.data()));
+        expect(await cold.methods.commitPreparedProjectArea(frozen)).toMatchObject({ ok: true });
+        expect(cold.saves()).toBe(0);
+        const reset = { ...cold.request('a'), colorOverride: null };
+        const resetPlan = cold.methods.prepareProjectArea(reset);
+        if (!resetPlan.ok || resetPlan.value.kind !== 'prepared') throw new Error('reset prepare failed');
+        expect(await cold.methods.commitPreparedProjectArea({ request: reset, prepared: resetPlan.value.prepared }))
+            .toMatchObject({ ok: true, value: { colorOverride: null } });
+        expect(cold.data().projects[0].colorOverride).toBeNull();
     });
 
     it('rejects forged requests, witnesses, results and effects before any write', async () => {

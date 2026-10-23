@@ -1,5 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -80,6 +81,8 @@ fun ArchiveList(model: InboxViewModel) = with(model.menu) {
     val own = own("archive")
     val tasks = view.getString("segment") == "tasks"
     val selecting = tasks && own.optBoolean("selecting")
+    // Back leaves selection mode before the screen (RN's archived.tsx on useTaskListSelection); an open dialog takes Back first.
+    BackHandler(enabled = selecting && dialog == null && model.failedAction == null) { selecting(false) }
     val labels = view.getJSONObject("labels")
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item(key = "segments") {

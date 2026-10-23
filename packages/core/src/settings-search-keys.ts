@@ -156,6 +156,8 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'obsidianDataviewMetadata', section: 'obsidianVault' },
         { key: 'obsidianTaskNotesIncludeArchived', section: 'obsidianVault' },
         { key: 'obsidianNewTaskFormat', section: 'obsidianVault' },
+        'gmailCapture',
+        { key: 'gmailCaptureLabel', section: 'gmailCapture' },
         'emailCapture',
         'mcpTitle',
         { key: 'emailCaptureHost', section: 'emailCapture' },

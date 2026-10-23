@@ -8,6 +8,7 @@ import TrashScreen from '../app/(drawer)/trash';
 
 const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
+  backListeners: [] as (() => boolean)[],
   areaFilter: {
     areaById: new Map<string, any>(),
     resolvedAreaFilter: { included: [] as string[], excluded: [] as string[] },
@@ -33,6 +34,12 @@ vi.mock('react-native', async () => {
   const actual = await vi.importActual<any>('react-native');
   return {
     ...actual,
+    BackHandler: {
+      addEventListener: (_event: string, listener: () => boolean) => {
+        mocks.backListeners.push(listener);
+        return { remove: () => { mocks.backListeners = mocks.backListeners.filter((item) => item !== listener); } };
+      },
+    },
     FlatList: ({ data = [], renderItem, keyExtractor, ListEmptyComponent, ...props }: any) => {
       const children = data.length > 0
         ? data.map((item: any, index: number) => (
@@ -353,5 +360,26 @@ describe('TrashScreen', () => {
 
     expect(mocks.showToast).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }));
     expect(findPressableByLabel(tree, 'trash.deletePermanently')).toBeTruthy();
+  });
+
+  it('leaves selection mode on Android Back (#1415)', () => {
+    mocks.backListeners = [];
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<TrashScreen />);
+    });
+    renderer.act(() => { findPressableByLabel(tree, 'Select').props.onPress(); });
+    renderer.act(() => { findPressableByLabel(tree, 'Select all').props.onPress(); });
+    expect(findPressableByLabel(tree, 'trash.restore')).toBeTruthy();
+
+    let handled = false;
+    renderer.act(() => {
+      handled = [...mocks.backListeners].reverse().some((listener) => listener());
+    });
+
+    expect(handled).toBe(true);
+    expect(findPressableByLabel(tree, 'trash.restore')).toBeUndefined();
+    expect(findPressableByLabel(tree, 'Select')).toBeTruthy();
+    expect(mocks.backListeners).toHaveLength(0);
   });
 });

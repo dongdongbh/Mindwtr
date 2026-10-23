@@ -1,8 +1,10 @@
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import { countActiveFilterCriteria, criteriaFromSelections } from './filter-criteria';
 import { tFallback } from './i18n';
+import { buildAdvancedFilterCriteriaChips } from './saved-filter-labels';
 import type { TaskMetadataFilterVisibility } from './task-metadata-filter-visibility';
 import type {
+    DateRange,
     FilterCriteria,
     MultiValueFilterMatchMode,
     TaskEnergyLevel,
@@ -25,6 +27,7 @@ export type ListFilterState = {
     energyLevels: TaskEnergyLevel[];
     timeEstimates: TimeEstimate[];
     location: string;
+    anyDateRange?: DateRange;
     contextMatchMode: MultiValueFilterMatchMode;
     tagMatchMode: MultiValueFilterMatchMode;
 };
@@ -52,6 +55,7 @@ export type ListFilterEdit =
     | { type: 'toggleTimeEstimate'; value: TimeEstimate }
     | { type: 'setSearch'; value: string }
     | { type: 'setLocation'; value: string }
+    | { type: 'setAnyDateRange'; value: DateRange | null }
     | { type: 'setMatchMode'; kind: 'context' | 'tag'; value: MultiValueFilterMatchMode }
     | { type: 'clear' };
 
@@ -94,6 +98,10 @@ export function applyListFilterEdit(state: ListFilterState, edit: ListFilterEdit
             return { ...state, searchQuery: edit.value };
         case 'setLocation':
             return { ...state, location: edit.value };
+        case 'setAnyDateRange': {
+            const { anyDateRange: _previous, ...rest } = state;
+            return edit.value ? { ...rest, anyDateRange: edit.value } : rest;
+        }
         case 'setMatchMode':
             return edit.kind === 'context' ? { ...state, contextMatchMode: edit.value } : { ...state, tagMatchMode: edit.value };
         case 'clear':
@@ -157,6 +165,7 @@ export function resolveListFilterState(
         timeEstimates: visibility.timeEstimate ? state.timeEstimates : [],
         contextMatchMode: state.contextMatchMode,
         tagMatchMode: state.tagMatchMode,
+        anyDateRange: state.anyDateRange,
     });
     const criteria: FilterCriteria = {
         ...currentCriteria,
@@ -194,6 +203,14 @@ export function resolveListFilterState(
     if (visibility.timeEstimate) {
         state.timeEstimates.forEach((estimate) => {
             chips.push({ id: `time:${estimate}`, label: formatTimeEstimateLabel(estimate), excluded: false, edit: { type: 'toggleTimeEstimate', value: estimate } });
+        });
+    }
+    if (state.anyDateRange) {
+        chips.push({
+            id: 'anyDateRange',
+            label: buildAdvancedFilterCriteriaChips({ anyDateRange: state.anyDateRange }, { resolveText: (key, fallback) => tFallback(t, key, fallback) })[0].label,
+            excluded: false,
+            edit: { type: 'setAnyDateRange', value: null },
         });
     }
     const location = state.location.trim();

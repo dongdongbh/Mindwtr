@@ -5,6 +5,7 @@ import {
     createManagedAttachmentSourcePredicate,
     resolveFileBackendPath,
     writeFileSafelyAbsolute,
+    yieldToRenderer,
 } from './sync-service-utils';
 
 const sourceGuardMocks = vi.hoisted(() => ({
@@ -417,5 +418,32 @@ describe('writeFileSafelyAbsolute', () => {
         // never partially overwritten.
         expect(files.get(target)).toEqual(previousBytes);
         expect(rename).not.toHaveBeenCalled();
+    });
+});
+
+describe('yieldToRenderer', () => {
+    it('continues on a timer when a hidden window never delivers an animation frame (#1392)', async () => {
+        vi.useFakeTimers();
+        const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
+        try {
+            const result = yieldToRenderer();
+            await vi.advanceTimersByTimeAsync(100);
+            await expect(result).resolves.toBe('timer');
+        } finally {
+            raf.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
+    it('continues at the next frame when one arrives first', async () => {
+        const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+            callback(0);
+            return 1;
+        });
+        try {
+            await expect(yieldToRenderer()).resolves.toBe('frame');
+        } finally {
+            raf.mockRestore();
+        }
     });
 });

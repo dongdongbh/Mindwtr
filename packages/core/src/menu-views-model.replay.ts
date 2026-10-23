@@ -363,7 +363,7 @@ export async function replayMenuViewsScenario(options: {
                     deferred: view.deferred && {
                         header: view.deferred.title,
                         headerLabel: view.deferred.title,
-                        rows: view.deferred.rows.items.map((row) => ({ action: view.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color })),
+                        rows: view.deferred.rows.items.map((row) => ({ action: view.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color ?? '#64748b' })),
                     },
                     empty: view.empty ? [view.empty.title, view.empty.hint] : null,
                     ...drain(),
@@ -389,7 +389,7 @@ export async function replayMenuViewsScenario(options: {
                 deferred: model.deferred && {
                     header: model.deferred.title,
                     headerLabel: model.deferred.title,
-                    rows: model.deferred.rows.map((row) => ({ action: model.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color })),
+                    rows: model.deferred.rows.map((row) => ({ action: model.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color ?? '#64748b' })),
                 },
                 empty: model.deferred ? null : [labels.emptyTitle, labels.emptyHint],
                 ...drain(),
@@ -499,7 +499,7 @@ export async function replayMenuViewsScenario(options: {
                     deferred: view.deferred && {
                         header: view.deferred.title,
                         headerLabel: view.deferred.title,
-                        rows: view.deferred.rows.items.map((row) => ({ action: view.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color })),
+                        rows: view.deferred.rows.items.map((row) => ({ action: view.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color ?? '#64748b' })),
                     },
                     empty: view.empty ? [view.empty.title, ...(view.empty.hint ? [view.empty.hint] : []), ...(view.empty.clear ? [t('filters.clear')] : [])] : null,
                     ...drain(),
@@ -555,7 +555,7 @@ export async function replayMenuViewsScenario(options: {
                 deferred: model.deferred && {
                     header: model.deferred.title,
                     headerLabel: model.deferred.title,
-                    rows: model.deferred.rows.map((row) => ({ action: model.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color })),
+                    rows: model.deferred.rows.map((row) => ({ action: model.deferred!.activateLabel, title: row.title, area: row.areaName, color: row.color ?? '#64748b' })),
                 },
                 empty: model.deferred && !model.showEmptyState ? null
                     : [model.empty.message, ...(model.empty.hint ? [model.empty.hint] : []), ...(model.empty.actionLabel ? [model.empty.actionLabel] : [])],

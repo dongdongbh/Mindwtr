@@ -10,10 +10,11 @@ import {
     type ActiveFilterChipDeps,
 } from './active-filter-chips';
 
-const projects: Record<string, Pick<Project, 'title' | 'color' | 'areaId'>> = {
+const projects: Record<string, Pick<Project, 'title' | 'color' | 'colorOverride' | 'areaId'>> = {
     // A project with no colour of its own stores the empty string, not undefined.
     'p-plain': { title: 'Plain project', color: '' },
     'p-colored': { title: 'Coloured project', color: '#111111' },
+    'p-override': { title: 'Override project', color: '#ff0000', colorOverride: '#ff0000', areaId: 'area-1' },
     'p-in-area': { title: 'Area project', color: '#111111', areaId: 'area-1' },
     'p-in-grey-area': { title: 'Grey area project', color: '#111111', areaId: 'area-none' },
 };
@@ -70,14 +71,15 @@ describe('buildSelectionChips', () => {
         ]);
     });
 
-    it('takes the dot colour from the area first, then the project', () => {
+    it('uses explicit override, live Area, then only area-less legacy color', () => {
         const chips = buildSelectionChips({
-            projects: ['p-in-area', 'p-in-grey-area', 'p-colored', 'p-plain', SAVED_FILTER_NO_PROJECT_ID],
+            projects: ['p-override', 'p-in-area', 'p-in-grey-area', 'p-colored', 'p-plain', SAVED_FILTER_NO_PROJECT_ID],
         }, deps);
 
         expect(chips.map((chip) => chip.dotColor)).toEqual([
+            '#ff0000',
             '#area1',
-            '#111111',
+            undefined,
             '#111111',
             undefined,
             undefined,

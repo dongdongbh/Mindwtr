@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import { Folder } from 'lucide-react';
 import { DEFAULT_AREA_COLOR, tFallback, type Area, type Project } from '@mindwtr/core';
 
@@ -21,7 +22,7 @@ export function DeferredProjectRow({ project, area, t, onOpen, onReactivate, onM
                 className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-primary"
                 aria-label={`${tFallback(t, 'projects.title', 'Project')}: ${project.title}`}
             >
-                <Folder className="h-4 w-4 shrink-0" style={{ color: project.color }} />
+                <Folder className="h-4 w-4 shrink-0" style={{ color: getProjectAccentColor(project, new Map(area ? [[area.id, area]] : [])) }} />
                 <span className="truncate text-sm font-medium text-foreground">{project.title}</span>
                 {area && (
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">

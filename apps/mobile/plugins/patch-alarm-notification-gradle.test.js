@@ -33,6 +33,7 @@ const applyAlarmTimingPatchToSource = transformFor('alarm-timing');
 const applyAlarmExactRepeatPatchToSource = transformFor('alarm-exact-repeat-util');
 const applyAlarmReminderBehaviorPatchToSource = transformFor('alarm-reminder-behavior');
 const applyAlarmLockScreenPrivacyPatchToSource = transformFor('alarm-lock-screen-privacy');
+const applyAlarmPomodoroWhenPatchToSource = transformFor('alarm-pomodoro-when');
 const applyAlarmAudioInterfacePatchToSource = transformFor('alarm-audio-interface');
 const applyAlarmDismissReceiverPatchToSource = transformFor('alarm-dismiss-receiver');
 const applyAlarmReceiverPatchToSource = transformFor('alarm-receiver-dismiss-guard');
@@ -569,6 +570,22 @@ class AlarmBootReceiver {
     expect(output).toContain('.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)');
     expect(output).not.toContain('VISIBILITY_PUBLIC');
     expect(applyAlarmLockScreenPrivacyPatchToSource(output)).toBe(output);
+  });
+
+  it('stamps a Pomodoro alert with its phase end time, so one shown late never reads as a new phase', () => {
+    const input = `            NotificationCompat.Builder mBuilder = new NotificationCompat.Builder(mContext, channelID)
+                    .setSmallIcon(smallIconResId)
+                    .setDeleteIntent(createOnDismissedIntent(mContext, alarm.getId()));
+
+            long vibration = (long) alarm.getVibration();`;
+
+    const output = applyAlarmPomodoroWhenPatchToSource(input);
+
+    expect(output).toContain('String pomodoroEndsAtMs = bundle.getString("endsAtMs");');
+    expect(output).toContain('"pomodoro".equals(bundle.getString("kind"))');
+    expect(output).toContain('mBuilder.setWhen(Long.parseLong(pomodoroEndsAtMs)).setShowWhen(true);');
+    expect(output.indexOf('setShowWhen(true)')).toBeLessThan(output.indexOf('long vibration'));
+    expect(applyAlarmPomodoroWhenPatchToSource(output)).toBe(output);
   });
 
   it('patches AudioInterface fallback sound away from the alarm tone', () => {
@@ -1476,6 +1493,8 @@ describe('PATCHES registry completeness', () => {
     ['AlarmUtil.java', 'applyAlarmReminderBehaviorPatchToSource'],
     ['AlarmUtil.java', 'applyAlarmLockScreenPrivacyPatchToSource'],
     ['AlarmUtil.java', 'applyAlarmCompleteUtilPatchToSource'],
+    // dd's choice (2026-10-22): a Pomodoro alert shows its phase's end time.
+    ['AlarmUtil.java', 'applyAlarmPomodoroWhenPatchToSource'],
     ['AudioInterface.java', 'applyAlarmAudioInterfacePatchToSource'],
     ['AlarmDismissReceiver.java', 'applyAlarmDismissReceiverPatchToSource'],
     ['AlarmReceiver.java', 'applyAlarmReceiverPatchToSource'],
@@ -1525,7 +1544,7 @@ describe('PATCHES registry completeness', () => {
   });
 
   it('every entry declares required/firstMatchOnly explicitly', () => {
-    expect(PATCHES).toHaveLength(32);
+    expect(PATCHES).toHaveLength(33);
     for (const patch of PATCHES) {
       expect(typeof patch.id).toBe('string');
       expect(typeof patch.required).toBe('boolean');

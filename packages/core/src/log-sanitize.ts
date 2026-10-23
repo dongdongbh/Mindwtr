@@ -49,6 +49,17 @@ const AI_KEY_PATTERNS = [
 ];
 
 const ICS_URL_PATTERN = /\b(?:https?|webcal|webcals):\/\/[^\s'")]+/gi;
+// A local file or a document provider's URI (file:/, file://, content://, any letter case), or a plain path under a phone's
+// storage roots, names the user's folders and files: a log never keeps one. Provider and file-system errors quote them in their
+// text and stacks (File Sync, S5), and a folder name can hold spaces, quotes and parentheses, so no character marks where one
+// ends: everything from its start to the end of its line goes. One greedy `[^\n]*` keeps this linear on any input; the text
+// lost after a path ("is not writable") is what the File Sync lines' fileSyncErrorCode carries. Desktop OS paths outside these
+// roots stay (desktop logs them on purpose). A plain path starts after a character that cannot end a word or a path.
+const LOCAL_URI_PATTERN = /(file:\/|content:\/\/)[^\n]*/gi;
+const LOCAL_PATH_PATTERN = /(^|[^\w/.~-])\/(?:private\/var\/mobile|var\/mobile|storage|sdcard|data\/user|data\/data)\/[^\n]*/gi;
+const redactLocal = (text: string): string => text
+    .replace(LOCAL_URI_PATTERN, (_match, start: string) => (start.toLowerCase().startsWith('file:') ? '[redacted-file-uri]' : '[redacted-content-uri]'))
+    .replace(LOCAL_PATH_PATTERN, (_match, before: string) => `${before}[redacted-path]`);
 const MAX_SANITIZE_DEPTH = 5;
 const MAX_SANITIZE_ENTRIES = 50;
 
@@ -72,6 +83,7 @@ const sanitizeParsedUrl = (raw: string): string | null => {
     try {
         const parsed = new URL(raw);
         const scheme = parsed.protocol.replace(':', '').toLowerCase();
+        if (scheme === 'file' || scheme === 'content') return `[redacted-${scheme}-uri]`;
         if (scheme === 'webcal' || scheme === 'webcals' || parsed.pathname.toLowerCase().includes('.ics')) {
             return '[redacted-ics-url]';
         }
@@ -114,6 +126,7 @@ function redactSensitiveText(value: string): string {
         result = result.replace(pattern, '$1[redacted]');
     }
     result = result.replace(ICS_URL_PATTERN, (match) => sanitizeParsedUrl(match) ?? redactUnparsedUrl(match));
+    result = redactLocal(result);
     return result;
 }
 

@@ -175,7 +175,7 @@ describe('selected V5 availability-only lineage', () => {
         expect(operations.length).toBeLessThan(128);
         expect(Buffer.byteLength(JSON.stringify(oversized))).toBeGreaterThan(8 * 1024 * 1024);
         expect(() => validateNativeAttachmentDraftLineageV5(oversized)).toThrow('INVALID_INPUT');
-    });
+    }, 15_000); // Real multi-MiB proofs need headroom under CI coverage instrumentation.
 
     it('rejects malformed exact descriptors without invoking getters or custom array behavior', () => {
         const proof = outcome(), entry = tagged(proof), accessor = vi.fn(() => { throw Error('Getter invoked'); });

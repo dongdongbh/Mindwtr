@@ -123,7 +123,7 @@ private fun InboxToolbar(model: InboxViewModel, view: JSONObject) = with(model.m
 
 /** One direct control: the glyph in a bordered 32 circle (a pill with [count]), the tint while [selected]; one node with label, role and state. */
 @Composable
-private fun DirectControl(icon: ImageVector, label: String, selected: Boolean?, count: String?, enabled: Boolean, action: () -> Unit) {
+internal fun DirectControl(icon: ImageVector, label: String, selected: Boolean?, count: String?, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
     val on = selected == true
     Box(Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp)

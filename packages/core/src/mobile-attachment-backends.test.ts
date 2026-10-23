@@ -68,6 +68,7 @@ const setup = (options: {
   createUploadTask?: () => MobileAttachmentUploadTask | null;
   maxWebdavBufferedUploadBytes?: number;
   maxCloudBufferedUploadBytes?: number;
+  boundedWebdavResponses?: boolean;
   crypto?: SyncCryptoPrimitives;
 } = {}) => {
   const memory = createMemoryFileSystem({ saf: options.saf });
@@ -126,6 +127,7 @@ const setup = (options: {
     log,
     maxWebdavBufferedUploadBytes: options.maxWebdavBufferedUploadBytes,
     maxCloudBufferedUploadBytes: options.maxCloudBufferedUploadBytes,
+    boundedWebdavResponses: options.boundedWebdavResponses,
     core: { withRetry: (operation) => operation(), ...options.core },
   });
   return { backends, memory, lines, installer, order, files, common };
@@ -566,27 +568,146 @@ describe('WebDAV attachment pass', () => {
     }));
   });
 
-  it('refuses to overwrite a remote copy that has no strong ETag', async () => {
-    const webdavPutFileVersioned = vi.fn(async () => undefined);
-    const { backends, memory } = setup({
-      core: {
+  describe('a remote copy that has no strong ETag (a PUT landed, then the save recording it was refused)', () => {
+    const REFUSAL = 'WebDAV attachment version is unavailable; refusing an unconditional overwrite';
+    const unversionedServer = (etag: string | null, remote: Uint8Array | null, contentLength?: string | null) => {
+      const webdavPutFileVersioned = vi.fn(async () => undefined);
+      const webdavGetFile = vi.fn(async () => {
+        if (!remote) throw httpError(404);
+        return toArrayBuffer(remote);
+      });
+      const core = {
         webdavMakeDirectory: vi.fn(async () => undefined),
         webdavHeadFile: vi.fn(async () => ({
-          exists: true,
-          fingerprint: null,
-          etag: 'W/"weak"',
-          lastModified: null,
-          contentLength: null,
+          exists: true, fingerprint: null, etag, lastModified: null,
+          contentLength: contentLength === undefined ? (remote ? String(remote.byteLength) : null) : contentLength,
         })),
         webdavPutFileVersioned,
+        webdavGetFile,
+      };
+      return { core, webdavPutFileVersioned, webdavGetFile };
+    };
+    // A host whose fetch refuses an oversized body while receiving it (the native hosts' HostIo and NativeHTTPJobs).
+    const setupBounded = (options: Parameters<typeof setup>[0] = {}) => setup({ boundedWebdavResponses: true, ...options });
+    const adoptionLine = (lines: ReturnType<typeof setup>['lines']) => (
+      lines.find((line) => line.extra?.releaseCheck === 'v1.3.7/webdav-weak-etag-adopt')
+    );
+
+    it.each([['weak', 'W/"weak"'], ['missing', null]])(
+      'with a %s ETag, records the cloud key without a PUT when the remote holds the local bytes',
+      async (_kind, etag) => {
+        const server = unversionedServer(etag, LOCAL);
+        const { backends, memory, lines } = setupBounded({ core: server.core });
+        memory.put(LOCAL_URI, LOCAL);
+
+        const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+
+        expect(server.webdavGetFile).toHaveBeenCalledTimes(1);
+        expect(server.webdavGetFile).toHaveBeenCalledWith(
+          `${BASE_URL}/attachments/att-1.txt`, expect.objectContaining({ maxBytes: LOCAL.byteLength }),
+        );
+        expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+        expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
+        expect(adoptionLine(lines)?.extra).toEqual({ releaseCheck: 'v1.3.7/webdav-weak-etag-adopt', adopted: '1', refused: '0' });
       },
+    );
+
+    it('records an encrypted remote copy whose plaintext equals the local bytes', async () => {
+      const { common } = setupBounded({ crypto: defaultSyncCryptoPrimitives });
+      const sealed = await common.sealAttachmentBytesForUpload(LOCAL, material);
+      const server = unversionedServer('W/"weak"', sealed);
+      const { backends, memory } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL, undefined, { material });
+
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
     });
-    memory.put(LOCAL_URI, LOCAL);
 
-    const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+    it.each([
+      ['other bytes', REMOTE, undefined],
+      ['the local bytes, unencrypted, while encryption is on', LOCAL, null],
+      ['nothing any more (404)', null, '4'],
+    ] as const)('keeps refusing, with the same error, when the remote holds %s', async (name, remote, contentLength) => {
+      const encrypted = name.includes('encryption');
+      const server = unversionedServer('W/"weak"', remote, contentLength);
+      const { backends, memory, lines } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
 
-    expect(webdavPutFileVersioned).not.toHaveBeenCalled();
-    expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      const result = await backends.syncWebdavAttachments(
+        withAttachment(fileAttachment()), webdavConfig, BASE_URL, undefined, encrypted ? { material } : {},
+      );
+
+      expect(server.webdavGetFile).toHaveBeenCalledTimes(1);
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      expect(lines).toContainEqual(expect.objectContaining({
+        level: 'warn', message: 'Failed to upload attachment att-1', extra: { error: REFUSAL },
+      }));
+      expect(adoptionLine(lines)?.extra).toMatchObject({ adopted: '0', refused: '1' });
+    });
+
+    it('does not download a remote copy whose stated size differs from the local file', async () => {
+      const server = unversionedServer(null, LOCAL, String(LOCAL.byteLength + 1));
+      const { backends, memory } = setupBounded({ core: server.core });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+
+      expect(server.webdavGetFile).not.toHaveBeenCalled();
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+    });
+    it('keeps refusing, without a GET, on a host whose transport cannot bound a response while receiving it (React Native)', async () => {
+      const server = unversionedServer('W/"weak"', LOCAL);
+      const { backends, memory, lines } = setup({ core: server.core });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(withAttachment(fileAttachment()), webdavConfig, BASE_URL);
+
+      expect(server.webdavGetFile).not.toHaveBeenCalled();
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      expect(lines).toContainEqual(expect.objectContaining({
+        level: 'warn', message: 'Failed to upload attachment att-1', extra: { error: REFUSAL },
+      }));
+    });
+
+    it('with encryption on and a stale recorded size, never records a plaintext remote copy', async () => {
+      // The recorded size predicts an encrypted length equal to the real plaintext's length; the length check against the
+      // local file's real size is what refuses this copy, and the encrypted-artifact check backs it up.
+      const plaintext = new Uint8Array(encryptedSyncArtifactByteLength(LOCAL.byteLength)).fill(5);
+      const server = unversionedServer('W/"weak"', plaintext);
+      const { backends, memory, lines } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, plaintext);
+
+      const result = await backends.syncWebdavAttachments(
+        withAttachment(fileAttachment({ size: LOCAL.byteLength })), webdavConfig, BASE_URL, undefined, { material },
+      );
+
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBeUndefined();
+      expect(adoptionLine(lines)?.extra).toMatchObject({ adopted: '0', refused: '1' });
+    });
+
+    it('measures the local file, not its recorded size: an encrypted copy of it is recorded', async () => {
+      const { common } = setup({ crypto: defaultSyncCryptoPrimitives });
+      const sealed = await common.sealAttachmentBytesForUpload(LOCAL, material);
+      const server = unversionedServer('W/"weak"', sealed);
+      const { backends, memory } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
+      memory.put(LOCAL_URI, LOCAL);
+
+      const result = await backends.syncWebdavAttachments(
+        withAttachment(fileAttachment({ size: 1 })), webdavConfig, BASE_URL, undefined, { material },
+      );
+
+      expect(server.webdavGetFile).toHaveBeenCalledWith(
+        `${BASE_URL}/attachments/att-1.txt`, expect.objectContaining({ maxBytes: sealed.byteLength }),
+      );
+      expect(server.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentOf(result)?.cloudKey).toBe('attachments/att-1.txt');
+    });
   });
 
   it('streams a new upload but sends an overwrite through the checked byte PUT', async () => {

@@ -68,6 +68,58 @@ describe('quick-add', () => {
         expect(mixed.props.tags).toEqual(['#followup']);
     });
 
+    it.each([
+        ['@"Two words" Call him', 'contexts', '@Two words', 'Call him'],
+        ['#"x y" Call /due:tomorrow', 'tags', '#x y', 'Call'],
+        ['@“Two words” Call him', 'contexts', '@Two words', 'Call him'],
+        ['@”Two words” Call him', 'contexts', '@Two words', 'Call him'],
+        ['@„Two words“ Call him', 'contexts', '@Two words', 'Call him'],
+    ] as const)('a quoted token %s ends at its closing quote', (input, field, token, title) => {
+        const result = parseQuickAdd(input, undefined, new Date('2026-10-21T10:00:00Z'));
+        expect(result.props[field]).toEqual([token]);
+        expect(result.title).toBe(title);
+    });
+
+    it.each([
+        ['@person/todd Call', 'contexts', '@person/todd', 'Call'],
+        ['Call @place/bank/main today-ish', 'contexts', '@place/bank/main', 'Call today-ish'],
+        ['#area/sub-1 Call', 'tags', '#area/sub-1', 'Call'],
+        ['@Büro/Raum_2, Call', 'contexts', '@Büro/Raum_2', ', Call'],
+    ] as const)('parses an unknown hierarchical token in %s as one token (#1428)', (input, field, token, title) => {
+        const result = parseQuickAdd(input, undefined, new Date('2026-10-21T10:00:00Z'));
+        expect(result.props[field]).toEqual([token]);
+        expect(result.title).toBe(title);
+    });
+
+    it('a typed hierarchical token outranks a known parent token', () => {
+        const result = parseQuickAdd('@work/office Call', undefined, new Date('2026-10-21T10:00:00Z'), undefined, { knownContexts: ['@work'] });
+        expect(result.props.contexts).toEqual(['@work/office']);
+        expect(result.title).toBe('Call');
+    });
+
+    it.each([
+        ['@a/ Call', ['@a'], '/ Call'],
+        ['@a//b Call', ['@a'], '//b Call'],
+        ['@a/b/ Call', ['@a'], '/b/ Call'],
+        ['@work /due:tomorrow', ['@work'], ''],
+    ])('keeps the old reading of a malformed path %s', (input, contexts, title) => {
+        const result = parseQuickAdd(input, undefined, new Date('2026-10-21T10:00:00Z'));
+        expect(result.props.contexts).toEqual(contexts);
+        expect(result.title).toBe(title);
+    });
+
+    it.each([
+        'Read https://x.com/@a/b',
+        'Read https://x.com/#a/b',
+        'Email a@b.com',
+        'Email a@b/c.com',
+    ])('leaves %s alone (no hierarchical token mid-word)', (input) => {
+        const result = parseQuickAdd(input, undefined, new Date('2026-10-21T10:00:00Z'));
+        expect(result.title).toBe(input);
+        expect(result.props.contexts ?? []).toEqual([]);
+        expect(result.props.tags ?? []).toEqual([]);
+    });
+
     it('parses focus quick-add tokens and implies next when no status is supplied', () => {
         const result = parseQuickAdd('Call plumber /* focus');
 
@@ -1620,6 +1672,16 @@ describe('quick-add', () => {
     });
 
     describe('buildQuickAddParseOptions', () => {
+        it('parses unused saved multiword contexts and tags through the shared options builder', () => {
+            const at = '2026-10-20T12:00:00.000Z';
+            const options = buildQuickAddParseOptions({ quickAddAutoClean: true,
+                taxonomy: { contexts: [{ token: '@Seasonal Planning', rev: 1, revBy: 'device', updatedAt: at }],
+                    tags: [{ token: '#Deep Work', rev: 1, revBy: 'device', updatedAt: at }] } });
+            const parsed = parseQuickAdd('Plan @Seasonal Planning #Deep Work', undefined, new Date(at), undefined, options);
+            expect(parsed.props.contexts).toEqual(['@Seasonal Planning']);
+            expect(parsed.props.tags).toEqual(['#Deep Work']);
+            expect(parsed.title).toBe('Plan');
+        });
         const task = (props: Partial<Task>): Task => ({
             id: 't1',
             title: 'T',

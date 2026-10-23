@@ -183,14 +183,14 @@ describe('Task View reference target', () => {
         expect(writes).not.toHaveBeenCalled();
     });
 
-    it('resolves reference bullets and archived read-only checklist links without a description', () => {
+    it('resolves reference checklist and archived read-only checklist links without a description', () => {
         changeTask('source', { description: '', status: 'reference', checklist: [
             { id: 'c1', title: '[[project:target|Project]]', isCompleted: false },
         ] });
         view = { ...view, draft: createTaskDraft(saved()), checklist: saved().checklist };
         refresh();
         expect(value(host.getTaskView(view)).rows.find((row) => row.type === 'checklist'))
-            .toMatchObject({ bullets: true, tappable: false });
+            .toMatchObject({ tappable: true });
         expect(read(checklistInput(0, 0))).toEqual({ ok: true, value: { kind: 'project', id: 'target' } });
         changeTask('source', { status: 'next', projectId: 'archived-project' });
         view = { ...view, draft: createTaskDraft(saved()) };

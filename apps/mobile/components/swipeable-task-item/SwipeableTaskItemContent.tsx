@@ -470,48 +470,31 @@ export function SwipeableTaskItemContent({
                 {showChecklist && (localChecklist || []).length > 0 && (
                     <View style={styles.checklistItems}>
                         {(localChecklist || []).map((item, index) => (
-                            isReference ? (
-                                <View key={item.id || index} style={styles.referenceChecklistItem}>
-                                    <Text
-                                        style={[styles.referenceChecklistBullet, { color: tc.secondaryText }]}
-                                        accessible={false}
-                                    >
-                                        •
-                                    </Text>
-                                    <MarkdownInlineText
-                                        markdown={item.title}
-                                        tc={tc}
-                                        direction={textDirection}
-                                        style={[styles.referenceChecklistItemText, { color: tc.secondaryText }]}
-                                    />
-                                </View>
-                            ) : (
-                                <Pressable
-                                    key={item.id || index}
-                                    disabled={interactionDisabled}
-                                    onPress={interactionDisabled ? undefined : () => onToggleChecklistItem(index)}
-                                    style={styles.checklistItem}
-                                    accessibilityRole="button"
-                                    accessibilityLabel={item.title}
-                                    accessibilityState={{
-                                        checked: item.isCompleted,
-                                        ...(interactionDisabled ? { disabled: true } : {}),
-                                    }}
-                                >
-                                    <MarkdownInlineText
-                                        markdown={`${item.isCompleted ? '✓' : '○'} ${item.title}`}
-                                        tc={tc}
-                                        style={[
-                                            styles.checklistItemText,
-                                            { color: tc.secondaryText },
-                                            item.isCompleted ? styles.checklistItemCompleted : undefined,
-                                        ]}
-                                        numberOfLines={1}
-                                    />
-                                </Pressable>
-                            )
+                            <Pressable
+                                key={item.id || index}
+                                disabled={interactionDisabled}
+                                onPress={interactionDisabled ? undefined : () => onToggleChecklistItem(index)}
+                                style={styles.checklistItem}
+                                accessibilityRole="button"
+                                accessibilityLabel={item.title}
+                                accessibilityState={{
+                                    checked: item.isCompleted,
+                                    ...(interactionDisabled ? { disabled: true } : {}),
+                                }}
+                            >
+                                <MarkdownInlineText
+                                    markdown={`${item.isCompleted ? '✓' : '○'} ${item.title}`}
+                                    tc={tc}
+                                    style={[
+                                        styles.checklistItemText,
+                                        { color: tc.secondaryText },
+                                        item.isCompleted ? styles.checklistItemCompleted : undefined,
+                                    ]}
+                                    numberOfLines={1}
+                                />
+                            </Pressable>
                         ))}
-                        {!isReference && !selectionMode && !interactionDisabled && (
+                        {!selectionMode && !interactionDisabled && (
                             <TextInput
                                 ref={checklistDraftRef}
                                 value={checklistDraft}

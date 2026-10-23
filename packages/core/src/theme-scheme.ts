@@ -10,7 +10,7 @@ import type { AppTheme, TaskStatus } from './types';
 export type ThemeColorScheme = 'light' | 'dark';
 
 /** The themes with a bespoke, non-Material color identity. */
-export type ThemeStatusPreset = 'eink' | 'nord' | 'sepia' | 'oled' | 'catppuccin-macchiato' | 'dracula';
+export type ThemeStatusPreset = 'eink' | 'nord' | 'sepia' | 'oled' | 'catppuccin-macchiato' | 'dracula' | 'gruvbox-light' | 'gruvbox-dark';
 
 export type StatusColorSet = { bg: string; text: string; border: string };
 export type StatusPalette = Record<TaskStatus, StatusColorSet>;
@@ -43,6 +43,8 @@ export const THEME_DESCRIPTORS = {
     'system-oled': { scheme: 'system', statusPreset: null, desktop: true },
     'catppuccin-macchiato': { scheme: 'dark', statusPreset: 'catppuccin-macchiato', desktop: true },
     'dracula': { scheme: 'dark', statusPreset: 'dracula', desktop: true },
+    'gruvbox-light': { scheme: 'light', statusPreset: 'gruvbox-light', desktop: true },
+    'gruvbox-dark': { scheme: 'dark', statusPreset: 'gruvbox-dark', desktop: true },
 } as const satisfies Record<Exclude<AppTheme, 'system'>, ThemeDescriptor>;
 
 // A Map so inherited Object.prototype keys ('constructor', 'toString', …) in an
@@ -164,6 +166,36 @@ const DRACULA_STATUS_COLORS = buildPalette({
     archived: '#adb5cb',
 });
 
+// Gruvbox light (soft, on bg0_s #f2e5bc). Every hue here clears 4.5:1 on the
+// background and on the bg0 cards. Gruvbox's darkest aqua (#427b58) and green
+// (#79740e) stop near 3.9:1, so `done` takes the fg3 gray (the desktop default
+// and sepia themes already show done as a muted neutral), inbox/archived take
+// fg2, and `reference` keeps aqua's hue and saturation with the lightness
+// lowered only to 4.5:1. `next` is the faded blue darkened the same way so it
+// clears 4.5:1 on its own chip tint.
+const GRUVBOX_LIGHT_STATUS_COLORS = buildPalette({
+    inbox: '#504945',
+    next: '#075f70',
+    waiting: '#af3a03',
+    someday: '#8f3f71',
+    reference: '#3d7151',
+    done: '#665c54',
+    archived: '#504945',
+});
+
+// Gruvbox dark (medium, on bg0 #282828). The bright accents and fg4 clear
+// 4.5:1 on the background and on the bg0_s cards; `next` is the bright blue
+// lightened so it also clears 4.5:1 on its own chip tint.
+const GRUVBOX_DARK_STATUS_COLORS = buildPalette({
+    inbox: '#a89984',
+    next: '#9eb9ae',
+    waiting: '#fabd2f',
+    someday: '#d3869b',
+    reference: '#8ec07c',
+    done: '#b8bb26',
+    archived: '#a89984',
+});
+
 const EINK_STATUS_COLORS = buildPalette({
     inbox: '#000000',
     next: '#000000',
@@ -188,4 +220,6 @@ export const STATUS_COLORS_BY_THEME: Record<ThemeStatusPreset | ThemeColorScheme
     oled: DARK_STATUS_COLORS,
     'catppuccin-macchiato': CATPPUCCIN_MACCHIATO_STATUS_COLORS,
     dracula: DRACULA_STATUS_COLORS,
+    'gruvbox-light': GRUVBOX_LIGHT_STATUS_COLORS,
+    'gruvbox-dark': GRUVBOX_DARK_STATUS_COLORS,
 };

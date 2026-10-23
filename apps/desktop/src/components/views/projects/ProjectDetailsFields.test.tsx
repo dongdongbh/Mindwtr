@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Project } from '@mindwtr/core';
@@ -13,6 +13,7 @@ const translations: Record<string, string> = {
     'projects.noArea': 'No area',
     'projects.parallel': 'Parallel',
     'projects.parallelTooltip': 'Parallel project',
+    'projects.perSection': 'Per section',
     'projects.reviewAt': 'Review Date',
     'projects.reviewAtHint': 'Review reminders keep projects visible in Review.',
     'projects.sequenceMode': 'Flow Mode',
@@ -58,8 +59,8 @@ const defaultProps = {
     onNewArea: vi.fn(),
     onManageAreas: vi.fn(),
     onAreaChange: vi.fn(),
-    isSequential: false,
-    onToggleSequential: vi.fn(),
+    flowMode: 'parallel' as const,
+    onFlowModeChange: vi.fn(),
     sequentialScope: 'project' as Project['sequentialScope'],
     onSequentialScopeChange: vi.fn(),
     status: 'active' as Project['status'],
@@ -73,6 +74,43 @@ const defaultProps = {
 };
 
 describe('ProjectDetailsFields', () => {
+    it('picks Parallel, Sequential or Per section, and shows the scope only for Sequential (#1429)', () => {
+        const onFlowModeChange = vi.fn();
+        const { rerender } = render(<LanguageProvider><ProjectDetailsFields {...defaultProps} onFlowModeChange={onFlowModeChange} /></LanguageProvider>);
+        const select = screen.getByRole('combobox', { name: 'Flow Mode' });
+        expect(Array.from((select as HTMLSelectElement).options).map((option) => option.textContent))
+            .toEqual(['Parallel', 'Sequential', 'Per section']);
+        fireEvent.change(select, { target: { value: 'perSection' } });
+        expect(onFlowModeChange).toHaveBeenCalledWith('perSection');
+        expect(screen.queryByText('Sequential Scope')).toBeNull();
+
+        rerender(<LanguageProvider><ProjectDetailsFields {...defaultProps} flowMode="sequential" /></LanguageProvider>);
+        expect(screen.getByText('Sequential Scope')).toBeInTheDocument();
+        rerender(<LanguageProvider><ProjectDetailsFields {...defaultProps} flowMode="perSection" /></LanguageProvider>);
+        expect((screen.getByRole('combobox', { name: 'Flow Mode' }) as HTMLSelectElement).value).toBe('perSection');
+        expect(screen.queryByText('Sequential Scope')).toBeNull();
+    });
+
+    it('saves an explicit swatch and retries a refused durable save without losing its intent', async () => {
+        const onColorChange = vi.fn().mockRejectedValueOnce(new Error('disk unavailable')).mockResolvedValue({ success: true });
+        render(<LanguageProvider><ProjectDetailsFields {...defaultProps} onColorChange={onColorChange} /></LanguageProvider>);
+        fireEvent.click(screen.getByRole('button', { name: 'Project color' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Project color: #3b82f6' }));
+        await screen.findByRole('alert');
+        expect(onColorChange).toHaveBeenLastCalledWith('#3b82f6');
+        fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+        await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+        expect(onColorChange).toHaveBeenCalledTimes(2);
+        expect(onColorChange).toHaveBeenLastCalledWith('#3b82f6');
+    });
+
+    it('resets only through the explicit Area color option', async () => {
+        const onColorChange = vi.fn().mockResolvedValue({ success: true });
+        render(<LanguageProvider><ProjectDetailsFields {...defaultProps} project={buildProject({ colorOverride: '#3b82f6' })} onColorChange={onColorChange} /></LanguageProvider>);
+        fireEvent.click(screen.getByRole('button', { name: 'Project color' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Use Area color' }));
+        await waitFor(() => expect(onColorChange).toHaveBeenCalledWith(null));
+    });
     it('uses a compact responsive settings grid', () => {
         const { container } = render(
             <LanguageProvider>

@@ -2,9 +2,8 @@ import type { NativeHostResult } from './native-host-contract';
 import { exact, record } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
-import { resolveFeatureFlags } from './resolve-feature-flags';
 import { useTaskStore } from './store';
-import { resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
+import { getTaskSortByLabel, getVisibleTaskSortOptions, resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
 import type { TaskSortBy } from './types';
 
 export type NativeTaskListSortRequest = { requestId: string; sortBy: TaskSortBy; expected: { sortBy: string | null } };
@@ -62,11 +61,10 @@ export function createTaskListSortMethods(deps: {
             if (!raw.ok) return raw;
             const settings = useTaskStore.getState().settings;
             const selected = resolveNonDoneTaskSortBy(settings.taskSortBy, settings);
-            const timeEstimates = resolveFeatureFlags(settings).timeEstimates;
             return { ok: true, value: {
                 revision: deps.revision(), expected: { sortBy: raw.value },
-                choices: TASK_LIST_SORT_OPTIONS.filter((value) => value !== 'timeEstimate' || timeEstimates)
-                    .map((value) => ({ value, label: deps.t(`sort.${value}`), selected: value === selected })),
+                choices: getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, settings)
+                    .map((value) => ({ value, label: getTaskSortByLabel(value, deps.t), selected: value === selected })),
             } };
         },
 
@@ -95,7 +93,7 @@ export function createTaskListSortMethods(deps: {
                 if (raw.value !== input.expected.sortBy) return fail('STALE_REVISION', 'Task list sort changed while editing');
                 const settings = useTaskStore.getState().settings;
                 if (!settings.deviceId) return fail('INVALID_INPUT', 'Loaded device identity is required');
-                if (checked.value.sortBy === 'timeEstimate' && !resolveFeatureFlags(settings).timeEstimates)
+                if (getVisibleTaskSortOptions([checked.value.sortBy], settings).length === 0)
                     return fail('INVALID_INPUT', 'That task list sort is not offered');
                 const written = await runStoreWrite(() => useTaskStore.getState().updateSettings({ taskSortBy: checked.value.sortBy }));
                 return settleWrite(written, checked.value);

@@ -16,7 +16,7 @@ import java.io.File
  * A file this class creates gets RN's schema and `user_version = 1`, as RN's SQLiteOpenHelper (ReactDatabaseSupplier, version 1)
  * leaves it. At version 0 RN would run its onCreate over the existing table, fail, and delete the whole database on its retry.
  */
-class RnKeyValue(private val file: File) {
+class RnKeyValue(private val file: File) : RkStore {
     companion object {
         /** AsyncStorage's own table and statements (ReactDatabaseSupplier, AsyncStorageModule). */
         private const val CREATE = "CREATE TABLE IF NOT EXISTS catalystLocalStorage (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
@@ -32,7 +32,7 @@ class RnKeyValue(private val file: File) {
     fun remove(key: String) = multiRemove(listOf(key))
 
     /** Each key's value, or null when it has none; in the order asked. */
-    fun multiGet(keys: List<String>): Map<String, String?> = open { connection ->
+    override fun multiGet(keys: List<String>): Map<String, String?> = open { connection ->
         keys.associateWith { key ->
             connection.prepare(SELECT).use { statement ->
                 statement.bindText(1, key)
@@ -42,15 +42,23 @@ class RnKeyValue(private val file: File) {
     }
 
     /** All [entries] in one transaction: every value is on disk, or none. */
-    fun multiSet(entries: List<Pair<String, String>>) = write { connection ->
+    override fun multiSet(entries: List<Pair<String, String>>) = write { connection ->
         for ((key, value) in entries) connection.prepare(UPSERT).use { it.bindText(1, key); it.bindText(2, value); it.step() }
     }
 
-    fun multiRemove(keys: List<String>) = write { connection ->
+    override fun multiRemove(keys: List<String>) = write { connection ->
         for (key in keys) connection.prepare(DELETE).use { it.bindText(1, key); it.step() }
     }
 
-    private fun write(work: (SQLiteConnection) -> Unit) = open { connection ->
+    /** [changes] (a null value removes the key) in one transaction: every change is on disk, or none (a value with its sequence). */
+    override fun apply(changes: Map<String, String?>) = write { connection ->
+        for ((key, value) in changes) {
+            if (value == null) connection.prepare(DELETE).use { it.bindText(1, key); it.step() }
+            else connection.prepare(UPSERT).use { it.bindText(1, key); it.bindText(2, value); it.step() }
+        }
+    }
+
+    private fun write(work: (SQLiteConnection) -> Unit) = open<Unit> { connection ->
         connection.exec("BEGIN IMMEDIATE")
         try {
             work(connection)

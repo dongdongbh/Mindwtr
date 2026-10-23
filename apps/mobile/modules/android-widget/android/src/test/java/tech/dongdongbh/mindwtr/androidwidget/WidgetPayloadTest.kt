@@ -89,7 +89,7 @@ class WidgetPayloadTest {
     assertEquals(0xFF2563EB.toInt(), payload.palette!!.accent)
     assertEquals(0xFF1F2937.toInt(), payload.palette!!.card)
     assertFalse(payload.usesSystemColors)
-    assertEquals("Add task to inbox...", payload.quickCapture.placeholder)
+    assertEquals(WidgetPayload.EMPTY.quickCapture.placeholder, payload.quickCapture.placeholder)
     assertEquals("Description (optional)", payload.quickCapture.descriptionPlaceholder)
   }
 

@@ -212,6 +212,7 @@ const createProps = (overrides: FixtureOverrides = {}): Omit<RendererProps, 'fie
             attachmentError: null,
             visibleEditAttachments: [],
             addFileAttachment: vi.fn(),
+            addDroppedFileAttachments: vi.fn(async () => []),
             addLinkAttachment: vi.fn(),
             addFolderLinkAttachment: vi.fn(),
             addObsidianNoteAttachment: vi.fn(),
@@ -235,17 +236,19 @@ function DraftFieldHarness({
     fieldId,
     initialDraft = {},
     options = {},
+    attachments = {},
 }: {
     fieldId: RendererProps['fieldId'];
     initialDraft?: Partial<TaskDraft>;
     options?: Partial<TaskEditorOptionLists>;
+    attachments?: Partial<RendererProps['attachments']>;
 }) {
     const [draft, setDraft] = useState<TaskDraft>(() => ({ ...createTaskDraft(baseTask), ...initialDraft }));
 
     return (
         <TaskItemFieldRenderer
             fieldId={fieldId}
-            {...createProps({ options })}
+            {...createProps({ options, attachments })}
             draft={draft}
             setField={(field, value) => setDraft((current) => setTaskDraftField(current, field, value))}
         />
@@ -576,7 +579,7 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(view.queryByRole('checkbox', { name: 'taskEdit.resetChecklistOnRepeat' })).toBeNull();
     });
 
-    it('uses the effective draft status to edit a retained reference checklist as a plain list', () => {
+    it('uses the effective draft status to label a retained reference checklist List, with checkboxes and Reset (#1416)', () => {
         const task: Task = {
             ...baseTask,
             status: 'next',
@@ -590,8 +593,8 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(getByText('List')).toBeInTheDocument();
-        expect(queryByRole('button', { name: 'Checklist 1' })).not.toBeInTheDocument();
-        expect(queryByText('taskEdit.resetChecklist')).not.toBeInTheDocument();
+        expect(queryByRole('button', { name: 'List 1' })).toBeInTheDocument();
+        expect(queryByText('taskEdit.resetChecklist')).toBeInTheDocument();
     });
 
     it('shows a date-coherence note on conflicting start and due date fields', () => {
@@ -2020,4 +2023,31 @@ describe('TaskItemFieldRenderer quick-add token hints (#918)', () => {
             expect(queryByTitle(/^Quick add:/)).not.toBeInTheDocument();
         },
     );
+});
+
+
+describe('browser description image paste', () => {
+    it('inserts a managed reference once and preserves intervening typing', async () => {
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+        let finish!: (attachments: import('@mindwtr/core').Attachment[]) => void;
+        const addDroppedFileAttachments = vi.fn((_files: File[]) => new Promise<import('@mindwtr/core').Attachment[]>((resolve) => { finish = resolve; }));
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Before' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        const image = new File(['image'], 'image.png', { type: 'image/png' });
+        fireEvent.paste(textarea, { clipboardData: { items: [{ kind: 'file', type: image.type, getAsFile: () => new File([image], image.name, { type: image.type }) }], files: [image], getData: () => 'caption' } });
+        fireEvent.change(textarea, { target: { value: 'Before typing' } });
+        await act(async () => finish([{ id: 'image-1', kind: 'file', title: 'image.png', uri: '', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt }]));
+        expect(addDroppedFileAttachments).toHaveBeenCalledOnce();
+        expect(addDroppedFileAttachments.mock.calls[0][0]).toHaveLength(1);
+        expect(textarea.value).toBe('Before typingcaption\n\n![Image](mindwtr://attachment/image-1)');
+    });
+
+    it('does not enable the pending native description paste feature', () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        const addDroppedFileAttachments = vi.fn(async () => []);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" attachments={{ addDroppedFileAttachments }} />);
+        fireEvent.paste(getByRole('textbox', { name: 'Description' }), { clipboardData: { items: [], files: [new File(['x'], 'image.png', { type: 'image/png' })], getData: () => '' } });
+        expect(addDroppedFileAttachments).not.toHaveBeenCalled();
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    });
 });

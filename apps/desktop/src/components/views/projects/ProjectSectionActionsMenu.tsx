@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FileText, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, FileText, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -24,6 +24,14 @@ type ProjectSectionActionsMenuProps = {
     onToggleNotes: () => void;
     onRename: () => void;
     onDelete: () => void;
+    /** Present only while the project's Flow mode is Per section (#1429). */
+    flow?: {
+        label: string;
+        parallelLabel: string;
+        sequentialLabel: string;
+        isSequential: boolean;
+        onChange: (isSequential: boolean) => void;
+    };
 };
 
 const MENU_ITEM_CLASS = 'flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted focus:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40';
@@ -47,6 +55,7 @@ export function ProjectSectionActionsMenu({
     onToggleNotes,
     onRename,
     onDelete,
+    flow,
 }: ProjectSectionActionsMenuProps) {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -161,6 +170,34 @@ export function ProjectSectionActionsMenu({
                         <FileText className="h-4 w-4" aria-hidden="true" />
                         {notesLabel}
                     </button>
+                    {flow && (
+                        <div role="group" aria-label={flow.label}>
+                            <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                                {flow.label}
+                            </div>
+                            {([false, true] as const).map((sequential) => (
+                                <button
+                                    key={sequential ? 'sequential' : 'parallel'}
+                                    type="button"
+                                    role="menuitemradio"
+                                    aria-checked={flow.isSequential === sequential}
+                                    onClick={() => runAction(() => {
+                                        if (flow.isSequential !== sequential) flow.onChange(sequential);
+                                    })}
+                                    disabled={readOnly}
+                                    title={readOnly ? readOnlyHint : undefined}
+                                    className={MENU_ITEM_CLASS}
+                                >
+                                    <Check
+                                        className={cn('h-4 w-4', flow.isSequential !== sequential && 'invisible')}
+                                        aria-hidden="true"
+                                    />
+                                    {sequential ? flow.sequentialLabel : flow.parallelLabel}
+                                </button>
+                            ))}
+                            <div className="my-1 border-t border-border/60" role="separator" />
+                        </div>
+                    )}
                     <button
                         type="button"
                         role="menuitem"

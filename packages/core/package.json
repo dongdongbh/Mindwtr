@@ -1,7 +1,7 @@
 {
   "name": "@mindwtr/core",
   "license": "AGPL-3.0-only",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
@@ -62,7 +62,9 @@
     "./sync-encryption-card": "./src/sync-encryption-card.ts",
     "./mobile-reminder-alarms": "./src/mobile-reminder-alarms.ts",
     "./mobile-notification-open": "./src/mobile-notification-open.ts",
-    "./capture-modal-model": "./src/capture-modal-model.ts"
+    "./capture-modal-model": "./src/capture-modal-model.ts",
+    "./gmail-capture": "./src/gmail-capture.ts",
+    "./email-capture": "./src/email-capture.ts"
   },
   "sideEffects": false,
   "type": "module",
@@ -87,7 +89,7 @@
   "devDependencies": {
     "@types/react": "~19.1.0",
     "typescript": "~5.9.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "peerDependencies": {
     "react": ">=18.0.0"
@@ -96,7 +98,7 @@
     "picomatch": "4.0.4",
     "postcss": "8.5.25",
     "rollup": "4.59.0",
-    "vite": "7.3.6",
+    "vite": "7.3.7",
     "source-map-js": "1.2.2"
   }
 }

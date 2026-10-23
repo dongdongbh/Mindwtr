@@ -44,10 +44,10 @@ export const normalizeRevision = (value?: unknown): number => {
     return coerced.revision;
 };
 
-export const nextRevision = (value?: unknown): number => {
+export const nextRevision = (value?: unknown, options?: { warn?: boolean }): number => {
     const coerced = coerceRevision(value);
     if (coerced.clamped || coerced.revision >= MAX_SYNC_REVISION) {
-        logWarn('Sync revision reached safe maximum; preserving capped revision', {
+        if (options?.warn !== false) logWarn('Sync revision reached safe maximum; preserving capped revision', {
             scope: 'sync',
             category: 'sync',
             context: { rev: coerced.raw, maxRev: MAX_SYNC_REVISION },
@@ -55,7 +55,7 @@ export const nextRevision = (value?: unknown): number => {
         return MAX_SYNC_REVISION;
     }
     const next = coerced.revision + 1;
-    if (next >= SYNC_REVISION_WARNING_THRESHOLD) {
+    if (next >= SYNC_REVISION_WARNING_THRESHOLD && options?.warn !== false) {
         logWarn('Sync revision approaching safe maximum', {
             scope: 'sync',
             category: 'sync',

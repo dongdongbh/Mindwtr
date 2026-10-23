@@ -1,129 +1,50 @@
 import { requireNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 import {
-  normalizeSyncFileLockError,
-  SyncFileLockBusyError,
-  SyncFileLockUnavailableError,
+  createMobileFileSyncLeases,
+  SyncFileLockIdentityLostError,
+  type MobileFileSyncLease,
+  type SyncFileLockNativePort,
 } from '@mindwtr/core';
 
-type SyncFileLockNativeModule = {
-  acquireAsync(uri: string): Promise<string>;
-  revalidateAsync(token: string): Promise<void>;
-  releaseAsync(token: string): Promise<void>;
-};
+// The File Sync lease's rules live in core (mobile-file-sync-lease.ts); this binds them to the
+// SyncFileLock Expo module (SyncFileLockCore.kt, and SyncFileLockModule.swift on iOS).
 
-const SYNC_FILE_LOCK_IDENTITY_LOST_CODE = 'SYNC_FILE_LOCK_IDENTITY_LOST';
+export { SyncFileLockIdentityLostError };
+export type { MobileFileSyncLease };
 
-export type MobileFileSyncLease = {
-  token: string;
-  native: boolean;
-};
-
-/** Release consumed the native token but its final pathname/inode check proved
- * the compatibility lock was replaced. Callers that have just committed local
- * encryption material must compensate, unlike an ordinary close failure. */
-export class SyncFileLockIdentityLostError extends SyncFileLockUnavailableError {
-  constructor(cause: unknown) {
-    super('Safe File Sync locking was lost because the lock identity changed.');
-    this.name = 'SyncFileLockIdentityLostError';
-    (this as Error & { cause?: unknown }).cause = cause;
-  }
-}
-
-const isNativeLockIdentityLoss = (error: unknown): boolean =>
-  String(error ?? '').includes(SYNC_FILE_LOCK_IDENTITY_LOST_CODE)
-  || /SYNC_FILE_LOCK_UNAVAILABLE:[^\n]*(?:identity|root)[^\n]*changed/i.test(String(error ?? ''));
-
-let testModule: SyncFileLockNativeModule | null | undefined;
-let resolvedModule: SyncFileLockNativeModule | null | undefined;
+let testModule: SyncFileLockNativePort | null | undefined;
+let resolvedModule: SyncFileLockNativePort | null | undefined;
 let testPlatform: string | undefined;
-let fallbackLeaseToken: string | null = null;
-let fallbackLeaseSequence = 0;
 
-const getModule = (): SyncFileLockNativeModule | null => {
+const getModule = (): SyncFileLockNativePort | null => {
   if (testModule !== undefined) return testModule;
   if (resolvedModule !== undefined) return resolvedModule;
   try {
-    resolvedModule = requireNativeModule<SyncFileLockNativeModule>('SyncFileLock');
+    resolvedModule = requireNativeModule<SyncFileLockNativePort>('SyncFileLock');
   } catch {
     resolvedModule = null;
   }
   return resolvedModule;
 };
 
-/**
- * Android and iOS hold an unreplaceable platform authority first, then the
- * exact persistent `.mindwtr.lock` for old-client compatibility. Cross-device
- * and non-advisory providers remain protected by document CAS and transition
- * final inventory validation rather than pretending a kernel lock is distributed.
- */
-export const acquireMobileFileSyncLease = async (syncFileUri: string): Promise<MobileFileSyncLease> => {
-  const platform = testPlatform ?? Platform.OS;
-  if (platform === 'android' || platform === 'ios') {
-    const nativeModule = getModule();
-    if (!nativeModule) {
-      throw new SyncFileLockUnavailableError();
-    }
-    let token: string;
-    try {
-      token = await nativeModule.acquireAsync(syncFileUri);
-    } catch (error) {
-      throw normalizeSyncFileLockError(error);
-    }
-    if (!token || typeof token !== 'string') {
-      throw new SyncFileLockUnavailableError();
-    }
-    return { token, native: true };
-  }
+const leases = createMobileFileSyncLeases({
+  platform: () => testPlatform ?? Platform.OS,
+  nativeModule: () => getModule(),
+});
 
-  if (fallbackLeaseToken) {
-    throw new SyncFileLockBusyError();
-  }
-  fallbackLeaseSequence += 1;
-  fallbackLeaseToken = `mobile-process-${fallbackLeaseSequence}`;
-  return { token: fallbackLeaseToken, native: false };
-};
+export const acquireMobileFileSyncLease = (syncFileUri: string): Promise<MobileFileSyncLease> => leases.acquire(syncFileUri);
 
-export const revalidateMobileFileSyncLease = async (lease: MobileFileSyncLease): Promise<void> => {
-  if (lease.native) {
-    const nativeModule = getModule();
-    if (!nativeModule) throw new SyncFileLockUnavailableError();
-    try {
-      await nativeModule.revalidateAsync(lease.token);
-    } catch (error) {
-      throw normalizeSyncFileLockError(error);
-    }
-    return;
-  }
-  if (fallbackLeaseToken !== lease.token) throw new SyncFileLockUnavailableError();
-};
+export const revalidateMobileFileSyncLease = (lease: MobileFileSyncLease): Promise<void> => leases.revalidate(lease);
 
-export const releaseMobileFileSyncLease = async (lease: MobileFileSyncLease): Promise<void> => {
-  if (lease.native) {
-    const nativeModule = getModule();
-    if (!nativeModule) {
-      throw new SyncFileLockUnavailableError();
-    }
-    try {
-      await nativeModule.releaseAsync(lease.token);
-    } catch (error) {
-      if (isNativeLockIdentityLoss(error)) throw new SyncFileLockIdentityLostError(error);
-      throw normalizeSyncFileLockError(error);
-    }
-    return;
-  }
-  if (fallbackLeaseToken !== lease.token) {
-    throw new SyncFileLockUnavailableError();
-  }
-  fallbackLeaseToken = null;
-};
+export const releaseMobileFileSyncLease = (lease: MobileFileSyncLease): Promise<void> => leases.release(lease);
 
 export const setSyncFileLockNativeModuleForTests = (
-  nativeModule: SyncFileLockNativeModule | null | undefined,
+  nativeModule: SyncFileLockNativePort | null | undefined,
   platform?: string,
 ): void => {
   testModule = nativeModule;
   resolvedModule = undefined;
   testPlatform = platform;
-  fallbackLeaseToken = null;
+  leases.reset();
 };

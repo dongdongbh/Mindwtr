@@ -38,8 +38,8 @@
   },
   "todoist": {
     "plan": {
-      "bytes": 3700,
-      "sha256": "52c09653f29f226411f6370fe5dd2038ebcbdc4bb19b12ef01f5f8fc4cb66e47"
+      "bytes": 4057,
+      "sha256": "286186dccfbf08bbc94313decfc6a76117f6ed6960bba2d4eb2ddddacb0cf4d0"
     },
     "recovery": {
       "bytes": 1100,
@@ -48,8 +48,8 @@
   },
   "ticktick": {
     "plan": {
-      "bytes": 3921,
-      "sha256": "43922adcdf372e790b59cfa7cc6c464f6a70423afb89f72df401025e1cf0614e"
+      "bytes": 4393,
+      "sha256": "e1fa37c1a076acc269a1f171a82d8f63b9226721de42acf713849c9c7111adb3"
     },
     "recovery": {
       "bytes": 1100,
@@ -58,8 +58,8 @@
   },
   "dgt": {
     "plan": {
-      "bytes": 6381,
-      "sha256": "729467e9947d7f437922a216cea6dcb0757030aca35bc8c7b0e4cd04ff82fbbc"
+      "bytes": 6643,
+      "sha256": "8390d055e3b077ac7fc295201d53a17af4086c875e3f8e5e18b7e077fb3003f7"
     },
     "recovery": {
       "bytes": 1100,
@@ -68,8 +68,8 @@
   },
   "omnifocus": {
     "plan": {
-      "bytes": 6122,
-      "sha256": "f43ce549bf9680858d0264f9a840a3a5a385845c58b9c535d4a838994d4c45c2"
+      "bytes": 6255,
+      "sha256": "27b01b6346c908d5d59bc8f5b18b4bc4c7fe9e928cead6e492cdf99106784e09"
     },
     "recovery": {
       "bytes": 1100,

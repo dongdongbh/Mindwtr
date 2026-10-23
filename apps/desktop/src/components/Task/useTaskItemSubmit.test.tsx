@@ -38,6 +38,64 @@ describe('useTaskItemSubmit attachment durability', () => {
         useTaskStore.setState(initialTaskState, true);
     });
 
+    it('serializes browser preparation and saves intervening typing after upload', async () => {
+        let finish!: (attachments: Attachment[]) => void;
+        const prepareAttachmentsForSave = vi.fn(() => new Promise<Attachment[]>((resolve) => { finish = resolve; }));
+        const retainWebAttachmentsBeforeStore = vi.fn();
+        const updateTask = seedStore(task);
+        const attachment: Attachment = { id: 'upload', kind: 'file', title: 'report.pdf', uri: '', createdAt: task.createdAt, updatedAt: task.updatedAt };
+        const params = {
+            baselineTask: task, task, editAttachments: [attachment], editingTaskId: task.id,
+            setEditingTaskId: vi.fn(), setIsEditing: vi.fn(), showToast: vi.fn(), t: (key: string) => key,
+            beginAttachmentSave: vi.fn(() => true), cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
+            settlePersistedAttachmentSave: vi.fn(), prepareAttachmentsForSave, retainWebAttachmentsBeforeStore,
+        };
+        const { result, rerender } = renderHook(({ title }) => useTaskItemSubmit({ ...params, draft: createTaskDraft({ ...task, title }) }),
+            { initialProps: { title: 'Before upload' } });
+        let first!: ReturnType<typeof result.current>;
+        act(() => { first = result.current(); });
+        expect(result.current()).toBe(first);
+        expect(updateTask).not.toHaveBeenCalled();
+        rerender({ title: 'Continued typing' });
+        await act(async () => { finish([{ ...attachment, cloudKey: 'attachments/upload.pdf' }]); await first; });
+        expect(updateTask).toHaveBeenCalledOnce();
+        expect(updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({ title: 'Continued typing', attachments: [expect.objectContaining({ cloudKey: 'attachments/upload.pdf' })] }));
+        expect(retainWebAttachmentsBeforeStore.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0]);
+    });
+
+    it('blocks metadata publication on failed browser preparation', async () => {
+        const updateTask = seedStore(task);
+        const setAttachmentError = vi.fn();
+        const { result } = renderHook(() => useTaskItemSubmit({
+            baselineTask: task, task, draft: createTaskDraft({ ...task, title: 'Keep draft' }), editAttachments: [], editingTaskId: task.id,
+            setEditingTaskId: vi.fn(), setIsEditing: vi.fn(), showToast: vi.fn(), t: (key) => key,
+            beginAttachmentSave: vi.fn(), cancelAttachmentSaveBeforeStoreUpdate: vi.fn(), settlePersistedAttachmentSave: vi.fn(),
+            prepareAttachmentsForSave: async () => { throw new Error('offline'); }, setAttachmentError,
+        }));
+        await act(async () => { await result.current(); });
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(setAttachmentError).toHaveBeenCalledWith(expect.stringContaining('attachments.webUploadRetry'));
+    });
+
+    it('rejects a discarded draft while its save waits behind a sync writer', async () => {
+        const updateTask = seedStore(task);
+        let generation = 0;
+        const setAttachmentError = vi.fn();
+        const finish = holdSyncSave(() => undefined);
+        const { result } = renderHook(() => useTaskItemSubmit({
+            baselineTask: task, task, draft: createTaskDraft({ ...task, title: 'Old draft' }), editAttachments: [], editingTaskId: task.id,
+            setEditingTaskId: vi.fn(), setIsEditing: vi.fn(), showToast: vi.fn(), t: (key) => key,
+            beginAttachmentSave: vi.fn(), cancelAttachmentSaveBeforeStoreUpdate: vi.fn(), settlePersistedAttachmentSave: vi.fn(),
+            getAttachmentDraftGeneration: () => generation, setAttachmentError,
+        }));
+        let pending!: ReturnType<typeof result.current>;
+        await act(async () => { pending = result.current(); await Promise.resolve(); });
+        generation += 1;
+        await act(async () => { await finish(); await pending; });
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(setAttachmentError).not.toHaveBeenCalled();
+    });
+
     it('keeps the editor and attachment files unsettled until persistence completes', async () => {
         let resolveDurability!: () => void;
         flushPendingSaveMock.mockImplementationOnce(() => new Promise<void>((resolve) => {

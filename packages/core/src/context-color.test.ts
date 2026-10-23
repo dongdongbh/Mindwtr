@@ -3,6 +3,8 @@ import {
     CATPPUCCIN_MACCHIATO_CONTEXT_COLOR_PALETTE,
     DRACULA_CONTEXT_COLOR_PALETTE,
     getContextColor,
+    GRUVBOX_DARK_CONTEXT_COLOR_PALETTE,
+    GRUVBOX_LIGHT_CONTEXT_COLOR_PALETTE,
     NORD_CONTEXT_COLOR_PALETTE,
 } from './context-color';
 
@@ -53,6 +55,14 @@ describe('getContextColor', () => {
     it('swaps in the Dracula palette slot-for-slot', () => {
         expect(SLOT_TOKENS.map(([token]) => getContextColor(token, 'dracula')))
             .toEqual(SLOT_TOKENS.map(([, , , , dracula]) => dracula));
+    });
+
+    it.each([
+        ['gruvbox-light', GRUVBOX_LIGHT_CONTEXT_COLOR_PALETTE],
+        ['gruvbox-dark', GRUVBOX_DARK_CONTEXT_COLOR_PALETTE],
+    ] as const)('swaps in a ten-slot palette of distinct colors under %s', (theme, palette) => {
+        expect(new Set(palette).size).toBe(SLOT_TOKENS.length);
+        expect(SLOT_TOKENS.map(([token]) => getContextColor(token, theme))).toEqual([...palette]);
     });
 
     it('leaves every other theme on the canonical palette', () => {

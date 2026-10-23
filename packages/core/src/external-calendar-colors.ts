@@ -116,10 +116,34 @@ export const DRACULA_EXTERNAL_CALENDAR_COLOR_MAP: Record<string, string> = {
     '#65a30d': '#f1fa8c',
 };
 
+export const GRUVBOX_LIGHT_EXTERNAL_CALENDAR_COLOR_MAP: Record<string, string> = {
+    '#2563eb': '#076678',
+    '#7c3aed': '#8f3f71',
+    '#db2777': '#9d0006',
+    '#ea580c': '#af3a03',
+    '#059669': '#427b58',
+    '#0891b2': '#458588',
+    '#4f46e5': '#b16286',
+    '#65a30d': '#79740e',
+};
+
+export const GRUVBOX_DARK_EXTERNAL_CALENDAR_COLOR_MAP: Record<string, string> = {
+    '#2563eb': '#83a598',
+    '#7c3aed': '#d3869b',
+    '#db2777': '#fb4934',
+    '#ea580c': '#fe8019',
+    '#059669': '#8ec07c',
+    '#0891b2': '#689d6a',
+    '#4f46e5': '#458588',
+    '#65a30d': '#b8bb26',
+};
+
 const EXTERNAL_CALENDAR_COLOR_MAPS_BY_THEME = new Map<AppTheme, Record<string, string>>([
     ['nord', NORD_EXTERNAL_CALENDAR_COLOR_MAP],
     ['catppuccin-macchiato', CATPPUCCIN_MACCHIATO_EXTERNAL_CALENDAR_COLOR_MAP],
     ['dracula', DRACULA_EXTERNAL_CALENDAR_COLOR_MAP],
+    ['gruvbox-light', GRUVBOX_LIGHT_EXTERNAL_CALENDAR_COLOR_MAP],
+    ['gruvbox-dark', GRUVBOX_DARK_EXTERNAL_CALENDAR_COLOR_MAP],
 ]);
 
 export function themeExternalCalendarDisplayColor(color: string, theme?: string): string {

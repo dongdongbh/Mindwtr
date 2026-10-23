@@ -59,7 +59,7 @@ import { tFallback } from './i18n';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import type { ListFilterEdit, ListFilterState } from './list-filter-state';
 import { NATIVE_HOST_CONTRACT_VERSION, NATIVE_HOST_MAX_WINDOW, type NativeHostResult } from './native-host-contract';
-import { fail, firstWindow, isFilterEdit, isObjectRecord, isText, matchesPickerQuery, readFilterState, type NativeWindow } from './native-host-contract-menu-views';
+import { buildNativeTaskDateFilter, fail, firstWindow, isFilterEdit, isPreservedFilterCriteria, isObjectRecord, isText, matchesPickerQuery, readFilterState, type NativeWindow } from './native-host-contract-menu-views';
 import {
     createNativeRequestReceipts,
     isRevisions,
@@ -72,7 +72,8 @@ import {
 } from './native-request-receipts';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 
-import { isSavedFilterSortField } from './saved-filters';
+import { isSavedFilterSortField, normalizeFilterCriteria } from './saved-filters';
+import { buildAdvancedFilterCriteriaChips } from './saved-filter-labels';
 import { useTaskStore } from './store';
 import { FOCUS_SORT_OPTIONS } from './task-list-sort-options';
 import { TASK_EDITOR_ENERGY_LEVEL_OPTIONS, TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
@@ -81,19 +82,21 @@ import type { FilterCriteria, FocusGroupBy, SortField, TaskEnergyLevel, TaskPrio
 type Translate = (key: string) => string;
 
 const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 200;
-const CONTROL_KEYS = new Set(['filters', 'savedFilterId', 'sortBy']);
+const CONTROL_KEYS = new Set(['filters', 'savedFilterId', 'sortBy', 'preservedCriteria']);
 
 /** The control state as a host sends it; missing keys are the default's. */
 export type NativeFocusControlsInput = {
     filters?: Partial<ListFilterState>;
     savedFilterId?: string | null;
     sortBy?: SortField;
+    preservedCriteria?: FilterCriteria;
 };
 
 /** A host's control state, completed and checked; null when it is not one Focus can hold. */
 export function readNativeFocusControls(value: unknown): FocusControlState | null {
     if (value === undefined) return DEFAULT_FOCUS_CONTROL_STATE;
     if (!isObjectRecord(value) || Object.keys(value).some((key) => !CONTROL_KEYS.has(key))) return null;
+    if (value.preservedCriteria !== undefined && !isPreservedFilterCriteria(value.preservedCriteria)) return null;
     const filters = readFilterState(value.filters);
     // Focus has no search box.
     if (!filters || filters.searchQuery !== '') return null;
@@ -104,6 +107,7 @@ export function readNativeFocusControls(value: unknown): FocusControlState | nul
     return {
         filters,
         savedFilterId: (value.savedFilterId as string | null | undefined) ?? null,
+        ...(value.preservedCriteria ? { preservedCriteria: value.preservedCriteria as FilterCriteria } : {}),
         sortBy: (value.sortBy as SortField | undefined) ?? DEFAULT_FOCUS_SORT_BY,
     };
 }
@@ -116,6 +120,8 @@ export function readNativeFocusControlEdit(value: unknown): FocusControlEdit | n
             return isFilterEdit(value.edit) && value.edit.type !== 'setSearch' ? { type: 'filter', edit: value.edit } : null;
         case 'sort':
             return FOCUS_SORT_OPTIONS.includes(value.sortBy as SortField) ? { type: 'sort', sortBy: value.sortBy as SortField } : null;
+        case 'removePreservedCriterion':
+            return isId(value.criterionId) ? { type: 'removePreservedCriterion', criterionId: value.criterionId } : null;
         case 'applySavedFilter':
             return isId(value.id) ? { type: 'applySavedFilter', id: value.id } : null;
         default:
@@ -210,6 +216,7 @@ export type NativeFocusFilterSheet = {
     timeEstimates: { value: TimeEstimate; label: string; selected: boolean; edit: FocusControlEdit }[];
     /** The location field's text; send typing as a setLocation filter edit. */
     location: string;
+    taskDates: { label: string; options: { value: string; label: string; selected: boolean; edit: FocusControlEdit }[] };
     /** Any / All for two or more selected contexts (or tags). */
     matchModes: {
         context: { visible: boolean; label: string; options: { value: 'any' | 'all'; label: string; selected: boolean; edit: FocusControlEdit }[] };
@@ -275,7 +282,28 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
     const { filters } = state;
     const all = tf('common.all', 'All');
     const excluded = tf('filters.excluded', 'Excluded');
-    const chips: NativeFocusChip[] = filter.chips.map((chip) => ({ id: chip.id, label: chip.label, excluded: chip.excluded, edit: filterEdit(chip.edit) }));
+    const preserved = !filter.activeSavedFilter ? state.preservedCriteria : undefined;
+    const preservedBasic = [
+        { field: 'priority' as const, prefix: 'priority:', label: tf('filters.priority', 'Priority'),
+            values: preserved?.priority?.map((value) => value === 'none' ? tf('focus.group.noPriority', 'No priority') : t(`priority.${value}`)) },
+        { field: 'energy' as const, prefix: 'energy:', label: tf('taskEdit.energyLevel', 'Energy level'),
+            values: preserved?.energy?.map((value) => t(`energyLevel.${value}`)) },
+        { field: 'timeEstimates' as const, prefix: 'time:', label: tf('filters.timeEstimate', 'Time estimate'),
+            values: preserved?.timeEstimates?.map((value) => formatTimeEstimateLabel(value, { t })) },
+        { field: 'projects' as const, prefix: 'project:', label: tf('filters.projects', 'Projects'),
+            values: preserved?.projects?.map((id) => model.projectById.get(id)?.title ?? id) },
+    ].filter((part) => part.values?.length);
+    const chips: NativeFocusChip[] = [
+        ...filter.chips.filter((chip) => !(chip.id === 'location' && preserved?.locations)
+            && !preservedBasic.some((part) => chip.id.startsWith(part.prefix)))
+            .map((chip) => ({ id: chip.id, label: chip.label, excluded: chip.excluded, edit: filterEdit(chip.edit) })),
+        ...preservedBasic.map((part) => ({ id: `preserved:${part.field}`, label: `${part.label}: ${part.values!.join(', ')}`, excluded: false,
+            edit: { type: 'removePreservedCriterion' as const, criterionId: part.field } })),
+        ...(!filter.activeSavedFilter ? buildAdvancedFilterCriteriaChips(normalizeFilterCriteria(state.preservedCriteria), { resolveText: tf }).map((chip) => ({
+            id: `preserved:${chip.id}`, label: chip.label, excluded: false,
+            edit: { type: 'removePreservedCriterion' as const, criterionId: chip.id },
+        })) : []),
+    ];
     const lists_ = focusLists(model, t);
     const activeChipLabels = [...chips.map((chip) => chip.label), ...model.advancedChips.map((chip) => chip.label)];
     const matchMode = (kind: 'context' | 'tag', visible: boolean, label: string, value: 'any' | 'all') => ({
@@ -290,6 +318,7 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
     });
     const confirm = (title: string): Confirm => ({ title, cancelLabel: tf('common.cancel', 'Cancel'), confirmLabel: tf('common.delete', 'Delete') });
     const focused = lists.focusedTasks;
+    const taskDates = buildNativeTaskDateFilter(filters, t);
     return {
         state,
         header: {
@@ -349,6 +378,7 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
                 value, label: formatTimeEstimateLabel(value), selected: filters.timeEstimates.includes(value), edit: filterEdit({ type: 'toggleTimeEstimate', value }),
             })),
             location: filters.location,
+            taskDates: { ...taskDates, options: taskDates.options.map((option) => ({ ...option, edit: filterEdit(option.edit) })) },
             matchModes: {
                 context: matchMode('context', filter.showContextMatchMode, tf('filters.contextMatchMode', 'Context match'), filters.contextMatchMode),
                 tag: matchMode('tag', filter.showTagMatchMode, tf('filters.tagMatchMode', 'Tag match'), filters.tagMatchMode),

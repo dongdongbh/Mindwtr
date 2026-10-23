@@ -47,13 +47,13 @@ export function reorderChecklistItems(checklist: Task['checklist'], fromIndex: n
 
 /**
  * The checklist after one edit, as the React Native editor makes it; null when it
- * makes no change (it then ends editing, or does nothing). `isReference` is the
- * draft's status: a reference list keeps pasted items open.
+ * makes no change (it then ends editing, or does nothing). A Reference list edits
+ * like a checklist: pasted `- [x]` lines stay checked.
  */
 export function applyTaskChecklistEdit(
     checklist: Task['checklist'],
     edit: TaskChecklistEdit,
-    options: { isReference: boolean; newId: () => string },
+    options: { newId: () => string },
 ): TaskChecklistEditResult | null {
     const list = checklist || [];
     const done = (next: ChecklistItem[], focusId: string | null = null) => ({ checklist: next, focusId });
@@ -72,9 +72,9 @@ export function applyTaskChecklistEdit(
             const updated = {
                 ...current,
                 title: first?.title ?? '',
-                isCompleted: options.isReference ? current.isCompleted : current.isCompleted || (first?.isCompleted ?? false),
+                isCompleted: current.isCompleted || (first?.isCompleted ?? false),
             };
-            const inserted = rest.map((item) => ({ id: options.newId(), title: item.title, isCompleted: options.isReference ? false : item.isCompleted }));
+            const inserted = rest.map((item) => ({ id: options.newId(), title: item.title, isCompleted: item.isCompleted }));
             return done([...list.slice(0, edit.index), updated, ...inserted, ...list.slice(edit.index + 1)]);
         }
         case 'insertAfter': {
@@ -108,8 +108,8 @@ export function applyTaskChecklistEdit(
 /**
  * The draft status after a checklist edit. A list task (taskMode 'list') is Done
  * once every item is; an open item takes a Done list task back to Next. Other
- * tasks keep their status, and so does a Reference list: its items are bullets,
- * never ticked off.
+ * tasks keep their status, and so does a Reference: its items tick like a
+ * checklist, but the reference itself never completes (#1416).
  */
 export function getChecklistEditStatus(input: {
     taskMode: Task['taskMode'];
@@ -126,7 +126,7 @@ export type TaskChecklistFieldItem = {
     id: string;
     title: string;
     completed: boolean;
-    /** A completed item on a checklist (not a reference list) is struck and muted. */
+    /** A completed item is struck and muted (a reference list too). */
     struck: boolean;
     /** The checkbox's name: the title, or the placeholder when blank. */
     checkboxLabel: string;
@@ -143,13 +143,11 @@ export type TaskChecklistFieldItem = {
 export type TaskChecklistFieldModel = {
     /** "Checklist", or "List" for a reference. */
     label: string;
-    /** A reference list shows bullets and no checkboxes. */
-    bullets: boolean;
     /** The Reorder toggle shows with two items or more. */
     canReorder: boolean;
     /** "+ Add item" adds nothing while an item is empty. */
     canAdd: boolean;
-    /** Reset checklist shows under a checklist (not a reference list) with items. */
+    /** Reset checklist shows under a list with items (a reference list too). */
     canReset: boolean;
     labels: { reorder: string; done: string; add: string; reset: string; placeholder: string };
     items: TaskChecklistFieldItem[];
@@ -167,10 +165,9 @@ export function buildTaskChecklistFieldModel(input: {
     const placeholder = t('taskEdit.itemNamePlaceholder');
     return {
         label,
-        bullets: isReference,
         canReorder: items.length > 1,
         canAdd: !items.some((item) => item.title.trim().length === 0),
-        canReset: !isReference && items.length > 0,
+        canReset: items.length > 0,
         labels: {
             reorder: t('projects.reorderTasks'),
             done: t('common.done'),
@@ -185,7 +182,7 @@ export function buildTaskChecklistFieldModel(input: {
                 id: item.id,
                 title: item.title,
                 completed: item.isCompleted,
-                struck: !isReference && item.isCompleted,
+                struck: item.isCompleted,
                 checkboxLabel: orderTitle,
                 inputLabel: `${label} ${index + 1}`,
                 orderTitle,

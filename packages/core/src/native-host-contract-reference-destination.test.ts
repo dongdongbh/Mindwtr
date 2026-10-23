@@ -7,6 +7,8 @@ import { flushPendingSave, resetForTests, useTaskStore } from './store';
 import { buildTaskMovePatch, type TaskMoveDestination } from './task-container-rules';
 import type { NativeReferenceTaskDestinationEnvelope } from './native-host-contract-task-checklist';
 import type { AppData, Task } from './types';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
+// Raw-byte preservation cases catalog existing labels before their baseline; legacy RN/native parity cases remain uncatalogued.
 
 const NOW = '2026-10-03T13:00:00.000Z';
 const ID = 'reference-destination';
@@ -197,7 +199,7 @@ describe('Reference destination uses actual RN row filing', () => {
             }
             const input = request({ kind: 'project', id: 'other' }); const envelope = { request: input, prepared: value(await sqlite.host.prepareReferenceTaskDestination(input)).prepared };
             await sqlite.client().run('UPDATE tasks SET orderNum=99 WHERE id=?', ['ranked']);
-            const [saved] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = JSON.parse(saved.data);
+            const [saved] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = retainTaxonomyEffects(JSON.parse(saved.data), rows().tasks.map(row => ({ before: row, after: row })));
             settings.gtd.autoArchiveDays = 99; settings.gtd.focusTaskLimit = 500; settings.showCompleted = true;
             await sqlite.client().run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify(settings)]);
             value(await sqlite.host.commitPreparedReferenceTaskDestination(envelope));

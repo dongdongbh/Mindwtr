@@ -1093,7 +1093,7 @@ struct ReferencePanel: View {
                     else {
                         HStack(spacing: 8) {
                             if model.referencePanel == "group" || isSort {
-                                Button { model.referencePanel = "menu" } label: {
+                                Button { model.backReferencePanel() } label: {
                                     Text(model.label("common.back")).rnFont(13, .semibold).padding(.horizontal, 8).frame(minHeight: 44).contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain).foregroundStyle(palette.tint).accessibilityIdentifier("reference-panel-back").disabled(model.busy || model.retryNeeded)
@@ -1123,7 +1123,7 @@ struct ReferencePanel: View {
                 guard !model.busy, !model.retryNeeded else { return }
                 focusedField = nil
                 if !model.referencePickerName.isEmpty { model.closeReferencePicker() }
-                else if model.referencePanel == "group" || isSort { model.referencePanel = "menu" }
+                else if model.referencePanel == "group" || isSort { model.backReferencePanel() }
                 else { close() }
             }
         }
@@ -1139,22 +1139,7 @@ struct ReferencePanel: View {
                 overflowRow(title: model.label("list.groupBy"), value: model.reference.object("group").text("label"),
                             icon: "folder", id: "reference-group-action") { model.referencePanel = "group" }
             } else if isSort {
-                if let error = model.referenceSortError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("reference-sort-error")
-                    Button(model.label("common.retry")) { Task { await model.retryReferenceSort() } }
-                        .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
-                        .disabled(model.busy).accessibilityIdentifier("reference-sort-retry")
-                }
-                let choices = model.referenceSortOptions.objects("choices")
-                ForEach(choices.indices, id: \.self) { index in
-                    let option = choices[index]
-                    overflowRow(title: option.text("label"), selected: option.flag("selected"),
-                                id: "reference-sort-" + option.text("value")) {
-                        Task { await model.setReferenceSort(option.text("value")) }
-                    }
-                }
-                if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
+                TaskListSortChoices(model: model, palette: palette, caller: .reference)
             } else {
                 let options = model.reference.object("group").objects("options")
                 ForEach(options.indices, id: \.self) { index in
@@ -1206,4 +1191,49 @@ struct ReferencePanel: View {
     }
 
     private func close() { focusedField = nil; model.closeReferencePanel() }
+}
+
+struct TaskListSortChoices: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    let caller: CoreModel.TaskListSortCaller
+    private var prefix: String { caller == .inbox ? "inbox" : "reference" }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let error = model.referenceSortError {
+                Text(error).rnFont(13).foregroundStyle(palette.danger)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier(prefix + "-sort-error")
+                Button(model.label("common.retry")) {
+                    Task {
+                        if caller == .inbox { await model.retryInboxSort() }
+                        else { await model.retryReferenceSort() }
+                    }
+                }
+                .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(minHeight: 44)
+                .disabled(model.busy).accessibilityIdentifier(prefix + "-sort-retry")
+            }
+            let choices = model.referenceSortOptions.objects("choices")
+            ForEach(choices.indices, id: \.self) { index in
+                let option = choices[index]
+                Button {
+                    Task {
+                        if caller == .inbox { await model.setInboxSort(option.text("value")) }
+                        else { await model.setReferenceSort(option.text("value")) }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(option.text("label")).rnFont(15, .semibold).frame(maxWidth: .infinity, alignment: .leading)
+                        if option.flag("selected") { Image(systemName: "checkmark").font(.system(size: 16)).foregroundStyle(palette.tint) }
+                    }
+                    .padding(10).frame(minHeight: 52).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!model.taskListSortActionsEnabled)
+                .accessibilityLabel(option.text("label"))
+                .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                .accessibilityIdentifier(prefix + "-sort-" + option.text("value"))
+            }
+            if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
+        }
+    }
 }

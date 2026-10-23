@@ -70,6 +70,8 @@ type Labels = {
     nord: string;
     catppuccinMacchiato: string;
     dracula: string;
+    gruvboxLight: string;
+    gruvboxDark: string;
     sepia: string;
     oled: string;
     language: string;
@@ -259,7 +261,7 @@ export function SettingsMainPage({
                 <SettingRow padded
                     settingsKey="appearance"
                     title={t.appearance}
-                    description={`${t.system} / ${t.system} (${t.light} / OLED ${t.dark}) / ${t.light} / ${t.dark} / ${t.eink} / ${t.nord} / ${t.catppuccinMacchiato} / ${t.dracula} / ${t.sepia} / ${t.oled}`}
+                    description={`${t.system} / ${t.system} (${t.light} / OLED ${t.dark}) / ${t.light} / ${t.dark} / ${t.eink} / ${t.nord} / ${t.catppuccinMacchiato} / ${t.dracula} / ${t.gruvboxLight} / ${t.gruvboxDark} / ${t.sepia} / ${t.oled}`}
                 >
                     <select
                         aria-label={t.appearance}
@@ -275,6 +277,8 @@ export function SettingsMainPage({
                         <option value="nord">{t.nord}</option>
                         <option value="catppuccin-macchiato">{t.catppuccinMacchiato}</option>
                         <option value="dracula">{t.dracula}</option>
+                        <option value="gruvbox-light">{t.gruvboxLight}</option>
+                        <option value="gruvbox-dark">{t.gruvboxDark}</option>
                         <option value="sepia">{t.sepia}</option>
                         <option value="oled">{t.oled}</option>
                     </select>

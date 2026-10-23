@@ -15,6 +15,32 @@ object WidgetListStore {
   fun isTokenList(id: String): Boolean = id.startsWith(CONTEXT_PREFIX) || id.startsWith(TAG_PREFIX)
   const val FILTER_PREFIX = "filter:"
 
+  // Core's SIMPLE_ / HIERARCHICAL_TASK_TOKEN_RE: quick-add reads these unaided as typed (`@Todd`, `@person/todd`).
+  private val PLAIN_CAPTURE_TOKEN = Regex("[\\p{L}\\p{N}_-]+(?:/[\\p{L}\\p{N}_-]+)*")
+
+  // Any other name goes in quick-add's quoted form (`@"Two words"`) when that reads back exactly: no quote
+  // or backslash, single inner spaces only (the parse collapses spacing), and no space before a marker or
+  // slash (`#"x @y"` loses `@y` to the context parse; `/link:` is read before any token).
+  private fun quotable(value: String): Boolean =
+    value.isNotEmpty() && !value.first().isWhitespace() && !value.last().isWhitespace() &&
+      value.none { it in "\"\\\u201C\u201D\u201E" || (it.isWhitespace() && it != ' ') } &&
+      value.zipWithNext().none { (a, b) -> a == ' ' && (b == ' ' || b in "@#+!%/") }
+
+  /** Capture text for a widget showing one context or tag (#1418), e.g. `@Todd `, `@"Two words" `; empty otherwise. */
+  fun captureText(listId: String): String {
+    val token = when {
+      listId.startsWith(CONTEXT_PREFIX) -> listId.removePrefix(CONTEXT_PREFIX).takeIf { it.startsWith("@") }
+      listId.startsWith(TAG_PREFIX) -> listId.removePrefix(TAG_PREFIX).takeIf { it.startsWith("#") }
+      else -> null
+    } ?: return ""
+    val value = token.substring(1)
+    return when {
+      PLAIN_CAPTURE_TOKEN.matches(value) -> "$token "
+      quotable(value) -> "${token[0]}\"$value\" "
+      else -> ""
+    }
+  }
+
   fun read(context: Context, appWidgetId: Int): String {
     val stored = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(appWidgetId.toString(), null)
     return stored ?: DEFAULT_LIST

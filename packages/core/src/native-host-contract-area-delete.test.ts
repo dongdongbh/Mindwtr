@@ -73,6 +73,35 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Area delete', () => {
+    it.each([1, 2] as const)('cold-retries and receipts the frozen v%s Project detach color policy', async (version) => {
+        const first = await open({ projects: [project('inherited')] });
+        const input = { ...first.request(), detachProjects: true as const };
+        const plan = await first.methods.prepareAreaDelete(input);
+        if (!plan.ok) throw new Error(JSON.stringify(plan));
+        expect(plan.value.prepared.version).toBe(2);
+        const prepared = structuredClone(plan.value.prepared);
+        prepared.version = version;
+        if (version === 1) {
+            // Historical v1 detached the relationship but retained the compatibility color.
+            for (const pair of prepared.effect.projects!) pair.after.color = pair.before.color;
+        }
+        const frozen = JSON.parse(JSON.stringify({ request: input, prepared }));
+        const snapshot = structuredClone(first.data());
+        let failed = true;
+        const cold = await open(snapshot, () => failed);
+        expect(cold.methods.validatePreparedAreaDelete(frozen)).toMatchObject({ ok: true });
+        expect(await cold.methods.commitPreparedAreaDelete(frozen)).toMatchObject({ ok: false,
+            error: { code: 'SAVE_FAILED' } });
+        expect(cold.data().projects[0].areaId).toBe('work');
+        failed = false;
+        expect(await cold.methods.commitPreparedAreaDelete(frozen)).toMatchObject({ ok: true });
+        expect(cold.data().projects[0].areaId).toBeUndefined();
+        expect(cold.data().projects[0].color).toBe(version === 1 ? '#3b82f6' : '#94a3b8');
+        const receipt = await open(structuredClone(cold.data()));
+        expect(await receipt.methods.commitPreparedAreaDelete(frozen)).toMatchObject({ ok: true });
+        expect(receipt.saves()).toBe(0);
+    });
+
     it('accepts a Foundation-style sorted-key journal for a rich linked Task', async () => {
         const first = task('linked');
         const linked = { ...first, attachments: [first.attachments![0],

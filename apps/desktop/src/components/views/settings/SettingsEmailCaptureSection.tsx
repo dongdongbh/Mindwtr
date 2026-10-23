@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 
 import { Switch } from '../../ui/Switch';
 import { SettingField } from './SettingRow';
+import { SettingsGmailCaptureSection } from './SettingsGmailCaptureSection';
 import {
     DEFAULT_EMAIL_CAPTURE_FOLDER,
     DEFAULT_EMAIL_CAPTURE_PORT,
@@ -153,6 +154,8 @@ export function SettingsEmailCaptureSection({ t, isTauri, showSaved }: SettingsE
         : t.emailCaptureNeverChecked;
 
     return (
+        <>
+        <SettingsGmailCaptureSection isTauri={isTauri} showSaved={showSaved} />
         <div className="bg-card border border-border rounded-lg">
             <div className="p-4 flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1 space-y-2">
@@ -295,5 +298,6 @@ export function SettingsEmailCaptureSection({ t, isTauri, showSaved }: SettingsE
                 </div>
             )}
         </div>
+        </>
     );
 }

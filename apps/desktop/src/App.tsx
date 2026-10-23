@@ -88,6 +88,10 @@ import {
     registerEmailCaptureController,
     type EmailCaptureController,
 } from './lib/email-capture';
+import {
+    createGmailCaptureController,
+    registerGmailCaptureController,
+} from './lib/gmail-capture';
 import { canDesktopAutoSync } from './lib/desktop-auto-sync-eligibility';
 import { beginSettingsOpenTrace, markSettingsOpenTrace, wrapSettingsOpenImport } from './lib/settings-open-diagnostics';
 import {
@@ -1050,6 +1054,23 @@ function App() {
             unsubscribeExternalSync();
         };
     }, [fetchData, quitApp, requestConfirmation, sandboxMode, setError, showToast]);
+
+    useEffect(() => {
+        if (!startupDataReady || sandboxMode || !isTauriRuntime()) return;
+        const controller = createGmailCaptureController({
+            addTasks: (items) => useTaskStore.getState().addTasks(items),
+            flushPendingSave,
+            logInfo: (message, extra) => {
+                void logInfo(message, { scope: 'gmail-capture', extra });
+            },
+        });
+        registerGmailCaptureController(controller);
+        controller.start();
+        return () => {
+            registerGmailCaptureController(null);
+            controller.dispose();
+        };
+    }, [sandboxMode, startupDataReady]);
 
     useEffect(() => {
         if (sandboxMode || !isTauriRuntime()) return;

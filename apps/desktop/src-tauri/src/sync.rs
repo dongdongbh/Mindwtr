@@ -1152,7 +1152,7 @@ fn discard_staged_dropbox_credentials_in_store(
 // TLS-1.3-only servers reject it with "bad protocol version". Linux keeps
 // rustls with native roots (covers private CAs in the system store).
 // Known ceiling: schannel on Windows 10 has no TLS 1.3, matching 1.1.0-1.1.5.
-fn blocking_http_client_builder(
+pub(crate) fn blocking_http_client_builder(
     proxy_url: Option<&str>,
 ) -> Result<reqwest::blocking::ClientBuilder, String> {
     let builder =

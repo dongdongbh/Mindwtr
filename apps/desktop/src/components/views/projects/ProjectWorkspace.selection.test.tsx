@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { archiveSectionForProjectArchive, useTaskStore, type Project, type Section, type Task } from '@mindwtr/core';
@@ -8,7 +8,7 @@ import { useUiStore } from '../../../store/ui-store';
 import { DndContext } from '@dnd-kit/core';
 import { LanguageProvider } from '../../../contexts/language-context';
 import { KeybindingProvider } from '../../../contexts/keybinding-context';
-import { selectToolbarOption } from '../../../test/toolbar-select';
+import { openToolbarSelect, selectToolbarOption } from '../../../test/toolbar-select';
 import { expectScrolledEndGap } from '../../../test/list-end-gap';
 import { holdSyncSave } from '../../../test/hold-sync-save';
 import { ProjectWorkspace } from './ProjectWorkspace';
@@ -101,8 +101,8 @@ vi.mock('./ProjectDetailsHeader', () => ({
 }));
 
 vi.mock('./ProjectDetailsFields', () => ({
-    ProjectDetailsFields: ({ onToggleSequential, onStartDateChange, onTagDraftChange, onCommitTags, readOnly }: {
-        onToggleSequential: () => void;
+    ProjectDetailsFields: ({ onFlowModeChange, onStartDateChange, onTagDraftChange, onCommitTags, readOnly }: {
+        onFlowModeChange: (mode: string) => void;
         onStartDateChange: (value: string) => void;
         onTagDraftChange: (value: string) => void;
         onCommitTags: () => void;
@@ -119,7 +119,7 @@ vi.mock('./ProjectDetailsFields', () => ({
                 type="button"
                 data-testid="project-type-toggle"
                 disabled={readOnly}
-                onClick={onToggleSequential}
+                onClick={() => onFlowModeChange('sequential')}
             >
                 Project type
             </button>
@@ -192,6 +192,9 @@ const translations: Record<string, string> = {
     'projects.noActiveTasks': 'No active tasks',
     'projects.reactivate': 'Reactivate',
     'projects.sectionNotes': 'Section notes',
+    'projects.parallel': 'Parallel',
+    'projects.sequential': 'Sequential',
+    'projects.sequenceMode': 'Flow Mode',
     'projects.sectionsLabel': 'Tasks',
     'project.notes': 'Project notes',
     'taskEdit.moreOptions': 'More options',
@@ -495,6 +498,32 @@ describe('ProjectWorkspace Select mode', () => {
         expect(updateProject).not.toHaveBeenCalled();
         expect(updateSection).not.toHaveBeenCalled();
         expect(deleteProject).not.toHaveBeenCalled();
+    });
+
+    it('labels each section with its flow and offers the choice only in Per section mode (#1429)', () => {
+        const book = { ...projectSection, id: 'book', title: 'Book campsite', isSequential: true };
+        const prep = { ...projectSection, id: 'prep', title: 'Prep', order: 1 };
+        const updateSection = vi.fn();
+        const perSection = renderWorkspace({
+            selectedProject: { ...project, perSectionFlow: true },
+            sections: [book, prep], allSections: [book, prep], updateSection,
+        });
+        const labels = () => Array.from(perSection.container.querySelectorAll('[data-section-flow-label]'))
+            .map((node) => node.textContent);
+        expect(labels()).toEqual(['Sequential', 'Parallel']);
+        fireEvent.click(perSection.getByRole('button', { name: 'More options: Prep' }));
+        fireEvent.click(perSection.getByRole('menuitemradio', { name: 'Sequential' }));
+        expect(updateSection).toHaveBeenCalledWith('prep', { isSequential: true });
+        perSection.unmount();
+
+        // Stored choices stay on the sections but nothing shows outside Per section mode.
+        const sequential = renderWorkspace({
+            selectedProject: { ...project, isSequential: true, perSectionFlow: true },
+            sections: [book, prep], allSections: [book, prep],
+        });
+        expect(sequential.container.querySelector('[data-section-flow-label]')).toBeNull();
+        fireEvent.click(sequential.getByRole('button', { name: 'More options: Prep' }));
+        expect(sequential.queryByRole('menuitemradio')).toBeNull();
     });
 
     it('groups archived history under the section tombstones created by project archive', () => {
@@ -1010,6 +1039,15 @@ describe('ProjectWorkspace Select mode', () => {
         selectToolbarOption('Sort', 'Due date');
 
         expect(updateProject).toHaveBeenCalledWith('project-1', { taskSortBy: 'due' });
+    });
+
+    // Project.taskSortBy syncs; older clients erase a project sort they do not know,
+    // so Priority stays a shared-list sort only (#1415).
+    it('never offers the shared-list-only Priority sort for a project', () => {
+        renderWorkspace({ allTasks: sortSampleTasks() });
+        openToolbarSelect('Sort');
+        expect(screen.getByRole('option', { name: 'Due date' })).toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: /priority/i })).not.toBeInTheDocument();
     });
 
     it('shows the direct sort control and falls back to manual order without a persisted sort', () => {

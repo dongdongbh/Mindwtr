@@ -19,6 +19,7 @@ beforeAll(async () => {
                 failSave: () => useTaskStore.setState({ persistenceFailure: { message: 'synthetic failure' } }),
                 sandbox: () => initializeSandboxRuntime(true),
                 transition: acquireWorkspaceTransitionLock,
+                enableLogging: () => useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, diagnostics: { loggingEnabled: true } } }),
             };
         `, resolveDir: import.meta.dir, loader: 'ts' },
         bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent',
@@ -34,7 +35,7 @@ const deferred = <T,>() => {
     return { promise, resolve };
 };
 
-const fixture = () => {
+const fixture = (platform: 'ios' | 'android' = 'ios') => {
     const database = new Database(':memory:'); databases.push(database);
     const requests: { url: string; init?: RequestInit }[] = [], writes: string[] = [], lines: string[] = [];
     let wire: typeof fetch = async () => result(requests.length === 1 ? '1.0.0' : '2.0.0');
@@ -44,7 +45,7 @@ const fixture = () => {
     }
     const state: Record<string, any> = {
         AbortController: Controller, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout,
-        __mindwtrHostPlatform: 'ios', console: { info() {}, warn() {}, error() {}, log() {} },
+        __mindwtrHostPlatform: platform, console: { info() {}, warn() {}, error() {}, log() {} },
         fetch: (input: RequestInfo | URL, init?: RequestInit) => {
             requests.push({ url: String(input), init }); return wire(input, init);
         },
@@ -93,6 +94,20 @@ const fixture = () => {
         wire: (fetcher: typeof fetch) => { wire = fetcher; },
         cancelNext: () => { cancelNext = true; }, failLog: () => { failLog = true; }, logText: () => logText };
 };
+
+describe('actual exported native diagnostic bridge', () => {
+    it.each([['ios', 'native-ios'], ['android', 'native-android']] as const)('keeps the %s caller platform in the exported log', async (platform, scope) => {
+        const f = fixture(platform); await f.boot(); f.state.fixture.enableLogging();
+        const message = platform === 'ios' ? 'Native iOS Inbox filters applied' : 'Native Android queue drain';
+        const context = { releaseCheck: 'v1.3.5/ios-inbox-filters', operation: 'edit', count: 3 };
+        expect(await f.poll(f.state.MindwtrHost.logLine(message, JSON.stringify(context)))).toEqual({ ok: true, value: {} });
+        await f.poll(f.state.MindwtrHost.logShare());
+        const entries = f.logText().trim().split('\n').map((line) => JSON.parse(line)).filter((entry) => entry.message === message);
+        expect(entries).toEqual([{ ts: expect.any(String), level: 'info', scope, message,
+            context: { releaseCheck: context.releaseCheck, operation: 'edit', count: '3' } }]);
+        expect(f.requests).toEqual([]); expect(f.writes).toEqual([]);
+    });
+});
 
 describe('actual exported iOS About update-state bridge', () => {
     const names = ['mindwtr-update-available', 'mindwtr-update-last-check', 'mindwtr-update-latest'];

@@ -15,8 +15,11 @@
  */
 import { isDueForReview, safeParseDate, safeParseDueDate } from './date';
 import { applyFilter } from './saved-filters';
+import { isTaskCountedAsFocused } from './store-helpers';
 import {
     getFocusSequentialFirstTaskIds,
+    getTaskSequencing,
+    isTaskSequenceBlocked,
     getProjectDeadlineBoosts,
     getUpcomingDeferredTasks,
     isTaskFocusedNow,
@@ -71,8 +74,8 @@ export function isTodayScheduleCandidate(
  */
 export interface FocusPools {
     /**
-     * Today's starred tasks after the user's criteria. Area visibility does
-     * not hide a Focus slot; future-start stars remain in Upcoming until ready.
+     * Today's area-visible starred tasks after the user's criteria.
+     * Future-start stars remain in Upcoming until ready.
      */
     focused: Task[];
     /** The time-granularity pool after the user's criteria (Next actions, Review Due). */
@@ -91,17 +94,19 @@ export interface FocusPools {
 
 export interface BuildFocusPoolsInput {
     /**
-     * Actionable, undeleted tasks WITHOUT the area-visibility narrowing. Only
-     * the starred pool reads it — see `FocusPools.focused`.
+     * Actionable, undeleted tasks WITHOUT area narrowing: the global slot
+     * count and the starred pool's explicit area-membership projection.
      */
     tasks: Task[];
-    /** The same pool narrowed to the visible areas; every other pool is cut from it. */
+    /** Normal base visibility; also the starred pool when no area-only predicate is supplied. */
     visibleTasks: Task[];
     projects: Project[];
     criteria: FilterCriteria | undefined;
     now: Date;
     /** An extra caller predicate applied to every pool — desktop's search box. */
     keep?: (task: Task) => boolean;
+    /** Area membership alone, excluding unrelated base visibility such as a parked project. */
+    isAreaVisible?: (task: Task) => boolean;
 }
 
 export function buildFocusPools({
@@ -111,14 +116,17 @@ export function buildFocusPools({
     criteria,
     now,
     keep,
-}: BuildFocusPoolsInput): FocusPools {
+    isAreaVisible,
+}: BuildFocusPoolsInput): FocusPools & { selection: FocusSelection } {
     const narrow = (pool: Task[]) => applyFilter(
         keep ? pool.filter(keep) : pool,
         criteria,
         { projects, now, tokenMatchMode: 'all' },
     );
     return {
-        focused: narrow(tasks.filter((task) => isTaskFocusedNow(task, now))),
+        selection: getFocusSelection(tasks, visibleTasks, now, isAreaVisible),
+        focused: narrow((isAreaVisible ? tasks.filter(isAreaVisible) : visibleTasks)
+            .filter((task) => isTaskFocusedNow(task, now))),
         active: narrow(visibleTasks.filter((task) => shouldShowTaskForStart(task, { now, granularity: 'time' }))),
         // Today membership is decided at day granularity (a later-today start
         // belongs there, by its time). A task deferred to another day must
@@ -130,6 +138,22 @@ export function buildFocusPools({
         upcoming: getUpcomingDeferredTasks(narrow(visibleTasks), { now }),
         base: visibleTasks,
     };
+}
+
+export type FocusSelection = { globalCount: number; hiddenByAreaCount: number };
+
+/** Counts precede search and criteria: only the area selector can hide an area slot. */
+export function getFocusSelection(tasks: readonly Task[], visibleTasks: readonly Task[], now: Date,
+    isAreaVisible?: (task: Task) => boolean): FocusSelection {
+    const visibleIds = new Set(visibleTasks.map((task) => task.id));
+    let globalCount = 0;
+    let hiddenByAreaCount = 0;
+    for (const task of tasks) {
+        if (!isTaskCountedAsFocused(task, now)) continue;
+        globalCount += 1;
+        if (!(isAreaVisible ? isAreaVisible(task) : visibleIds.has(task.id))) hiddenByAreaCount += 1;
+    }
+    return { globalCount, hiddenByAreaCount };
 }
 
 export interface FocusTaskLists {
@@ -192,23 +216,16 @@ export function deriveFocusTaskLists(pools: FocusPools, ctx: FocusListContext): 
         },
     );
 
-    const sequentialProjectIds = new Set<string>();
-    const sequentialWithinSectionProjectIds = new Set<string>();
-    for (const project of projects) {
-        if (project.deletedAt || !project.isSequential) continue;
-        sequentialProjectIds.add(project.id);
-        if (project.sequentialScope === 'section') sequentialWithinSectionProjectIds.add(project.id);
-    }
-    const sequentialFirstTaskIds = getFocusSequentialFirstTaskIds(pools.base, sequentialProjectIds, {
+    // Per section projects (#1429) add one sequence per Sequential section; their
+    // Parallel sections and section-less tasks are never held back.
+    const sequencing = getTaskSequencing(projects, sections);
+    const sequentialFirstTaskIds = getFocusSequentialFirstTaskIds(pools.base, sequencing.sequentialProjectIds, {
         now,
-        sectionScopedProjectIds: sequentialWithinSectionProjectIds,
+        sectionScopedProjectIds: sequencing.sectionScopedProjectIds,
+        sequentialSectionKeys: sequencing.sequentialSectionKeys,
         sections,
     });
-    const isSequentialBlocked = (task: Task) => {
-        if (!task.projectId) return false;
-        if (!sequentialProjectIds.has(task.projectId)) return false;
-        return !sequentialFirstTaskIds.has(task.id);
-    };
+    const isSequentialBlocked = (task: Task) => isTaskSequenceBlocked(task, sequencing, sequentialFirstTaskIds);
 
     // One pair of Date objects for the whole loop, not one pair per task.
     const todayBounds = getTodayBounds(now);
@@ -284,9 +301,10 @@ export interface FocusTaskSection {
 export function buildFocusTaskSections(
     lists: Pick<FocusTaskLists, 'focusedTasks' | 'schedule' | 'reviewDue' | 'nextActions' | 'upcoming'>,
     translate: (key: string) => string | undefined,
+    globalFocusedCount = lists.focusedTasks.length,
 ): FocusTaskSection[] {
     const sections: FocusTaskSection[] = [];
-    if (lists.focusedTasks.length > 0) {
+    if (globalFocusedCount > 0) {
         sections.push({ key: 'focus', title: translate('agenda.todaysFocus') ?? "Today's Focus", items: lists.focusedTasks });
     }
     sections.push(

@@ -38,6 +38,8 @@ const THEME_VALUE_FLAGS: Record<ThemeValue, true> = {
     oled: true,
     'catppuccin-macchiato': true,
     dracula: true,
+    'gruvbox-light': true,
+    'gruvbox-dark': true,
 };
 
 const WEEK_START_VALUE_FLAGS: Record<WeekStartValue, true> = {

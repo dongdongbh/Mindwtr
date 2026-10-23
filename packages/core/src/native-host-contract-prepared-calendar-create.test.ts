@@ -272,3 +272,21 @@ it('returns no-write refusal for empty, malformed date and start-after-due title
     expect(saveData).not.toHaveBeenCalled();
     expect(useTaskStore.getState()._tasksById.has(requestId)).toBe(false);
 });
+
+it('creates the composer task under Skip as RN addTask does, and keeps an earlier Send journal valid', async () => {
+    const host = await open();
+    const sent = value(await host.prepareCalendarComposerCreate({ requestId: '7475c779-e751-42d3-a2ea-85abffb3be73', composer: composer(host, 'Sent') }));
+    if (sent.kind !== 'prepared') throw new Error('Expected a prepared creation');
+    expect(sent.prepared.task.suppressMindwtrReminders).toBe(false);
+    useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault: 'skip' } }));
+    const prepared = value(await host.prepareCalendarComposerCreate({ requestId, composer: composer(host, 'Skipped') }));
+    if (prepared.kind !== 'prepared') throw new Error('Expected a prepared creation');
+    expect(prepared.prepared.task.suppressMindwtrReminders).toBe(true);
+    expect(value(await host.commitPreparedCalendarComposerCreate({ request: prepared.prepared.request, prepared: prepared.prepared })))
+        .toEqual(prepared.prepared.result);
+    expect(useTaskStore.getState()._tasksById.get(requestId)?.suppressMindwtrReminders).toBe(true);
+    expect(value(host.validatePreparedCalendarComposerCreate({ request: sent.prepared.request, prepared: sent.prepared })))
+        .toEqual(sent.prepared.result);
+    const ordinary = await useTaskStore.getState().addTask('Reference', { status: 'next' });
+    expect(useTaskStore.getState()._tasksById.get(ordinary.id!)?.suppressMindwtrReminders).toBe(true);
+});

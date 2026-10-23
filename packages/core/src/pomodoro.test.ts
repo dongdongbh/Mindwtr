@@ -13,7 +13,33 @@ import {
     sanitizePomodoroDurations,
     sanitizePomodoroSessionHistory,
     tickPomodoroState,
+    POMODORO_PRESETS,
+    type PomodoroAutoStartOptions,
+    type PomodoroDurations,
+    type PomodoroEvent,
+    type PomodoroState,
 } from './pomodoro';
+
+// Bounded reference to the previous elapsed-second algorithm. Large catch-up
+// cases below use worked expectations, never this oracle.
+const advanceByTicks = (
+    state: PomodoroState,
+    durations: PomodoroDurations,
+    elapsedSeconds: number,
+    options: PomodoroAutoStartOptions,
+) => {
+    let nextState = state;
+    let lastEvent: PomodoroEvent | null = null;
+    for (let i = 0; i < Math.max(0, Math.floor(elapsedSeconds)); i += 1) {
+        const next = tickPomodoroState(nextState, durations, options);
+        nextState = next.state;
+        if (next.switchedPhase) {
+            lastEvent = next.completedFocusSession ? 'focus-finished' : 'break-finished';
+        }
+        if (!nextState.isRunning) break;
+    }
+    return { state: nextState, lastEvent };
+};
 
 describe('pomodoro helpers', () => {
     it('sanitizes durations into a safe range', () => {
@@ -91,6 +117,116 @@ describe('pomodoro helpers', () => {
             isRunning: true,
             completedFocusSessions: 5,
         });
+    });
+
+    it('ignores nonfinite elapsed time without completing a running phase', () => {
+        const state = {
+            phase: 'focus' as const,
+            remainingSeconds: 3,
+            isRunning: true,
+            completedFocusSessions: 4,
+        };
+        // Default auto-start stops after one phase, so the old Infinity behavior
+        // fails promptly here instead of hanging the test process.
+        for (const elapsedSeconds of [NaN, Infinity, -Infinity]) {
+            expect(advancePomodoroState(state, DEFAULT_POMODORO_DURATIONS, elapsedSeconds)).toEqual({
+                state,
+                lastEvent: null,
+            });
+        }
+    });
+
+    it('matches iterative ticks across presets, options, partial phases and boundaries', () => {
+        const durationCases = [
+            ...POMODORO_PRESETS,
+            { focusMinutes: 1.4, breakMinutes: -2 },
+            { focusMinutes: NaN, breakMinutes: Infinity },
+        ];
+        for (const durations of durationCases) {
+            const cycleSeconds = getPomodoroPhaseSeconds('focus', durations)
+                + getPomodoroPhaseSeconds('break', durations);
+            for (const phase of ['focus', 'break'] as const) {
+                const phaseSeconds = getPomodoroPhaseSeconds(phase, durations);
+                const nextPhaseSeconds = cycleSeconds - phaseSeconds;
+                for (const remainingSeconds of [phaseSeconds, phaseSeconds + 3, phaseSeconds - 2, 2.25, 1.25, 1, 0.25, 0, -3]) {
+                    const boundary = Math.max(1, Math.ceil(remainingSeconds));
+                    const elapsedCases = [
+                        -1, 0, 0.9, 1, 1.9,
+                        boundary - 1, boundary, boundary + 1,
+                        boundary + nextPhaseSeconds - 1,
+                        boundary + nextPhaseSeconds,
+                        boundary + cycleSeconds,
+                        boundary + cycleSeconds * 2 + 3,
+                    ];
+                    for (const autoStartFocus of [false, true]) {
+                        for (const autoStartBreaks of [false, true]) {
+                            const options = { autoStartFocus, autoStartBreaks };
+                            const state = { phase, remainingSeconds, isRunning: true, completedFocusSessions: 4 };
+                            for (const elapsedSeconds of elapsedCases) {
+                                expect(
+                                    advancePomodoroState(state, durations, elapsedSeconds, options),
+                                    JSON.stringify({ durations, state, elapsedSeconds, options }),
+                                ).toEqual(advanceByTicks(state, durations, elapsedSeconds, options));
+                            }
+                            expect(state).toEqual({ phase, remainingSeconds, isRunning: true, completedFocusSessions: 4 });
+                        }
+                    }
+                }
+            }
+        }
+    }, 30_000);
+
+    it('leaves paused and nonpositive elapsed states untouched', () => {
+        const state = { phase: 'break' as const, remainingSeconds: 31.25, isRunning: false, completedFocusSessions: 7 };
+        for (const elapsedSeconds of [-100, 0, 0.99, 1, 100 * 365.25 * 24 * 60 * 60]) {
+            const result = advancePomodoroState(state, DEFAULT_POMODORO_DURATIONS, elapsedSeconds, {
+                autoStartFocus: true, autoStartBreaks: true,
+            });
+            expect(result.state).toBe(state);
+            expect(result.lastEvent).toBeNull();
+        }
+    });
+
+    it('catches up a century from a partial focus with exact count, residual and last event', () => {
+        // 100 Julian years contain exactly 1,753,200 classic 25/5 cycles.
+        // Seven seconds finish the partial focus; one additional second runs
+        // the break after those cycles, leaving 299 seconds on that break.
+        expect(advancePomodoroState({
+            phase: 'focus', remainingSeconds: 7, isRunning: true, completedFocusSessions: 4,
+        }, DEFAULT_POMODORO_DURATIONS, 3_155_760_008, {
+            autoStartFocus: true, autoStartBreaks: true,
+        })).toEqual({
+            state: { phase: 'break', remainingSeconds: 299, isRunning: true, completedFocusSessions: 1_753_205 },
+            lastEvent: 'focus-finished',
+        });
+    });
+
+    it('ends complete cycles at the original full phase and reports the final transition', () => {
+        for (const phase of ['focus', 'break'] as const) {
+            expect(advancePomodoroState({
+                ...createPomodoroState(DEFAULT_POMODORO_DURATIONS, phase, 4), isRunning: true,
+            }, DEFAULT_POMODORO_DURATIONS, 3_155_760_000, {
+                autoStartFocus: true, autoStartBreaks: true,
+            })).toEqual({
+                state: {
+                    phase, remainingSeconds: phase === 'focus' ? 1500 : 300,
+                    isRunning: true, completedFocusSessions: 1_753_204,
+                },
+                lastEvent: phase === 'focus' ? 'break-finished' : 'focus-finished',
+            });
+        }
+    });
+
+    it('preserves large integer counts where repeated plus-one increments stop changing them', () => {
+        const durations = { focusMinutes: 1, breakMinutes: 1 };
+        for (const completedFocusSessions of [2 ** 53 - 2, 2 ** 53 - 1, 2 ** 53, 2 ** 53 + 2, 2 ** 54]) {
+            for (const phase of ['focus', 'break'] as const) {
+                const state = { phase, remainingSeconds: 1, isRunning: true, completedFocusSessions };
+                const options = { autoStartFocus: true, autoStartBreaks: true };
+                expect(advancePomodoroState(state, durations, 1201, options))
+                    .toEqual(advanceByTicks(state, durations, 1201, options));
+            }
+        }
     });
 
     it('formats timer clock values', () => {

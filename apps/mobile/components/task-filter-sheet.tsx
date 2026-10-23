@@ -35,6 +35,7 @@ import { useKeyboardInset } from '@/lib/use-android-keyboard-inset';
  */
 
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+const DATE_PRESETS = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
 const ENERGY_LEVEL_OPTIONS: TaskEnergyLevel[] = ['low', 'medium', 'high'];
 
 export type TaskFilterSheetColors = {
@@ -200,6 +201,7 @@ export function TaskFilterSheet({
   const keyboardInset = useKeyboardInset(visible);
   const [pickerPage, setPickerPage] = useState<PickerPage>('overview');
   const [pickerQuery, setPickerQuery] = useState('');
+  const [datesExpanded, setDatesExpanded] = useState(false);
   const [timeExpanded, setTimeExpanded] = useState(false);
   const [energyExpanded, setEnergyExpanded] = useState(false);
   const [moreExpanded, setMoreExpanded] = useState(false);
@@ -213,6 +215,7 @@ export function TaskFilterSheet({
   const resetSheetNavigation = useCallback(() => {
     setPickerPage('overview');
     setPickerQuery('');
+    setDatesExpanded(false);
     setTimeExpanded(false);
     setEnergyExpanded(false);
     setMoreExpanded(false);
@@ -594,6 +597,30 @@ export function TaskFilterSheet({
               {topContent}
 
               <View style={styles.overviewRows}>
+                <View>
+                  {renderOverviewRow({
+                    label: t('filters.taskDates'),
+                    summary: selections.anyDateRange && 'preset' in selections.anyDateRange
+                      ? t(`filters.datePreset.${selections.anyDateRange.preset}`)
+                      : t('filters.anyTime'),
+                    expanded: datesExpanded,
+                    onPress: () => setDatesExpanded((current) => !current),
+                  })}
+                  {datesExpanded ? (
+                    <View style={styles.disclosureContent}>
+                      <View style={styles.sheetChipRow}>
+                        <FilterChip label={t('filters.anyTime')} selected={!selections.anyDateRange}
+                          themeColors={themeColors} onPress={() => selections.setAnyDateRange(undefined)} />
+                        {DATE_PRESETS.map((preset) => (
+                          <FilterChip key={preset} label={t(`filters.datePreset.${preset}`)}
+                            selected={Boolean(selections.anyDateRange && 'preset' in selections.anyDateRange && selections.anyDateRange.preset === preset)}
+                            themeColors={themeColors} onPress={() => selections.setAnyDateRange({ preset })} />
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+
                 {options.tokens.length > 0
                   ? renderOverviewRow({
                       label: resolveText('filters.contexts', 'Contexts & tags'),

@@ -1,11 +1,14 @@
+import { nativeAIGeminiThinkingBudgetWitness, readNativeAIGeminiThinkingBudgetRequest } from './native-ai-gemini-thinking-budget-request';
+import { nativeAIReasoningEffortWitness, readNativeAIReasoningEffortRequest } from './native-ai-reasoning-effort-request';
+import { nativeAIRequestTimeoutWitness, readNativeAIRequestTimeoutRequest } from './native-ai-request-timeout-request';
 import { logInfo, logWarn } from './logger';
-import { summarizeTaskLifecycleCounts } from './task-utils';
+import { baseTextCollator, summarizeTaskLifecycleCounts } from './task-utils';
 import { markCoreStartupPhase, measureCoreStartupPhase } from './startup-profiler';
 import { normalizeTaskForLoad } from './task-status';
 import { normalizeProjectLifecycleFields } from './project-status';
 import type { StorageAdapter } from './storage';
 import type { AppData, AppSettings, Area, SavedFilter, Task, TaskEditorFieldId, TaskEditorSectionId } from './types';
-import type { DerivedCache, SavedSearchWriteScope, TaskStore } from './store-types';
+import type { DerivedCache, DerivedState, SavedSearchWriteScope, TaskStore } from './store-types';
 import type { FocusControlState } from './focus-controls';
 import { buildFocusControlsModel } from './focus-controls';
 import {
@@ -35,13 +38,15 @@ import { buildLoadContext, runAutoArchive, runLoadMigrations } from './store-loa
 import { createSeedGettingStartedAction } from './getting-started-seed';
 import { beginNotifyProfile, endNotifyProfile, profilerNow, recordDerivedStateRebuild, type NotifyProfile } from './store-notify-profiler';
 import { buildGeneralSettingsUpdate } from './general-settings-model';
-import { buildGtdSettingsUpdate, GTD_DEFAULT_AREA_ACTIVE_OPTION, isGtdSettingStored } from './gtd-settings-model';
+import { buildGtdSettingsUpdate, GTD_DEFAULT_AREA_ACTIVE_OPTION, isGtdSettingStored, type GtdSettingsEdit } from './gtd-settings-model';
+import type { PomodoroDurations } from './pomodoro';
 import { DEFAULT_TASK_EDITOR_ORDER, TASK_EDITOR_SECTION_ORDER } from './task-editor-layout';
 import { generalPreferenceWitness } from './general-preference-witness';
 import { notificationSettingWitness } from './notification-settings-model';
 import { taskEditValuesEqual } from './json-value-equality';
 import { backfillArchiveClocks, getArchiveRetentionPreview, isArchiveRetentionDays } from './archive-retention';
 import { calendarSubscriptionModules } from './store-calendar-subscription-modules';
+import { getSavedTaxonomyTokens, normalizeTaxonomyToken } from './taxonomy-catalog';
 
 const STORAGE_TIMEOUT_MS = 15_000;
 let storageTimeoutMs = STORAGE_TIMEOUT_MS;
@@ -65,6 +70,32 @@ const getFetchDataErrorMessage = (error: unknown): string => {
 const NON_MUTATING_SETTINGS_KEYS = new Set<keyof AppData['settings']>(SYNC_STATUS_BOOKKEEPING_SETTINGS_KEYS);
 
 let derivedCache: DerivedCache | null = null;
+
+const sameStringSet = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => (
+    left.size === right.size && [...left].every((value) => right.has(value))
+);
+
+/**
+ * A section edit (rename, collapse, reorder) or project edit rebuilds these sets, but
+ * their contents rarely change. Keep the previous Set objects when they are equal so
+ * subscribers that compare by identity (every desktop TaskItem) do not re-render (#1429).
+ */
+const reuseEqualSequencingSets = <T extends Pick<DerivedState,
+    'sequentialProjectIds' | 'sequentialWithinSectionProjectIds' | 'sequentialSectionKeys'>>(
+    previous: DerivedState | undefined,
+    next: T,
+): T => {
+    if (!previous) return next;
+    const keep = <K extends keyof Pick<DerivedState, 'sequentialProjectIds' | 'sequentialWithinSectionProjectIds' | 'sequentialSectionKeys'>>(key: K) => (
+        previous[key] && sameStringSet(previous[key], next[key]) ? previous[key] : next[key]
+    );
+    return {
+        ...next,
+        sequentialProjectIds: keep('sequentialProjectIds'),
+        sequentialWithinSectionProjectIds: keep('sequentialWithinSectionProjectIds'),
+        sequentialSectionKeys: keep('sequentialSectionKeys'),
+    };
+};
 
 export const clearDerivedCache = () => {
     derivedCache = null;
@@ -115,9 +146,26 @@ export type GtdWorkflowDirectType = 'defaultScheduleTime' | 'focusTaskLimit' | '
 export type GtdWorkflowReviewType = 'dailyReviewFocusStep' | 'weeklyReviewContextStep';
 export type GtdWorkflowInboxType = 'inboxTwoMinute' | 'inboxProjectFirst' | 'inboxContextStep' | 'inboxSchedule';
 export type GtdWorkflowCaptureParseType = 'quickAddAutoClean' | 'naturalLanguageDates';
+export type GtdWorkflowPomodoroBooleanType = 'pomodoro' | 'pomodoroLinkTask' | 'pomodoroAutoStartBreaks'
+    | 'pomodoroAutoStartFocus' | 'pomodoroCompletionAlert';
+export type GtdWorkflowPomodoroType = GtdWorkflowPomodoroBooleanType | 'pomodoroDurations';
+export type GtdWorkflowPomodoroGate = { featuresPresent: boolean; enabled: { present: boolean; value: boolean | null } };
+export type GtdWorkflowPomodoroWitness = GtdWorkflowReviewWitness & { gate: GtdWorkflowPomodoroGate };
+export type GtdWorkflowPomodoroDurationsWitness = { parentPresent: boolean; present: boolean;
+    value: Partial<PomodoroDurations> | null; gate: GtdWorkflowPomodoroGate; stampPresent: boolean; stamp: string | null };
+/** Native's canonical pair uses the unchanged RN draft resolver/update path. */
+export const gtdWorkflowSettingsEdit = (edit: GtdSettingsEdit | { type: 'pomodoroDurations'; value: PomodoroDurations }): GtdSettingsEdit =>
+    edit.type === 'pomodoroDurations' && 'value' in edit
+        ? { type: edit.type, focusMinutes: String(edit.value.focusMinutes), breakMinutes: String(edit.value.breakMinutes) }
+        : edit;
+export const gtdWorkflowPomodoroField = (type: Exclude<GtdWorkflowPomodoroType, 'pomodoro'>) => ({
+    pomodoroLinkTask: 'linkTask', pomodoroAutoStartBreaks: 'autoStartBreaks',
+    pomodoroAutoStartFocus: 'autoStartFocus', pomodoroCompletionAlert: 'completionAlert',
+    pomodoroDurations: 'customDurations',
+} as const)[type];
 export type GtdWorkflowTaskEditorSection = 'scheduling' | 'organization' | 'details';
 export type GtdWorkflowType = GtdWorkflowDirectType | GtdWorkflowReviewType | GtdWorkflowInboxType
-    | GtdWorkflowCaptureParseType | 'defaultArea' | 'taskEditorSectionOpen' | 'taskEditorPreset'
+    | GtdWorkflowCaptureParseType | GtdWorkflowPomodoroType | 'defaultArea' | 'taskEditorSectionOpen' | 'taskEditorPreset'
     | 'taskEditorFieldVisible' | 'taskEditorFieldSection' | 'taskEditorOrder' | 'taskEditorReset';
 export type GtdWorkflowDirectWitness = { present: boolean; value: string | number | boolean | null;
     stampPresent: boolean; stamp: string | null };
@@ -147,7 +195,8 @@ export type GtdWorkflowTargetArea = { id: string; createdAt: string; updatedAt: 
     revPresent: boolean; rev: number | null; revByPresent: boolean; revBy: string | null };
 export type GtdWorkflowWitness = GtdWorkflowDirectWitness | GtdWorkflowCaptureParseWitness
     | GtdWorkflowReviewWitness | GtdWorkflowInboxWitness | GtdWorkflowAreaWitness
-    | GtdWorkflowTaskEditorWitness | GtdWorkflowPresetWitness;
+    | GtdWorkflowTaskEditorWitness | GtdWorkflowPresetWitness
+    | GtdWorkflowPomodoroWitness | GtdWorkflowPomodoroDurationsWitness;
 export const gtdWorkflowTaskEditorSelected = (witness: GtdWorkflowTaskEditorWitness): GtdWorkflowTaskEditorSelected => ({
     taskEditorPresent: witness.taskEditorPresent, sectionOpenPresent: witness.sectionOpenPresent,
     present: witness.present, value: witness.value,
@@ -210,6 +259,9 @@ const presetRaw = <T>(parent: Record<string, unknown> | undefined, field: string
 };
 /** One raw GTD scalar and its group stamp, without carrying the Settings row. */
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowDirectType): GtdWorkflowDirectWitness | null;
+export function gtdWorkflowWitness(settings: AppSettings, type: 'pomodoro'): GtdWorkflowReviewWitness | null;
+export function gtdWorkflowWitness(settings: AppSettings, type: Exclude<GtdWorkflowPomodoroBooleanType, 'pomodoro'>): GtdWorkflowPomodoroWitness | null;
+export function gtdWorkflowWitness(settings: AppSettings, type: 'pomodoroDurations'): GtdWorkflowPomodoroDurationsWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowReviewType): GtdWorkflowReviewWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowInboxType): GtdWorkflowInboxWitness | null;
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowCaptureParseType): GtdWorkflowCaptureParseWitness | null;
@@ -224,12 +276,38 @@ export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowType,
 export function gtdWorkflowWitness(settings: AppSettings, type: GtdWorkflowType, section?: GtdWorkflowTaskEditorSection): GtdWorkflowWitness | null {
     const group = settings.gtd;
     const stamps = settings.syncPreferencesUpdatedAt;
-    if (type !== 'quickAddAutoClean' && group !== undefined && (!group || typeof group !== 'object' || Array.isArray(group))
+    if (type !== 'quickAddAutoClean' && type !== 'pomodoro' && group !== undefined && (!group || typeof group !== 'object' || Array.isArray(group))
         || stamps !== undefined && (!stamps || typeof stamps !== 'object' || Array.isArray(stamps))) return null;
     const stampPresent = stamps !== undefined && owns(stamps, 'gtd') && stamps.gtd !== undefined;
     const stamp = stampPresent ? stamps?.gtd : null;
     if (stampPresent && !(typeof stamp === 'string' && stamp.length <= 40
         && Number.isFinite(Date.parse(stamp)) && new Date(stamp).toISOString() === stamp)) return null;
+    if (type === 'pomodoro' || type === 'pomodoroDurations' || type === 'pomodoroLinkTask'
+        || type === 'pomodoroAutoStartBreaks' || type === 'pomodoroAutoStartFocus' || type === 'pomodoroCompletionAlert') {
+        const featuresPresent = owns(settings, 'features') && settings.features !== undefined;
+        const features = featuresPresent ? settings.features : undefined;
+        if (featuresPresent && !plain(features)) return null;
+        const enabled = presetRaw(features as Record<string, unknown> | undefined, 'pomodoro',
+            (value): value is boolean => typeof value === 'boolean');
+        if (!enabled) return null;
+        const stampFields = { stampPresent, stamp: stampPresent ? stamp! : null };
+        if (type === 'pomodoro') return { parentPresent: featuresPresent, ...enabled, ...stampFields };
+        const gate = { featuresPresent, enabled };
+        const parentPresent = group !== undefined && owns(group, 'pomodoro') && group.pomodoro !== undefined;
+        const parent = parentPresent ? group?.pomodoro : undefined;
+        if (parentPresent && !plain(parent)) return null;
+        const field = gtdWorkflowPomodoroField(type);
+        if (type === 'pomodoroDurations') {
+            const raw = presetRaw(parent as Record<string, unknown> | undefined, field,
+                (value): value is Partial<PomodoroDurations> => plain(value)
+                    && Object.keys(value).every((key) => key === 'focusMinutes' || key === 'breakMinutes')
+                    && Object.values(value).every((item) => typeof item === 'number' && Number.isFinite(item)));
+            return raw ? { parentPresent, ...raw, gate, ...stampFields } : null;
+        }
+        const raw = presetRaw(parent as Record<string, unknown> | undefined, field,
+            (value): value is boolean => typeof value === 'boolean');
+        return raw ? { parentPresent, ...raw, gate, ...stampFields } : null;
+    }
     if (type === 'defaultArea') {
         const modePresent = group !== undefined && owns(group, 'defaultAreaMode') && group.defaultAreaMode !== undefined;
         const idPresent = group !== undefined && owns(group, 'defaultAreaId') && group.defaultAreaId !== undefined;
@@ -401,7 +479,7 @@ type SettingsActionContext = {
     getStorage: () => StorageAdapter;
 };
 
-type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'commitPreparedGeneralPreference' | 'commitPreparedGtdWorkflow' | 'commitPreparedAppLock' | 'retryPreparedAppLockSnapshot' | 'commitPreparedNotificationSetting' | 'retryPreparedNotificationSettingSnapshot' | 'commitPreparedCalendarSubscriptionSetting' | 'commitPreparedCalendarSubscriptionAdd' | 'retryPreparedCalendarSubscriptionSettingSnapshot' | 'commitPreparedFocusSavedFilter' | 'commitPreparedSavedSearchWrite' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
+type SettingsActions = Pick<TaskStore, 'fetchData' | 'seedGettingStarted' | 'updateSettings' | 'commitPreparedGeneralPreference' | 'commitPreparedGtdWorkflow' | 'commitPreparedAppLock' | 'retryPreparedAppLockSnapshot' | 'commitPreparedNotificationSetting' | 'retryPreparedNotificationSettingSnapshot' | 'commitPreparedAIRequestTimeout' | 'retryPreparedAIRequestTimeoutSnapshot' | 'applyPreparedAIReasoningEffort' | 'retryPreparedAIReasoningEffortSnapshot' | 'applyPreparedAIGeminiThinkingBudget' | 'retryPreparedAIGeminiThinkingBudgetSnapshot' | 'commitPreparedCalendarSubscriptionSetting' | 'commitPreparedCalendarSubscriptionAdd' | 'retryPreparedCalendarSubscriptionSettingSnapshot' | 'commitPreparedFocusSavedFilter' | 'commitPreparedSavedSearchWrite' | 'persistSnapshot' | 'getDerivedState' | 'getFocusedCount' | 'setHighlightTask'>;
 
 // Whether the store's last completed load was a recovery load (raw adapter rows). The next normal load then reuses no
 // row object (reuseEntities below), so it is not a no-op even for an unchanged document (D9b W6 refresh drop).
@@ -569,10 +647,10 @@ export const createSettingsActions = ({
                             setProducerMs = Date.now() - producerStartedAt;
                             return options?.silent || !state.isLoading ? state : { isLoading: false };
                         }
-                        // Normalization can change a view-only field without a new
-                        // revision. Reusing by revision across recovery boundaries
-                        // would keep either the normalized receipt or the raw UI row.
-                        const reuseEntities = recoveryLoad === lastLoadWasRecovery;
+                        // Recovery must refresh raw task/project content even when a capped
+                        // revision and timestamp match. Ordinary loads may reuse identities;
+                        // crossing a recovery boundary must also drop normalized view rows.
+                        const reuseEntities = !recoveryLoad && recoveryLoad === lastLoadWasRecovery;
                         let previousTasksById: TaskStore['_tasksById'] = reuseEntities ? state._tasksById : new Map();
                         if (reuseEntities && !recoveryLoad) {
                             for (const task of allTasks) {
@@ -1045,7 +1123,8 @@ export const createSettingsActions = ({
             const current = gtdWorkflowWitness(durable.settings, edit.type,
                 edit.type === 'taskEditorSectionOpen' ? edit.section : undefined);
             if (!current) return memory;
-            const update = buildGtdSettingsUpdate(durable.settings, edit);
+            const settingsEdit = gtdWorkflowSettingsEdit(edit);
+            const update = buildGtdSettingsUpdate(durable.settings, settingsEdit);
             if (!update) return memory;
             const target = update.gtd;
             const after = (edit.type === 'taskEditorSectionOpen'
@@ -1073,7 +1152,7 @@ export const createSettingsActions = ({
             }
             if (!taskEditValuesEqual(current, expected)
                 || (durable.settings.deviceId ?? null) !== input.deviceIdBefore) return memory;
-            if (isGtdSettingStored(durable.settings, edit)) return memory;
+            if (isGtdSettingStored(durable.settings, settingsEdit)) return memory;
             if (edit.type === 'defaultArea' && (edit.value === '' || edit.value === GTD_DEFAULT_AREA_ACTIVE_OPTION
                 ? input.targetArea !== null
                 : !input.targetArea || !taskEditValuesEqual(input.targetArea,
@@ -1224,6 +1303,179 @@ export const createSettingsActions = ({
     retryPreparedNotificationSettingSnapshot: async (authority) => {
         let result: import('./store-types').PreparedTaskEditResult = { success: false,
             reason: 'conflict', error: 'Notification save ownership changed' };
+        set((memory) => {
+            const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
+            if (!boundary || !raw || memory._allTasks !== boundary.taskReference
+                || memory.lastDataChangeAt !== boundary.lastDataChangeAt
+                || memory.settings !== raw.settings || memory.persistenceFailure === null
+                || memory.persistenceFailure !== boundary.failure
+                || boundary.generation !== getSaveGeneration()) return memory;
+            persist(set, debouncedSave, { ...memory, _allTasks: raw.tasks,
+                _allProjects: raw.projects, _allSections: raw.sections ?? [],
+                _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
+            authority.saveBoundary = { ...boundary, generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            result = { success: true, outcome: 'applied' };
+            return { ...memory };
+        });
+        return result;
+    },
+
+    commitPreparedAIRequestTimeout: async (request, authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI timeout setting changed; refresh AI settings' };
+        set((memory) => {
+            const before = authority.state;
+            if (memory.persistenceFailure || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const validated = readNativeAIRequestTimeoutRequest(request);
+            if (!validated) return memory;
+            const current = nativeAIRequestTimeoutWitness(durable.settings);
+            if (!current || !taskEditValuesEqual(current, request.expected)
+                || current.timeoutPresent && current.timeout === request.value) return memory;
+            const settings = { ...durable.settings, ai: { ...(durable.settings.ai ?? {}), requestTimeoutSeconds: request.value },
+                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
+                    ai: timestampAtLeastAfter(new Date().toISOString(), current.stamp ?? undefined) } };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    retryPreparedAIRequestTimeoutSnapshot: async (authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI timeout save ownership changed' };
+        set((memory) => {
+            const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
+            if (!boundary || !raw || memory._allTasks !== boundary.taskReference
+                || memory.lastDataChangeAt !== boundary.lastDataChangeAt
+                || memory.settings !== raw.settings || memory.persistenceFailure === null
+                || memory.persistenceFailure !== boundary.failure
+                || boundary.generation !== getSaveGeneration()) return memory;
+            persist(set, debouncedSave, { ...memory, _allTasks: raw.tasks,
+                _allProjects: raw.projects, _allSections: raw.sections ?? [],
+                _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
+            authority.saveBoundary = { ...boundary, generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            result = { success: true, outcome: 'applied' };
+            return { ...memory };
+        });
+        return result;
+    },
+
+    applyPreparedAIReasoningEffort: async (request, authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI reasoning effort setting changed; refresh AI settings' };
+        set((memory) => {
+            const before = authority.state;
+            if (memory.persistenceFailure || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const validated = readNativeAIReasoningEffortRequest(request);
+            if (!validated) return memory;
+            const current = nativeAIReasoningEffortWitness(durable.settings);
+            if (!current || current.providerPresent && current.provider !== 'openai'
+                || !taskEditValuesEqual(current, request.expected)
+                || current.effortPresent && current.effort === request.value) return memory;
+            const settings = { ...durable.settings, ai: { ...(durable.settings.ai ?? {}), reasoningEffort: request.value },
+                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
+                    ai: timestampAtLeastAfter(new Date().toISOString(), current.stamp ?? undefined) } };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    retryPreparedAIReasoningEffortSnapshot: async (authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI reasoning effort save ownership changed' };
+        set((memory) => {
+            const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
+            if (!boundary || !raw || memory._allTasks !== boundary.taskReference
+                || memory.lastDataChangeAt !== boundary.lastDataChangeAt
+                || memory.settings !== raw.settings || memory.persistenceFailure === null
+                || memory.persistenceFailure !== boundary.failure
+                || boundary.generation !== getSaveGeneration()) return memory;
+            persist(set, debouncedSave, { ...memory, _allTasks: raw.tasks,
+                _allProjects: raw.projects, _allSections: raw.sections ?? [],
+                _allAreas: raw.areas ?? [], _allPeople: raw.people ?? [] }, raw);
+            authority.saveBoundary = { ...boundary, generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            result = { success: true, outcome: 'applied' };
+            return { ...memory };
+        });
+        return result;
+    },
+
+    applyPreparedAIGeminiThinkingBudget: async (request, authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI Gemini thinking budget setting changed; refresh AI settings' };
+        set((memory) => {
+            const before = authority.state;
+            if (memory.persistenceFailure || memory._allTasks !== before._allTasks || memory._allProjects !== before._allProjects
+                || memory._allAreas !== before._allAreas || memory._allSections !== before._allSections
+                || memory._allPeople !== before._allPeople || memory.settings !== before.settings
+                || memory.lastDataChangeAt !== before.lastDataChangeAt) return memory;
+            const durable = authority.snapshot;
+            const validated = readNativeAIGeminiThinkingBudgetRequest(request);
+            if (!validated) return memory;
+            const current = nativeAIGeminiThinkingBudgetWitness(durable.settings);
+            if (!current || !current.providerPresent || current.provider !== 'gemini'
+                || !taskEditValuesEqual(current, request.expected)
+                || current.budgetPresent && current.budget === request.value) return memory;
+            const settings = { ...durable.settings, ai: { ...(durable.settings.ai ?? {}), thinkingBudget: request.value },
+                syncPreferencesUpdatedAt: { ...(durable.settings.syncPreferencesUpdatedAt ?? {}),
+                    ai: timestampAtLeastAfter(new Date().toISOString(), current.stamp ?? undefined) } };
+            const rawSnapshot = { ...durable, settings };
+            const freshTasks = durable.tasks.map((row) => normalizeTaskForLoad(row));
+            const freshProjects = durable.projects.map(normalizeProjectLifecycleFields);
+            clearDerivedCache();
+            persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
+                _allProjects: durable.projects, _allSections: durable.sections ?? [],
+                _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings }, rawSnapshot);
+            const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
+            authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
+                generation: getSaveGeneration(), failure: memory.persistenceFailure };
+            authority.rawSavedSnapshot = rawSnapshot;
+            result = { success: true, outcome: 'applied' };
+            return { _allTasks: freshTasks, _allProjects: freshProjects,
+                _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
+                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+        });
+        return result;
+    },
+
+    retryPreparedAIGeminiThinkingBudgetSnapshot: async (authority) => {
+        let result: import('./store-types').PreparedTaskEditResult = { success: false,
+            reason: 'conflict', error: 'AI Gemini thinking budget save ownership changed' };
         set((memory) => {
             const boundary = authority.saveBoundary, raw = authority.rawSavedSnapshot;
             if (!boundary || !raw || memory._allTasks !== boundary.taskReference
@@ -1416,6 +1668,8 @@ export const createSettingsActions = ({
             && derivedCache.visibleTasksRef === state.tasks
             && derivedCache.taskLookupRef === state._tasksById
             && derivedCache.projectLookupRef === state._projectsById
+            && derivedCache.sectionsRef === state._allSections
+            && derivedCache.taxonomyRef === state.settings.taxonomy
             && derivedCache.day === day
         ) {
             return derivedCache.value;
@@ -1426,6 +1680,7 @@ export const createSettingsActions = ({
             derivedCache
                 && derivedCache.visibleTasksRef === state.tasks
                 && derivedCache.taskLookupRef === state._tasksById
+                && derivedCache.taxonomyRef === state.settings.taxonomy
                 && derivedCache.day === day
                 && previous
                 ? {
@@ -1445,22 +1700,31 @@ export const createSettingsActions = ({
                 }
                 : computeTaskDerivedState(state.tasks, state._tasksById, now);
         const projectDerived =
-            derivedCache && derivedCache.projectLookupRef === state._projectsById && previous
+            derivedCache && derivedCache.projectLookupRef === state._projectsById
+                && derivedCache.sectionsRef === state._allSections && previous
                 ? {
                     projectMap: previous.projectMap,
                     sequentialProjectIds: previous.sequentialProjectIds,
                     sequentialWithinSectionProjectIds: previous.sequentialWithinSectionProjectIds,
+                    sequentialSectionKeys: previous.sequentialSectionKeys,
                     focusedProjectCount: previous.focusedProjectCount,
                 }
-                : computeProjectDerivedState(state._allProjects, state._projectsById);
+                : reuseEqualSequencingSets(previous,
+                    computeProjectDerivedState(state._allProjects, state._projectsById, state._allSections));
         const derived = {
             ...projectDerived,
             ...taskDerived,
+            allContexts: Array.from(new Map([...taskDerived.allContexts, ...getSavedTaxonomyTokens(state.settings, 'context')]
+                .map((token) => [normalizeTaxonomyToken('context', token).toLowerCase(), token])).values()).sort(baseTextCollator.compare),
+            allTags: Array.from(new Map([...taskDerived.allTags, ...getSavedTaxonomyTokens(state.settings, 'tag')]
+                .map((token) => [normalizeTaxonomyToken('tag', token).toLowerCase(), token])).values()).sort(baseTextCollator.compare),
         };
         derivedCache = {
+            taxonomyRef: state.settings.taxonomy,
             visibleTasksRef: state.tasks,
             taskLookupRef: state._tasksById,
             projectLookupRef: state._projectsById,
+            sectionsRef: state._allSections,
             day,
             value: derived,
         };

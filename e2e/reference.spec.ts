@@ -106,7 +106,7 @@ test('Reference editing preserves retained metadata and exposes a secondary conv
     });
 });
 
-test('converting an action to Reference keeps an editable plain list and restores checked states', async ({ page }, testInfo) => {
+test('converting an action to Reference keeps an editable checklist and restores checked states', async ({ page }, testInfo) => {
     await seedReferences(page);
     await page.goto('/?view=next');
     await row(page, 'normal-action').getByText('Ordinary action', { exact: true }).dblclick();
@@ -136,12 +136,20 @@ test('converting an action to Reference keeps an editable plain list and restore
     await page.reload();
     const reference = row(page, 'normal-action');
     await reference.getByText('Ordinary action', { exact: true }).click();
-    await expect(reference.getByRole('listitem')).toHaveText(['Read the guide', updatedTitle]);
+    await expect(reference.getByText('Read', { exact: true })).toBeVisible();
     await expect(reference.getByRole('link', { name: 'guide', exact: true })).toHaveAttribute('title', 'https://example.invalid/guide');
     await expect(reference.getByText('Keep these original notes.', { exact: true })).toBeVisible();
-    await expect(reference.getByRole('button', { name: retainedChecklist[0].title, exact: true })).toHaveCount(0);
-    await reference.getByRole('listitem').nth(1).click();
-    expect((await readTask(page, 'normal-action')).checklist).toEqual(expectedChecklist);
+    await expect(reference.getByRole('button', { name: retainedChecklist[0].title, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    const secondEntry = reference.getByRole('button', { name: updatedTitle, exact: true });
+    await expect(secondEntry).toHaveAttribute('aria-pressed', 'false');
+    await secondEntry.click();
+    await expect(secondEntry).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(async () => (await readTask(page, 'normal-action')).checklist).toEqual([
+        expectedChecklist[0], { ...expectedChecklist[1], isCompleted: true },
+    ]);
+    await secondEntry.click();
+    await expect(secondEntry).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(async () => (await readTask(page, 'normal-action')).checklist).toEqual(expectedChecklist);
     await page.screenshot({ path: testInfo.outputPath('reference-preserved-list.png') });
 
     await reference.getByText('Ordinary action', { exact: true }).dblclick();

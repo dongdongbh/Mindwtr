@@ -16,6 +16,17 @@ struct ProcessInboxSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if !model.processInboxUndoLabel.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(model.processInboxToast).rnFont(13).foregroundStyle(palette.success)
+                    actionButton(model.processInboxUndoLabel, id: "process-inbox-undo",
+                                 requiresControls: false, active: model.processInboxUndoEnabled) {
+                        Task { await model.undoProcessInboxDecision() }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20).padding(.vertical, 8)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     if view.isEmpty { completed }
@@ -488,7 +499,7 @@ struct ProcessInboxSheet: View {
                     .foregroundStyle(notice.text("tone") == "error" ? palette.danger : palette.warning)
                     .accessibilityIdentifier("process-inbox-notice")
             }
-            if !model.processInboxToast.isEmpty {
+            if !model.processInboxToast.isEmpty && model.processInboxUndoLabel.isEmpty {
                 Text(model.processInboxToast).rnFont(13).foregroundStyle(palette.success)
                     .accessibilityIdentifier("process-inbox-toast")
             }

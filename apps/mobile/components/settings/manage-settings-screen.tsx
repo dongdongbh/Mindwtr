@@ -1,3 +1,4 @@
+import { logInfo } from '../../lib/app-log';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Linking, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -97,6 +98,8 @@ export function ManageSettingsScreen() {
     const allTasks = useTaskStore((state) => state._allTasks);
     const derivedState = useTaskStore((state) => state.getDerivedState());
     const addArea = useTaskStore((state) => state.addArea);
+    const addContext = useTaskStore((state) => state.addContext);
+    const addTag = useTaskStore((state) => state.addTag);
     const deleteArea = useTaskStore((state) => state.deleteArea);
     const updateArea = useTaskStore((state) => state.updateArea);
     const updateSettings = useTaskStore((state) => state.updateSettings);
@@ -138,6 +141,8 @@ export function ManageSettingsScreen() {
     const { allContexts, allTags } = derivedState;
     const [editorTarget, setEditorTarget] = useState<ManageEditorTarget | null>(null);
     const [editorName, setEditorName] = useState('');
+    const [editorSaving, setEditorSaving] = useState(false);
+    const [editorFailed, setEditorFailed] = useState(false);
     const [editorColor, setEditorColor] = useState(DEFAULT_AREA_COLOR);
     const [editorNote, setEditorNote] = useState('');
     const [editorReferenceLink, setEditorReferenceLink] = useState('');
@@ -229,7 +234,11 @@ export function ManageSettingsScreen() {
         }, { write: updateSettings, read: () => useTaskStore.getState().settings }).then(() => undefined);
     };
 
+    const tokenEditorFailed = editorFailed && (editorTarget?.type === 'context' || editorTarget?.type === 'tag'
+        || editorTarget?.type === 'newContext' || editorTarget?.type === 'newTag');
     const closeEditor = () => {
+        if (editorSaving) return;
+        setEditorFailed(false);
         setEditorTarget(null);
         setEditorName('');
         setEditorColor(DEFAULT_AREA_COLOR);
@@ -238,12 +247,21 @@ export function ManageSettingsScreen() {
     };
 
     const openEditor = (target: ManageEditorTarget) => {
+        setEditorFailed(false);
         const draft = getManageEditorDraft(target);
         setEditorTarget(target);
         setEditorName(draft.name);
         setEditorColor(draft.color);
         setEditorNote(draft.note);
         setEditorReferenceLink(draft.referenceLink);
+    };
+
+    const deleteToken = async (kind: 'context' | 'tag', name: string) => {
+        try {
+            await (kind === 'context' ? deleteContext(name) : deleteTag(name));
+        } catch {
+            Alert.alert(t('common.error'), t('settings.feedback.saveFailed'));
+        }
     };
 
     const openUnassignedAreaEditor = () => openEditor({ type: 'unassignedArea', color: unassignedAreaColor });
@@ -266,43 +284,58 @@ export function ManageSettingsScreen() {
     };
 
     const saveEditor = async () => {
-        if (!editorTarget) return;
+        if (!editorTarget || editorSaving) return;
         const writes = planManageEditorSave(
             editorTarget,
             { name: editorName, color: editorColor, note: editorNote, referenceLink: editorReferenceLink },
             settings,
         );
         if (!writes) return;
-        for (const write of writes) {
-            switch (write.kind) {
-                case 'updateSettings':
-                    await updateSettings(write.updates);
-                    break;
-                case 'addArea':
-                    await addArea(write.name, write.props);
-                    break;
-                case 'addPerson':
-                    await addPerson(write.name, write.props);
-                    break;
-                case 'updatePerson':
-                    await updatePerson(write.id, write.updates);
-                    break;
-                case 'renamePerson':
-                    await renamePerson(write.id, write.name, write.options);
-                    break;
-                case 'updateArea':
-                    await updateArea(write.id, write.updates);
-                    break;
-                // Not awaited: the editor closes while the rename runs.
-                case 'renameContext':
-                    void renameContext(write.from, write.to);
-                    break;
-                case 'renameTag':
-                    void renameTag(write.from, write.to);
-                    break;
+        setEditorSaving(true);
+        setEditorFailed(false);
+        try {
+            for (const write of writes) {
+                switch (write.kind) {
+                    case 'updateSettings':
+                        await updateSettings(write.updates);
+                        break;
+                    case 'addContext':
+                        await addContext(write.name);
+                        void logInfo('Saved context or tag created', { scope: 'settings', force: true, extra: { releaseCheck: 'v1.3.7/saved-taxonomy', taxonomyKind: 'context', outcome: 'persisted' } });
+                        break;
+                    case 'addTag':
+                        await addTag(write.name);
+                        void logInfo('Saved context or tag created', { scope: 'settings', force: true, extra: { releaseCheck: 'v1.3.7/saved-taxonomy', taxonomyKind: 'tag', outcome: 'persisted' } });
+                        break;
+                    case 'addArea':
+                        await addArea(write.name, write.props);
+                        break;
+                    case 'addPerson':
+                        await addPerson(write.name, write.props);
+                        break;
+                    case 'updatePerson':
+                        await updatePerson(write.id, write.updates);
+                        break;
+                    case 'renamePerson':
+                        await renamePerson(write.id, write.name, write.options);
+                        break;
+                    case 'updateArea':
+                        await updateArea(write.id, write.updates);
+                        break;
+                    case 'renameContext':
+                        await renameContext(write.from, write.to);
+                        break;
+                    case 'renameTag':
+                        await renameTag(write.from, write.to);
+                        break;
+                }
             }
+            closeEditor();
+        } catch {
+            setEditorFailed(true);
+        } finally {
+            setEditorSaving(false);
         }
-        closeEditor();
     };
 
     // Icon buttons name the item they act on, as the Someday section rows do.
@@ -602,9 +635,19 @@ export function ManageSettingsScreen() {
                             key={ctx}
                             label={ctx}
                             onRename={() => openValueEditor('context', ctx)}
-                            onDelete={() => confirmDelete(ctx, () => void deleteContext(ctx))}
+                            onDelete={() => confirmDelete(ctx, () => void deleteToken('context', ctx))}
                         />
                     ))}
+                    <View style={styles.settingRow}>
+                        <Text style={[styles.settingLabel, { color: tc.text, flex: 1 }]}>{text.contexts.newLabel}</Text>
+                        <Pressable accessibilityLabel={text.contexts.newLabel} accessibilityRole="button"
+                            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                            onPress={() => openEditor({ type: 'newContext' })}
+                            style={[styles.manageEditorButton, styles.manageEditorButtonPrimary]}
+                            testID="manage-context-add">
+                            <Text style={[styles.manageEditorButtonText, styles.manageEditorButtonPrimaryText]}>{text.contexts.addLabel}</Text>
+                        </Pressable>
+                    </View>
                 </CollapsibleSection>
 
                 <CollapsibleSection
@@ -625,9 +668,19 @@ export function ManageSettingsScreen() {
                             key={tag}
                             label={tag}
                             onRename={() => openValueEditor('tag', tag)}
-                            onDelete={() => confirmDelete(tag, () => void deleteTag(tag))}
+                            onDelete={() => confirmDelete(tag, () => void deleteToken('tag', tag))}
                         />
                     ))}
+                    <View style={styles.settingRow}>
+                        <Text style={[styles.settingLabel, { color: tc.text, flex: 1 }]}>{text.tags.newLabel}</Text>
+                        <Pressable accessibilityLabel={text.tags.newLabel} accessibilityRole="button"
+                            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                            onPress={() => openEditor({ type: 'newTag' })}
+                            style={[styles.manageEditorButton, styles.manageEditorButtonPrimary]}
+                            testID="manage-tag-add">
+                            <Text style={[styles.manageEditorButtonText, styles.manageEditorButtonPrimaryText]}>{text.tags.addLabel}</Text>
+                        </Pressable>
+                    </View>
                 </CollapsibleSection>
             </ScrollView>
             <Modal
@@ -650,9 +703,13 @@ export function ManageSettingsScreen() {
                                     ? 'manage-area-name-input'
                                     : editorTarget?.type === 'newPerson' || editorTarget?.type === 'person'
                                         ? 'manage-person-name-input'
-                                        : undefined}
+                                        : editorTarget?.type === 'newContext' || editorTarget?.type === 'newTag'
+                                            ? 'manage-token-name-input'
+                                            : undefined}
+                                accessibilityLabel={editorText.namePlaceholder}
+                                editable={!editorSaving && !tokenEditorFailed}
                                 value={editorName}
-                                onChangeText={setEditorName}
+                                onChangeText={(name) => { if (!editorSaving && !tokenEditorFailed) setEditorName(name); }}
                                 placeholder={editorText.namePlaceholder}
                                 placeholderTextColor={tc.secondaryText}
                                 style={[
@@ -730,18 +787,21 @@ export function ManageSettingsScreen() {
                                 ))}
                             </View>
                         ) : null}
+                        {editorFailed && <Text accessibilityRole="alert" style={[styles.settingDescription, { color: tc.danger }]}>{t('settings.feedback.saveFailed')}</Text>}
                         <View style={styles.manageEditorActions}>
                             <TouchableOpacity
+                                testID="manage-editor-cancel"
+                                disabled={editorSaving}
                                 onPress={closeEditor}
                                 style={[styles.manageEditorButton, { borderColor: tc.border }]}
                             >
                                 <Text style={[styles.manageEditorButtonText, { color: tc.secondaryText }]}>
-                                    {editorText.cancelLabel}
+                                    {tokenEditorFailed ? t('common.close') : editorText.cancelLabel}
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 testID="manage-editor-save"
-                                disabled={saveDisabled}
+                                disabled={saveDisabled || editorSaving}
                                 onPress={() => {
                                     void saveEditor();
                                 }}

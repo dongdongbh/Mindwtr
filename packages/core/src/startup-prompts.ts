@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { scheduleStartupPrompt, selectStartupPrompt } from './startup-prompt-run';
+
 /**
  * One-at-a-time scheduler for the app's startup prompts (first-run onboarding,
  * maintainer announcement, donation ask, update reminder, and the dev/test
@@ -124,22 +126,10 @@ export function useStartupPromptQueue(options: UseStartupPromptQueueOptions): St
         }
     }, []);
 
-    const selectCandidate = useCallback((): StartupPromptDescriptor | null => {
-        const ordered = descriptorsRef.current
-            .filter((descriptor) => !retiredRef.current.has(descriptor.id))
-            .sort((a, b) => b.priority - a.priority);
-        for (const descriptor of ordered) {
-            let eligible = false;
-            try {
-                eligible = descriptor.isEligible();
-            } catch (error) {
-                retire(descriptor, error, 'eligible');
-                continue;
-            }
-            if (eligible) return descriptor;
-        }
-        return null;
-    }, [retire]);
+    const selectCandidate = useCallback(
+        (): StartupPromptDescriptor | null => selectStartupPrompt(descriptorsRef.current, retiredRef.current, retire),
+        [retire],
+    );
 
     useEffect(() => {
         if (!enabled || !gateOpen || openId || pendingRef.current) return;
@@ -157,49 +147,23 @@ export function useStartupPromptQueue(options: UseStartupPromptQueueOptions): St
 
         pendingRef.current = candidate.id;
         let cancelled = false;
-        let presentTimeoutId: ReturnType<typeof setTimeout> | undefined;
-        const presentAbortController = new AbortController();
-        const timer = setTimeout(() => {
-            const presented = Promise.resolve().then(() => candidate.present(presentAbortController.signal));
-            const raced = candidate.presentTimeoutMs === undefined
-                ? presented
-                : Promise.race<boolean | void>([
-                    presented,
-                    new Promise<false>((resolve) => {
-                        presentTimeoutId = setTimeout(() => {
-                            presentAbortController.abort();
-                            resolve(false);
-                        }, candidate.presentTimeoutMs);
-                    }),
-                ]);
-            raced
-                .then((opened) => {
-                    if (presentTimeoutId !== undefined) clearTimeout(presentTimeoutId);
-                    pendingRef.current = null;
-                    if (cancelled) return;
-                    if (opened) {
-                        setOpenId(candidate.id);
-                    } else {
-                        retiredRef.current.add(candidate.id);
-                        bumpRevision();
-                    }
-                })
-                .catch((error) => {
-                    if (presentTimeoutId !== undefined) clearTimeout(presentTimeoutId);
-                    if (cancelled) {
-                        pendingRef.current = null;
-                        return;
-                    }
-                    retire(candidate, error, 'present');
-                    bumpRevision();
-                });
-        }, candidate.delayMs);
+        const cancel = scheduleStartupPrompt(candidate, (outcome) => {
+            pendingRef.current = null;
+            if (cancelled) return;
+            if ('error' in outcome) {
+                retire(candidate, outcome.error, 'present');
+                bumpRevision();
+            } else if (outcome.opened) {
+                setOpenId(candidate.id);
+            } else {
+                retiredRef.current.add(candidate.id);
+                bumpRevision();
+            }
+        });
 
         return () => {
             cancelled = true;
-            presentAbortController.abort();
-            clearTimeout(timer);
-            if (presentTimeoutId !== undefined) clearTimeout(presentTimeoutId);
+            cancel();
             pendingRef.current = null;
         };
     }, [enabled, gateOpen, openId, revision, selectCandidate, retire, bumpRevision, ...(signals ?? [])]);

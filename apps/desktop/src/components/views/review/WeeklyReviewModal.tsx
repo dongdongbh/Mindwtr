@@ -10,6 +10,7 @@ import {
     getExternalCalendarDaySummaries,
     getUsedTaskTokens,
     getWeeklyReviewBuckets,
+    getProjectAccentColor,
     isSandboxMode,
     isTaskInActiveProject,
     isTaskFinished,
@@ -954,7 +955,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                     <div key={project.id} className="border border-border rounded-lg p-4">
                                         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                                             <div className="flex items-center gap-2">
-                                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || DEFAULT_AREA_COLOR }} />
+                                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getProjectAccentColor(project, areaById) || DEFAULT_AREA_COLOR }} />
                                                 <h3 className="font-semibold">{project.title}</h3>
                                             </div>
                                             <div className="flex flex-wrap items-center gap-2">

@@ -1,6 +1,10 @@
 import { vi } from 'vitest';
 import React from 'react';
 
+vi.mock('@react-navigation/native', () => ({
+  NavigationContext: React.createContext(undefined),
+}));
+
 // Minimal globals for Expo modules in node test env.
 const testGlobal = globalThis as typeof globalThis & {
   __DEV__?: boolean;

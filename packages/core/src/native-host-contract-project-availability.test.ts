@@ -268,6 +268,26 @@ const privateMethods = (env: Awaited<ReturnType<typeof openSqliteHost>>,
         revision: () => value(env.host.getProjectAttachmentEditOptions({ projectId: 'target' })).revision, save });
 
 describe('private prepared ordinary Project availability', () => {
+    it('cold-replays a pre-color 26-cell journal and refuses to erase a later override', async () => {
+        const { env } = await open(undefined, project('target', { attachments: [{ ...file, uri: '' }, sibling] }));
+        try {
+            const api = privateMethods(env);
+            const envelope = JSON.parse(JSON.stringify(value(await api.prepareProjectFileAvailability(downloadRequest(env)))));
+            // v1.3.6 froze 26 cells: neither colorOverride nor perSectionFlow (#1429) existed yet.
+            expect(envelope.prepared.effect.rawBefore.splice(26)).toEqual([null, null]);
+            expect(envelope.prepared.effect.rawAfter.splice(26)).toEqual([null, null]);
+            expect(api.validatePreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            await env.restart();
+            expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            const committed = await allRows(env);
+            await env.restart();
+            expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            expect(await allRows(env)).toEqual(committed);
+            await useTaskStore.getState().updateProject('target', { colorOverride: '#ef4444' });
+            expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: false });
+            expect((await env.sql('SELECT colorOverride FROM projects WHERE id=?', ['target']))[0]).toEqual({ colorOverride: '#ef4444' });
+        } finally { await env.close(); }
+    });
     it.each(['', target])('freezes missing URI %j without file, domain, queue or save work', async (uri) => {
         const { env, ensure } = await open(undefined, project('target', { attachments: [{ ...file, uri }, sibling] }));
         try {

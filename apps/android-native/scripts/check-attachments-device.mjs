@@ -317,7 +317,9 @@ try {
     check(true, `the test files are in ${PHONE_DIR} (PDF ${pdfBytes.length} bytes, PNG ${pngBytes.length} bytes) and the PNG is in the media store`);
 
     dav = await serveWebdav({ port: WEBDAV_PORT, username: USER, password: PASSWORD });
-    execFileSync(adbBin, ['-s', serial, 'reverse', `tcp:${WEBDAV_PORT}`, `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' });
+    // No port mapping until a backend left by a cut-off run (its finally never ran) is set Off below: until then the app's
+    // stale WebDAV backend finds no server and reads as offline.
+    try { execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' }); } catch { /* none mapped */ }
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
     sh('setprop debug.mindwtr.native.install_stop \'\'');
     await device.stopApp();
@@ -328,8 +330,10 @@ try {
     // (1) The phone and the second device on one local WebDAV folder; the second device adds the project.
     let nodes = await openSync();
     if (!nodes.some((node) => node.text === en['settings.syncOff'])) {
+        console.log('note - a backend left by an earlier run is set Off before the check maps its port');
         await tapTag('sync-backend-off', (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off');
     }
+    execFileSync(adbBin, ['-s', serial, 'reverse', `tcp:${WEBDAV_PORT}`, `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' });
     await tapTag('sync-backend-webdav', (current) => Boolean(tagged(current, 'sync-url')), 'the WebDAV form');
     await fill('sync-url', webdavFields.url);
     await insecureOn();

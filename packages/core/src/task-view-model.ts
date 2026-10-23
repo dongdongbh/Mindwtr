@@ -30,12 +30,10 @@ export type TaskViewRow =
     | {
         type: 'checklist';
         label: string;
-        /** A reference list: bullets, no ticks. */
-        bullets: boolean;
-        /** A tap ticks the item (toggle by its `index`); not read-only and not a reference list. */
+        /** A tap ticks the item (toggle by its `index`) when not read-only; a reference list too. */
         tappable: boolean;
         /** Titles are inline Markdown. `accessibilityLabel` names a static item: "Step. Done". */
-        items: Array<{ index: number; id: string; title: string; completed: boolean; accessibilityLabel: string | null }>;
+        items: Array<{ index: number; id: string; title: string; completed: boolean; accessibilityLabel: string }>;
         /** The add input after the items (append on submit). */
         add: { placeholder: string; label: string } | null;
     }
@@ -159,11 +157,10 @@ export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
     }
     if (description) rows.push({ type: 'description', label: t('taskEdit.descriptionLabel'), markdown: description });
     if (checklist.length) {
-        const tappable = !readOnly && !isReference;
+        const tappable = !readOnly;
         rows.push({
             type: 'checklist',
             label: t(isReference ? 'taskEdit.tab.list' : 'taskEdit.checklist'),
-            bullets: isReference,
             tappable,
             items: checklist.map((item, index) => ({
                 index,
@@ -172,7 +169,7 @@ export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
                 completed: item.isCompleted,
                 accessibilityLabel: tappable
                     ? item.title
-                    : isReference ? null : `${item.title}. ${item.isCompleted ? t('common.done') : t('status.active')}`,
+                    : `${item.title}. ${item.isCompleted ? t('common.done') : t('status.active')}`,
             })),
             add: tappable ? { placeholder: `+ ${t('taskEdit.addItem')}`, label: t('taskEdit.addItem') } : null,
         });

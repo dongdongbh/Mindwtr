@@ -737,6 +737,94 @@ describe('TaskItemDisplay', () => {
         expect(queryByText('Second line')).toBeNull();
     });
 
+    it('opens a URL in the collapsed description preview without toggling the row (#1425)', () => {
+        const onToggleView = vi.fn();
+        const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+        const { getByRole, getByText, container } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{ ...baseTask, description: 'See https://example.com/spec before the call' }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView,
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(getByRole('link', { name: 'https://example.com/spec' }));
+        expect(openSpy).toHaveBeenCalledWith('https://example.com/spec', '_blank', 'noopener,noreferrer');
+        expect(onToggleView).not.toHaveBeenCalled();
+
+        // Plain preview text stays inert, as before; the title still toggles.
+        fireEvent.click(getByText(/before the call/));
+        expect(onToggleView).not.toHaveBeenCalled();
+        fireEvent.click(container.querySelector('[data-task-view-toggle]')!);
+        expect(onToggleView).toHaveBeenCalledTimes(1);
+
+        openSpy.mockRestore();
+    });
+
+    it('opens a bare www. address in the collapsed description preview, as the opened description does (#1425)', () => {
+        const onToggleView = vi.fn();
+        const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+        const { getByRole, getByText, container } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{ ...baseTask, description: 'www.google.com before the call' }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView,
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(getByRole('link', { name: 'www.google.com' }));
+        expect(openSpy).toHaveBeenCalledWith('http://www.google.com', '_blank', 'noopener,noreferrer');
+        expect(onToggleView).not.toHaveBeenCalled();
+
+        // Plain preview text stays inert, as before; the title still toggles.
+        fireEvent.click(getByText(/before the call/));
+        expect(onToggleView).not.toHaveBeenCalled();
+        fireEvent.click(container.querySelector('[data-task-view-toggle]')!);
+        expect(onToggleView).toHaveBeenCalledTimes(1);
+
+        openSpy.mockRestore();
+    });
+
     it('shows the completion date and time for completed tasks when compact details are off', () => {
         const completedTask: Task = {
             ...baseTask,
@@ -1504,7 +1592,7 @@ describe('TaskItemDisplay', () => {
         expect(openAttachment).toHaveBeenCalledWith(imageAttachment);
     });
 
-    it('renders preserved reference checklists as ordered plain lists without completion behavior', () => {
+    it('renders a reference list with checkboxes that tick its entries, without a progress count (#1416)', () => {
         const onToggleChecklistItem = vi.fn();
         const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
         const referenceTask: Task = {
@@ -1547,21 +1635,18 @@ describe('TaskItemDisplay', () => {
             </LanguageProvider>
         );
 
-        const list = getByRole('list');
-        const items = Array.from(list.querySelectorAll('li'));
         expect(queryByText('1/2')).not.toBeInTheDocument();
         expect(getByText('Existing description')).toBeInTheDocument();
-        expect(items).toHaveLength(2);
-        expect(items.map((item) => item.textContent)).toEqual(['Finished source', 'First line\nsecond line']);
+        const boxes = Array.from(container.querySelectorAll('[aria-pressed]'));
+        expect(boxes.map((box) => box.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+        expect(container.querySelector('.line-through')?.textContent).toBe('Finished source');
         const sourceLink = getByRole('link', { name: 'source' });
-        expect(sourceLink).toBeInTheDocument();
-        expect(container.querySelector('[aria-pressed]')).not.toBeInTheDocument();
-        expect(items[0]).not.toHaveClass('line-through');
 
         fireEvent.click(sourceLink);
         expect(openSpy).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer');
-        fireEvent.click(items[0]);
         expect(onToggleChecklistItem).not.toHaveBeenCalled();
+        fireEvent.click(boxes[1]);
+        expect(onToggleChecklistItem).toHaveBeenCalledWith(1);
     });
 
     it('renders Reference as a memo summary without task-only metadata or controls', () => {

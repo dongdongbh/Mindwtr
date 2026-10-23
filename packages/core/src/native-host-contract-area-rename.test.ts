@@ -73,6 +73,37 @@ async function open(initial: Partial<AppData>, fail?: () => boolean) {
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Area rename', () => {
+    it.each([1, 2] as const)('cold-retries and receipts the frozen v%s colorless collision policy', async (version) => {
+        const source = area('source', 'Work', 0);
+        const destination = area('destination', 'Home', 1, { color: undefined });
+        const first = await open({ areas: [source, destination],
+            projects: [project('inherited', source.id, source.name)] });
+        const input = first.request(source.id, 'Home');
+        const plan = await first.methods.prepareAreaRename(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        expect(plan.value.prepared.version).toBe(2);
+        const prepared = structuredClone(plan.value.prepared);
+        prepared.version = version;
+        if (version === 1) {
+            // Historical v1 retained the source compatibility color for a colorless destination.
+            for (const pair of prepared.effect.projects) pair.after.color = pair.before.color;
+        }
+        const frozen = JSON.parse(JSON.stringify({ request: input, prepared }));
+        let failed = true;
+        const cold = await open(structuredClone(first.data()), () => failed);
+        expect(cold.methods.validatePreparedAreaRename(frozen)).toMatchObject({ ok: true });
+        expect(await cold.methods.commitPreparedAreaRename(frozen)).toMatchObject({ ok: false,
+            error: { code: 'SAVE_FAILED' } });
+        expect(cold.data().projects[0].areaId).toBe(source.id);
+        failed = false;
+        expect(await cold.methods.commitPreparedAreaRename(frozen)).toMatchObject({ ok: true });
+        expect(cold.data().projects[0].areaId).toBe(destination.id);
+        expect(cold.data().projects[0].color).toBe(version === 1 ? '#3b82f6' : '#94a3b8');
+        const receipt = await open(structuredClone(cold.data()));
+        expect(await receipt.methods.commitPreparedAreaRename(frozen)).toMatchObject({ ok: true });
+        expect(receipt.saves()).toBe(0);
+    });
+
     it('uses the Manage opening draft for blank, unchanged custom color, and default gray no-ops', async () => {
         const custom = await open({ areas: [area('custom', 'Work', 0, { color: '#123456' })], settings: {} });
         setSavedState({ settings: {} });

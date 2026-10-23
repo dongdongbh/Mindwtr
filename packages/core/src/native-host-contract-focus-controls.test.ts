@@ -94,6 +94,68 @@ describe('native host contract: Focus controls', () => {
         },
     );
 
+    it('keeps globally occupied Focus slots and pages only visible rows under area and criteria filters', async () => {
+        freezeClock();
+        const host = await openHost();
+        const state = useTaskStore.getState();
+        const focused = state.tasks.filter((task) => task.isFocusedToday);
+        expect(focused).toHaveLength(3);
+        await state.updateTask(focused[0].id, { areaId: 'a-work' });
+        await state.updateTask(focused[1].id, { areaId: 'a-home' });
+        await state.updateTask(focused[2].id, { areaId: 'a-home' });
+        await state.updateSettings({ filters: { areaIds: ['a-work'] }, gtd: { ...state.settings.gtd, focusTaskLimit: 3 } });
+        const controls = DEFAULT_FOCUS_CONTROL_STATE;
+        const view = value(host.getFocus({ limit: 100, controls }));
+        const section = view.sections.find((item) => item.key === 'focus')!;
+        expect(section).toMatchObject({ total: 3, rowTotal: 1, countLabel: '3/3', hiddenByAreaLabel: '2 selected in other areas' });
+        expect(section.rows.map((row) => row.id)).toEqual([focused[0].id]);
+        const filtered = value(host.getFocus({ limit: 100, controls: { ...controls, preservedCriteria: { hasDescription: true } } }));
+        const filteredSection = filtered.sections.find((item) => item.key === 'focus')!;
+        expect(filteredSection).toMatchObject({ total: 3, rowTotal: 0, countLabel: '3/3', hiddenByAreaLabel: '2 selected in other areas' });
+        expect(filtered.controls.empty).toBeNull();
+        const page = value(host.getFocusSectionWindow({ key: 'focus', offset: 0, limit: 100,
+            revision: filtered.revision, controls: filtered.controls.state }));
+        expect(page).toMatchObject({ total: 3, rowTotal: 0, rows: [] });
+    });
+
+    it('pages Pomodoro choices from all four RN Focus pools under the same controls and revision', async () => {
+        freezeClock();
+        const host = await openHost();
+        const states = [DEFAULT_FOCUS_CONTROL_STATE, withFilters({ tokens: ['@phone'] })];
+        for (const controls of states) {
+            const focus = value(host.getFocus({ limit: 1, controls }));
+            const lists = direct(controls).lists;
+            const expected = new Map<string, string>();
+            for (const task of [...lists.focusedTasks, ...lists.schedule, ...lists.nextActions, ...lists.reviewDue])
+                if (!task.deletedAt) expected.set(task.id, task.title);
+            const observed: { id: string; title: string }[] = [];
+            for (let offset = 0; offset < Math.max(1, expected.size); offset += 2) {
+                const page = value(host.getPomodoroTaskWindow({ offset, limit: 2, revision: focus.revision, controls }));
+                expect(page.total).toBe(expected.size);
+                expect(page.revision).toBe(focus.revision);
+                observed.push(...page.rows);
+            }
+            expect(observed).toEqual([...expected].map(([id, title]) => ({ id, title })));
+            expect(host.getPomodoroTaskWindow({ offset: 0, limit: 2, revision: focus.revision + '-stale', controls }))
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        }
+        expect(focusControlsWrites()).toHaveLength(0);
+    });
+
+    it('rejects malformed, oversized and unready Pomodoro picker reads', async () => {
+        freezeClock();
+        const host = await openHost();
+        const focus = value(host.getFocus({ limit: 1 }));
+        const input = { offset: 0, limit: 1, revision: focus.revision };
+        for (const change of [{ offset: -1 }, { offset: 0.5 }, { limit: 0 }, { limit: 101 },
+            { revision: null }, { controls: { extra: true } }, { extra: true }]) {
+            expect(host.getPomodoroTaskWindow({ ...input, ...change } as never))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(createNativeHostContract().getPomodoroTaskWindow(input))
+            .toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
+    });
+
     it('returns what core\'s Focus model returns when called directly', async () => {
         freezeClock();
         const host = await openHost('base');
@@ -121,6 +183,48 @@ describe('native host contract: Focus controls', () => {
             expect(view.controls.reorder !== null).toBe(model.canReorder);
             expect(view.controls.empty).toEqual(model.empty);
         }
+    });
+
+    it('round trips task-date options, widget criteria, preserved advanced chips and clear', async () => {
+        freezeClock();
+        const host = await openHost('base');
+        const saved = { id: 'date-filter', name: 'Dates', view: 'focus' as const,
+            criteria: { anyDateRange: { preset: 'next_7_days' as const }, dueDateRange: { preset: 'today' as const }, statuses: ['next' as const], futureDateRule: { keep: true },
+                priority: ['none' as const], timeEstimates: ['custom:45'], locations: ['Office', 'Home'] },
+            createdAt: fixture.now, updatedAt: fixture.now };
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, savedFilters: [saved] } }));
+        const applied = value(host.getFocus({ limit: 100, controlEdit: { type: 'applySavedFilter', id: saved.id } }));
+        const options = applied.controls.filterSheet.taskDates.options;
+        expect(options.map((option) => option.value)).toEqual(['', 'today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
+        expect(options.find((option) => option.selected)?.value).toBe('next_7_days');
+        expect(applied.controls.widgetFilter.criteria).toMatchObject({ anyDateRange: { preset: 'next_7_days' }, dueDateRange: { preset: 'today' } });
+        expect(applied.controls.filterSheet.advancedChips.map((chip) => chip.criterionId)).not.toContain('anyDateRange');
+        const next30 = options.find((option) => option.value === 'next_30_days')!;
+        const edited = value(host.getFocus({ limit: 100, controls: applied.controls.state, controlEdit: next30.edit }));
+        expect(edited.controls.state.savedFilterId).toBeNull();
+        expect(edited.controls.widgetFilter.criteria).toEqual({ ...saved.criteria, anyDateRange: { preset: 'next_30_days' } });
+        expect(edited.controls.filterSheet.chips.map((chip) => chip.id)).toEqual(expect.arrayContaining([
+            'preserved:priority', 'preserved:timeEstimates', 'preserved:location:Office', 'preserved:location:Home',
+        ]));
+        const basicRemoved = value(host.getFocus({ limit: 100, controls: edited.controls.state,
+            controlEdit: edited.controls.filterSheet.chips.find((chip) => chip.id === 'preserved:priority')!.edit }));
+        expect(basicRemoved.controls.widgetFilter.criteria.priority).toBeUndefined();
+        const malformed = value(host.getFocus({ limit: 100, controls: { ...DEFAULT_FOCUS_CONTROL_STATE,
+            preservedCriteria: { dueDateRange: { preset: 42 } as never } } }));
+        expect(malformed.controls.filterSheet.chips).toEqual([]);
+        const preserved = edited.controls.filterSheet.chips.find((chip) => chip.id === 'preserved:dueDateRange')!;
+        expect(preserved).toBeDefined();
+        const removed = value(host.getFocus({ limit: 100, controls: edited.controls.state, controlEdit: preserved.edit }));
+        expect(removed.controls.widgetFilter.criteria.dueDateRange).toBeUndefined();
+        expect(removed.controls.widgetFilter.criteria.statuses).toEqual(['next']);
+        const noDate = value(host.getFocus({ limit: 100, controls: removed.controls.state,
+            controlEdit: removed.controls.filterSheet.taskDates.options[0].edit }));
+        expect(noDate.controls.widgetFilter.criteria).toEqual({ ...saved.criteria, anyDateRange: undefined, dueDateRange: undefined });
+        const cleared = value(host.getFocus({ limit: 100, controls: noDate.controls.state, controlEdit: noDate.controls.filterSheet.clear.edit }));
+        expect(cleared.controls.state).toEqual(DEFAULT_FOCUS_CONTROL_STATE);
+        expect(cleared.controls.widgetFilter.criteria).toEqual({});
+        expect(host.getFocus({ limit: 100, controls: withFilters({ anyDateRange: { preset: 'invalid' } as never }) }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('groups Next actions as RN does, and pages the rows with their headings under one revision', async () => {

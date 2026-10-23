@@ -6,7 +6,10 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { JALALI_LOCALE_TAG } from '@mindwtr/core';
+import { JALALI_LOCALE_TAG, useTaskStore } from '@mindwtr/core';
+
+import { LanguageProvider } from '../../contexts/language-context';
+import { useNativeDateInputLocale } from '../../hooks/use-native-date-input-locale';
 
 import { Dialog, DialogBody } from './Dialog';
 import { DateField } from './DateField';
@@ -36,6 +39,38 @@ afterEach(() => {
 });
 
 describe('DateField', () => {
+    it('opens and edits dates when WebKit reports navigator.language as C', () => {
+        const previousSettings = useTaskStore.getState().settings;
+        const language = vi.spyOn(navigator, 'language', 'get').mockReturnValue('C');
+        const languages = vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['C']);
+        const onDateChange = vi.fn();
+        function SystemDateField() {
+            const locale = useNativeDateInputLocale();
+            return <DateField
+                t={t}
+                dateAriaLabel="Due"
+                dateValue="2026-04-19"
+                selectedDate={new Date(2026, 3, 19)}
+                {...locale}
+                dateInputClassName="border"
+                onDateChange={onDateChange}
+            />;
+        }
+        try {
+            useTaskStore.setState({ settings: { dateFormat: 'system', timeFormat: 'system' } });
+            render(<LanguageProvider><SystemDateField /></LanguageProvider>);
+            fireEvent.click(screen.getByRole('button', { name: 'Due Calendar' }));
+            expect(screen.getByRole('dialog', { name: 'Due Calendar' })).toHaveTextContent('April 2026');
+            fireEvent.change(screen.getByRole('textbox', { name: 'Due' }), { target: { value: '04/20/2026' } });
+            expect(onDateChange).toHaveBeenCalledWith('2026-04-20');
+        } finally {
+            cleanup();
+            useTaskStore.setState({ settings: previousSettings });
+            language.mockRestore();
+            languages.mockRestore();
+        }
+    });
+
     it('opens its calendar popover from inside a Dialog', () => {
         // The popover is position:fixed rather than its own portal, so a Dialog
         // panel's overflow-hidden must not be allowed to swallow it. jsdom

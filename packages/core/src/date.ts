@@ -413,7 +413,16 @@ export function resolveDateLocaleTag(params: {
 }): string {
     const dateFormat = normalizeDateFormatSetting(params.dateFormat);
     const language = normalizeLanguage(params.language);
-    const systemLocale = normalizeLocaleTag(params.systemLocale);
+    let systemLocale = normalizeLocaleTag(params.systemLocale);
+    try {
+        if (systemLocale) {
+            // WebKitGTK can report POSIX values such as "C", which Intl rejects.
+            if (typeof Intl.getCanonicalLocales === 'function') Intl.getCanonicalLocales(systemLocale);
+            else new Intl.DateTimeFormat(systemLocale);
+        }
+    } catch {
+        systemLocale = '';
+    }
     const calendarSystem = resolveCalendarSystemSetting(params.calendarSystem, {
         language: params.language,
         systemLocale,

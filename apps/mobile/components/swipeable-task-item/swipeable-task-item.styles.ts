@@ -130,22 +130,6 @@ export const styles = StyleSheet.create({
     checklistItemText: {
         fontSize: 11,
     },
-    referenceChecklistItem: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 6,
-        paddingVertical: 2,
-    },
-    referenceChecklistBullet: {
-        fontSize: 11,
-        lineHeight: 16,
-    },
-    referenceChecklistItemText: {
-        flex: 1,
-        minWidth: 0,
-        fontSize: 11,
-        lineHeight: 16,
-    },
     checklistAddInput: {
         fontSize: 11,
         paddingVertical: 4,

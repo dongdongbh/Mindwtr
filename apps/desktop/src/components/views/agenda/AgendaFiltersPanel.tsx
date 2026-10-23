@@ -1,7 +1,8 @@
+import { TaskDateFilter } from '../list/TaskDateFilter';
 import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react';
 import { SAVED_FILTER_NO_PROJECT_ID, tFallback } from '@mindwtr/core';
-import type { MultiValueFilterMatchMode, TaskEnergyLevel, TaskPriority, TimeEstimate } from '@mindwtr/core';
+import type { DateRange, MultiValueFilterMatchMode, TaskEnergyLevel, TaskPriority, TimeEstimate } from '@mindwtr/core';
 import { Filter, Save } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
@@ -26,9 +27,11 @@ export type AgendaProjectFilterOption = {
 
 export type AgendaActiveFilterChip = DesktopActiveFilterChip;
 
-type FilterCategoryId = 'tokens' | 'projects' | 'location' | 'priority' | 'energy' | 'time';
+type FilterCategoryId = 'dates' | 'tokens' | 'projects' | 'location' | 'priority' | 'energy' | 'time';
 
 type AgendaFiltersPanelProps = {
+    anyDateRange?: DateRange;
+    onAnyDateRangeChange?: (value: DateRange | undefined) => void;
     allTokens: string[];
     activeFilterChips: AgendaActiveFilterChip[];
     energyLevelOptions: TaskEnergyLevel[];
@@ -81,6 +84,8 @@ const focusFiltersTrigger = () => {
 };
 
 export function AgendaFiltersPanel({
+    anyDateRange,
+    onAnyDateRangeChange,
     allTokens,
     activeFilterChips,
     energyLevelOptions,
@@ -258,6 +263,10 @@ export function AgendaFiltersPanel({
             <ActiveFilterChips chips={activeFilterChips} excludedLabel={excludedStateLabel} removeLabel={removeLabel} />
             {showFiltersPanel && (
                 <div className="rounded-md border border-border/60 px-2">
+                    {onAnyDateRangeChange && (
+                        <TaskDateFilter id="agenda-date-filters" value={anyDateRange} onChange={onAnyDateRangeChange}
+                            expanded={expandedCategory === 'dates'} onToggle={() => toggleCategory('dates')} t={t} />
+                    )}
                     <FilterCategory
                         id="agenda-token-filters"
                         label={t('filters.contexts')}

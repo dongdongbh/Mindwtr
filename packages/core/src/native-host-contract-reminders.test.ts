@@ -239,6 +239,28 @@ describe('native host contract: reminders', () => {
         expect(JSON.stringify(useTaskStore.getState().settings)).toBe(before); expect(saveData).not.toHaveBeenCalled(); expect(updates).toEqual([]);
     });
 
+    it('keeps iOS one-shots, summaries, live Snoozes and a Pomodoro slot within 64 pending, keeping the earliest', async () => {
+        freezeClock();
+        const many = Array.from({ length: 62 }, (_, index) => task({ id: `t-${String(index).padStart(2, '0')}`,
+            dueDate: new Date(Date.parse('2026-09-28T11:00:00.000Z') + index * 60_000).toISOString() }));
+        await seed({ dailyDigestMorningEnabled: true, dailyDigestEveningEnabled: true, weeklyReviewEnabled: true }, many);
+        const host = await openHost('ios');
+        const pending = (plan: { alarms: string; state: string }) => readReminderAlarmMap(plan.alarms).size
+            + Object.values(JSON.parse(plan.state) as Record<string, { kind: string; fireAtMs: number }>)
+                .filter((entry) => entry.kind === 'snooze' && entry.fireAtMs > Date.now()).length;
+        const first = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        expect([...readReminderAlarmMap(first.alarms).keys()].filter((key) => key.startsWith('digest:'))).toHaveLength(3);
+        expect(pending(first) + 1).toBeLessThanOrEqual(64);
+        const fired = first.schedule.find((alarm) => alarm.key === 'task:t-00')!;
+        const snooze = value(await host.snoozeReminder({ requestId: generateUUID(), requestedAt: Date.now(), details: fired.details }));
+        const made = value(await host.planReminderSnooze({ storedState: first.state, alarm: snooze, permissionGranted: true }));
+        const second = value(await host.planReminderAlarms({ storedAlarms: first.alarms, storedState: made.stateAhead, permissionGranted: true }));
+        expect(pending(second) + 1).toBeLessThanOrEqual(64);
+        const kept = [...readReminderAlarmMap(second.alarms).keys()].filter((key) => key.startsWith('task:')).sort();
+        expect(kept).toEqual(many.slice(0, kept.length).map((entry) => `task:${entry.id}`));
+        expect(second.cancel.map((entry) => entry.key)).toEqual([`task:${many[kept.length].id}`]);
+    });
+
     it('reads iOS calendar slots from settings after the held translation await', async () => {
         freezeClock(); await seed({ dailyDigestMorningEnabled: true, weeklyReviewEnabled: true, dailyDigestMorningTime: '02:30', weeklyReviewDay: 0 });
         const host = await openHost('ios'), translations = await loadTranslations('en');

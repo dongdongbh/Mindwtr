@@ -24,9 +24,9 @@ export type AreaRenamePlan = AreaRenameRows & {
     repairedDestinationProjects: number;
 };
 
-/** The existing RN updateArea name branch, including its silent collision merge. */
+/** Version 1 retains frozen pre-override journals; new writes use the current color policy. */
 export function planAreaRename(rows: AreaRenameRows, areaId: string, updates: Partial<Area>,
-    deviceId: string, now: string): AreaRenamePlan | null {
+    deviceId: string, now: string, version: 1 | 2 = 2): AreaRenamePlan | null {
     const source = rows.areas.find((area) => area.id === areaId);
     const name = updates.name?.trim() ?? '';
     if (!source || !name) return null;
@@ -52,7 +52,8 @@ export function planAreaRename(rows: AreaRenameRows, areaId: string, updates: Pa
             if (project.areaId !== areaId) return project;
             projectsChanged = true;
             return { ...project, areaId: destination.id, areaTitle: survivingArea.name,
-                color: survivingArea.color ?? project.color, updatedAt: now,
+                color: version === 1 ? survivingArea.color ?? project.color
+                    : project.colorOverride ?? survivingArea.color ?? DEFAULT_PROJECT_COLOR, updatedAt: now,
                 rev: nextRevision(project.rev), revBy: deviceId };
         });
         const tasks = rows.tasks.map((task) => {
@@ -78,7 +79,7 @@ export function planAreaRename(rows: AreaRenameRows, areaId: string, updates: Pa
     let projectsChanged = false;
     const projects = !repaintColor && name === source.name.trim() ? rows.projects : rows.projects.map((project) => {
         if (project.areaId !== areaId) return project;
-        const wantsColor = repaintColor && project.color !== nextColor;
+        const wantsColor = repaintColor && (version === 1 || project.colorOverride == null) && project.color !== nextColor;
         const wantsTitle = project.areaTitle !== name;
         if (!wantsColor && !wantsTitle) return project;
         projectsChanged = true;
@@ -102,13 +103,13 @@ export function planAreaRename(rows: AreaRenameRows, areaId: string, updates: Pa
 
 /** The existing updateArea color branch, including its denormalized Project title repair. */
 export function planAreaColorChange(area: Area, projects: Project[], color: string | undefined,
-    deviceId: string, now: string): { area: Area; projects: Project[]; projectsChanged: boolean } {
+    deviceId: string, now: string, version: 1 | 2 = 2): { area: Area; projects: Project[]; projectsChanged: boolean } {
     const targetColor = color ?? DEFAULT_PROJECT_COLOR;
     const title = area.name.trim() || undefined;
     let projectsChanged = false;
     const nextProjects = projects.map((project) => {
         if (project.areaId !== area.id) return project;
-        const wantsColor = project.color !== targetColor;
+        const wantsColor = (version === 1 || project.colorOverride == null) && project.color !== targetColor;
         const wantsTitle = project.areaTitle !== title;
         if (!wantsColor && !wantsTitle) return project;
         projectsChanged = true;
@@ -124,16 +125,16 @@ export function planAreaColorChange(area: Area, projects: Project[], color: stri
 
 /** One Settings editor save, using the same diff policy as the React Native editor. */
 export function planAreaEditorSave(rows: AreaRenameRows, areaId: string, name: string,
-    manageColor: string | undefined, deviceId: string, now: string): AreaRenamePlan | null {
+    manageColor: string | undefined, deviceId: string, now: string, version: 1 | 2 = 2): AreaRenamePlan | null {
     const source = rows.areas.find((area) => area.id === areaId);
     if (!source || !name.trim()) return null;
-    if (manageColor === undefined) return planAreaRename(rows, areaId, { name }, deviceId, now);
+    if (manageColor === undefined) return planAreaRename(rows, areaId, { name }, deviceId, now, version);
     const writes = planManageEditorSave({ type: 'area', id: source.id, name: source.name, color: source.color },
         { name, color: manageColor, note: '', referenceLink: '' }, {});
     if (!writes?.length || writes[0].kind !== 'updateArea') return null;
     const updates = writes[0].updates;
-    if (updates.name !== undefined) return planAreaRename(rows, areaId, updates, deviceId, now);
-    const planned = planAreaColorChange(source, rows.projects, updates.color, deviceId, now);
+    if (updates.name !== undefined) return planAreaRename(rows, areaId, updates, deviceId, now, version);
+    const planned = planAreaColorChange(source, rows.projects, updates.color, deviceId, now, version);
     return { areas: rows.areas.map((row) => row.id === areaId ? planned.area : row),
         projects: planned.projects, tasks: rows.tasks,
         result: { id: areaId, areaId, name: source.name }, merged: false,
@@ -175,8 +176,8 @@ export const sameAreaAdditionRow = {
 };
 
 export function areaRenameEffect(scope: AreaRenameScope, areaId: string, name: string,
-    deviceId: string, now: string, manageColor?: string): { effect: AreaRenameEffect; result: AreaRenameResult } | null {
-    const planned = planAreaEditorSave(scope, areaId, name, manageColor, deviceId, now);
+    deviceId: string, now: string, manageColor?: string, version: 1 | 2 = 2): { effect: AreaRenameEffect; result: AreaRenameResult } | null {
+    const planned = planAreaEditorSave(scope, areaId, name, manageColor, deviceId, now, version);
     if (!planned) return null;
     const changed = <T extends { id: string }>(before: T[], after: T[],
         same: (left: T, right: T) => boolean): Array<{ before: T; after: T }> => {

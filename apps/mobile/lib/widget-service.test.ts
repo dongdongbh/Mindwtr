@@ -153,20 +153,31 @@ describe('widget-service', () => {
         resetMobileWidgetRenderCache();
     });
 
-    it('publishes previously unselected context and tag caches and content-free proving diagnostics', async () => {
+    it('publishes placed widgets\' context and tag lists, offers every label, and logs content-free proving diagnostics', async () => {
         const source = buildData(3);
         source.tasks[0].contexts = ['@家/desk +?'];
         source.tasks[1].tags = ['#urgent'];
         source.tasks[2].contexts = ['@empty'];
         source.tasks[2].status = 'done';
+        mockAndroidWidgetGetWidgetListSelections.mockReturnValue(['context:@家/desk +?', 'tag:#urgent', 'context:@empty']);
         expect(await updateMobileWidgetFromData(source)).toBe(true);
         const payload = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0]);
         expect(payload.lists['context:@家/desk +?'].items.map((row: { id: string }) => row.id)).toEqual(['1']);
         expect(payload.lists['tag:#urgent'].items.map((row: { id: string }) => row.id)).toEqual(['2']);
         expect(payload.lists['context:@empty'].items).toEqual([]);
+
+        // An unplaced label is offered in the chooser, with no list until a widget picks it.
+        mockAndroidWidgetGetWidgetListSelections.mockReturnValue([]);
+        mockAndroidWidgetSetPayload.mockClear();
+        resetMobileWidgetRenderCache();
+        expect(await updateMobileWidgetFromData(source)).toBe(true);
+        const unplaced = JSON.parse(mockAndroidWidgetSetPayload.mock.calls[0][0]);
+        expect(Object.keys(unplaced.lists).filter((id) => /^(context|tag):/.test(id))).toEqual([]);
+        expect([...unplaced.contexts, ...unplaced.tags].map((option: { id: string }) => option.id).sort())
+            .toEqual(['context:@empty', 'context:@家', 'context:@家/desk +?', 'tag:#urgent']);
         expect(mockLogInfo).toHaveBeenCalledWith('Android widget context and tag snapshots published', {
             scope: 'widget', force: true,
-            extra: { releaseCheck: 'v1.3.7/widget-context-selection', count: 4 },
+            extra: { releaseCheck: 'v1.3.7/widget-context-selection', count: 4, lists: 3 },
         });
     });
 
@@ -285,7 +296,10 @@ describe('widget-service', () => {
         expect(payload.palette.background).toMatch(/^#/);
         expect(payload.quickCapture).toMatchObject({
             title: 'Quick capture',
-            placeholder: 'Add task to inbox...',
+            placeholder: 'Add a task… use @context +Project #tag',
+            statusLabel: 'Status',
+            statusLabels: { inbox: 'Inbox', next: 'Next Actions', waiting: 'Waiting For', someday: 'Someday/Maybe' },
+            queued: 'Saved. Your task will be added when Mindwtr opens.',
             save: 'Save',
             cancel: 'Cancel',
             added: 'Task added to Mindwtr.',
@@ -854,6 +868,26 @@ describe('widget-service', () => {
         mockGetSystemColorSchemeForWidget.mockReturnValue('dark');
         expect(await updateMobileWidgetFromStore()).toBe(true);
         expect(vi.mocked(createWidgetPayloadProjection)).toHaveBeenCalledTimes(2);
+    });
+
+    it('rebuilds the widget payload via updateMobileWidgetFromStore when only a placed widget\'s list choice changes', async () => {
+        const data = buildData(3);
+        data.tasks[0].contexts = ['@desk'];
+        mockUseTaskStoreGetState.mockReturnValue({
+            _allTasks: data.tasks, _allProjects: [], _allSections: [], _allAreas: [],
+            tasks: data.tasks, projects: [], sections: [], areas: [], settings: {}, lastDataChangeAt: 1,
+        });
+
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(createWidgetPayloadProjection)).toHaveBeenCalledTimes(1);
+
+        // The chooser picked a context with no app running: the payload carries only placed widgets' lists, so the next
+        // refresh must build it even though no task changed.
+        mockAndroidWidgetGetWidgetListSelections.mockReturnValue(['context:@desk']);
+        expect(await updateMobileWidgetFromStore()).toBe(true);
+        expect(vi.mocked(createWidgetPayloadProjection)).toHaveBeenCalledTimes(2);
+        const published = JSON.parse(mockAndroidWidgetSetPayload.mock.calls.at(-1)![0] as string);
+        expect(published.lists['context:@desk'].items.map((item: { id: string }) => item.id)).toEqual(['1']);
     });
 
     it('renders again when a persisted fingerprint carries a different app version (correction #4)', async () => {

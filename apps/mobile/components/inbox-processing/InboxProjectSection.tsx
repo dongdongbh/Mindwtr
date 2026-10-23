@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import React from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Folder, X } from 'lucide-react-native';
@@ -8,7 +9,7 @@ import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
 type Area = { id: string; name: string; color?: string };
-type Project = { id: string; title: string; areaId?: string };
+type Project = { id: string; title: string; areaId?: string; color?: string; colorOverride?: string | null };
 
 type Props = {
   t: (key: string) => string;
@@ -197,7 +198,7 @@ export function InboxProjectSection({
               </Text>
             </TouchableOpacity>
             {filteredProjects.map((project) => {
-              const projectColor = project.areaId ? areaById.get(project.areaId)?.color : undefined;
+              const projectColor = getProjectAccentColor(project, areaById);
               const isSelected = selectedProjectId === project.id;
               return (
                 <TouchableOpacity

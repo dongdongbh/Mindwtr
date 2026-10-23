@@ -15,6 +15,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import { noopStorage, type StorageAdapter } from './storage';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToFilters, areaFilterSelectionToValue, cycleAreaFilterSelection, isAreaFilterSelectionActive, isTaskVisibleInArea, isTaskVisibleInInbox, resolveAreaFilterSelection, taskMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
+import { getProjectAccentColor } from './task-accent-color';
 import * as projectGrouping from './project-grouping';
 import * as focusDerivation from './focus-sections';
 import * as projectTaskListModel from './project-task-list-model';
@@ -463,6 +464,7 @@ describe('native host contract', () => {
         expect(first.value.active[0]).toMatchObject({ areaName: 'Alpha', areaColor: '#abcdef', areaIcon: 'home' });
         expect(first.value.active[3]).toMatchObject({ areaName: null, areaColor: null, areaIcon: null });
         const summaryById = state.getDerivedState().projectTaskSummaryById;
+        const areaById = new Map(state.areas.map((item) => [item.id, item]));
         for (const row of [...first.value.active, ...first.value.deferred, ...first.value.archived].flatMap((group) => group.projects)) {
             const summary = summaryById.get(row.id);
             expect(row).toMatchObject({
@@ -470,7 +472,7 @@ describe('native host contract', () => {
                 nextActionId: summary?.nextAction?.id ?? null,
                 nextActionTitle: summary?.nextAction?.title ?? null,
                 focusedWithoutNextAction: row.id === 'orphan',
-                color: '#123456',
+                color: getProjectAccentColor(state._projectsById.get(row.id)!, areaById) ?? null,
             });
         }
         expect(first.value.active[0].projects[0]).toMatchObject({
@@ -1569,6 +1571,7 @@ describe('native host contract', () => {
                 readOnly: false,
                 canCancel: true,
                 canSkipOccurrence: true,
+                canPreserveChecklistOnRepeat: true,
                 cancelLabel: 'Cancel recurring series',
                 draft,
                 backdatedCompletionStart: { initialValue: null, initialTimeSpentMinutes: null },
@@ -2061,6 +2064,14 @@ describe('native host contract', () => {
                 .toMatchObject({ ok: true, value: { matches: [] } });
             expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'contexts', query: 'Seas', limit: 4 }))
                 .toMatchObject({ ok: true, value: { matches: [{ value: '@Seasonal Planning', text: '@Seasonal Planning, ' }] } });
+            const retainedTasks = useTaskStore.getState()._allTasks;
+            await useTaskStore.getState().addContext('saved unused');
+            await useTaskStore.getState().addTag('saved unused');
+            expect(useTaskStore.getState()._allTasks).toBe(retainedTasks);
+            expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'contexts', query: 'saved', limit: 4 }))
+                .toMatchObject({ ok: true, value: { matches: [{ value: '@saved unused', text: '@saved unused, ' }] } });
+            expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: 'saved', limit: 4 }))
+                .toMatchObject({ ok: true, value: { matches: [{ value: '#saved unused', text: '#saved unused, ' }] } });
             expect(contexts.ok && contexts.value.draftValue).toBe('@o');
             expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: '', limit: 4 }))
                 .toMatchObject({ ok: true, value: { matches: [], quick: [{ value: '#launch', selected: false, text: '#launch' }] } });
@@ -2538,10 +2549,12 @@ describe('native host contract', () => {
         const state = useTaskStore.getState();
         const actionable = state.tasks.filter(isTaskActionable);
         const projectById = new Map(state.projects.map((item) => [item.id, item]));
+        const areaById = new Map(state.areas.map((item) => [item.id, item]));
         const resolvedAreaFilter = resolveAreaFilterSelection(undefined, state.areas);
-        const visibleTasks = actionable.filter((item) => isTaskVisibleInArea(item, { projectById, resolvedAreaFilter }));
+        const visibleTasks = actionable.filter((item) => isTaskVisibleInArea(item, { projectById, areaById, resolvedAreaFilter }));
         const pools = focusDerivation.buildFocusPools({
             tasks: actionable, visibleTasks, projects: state.projects, criteria: undefined, now,
+            isAreaVisible: (item) => taskMatchesAreaFilterSelection(item, resolvedAreaFilter, projectById, areaById),
         });
         const lists = focusDerivation.deriveFocusTaskLists(pools, {
             now, projects: state.projects, sections: state.sections,

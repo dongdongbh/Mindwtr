@@ -368,6 +368,20 @@ final class NativeCalendarJobs: @unchecked Sendable {
 
     func drain() { worker.sync {} }
 
+    /// Best effort and synchronous on the serial worker, only while the bridge is idle. Never
+    /// journaled: a refusal, failure or crash leaves the event as it was.
+    func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) {
+        condition.lock()
+        let idle = accepting && !registry.isClosing && jobs.isEmpty && taken == nil && writeSlot == nil
+        condition.unlock()
+        guard idle, NativeCalendarWriteValidation.id(eventID), NativeCalendarWriteValidation.id(calendarID) else { return }
+        worker.sync {
+            let provider: any NativeCalendarReading
+            if let reader { provider = reader } else { provider = readerFactory(); reader = provider }
+            try? (provider as? NativeCalendarNotesSuffixClearing)?.clearNotesSuffix(eventID: eventID, calendarID: calendarID, suffix: suffix)
+        }
+    }
+
     func shutdown() {
         condition.lock(); accepting = false; wake = nil; let current = Array(jobs.values); let write = writeSlot; condition.unlock()
         current.forEach { $0.token.cancel() }

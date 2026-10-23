@@ -1,3 +1,5 @@
+import { isTauriRuntime } from '../../lib/runtime';
+import { getClipboardImageFiles, getImageExtension } from '../../lib/clipboard-images';
 import { Calendar, CalendarClock, CalendarDays, Navigation, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import {
@@ -126,6 +128,7 @@ export type TaskEditorAttachments = {
     attachmentError: string | null;
     visibleEditAttachments: Attachment[];
     addFileAttachment: () => void;
+    addDroppedFileAttachments: (files: File[]) => Promise<Attachment[] | null>;
     addLinkAttachment: () => void;
     addFolderLinkAttachment: () => void;
     addObsidianNoteAttachment: () => void;
@@ -193,6 +196,7 @@ export function TaskItemFieldRenderer({
         attachmentError,
         visibleEditAttachments,
         addFileAttachment,
+        addDroppedFileAttachments,
         addLinkAttachment,
         addFolderLinkAttachment,
         addObsidianNoteAttachment,
@@ -269,6 +273,7 @@ export function TaskItemFieldRenderer({
     const descriptionUndoRef = useRef<Array<{ value: string; selection: MarkdownSelection }>>([]);
     const [descriptionUndoDepth, setDescriptionUndoDepth] = useState(0);
     const [descriptionAudioState, setDescriptionAudioState] = useState<DescriptionAudioState>('idle');
+    const descriptionRendererActiveRef = useRef(true);
     const [descriptionAudioError, setDescriptionAudioError] = useState<string | null>(null);
     const descriptionAudioStateRef = useRef<DescriptionAudioState>('idle');
     const descriptionCaptureRef = useRef<AudioCaptureSession | null>(null);
@@ -290,6 +295,8 @@ export function TaskItemFieldRenderer({
         descriptionUndoRef.current = [];
         setDescriptionUndoDepth(0);
         setDescriptionAudioError(null);
+        descriptionRendererActiveRef.current = true;
+        return () => { descriptionRendererActiveRef.current = false; };
     }, [taskId]);
     const parsedRecurrenceRRule = parseRRuleString(editRecurrenceRRule);
     const recurrenceEndMode: 'never' | 'until' | 'count' = parsedRecurrenceRRule.count
@@ -356,6 +363,8 @@ export function TaskItemFieldRenderer({
             : nextUndoEntries;
         setDescriptionUndoDepth(descriptionUndoRef.current.length);
     };
+    const latestDescriptionRef = useRef(editDescription);
+    latestDescriptionRef.current = editDescription;
     const applyDescriptionValue = (
         value: string,
         options?: {
@@ -364,9 +373,10 @@ export function TaskItemFieldRenderer({
             baseSelection?: MarkdownSelection;
         },
     ) => {
-        if ((options?.recordUndo ?? true) && value !== editDescription) {
-            pushDescriptionUndoEntry(editDescription, options?.baseSelection ?? descriptionSelectionRef.current);
+        if ((options?.recordUndo ?? true) && value !== latestDescriptionRef.current) {
+            pushDescriptionUndoEntry(latestDescriptionRef.current, options?.baseSelection ?? descriptionSelectionRef.current);
         }
+        latestDescriptionRef.current = value;
         setEditDescription(value);
         if (options?.nextSelection) {
             descriptionSelectionRef.current = options.nextSelection;
@@ -506,6 +516,28 @@ export function TaskItemFieldRenderer({
         applyDescriptionKeyboardResult(next);
     };
     const handleDescriptionPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+        const images = getClipboardImageFiles(event.clipboardData);
+        if (images.length > 0 && !isTauriRuntime()) {
+            event.preventDefault();
+            const textarea = event.currentTarget;
+            const pastedValue = textarea.value;
+            const pastedSelection = { start: textarea.selectionStart, end: textarea.selectionEnd };
+            const text = event.clipboardData.getData('text/plain');
+            const files = images.map((file) => new File([file], file.name || `clipboard.${getImageExtension(file)}`, { type: file.type }));
+            // shortcut: empty WebKit clipboard events use Quick Add; add a description fallback if needed.
+            void addDroppedFileAttachments(files).then((imported) => {
+                // A collapsed field may unmount while the owning task draft still retains the attachment.
+                if (!descriptionRendererActiveRef.current || !imported || (imported.length === 0 && !text)) return;
+                const value = latestDescriptionRef.current;
+                const start = value === pastedValue ? pastedSelection.start : value.length;
+                const end = value === pastedValue ? pastedSelection.end : value.length;
+                const insertion = `${text}${text ? '\n\n' : ''}${imported.map((attachment) => `![Image](mindwtr://attachment/${attachment.id})`).join('\n\n')}`;
+                const selection = { start: start + insertion.length, end: start + insertion.length };
+                applyDescriptionValue(`${value.slice(0, start)}${insertion}${value.slice(end)}`, { baseSelection: { start, end }, nextSelection: selection });
+                if (textarea.isConnected && document.activeElement === textarea) restoreDescriptionTextareaSelection(textarea, selection);
+            }).catch((error) => setDescriptionAudioError(error instanceof Error ? error.message : t('attachments.fileNotReadable')));
+            return;
+        }
         const pastedText = event.clipboardData.getData('text/plain');
         if (!pastedText) return;
         const eventTextarea = event.currentTarget;
@@ -780,6 +812,7 @@ export function TaskItemFieldRenderer({
                     t={t}
                     taskTitle={task.title}
                     taskId={taskId}
+                    attachments={visibleEditAttachments}
                     showDescriptionPreview={showDescriptionPreview}
                     editDescription={editDescription}
                     isRtl={isRtl}
@@ -790,7 +823,7 @@ export function TaskItemFieldRenderer({
                     descriptionSelection={descriptionSelectionRef.current}
                     descriptionAutocomplete={descriptionAutocomplete}
                     descriptionAudioState={descriptionAudioState}
-                    descriptionAudioError={descriptionAudioError}
+                    descriptionAudioError={descriptionAudioError || attachmentError}
                     onTogglePreview={toggleDescriptionPreview}
                     onEditFromPreview={handleEditDescriptionFromPreview}
                     onExpand={() => setDescriptionExpanded(true)}
@@ -1206,7 +1239,7 @@ export function TaskItemFieldRenderer({
                         t={t}
                         taskId={taskId}
                         checklist={task.checklist}
-                        plainList={editStatus === 'reference'}
+                        isReference={editStatus === 'reference'}
                         resetTaskChecklist={resetTaskChecklist}
                     />
                 </div>

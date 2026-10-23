@@ -14,7 +14,6 @@ import {
   MOBILE_ONBOARDING_STORAGE_KEY,
   dispatchMobileOnboardingEvent,
   readMobileOnboardingDismissed,
-  shouldOpenMobileFirstRunOnboarding,
   subscribeMobileOnboardingEvent,
   writeMobileOnboardingDismissed,
 } from './mobile-onboarding-events';
@@ -25,43 +24,6 @@ describe('mobile onboarding events', () => {
     asyncStorageSetItem.mockReset();
     asyncStorageGetItem.mockResolvedValue(null);
     asyncStorageSetItem.mockResolvedValue(undefined);
-  });
-
-  it('opens first-run onboarding only for empty local installs with sync off', () => {
-    expect(shouldOpenMobileFirstRunOnboarding({
-      dataReady: true,
-      dismissed: false,
-      syncBackend: 'off',
-      visibleDataCount: 0,
-    })).toBe(true);
-
-    expect(shouldOpenMobileFirstRunOnboarding({
-      dataReady: false,
-      dismissed: false,
-      syncBackend: 'off',
-      visibleDataCount: 0,
-    })).toBe(false);
-
-    expect(shouldOpenMobileFirstRunOnboarding({
-      dataReady: true,
-      dismissed: true,
-      syncBackend: 'off',
-      visibleDataCount: 0,
-    })).toBe(false);
-
-    expect(shouldOpenMobileFirstRunOnboarding({
-      dataReady: true,
-      dismissed: false,
-      syncBackend: 'cloudkit',
-      visibleDataCount: 0,
-    })).toBe(false);
-
-    expect(shouldOpenMobileFirstRunOnboarding({
-      dataReady: true,
-      dismissed: false,
-      syncBackend: 'off',
-      visibleDataCount: 1,
-    })).toBe(false);
   });
 
   it('dispatches manual trigger events until unsubscribed', () => {
@@ -76,6 +38,7 @@ describe('mobile onboarding events', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  // The gate itself is core's (first-run-onboarding.test.ts); this pins the AsyncStorage binding under RN's key.
   it('stores dismissal state locally', async () => {
     asyncStorageGetItem.mockResolvedValueOnce('dismissed');
 

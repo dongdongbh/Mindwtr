@@ -467,6 +467,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         title: input.title,
         props: filterUndefined({
           color: input.color,
+          colorOverride: input.colorOverride,
           status: input.status,
           cancelledAt: input.cancelledAt ?? undefined,
           areaId: input.areaId ?? undefined,
@@ -485,6 +486,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       const patch: Record<string, unknown> = {};
       if (input.title !== undefined) patch.title = input.title;
       if (input.color !== undefined) patch.color = input.color;
+      if (input.colorOverride !== undefined) patch.colorOverride = input.colorOverride;
       if (input.status !== undefined) patch.status = input.status;
       if (input.cancelledAt !== undefined) patch.cancelledAt = input.cancelledAt;
       if (input.areaId !== undefined) patch.areaId = input.areaId;

@@ -1,4 +1,5 @@
 import type { AiSettings, AppData, GtdSettings, SavedFilter, SettingsSyncGroup, SettingsSyncPreferences, SupportPromptSettings } from './types';
+import { mergeTaxonomyCatalog } from './taxonomy-catalog';
 import {
     AI_PROVIDER_VALUE_SET,
     AI_REASONING_EFFORT_VALUE_SET,
@@ -909,6 +910,8 @@ export const mergeSettingsForSync = (
     incomingSettings: AppData['settings']
 ): AppData['settings'] => {
     const merged: AppData['settings'] = { ...localSettings };
+    const taxonomy = mergeTaxonomyCatalog(localSettings.taxonomy, incomingSettings.taxonomy);
+    if (taxonomy !== undefined) merged.taxonomy = taxonomy;
     const nextSyncUpdatedAt: NonNullable<AppData['settings']['syncPreferencesUpdatedAt']> = {};
 
     // One logical dataset = one profile id. The remote document's id always

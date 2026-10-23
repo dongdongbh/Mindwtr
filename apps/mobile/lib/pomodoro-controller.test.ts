@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_POMODORO_DURATIONS, getPomodoroLocalDayKey, runStoreCommand, runSyncStoreSave, type Task } from '@mindwtr/core';
+import { DEFAULT_POMODORO_DURATIONS, getPomodoroLocalDayKey, runStoreCommand, runSyncStoreSave, useTaskStore, type Task } from '@mindwtr/core';
+import { logInfo } from './app-log';
 
 vi.mock('./app-log', () => ({ logInfo: vi.fn(async () => undefined), logWarn: vi.fn(async () => undefined) }));
 
@@ -19,6 +20,7 @@ describe('mobile pomodoro controller', () => {
 
   beforeEach(() => {
     nowMs = 10_000;
+    vi.mocked(logInfo).mockClear();
   });
 
   it.each([
@@ -201,6 +203,162 @@ describe('mobile pomodoro controller', () => {
       timeSpentMinutes: 5 + DEFAULT_POMODORO_DURATIONS.focusMinutes,
     });
   });
+
+  it('credits the expired old interval before replacing its durations', async () => {
+    const task = { id: 'task-a', title: 'Write', timeSpentMinutes: 5 } as Task;
+    const updateTask = vi.fn(async () => ({ success: true }));
+    const controller = createMobilePomodoroController({
+      storage: makeStorage(),
+      now: () => nowMs,
+      getTaskStore: () => ({ tasks: [task], updateTask }),
+    });
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(task.id);
+    controller.toggle();
+
+    nowMs += 25 * 60_000;
+    controller.setDurations({ focusMinutes: 50, breakMinutes: 10 });
+    await controller.flushPersistence();
+
+    expect(updateTask).toHaveBeenCalledExactlyOnceWith(task.id, { timeSpentMinutes: 30 });
+    expect(logInfo).toHaveBeenCalledExactlyOnceWith('Pomodoro elapsed focus boundary resolved before action', {
+      scope: 'pomodoro',
+      extra: { releaseCheck: 'v1.3.5/pomodoro-rn-boundary', outcome: 'elapsed-focus-resolved' },
+    });
+    expect(controller.getSnapshot()).toMatchObject({
+      durations: { focusMinutes: 50, breakMinutes: 10 },
+      timerState: { phase: 'break', remainingSeconds: 600, isRunning: false, completedFocusSessions: 1 },
+      selectedTaskId: task.id,
+      lastEvent: null,
+      sessionHistory: { totalCompletedFocusSessions: 1, completedFocusSessionsByTaskId: { 'task-a': 1 } },
+    });
+    expect(controller.getSnapshot().phaseEndsAt).toBeUndefined();
+    controller.reconcile();
+    controller.setDurations({ focusMinutes: 50, breakMinutes: 10 });
+    await controller.flushPersistence();
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(logInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses restored durations to credit hydration rather than the default in-memory pair', async () => {
+    const task = { id: 'restored-task', title: 'Write', timeSpentMinutes: 5 } as Task;
+    const updateTask = vi.fn(async () => ({ success: true }));
+    const controller = createMobilePomodoroController({
+      storage: makeStorage({
+        durations: { focusMinutes: 50, breakMinutes: 10 },
+        timerState: { phase: 'focus', remainingSeconds: 1, isRunning: true, completedFocusSessions: 0 },
+        selectedTaskId: task.id,
+        phaseEndsAt: new Date(9_000).toISOString(),
+      }),
+      now: () => nowMs,
+      getTaskStore: () => ({ tasks: [task], updateTask }),
+    });
+    await controller.ensureHydrated();
+    controller.reconcile();
+    await controller.flushPersistence();
+
+    expect(updateTask).toHaveBeenCalledExactlyOnceWith(task.id, { timeSpentMinutes: 55 });
+    expect(controller.getSnapshot()).toMatchObject({
+      durations: { focusMinutes: 50, breakMinutes: 10 },
+      timerState: { phase: 'break', remainingSeconds: 600, completedFocusSessions: 1 },
+    });
+    expect(logInfo).not.toHaveBeenCalled();
+  });
+
+  it('journals the expired old duration before retrying its task credit after a restart', async () => {
+    const task = { id: 'task-a', title: 'Write', timeSpentMinutes: 5 } as Task;
+    const device = new Map<string, string>();
+    const storage = {
+      getItem: async (key: string) => device.get(key) ?? null,
+      setItem: async (key: string, value: string) => { device.set(key, value); },
+    };
+    let rejectCredit = true;
+    const updateTask = vi.fn(async (_id: string, updates: Partial<Task>) => {
+      if (rejectCredit) return { success: false };
+      Object.assign(task, updates);
+      return { success: true };
+    });
+    const options = { storage, now: () => nowMs, getTaskStore: () => ({ tasks: [task], updateTask }) };
+    const first = createMobilePomodoroController(options);
+    await first.ensureHydrated();
+    first.setSelectedTaskId(task.id);
+    first.toggle();
+
+    nowMs += 25 * 60_000;
+    first.setDurations({ focusMinutes: 50, breakMinutes: 10 });
+    await first.flushPersistence();
+
+    expect(task.timeSpentMinutes).toBe(5);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!)).toMatchObject({
+      durations: { focusMinutes: 50, breakMinutes: 10 },
+      pendingCredits: [{ taskId: task.id, from: 5, to: 30 }],
+    });
+    expect(updateTask).toHaveBeenCalledExactlyOnceWith(task.id, { timeSpentMinutes: 30 });
+
+    rejectCredit = false;
+    const restarted = createMobilePomodoroController(options);
+    await restarted.ensureHydrated();
+    await restarted.flushPersistence();
+    await restarted.flushPersistence();
+    expect(task.timeSpentMinutes).toBe(30);
+    expect(updateTask).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!)).not.toHaveProperty('pendingCredits');
+
+    const third = createMobilePomodoroController(options);
+    await third.ensureHydrated();
+    await third.flushPersistence();
+    expect(task.timeSpentMinutes).toBe(30);
+    expect(updateTask).toHaveBeenCalledTimes(2);
+  });
+
+  it.each((['focus', 'break'] as const).flatMap((phase) => (
+    [false, true].flatMap((autoStartBreaks) => (
+      [false, true].flatMap((autoStartFocus) => (
+        ['task-b', undefined].map((selectedTaskId) => ({ phase, autoStartBreaks, autoStartFocus, selectedTaskId }))
+      ))
+    ))
+  )))('settles the old $phase selection with breaks=$autoStartBreaks focus=$autoStartFocus before selecting $selectedTaskId', async ({
+    phase, autoStartBreaks, autoStartFocus, selectedTaskId,
+  }) => {
+    const taskA = { id: 'task-a', title: 'Write', timeSpentMinutes: 5 } as Task;
+    const taskB = { id: 'task-b', title: 'Read', timeSpentMinutes: 10 } as Task;
+    const updateTask = vi.fn(async () => ({ success: true }));
+    const controller = createMobilePomodoroController({
+      storage: makeStorage(),
+      now: () => nowMs,
+      getTaskStore: () => ({ tasks: [taskA, taskB], updateTask }),
+    });
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(taskA.id);
+    if (phase === 'break') controller.switchPhase();
+    controller.toggle();
+    nowMs += (phase === 'focus' ? 25 : 5) * 60_000;
+    const autoStartOptions = { autoStartBreaks, autoStartFocus };
+
+    controller.setSelectedTaskId(selectedTaskId, autoStartOptions);
+    await controller.flushPersistence();
+
+    const isRunning = phase === 'focus' ? autoStartBreaks : autoStartFocus;
+    const remainingSeconds = phase === 'focus' ? 300 : 1500;
+    expect(controller.getSnapshot()).toMatchObject({
+      selectedTaskId,
+      timerState: { phase: phase === 'focus' ? 'break' : 'focus', remainingSeconds, isRunning },
+      lastEvent: phase === 'focus' ? 'focus-finished' : 'break-finished',
+    });
+    expect(controller.getSnapshot().phaseEndsAt).toBe(isRunning
+      ? new Date(nowMs + remainingSeconds * 1000).toISOString()
+      : undefined);
+    if (phase === 'focus') {
+      expect(updateTask).toHaveBeenCalledExactlyOnceWith(taskA.id, { timeSpentMinutes: 30 });
+      expect(controller.getSnapshot().sessionHistory.completedFocusSessionsByTaskId).toEqual({ 'task-a': 1 });
+    } else {
+      expect(updateTask).not.toHaveBeenCalled();
+    }
+    controller.setSelectedTaskId(selectedTaskId, autoStartOptions);
+    controller.reconcile(autoStartOptions);
+    await controller.flushPersistence();
+    expect(updateTask).toHaveBeenCalledTimes(phase === 'focus' ? 1 : 0);
+  });
 });
 
 /** A finished focus session's task credit across the two stores it touches (the session on the device, the task in the database). */
@@ -283,6 +441,96 @@ describe('Pomodoro task credit', () => {
     await second.ensureHydrated();
     await settle(second);
     expect(tasks[0].timeSpentMinutes).toBe(30);
+  });
+
+  it('credits once when the app stopped while the task save was still in flight', async () => {
+    // The real store answers updateTask from memory and saves later: the credit counts only once the save is on disk.
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    const memory = makeTasks();
+    const first = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks: memory,
+        updateTask: async (_id, updates) => { Object.assign(memory[0], updates); return { success: true }; },
+        // The app stops before the save lands.
+        flush: () => new Promise<void>(() => undefined),
+      }),
+    });
+    await first.ensureHydrated();
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    expect(memory[0].timeSpentMinutes).toBe(30);
+
+    const restarted = makeTasks();
+    const second = open(device, restarted);
+    await second.ensureHydrated();
+    await settle(second);
+    expect(restarted[0].timeSpentMinutes).toBe(30);
+  });
+
+  it('keeps a credit owed when the task save failed', async () => {
+    const tasks = makeTasks();
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    const first = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks,
+        updateTask: async (_id, updates) => { Object.assign(tasks[0], updates); return { success: true }; },
+        flush: async () => { throw new Error('disk full'); },
+      }),
+    });
+    await first.ensureHydrated();
+    await settle(first);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
+  });
+
+  it('keeps a credit owed when the real store gave up on its save, though its flush resolves', async () => {
+    // The default store port: core's flushPendingSave finds nothing queued (the failed save was dropped), but the failure
+    // is still recorded, so the time is not on disk.
+    const tasks = makeTasks();
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    const before = useTaskStore.getState();
+    useTaskStore.setState({
+      tasks,
+      _allTasks: tasks,
+      // The task changes in memory; its save then fails for good, so the store records the failure and drops the save.
+      updateTask: async (_id: string, updates: Partial<Task>) => {
+        Object.assign(tasks[0], updates);
+        useTaskStore.setState({ persistenceFailure: { message: 'disk full', at: NOW } } as never);
+        return { success: true };
+      },
+    } as never);
+    try {
+      const controller = createMobilePomodoroController({
+        storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      });
+      await controller.ensureHydrated();
+      await settle(controller);
+      expect(tasks[0].timeSpentMinutes).toBe(30);
+      expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
+    } finally {
+      useTaskStore.setState({ tasks: before.tasks, _allTasks: before._allTasks, updateTask: before.updateTask, persistenceFailure: null } as never);
+    }
+  });
+
+  it('keeps a credit owed through later session writes while the task save keeps failing', async () => {
+    const tasks = makeTasks();
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    let flushes = 0;
+    const controller = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks,
+        updateTask: async (_id, updates) => { Object.assign(tasks[0], updates); return { success: true }; },
+        flush: async () => { flushes += 1; throw new Error('disk full'); },
+      }),
+    });
+    await controller.ensureHydrated();
+    await settle(controller);
+    // A later change writes the session again: the time is already in memory, so only its save is retried.
+    controller.setSelectedTaskId(undefined);
+    await settle(controller);
+    expect(flushes).toBe(2);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
   });
 
   it('checks a credit against the time a sync save published while the credit waited', async () => {

@@ -97,12 +97,12 @@ describe('cloud Project schema contract', () => {
         expect(sorted(CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS)).toEqual(sorted(expected));
     });
 
-    it('preserves the project creation contract plus the cancellation and view-section fields', () => {
-        expect(sorted(CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS)).toEqual(sorted([...PRE_REFACTOR_CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS, 'cancelledAt', 'viewSectionIds']));
+    it('preserves the project creation contract plus the cancellation, view-section, and color-override fields', () => {
+        expect(sorted(CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS)).toEqual(sorted([...PRE_REFACTOR_CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS, 'cancelledAt', 'viewSectionIds', 'colorOverride']));
     });
 
-    it('preserves the project patch contract plus the cancellation and view-section fields', () => {
-        expect(sorted(CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS)).toEqual(sorted([...PRE_REFACTOR_CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS, 'cancelledAt', 'viewSectionIds']));
+    it('preserves the project patch contract plus the cancellation, view-section, and color-override fields', () => {
+        expect(sorted(CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS)).toEqual(sorted([...PRE_REFACTOR_CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS, 'cancelledAt', 'viewSectionIds', 'colorOverride']));
     });
 });
 

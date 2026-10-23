@@ -30,6 +30,7 @@ import { createAttachmentTransferAdmission, isAttachmentUploadTooLargeError, isC
 import { isSyncEncryptionPartlyEncryptedError } from './sync-encryption';
 import { isHostResponseTooLargeError } from './http-utils';
 import { flushPendingSave, useTaskStore } from './store';
+import { getStoreListenerCount } from './store-notify-profiler';
 import { markArchiveRetentionSyncCompleted } from './store-archive-retention';
 import {
     assertNoPendingAttachmentContentReplacements,
@@ -132,6 +133,8 @@ type SharedSyncRunState = {
     publishedCommitMs: number[];
     publishedSwaps: ('prepared' | 'in-gate')[];
     publishedStep: string | null;
+    /** The LocalSyncAbort reason that requeued this cycle, if one did. */
+    requeueReason: string | null;
     remoteDataForCompare: AppData | null;
     /** The authoritative remote read repaired a legacy attachment shape and
      *  must be rewritten even when its repaired view equals the merge output. */
@@ -625,6 +628,7 @@ class SharedSyncRunMachine {
         publishedCommitMs: [],
         publishedSwaps: [],
         publishedStep: null,
+        requeueReason: null,
         remoteDataForCompare: null,
         remoteLegacyAttachmentsChanged: false,
         readCheckRemoteData: undefined,
@@ -674,6 +678,7 @@ class SharedSyncRunMachine {
         } finally {
             // A refused native cleanup quarantines the cycle: nothing more is logged or written.
             if (!cleanupUnconfirmed) this.logSavesPublished();
+            if (!cleanupUnconfirmed) this.logSlices();
             // A retained native cleanup owner forbids another remote request; the lease expires naturally.
             if (!cleanupUnconfirmed) cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
         }
@@ -1129,12 +1134,24 @@ class SharedSyncRunMachine {
             backend: this.backend,
             step: this.state.publishedStep,
             gateWaitMs: this.state.publishedGateWaitsMs.join(','),
-            // Sliced cycles only (D9b W6): each save's time in the gate, and whether its prepared publish was swapped in.
-            ...(this.slicedCycle ? {
-                commitPublishMs: this.state.publishedCommitMs.join(','),
-                storePublish: this.state.publishedSwaps.join(','),
-            } : {}),
             releaseCheck: 'v1.3.7/sync-write-gate',
+        });
+    }
+
+    /** Once per sliced cycle, when it ends (design D9b diagnostics): how it sliced, its time in the gate, and why it requeued. */
+    private logSlices(): void {
+        if (!this.slicer) return;
+        const { slices, longestMs } = this.slicer.stats();
+        this.notifier.logInfo('Sync cycle ran in slices', {
+            backend: this.backend,
+            slices: String(slices),
+            longestSliceMs: String(Math.round(longestMs)),
+            gateWaitMs: this.state.publishedGateWaitsMs.join(',') || '-',
+            commitPublishMs: this.state.publishedCommitMs.join(',') || '-',
+            storePublish: this.state.publishedSwaps.join(',') || '-',
+            storeListeners: String(this.store.listenerCount?.() ?? '-'),
+            requeue: this.state.requeueReason ?? 'none',
+            releaseCheck: 'v1.3.7/native-sync-slices',
         });
     }
 
@@ -2205,6 +2222,7 @@ class SharedSyncRunMachine {
             // no trace at all; an activation probe that keeps requeuing (a store
             // write landing mid-probe on every attempt) then reads as "the switch
             // never saves" with nothing in the log to say why.
+            this.state.requeueReason = error.reason;
             this.notifier.logInfo('Sync cycle requeued', {
                 backend: this.backend,
                 step: this.state.step ?? '-',
@@ -2295,6 +2313,7 @@ export const createDefaultSyncRunStoreBridge = (): SyncRunStoreBridge => ({
     getLastDataChangeAt: () => useTaskStore.getState().lastDataChangeAt,
     getInMemorySnapshot: () => getInMemoryAppDataSnapshot(),
     captureInMemorySnapshot: () => captureInMemoryAppDataSnapshot(),
+    listenerCount: () => getStoreListenerCount(),
     flushPendingSave: () => flushPendingSave(),
     setUiError: (message) => useTaskStore.getState().setError(message),
     getSettings: () => useTaskStore.getState().settings,

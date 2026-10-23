@@ -301,6 +301,14 @@ const getWhisperModelRoots = (): Directory[] => {
 const getWhisperModelDirectories = (): Directory[] => getWhisperModelRoots()
   .map((root) => new Directory(buildWhisperModelDirectoryUri(root.uri)));
 
+/** Which app folder a model directory lives in, for a log line: core's log redacts file:// URIs, so the line names its root. */
+const whisperDirectoryRoot = (uri: string): string => {
+  const normalized = normalizeWhisperModelUri(uri).uri;
+  const root = getWhisperModelRoots().find((candidate) => normalized.startsWith(normalizeWhisperModelUri(candidate.uri).uri));
+  if (!root) return 'other';
+  try { return root.uri === Paths.document.uri ? 'document' : 'cache'; } catch { return 'cache'; }
+};
+
 const isKnownWhisperModelDirectoryUri = (uri: string): boolean => {
   const normalized = normalizeWhisperModelUri(uri).uri.replace(/\/+$/u, '');
   return getWhisperModelDirectories()
@@ -315,7 +323,7 @@ const repairDirectoryBlockingFile = async (uri: string, reason: string): Promise
   const normalized = normalizeWhisperModelUri(uri).uri;
   if (!isKnownWhisperModelDirectoryUri(normalized)) {
     void logWarn('Refusing to repair unsafe Whisper model directory target', {
-      scope: 'speech', force: true, extra: { uri: normalized, reason },
+      scope: 'speech', force: true, extra: { root: whisperDirectoryRoot(normalized), reason },
     });
     return false;
   }
@@ -328,7 +336,7 @@ const repairDirectoryBlockingFile = async (uri: string, reason: string): Promise
   } catch (error) {
     void logWarn('Whisper model directory file cleanup failed', {
       scope: 'speech', force: true,
-      extra: { uri: normalized, reason, error: error instanceof Error ? error.message : String(error) },
+      extra: { root: whisperDirectoryRoot(normalized), reason, error: error instanceof Error ? error.message : String(error) },
     });
   }
   if (!deleted) {
@@ -337,7 +345,7 @@ const repairDirectoryBlockingFile = async (uri: string, reason: string): Promise
     } catch (error) {
       void logWarn('Whisper model directory file cleanup with native fs failed', {
         scope: 'speech', force: true,
-        extra: { uri: normalized, reason, error: error instanceof Error ? error.message : String(error) },
+        extra: { root: whisperDirectoryRoot(normalized), reason, error: error instanceof Error ? error.message : String(error) },
       });
     }
   }
@@ -520,7 +528,7 @@ const ensurePreferredModelDirectory = async (): Promise<string | null> => {
     } catch (error) {
       void logWarn('Whisper model directory create failed', {
         scope: 'speech', force: true,
-        extra: { uri: directory.uri, error: error instanceof Error ? error.message : String(error) },
+        extra: { root: whisperDirectoryRoot(directory.uri), error: error instanceof Error ? error.message : String(error) },
       });
     }
   }
@@ -714,7 +722,7 @@ export const download = async (
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       void logWarn('Whisper model download failed', {
-        scope: 'speech', force: true, extra: { directory: directory.uri, error: lastError.message },
+        scope: 'speech', force: true, extra: { root: whisperDirectoryRoot(directory.uri), error: lastError.message },
       });
     }
   }

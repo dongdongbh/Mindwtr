@@ -463,6 +463,18 @@ describe('backup transfer', () => {
         expect(restored.settings.security).toEqual({ mobileAppLockEnabled: true });
     });
 
+    it('keeps this device\'s App Lock relock delay through a restore, and never takes the file\'s (#1423)', () => {
+        const data = buildAppData();
+        data.settings = { security: { mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: 15 } };
+        const previousData = buildAppData();
+        previousData.settings = { security: { mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: 1 } };
+        const restoredAt = '2026-04-01T00:00:10.000Z';
+
+        expect(prepareRestoredBackupDataForSync(data, { restoredAt, previousData }).settings.security)
+            .toEqual({ mobileAppLockEnabled: true, mobileAppLockRelockDelayMinutes: 1 });
+        expect(prepareRestoredBackupDataForSync(data, { restoredAt }).settings.security).toBeUndefined();
+    });
+
     it('restores 32768 saved-filter tombstones, more times than a QuickJS call takes arguments', () => {
         const backup = buildAppData();
         const at = '2026-09-01T00:00:00.000Z';

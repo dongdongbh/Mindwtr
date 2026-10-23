@@ -90,6 +90,7 @@ patchTaskShape.id = z.string().min(1);
 const createTaskSchema = z.object(createTaskShape).strict();
 const patchTaskSchema = z.object(patchTaskShape).strict();
 const projectFieldsShape = {
+  colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().refine((value) => value.trim().length > 0).optional(),
   status: z.enum(['active', 'someday', 'waiting', 'archived']).optional(),
   areaId: z.string().trim().min(1).nullable().optional(),
@@ -142,7 +143,7 @@ const assertTaskInputsSupported = (input: unknown, creating: boolean): void => {
 const assertProjectInputsSupported = (input: unknown): void => {
   const record = asRecord(input);
   if (record && LOCAL_API_UNSUPPORTED_PROJECT_FIELDS.some((name) => Object.hasOwn(record, name))) {
-    throw new ValidationError('Desktop Local API project writes support only title, color, status, areaId, and isSequential. Other project fields are unsupported.');
+    throw new ValidationError('Desktop Local API project writes support only title, color, colorOverride, status, areaId, and isSequential. Other project fields are unsupported.');
   }
 };
 const normalizeTaskProps = (input: Record<string, unknown>, creating: boolean): Record<string, unknown> => {

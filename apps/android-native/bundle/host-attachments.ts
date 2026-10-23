@@ -188,6 +188,7 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
         // A file share's copies (prepareSharedFiles) and the capture screen's managed-copy check.
         persistAttachmentLocallyDetailed: (attachment) => files.persistAttachmentLocallyDetailed(attachment),
         canUploadAttachmentFrom: (uri) => files.canUploadAttachmentFrom(uri),
+        getLocalAttachmentPresence: (uri) => files.getLocalAttachmentPresence(uri),
     };
     // Install the global provider only after every optional binding constructed
     // successfully. A refused local capability leaves the prior provider intact.
@@ -210,6 +211,9 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         log: { sanitize: (message) => bindings.log.sanitize(message) },
         maxWebdavBufferedUploadBytes: bindings.maxWebdavBufferedUploadBytes,
         maxCloudBufferedUploadBytes: bindings.maxCloudBufferedUploadBytes,
+        // host-polyfills.js's fetch answers from HostIo.kt (Android) or NativeHTTPJobs.swift (iOS), which refuse a body over
+        // their ceiling while receiving it.
+        boundedWebdavResponses: true,
     });
 
     /** Sync's attachment passes (core's mobile sync service), as RN's lib/sync-service.ts binds them. */

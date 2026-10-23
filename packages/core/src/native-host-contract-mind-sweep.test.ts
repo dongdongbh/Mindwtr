@@ -486,3 +486,59 @@ it('freezes a missing device ID without initializing settings before the journal
     expect(saveData).toHaveBeenCalledTimes(1);
 });
 });
+
+describe('Mind Sweep: prepared add honors the task reminder default', () => {
+const fixture = loadCalendarViewsFixture();
+const requestId = '6475c779-e751-42d3-a2ea-85abffb3be73';
+const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => {
+    if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
+    return result.value;
+};
+const open = async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(fixture.now));
+    await seedCalendarStore(fixture, { name: 'mind-sweep', settings: 'month', actions: [] }, createCalendarRecorder(), {});
+    const host = createNativeHostContract();
+    value(await host.setLanguage({ storedLanguage: 'en', systemLocale: fixture.deviceLocale }));
+    value(await host.activate({ writeSafetyReady: true }));
+    return host;
+};
+const setReminderDefault = (taskReminderDefault: 'send' | 'skip' | undefined) =>
+    useTaskStore.setState((state) => ({ settings: { ...state.settings, taskReminderDefault } }));
+
+afterEach(async () => {
+    await flushPendingSave();
+    resetForTests();
+    vi.useRealTimers();
+});
+
+it('prepares and commits under Skip with Mindwtr reminders suppressed, as RN addTask writes the row', async () => {
+    const host = await open();
+    setReminderDefault('skip');
+    const prepared = value(host.prepareMindSweepAdd({ requestId, title: 'Call dentist' })).prepared;
+    expect(prepared.task.suppressMindwtrReminders).toBe(true);
+    const ordinary = await useTaskStore.getState().addTask('Call dentist', { status: 'inbox' }, { captureId: '8475c779-e751-42d3-a2ea-85abffb3be73' });
+    expect(ordinary.success).toBe(true);
+    const reference = useTaskStore.getState()._tasksById.get('8475c779-e751-42d3-a2ea-85abffb3be73')!;
+    expect(taskToSqliteRow({ ...reference, id: requestId })).toEqual(taskToSqliteRow(prepared.task));
+    expect(value(await host.commitPreparedMindSweepAdd({ request: prepared.request, prepared }))).toEqual(prepared.result);
+    expect(useTaskStore.getState()._tasksById.get(requestId)?.suppressMindwtrReminders).toBe(true);
+});
+
+it('publishes the frozen row after the reminder default changes, and keeps an earlier Send journal valid', async () => {
+    const host = await open();
+    const sent = value(host.prepareMindSweepAdd({ requestId: '7475c779-e751-42d3-a2ea-85abffb3be73', title: 'Earlier' })).prepared;
+    expect(sent.version).toBe(1);
+    expect(sent.task.suppressMindwtrReminders).toBe(false);
+    setReminderDefault('skip');
+    const prepared = value(host.prepareMindSweepAdd({ requestId, title: 'Call dentist' })).prepared;
+    expect(prepared.version).toBe(1);
+    setReminderDefault('send');
+    expect(value(await host.commitPreparedMindSweepAdd({ request: prepared.request, prepared }))).toEqual(prepared.result);
+    expect(useTaskStore.getState()._tasksById.get(requestId)?.suppressMindwtrReminders).toBe(true);
+    setReminderDefault('skip');
+    expect(value(host.validatePreparedMindSweepAdd({ request: sent.request, prepared: sent }))).toEqual(sent.result);
+    expect(value(await host.commitPreparedMindSweepAdd({ request: sent.request, prepared: sent }))).toEqual(sent.result);
+    expect(useTaskStore.getState()._tasksById.get(sent.task.id)?.suppressMindwtrReminders).toBe(false);
+});
+});

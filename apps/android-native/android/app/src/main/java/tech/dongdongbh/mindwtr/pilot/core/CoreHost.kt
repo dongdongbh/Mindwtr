@@ -63,6 +63,8 @@ class CoreHost(
     private val backups: BackupOperations? = null,
     /** The device calendars core's external calendars read (bundle/host-calendar.ts); null: this host reads none. */
     private val calendars: HostCalendars? = null,
+    /** Android system search (bundle/host-app-search.ts); null: this host indexes nothing. */
+    private val appSearch: HostAppSearch? = null,
 ) {
     /**
      * Reminder alarms on the platform (pilot/Reminders.kt): core's plan applied in core's order, the notification permission as RN
@@ -503,6 +505,12 @@ class CoreHost(
         // The device calendars (host-calendar.ts): each call only starts here; HostIo runs it on its calendar thread and the pump
         // settles it, as a fetch. A permission prompt answers when the user does, holding no thread meanwhile.
         calendars?.let { device -> bridge.setProperty("calendarCall", guarded { args -> io.calendar(args[0] as String, device::call) }) }
+        // Android system search (host-app-search.ts): a call only starts here (on HostIo's calendar thread, as a device calendar
+        // call) and AppSearch answers through the pump; `appSearchInfo` is whether it runs here and the build's link scheme.
+        appSearch?.let { search ->
+            bridge.setProperty("appSearchInfo", guarded { _ -> search.info() })
+            bridge.setProperty("appSearchCall", guarded { args -> io.calendar(args[0] as String, search::call) })
+        }
         // Reminder alarms (host-reminders.ts): core's plan applied, the notification permission, RN's old alarms cancelled once.
         reminders?.let { alarms ->
             bridge.setProperty("alarmApply", guarded { args -> alarms.apply(args[0] as String); null })
@@ -728,6 +736,15 @@ class CoreHost(
      */
     fun remindersStart(): JSONObject = callAsync("remindersStart")
 
+    /** Android system search's start (core's syncWithPreference): a full reindex and live indexing when the switch is on. */
+    fun appSearchStart(): JSONObject = callAsync("appSearchStart")
+
+    /** After General's system search switch was stored: the index follows it (core's enable or wipe). */
+    fun appSearchApply(): JSONObject = callAsync("appSearchApply")
+
+    /** Debug device check: the ids in the system search index (`{ ids }`), never titles. */
+    fun appSearchIds(): JSONObject = callAsync("appSearchIds")
+
     /**
      * Core's reminder plan applied now: [mode] "cycle", "rebuild" to remake every alarm (a reboot dropped them, exact alarms were just
      * allowed), or "fired" to make the daily or weekly alarm [key] that fired again at its next time.
@@ -742,10 +759,11 @@ class CoreHost(
 
     /**
      * The home-screen widgets published now if what they show changed (bundle/host-widgets.ts), and stored and drawn before this
-     * returns: after a CoreWork job, and when the app comes to the front.
+     * returns: after a CoreWork job, and when the app comes to the front. [leave]: the app left the front, so only a change still
+     * waiting is published (RN's flush); the whole payload is not built again.
      */
-    fun refreshWidgets() {
-        callAsync("widgetsRefresh")
+    fun refreshWidgets(leave: Boolean = false) {
+        if (leave) callAsync("widgetsRefresh", "leave") else callAsync("widgetsRefresh")
         widgets?.settle()
     }
 
@@ -844,6 +862,20 @@ class CoreHost(
 
     /** Core's result toast for a commit's reply. */
     fun backupResultModel(replyJson: String): JSONObject = callAsync("backupDocumentResultModel", replyJson)
+
+    /** RN's last screen at a cold start: `{ route: { pathname, params? } | null }` (core's parseRestorableLastRoute). */
+    fun sessionRestoreRead(): JSONObject = callAsync("sessionRestoreRead")
+
+    /** Stores the screen on show as RN's last screen (core's buildLastRouteSnapshot); [ageMs] dates it back (debug checks). */
+    fun sessionRestoreWrite(pathname: String, paramsJson: String, ageMs: Long): JSONObject = callAsync("sessionRestoreWrite", pathname, paramsJson, ageMs)
+
+    /** Before a leftover result offers Undo: core holds the attachment files of recovery snapshot [snapshot] again (`{ held }`). */
+    fun backupUndoHold(snapshot: File): JSONObject {
+        val handle = data.openRead(snapshot, false)
+        try {
+            return callAsync("backupUndoHold", handle, snapshot.name, deadlineMs = sized(BACKUP_DEADLINE_MS, snapshot.length()))
+        } finally { data.drop(handle) }
+    }
 
     /** Core's question before restoring snapshot [name]: [mode] "undo" (a result's Undo) or "restore" (a Recovery snapshots row). */
     fun backupSnapshotModel(name: String, mode: String): JSONObject = callAsync("backupSnapshotRestoreModel", name, mode)

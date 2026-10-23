@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from './task-accent-color';
 import type { Area, FocusGroupBy, Project, Task, TaskEnergyLevel, TaskPriority } from './types';
 import type { ProjectDeadlineBoost } from './task-utils';
 import { baseTextCollator } from './task-utils';
@@ -172,6 +173,7 @@ export function buildFocusTaskGroups({
                 theme,
             );
         case 'project': {
+            const areaById = new Map(areas.map((area) => [area.id, area]));
             const projectById = new Map(projects.map((project) => [project.id, project]));
             return buildOrderedGroups(tasks, (task) => {
                 const project = task.projectId ? projectById.get(task.projectId) : undefined;
@@ -187,7 +189,7 @@ export function buildFocusTaskGroups({
                     key: `project:${project.id}`,
                     label: project.title,
                     sortOrder: Number.isFinite(project.order) ? project.order : Number.POSITIVE_INFINITY,
-                    dotColor: project.color,
+                    dotColor: getProjectAccentColor(project, areaById),
                 };
             });
         }

@@ -184,7 +184,14 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      */
     var capture by mutableStateOf<CaptureDraft?>(null); private set
     var failedAction by mutableStateOf<FailedAction?>(null); private set
-    var screen by mutableStateOf(Screen.entries.firstOrNull { it.name == saved.get<String>("screen") } ?: Screen.Inbox); private set
+    /**
+     * Debug builds only: `debug.mindwtr.native.start_tab` = `inbox` starts on the Inbox with no last-screen restore, the start
+     * the device checks were written for (device.mjs launch sets it; the session check clears it).
+     */
+    private val harnessStart = debugProperty("start_tab")
+    // RN opens Focus on a fresh start (its home tab); a recent last screen reopens instead (keepLastRoute, openRestored).
+    var screen by mutableStateOf(Screen.entries.firstOrNull { it.name == saved.get<String>("screen") }
+        ?: if (harnessStart == "inbox") Screen.Inbox else Screen.Focus); private set
     var focus by mutableStateOf<FocusView?>(null); private set
     var projects by mutableStateOf<ProjectsView?>(null); private set
     /** The project whose detail shows on the Projects tab; its rows reload from core after process death. */
@@ -307,6 +314,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** RN's AppState for core's sync triggers and the reminder alarms: "active" on resume, "background" on leaving (MainActivity). */
     fun appState(state: String) {
         if (state == "active") resumes += 1
+        // RN stores the last screen again on leaving, so its time is the moment the app was left.
+        if (state == "background") keepLastRoute(force = true)
         ProcessCoreHost.appState(state)
         // RN's Calendar reloads its external calendars on a return to the app (shouldRefreshExternalCalendarOnAppStateChange).
         if (state == "active" && resumes > 1 && menu.list == "calendar") menu.calendarFeed("calendar")
@@ -329,10 +338,25 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     override fun onCleared() {
         ProcessCoreHost.unlistenSync(syncListener)
         entries.close()
+        routeWrites.shutdown()
         super.onCleared()
     }
 
+    /**
+     * A cold start: no saved state at all (the "started" mark, set below, comes back with any saved state, also when the user
+     * never left the default tab), so a process the system killed comes back from its own saved state, never a restore.
+     */
+    private val freshStart = saved.get<Boolean>("started") != true
+    /** The last screen was read and opened (or there was none): from now on every screen change is stored. */
+    private var routeReady = false
+    private var keptRoute: String? = null
+    /** Stores run one at a time, in order (two quick changes never land reversed). */
+    private val routeWrites = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "mindwtr-last-route") }
+    /** Debug builds: `debug.mindwtr.native.session_age_ms`, read once (a device check ages the stored screens out). */
+    private val routeAgeMs by lazy { if (BuildConfig.DEBUG) debugProperty("session_age_ms").toLongOrNull() ?: 0L else 0L }
+
     init {
+        saved["started"] = true
         ProcessCoreHost.listenSync(syncListener)
         saved["projectRequestId"] = projectRequestId
         val at = depth()
@@ -357,13 +381,16 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 applyDeviceChoices(runtime, prefs)
                 // RN's app lock, before any screen shows data (an owed save does not block it).
                 lock.boot(runtime)
-                ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture) }; return@Thread }
+                ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture); keepRoutes() }; return@Thread }
+                // RN's last screen (#842): only on a start with no screen of its own (no saved state) and no entry to open.
+                val lastRoute = if (freshStart && harnessStart.isEmpty() && entries.head == null) runCatching { runtime.sessionRestoreRead().optJSONObject("route") }
+                    .onFailure { Log.w(CoreHost.TAG, "Last screen not read ${failureForLog(it)}") }.getOrNull() else null
                 // Only the tab on screen: Focus and Projects are read once first content is drawn ([contentShown]) or their tab opens.
                 val lists = try {
                     read(runtime, at, screen)
                 } catch (failure: Throwable) {
                     // A save that failed while this screen opened blocks reads; show its retry.
-                    ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture) }; return@Thread }
+                    ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture); keepRoutes() }; return@Thread }
                     throw failure
                 }
                 // RN's More sheet, for the quick-access tab the tab bar draws from its first frame (cosmetic: a failure shows Projects).
@@ -393,6 +420,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     // An owed create left on disk goes first; then the open sheet and screen are read.
                     menu.start(sheet)
                     captureModal.resume()
+                    // An entry that arrived while the boot ran (a link on a warm process) wins over the last screen, as RN's does.
+                    if (entries.head == null) lastRoute?.let { entries.openRestored(it.getString("pathname"), it.optJSONObject("params") ?: JSONObject()) }
+                    keepRoutes()
                     // A restore, merge or import result a death after its commit left unshown, and an export cut short.
                     menu.settings.transfer.leftover()
                     search?.let { current ->
@@ -442,6 +472,53 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         if (focus == null) refreshFocus()
         if (projects == null) refreshProjects()
         ProcessCoreHost.contentShown()
+    }
+
+    /**
+     * Stores the screen on show for RN's last-screen restore (SessionRestore.kt names it; core stores it, as RN's
+     * persistLastRoute), when it changed or [force] (leaving the app). Debug builds: `debug.mindwtr.native.session_age_ms` dates
+     * it that far back, so a device check ages it out without touching the phone's clock.
+     */
+    private fun currentRoute() = lastRouteOf(screen, menu.quickView, menu.screen, menu.historyTab, openProjectId,
+        menu.own("savedSearch").optString("id").ifEmpty { null }, search != null, menu.sheet)
+    private fun routeKey() = currentRoute()?.let { it.pathname + it.params }
+
+    /** From now on the screen on show is stored: at once, then on each change. */
+    private fun keepRoutes() {
+        if (routeReady) return
+        routeReady = true
+        keepLastRoute(force = true)
+        viewModelScope.launch { snapshotFlow { routeKey() }.collect { keepLastRoute() } }
+    }
+
+    private fun keepLastRoute(force: Boolean = false) {
+        if (!routeReady) return
+        val route = currentRoute() ?: return
+        val key = route.pathname + route.params
+        if (!force && key == keptRoute) return
+        keptRoute = key
+        val runtime = host ?: return
+        val ageMs = routeAgeMs
+        // A screen cleared before its boot ended (Back on the splash) stores nothing.
+        if (routeWrites.isShutdown) return
+        runCatching {
+            routeWrites.execute {
+                runCatching { runtime.sessionRestoreWrite(route.pathname, route.params.toString(), ageMs) }
+                    .onFailure { Log.w(CoreHost.TAG, "Last screen not stored ${failureForLog(it)}") }
+            }
+        }
+    }
+
+    /**
+     * First content of the screen on show is drawn (MainActivity's ReportDrawnWhen; RN hides its splash once its first screen has
+     * data): the Inbox's rows, Focus's, the Projects tab's or quick view's, or a Menu screen's first page.
+     */
+    // `loading` first: a snapshot state, so Compose checks this again when the boot ends (`host` is a plain field).
+    fun firstContentReady(): Boolean = !loading && host != null && when {
+        menu.screen != null -> !menu.firstPagePending
+        screen == Screen.Focus -> focus != null
+        screen == Screen.Projects -> if (menu.quickView == "projects") projects != null else !menu.firstPagePending
+        else -> !menu.firstPagePending
     }
 
     /** The editor opens over this list, so Save and Cancel return to it. */

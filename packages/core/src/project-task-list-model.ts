@@ -2,7 +2,7 @@ import { tFallback } from './i18n';
 import { getProjectSectionsForView } from './project-utils';
 import { createReferenceSearchPredicate } from './reference';
 import { taskMatchesFilterSelections } from './task-filter-selections';
-import { compareTasksByProjectOrder, sortDoneTasksForListView, sortTasksBy, splitCompletedTasks } from './task-utils';
+import { compareTasksByProjectOrder, getProjectFlowMode, sortDoneTasksForListView, sortTasksBy, splitCompletedTasks } from './task-utils';
 import type { FilterCriteria, Project, Section, Task, TaskSortBy, TaskStatus } from './types';
 
 /**
@@ -38,7 +38,9 @@ export function getProjectSyntheticSectionIds(sections: readonly Pick<Section, '
 }
 
 export type ProjectTaskListItem =
-    | { type: 'section'; id: string; title: string; count: number; muted?: boolean; collapsible?: boolean; collapsed?: boolean; synthetic?: ProjectSyntheticSection }
+    | { type: 'section'; id: string; title: string; count: number; muted?: boolean; collapsible?: boolean; collapsed?: boolean; synthetic?: ProjectSyntheticSection;
+        /** "Parallel" or "Sequential", only on real sections of a Per section project (#1429). */
+        flowLabel?: string }
     /** `reorderSectionId`: the section a drag lands the task in (null = no section; undefined = not reorderable). */
     | { type: 'task'; task: Task; reorderSectionId?: string | null };
 
@@ -52,7 +54,8 @@ export type ProjectTaskListModel = {
 
 export type ProjectTaskListModelInput = {
     /** An archived project reads its archived section history. Its tags pull in tag-matched references. */
-    project: Pick<Project, 'id' | 'status'> & { tagIds?: readonly string[] };
+    project: Pick<Project, 'id' | 'status'> & { tagIds?: readonly string[] }
+        & Partial<Pick<Project, 'isSequential' | 'perSectionFlow'>>;
     /** The list's tasks, from selectProjectTaskListTasks. */
     tasks: readonly Task[];
     /** Every visible task: a tag-matched reference can live in another project (#1000). */
@@ -86,7 +89,7 @@ export function sortProjectTasksByOrder<T extends { createdAt: string; id: strin
  * Completed pile unless the workspace asks for it.
  */
 export function getProjectDetailTaskListOptions(
-    selectedProject: Pick<Project, 'status' | 'isSequential'> | null,
+    selectedProject: Pick<Project, 'status' | 'isSequential' | 'perSectionFlow'> | null,
     showCompletedTasks = false,
 ) {
     const isArchived = selectedProject?.status === 'archived';
@@ -95,7 +98,9 @@ export function getProjectDetailTaskListOptions(
         enableProjectReorder: !isArchived,
         includeArchived: isArchived || showCompletedTasks,
         includeDone: isArchived || showCompletedTasks,
-        groupCompletedTasksLast: !isArchived && showCompletedTasks && !selectedProject?.isSequential,
+        // Any sequence (Sequential or Per section, #1429) keeps finished steps in place.
+        groupCompletedTasksLast: !isArchived && showCompletedTasks
+            && (!selectedProject || getProjectFlowMode(selectedProject) === 'parallel'),
         readOnly: isArchived,
     };
 }
@@ -227,10 +232,14 @@ export function buildProjectTaskListModel(input: ProjectTaskListModelInput): Pro
         }
     });
     const items: ProjectTaskListItem[] = [];
+    const perSection = getProjectFlowMode(project) === 'perSection';
     sections.forEach((section) => {
         const tasksForSection = tasksBySection.get(section.id) ?? [];
         if (tasksForSection.length === 0 && !reorderMode) return;
-        items.push({ type: 'section', id: section.id, title: section.title, count: tasksForSection.length });
+        items.push({ type: 'section', id: section.id, title: section.title, count: tasksForSection.length,
+            ...(perSection ? { flowLabel: section.isSequential === true
+                ? tFallback(t, 'projects.sequential', 'Sequential')
+                : tFallback(t, 'projects.parallel', 'Parallel') } : {}) });
         tasksForSection.forEach((task) => items.push({ type: 'task', task, reorderSectionId: section.id }));
     });
     if (unsectioned.length > 0) {

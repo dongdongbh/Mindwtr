@@ -271,6 +271,8 @@ export interface SyncRunStoreBridge {
     getInMemorySnapshot(): AppData;
     /** The store's lists in one read, not copied (sync-client-helpers.ts); a sliced cycle copies them a few records at a time. */
     captureInMemorySnapshot?(): AppData;
+    /** The store's live subscribers: each runs at once on a publish inside the gate (D9b W6). */
+    listenerCount?(): number;
     flushPendingSave(): Promise<void>;
     setUiError(message: string | null): void;
     getSettings(): AppSettings | undefined;

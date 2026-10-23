@@ -111,7 +111,6 @@ const KNOWN_MISSING_KEYS = new Set([
     'people.referenceLink',
     'people.referencePlaceholder',
     'projects.expandSidebar',
-    'projects.sequenceMode',
     'savedFilters.defaultName',
     'savedFilters.deleteTitle',
     'savedFilters.label',

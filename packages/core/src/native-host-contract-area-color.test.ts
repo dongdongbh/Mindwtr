@@ -172,7 +172,7 @@ describe('prepared native Area color', () => {
         expect(useTaskStore.getState()._allAreas[0].rev).toBe(4);
     });
 
-    it('recognizes a complete cold receipt after canonical reload, including initialized device ID', async () => {
+    it.each([1, 2] as const)('recognizes a complete v%s cold recolor receipt with initialized device ID', async (version) => {
         const first = await open({ areas: [area()], projects: [project('linked', { areaTitle: 'Old' })], settings: {} });
         useTaskStore.setState({ settings: {} });
         const input = first.request();
@@ -180,7 +180,8 @@ describe('prepared native Area color', () => {
         if (!plan.ok) throw new Error(JSON.stringify(plan.error));
         expect(plan.value.prepared.deviceIdBefore).toBeNull();
         expect(plan.value.prepared.deviceIdToInitialize).toMatch(/^[0-9a-f]{8}-/);
-        const envelope = { request: input, prepared: plan.value.prepared };
+        expect(plan.value.prepared.version).toBe(2);
+        const envelope = { request: input, prepared: { ...plan.value.prepared, version } };
         expect(await first.methods.commitPreparedAreaColor(envelope)).toMatchObject({ ok: true });
         const saved = structuredClone(first.data());
         expect(saved.settings.deviceId).toBe(plan.value.prepared.deviceIdToInitialize);

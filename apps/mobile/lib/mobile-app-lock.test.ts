@@ -17,6 +17,7 @@ vi.mock('expo-local-authentication', () => ({
 import {
   authenticateWithDeviceLock,
   getMobileAppLockErrorKey,
+  isWithinMobileAppLockRelockDelay,
   shouldAttemptMobileAppLockAuthentication,
 } from './mobile-app-lock';
 
@@ -139,5 +140,21 @@ describe('mobile app lock authentication', () => {
       lockNonce: 1,
       promptedNonce: 1,
     })).toBe(false);
+  });
+
+  it('skips the prompt only within the relock delay after leaving unlocked (#1423)', () => {
+    const leftUnlockedAt = 1_000_000;
+    const at = (delayMinutes: number, awayMs: number, left: number | null = leftUnlockedAt) => (
+      isWithinMobileAppLockRelockDelay({ delayMinutes, leftUnlockedAt: left, now: leftUnlockedAt + awayMs })
+    );
+    expect(at(1, 59_999)).toBe(true);
+    expect(at(5, 4 * 60_000)).toBe(true);
+    expect(at(1, 60_000)).toBe(false);
+    expect(at(15, 16 * 60_000)).toBe(false);
+    // Immediately, a cold start or a lock left locked, and a clock moved back all ask.
+    expect(at(0, 0)).toBe(false);
+    expect(at(15, 1_000, null)).toBe(false);
+    expect(at(15, -1)).toBe(false);
+    expect(at(15, Number.NaN)).toBe(false);
   });
 });

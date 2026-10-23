@@ -218,6 +218,17 @@ describe('buildTaskRowMeta', () => {
         expect(meta(new Date('2026-09-09T10:00')).ageLabel).toBe('1 week old');
     });
 
+    it('uses the Project override for its dot while keeping overdue and priority tones', () => {
+        const project: Project = { id: 'p', title: 'Project', status: 'active', color: '#3b82f6',
+            colorOverride: '#10b981', areaId: 'a', order: 0, tagIds: [], createdAt: '', updatedAt: '' };
+        const meta = buildTaskRowMeta({ ...base, task: task({ projectId: 'p', priority: 'urgent', dueDate: '2026-09-20' }),
+            lookup: { project, projectArea: { id: 'a', name: 'Area', color: '#ef4444', order: 0, createdAt: '', updatedAt: '' } },
+            now: new Date('2026-09-24T15:00') });
+        expect(meta.parts.find((part) => part.kind === 'project')).toMatchObject({ dotColor: '#10b981' });
+        expect(meta.parts.find((part) => part.kind === 'due')).toMatchObject({ tone: 'overdue' });
+        expect(meta.priority).toBe('urgent');
+    });
+
     it('carries the sequence label only for the available cue', () => {
         const label = (sequenceCue: 'available' | 'later') => buildTaskRowMeta({
             ...base, task: task({}), sequenceCue, sequenceLabel: 'Available next action',

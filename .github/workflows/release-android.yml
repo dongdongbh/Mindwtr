@@ -102,6 +102,7 @@ permissions:
   contents: read
 
 env:
+  MINDWTR_GMAIL_PRODUCTION_VERIFIED: ${{ vars.MINDWTR_GMAIL_PRODUCTION_VERIFIED }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:

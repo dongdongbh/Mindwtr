@@ -146,6 +146,14 @@ describe('review view models', () => {
         expect(area.projectGroups[0].summary).not.toContain('Needs Action');
     });
 
+    it('shows a red Project override in a blue Area without changing next-action badges', () => {
+        const [entry] = getWeeklyReviewProjects([{ project: { id: 'project', areaId: 'blue',
+            color: '#ff0000', colorOverride: '#ff0000' }, tasks: [], nextActionState: 'none' }] as never,
+        new Map([['blue', { id: 'blue', color: '#0000ff' } as never]]), getWeeklyReviewLabels((key) => key));
+        expect(entry.areaColor).toBe('#ff0000');
+        expect(entry.badge.color).toBe('#EF4444');
+    });
+
     it('uses the singular active-task noun in Weekly Review Projects', () => {
         const labels = getWeeklyReviewLabels((key) => ({ 'review.activeTask': 'active task',
             'review.activeTasks': 'active tasks' }[key] ?? key));

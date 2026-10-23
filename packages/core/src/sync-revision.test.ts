@@ -7,6 +7,15 @@ import {
 } from './sync-revision';
 
 describe('sync revision helpers', () => {
+    it('silently preserves cap and increment policy for pure preparation when explicitly requested', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            expect(nextRevision(MAX_SYNC_REVISION, { warn: false })).toBe(MAX_SYNC_REVISION);
+            expect(nextRevision(MAX_SYNC_REVISION + 100, { warn: false })).toBe(MAX_SYNC_REVISION);
+            expect(nextRevision(SYNC_REVISION_WARNING_THRESHOLD - 1, { warn: false })).toBe(SYNC_REVISION_WARNING_THRESHOLD);
+            expect(warn).not.toHaveBeenCalled();
+        } finally { warn.mockRestore(); }
+    });
     it('increments revisions up to the safe maximum', () => {
         expect(nextRevision(undefined)).toBe(1);
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

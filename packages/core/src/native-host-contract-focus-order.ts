@@ -15,7 +15,7 @@ import type { Task } from './types';
 
 export type NativeFocusOrderRequest = PreparedFocusOrder['request'];
 export type NativeFocusOrderResult = PreparedFocusOrder['result'];
-export type NativePreparedFocusOrder = PreparedFocusOrder & { version: 1 };
+export type NativePreparedFocusOrder = PreparedFocusOrder & { version: 1 | 2 };
 export type NativeFocusOrderPreparation =
     | { kind: 'noop'; result: NativeFocusOrderResult }
     | { kind: 'prepared'; prepared: NativePreparedFocusOrder };
@@ -63,7 +63,7 @@ const readPrepared = (value: unknown): NativePreparedFocusOrder | null => {
     const request = readRequest(envelope.request);
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'scope', 'effect', 'deviceIdBefore',
-        'deviceIdToInitialize', 'preparedAt', 'result']) || raw.version !== 1
+        'deviceIdToInitialize', 'preparedAt', 'result']) || (raw.version !== 1 && raw.version !== 2)
         || !same(raw.request, request) || !record(raw.scope) || !exact(raw.scope, ['tasks'])
         || !Array.isArray(raw.scope.tasks) || raw.scope.tasks.length < 1
         || raw.scope.tasks.length > NATIVE_HOST_MAX_WINDOW
@@ -81,10 +81,10 @@ const readPrepared = (value: unknown): NativePreparedFocusOrder | null => {
         if (scope.tasks.some((task) => !validTask(task))
             || new Set(scope.tasks.map((task) => task.id)).size !== scope.tasks.length
             || focusOrderToken(scope.tasks) !== request.expectedOrder
-            || request.ids.length !== scope.tasks.length
+            || (raw.version === 1 && request.ids.length !== scope.tasks.length)
             || request.ids.some((id) => !scope.tasks.some((task) => task.id === id))) return null;
         const planned = focusOrderEffect(scope, request.ids,
-            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.preparedAt);
+            prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!, prepared.preparedAt, prepared.version === 2);
         if (planned.tasks.length !== effect.tasks.length) return null;
         return effect.tasks.every((row, index) => {
             const expected = planned.tasks[index];
@@ -125,7 +125,7 @@ export function createFocusOrderMethods(deps: {
             if (!controls) return fail('INVALID_INPUT', 'Valid Focus controls are required');
             const model = current(controls);
             const tasks = model.lists.focusedTasks;
-            if (tasks.length > NATIVE_HOST_MAX_WINDOW)
+            if (model.globalFocusedTasks.length > NATIVE_HOST_MAX_WINDOW)
                 return fail('INVALID_INPUT', 'Focus order exceeds the bounded native list');
             const available = model.canReorder;
             const rows = available ? tasks.map((task, index) => ({
@@ -136,7 +136,7 @@ export function createFocusOrderMethods(deps: {
                 moveDown: moveFocusReorderTask(tasks, task.id, 1)?.map(({ id }) => id) ?? null,
             })) : [];
             const value = { revision: deps.revision(), controls: model.filter.state,
-                expectedOrder: available ? focusOrderToken(tasks) : '',
+                expectedOrder: available ? focusOrderToken(model.globalFocusedTasks) : '',
                 canReorder: available, rows };
             return isNativeJsonWithinBytes(value) ? { ok: true, value }
                 : fail('INVALID_INPUT', 'Focus order exceeds the bounded native response');
@@ -156,20 +156,20 @@ export function createFocusOrderMethods(deps: {
             if (!request) return fail('INVALID_INPUT', 'A bounded Focus order request is required');
             const model = current(request.controls);
             const tasks = model.lists.focusedTasks;
-            if (!model.canReorder || tasks.length > NATIVE_HOST_MAX_WINDOW
-                || focusOrderToken(tasks) !== request.expectedOrder)
+            if (!model.canReorder || model.globalFocusedTasks.length > NATIVE_HOST_MAX_WINDOW
+                || focusOrderToken(model.globalFocusedTasks) !== request.expectedOrder)
                 return fail('STALE_REVISION', 'Focus order changed; refresh before moving');
             if (request.ids.length !== tasks.length || request.ids.some((id) => !tasks.some((task) => task.id === id)))
                 return fail('INVALID_INPUT', 'Every visible Focus task is required once');
             const result = { ids: request.ids };
-            if (request.ids.every((id, index) => tasks.find((task) => task.id === id)?.focusOrder === index))
-                return { ok: true, value: { kind: 'noop', result } };
             const state = useTaskStore.getState();
             const device = ensureDeviceId(state.settings);
             const preparedAt = new Date().toISOString();
-            const scope = { tasks };
-            const prepared: NativePreparedFocusOrder = { version: 1, request, scope,
-                effect: focusOrderEffect(scope, request.ids, device.deviceId, preparedAt),
+            const scope = { tasks: model.globalFocusedTasks };
+            const effect = focusOrderEffect(scope, request.ids, device.deviceId, preparedAt, true);
+            if (!effect.tasks.length) return { ok: true, value: { kind: 'noop', result } };
+            const prepared: NativePreparedFocusOrder = { version: 2, request, scope,
+                effect,
                 deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,
                 preparedAt, result };

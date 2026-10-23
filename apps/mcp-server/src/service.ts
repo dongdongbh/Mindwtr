@@ -283,6 +283,7 @@ const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
 export type AddProjectInput = {
   title: string;
   color?: string;
+  colorOverride?: string | null;
   status?: CoreProject['status'];
   cancelledAt?: string | null;
   areaId?: string | null;
@@ -299,6 +300,7 @@ export type UpdateProjectInput = {
   id: string;
   title?: string;
   color?: string | null;
+  colorOverride?: string | null;
   status?: CoreProject['status'];
   cancelledAt?: string | null;
   areaId?: string | null;
@@ -598,6 +600,7 @@ export const createService = (
           title,
           color: input.color ?? DEFAULT_PROJECT_COLOR,
           props: filterUndefined({
+            colorOverride: input.colorOverride,
             status: parseProjectStatus(input.status),
             cancelledAt: input.cancelledAt ?? undefined,
             areaId: input.areaId ?? undefined,
@@ -617,6 +620,7 @@ export const createService = (
         const updates: Partial<CoreProject> = {};
         if (input.title !== undefined) updates.title = validateProjectTitle(input.title);
         if (input.color !== undefined) updates.color = input.color ?? undefined;
+        if (input.colorOverride !== undefined) updates.colorOverride = input.colorOverride;
         if (input.status !== undefined) updates.status = parseProjectStatus(input.status);
         if (input.cancelledAt !== undefined) updates.cancelledAt = input.cancelledAt ?? undefined;
         if (input.areaId !== undefined) updates.areaId = input.areaId ?? undefined;

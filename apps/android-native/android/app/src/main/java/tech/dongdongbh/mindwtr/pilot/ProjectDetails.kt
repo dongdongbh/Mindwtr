@@ -255,6 +255,11 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         edit(projectId, "area") { put("areaId", area?.getString("id") ?: JSONObject.NULL) }
     }
 
+    fun setColor(color: String?) {
+        areaPicker = null
+        edit(projectId, "color") { put("colorOverride", color ?: JSONObject.NULL) }
+    }
+
     /** A tag chip: the tag on or off, as the chip shows the other. */
     fun setTag(tag: String, present: Boolean) {
         if (tag.isBlank()) return
@@ -571,7 +576,8 @@ private fun DetailsArea(model: InboxViewModel, detail: ProjectDetail, metadata: 
     val archived = detail.readOnly
     val enabled = !archived && !model.busy && model.failedAction == null
     DetailsBlock(tag = "project-details-area") {
-        MetadataRow(t("projects.areaLabel"), metadata.getString("areaLabel"), enabled, "project-area-picker", divider = false) { openAreas() }
+        MetadataRow(t("projects.color"), "", enabled, "project-color-picker", divider = false) { openAreas() }
+        MetadataRow(t("projects.areaLabel"), metadata.getString("areaLabel"), enabled, "project-area-picker", divider = true) { openAreas() }
         MetadataRow(t("taskEdit.tagsLabel"), metadata.getString("tagsLabel"), enabled, "project-tag-picker", divider = true) { openTags() }
     }
 }
@@ -743,6 +749,25 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
     }
     areaPicker?.let { options ->
         PickerCard(t("projects.areaLabel"), ::closeAreas, "project-area-sheet") {
+            Text(t("projects.color"), style = rnText(14, 600), color = c.secondaryText)
+            TextButton(onClick = { setColor(null) }, enabled = !model.busy,
+                modifier = Modifier.semantics { selected = options.isNull("colorOverride") }.testTag("project-color-area")) {
+                Text(t("projects.useAreaColor"))
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val colors = options.getJSONArray("colors")
+                for (index in 0 until colors.length()) {
+                    val color = colors.getString(index)
+                    val chosen = options.optString("colorOverride") == color
+                    Box(Modifier.size(44.dp).clickable(enabled = !model.busy, role = Role.Button) { setColor(color) }
+                        .semantics { contentDescription = t("projects.color") + ": " + color; selected = chosen }
+                        .testTag("project-color-" + color), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(30.dp).clip(CircleShape).background(coreColorOrNull(color) ?: c.tint)
+                            .border(if (chosen) 3.dp else 1.dp, if (chosen) c.text else c.border, CircleShape))
+                        if (chosen) Text("✓", color = c.text, style = rnText(16, 600))
+                    }
+                }
+            }
             AreaRow(model, options.getString("noAreaLabel"), null)
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 for (area in options.menuObjects("areas")) AreaRow(model, area.getString("label"), area)

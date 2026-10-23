@@ -143,8 +143,17 @@ vi.mock('./settings.shell', () => ({
 vi.mock('./android-capture-intent-section', () => ({
   AndroidCaptureIntentSection: () => React.createElement('AndroidCaptureIntentSection'),
 }));
+vi.mock('./gmail-capture-section', () => ({
+  GmailCaptureSection: () => React.createElement('GmailCaptureSection'),
+}));
 
 describe('GtdSettingsScreen task editor layout', () => {
+  it('places the Gmail account card on the Capture subpage', () => {
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => { tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd-capture" />); });
+    expect(tree.root.findByType('GmailCaptureSection' as never)).toBeTruthy();
+    renderer.act(() => tree.unmount());
+  });
   beforeEach(() => {
     updateSettings.mockClear();
     taskOpenModeState.setMode.mockClear();

@@ -334,6 +334,12 @@ const generalScenarios: Scenario[] = [
     actions: [['toggle', 'appLock'], ['toggle', 'appLock'], ['toggle', 'appLock'], ['toggle', 'appLock'], ['toggle', 'appLock']],
   },
   {
+    name: 'general: app lock relock delay',
+    data: 'none', settings: 'stored', device: { themeMode: 'nord' },
+    // The last pick is the choice already stored: nothing is written again.
+    actions: [['open', 'appLockRelock'], ['pick', 2], ['open', 'appLockRelock'], ['pick', 2], ['open', 'appLockRelock'], ['dismiss']],
+  },
+  {
     name: 'general: Android system search',
     data: 'none', settings: 'base', device: { appSearch: { supported: true, enabled: false } },
     actions: [['toggle', 'appSearch'], ['toggle', 'appSearch']],
@@ -650,7 +656,7 @@ const MENU_TITLE_KEYS: Record<string, string> = {
   sync: 'settings.sync', data: 'settings.data', advanced: 'settings.advanced', about: 'settings.about', ai: 'settings.ai', calendar: 'settings.calendar',
 };
 const GENERAL_ROW_KEYS: Record<string, string> = {
-  theme: 'settings.theme', quickAccess: 'settings.mobile.quickAccessView', language: 'settings.language',
+  theme: 'settings.theme', quickAccess: 'settings.mobile.quickAccessView', appLockRelock: 'settings.mobile.appLockRelock', language: 'settings.language',
   weekStart: 'settings.weekStart', dateFormat: 'settings.dateFormat', calendarSystem: 'settings.calendarSystem', timeFormat: 'settings.timeFormat',
 };
 const GENERAL_SWITCHES: Record<string, number> = { showTaskAge: 0, appLock: 1, appSearch: 2 };

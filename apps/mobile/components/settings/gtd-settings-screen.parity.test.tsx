@@ -103,6 +103,10 @@ vi.mock('@/lib/exact-alarm-permission', () => ({
 vi.mock('./android-capture-intent-section', () => ({
   AndroidCaptureIntentSection: () => React.createElement('AndroidCaptureIntentSection'),
 }));
+// Native account cards have separate behavior tests; this frozen fixture covers the GTD model.
+vi.mock('./gmail-capture-section', () => ({
+  GmailCaptureSection: () => React.createElement('GmailCaptureSection'),
+}));
 // Each lucide icon is its own element, so the archive screen's Check can be seen.
 vi.mock('lucide-react-native', () => {
   const icons = new Map<string, unknown>();

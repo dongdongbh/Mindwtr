@@ -31,9 +31,18 @@ const taskManagerMock = vi.hoisted(() => {
   };
 });
 
-const coreMock = vi.hoisted(() => ({
-  flushPendingSave: vi.fn(),
-}));
+const coreMock = vi.hoisted(() => {
+  const noopStorage = { name: 'noop' };
+  const state = { adapter: noopStorage as unknown, fetchData: vi.fn(async () => undefined) };
+  return {
+    state,
+    noopStorage,
+    flushPendingSave: vi.fn(),
+    getStorageAdapter: vi.fn(() => state.adapter),
+    setStorageAdapter: vi.fn((adapter: unknown) => { state.adapter = adapter; }),
+    useTaskStore: { getState: () => ({ fetchData: state.fetchData }) },
+  };
+});
 
 const syncServiceMock = vi.hoisted(() => ({
   abortMobileSync: vi.fn(),
@@ -43,6 +52,7 @@ const syncServiceMock = vi.hoisted(() => ({
 }));
 
 const storageAdapterMock = vi.hoisted(() => ({
+  mobileStorage: { name: 'mobile' },
   quiesceMobileStorage: vi.fn(),
 }));
 
@@ -131,6 +141,7 @@ describe('mobile background sync task', () => {
       nativeBackgroundTaskState.registered = false;
     });
     coreMock.flushPendingSave.mockResolvedValue(undefined);
+    coreMock.state.adapter = coreMock.noopStorage;
     syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'off', configured: false });
     syncServiceMock.performMobileSync.mockResolvedValue({ success: true });
     storageAdapterMock.quiesceMobileStorage.mockResolvedValue(undefined);
@@ -772,6 +783,28 @@ describe('mobile background sync task', () => {
       expect(done).toBe(false);
       reconciled.resolve();
       await run;
+    });
+
+    it('loads the store before reconciling reminders after a cold headless sync (#1424)', async () => {
+      configureSync();
+      const order: string[] = [];
+      coreMock.state.fetchData.mockImplementationOnce(async () => {
+        order.push(`fetch:${(coreMock.state.adapter as { name: string }).name}`);
+      });
+      reminderMock.mockImplementationOnce(async () => { order.push('reconcile'); });
+      await loadModule();
+      await taskManagerMock.state.executor?.();
+      expect(order).toEqual(['fetch:mobile', 'reconcile']);
+    });
+
+    it('keeps an already connected store as it is before reconciling reminders', async () => {
+      configureSync();
+      coreMock.state.adapter = storageAdapterMock.mobileStorage;
+      await loadModule();
+      await taskManagerMock.state.executor?.();
+      expect(coreMock.setStorageAdapter).not.toHaveBeenCalled();
+      expect(coreMock.state.fetchData).not.toHaveBeenCalled();
+      expect(reminderMock).toHaveBeenCalledWith('sync');
     });
 
     it('does not reconcile after a failed sync', async () => {

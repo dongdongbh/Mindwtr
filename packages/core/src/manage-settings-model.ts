@@ -133,8 +133,8 @@ export function getManageSettingsText(t: Translate, untranslated: ManageUntransl
             /** The task count's accessibility hint: it opens search. */
             countHint: t('search.title'),
         },
-        contexts: { empty: t('contexts.empty') },
-        tags: { empty: t('projects.noTags') },
+        contexts: { empty: t('contexts.empty'), newLabel: tf('contexts.new', 'New context'), addLabel: tf('common.add', 'Add') },
+        tags: { empty: t('projects.noTags'), newLabel: tf('tags.new', 'New tag'), addLabel: tf('common.add', 'Add') },
     };
 }
 
@@ -189,6 +189,8 @@ export type ManageEditorTarget =
     | { type: 'newArea' }
     | { type: 'unassignedArea'; color?: string }
     | { type: 'newPerson' }
+    | { type: 'newContext' }
+    | { type: 'newTag' }
     | { type: 'person'; id: string; name: string; note?: string; referenceLink?: string }
     | { type: 'context' | 'tag'; name: string };
 
@@ -228,7 +230,11 @@ export function getManageEditorText(t: Translate, type: ManageEditorTarget['type
                         ? tf('people.new', 'New Person')
                         : type === 'person'
                             ? untranslated.editPerson
-                            : t('common.rename'),
+                            : type === 'newContext'
+                                ? tf('contexts.new', 'New context')
+                                : type === 'newTag'
+                                    ? tf('tags.new', 'New tag')
+                                    : t('common.rename'),
         /** The name field's placeholder; null: no name field (the unassigned color). */
         namePlaceholder: type === 'unassignedArea'
             ? null
@@ -267,6 +273,7 @@ export const isManageEditorSaveDisabled = (type: ManageEditorTarget['type'], nam
 /** One store call the editor's Save makes. */
 export type ManageEditorWrite =
     | { kind: 'updateSettings'; updates: Partial<AppSettings> }
+    | { kind: 'addContext' | 'addTag'; name: string }
     | { kind: 'addArea'; name: string; props: Partial<Area> }
     | { kind: 'addPerson'; name: string; props: Partial<Person> | undefined }
     | { kind: 'updatePerson'; id: string; updates: Partial<Person> }
@@ -290,6 +297,9 @@ export function planManageEditorSave(target: ManageEditorTarget, draft: ManageEd
     }
 
     if (!trimmed) return null;
+
+    if (target.type === 'newContext') return [{ kind: 'addContext', name: trimmed }];
+    if (target.type === 'newTag') return [{ kind: 'addTag', name: trimmed }];
 
     if (target.type === 'newArea') return [{ kind: 'addArea', name: trimmed, props: { color: draft.color } }];
 

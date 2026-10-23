@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import {
     buildCompletionDateSections,
     compareProjectsByOrder,
@@ -292,7 +293,7 @@ export function groupTasksByProject({
             // project dots use: the area color is the identity color, the
             // project's own color is the fallback — a header dot must not
             // disagree with the chips right under it.
-            dotColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || project.color,
+            dotColor: getProjectAccentColor(project, areaById),
         });
     });
 

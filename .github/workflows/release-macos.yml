@@ -8,6 +8,10 @@ on:
         required: false
         type: string
     secrets:
+      MINDWTR_GMAIL_CLIENT_ID:
+        required: false
+      MINDWTR_GMAIL_CLIENT_SECRET:
+        required: false
       APPLE_ID:
         required: false
       APPLE_PASSWORD:
@@ -56,6 +60,9 @@ jobs:
     name: macOS Build (${{ matrix.rust_target }})
     timeout-minutes: 90
     env:
+      MINDWTR_GMAIL_PRODUCTION_VERIFIED: ${{ vars.MINDWTR_GMAIL_PRODUCTION_VERIFIED }}
+      MINDWTR_GMAIL_CLIENT_ID: ${{ secrets.MINDWTR_GMAIL_CLIENT_ID }}
+      MINDWTR_GMAIL_CLIENT_SECRET: ${{ secrets.MINDWTR_GMAIL_CLIENT_SECRET }}
       VITE_DROPBOX_APP_KEY: ${{ vars.VITE_DROPBOX_APP_KEY || secrets.VITE_DROPBOX_APP_KEY }}
       VITE_FEEDBACK_ENDPOINT_URL: ${{ vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
       VITE_DONATION_PROMPT_ENABLED: "true"
@@ -586,7 +593,21 @@ jobs:
             fi
 
             echo "Stapling $dmg"
-            xcrun stapler staple "$dmg"
+            # stapler fetches the ticket from Apple's CloudKit; the Intel runners
+            # lose that connection now and then (error 68), so retry the fetch.
+            stapled=0
+            for attempt in 1 2 3 4 5; do
+              if xcrun stapler staple "$dmg"; then
+                stapled=1
+                break
+              fi
+              echo "::warning::stapler staple attempt $attempt failed for $dmg; retrying in 30 s"
+              sleep 30
+            done
+            if [ "$stapled" -ne 1 ]; then
+              echo "::error::Could not staple $dmg after 5 attempts"
+              exit 1
+            fi
             xcrun stapler validate "$dmg"
           done
           if [ "$found" -eq 0 ]; then

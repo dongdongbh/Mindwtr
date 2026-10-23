@@ -57,4 +57,21 @@ describe('sync-path-bookmarks wrapper', () => {
     await writeBookmarkedSyncFileText('token', '{"projects":[]}');
     expect(nativeModuleMock.writeTextFile).toHaveBeenCalledWith('token', '{"projects":[]}');
   });
+
+  it('logs a failed bookmark create or resolve by the error name, never its text', async () => {
+    const privatePath = 'file:///private/var/mobile/Containers/Shared/AppGroup/private-folder/data.json';
+    nativeModuleMock.createBookmark.mockRejectedValue(new Error(`The file "${privatePath}" couldn't be opened.`));
+    nativeModuleMock.resolveBookmark.mockRejectedValue(new Error(`NSFilePath=${privatePath}`));
+    const { createSyncPathBookmark, resolveSyncPathBookmark } = await import('./sync-path-bookmarks');
+    const { logWarn } = await import('./app-log');
+
+    await expect(createSyncPathBookmark(privatePath)).resolves.toBeNull();
+    await expect(resolveSyncPathBookmark('token')).resolves.toBeNull();
+
+    expect(vi.mocked(logWarn).mock.calls.map(([, context]) => context)).toEqual([
+      { scope: 'sync', extra: { error: 'Error' } },
+      { scope: 'sync', extra: { error: 'Error' } },
+    ]);
+    expect(JSON.stringify(vi.mocked(logWarn).mock.calls)).not.toContain('private-folder');
+  });
 });

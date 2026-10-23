@@ -691,6 +691,11 @@ private fun ManageValues(model: InboxViewModel, page: SettingsPage, list: String
         }
     }
     if (page.list(list).size < page.total(list)) ListMore(model, list)
+    val create = page.view.getJSONObject(list).getJSONObject("create")
+    Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(create.getString("label"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.weight(1f))
+        RowButton(SettingsIonicons.Add, create.getString("label"), c.tint, idle) { settings.openEditor(create.getJSONObject("edit")) }
+    }
 }
 
 /**

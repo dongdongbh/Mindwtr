@@ -106,9 +106,15 @@ function readState(value: unknown): MindSweepState | null {
     return { scope: scope as MindSweepState['scope'], step: step as number, captured: captured as Record<string, string[]> };
 }
 
-/** Only these factory dependencies influence an unstarred, unprojected Inbox row. */
-const derive = (input: NativeMindSweepRequest, preparedAt: string, deviceId: string, defaultAreaId: string | null) => {
-    const settings = { gtd: defaultAreaId ? { defaultAreaMode: 'fixed', defaultAreaId } : { defaultAreaMode: 'none' } } as AppSettings;
+/**
+ * Only these factory dependencies influence an unstarred, unprojected Inbox row. The
+ * reminder default is read back from the frozen row: a new row inherits it, so its
+ * suppression flag records it, and the journal keeps its version-1 shape.
+ */
+const derive = (input: NativeMindSweepRequest, preparedAt: string, deviceId: string, defaultAreaId: string | null,
+    suppressMindwtrReminders: unknown) => {
+    const settings = { gtd: defaultAreaId ? { defaultAreaMode: 'fixed', defaultAreaId } : { defaultAreaMode: 'none' },
+        taskReminderDefault: suppressMindwtrReminders === true ? 'skip' : 'send' } as AppSettings;
     const areas = defaultAreaId ? [{ id: defaultAreaId }] as Area[] : [];
     return buildNewTask({
         title: input.title.trim(), initialTaskProps: { status: 'inbox' }, id: input.requestId,
@@ -138,7 +144,7 @@ export const validatePreparedMindSweepAdd = (input: unknown): NativeHostResult<N
             || prepared.result.taskId !== bound.requestId || prepared.result.title !== bound.title.trim()
             || JSON.stringify(input).length > MAX_JOURNAL) return fail('INVALID_INPUT', 'Malformed prepared Mind Sweep add');
         const built = derive(bound, prepared.preparedAt, prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!,
-            prepared.effectiveDefaultAreaId);
+            prepared.effectiveDefaultAreaId, prepared.task.suppressMindwtrReminders);
         if (!built.ok || !same(built.task, prepared.task)
             || !same(taskToSqliteRow(built.task), taskToSqliteRow(prepared.task))) {
             return fail('INVALID_INPUT', 'Prepared Mind Sweep task does not match the literal request');

@@ -21,7 +21,7 @@ import {
 import { markCoreStartupPhase } from './startup-profiler';
 import { createProjectActions } from './store-projects';
 import { createSettingsActions } from './store-settings';
-export { getStorageTimeoutMs, lastStoreLoadWasRecovery, setStorageTimeoutMs } from './store-settings';
+export { getStorageTimeoutMs, lastStoreLoadWasRecovery, markNextLoadAsDocumentReplacement, setStorageTimeoutMs } from './store-settings';
 import { createTaskActions } from './store-tasks';
 import { createArchiveRetentionActions, resetArchiveRetentionSyncForTests } from './store-archive-retention';
 import { sleep } from './async-utils';

@@ -120,6 +120,9 @@ export const instrumentStoreSubscribe = <TStore extends InstrumentableStore>(
     instrumentedStores.add(api);
 };
 
+/** The store's live subscribers (every subscribe through an instrumented store, until it unsubscribes). */
+export const getStoreListenerCount = (): number => activeListenerCount;
+
 export const beginNotifyProfile = (): void => {
     currentProfile = { entries: [], derivedRebuildCount: 0, derivedRebuildMs: 0 };
 };

@@ -1,7 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as Calendar from 'expo-calendar';
-import type { StoreActionResult, Task } from '@mindwtr/core';
+import {
+  classifyAppleReminderForImport,
+  normalizeAppleRemindersImportSettings,
+  type AppleReminderList,
+  type AppleRemindersImportResult,
+  type AppleRemindersImportSettings,
+  type StoreActionResult,
+  type Task,
+} from '@mindwtr/core';
 
 import { logWarn } from './app-log';
 
@@ -9,30 +17,8 @@ export const APPLE_REMINDERS_IMPORT_SETTINGS_KEY = 'mindwtr-apple-reminders-impo
 
 export type AppleRemindersPermissionStatus = 'unavailable' | 'undetermined' | 'granted' | 'denied';
 
-export type AppleRemindersImportSettings = {
-  selectedListId?: string;
-  selectedListTitle?: string;
-  importedReminderIds: string[];
-  deleteImportedReminders: boolean;
-  /** Run the import each time Mindwtr comes to the foreground (#1238). */
-  autoImportOnOpen: boolean;
-};
-
-export type AppleReminderList = {
-  id: string;
-  title: string;
-  color?: string;
-};
-
-export type AppleRemindersImportResult = {
-  importedCount: number;
-  deletedCount: number;
-  deleteFailedCount: number;
-  skippedDuplicateCount: number;
-  skippedCompletedCount: number;
-  skippedEmptyTitleCount: number;
-  failedCount: number;
-};
+export { normalizeAppleRemindersImportSettings };
+export type { AppleReminderList, AppleRemindersImportResult, AppleRemindersImportSettings };
 
 export type AddInboxTask = (
   title: string,
@@ -44,12 +30,6 @@ export type AddInboxTask = (
 // task id: adding the same reminder twice then returns the first task instead
 // of a duplicate. Older ids keep the legacy path. Same rule as pending captures.
 const UUID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
-
-const DEFAULT_IMPORT_SETTINGS: AppleRemindersImportSettings = {
-  importedReminderIds: [],
-  deleteImportedReminders: false,
-  autoImportOnOpen: false,
-};
 
 // The manual button and the foreground auto-import both read the imported-id
 // list at start; running them at the same time would add a reminder twice.
@@ -71,51 +51,13 @@ const normalizePermissionStatus = (status: unknown): AppleRemindersPermissionSta
   return 'denied';
 };
 
-const normalizeDateKey = (value: unknown): string | undefined => {
-  if (value instanceof Date) return value.toISOString();
-  return normalizeString(value);
-};
-
-const getReminderImportKey = (reminder: Calendar.Reminder, listId: string, title: string): string => {
-  const reminderId = normalizeString(reminder.id);
-  if (reminderId) return reminderId;
-
-  return [
-    'fallback',
-    listId,
-    title,
-    normalizeString(reminder.notes) ?? '',
-    normalizeDateKey(reminder.creationDate) ?? '',
-    normalizeDateKey(reminder.startDate) ?? '',
-    normalizeDateKey(reminder.dueDate) ?? '',
-  ].join(':');
-};
-
-export function normalizeAppleRemindersImportSettings(value: unknown): AppleRemindersImportSettings {
-  if (!value || typeof value !== 'object') return { ...DEFAULT_IMPORT_SETTINGS };
-  const raw = value as Partial<AppleRemindersImportSettings>;
-  const selectedListId = normalizeString(raw.selectedListId);
-  const selectedListTitle = normalizeString(raw.selectedListTitle);
-  const importedReminderIds = Array.isArray(raw.importedReminderIds)
-    ? Array.from(new Set(raw.importedReminderIds.map(normalizeString).filter((id): id is string => Boolean(id))))
-    : [];
-
-  return {
-    ...(selectedListId ? { selectedListId } : {}),
-    ...(selectedListTitle ? { selectedListTitle } : {}),
-    importedReminderIds,
-    deleteImportedReminders: raw.deleteImportedReminders === true,
-    autoImportOnOpen: raw.autoImportOnOpen === true,
-  };
-}
-
 export async function loadAppleRemindersImportSettings(): Promise<AppleRemindersImportSettings> {
   const raw = await AsyncStorage.getItem(APPLE_REMINDERS_IMPORT_SETTINGS_KEY);
-  if (!raw) return { ...DEFAULT_IMPORT_SETTINGS };
+  if (!raw) return normalizeAppleRemindersImportSettings(undefined);
   try {
     return normalizeAppleRemindersImportSettings(JSON.parse(raw));
   } catch {
-    return { ...DEFAULT_IMPORT_SETTINGS };
+    return normalizeAppleRemindersImportSettings(undefined);
   }
 }
 
@@ -271,24 +213,23 @@ async function runAppleRemindersImport({
   let recoverySnapshotCreated = false;
 
   for (const reminder of reminders) {
-    if (reminder.completed === true) {
+    const classification = classifyAppleReminderForImport(reminder, normalizedListId, importedIds);
+    if (classification.kind === 'completed') {
       result.skippedCompletedCount += 1;
       continue;
     }
 
-    const title = normalizeString(reminder.title);
-    if (!title) {
+    if (classification.kind === 'empty-title') {
       result.skippedEmptyTitleCount += 1;
       continue;
     }
 
-    const reminderKey = getReminderImportKey(reminder, normalizedListId, title);
-    if (importedIds.has(reminderKey)) {
+    if (classification.kind === 'duplicate') {
       result.skippedDuplicateCount += 1;
       continue;
     }
 
-    const description = normalizeString(reminder.notes);
+    const reminderKey = classification.importKey;
     if (!recoverySnapshotCreated) {
       await createRecoverySnapshot();
       recoverySnapshotCreated = true;
@@ -297,10 +238,7 @@ async function runAppleRemindersImport({
     const captureOptions: [{ captureId: string }?] = reminderId && UUID_PATTERN.test(reminderId)
       ? [{ captureId: reminderId.toLowerCase() }]
       : [];
-    const taskResult = await addTask(title, {
-      status: 'inbox',
-      ...(description ? { description } : {}),
-    }, ...captureOptions);
+    const taskResult = await addTask(classification.title, classification.props, ...captureOptions);
 
     if (taskResult.success === false) {
       result.failedCount += 1;

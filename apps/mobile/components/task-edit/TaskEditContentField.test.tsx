@@ -325,7 +325,7 @@ describe('TaskEditContentField', () => {
     expect(checkmark.props.color).toBe(baseProps.tc.onTint);
   });
 
-  it('edits a draft Reference checklist as a plain list without changing completion state', () => {
+  it('gives a draft Reference list checkboxes that tick an entry, struck when checked, with Reset (#1416)', () => {
     const checklist = [
       { id: 'check-1', title: 'Completed **source**', isCompleted: true },
       { id: 'check-2', title: '[Pending link](https://example.com)', isCompleted: false },
@@ -347,28 +347,28 @@ describe('TaskEditContentField', () => {
     });
 
     expect(tree.root.findAllByProps({ children: 'taskEdit.tab.list' })).not.toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox')).toHaveLength(0);
-    expect(tree.root.findAll((node) => node.props.accessibilityState?.checked !== undefined)).toHaveLength(0);
-    expect(tree.root.findAllByType(Text).filter((node) => node.props.children === '•')).toHaveLength(2);
-    expect(tree.root.findAllByProps({ children: 'taskEdit.resetChecklist' })).toHaveLength(0);
-    expect(tree.root.findByProps({ testID: 'mobile-checklist-add-item' })).toBeTruthy();
-    expect(tree.root.findByProps({ testID: 'mobile-checklist-order-toggle' })).toBeTruthy();
+    const boxes = tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox' && typeof node.type !== 'string');
+    expect(boxes.map((node) => [node.props.accessibilityLabel, node.props.accessibilityState])).toEqual([
+      ['Completed **source**', { checked: true }],
+      ['[Pending link](https://example.com)', { checked: false }],
+    ]);
+    expect(tree.root.findAllByType(Text).filter((node) => node.props.children === '•')).toHaveLength(0);
+    expect(tree.root.findAllByProps({ children: 'taskEdit.resetChecklist' })).not.toHaveLength(0);
 
     const completedInput = tree.root.findByProps({ accessibilityLabel: 'taskEdit.tab.list 1' });
-    expect(flattenStyle(completedInput.props.style).color).toBe(baseProps.tc.text);
-    expect(flattenStyle(completedInput.props.style).textDecorationLine).toBeUndefined();
+    expect(flattenStyle(completedInput.props.style).color).toBe(baseProps.tc.secondaryText);
 
     act(() => {
-      completedInput.props.onChangeText('Edited **source**');
+      boxes[1].props.onPress();
     });
 
     expect(applyChecklistUpdate).toHaveBeenCalledWith([
-      { id: 'check-1', title: 'Edited **source**', isCompleted: true },
-      checklist[1],
+      checklist[0],
+      { ...checklist[1], isCompleted: true },
     ]);
   });
 
-  it('strips pasted checkbox markers in Reference without importing completion state', () => {
+  it('keeps pasted checked markers checked in Reference, as in a checklist (#1416)', () => {
     let checklist = [
       { id: 'check-1', title: 'Replace me', isCompleted: false },
       { id: 'check-2', title: 'Existing completed item', isCompleted: true },
@@ -402,7 +402,7 @@ describe('TaskEditContentField', () => {
       'Imported open marker',
       'Existing completed item',
     ]);
-    expect(checklist.map((item) => item.isCompleted)).toEqual([false, false, true]);
+    expect(checklist.map((item) => item.isCompleted)).toEqual([true, false, true]);
     expect(checklist[0].id).toBe('check-1');
     expect(checklist[2].id).toBe('check-2');
 
@@ -413,7 +413,7 @@ describe('TaskEditContentField', () => {
     expect(tree.root.findByProps({
       accessibilityLabel: 'Imported checked marker',
       accessibilityRole: 'checkbox',
-    }).props.accessibilityState).toEqual({ checked: false });
+    }).props.accessibilityState).toEqual({ checked: true });
     expect(tree.root.findByProps({
       accessibilityLabel: 'Imported open marker',
       accessibilityRole: 'checkbox',

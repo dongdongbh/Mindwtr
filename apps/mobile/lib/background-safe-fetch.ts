@@ -8,6 +8,9 @@
 // (#1001). XMLHttpRequest completes through a native event instead, and its
 // timeout is enforced by OkHttp, so neither depends on a JavaScript timer.
 
+import { getNativeUtf8TextNative } from '@/modules/native-utf8-text';
+import { logInfo } from './app-log';
+
 /** Ceiling for one request, enforced natively; foreground code keeps its own
  *  shorter JavaScript timeouts on top. */
 export const BACKGROUND_SAFE_FETCH_NATIVE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -57,6 +60,34 @@ const parseResponseHeaders = (raw: string): Headers => {
   return headers;
 };
 
+type NativeText = { text: string; bytes: number };
+type XhrBody = { buffer: () => ArrayBuffer; nativeText: () => NativeText | null };
+
+let nativeTextLogged = false;
+
+// #1434: Expo's TextDecoder is JavaScript, and a sync document of a few MB took seconds to decode in the
+// background. Swift decodes it when it is valid UTF-8; any other body takes the JavaScript path as before.
+const decodeNatively = (base64: string | null): NativeText | null => {
+  if (base64 === null) return null;
+  const native = getNativeUtf8TextNative();
+  if (!native) return null;
+  let text: unknown;
+  try {
+    text = native.decodeBase64Utf8(base64);
+  } catch {
+    return null;
+  }
+  if (typeof text !== 'string') return null;
+  const bytes = (base64.length / 4) * 3 - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+  if (!nativeTextLogged) {
+    nativeTextLogged = true;
+    void logInfo('Response text decoded natively', {
+      scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.8/ios-native-text-decode', bytes: String(bytes) },
+    }).catch(() => undefined);
+  }
+  return { text, bytes };
+};
+
 class XhrResponse {
   readonly body = null;
   readonly redirected = false;
@@ -64,7 +95,7 @@ class XhrResponse {
   bodyUsed = false;
 
   constructor(
-    private readonly buffer: ArrayBuffer,
+    private readonly content: XhrBody,
     readonly status: number,
     readonly statusText: string,
     readonly url: string,
@@ -75,9 +106,14 @@ class XhrResponse {
     return this.status >= 200 && this.status < 300;
   }
 
+  /** Core's readDecodedResponseText (http-utils.ts) reads text() under its byte limit when this is set. */
+  get mindwtrDecodedTextBytes(): number | undefined {
+    return this.content.nativeText()?.bytes;
+  }
+
   async arrayBuffer(): Promise<ArrayBuffer> {
     this.bodyUsed = true;
-    return this.buffer.slice(0);
+    return this.content.buffer().slice(0);
   }
 
   async bytes(): Promise<Uint8Array> {
@@ -86,7 +122,7 @@ class XhrResponse {
 
   async text(): Promise<string> {
     this.bodyUsed = true;
-    return new TextDecoder().decode(new Uint8Array(this.buffer));
+    return this.content.nativeText()?.text ?? new TextDecoder().decode(new Uint8Array(this.content.buffer()));
   }
 
   async json(): Promise<unknown> {
@@ -94,7 +130,7 @@ class XhrResponse {
   }
 
   clone(): XhrResponse {
-    return new XhrResponse(this.buffer.slice(0), this.status, this.statusText, this.url, this.headers);
+    return new XhrResponse(this.content, this.status, this.statusText, this.url, this.headers);
   }
 }
 
@@ -154,10 +190,26 @@ const xhrFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Respons
   });
 
   xhr.onload = () => {
-    const raw = xhr.response as ArrayBuffer | null;
-    const buffer = raw instanceof ArrayBuffer ? raw : new ArrayBuffer(0);
+    // React Native keeps an 'arraybuffer' reply as the native side's base64 string and builds the
+    // ArrayBuffer in JavaScript only when `response` is read, so a text read skips that step too.
+    const nativeBase64 = (xhr as unknown as { _response?: unknown })._response;
+    let buffer: ArrayBuffer | undefined;
+    let nativeText: NativeText | null | undefined;
+    const content: XhrBody = {
+      buffer: () => {
+        if (!buffer) {
+          const raw = xhr.response as ArrayBuffer | null;
+          buffer = raw instanceof ArrayBuffer ? raw : new ArrayBuffer(0);
+        }
+        return buffer;
+      },
+      nativeText: () => {
+        if (nativeText === undefined) nativeText = decodeNatively(typeof nativeBase64 === 'string' ? nativeBase64 : null);
+        return nativeText;
+      },
+    };
     finish(() => resolve(new XhrResponse(
-      buffer,
+      content,
       xhr.status,
       xhr.statusText ?? '',
       xhr.responseURL || url,

@@ -10,6 +10,7 @@ const SQLITE_NEUTRAL_FALSE_FIELDS = new Set([
     'isSequential',
     'isFocused',
     'isCollapsed',
+    'perSectionFlow',
 ]);
 
 // normalizeTaskForLoad no longer backfills pushCount: 0 on purged tombstones

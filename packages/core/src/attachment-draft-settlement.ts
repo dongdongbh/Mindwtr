@@ -1,3 +1,5 @@
+import { normalizeAttachmentCleanupUri } from './attachment-cleanup';
+import { logInfo } from './logger';
 import type { Attachment } from './types';
 
 export type AttachmentDraftSettlementReason =
@@ -66,14 +68,25 @@ export function planAttachmentDraftSettlement({
  * Whether a live task or project attachment still points at `uri`. A settlement candidate
  * whose file is in use (an attachment restored, or synced back, after the plan was made)
  * must keep its bytes. Ask it immediately before the delete, after every await.
+ * Equivalent spellings of one file (percent-encoded or not, the iOS container alias) count
+ * as the same reference; this identity only keeps bytes and never names a file to open.
  */
 export function isAttachmentFileInUse(
     uri: string,
     owners: Iterable<{ deletedAt?: string; attachments?: readonly Attachment[] }>,
 ): boolean {
+    const identity = normalizeAttachmentCleanupUri(uri) ?? uri;
     for (const owner of owners) {
         if (owner.deletedAt) continue;
-        if (owner.attachments?.some((item) => !item.deletedAt && item.kind === 'file' && item.uri === uri)) return true;
+        const match = owner.attachments?.find((item) => !item.deletedAt && item.kind === 'file' && item.uri
+            && (normalizeAttachmentCleanupUri(item.uri) ?? item.uri) === identity);
+        if (!match) continue;
+        if (match.uri !== uri) {
+            try { logInfo('Attachment file kept for an equivalent reference spelling', { scope: 'attachments', category: 'storage',
+                context: { releaseCheck: 'v1.3.7/attachment-equivalent-reference' } }); }
+            catch { /* Diagnostics cannot change the keep decision. */ }
+        }
+        return true;
     }
     return false;
 }

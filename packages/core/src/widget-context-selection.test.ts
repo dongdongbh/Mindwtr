@@ -16,24 +16,36 @@ const publish = (source: AppData, listSelections: string[] = []) => buildAndroid
 const ids = (items: { id: string }[]) => items.map((item) => item.id).sort();
 
 describe('Android context/tag widget selection', () => {
-    it('caches every offered context, tag and saved filter before any widget selects it', () => {
+    it('builds context, tag and saved-filter lists only for the placed selections, and still offers every name', () => {
         const source = data([
             task('inbox', { status: 'inbox', contexts: ['@desk'] }),
             task('waiting', { status: 'waiting', contexts: ['desk'], tags: ['#urgent'] }),
             task('someday', { status: 'someday', contexts: ['@desk/deep'] }),
             task('other', { contexts: ['@home'] }),
         ]);
-        source.settings.savedFilters = [{ id: 'unselected', name: 'Urgent', view: 'all', criteria: { tags: ['#urgent'] }, createdAt: timestamp, updatedAt: timestamp }];
-        const payload = buildAndroidWidgetPublication(source, 'en', {
-            listSelections: [], focusFilter: { criteria: { contexts: ['@home'] }, sortBy: 'default' },
-        });
+        source.settings.savedFilters = [
+            { id: 'unselected', name: 'Urgent', view: 'all', criteria: { tags: ['#urgent'] }, createdAt: timestamp, updatedAt: timestamp },
+            { id: 'home', name: 'Home', view: 'all', criteria: { contexts: ['@home'] }, createdAt: timestamp, updatedAt: timestamp },
+        ];
+        const focusFilter = { criteria: { contexts: ['@home'] }, sortBy: 'default' as const };
+        const chosenLists = (lists: Record<string, unknown>) => Object.keys(lists).filter((id) => /^(context|tag|filter):/.test(id)).sort();
+        // A list for every label made each refresh grow with the number of labels (#1399). A list the
+        // chooser picks shows under its name, empty, until the app's next publication builds it.
+        const unplaced = buildAndroidWidgetPublication(source, 'en', { listSelections: [], focusFilter });
+        expect(chosenLists(unplaced.lists)).toEqual([]);
+        expect(ids(unplaced.contexts!)).toEqual(['context:@desk', 'context:@desk/deep', 'context:@home']);
+        expect(ids(unplaced.tags!)).toEqual(['tag:#urgent']);
+        expect(ids(unplaced.savedFilters)).toEqual(['home', 'unselected']);
+
+        const selections = ['context:@desk', 'tag:#urgent', 'filter:unselected'];
+        const payload = buildAndroidWidgetPublication(source, 'en', { listSelections: selections, focusFilter });
+        expect(chosenLists(payload.lists)).toEqual([...selections].sort());
         expect(ids(payload.lists['context:@desk'].items)).toEqual(['inbox', 'someday', 'waiting']);
         expect(ids(payload.lists['tag:#urgent'].items)).toEqual(['waiting']);
         expect(ids(payload.lists['filter:unselected'].items)).toEqual(['waiting']);
-        for (const option of [...payload.contexts!, ...payload.tags!]) expect(payload.lists[option.id]).toBeDefined();
+        expect(payload.contexts).toEqual(unplaced.contexts);
         expect(payload.contexts!.filter((option) => option.id === 'context:@desk')).toHaveLength(1);
         expect(payload.lists['context:@desk'].items.every((row) => row.completionToken && row.openUri)).toBe(true);
-        expect(publish(source, ['context:@desk', 'tag:#urgent']).lists).toEqual(payload.lists);
     });
 
     it('uses shared canonical hierarchical matching and URI encodes Unicode and reserved characters once', () => {
@@ -46,7 +58,8 @@ describe('Android context/tag widget selection', () => {
             task('tag', { tags: ['#desk'] }),
             task('different-case', { contexts: ['@Desk'] }),
         ]);
-        const payload = publish(source);
+        const offered = publish(source);
+        const payload = publish(source, [...offered.contexts!, ...offered.tags!].map((option) => option.id));
         for (const option of payload.contexts!) {
             const expected = applyFilter(source.tasks, { contexts: [option.name] }, { projects: [] });
             expect(ids(payload.lists[option.id].items)).toEqual(ids(expected));
@@ -75,7 +88,7 @@ describe('Android context/tag widget selection', () => {
         source.projects = [project('deleted-project', { deletedAt: timestamp }), project('archived-project', { status: 'archived' })];
         source.areas = ['visible', 'hidden'].map((id, order) => ({ id, name: id, order, createdAt: timestamp, updatedAt: timestamp }));
         source.settings.filters = { areaIds: ['visible'] };
-        const payload = publish(source, ['context:@deleted', 'context:@hidden']);
+        const payload = publish(source, ['context:@desk', 'context:@retained', 'context:@deleted', 'context:@hidden']);
         expect(payload.contexts?.map((option) => option.id).sort()).toEqual(['context:@desk', 'context:@retained']);
         expect(ids(payload.lists['context:@desk'].items)).toEqual(['good']);
         for (const id of ['context:@retained', 'context:@deleted', 'context:@hidden']) {
@@ -94,7 +107,7 @@ describe('Android context/tag widget selection', () => {
 
     it('offers more than fifty tokens and bounds each cached list to the existing Android row cap', () => {
         const source = data(Array.from({ length: 250 }, (_, index) => task(String(index), { contexts: ['@common', `@context-${index}`] })));
-        const payload = publish(source);
+        const payload = publish(source, ['context:@common', 'context:@context-249']);
         expect(payload.contexts).toHaveLength(251);
         expect(payload.lists['context:@common'].items).toHaveLength(200);
         expect(payload.lists['context:@common'].totalCount).toBe(250);

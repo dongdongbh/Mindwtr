@@ -545,7 +545,7 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
             if (yieldsSincePrepared === nth) await act();
         };
     };
-    const published = (fake: ReturnType<typeof createHost>) => fake.logs.find((line) => line.message === 'Sync save published to the store')?.extra;
+    const published = (fake: ReturnType<typeof createHost>) => fake.logs.find((line) => line.message === 'Sync cycle ran in slices')?.extra;
 
     it('swaps in the prepared publish, and the store then equals disk', async () => {
         const adapter = await openStore(true, false, [other]);

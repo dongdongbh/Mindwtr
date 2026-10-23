@@ -802,6 +802,13 @@ describePerf('large-store performance budgets', () => {
                 });
 
                 try {
+                    // A legacy document enrolls its previously used tokens on its first explicit edit.
+                    await useTaskStore.getState().updateTask(fixture.targetTaskId, { title: 'Enroll retained tokens' });
+                    await flushPendingSave();
+                    expect(saveDataCalls).toBe(1);
+                    expect(useTaskStore.getState().settings.taxonomy).toBeDefined();
+                    saveDataCalls = 0;
+                    savedTask = null;
                     const startedAt = performance.now();
                     const result = await useTaskStore.getState().updateTask(fixture.targetTaskId, {
                         title: `Incrementally persisted task at ${size}`,

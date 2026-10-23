@@ -1,7 +1,7 @@
 import type { Project, Section, Task } from './types';
 import type { TaskStore } from './store-types';
 import { ensureDeviceId, createProjectOrderReserver, nextRevision } from './store-helpers';
-import { compareTasksByProjectOrder } from './task-utils';
+import { compareTasksByProjectOrder, getProjectFlowMode } from './task-utils';
 import { projectSectionOrderMax, buildNewSection, sameSectionDeleteJson } from './store-projects/section-actions';
 import { generateUUID } from './uuid';
 import { buildTaskMovePatch } from './task-container-rules';
@@ -94,8 +94,11 @@ const destinationBlock = (source: Project, destination: Project | undefined): Bl
     if (destination.deletedAt || destination.purgedAt || destination.status !== 'active'
         || destination.archivedAt || destination.cancelledAt)
         return { ok: false, reason: 'destination-inactive' };
+    // A sequence survives as a section sequence: "Sequential, within sections", or a
+    // Per section destination where the new section becomes Sequential (#1429).
     if (source.isSequential) {
-        if (!destination.isSequential || destination.sequentialScope !== 'section')
+        if (getProjectFlowMode(destination) !== 'perSection'
+            && (!destination.isSequential || destination.sequentialScope !== 'section'))
             return { ok: false, reason: 'destination-section-sequence' };
     } else if (destination.isSequential) return { ok: false, reason: 'destination-sequential' };
     return null;
@@ -171,7 +174,8 @@ export const planProjectToSection = (state: PreparationState, sourceProjectId: s
         .sort(compareTasksByProjectOrder);
     const reserveOrder = createProjectOrderReserver(state._allTasks);
     const section = buildNewSection({ id: sectionId, projectId: destination.id, title: sectionTitle,
-        initialProps: { description: source.supportNotes },
+        initialProps: { description: source.supportNotes,
+            ...(getProjectFlowMode(destination) === 'perSection' ? { isSequential: source.isSequential === true } : {}) },
         orderMax: projectSectionOrderMax(state._allSections, destination.id), deviceId, now: preparedAt });
     const assignment = buildTaskMovePatch({ kind: 'project', id: destination.id },
         { projectId: destination.id, sectionId: section.id });

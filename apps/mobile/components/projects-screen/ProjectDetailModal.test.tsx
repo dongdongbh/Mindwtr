@@ -97,6 +97,7 @@ vi.mock('../../contexts/language-context', () => ({
 // the store is a plain selector over spies.
 const storeActions = vi.hoisted(() => ({
     _allProjects: [] as Project[],
+    _projectsById: new Map<string, Project>(),
     _allSections: [] as Section[],
     _allTasks: [] as Task[],
     addSection: vi.fn(),
@@ -105,6 +106,7 @@ const storeActions = vi.hoisted(() => ({
     reorderSections: vi.fn(),
     updateProject: vi.fn(),
     updateSection: vi.fn(),
+    setProjectFlowMode: vi.fn(),
     lockEditing: vi.fn(),
     unlockEditing: vi.fn(),
 }));
@@ -332,6 +334,7 @@ const expandProjectDetails = (tree: ReturnType<typeof create>) => {
 
 beforeEach(() => {
     storeActions._allProjects = [];
+    storeActions._projectsById = new Map();
     storeActions._allSections = [];
     storeActions._allTasks = [];
     for (const action of Object.values(storeActions)) {
@@ -410,6 +413,27 @@ describe('ProjectDetailModal safe area handling', () => {
 });
 
 describe('ProjectDetailModal progressive disclosure', () => {
+    it('retries the exact color intent after save failure and sends an explicit null reset', async () => {
+        const selected = project('active');
+        storeActions._allProjects = [selected];
+        storeActions._projectsById.set(selected.id, selected);
+        storeActions.updateProject.mockResolvedValueOnce({ success: false }).mockResolvedValue({ success: true });
+        const onProjectChange = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        act(() => { tree = create(<ProjectDetailModal {...createProjectDetailModalProps({ project: selected, onProjectChange })} />); });
+        expandProjectDetails(tree);
+        await act(async () => { tree.root.findByProps({ accessibilityLabel: 'Project color: #3b82f6' }).props.onPress(); });
+        expect(onProjectChange).not.toHaveBeenCalled();
+        expect(tree.root.findByProps({ accessibilityRole: 'alert' })).toBeTruthy();
+        await act(async () => { tree.root.findByProps({ accessibilityLabel: 'common.retry' }).props.onPress(); });
+        expect(storeActions.updateProject.mock.calls.slice(0, 2)).toEqual([
+            [selected.id, { colorOverride: '#3b82f6' }], [selected.id, { colorOverride: '#3b82f6' }],
+        ]);
+        expect(onProjectChange).toHaveBeenCalledWith(expect.objectContaining({ colorOverride: '#3b82f6' }));
+        await act(async () => { tree.root.findByProps({ accessibilityLabel: 'Use Area color' }).props.onPress(); });
+        expect(storeActions.updateProject).toHaveBeenLastCalledWith(selected.id, { colorOverride: null });
+    });
+
     it('keeps tasks near the top with a compact collapsed project summary', () => {
         let tree!: ReturnType<typeof create>;
 
@@ -492,6 +516,42 @@ describe('ProjectDetailModal notes editing', () => {
 });
 
 describe('ProjectDetailModal section management', () => {
+    it('picks Parallel, Sequential or Per section, and offers section flow only in Per section mode (#1429)', async () => {
+        const onProjectChange = vi.fn();
+        const book = { ...section('book', 'Book campsite'), isSequential: true };
+        const prep = section('prep', 'Prep');
+        storeActions._allSections = [book, prep];
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({ onProjectChange, sections: [book, prep] })} />);
+        });
+        expandProjectDetails(tree);
+        const option = (mode: string) => tree.root.findByProps({ testID: `project-flow-mode-${mode}` });
+        expect(option('parallel').props.accessibilityState).toMatchObject({ selected: true });
+        expect(option('perSection').findByType(Text).props.children).toBe('Per section');
+        await act(async () => {
+            tree.root.findByProps({ testID: 'project-sections-button' }).props.onPress();
+        });
+        expect(tree.root.findAllByProps({ testID: 'project-section-flow-prep' })).toHaveLength(0);
+
+        await act(async () => { option('perSection').props.onPress(); });
+        expect(storeActions.setProjectFlowMode).toHaveBeenCalledWith('project-1', 'perSection');
+        expect(onProjectChange).toHaveBeenCalledWith(expect.objectContaining({ isSequential: false, perSectionFlow: true }));
+        expect(storeActions.updateProject).not.toHaveBeenCalled();
+
+        await act(async () => {
+            tree.update(<ProjectDetailModal {...createProjectDetailModalProps({
+                onProjectChange, sections: [book, prep], project: { ...project('active'), perSectionFlow: true },
+            })} />);
+        });
+        expect(option('perSection').props.accessibilityState).toMatchObject({ selected: true });
+        const prepFlow = tree.root.findByProps({ testID: 'project-section-flow-prep' });
+        expect(prepFlow.findByType(Text).props.children).toBe('Parallel');
+        expect(tree.root.findByProps({ testID: 'project-section-flow-book' }).findByType(Text).props.children).toBe('Sequential');
+        await act(async () => { prepFlow.props.onPress(); });
+        expect(storeActions.updateSection).toHaveBeenCalledWith('prep', { isSequential: true });
+    });
+
     it('creates a section from project details', async () => {
         storeActions.addSection.mockResolvedValue(section('section-created', 'Grammar'));
         let tree!: ReturnType<typeof create>;
@@ -1013,6 +1073,42 @@ describe('ProjectDetailModal task sorting', () => {
         expect(onOpenOrganize).toHaveBeenCalledTimes(1);
     });
 
+    it('leaves task selection on Android Back before closing the project (#1415)', () => {
+        const onClose = vi.fn();
+        const onExitSelectionMode = vi.fn();
+        let tree!: ReturnType<typeof create>;
+
+        act(() => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({ onClose })} />);
+        });
+        const modal = () => tree.root.findAll((node) => typeof node.props.onRequestClose === 'function' && node.props.allowSwipeDismissal)[0];
+        const taskListProps = taskListPropsSpy.mock.calls.at(-1)?.[0];
+
+        act(() => {
+            taskListProps.onBulkBarPropsChange({
+                bulkActionLabel: '',
+                bulkActionLoading: false,
+                handleBatchDelete: vi.fn(),
+                handleBatchMove: vi.fn(),
+                hasSelection: true,
+                onExitSelectionMode,
+                onOpenTagModal: vi.fn(),
+                onToggleRangeSelectMode: vi.fn(),
+                rangeSelectMode: false,
+                selectedCount: 1,
+                t: translate,
+                themeColors,
+            });
+        });
+        act(() => { modal().props.onRequestClose(); });
+        expect(onExitSelectionMode).toHaveBeenCalledTimes(1);
+        expect(onClose).not.toHaveBeenCalled();
+
+        act(() => { taskListProps.onBulkBarPropsChange(null); });
+        act(() => { modal().props.onRequestClose(); });
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it('reflects active filters as a direct compact Filters count', () => {
         let tree!: ReturnType<typeof create>;
 
@@ -1226,7 +1322,7 @@ describe('ProjectDetailModal lifecycle actions', () => {
         const duplicate = tree.root.findByProps({ testID: 'project-duplicate-button' });
         expect(duplicate).toBeTruthy();
         expect(tree.root.findByProps({ testID: 'project-archive-button' })).toBeTruthy();
-        expect(duplicate.findAllByProps({ testID: 'project-type-toggle' })).toHaveLength(0);
+        expect(duplicate.findAllByProps({ testID: 'project-flow-mode-options' })).toHaveLength(0);
     });
 
     it('deletes the project from the actions menu after a confirm', () => {
@@ -1451,7 +1547,7 @@ describe('ProjectDetailModal archived projects', () => {
         expandProjectDetails(tree);
 
         expect(tree.root.findByProps({ testID: 'project-status-picker' }).props.disabled).toBe(true);
-        expect(tree.root.findByProps({ testID: 'project-type-toggle' }).props.disabled).toBe(true);
+        expect(tree.root.findByProps({ testID: 'project-flow-mode-sequential' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-area-picker' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-due-date-picker' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-review-date-picker' }).props.disabled).toBe(true);
@@ -1466,11 +1562,12 @@ describe('ProjectDetailModal archived projects', () => {
 
         act(() => {
             titleInput?.props.onEndEditing();
-            tree.root.findByProps({ testID: 'project-type-toggle' }).props.onPress();
+            tree.root.findByProps({ testID: 'project-flow-mode-sequential' }).props.onPress();
             sortOption.props.onPress();
         });
 
         expect(storeActions.updateProject).not.toHaveBeenCalled();
+        expect(storeActions.setProjectFlowMode).not.toHaveBeenCalled();
         expect(onProjectChange).not.toHaveBeenCalled();
         expect(onTaskSortByChange).not.toHaveBeenCalled();
         expect(notes.commitSelectedProjectNotes).not.toHaveBeenCalled();

@@ -1,5 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,6 +59,8 @@ fun TrashList(model: InboxViewModel) = with(model.menu) {
     val selected = view.getJSONObject("selected")
     val tasks = selected.optJSONArray("taskIds").ids()
     val projects = selected.optJSONArray("projectIds").ids()
+    // Back leaves selection mode before the screen (RN's trash.tsx); an open dialog takes Back first.
+    BackHandler(enabled = selecting && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("trash-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         view.menuText("summary")?.let { summary ->
             item(key = "summary") {

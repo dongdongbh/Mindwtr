@@ -79,6 +79,7 @@ export default function ProjectsScreen() {
     allProjects,
     tasks,
     allTasks,
+    settings,
     sections,
     allSections,
     addProject,
@@ -98,6 +99,7 @@ export default function ProjectsScreen() {
     allProjects: state._allProjects,
     tasks: state.tasks,
     allTasks: state._allTasks,
+    settings: state.settings,
     sections: state.sections,
     allSections: state._allSections,
     addProject: state.addProject,
@@ -249,6 +251,7 @@ export default function ProjectsScreen() {
   } = useProjectFiltering({
     projects,
     tasks,
+    settings,
     sortedAreas,
     selectedTagFilter,
     selectedAreaFilter,

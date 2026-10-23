@@ -230,12 +230,12 @@ const around = (nodes, label) => {
 };
 /** The choice reading [text] is on (Review's scope buttons carry their state around their text). */
 const textOn = (nodes, text) => { const label = nodes.find((node) => node.text === text); return isOn(label) || isOn(around(nodes, label)); };
-/** A clickable text reading [text] on the same line as [anchor] (the Contexts bar's Done beside its count, not the Done status). */
+/** A node reading or named [text] on the same line as [anchor] (the Contexts bar's X exit beside its count, not the Done status). */
 const onLineOf = (nodes, anchor, text) => {
     if (!anchor) return undefined;
     const [, t, , b] = box(anchor);
     const middle = (t + b) / 2;
-    return nodes.find((node) => node.text === text && box(node)[1] <= middle && box(node)[3] >= middle);
+    return nodes.find((node) => (node.text === text || node['content-desc'] === text) && box(node)[1] <= middle && box(node)[3] >= middle);
 };
 /** The nodes inside [outer]'s bounds. */
 const inside = (nodes, outer) => {
@@ -601,7 +601,7 @@ try {
     await hideKeyboard();
     nodes = await tapExpecting(button(await screen(), en['common.cancel']) ?? fail('no Cancel'), (current) => !tagged(current, 'menu-dialog-field'), 'the picker to close');
     const count = (current) => current.find((node) => /^\d+ /.test(node.text ?? '') && node.text.endsWith(` ${en['bulk.selected']}`));
-    nodes = await tapExpecting(onLineOf(nodes, count(nodes), seen.contexts.exit) ?? fail('no Done beside the bar\'s count'), (current) => !button(current, seen.contexts.add), 'the selection to end');
+    nodes = await tapExpecting(onLineOf(nodes, count(nodes), seen.contexts.exit) ?? fail('no exit beside the bar\'s count'), (current) => !button(current, seen.contexts.add), 'the selection to end');
     if (seen.quickAccess === 'contexts') await tapExpecting(tab(await screen(), en['tab.inbox']), onInbox, 'the Inbox');
     else await back(onInbox);
 

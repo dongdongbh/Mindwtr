@@ -19,8 +19,10 @@ vi.mock('react-native', () => ({
 }));
 
 import {
+    clearAppSearchWipeOwed,
     isAppSearchSupported,
     readAppSearchIndexingEnabled,
+    readAppSearchWipeOwed,
     writeAppSearchIndexingEnabled,
 } from './app-search-preference';
 
@@ -52,6 +54,18 @@ describe('app-search-preference', () => {
 
         await writeAppSearchIndexingEnabled(false);
         expect(mockRemoveItem).toHaveBeenCalledWith('mindwtr:appSearchIndexingEnabled');
+    });
+
+    // A toggle-off whose wipe never lands (the app dies first, or the wipe fails) must not leave titles in system search:
+    // the owed wipe is stored before the switch goes, so the next start can finish it.
+    it('stores an owed wipe before it removes the switch, and clears it on request', async () => {
+        await writeAppSearchIndexingEnabled(false);
+        expect(mockSetItem).toHaveBeenCalledWith('mindwtr:appSearchWipeOwed', 'true');
+        expect(mockSetItem.mock.invocationCallOrder[0]).toBeLessThan(mockRemoveItem.mock.invocationCallOrder[0]);
+        mockGetItem.mockImplementation(async (key: string) => (key === 'mindwtr:appSearchWipeOwed' ? 'true' : null));
+        expect(await readAppSearchWipeOwed()).toBe(true);
+        await clearAppSearchWipeOwed();
+        expect(mockRemoveItem).toHaveBeenCalledWith('mindwtr:appSearchWipeOwed');
     });
 
     it('is inert when unsupported (old Android, or non-Android)', async () => {

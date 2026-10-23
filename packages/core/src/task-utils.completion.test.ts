@@ -119,6 +119,36 @@ describe('sortTasksBy case coverage', () => {
         ];
         expect(sortTasksBy(sameEstimate, 'timeEstimate').map((item) => item.id)).toEqual(['first', 'second']);
     });
+
+    // #1415: the shared list's Priority sort uses Focus's rank (urgent, high,
+    // medium, low, none) and Focus's tie order: due, then start, then created.
+    it('sorts priority high to low, no priority last', () => {
+        const ranked = [
+            task('none', { createdAt: '2026-02-01T00:00:00.000Z' }),
+            task('low', { priority: 'low' }),
+            task('high', { priority: 'high' }),
+            task('medium', { priority: 'medium' }),
+            task('urgent', { priority: 'urgent' }),
+        ];
+        expect(sortTasksBy(ranked, 'priority').map((item) => item.id))
+            .toEqual(['urgent', 'high', 'medium', 'low', 'none']);
+    });
+
+    it('breaks equal priorities by due, start, then created, keeping full ties in input order', () => {
+        const ties = [
+            task('created-later', { priority: 'high', createdAt: '2026-02-03T00:00:00.000Z' }),
+            task('start-later', { priority: 'high', startTime: '2026-03-02T00:00:00.000Z' }),
+            task('due', { priority: 'high', dueDate: '2026-03-05' }),
+            task('created-earlier', { priority: 'high', createdAt: '2026-02-02T00:00:00.000Z' }),
+            task('start-earlier', { priority: 'high', startTime: '2026-03-01T00:00:00.000Z' }),
+            task('twin-a', { priority: 'low' }),
+            task('twin-b', { priority: 'low' }),
+        ];
+        expect(sortTasksBy(ties, 'priority').map((item) => item.id)).toEqual([
+            'due', 'start-earlier', 'start-later', 'created-earlier', 'created-later', 'twin-a', 'twin-b',
+        ]);
+        expect(sortTasksBy([...ties].reverse(), 'priority').map((item) => item.id).slice(-2)).toEqual(['twin-b', 'twin-a']);
+    });
 });
 
 describe('resolveTaskSortByForFeatures (#1107)', () => {

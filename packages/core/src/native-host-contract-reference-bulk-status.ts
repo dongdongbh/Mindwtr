@@ -29,7 +29,9 @@ import { isFoldIdList, readFilterState } from './native-host-contract-menu-views
 import { resolveListFilterState, type ListFilterState } from './list-filter-state';
 import { projectFromSqliteRow, projectToSqliteRow, PROJECT_SQLITE_COLUMNS } from './project-sync-schema';
 import { normalizeRelativeStartOffset } from './task-relative-start';
+import type { NativeInboxTasksMoveRequest, NativeInboxTasksMovePrepared } from './native-host-contract-inbox-bulk-status';
 import type { TaskGroupBy } from './task-group-sections';
+import type { TaskLoadTemporalContext } from './task-status';
 
 export type NativeReferenceTasksMoveStatus = 'inbox' | 'next' | 'waiting' | 'someday' | 'done';
 export type NativeReferenceTasksMoveParams = { groupBy?: TaskGroupBy; includeArchivedProjects?: boolean;
@@ -51,6 +53,14 @@ export type NativeReferenceTasksMovePrepared = {
 };
 export type NativeReferenceTasksMoveEnvelope = { request: NativeReferenceTasksMoveRequest; prepared: NativeReferenceTasksMovePrepared };
 export type NativeReferenceTasksMovePreparation = { kind: 'prepared'; prepared: NativeReferenceTasksMovePrepared };
+
+type MoveSource = 'reference' | 'inbox';
+type MoveRequest = NativeReferenceTasksMoveRequest | NativeInboxTasksMoveRequest;
+type MovePrepared = Omit<NativeReferenceTasksMovePrepared, 'request' | 'result'> & {
+    request: MoveRequest; result: { count: number; status: MoveRequest['status'] };
+};
+type MoveEnvelope = { request: MoveRequest; prepared: MovePrepared };
+const sourceOf = (request: MoveRequest): MoveSource => 'source' in request ? request.source : 'reference';
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const same = taskEditValuesEqual;
@@ -82,23 +92,25 @@ const detach = <T>(value: unknown): T | null => {
 const jsonSafe = <T>(value: unknown): T | null => {
     try { return detach<T>(JSON.parse(JSON.stringify(value))); } catch { return null; }
 };
-const readRequest = (input: unknown): NativeReferenceTasksMoveRequest | null => {
+const readMoveRequest = (input: unknown, source: MoveSource): MoveRequest | null => {
     const request = detach<Record<string, unknown>>(input);
-    if (!request || !exact(request, ['requestId', 'taskIds', 'taskRevisions', 'status', 'params'])
+    if (!request || !exact(request, ['requestId', 'taskIds', 'taskRevisions', 'status', 'params', ...(source === 'inbox' ? ['source'] : [])])
+        || (source === 'inbox' && request.source !== 'inbox')
         || typeof request.requestId !== 'string' || !UUID.test(request.requestId)
         || !Array.isArray(request.taskIds) || !request.taskIds.length || request.taskIds.length > 10_000
         || !request.taskIds.every((id) => text(id, 500)) || new Set(request.taskIds).size !== request.taskIds.length
         || !record(request.taskRevisions) || !exact(request.taskRevisions, request.taskIds)
         || !Object.values(request.taskRevisions).every((revision) => text(revision, 200))
-        || !getBulkMoveStatusOptions('reference').includes(request.status as TaskStatus)
+        || !getBulkMoveStatusOptions(source).includes(request.status as TaskStatus)
         || !record(request.params) || Object.keys(request.params).some((name) =>
-            !['groupBy', 'includeArchivedProjects', 'collapsedGroupIds', 'filters'].includes(name))
+            !(source === 'inbox' ? ['groupBy', 'collapsedGroupIds', 'filters'] : ['groupBy', 'includeArchivedProjects', 'collapsedGroupIds', 'filters']).includes(name))
         || (request.params.groupBy !== undefined && !(TASK_LIST_GROUP_OPTIONS as readonly string[]).includes(request.params.groupBy as string))
         || (request.params.includeArchivedProjects !== undefined && typeof request.params.includeArchivedProjects !== 'boolean')
         || (request.params.collapsedGroupIds !== undefined && !isFoldIdList(request.params.collapsedGroupIds))
         || !readFilterState(request.params.filters)) return null;
-    return request as NativeReferenceTasksMoveRequest;
+    return request as MoveRequest;
 };
+const readRequest = (input: unknown): NativeReferenceTasksMoveRequest | null => readMoveRequest(input, 'reference') as NativeReferenceTasksMoveRequest | null;
 const validTask = (row: unknown): row is Task => record(row) && text(row.id, 500)
     && validRawTask({ ...row, tags: row.tags ?? [], contexts: row.contexts ?? [] }, row.id);
 const validArea = (row: unknown): row is Area => record(row) && text(row.id, 500)
@@ -157,13 +169,20 @@ const relevantSettings = (settings: AppData['settings']): AppData['settings'] =>
     gtd: { autoArchiveDays: settings.gtd?.autoArchiveDays },
 })) as AppData['settings'];
 
+const moveSettings = (settings: AppData['settings'], source: MoveSource): AppData['settings'] => {
+    if (source === 'reference') return relevantSettings(settings);
+    const value = relevantSettings(settings); delete value.filters;
+    return JSON.parse(JSON.stringify({ ...value, features: { ...value.features, priorities: settings.features?.priorities } })) as AppData['settings'];
+};
+
 /** Bounded container membership, plus every normalized projectless recurrence peer. */
-export const referenceTasksMoveScope = (request: NativeReferenceTasksMoveRequest,
+export const referenceTasksMoveScope = (request: MoveRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeReferenceTasksMoveScope => {
     const selected = new Set(request.taskIds);
     const bySection = buildEntityMap(data.sections);
     const normalizedProject = (row: Task) => typeof row.projectId === 'string' && row.projectId.trim() ? row.projectId : undefined;
-    const sources = data.tasks.filter((row) => selected.has(row.id));
+    // Inbox filter-option visibility and grouping depend on its other rows too.
+    const sources = data.tasks.filter((row) => selected.has(row.id) || (sourceOf(request) === 'inbox' && row.status === 'inbox'));
     const parentIds = new Set([...sources.flatMap((row) => {
         const parent = normalizedProject(row);
         const inferred = row.sectionId ? bySection.get(row.sectionId)?.projectId : undefined;
@@ -172,17 +191,17 @@ export const referenceTasksMoveScope = (request: NativeReferenceTasksMoveRequest
     const selectedSections = new Set(sources.flatMap((row) => row.sectionId ? [row.sectionId] : []));
     const projectlessPeers = request.status === 'done' && sources.some((row) => !normalizedProject(row)
         && historyRowLoadProjection(row, row.updatedAt).recurrence);
-    const tasks = data.tasks.filter((row) => selected.has(row.id) || (projectlessPeers && !normalizedProject(row))
+    const tasks = data.tasks.filter((row) => selected.has(row.id) || (sourceOf(request) === 'inbox' && row.status === 'inbox') || (projectlessPeers && !normalizedProject(row))
         || Boolean(normalizedProject(row) && parentIds.has(normalizedProject(row)!))
         || Boolean(!normalizedProject(row) && row.sectionId && parentIds.has(bySection.get(row.sectionId)?.projectId ?? '')));
     const projects = data.projects.filter((row) => parentIds.has(row.id));
-    const filters = data.settings.filters as unknown;
+    const filters = sourceOf(request) === 'reference' ? data.settings.filters as unknown : undefined;
     const filterIds = typeof filters === 'string' ? [filters] : record(filters)
         ? [filters.areaId, ...(['areaIds', 'excludedAreaIds', 'included', 'excluded'].flatMap((name) =>
             Array.isArray(filters[name]) ? filters[name] as unknown[] : []))].filter((id): id is string => typeof id === 'string') : [];
     const areaIds = new Set([...sources, ...projects].flatMap((row) => row.areaId ? [row.areaId] : []).concat(filterIds));
     return { tasks, projects, sections: data.sections.filter((row) => parentIds.has(row.projectId) || selectedSections.has(row.id)),
-        areas: data.areas.filter((row) => areaIds.has(row.id)), settings: relevantSettings(data.settings) };
+        areas: data.areas.filter((row) => areaIds.has(row.id)), settings: moveSettings(data.settings, sourceOf(request)) };
 };
 const rawScope = (scope: NativeReferenceTasksMoveScope): NativeReferenceTasksMoveScope | null => {
     const tasks = scope.tasks.map(rawReadTaskSnapshot); const projects = scope.projects.map(rawReadProjectSnapshot);
@@ -201,33 +220,37 @@ const settingsReadable = (settings: AppData['settings']): boolean => {
 };
 const requiredDates = (scope: NativeReferenceTasksMoveScope) => [...new Set(scope.tasks.flatMap((row) =>
     [row.startTime, row.dueDate, row.reviewAt].filter((value): value is string => typeof value === 'string')))].sort();
-const selectable = (request: NativeReferenceTasksMoveRequest, scope: NativeReferenceTasksMoveScope, at: string): Set<string> => {
+const selectable = (request: MoveRequest, scope: NativeReferenceTasksMoveScope, at: string, temporal?: TaskLoadTemporalContext): Set<string> => {
+    const kind = sourceOf(request);
     const t = (name: string) => name;
-    const tasks = scope.tasks.map((row) => historyRowLoadProjection(row, at));
+    const tasks = scope.tasks.map((row) => historyRowLoadProjection(row, at, temporal));
     const allProjects = scope.projects.map(loadedProject);
     const projects = allProjects.filter((row) => !row.deletedAt && !row.purgedAt && row.status !== 'archived');
     const areas = scope.areas.filter((row) => !row.deletedAt);
-    const selected = selectStatusListTasks({ kind: 'reference', tasks, projects, allProjects,
+    const selected = selectStatusListTasks({ kind, tasks, projects, allProjects,
         resolvedAreaFilter: resolveAreaFilterSelection(scope.settings.filters, areas),
-        areaById: buildEntityMap(areas), includeArchivedProjects: request.params.includeArchivedProjects });
-    const options = buildStatusListFilterOptions({ kind: 'reference', tasks: selected, allProjects, settings: scope.settings, t });
+        areaById: buildEntityMap(areas), includeArchivedProjects: 'includeArchivedProjects' in request.params ? request.params.includeArchivedProjects : undefined });
+    const options = buildStatusListFilterOptions({ kind, tasks: selected, allProjects, settings: scope.settings, t });
     const resolved = resolveListFilterState(readFilterState(request.params.filters)!, {
-        visibility: options.visibility, retainProjects: options.retainProjects, getProjectLabel: options.getProjectLabel, t });
-    const model = buildStatusListModel({ kind: 'reference', tasks: selected, projects, areas, settings: scope.settings,
-        groupBy: request.params.groupBy ?? REFERENCE_LIST_DEFAULT_GROUP_BY, criteria: resolved.criteria,
+        visibility: options.visibility, ...(kind === 'reference' ? { retainProjects: options.retainProjects, getProjectLabel: options.getProjectLabel } : {}), t });
+    const model = buildStatusListModel({ kind, tasks: selected, projects, areas, settings: scope.settings,
+        groupBy: request.params.groupBy ?? (kind === 'reference' ? REFERENCE_LIST_DEFAULT_GROUP_BY : 'none'), criteria: resolved.criteria,
         searchQuery: resolved.searchQuery, collapsedGroupIds: new Set(request.params.collapsedGroupIds ?? []), t, now: new Date(at) });
     return new Set(model.items.flatMap((item) => item.type === 'task'
         && !isStatusListTaskReadOnly(item.task, allProjects) ? [item.task.id] : []));
 };
-const selectedSourcesMatch = (request: NativeReferenceTasksMoveRequest, scope: NativeReferenceTasksMoveScope, at: string): boolean => {
-    const eligible = selectable(request, scope, at); const byId = buildEntityMap(scope.tasks);
-    return request.taskIds.every((id) => { const row = byId.get(id); return row && row.status === 'reference'
+const selectedSourcesMatch = (request: MoveRequest, scope: NativeReferenceTasksMoveScope, at: string, temporal?: TaskLoadTemporalContext): boolean => {
+    const eligible = selectable(request, scope, at, temporal); const byId = buildEntityMap(scope.tasks);
+    return request.taskIds.every((id) => { const row = byId.get(id); return row && row.status === sourceOf(request)
         && !row.deletedAt && !row.purgedAt && !isProjectedRecurringTaskId(id) && eligible.has(id)
-        && taskRevisionOf(historyRowLoadProjection(row, at)) === request.taskRevisions[id]; });
+        && taskRevisionOf(historyRowLoadProjection(row, at, temporal)) === request.taskRevisions[id]; });
 };
 
+const referenceSourcesMatch = (request: NativeReferenceTasksMoveRequest, scope: NativeReferenceTasksMoveScope, at: string): boolean =>
+    sourceOf(request) === 'reference' && selectedSourcesMatch(request, scope, at);
+
 /** Actual RN loaded-before batch planner. UUID allocation never happens during replay. */
-export const referenceTasksMoveEffect = (prepared: Pick<NativeReferenceTasksMovePrepared,
+export const referenceTasksMoveEffect = (prepared: Pick<MovePrepared,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates' | 'recurrenceProjections' | 'allocatedIds'>,
     allocate = false): NativeReferenceTasksMovePrepared['effect'] | null => {
     const { request, scope } = prepared;
@@ -259,10 +282,10 @@ export const referenceTasksMoveEffect = (prepared: Pick<NativeReferenceTasksMove
     return { tasks: pairs(scope.tasks, tasks, planned.tasks), createdTasks: planned.createdTasks,
         projects: pairs(scope.projects, projects, planned.projects), sections: pairs(scope.sections, scope.sections, planned.sections) };
 };
-export const readReferenceTasksMoveEnvelope = (input: unknown): NativeReferenceTasksMoveEnvelope | null => {
+export const readTasksMoveEnvelope = (input: unknown, source: MoveSource): MoveEnvelope | null => {
     const envelope = detach<Record<string, unknown>>(input);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
-    const request = readRequest(envelope.request); const raw = envelope.prepared;
+    const request = readMoveRequest(envelope.request, source); const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'scope', 'effect', 'deviceIdBefore', 'deviceIdToInitialize', 'updateAt',
         'preparedLocalDay', 'preparedOffsetMinutes', 'boundaryOffsetMinutes', 'futureBoundary', 'dates', 'recurrenceProjections', 'allocatedIds', 'result'])
         || raw.version !== 1 || !same(raw.request, request) || !record(raw.scope)
@@ -272,7 +295,7 @@ export const readReferenceTasksMoveEnvelope = (input: unknown): NativeReferenceT
         || !Array.isArray(raw.scope.sections) || !raw.scope.sections.every((row) => record(row) && text(row.id, 500)
             && text(row.projectId, 500) && validSection(row, row.id, row.projectId)) || !unique(raw.scope.sections)
         || !Array.isArray(raw.scope.areas) || !raw.scope.areas.every(validArea) || !unique(raw.scope.areas)
-        || !record(raw.scope.settings) || !same(relevantSettings(raw.scope.settings), raw.scope.settings)
+        || !record(raw.scope.settings) || !same(moveSettings(raw.scope.settings, source), raw.scope.settings)
         || !record(raw.effect) || !exact(raw.effect, ['tasks', 'createdTasks', 'projects', 'sections'])
         || !Array.isArray(raw.effect.tasks) || !Array.isArray(raw.effect.createdTasks)
         || !Array.isArray(raw.effect.projects) || !Array.isArray(raw.effect.sections)
@@ -289,7 +312,7 @@ export const readReferenceTasksMoveEnvelope = (input: unknown): NativeReferenceT
         || new Set(raw.allocatedIds).size !== raw.allocatedIds.length
         || !record(raw.result) || !exact(raw.result, ['count', 'status']) || raw.result.count !== request.taskIds.length || raw.result.status !== request.status) return null;
     try {
-        const prepared = raw as unknown as NativeReferenceTasksMovePrepared;
+        const prepared = raw as unknown as MovePrepared;
         const expected = referenceTasksMoveEffect(prepared);
         return selectedSourcesMatch(request, prepared.scope, prepared.updateAt)
             && (prepared.scope.settings.deviceId ?? null) === prepared.deviceIdBefore
@@ -300,65 +323,71 @@ export const readReferenceTasksMoveEnvelope = (input: unknown): NativeReferenceT
             && expected && same(expected, prepared.effect)
             && request.taskIds.every((id) => expected.tasks.some((pair) => pair.before.id === id))
             && [...prepared.effect.tasks, ...prepared.effect.projects, ...prepared.effect.sections].every((pair) => record(pair) && exact(pair, ['before', 'after']))
-            ? envelope as NativeReferenceTasksMoveEnvelope : null;
+            ? envelope as MoveEnvelope : null;
     } catch { return null; }
 };
 
+export const readReferenceTasksMoveEnvelope = (input: unknown): NativeReferenceTasksMoveEnvelope | null =>
+    readTasksMoveEnvelope(input, 'reference') as NativeReferenceTasksMoveEnvelope | null;
+
 /** Exact raw scope plus a frozen replan; the adapter epoch fence proves it again inside BEGIN. */
-export const referenceTasksMoveAuthorityMatches = (prepared: NativeReferenceTasksMovePrepared, data: AppData): boolean => {
+export const referenceTasksMoveAuthorityMatches = (prepared: MovePrepared, data: AppData): boolean => {
     const current = rawScope(referenceTasksMoveScope(prepared.request, data));
     return Boolean(current && same(current, prepared.scope) && selectedSourcesMatch(prepared.request, current, prepared.updateAt)
         && !data.tasks.some((row) => prepared.allocatedIds.includes(row.id))
         && same(referenceTasksMoveEffect({ ...prepared, scope: current }), prepared.effect));
 };
 
-export function createReferenceTasksMoveMethods(deps: {
+export function createTasksMoveMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
-}) {
+}, source: MoveSource) {
+    const label = source === 'inbox' ? 'Inbox' : 'Reference';
     const guardedAdapter = (): NativeHostResult<null> => {
         const adapter = getStorageAdapter();
         return adapter instanceof NativeReceiptSqliteAdapter && adapter.concurrentWritesGuarded
-            ? { ok: true, value: null } : fail('SAVE_FAILED', 'Reference Move requires guarded canonical SQLite storage');
+            ? { ok: true, value: null } : fail('SAVE_FAILED', `${label} Move requires guarded canonical SQLite storage`);
     };
     const checkForeignKeyAuthority = async (adapter: ReturnType<typeof getStorageAdapter>): Promise<NativeHostResult<null>> => {
-        if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', 'Reference Move storage changed while reading');
+        if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', `${label} Move storage changed while reading`);
         if (!(adapter instanceof NativeReceiptSqliteAdapter) || !adapter.concurrentWritesGuarded)
-            return fail('SAVE_FAILED', 'Reference Move requires guarded canonical SQLite storage');
+            return fail('SAVE_FAILED', `${label} Move requires guarded canonical SQLite storage`);
         try {
             const invalid = await adapter.hasForeignKeyViolations();
-            if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', 'Reference Move storage changed while reading');
-            return invalid ? fail('SAVE_FAILED', 'Saved Reference data has invalid container references') : { ok: true, value: null };
-        } catch { return fail('SAVE_FAILED', 'Saved Reference container references could not be checked'); }
+            if (getStorageAdapter() !== adapter) return fail('STALE_REVISION', `${label} Move storage changed while reading`);
+            return invalid ? fail('SAVE_FAILED', `Saved ${label} data has invalid container references`) : { ok: true, value: null };
+        } catch { return fail('SAVE_FAILED', `Saved ${label} container references could not be checked`); }
     };
     const saves = createAreaSaveGuard(deps.save);
-    let pending: { envelope: NativeReferenceTasksMoveEnvelope; adapter: ReturnType<typeof getStorageAdapter>;
+    let pending: { envelope: MoveEnvelope; adapter: ReturnType<typeof getStorageAdapter>;
         boundary: PreparedNativeSaveBoundary | undefined } | null = null;
-    const payload = (envelope: NativeReferenceTasksMoveEnvelope) => canonicalPayload(['referenceTasksMove', envelope]);
-    const checkAuthority = (envelope: NativeReferenceTasksMoveEnvelope, authority: PreparedAreaAuthority): NativeHostResult<null> => {
+    const payload = (envelope: MoveEnvelope) => canonicalPayload([source === 'inbox' ? 'inboxTasksMove' : 'referenceTasksMove', envelope]);
+    const checkAuthority = (envelope: MoveEnvelope, authority: PreparedAreaAuthority): NativeHostResult<null> => {
         const guarded = guardedAdapter(); if (!guarded.ok) return guarded;
-        if (!settingsReadable(authority.snapshot.settings)) return fail('SAVE_FAILED', 'Saved Reference settings JSON is unreadable');
+        if (!settingsReadable(authority.snapshot.settings)) return fail('SAVE_FAILED', `Saved ${label} settings JSON is unreadable`);
         const prepared = envelope.prepared; const current = rawScope(referenceTasksMoveScope(envelope.request, authority.snapshot));
-        if (!current) return fail('SAVE_FAILED', 'Saved Reference raw JSON could not be bound safely');
+        if (!current) return fail('SAVE_FAILED', `Saved ${label} raw JSON could not be bound safely`);
         if (!same(current, prepared.scope) || !selectedSourcesMatch(envelope.request, current, prepared.updateAt)
             || authority.snapshot.tasks.some((row) => prepared.allocatedIds.includes(row.id)))
-            return fail('STALE_REVISION', 'Reference selection or its saved dependency context changed');
+            return fail('STALE_REVISION', `${label} selection or its saved dependency context changed`);
         try { return same(referenceTasksMoveEffect({ ...prepared, scope: current }), prepared.effect)
-            ? { ok: true, value: null } : fail('STALE_REVISION', 'Reference Move rules changed since preparation'); }
-        catch { return fail('STALE_REVISION', 'Reference Move destination changed since preparation'); }
+            ? { ok: true, value: null } : fail('STALE_REVISION', `${label} Move rules changed since preparation`); }
+        catch { return fail('STALE_REVISION', `${label} Move destination changed since preparation`); }
     };
-    const apply = (envelope: NativeReferenceTasksMoveEnvelope, authority: PreparedAreaAuthority) =>
-        useTaskStore.getState().commitPreparedReferenceTasksMove(envelope.prepared, authority);
+    const apply = (envelope: MoveEnvelope, authority: PreparedAreaAuthority) =>
+        source === 'inbox'
+            ? useTaskStore.getState().commitPreparedInboxTasksMove(envelope.prepared as NativeInboxTasksMovePrepared, authority)
+            : useTaskStore.getState().commitPreparedReferenceTasksMove(envelope.prepared as NativeReferenceTasksMovePrepared, authority);
     const receipts = createNativeRequestReceipts({ save: async (requestId) => {
         const owned = pending;
-        if (!owned || owned.envelope.request.requestId !== requestId) return fail('SAVE_FAILED', 'Reference Move has no owned raw save');
+        if (!owned || owned.envelope.request.requestId !== requestId) return fail('SAVE_FAILED', `${label} Move has no owned raw save`);
         if (useTaskStore.getState().persistenceFailure) {
-            if (!saves.mayApply(owned.envelope, owned.adapter)) return fail('SAVE_FAILED', 'Reference Move has an unrelated persistence failure');
+            if (!saves.mayApply(owned.envelope, owned.adapter)) return fail('SAVE_FAILED', `${label} Move has an unrelated persistence failure`);
             const read = await readAreaDurableData(true, true); if (!read.ok) return read;
-            if (read.value.adapter !== owned.adapter) return fail('STALE_REVISION', 'Reference Move storage changed before retry');
+            if (read.value.adapter !== owned.adapter) return fail('STALE_REVISION', `${label} Move storage changed before retry`);
             const foreignKeys = await checkForeignKeyAuthority(read.value.adapter); if (!foreignKeys.ok) return foreignKeys;
             const checked = checkAuthority(owned.envelope, read.value.authority); if (!checked.ok) return checked;
             const applied = await apply(owned.envelope, read.value.authority);
-            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? 'Reference Move retry was superseded');
+            if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? `${label} Move retry was superseded`);
             owned.boundary = read.value.authority.saveBoundary;
         }
         const saved = await saves.finish(owned.envelope, owned.adapter, false, owned.boundary);
@@ -366,21 +395,21 @@ export function createReferenceTasksMoveMethods(deps: {
         return saved;
     } });
     return {
-        async prepareReferenceTasksMove(input: NativeReferenceTasksMoveRequest): Promise<NativeHostResult<NativeReferenceTasksMovePreparation>> {
+        async prepareTasksMove(input: MoveRequest): Promise<NativeHostResult<{ kind: 'prepared'; prepared: MovePrepared }>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const guarded = guardedAdapter(); if (!guarded.ok) return guarded;
-            const request = readRequest(input);
-            if (!request) return fail('INVALID_INPUT', 'Select saved Reference tasks with their exact revisions and list scope; select fewer tasks if the request is too large');
+            const request = readMoveRequest(input, source);
+            if (!request) return fail('INVALID_INPUT', `Select saved ${label} tasks with their exact revisions and list scope; select fewer tasks if the request is too large`);
             const memory = useTaskStore.getState(); const now = new Date();
             if (!selectedSourcesMatch(request, { tasks: memory._allTasks, projects: memory._allProjects, sections: memory._allSections,
-                areas: memory._allAreas, settings: memory.settings }, now.toISOString())) return fail('STALE_REVISION', 'Reference selection changed since it was shown');
+                areas: memory._allAreas, settings: memory.settings }, now.toISOString())) return fail('STALE_REVISION', `${label} selection changed since it was shown`);
             const read = await readAreaDurableData(false, true); if (!read.ok) return read;
             const foreignKeys = await checkForeignKeyAuthority(read.value.adapter); if (!foreignKeys.ok) return foreignKeys;
             const data = read.value.authority.snapshot;
-            if (!settingsReadable(data.settings)) return fail('SAVE_FAILED', 'Saved Reference settings JSON is unreadable');
+            if (!settingsReadable(data.settings)) return fail('SAVE_FAILED', `Saved ${label} settings JSON is unreadable`);
             const scope = rawScope(referenceTasksMoveScope(request, data));
-            if (!scope) return fail('SAVE_FAILED', 'Saved Reference raw JSON could not be bound safely');
-            if (!selectedSourcesMatch(request, scope, now.toISOString())) return fail('STALE_REVISION', 'Saved Reference selection changed');
+            if (!scope) return fail('SAVE_FAILED', `Saved ${label} raw JSON could not be bound safely`);
+            if (!selectedSourcesMatch(request, scope, now.toISOString())) return fail('STALE_REVISION', `Saved ${label} selection changed`);
             const end = new Date(now); end.setHours(23, 59, 59, 999); const device = ensureDeviceId(scope.settings);
             const loaded = buildEntityMap(scope.tasks.map((row) => historyRowLoadProjection(row, now.toISOString())));
             const base = { version: 1 as const, request, scope, deviceIdBefore: scope.settings.deviceId ?? null,
@@ -393,52 +422,52 @@ export function createReferenceTasksMoveMethods(deps: {
             let effect;
             try {
                 const fullScope = rawScope({ tasks: data.tasks, projects: data.projects, sections: data.sections, areas: data.areas,
-                    settings: relevantSettings(data.settings) });
-                if (!fullScope) return fail('SAVE_FAILED', 'Saved Reference raw JSON could not be bound safely');
+                    settings: moveSettings(data.settings, source) });
+                if (!fullScope) return fail('SAVE_FAILED', `Saved ${label} raw JSON could not be bound safely`);
                 const first = referenceTasksMoveEffect({ ...base, scope: fullScope, dates: projectFocusDateValues(requiredDates(fullScope)) }, true);
                 effect = referenceTasksMoveEffect(base);
                 if (!same(first, effect) || data.tasks.some((row) => base.allocatedIds.includes(row.id))) effect = null;
             } catch { effect = null; }
-            const prepared = effect && jsonSafe<NativeReferenceTasksMovePrepared>({ ...base, effect });
-            return prepared && readReferenceTasksMoveEnvelope({ request, prepared }) ? { ok: true, value: { kind: 'prepared', prepared } }
-                : fail('INVALID_INPUT', 'Reference Move cannot prepare these rows or its journal is too large; select fewer tasks');
+            const prepared = effect && jsonSafe<MovePrepared>({ ...base, effect });
+            return prepared && readTasksMoveEnvelope({ request, prepared }, source) ? { ok: true, value: { kind: 'prepared', prepared } }
+                : fail('INVALID_INPUT', `${label} Move cannot prepare these rows or its journal is too large; select fewer tasks`);
         },
-        validatePreparedReferenceTasksMove(input: NativeReferenceTasksMoveEnvelope): NativeHostResult<NativeReferenceTasksMoveResult> {
-            const envelope = readReferenceTasksMoveEnvelope(input); return envelope ? { ok: true, value: envelope.prepared.result }
-                : fail('INVALID_INPUT', 'Prepared Reference Move is malformed');
+        validatePreparedTasksMove(input: MoveEnvelope): NativeHostResult<MovePrepared['result']> {
+            const envelope = readTasksMoveEnvelope(input, source); return envelope ? { ok: true, value: envelope.prepared.result }
+                : fail('INVALID_INPUT', `Prepared ${label} Move is malformed`);
         },
-        referenceTasksMoveOutcome(input: NativeReferenceTasksMoveEnvelope): NativeHostResult<NativeReferenceTasksMoveResult | null> {
-            const envelope = readReferenceTasksMoveEnvelope(input); return envelope
-                ? receipts.saved<NativeReferenceTasksMoveResult>(envelope.request.requestId, payload(envelope)) ?? { ok: true, value: null }
-                : fail('INVALID_INPUT', 'Prepared Reference Move is malformed');
+        tasksMoveOutcome(input: MoveEnvelope): NativeHostResult<MovePrepared['result'] | null> {
+            const envelope = readTasksMoveEnvelope(input, source); return envelope
+                ? receipts.saved<MovePrepared['result']>(envelope.request.requestId, payload(envelope)) ?? { ok: true, value: null }
+                : fail('INVALID_INPUT', `Prepared ${label} Move is malformed`);
         },
-        async commitPreparedReferenceTasksMove(input: NativeReferenceTasksMoveEnvelope): Promise<NativeHostResult<NativeReferenceTasksMoveResult>> {
-            const envelope = readReferenceTasksMoveEnvelope(input); if (!envelope) return fail('INVALID_INPUT', 'Prepared Reference Move is malformed');
+        async commitPreparedTasksMove(input: MoveEnvelope): Promise<NativeHostResult<MovePrepared['result']>> {
+            const envelope = readTasksMoveEnvelope(input, source); if (!envelope) return fail('INVALID_INPUT', `Prepared ${label} Move is malformed`);
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const guarded = guardedAdapter(); if (!guarded.ok) return guarded;
-            const boundPayload = payload(envelope); const saved = receipts.saved<NativeReferenceTasksMoveResult>(envelope.request.requestId, boundPayload);
+            const boundPayload = payload(envelope); const saved = receipts.saved<MovePrepared['result']>(envelope.request.requestId, boundPayload);
             if (saved) return saved.ok && !same(saved.value, envelope.prepared.result)
-                ? fail('INVALID_INPUT', 'Saved Reference Move result does not match its journal') : saved;
+                ? fail('INVALID_INPUT', `Saved ${label} Move result does not match its journal`) : saved;
             let prewriteFailure: NativeHostResult<never> | null = null;
             const notLanded = (message: string): NativeHostResult<never> => { prewriteFailure = fail('SAVE_FAILED', message);
                 return { ok: false, error: { code: 'ACTION_FAILED', message } }; };
             const confirmed = await receipts.run(envelope.request.requestId, boundPayload, async () => {
-                if (useTaskStore.getState().persistenceFailure) return notLanded('Reference Move has an unresolved persistence failure');
+                if (useTaskStore.getState().persistenceFailure) return notLanded(`${label} Move has an unresolved persistence failure`);
                 const read = await readAreaDurableData(false, true);
                 if (!read.ok) return read.error.code === 'SAVE_FAILED' ? notLanded(read.error.message) : read;
                 const foreignKeys = await checkForeignKeyAuthority(read.value.adapter);
                 if (!foreignKeys.ok) return foreignKeys.error.code === 'SAVE_FAILED' ? notLanded(foreignKeys.error.message) : foreignKeys;
                 const checked = checkAuthority(envelope, read.value.authority); if (!checked.ok) return checked;
                 const applied = await apply(envelope, read.value.authority);
-                if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? 'Reference Move conflicts with saved data');
+                if (!applied.success || applied.outcome !== 'applied') return fail('STALE_REVISION', applied.error ?? `${label} Move conflicts with saved data`);
                 pending = { envelope, adapter: read.value.adapter, boundary: read.value.authority.saveBoundary };
                 return { ok: true, value: envelope.prepared.result };
             });
             if (prewriteFailure) return prewriteFailure;
-            if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', 'Saved Reference Move result does not match its journal');
+            if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Move result does not match its journal`);
             if (confirmed.ok) {
-                try { logInfo('Native Reference bulk status confirmed', { scope: 'native-host', category: 'storage',
-                    context: { releaseCheck: 'v1.3.4/ios-reference-bulk-status', count: confirmed.value.count,
+                try { logInfo(`Native ${label} bulk status confirmed`, { scope: 'native-host', category: 'storage',
+                    context: { releaseCheck: source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-status' : 'v1.3.4/ios-reference-bulk-status', count: confirmed.value.count,
                         status: confirmed.value.status, outcome: 'moved' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
@@ -447,11 +476,23 @@ export function createReferenceTasksMoveMethods(deps: {
     };
 }
 
+export function createReferenceTasksMoveMethods(deps: Parameters<typeof createTasksMoveMethods>[0]) {
+    const methods = createTasksMoveMethods(deps, 'reference');
+    return {
+        prepareReferenceTasksMove: (input: NativeReferenceTasksMoveRequest) => methods.prepareTasksMove(input) as Promise<NativeHostResult<NativeReferenceTasksMovePreparation>>,
+        validatePreparedReferenceTasksMove: (input: NativeReferenceTasksMoveEnvelope) => methods.validatePreparedTasksMove(input) as NativeHostResult<NativeReferenceTasksMoveResult>,
+        referenceTasksMoveOutcome: (input: NativeReferenceTasksMoveEnvelope) => methods.tasksMoveOutcome(input) as NativeHostResult<NativeReferenceTasksMoveResult | null>,
+        commitPreparedReferenceTasksMove: (input: NativeReferenceTasksMoveEnvelope) => methods.commitPreparedTasksMove(input) as Promise<NativeHostResult<NativeReferenceTasksMoveResult>>,
+    };
+}
+
 /** Additive reuse for Reference batch families; Move V1 bodies/bytes stay unchanged. */
 export { detach as detachReferenceBatchJson, jsonSafe as detachReferenceBatchValue,
-    readRequest as readReferenceBatchSelectionRequest, rawScope as rawReferenceBatchScope,
+    validRecurrenceProjection as validReferenceBatchRecurrenceProjection,
+    readRequest as readReferenceBatchSelectionRequest, readMoveRequest as readStatusBatchSelectionRequest,
+    selectedSourcesMatch as statusBatchSourcesMatch, moveSettings as statusBatchSettings, rawScope as rawReferenceBatchScope,
     loadedProject as loadedReferenceBatchProject, settingsReadable as referenceBatchSettingsReadable,
-    requiredDates as requiredReferenceBatchDates, selectedSourcesMatch as referenceBatchSourcesMatch,
+    requiredDates as requiredReferenceBatchDates, referenceSourcesMatch as referenceBatchSourcesMatch,
     validTask as validReferenceBatchTask, validContextProject as validReferenceBatchProject,
     validArea as validReferenceBatchArea, relevantSettings as relevantReferenceBatchSettings };
 

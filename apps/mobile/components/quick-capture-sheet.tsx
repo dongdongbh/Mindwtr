@@ -30,6 +30,7 @@ import {
   getQuickCaptureBulkConfirm,
   getQuickCaptureBulkFailedNotice,
   getQuickCaptureContextChoices,
+  getSavedTaxonomyTokens,
   getQuickCaptureContextPicker,
   getQuickCaptureLabels,
   isSelectableProjectForTaskAssignment,
@@ -735,8 +736,9 @@ export function QuickCaptureSheet({
       contextOptionsLoadTimerRef.current = null;
       try {
         const state = useTaskStore.getState();
-        const nextOptions = getQuickCaptureContextChoices(state.tasks, initialProps?.contexts);
-        const nextHistory = getQuickCaptureContextChoices(state._allTasks);
+        const savedContexts = getSavedTaxonomyTokens(state.settings, 'context');
+        const nextOptions = Array.from(new Set([...getQuickCaptureContextChoices(state.tasks, initialProps?.contexts), ...savedContexts]));
+        const nextHistory = Array.from(new Set([...getQuickCaptureContextChoices(state._allTasks), ...savedContexts]));
         if (contextOptionsRequestRef.current === requestId) {
           setContextOptions(nextOptions);
           setContextHistory(nextHistory);

@@ -1,3 +1,5 @@
+import { findLiveAttachmentResourceReferences, holdRestoreUndoAttachments, markMissingLocalAttachmentFiles } from './attachment-cleanup';
+import type { LocalAttachmentPresence } from './attachment-transfer';
 import { ensureFreshLocalSyncSnapshot } from './sync-client-helpers';
 import { cloneAppData } from './sync-runtime-utils';
 import { createSerializedAsyncQueue } from './async-queue';
@@ -109,6 +111,8 @@ export type DataTransferTransactionOptions<TResult> = {
     persistData: (data: AppData) => Promise<void>;
     refreshData: () => Promise<void>;
     onStale?: (details: DataTransferStaleDetails) => void;
+    /** The host's local file check: a live file attachment whose file is gone is saved as 'missing'. */
+    getLocalAttachmentPresence?: (uri: string) => Promise<LocalAttachmentPresence>;
 };
 
 export type DataTransferTransactionWithSnapshotOptions<TResult, TSnapshot> =
@@ -138,6 +142,9 @@ export async function runDataTransferTransaction<TResult, TSnapshot>(
         const currentData = await options.readCurrentData();
         const recoveryData = cloneAppData(currentData);
         const application = await options.apply(currentData);
+        const data = options.getLocalAttachmentPresence
+            ? await markMissingLocalAttachmentFiles(application.data, options.getLocalAttachmentPresence)
+            : application.data;
 
         const ensureFresh = () => {
             ensureFreshLocalSyncSnapshot({
@@ -158,7 +165,9 @@ export async function runDataTransferTransaction<TResult, TSnapshot>(
         const snapshot = await options.createRecoverySnapshot(recoveryData);
         ensureFresh();
 
-        await options.persistData(application.data);
+        await options.persistData(data);
+        // A snapshot means the platform offers this transfer's Undo: keep the files that Undo would bring back.
+        if (snapshot !== null) holdRestoreUndoAttachments(findLiveAttachmentResourceReferences(recoveryData));
         try {
             // The document on disk is now the one we just wrote, not the one the
             // store still holds; tell the load which guard applies.

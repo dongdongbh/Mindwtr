@@ -147,6 +147,59 @@ final class NativeDeviceKV {
     }
     deinit { close() }
 
+    #if DEBUG
+    /// Artifact-only fixture inventory; the CoreHost fixture validates launch authority.
+    func captureAISummaryEvidence() throws -> [String: Data] {
+        try requireUsable(); try verifyNamespace()
+        guard pending == nil else { throw Self.failure }
+        _ = try checkedRead()
+        let directory = try storeFD(), owner = try ownerFD()
+        func names(_ directory: Int32) throws -> [String] {
+            let copy = dup(directory)
+            guard copy >= 0, let stream = fdopendir(copy) else { if copy >= 0 { Darwin.close(copy) }; throw Self.failure }
+            defer { closedir(stream) }
+            rewinddir(stream)
+            var result: [String] = [], seen = Set<String>()
+            while true {
+                errno = 0
+                guard let entry = readdir(stream) else { guard errno == 0 else { throw Self.failure }; break }
+                let length = Int(entry.pointee.d_namlen)
+                guard length > 0, length <= 4096 else { throw Self.failure }
+                let decoded = withUnsafePointer(to: &entry.pointee.d_name) { pointer in
+                    pointer.withMemoryRebound(to: UInt8.self, capacity: length) {
+                        String(bytes: UnsafeBufferPointer(start: $0, count: length), encoding: .utf8)
+                    }
+                }
+                guard let name = decoded else { throw Self.failure }
+                if name == "." || name == ".." { continue }
+                guard !name.contains("/"), !name.utf8.contains(0), seen.insert(name).inserted,
+                      result.count < 4096 else { throw Self.failure }
+                result.append(name)
+            }
+            return result.sorted()
+        }
+        let before = try names(directory), ownerBefore = try names(owner)
+        guard ownerBefore.contains("RCTAsyncLocalStorage_V1"), before.count + ownerBefore.count <= 4096 else { throw Self.failure }
+        var remaining = 16 * 1024 * 1024, bindings: [(Int32, String, String, FileBinding)] = []
+        for (fd, prefix, list) in [(directory, "RCTAsyncLocalStorage_V1/", before), (owner, "", ownerBefore.filter { $0 != "RCTAsyncLocalStorage_V1" })] {
+            for name in list {
+                guard let binding = try Self.readFile(fd, name: name, limit: remaining, remaining: &remaining, optional: false) else { throw Self.failure }
+                bindings.append((fd, name, prefix + name, binding))
+            }
+        }
+        guard try names(directory) == before, try names(owner) == ownerBefore else { throw Self.failure }
+        try verifyNamespace()
+        for (fd, name, _, binding) in bindings {
+            var named = stat()
+            guard fstatat(fd, name, &named, AT_SYMLINK_NOFOLLOW) == 0,
+                  Self.sameGeneration(try Self.fileStat(binding.fd), binding.generation),
+                  Self.sameGeneration(named, binding.generation) else { throw Self.failure }
+        }
+        _ = try checkedRead()
+        return Dictionary(uniqueKeysWithValues: bindings.map { ($0.2, $0.3.bytes) })
+    }
+    #endif
+
     func get(_ key: String) throws -> String? { try multiGet([key])[0].1 }
     func multiGet(_ keys: [String]) throws -> [(String, String?)] {
         try Self.validateKeys(keys)
@@ -196,6 +249,47 @@ final class NativeDeviceKV {
     }
 
     private static let searchConsentName = "mindwtr:iosSearchIndexingEnabled"
+    /// Foundation accepts BOM and trailing commas that the shared JSON.parse reader refuses.
+    private static func strictAIConsentJSON(_ raw: String) -> Bool {
+        guard !raw.utf8.starts(with: [0xEF, 0xBB, 0xBF]) else { return false }
+        var quoted = false, escaped = false
+        var previous: UInt8?
+        for byte in raw.utf8 {
+            if quoted {
+                if escaped { escaped = false }
+                else if byte == 0x5C { escaped = true }
+                else if byte == 0x22 { quoted = false }
+                continue
+            }
+            if [0x20, 0x09, 0x0A, 0x0D].contains(byte) { continue }
+            if (byte == 0x7D || byte == 0x5D), previous == 0x2C { return false }
+            if byte == 0x22 { quoted = true }
+            previous = byte
+        }
+        return !quoted
+    }
+
+    /// Fixed selected-provider metadata only; the legacy credential value never leaves this snapshot.
+    func readAIProviderDeviceMetadata(provider: NativeAISettingsProjection.Provider) throws -> (consentRecorded: Bool, legacyItemPresent: Bool) {
+        try requireUsable()
+        guard pending == nil else { throw Self.failure }
+        let current = try checkedRead()
+        let legacyItemPresent = current.values.keys.contains(Data("mindwtr-ai-key:\(provider.rawValue)".utf8))
+        let raw = current.values[Data("mindwtr-ai-provider-consent-v1".utf8)]
+        guard let raw, raw.utf8.count <= Self.valueLimit, Self.strictAIConsentJSON(raw),
+              let consent = try? NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let value = consent[provider.rawValue] as? NSNumber else { return (false, legacyItemPresent) }
+        // NSNumber also bridges numeric 1; consent follows the shared strict `=== true` reader.
+        return (CFGetTypeID(value) == CFBooleanGetTypeID() && value.boolValue, legacyItemPresent)
+    }
+
+    /// Revalidate namespace/snapshot even before the selected provider is known.
+    func validateAIProviderDeviceMetadataRead() throws {
+        try requireUsable()
+        guard pending == nil else { throw Self.failure }
+        _ = try checkedRead()
+    }
+
     func readSearchConsent() throws -> Bool {
         switch try get(Self.searchConsentName) {
         case nil, "false": return false
@@ -252,6 +346,56 @@ final class NativeDeviceKV {
         guard zip(Self.calendarSettingNames, expected).allSatisfy({ name, value in
             before.values[Data(name.utf8)].map { Data($0.utf8) } == value.map { Data($0.utf8) }
         }) else { throw Self.failure }
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    private static let appleRemindersImportName = "mindwtr-apple-reminders-import-v1"
+    func readAppleRemindersImportState() throws -> String? {
+        let value = try get(Self.appleRemindersImportName)
+        guard (value?.utf8.count ?? 0) <= Self.valueLimit else { throw Self.failure }
+        return value
+    }
+    var hasPendingAppleRemindersImportMutation: Bool {
+        pending.map { $0.changes.map(\.key) == [Self.appleRemindersImportName] } ?? false
+    }
+    /// Fixed raw cell only; importer policy and saved-task proof belong to its owner.
+    func compareAndSetAppleRemindersImportState(expected: String?, next: String) throws {
+        guard (expected?.utf8.count ?? 0) <= Self.valueLimit,
+              next.utf8.count <= Self.valueLimit else { throw Self.invalid }
+        try requireUsable()
+        let name = Self.appleRemindersImportName
+        let changes = [Change(key: name, bytes: Data(name.utf8), value: next)]
+        let before: Snapshot
+        if let pending {
+            guard pending.changes == changes else { throw Self.failure }
+            before = pending.before
+        } else { before = try checkedRead() }
+        guard before.values[Data(name.utf8)].map({ Data($0.utf8) }) == expected.map({ Data($0.utf8) }) else { throw Self.failure }
+        try mutate(changes, skipUnchanged: true)
+    }
+
+    private static let pomodoroAlarmName = "mindwtr:native:pomodoro-alarms:v1"
+    func readPomodoroAlarmState() throws -> String? {
+        let value = try get(Self.pomodoroAlarmName)
+        guard (value?.utf8.count ?? 0) <= Self.valueLimit else { throw Self.failure }
+        return value
+    }
+    var hasPendingPomodoroAlarmMutation: Bool {
+        pending.map { $0.changes.map(\.key) == [Self.pomodoroAlarmName] } ?? false
+    }
+    /// Fixed raw cell only; alarm policy and transition proof belong to its owner.
+    func compareAndSetPomodoroAlarmState(expected: String?, next: String) throws {
+        guard (expected?.utf8.count ?? 0) <= Self.valueLimit,
+              next.utf8.count <= Self.valueLimit else { throw Self.invalid }
+        try requireUsable()
+        let name = Self.pomodoroAlarmName
+        let changes = [Change(key: name, bytes: Data(name.utf8), value: next)]
+        let before: Snapshot
+        if let pending {
+            guard pending.changes == changes else { throw Self.failure }
+            before = pending.before
+        } else { before = try checkedRead() }
+        guard before.values[Data(name.utf8)].map({ Data($0.utf8) }) == expected.map({ Data($0.utf8) }) else { throw Self.failure }
         try mutate(changes, skipUnchanged: true)
     }
 

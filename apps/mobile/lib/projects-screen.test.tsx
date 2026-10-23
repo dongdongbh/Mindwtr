@@ -568,6 +568,19 @@ describe('ProjectsScreen project quick add ordering', () => {
 });
 
 describe('ProjectsScreen list controls', () => {
+  it('forwards saved unused tags to the project picker without adding unused tag filters', async () => {
+    filteringHarness.useRealHook = true;
+    const previousSettings = storeState.settings;
+    storeState.settings = { taxonomy: { tags: [{ token: '#unused', rev: 1, revBy: 'test', updatedAt: now }] } };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); await Promise.resolve(); });
+    expect(tagPicker.props?.projectTagOptions).toContain('#unused');
+    act(() => tree.root.findByProps({ testID: 'projects-tag-filter-toggle' }).props.onPress());
+    expect(tree.root.findAllByProps({ accessibilityLabel: '#unused' })).toHaveLength(0);
+    await act(async () => { tree.unmount(); });
+    storeState.settings = previousSettings;
+  });
+
   it('labels the empty raw tag and filters it separately from untagged projects', async () => {
     filteringHarness.useRealHook = true;
     storeState.projects = [

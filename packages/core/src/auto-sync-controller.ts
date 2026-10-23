@@ -49,7 +49,11 @@ export type AutoSyncControllerOptions = {
     onSyncFailure?: (error: string) => void;
     /** Desktop: the task editor lock. Holds window-driven syncs off mid-edit. */
     shouldPauseWindowSync?: () => boolean;
-    /** Desktop: blur only syncs when this device has something to push. */
+    /** Desktop: blur only syncs when this device has something to push.
+     *  With adaptive pacing (mobile), a request made while this is true skips the
+     *  adaptive stretch unless the previous cycle also started with it true (#1431):
+     *  the first local edit after an opening, resume or no-change cycle uploads at
+     *  the plain cadence, while back-to-back local uploads keep #766's pacing. */
     hasPendingLocalChanges?: () => boolean;
     logInfo?: (message: string, extra?: Record<string, string>) => void;
     now?: () => number;
@@ -162,6 +166,7 @@ export const createAutoSyncController = (
 
     let lastAutoSyncAt = 0;
     let lastCycleDurationMs = 0;
+    let lastCycleCarriedLocalChange = false;
     let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let syncThrottleTimer: ReturnType<typeof setTimeout> | null = null;
     let initialSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -268,16 +273,19 @@ export const createAutoSyncController = (
 
     // An explicit 0 (a manual run, a lifecycle transition, an internal retry)
     // bypasses pacing entirely; every other request is stretched by how long the
-    // last cycle actually took on this device.
+    // last cycle actually took on this device, except a fresh local change after a
+    // cycle that carried none (#1431).
     const resolveEffectiveMinIntervalMs = (requestedMinIntervalMs: number | undefined) => {
         const requested = typeof requestedMinIntervalMs === 'number'
             ? requestedMinIntervalMs
             : cadence().minIntervalMs;
-        if (!adaptivePacing || requested <= 0) return requested;
-        return Math.max(
+        if (!adaptivePacing || requested <= 0) return { minIntervalMs: requested, adaptiveMinIntervalMs: requested };
+        const adaptiveMinIntervalMs = Math.max(
             requested,
             Math.min(lastCycleDurationMs * adaptivePacing.durationMultiplier, adaptivePacing.maxIntervalMs),
         );
+        const freshLocalChange = !lastCycleCarriedLocalChange && (options.hasPendingLocalChanges?.() ?? false);
+        return { minIntervalMs: freshLocalChange ? requested : adaptiveMinIntervalMs, adaptiveMinIntervalMs };
     };
 
     const autoSyncOrchestrator = createSyncOrchestrator<AutoSyncRequest, void>({
@@ -288,11 +296,23 @@ export const createAutoSyncController = (
             }
             if (!request.bypassFailureCooldown && !shouldRunAutoSyncNow(request.source)) return;
 
-            const effectiveMinIntervalMs = resolveEffectiveMinIntervalMs(request.minIntervalMs);
+            const {
+                minIntervalMs: effectiveMinIntervalMs,
+                adaptiveMinIntervalMs,
+            } = resolveEffectiveMinIntervalMs(request.minIntervalMs);
             const nowMs = now();
-            if (nowMs - lastAutoSyncAt < effectiveMinIntervalMs) {
+            const elapsedMs = nowMs - lastAutoSyncAt;
+            if (effectiveMinIntervalMs < adaptiveMinIntervalMs && elapsedMs < adaptiveMinIntervalMs) {
+                trace('Auto sync local change skipped adaptive pacing', {
+                    releaseCheck: 'v1.3.7/local-change-upload',
+                    source: request.source,
+                    delayMs: String(Math.max(0, effectiveMinIntervalMs - elapsedMs)),
+                    adaptiveWaitMs: String(adaptiveMinIntervalMs - elapsedMs),
+                });
+            }
+            if (elapsedMs < effectiveMinIntervalMs) {
                 if (allowDeferredWork && !syncThrottleTimer) {
-                    const waitMs = Math.max(0, effectiveMinIntervalMs - (nowMs - lastAutoSyncAt));
+                    const waitMs = Math.max(0, effectiveMinIntervalMs - elapsedMs);
                     trace('Auto sync throttled', {
                         source: request.source,
                         waitMs: String(waitMs),
@@ -332,6 +352,8 @@ export const createAutoSyncController = (
             }
 
             lastAutoSyncAt = nowMs;
+            // Read only under adaptive pacing: desktop's port is for blur alone.
+            const cycleCarriesLocalChange = !!adaptivePacing && (options.hasPendingLocalChanges?.() ?? false);
             trace('Auto sync run start', {
                 source: request.source,
                 minIntervalMs: String(effectiveMinIntervalMs),
@@ -339,6 +361,7 @@ export const createAutoSyncController = (
             await options.flushPendingSave().catch((error) => options.reportError('Save failed', error));
 
             const result = await options.performSync();
+            lastCycleCarriedLocalChange = cycleCarriesLocalChange;
             trace('Auto sync run complete', {
                 source: request.source,
                 success: String(result.success),

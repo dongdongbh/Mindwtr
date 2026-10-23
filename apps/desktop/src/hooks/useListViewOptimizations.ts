@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { type Task, type TaskStatus, useTaskStore, isReferenceInVisibleProject, isTaskInActiveProject, getSequentialFirstTaskIds, isSequentialChainStatus } from '@mindwtr/core';
+import { useEffect, useMemo, useRef } from 'react';
+import { type Task, type TaskStatus, useTaskStore, isReferenceInVisibleProject, isTaskInActiveProject, getSequentialFirstTaskIds, hasTaskSequences, isSequentialChainStatus, type TaskSequencing } from '@mindwtr/core';
 import { useConditionalMemo } from './useConditionalMemo';
 import { useProgressiveComputation } from './useProgressiveComputation';
 import { logInfo } from '../lib/app-log';
@@ -37,6 +37,13 @@ export function useListViewOptimizations(
     const projectMap = derived.projectMap;
     const sequentialProjectIds = derived.sequentialProjectIds;
     const sequentialWithinSectionProjectIds = derived.sequentialWithinSectionProjectIds;
+    const sequentialSectionKeys = derived.sequentialSectionKeys;
+    // Per section projects (#1429) add their Sequential sections; callers test with isTaskSequenceBlocked.
+    const sequencing = useMemo<TaskSequencing>(() => ({
+        sequentialProjectIds,
+        sectionScopedProjectIds: sequentialWithinSectionProjectIds,
+        sequentialSectionKeys,
+    }), [sequentialProjectIds, sequentialSectionKeys, sequentialWithinSectionProjectIds]);
     const tasksById = derived.tasksById;
     const sections = useTaskStore((state) => state.sections);
 
@@ -46,19 +53,19 @@ export function useListViewOptimizations(
             const perfApi = perfRef.current;
             perfApi?.trackUseMemo?.();
             const compute = () => {
-                if (sequentialProjectIds.size === 0) return new Set<string>();
+                if (!hasTaskSequences(sequencing)) return new Set<string>();
                 // Waiting tasks hold their chain slot too: a waiting first
                 // step keeps later next tasks out of the Next list.
                 return getSequentialFirstTaskIds(
                     baseTasks.filter((task) => !task.deletedAt && isSequentialChainStatus(task.status)),
                     sequentialProjectIds,
-                    { sectionScopedProjectIds: sequentialWithinSectionProjectIds, sections },
+                    { sectionScopedProjectIds: sequentialWithinSectionProjectIds, sequentialSectionKeys, sections },
                 );
             };
 
             return perfApi?.measure ? perfApi.measure('sequentialProjectFirstTasks', compute) : compute();
         },
-        [baseTasks, sections, sequentialProjectIds, sequentialWithinSectionProjectIds],
+        [baseTasks, sections, sequencing, sequentialProjectIds, sequentialSectionKeys, sequentialWithinSectionProjectIds],
         new Set<string>(),
     );
 
@@ -128,6 +135,7 @@ export function useListViewOptimizations(
         allTags,
         projectMap,
         sequentialProjectIds,
+        sequencing,
         sequentialProjectFirstTasks,
         tasksById,
         tokenCounts,

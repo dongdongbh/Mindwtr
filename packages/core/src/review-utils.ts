@@ -12,7 +12,7 @@ import {
     type AreaVisibilityContext,
 } from './area-filter';
 import { isTaskInActiveProject } from './project-utils';
-import { getSequentialFirstTaskIds, isSequentialChainStatus, shouldShowTaskForStart, sortTasksBy } from './task-utils';
+import { getSequentialFirstTaskIds, getTaskSequencing, isSequentialChainStatus, isTaskSequenceBlocked, shouldShowTaskForStart, sortTasksBy } from './task-utils';
 import { isTaskActionable, isTaskCompleted } from './task-status';
 import { normalizeTimeSpentMinutes } from './time-spent';
 
@@ -350,21 +350,15 @@ export function getDailyReviewBuckets(
         && isTaskActionable(task)
     ));
 
-    const sequentialProjectIds = new Set(
-        projects.filter((project) => project.isSequential && !project.deletedAt).map((project) => project.id),
-    );
-    const sectionScopedProjectIds = new Set(
-        projects
-            .filter((project) => project.isSequential && project.sequentialScope === 'section' && !project.deletedAt)
-            .map((project) => project.id),
-    );
+    const sequencing = getTaskSequencing(projects, opts.sections);
     // Waiting tasks hold their chain slot: a waiting first step keeps a
     // sequential project's later next tasks out of the review candidates too
     // ("later steps aren't actionable yet" applies while waiting on someone).
     const sequentialFirstTaskIds = getSequentialFirstTaskIds(
         activeTasks.filter((task) => isSequentialChainStatus(task.status)),
-        sequentialProjectIds,
-        { sectionScopedProjectIds, sections: opts.sections },
+        sequencing.sequentialProjectIds,
+        { sectionScopedProjectIds: sequencing.sectionScopedProjectIds,
+            sequentialSectionKeys: sequencing.sequentialSectionKeys, sections: opts.sections },
     );
 
     const inbox = activeTasks.filter((task) => task.status === 'inbox');
@@ -399,9 +393,7 @@ export function getDailyReviewBuckets(
             if (!shouldShowTaskForStart(task, opts)) return;
             // Sequential projects surface only their first remaining task;
             // later steps aren't actionable yet.
-            if (task.projectId && sequentialProjectIds.has(task.projectId) && !sequentialFirstTaskIds.has(task.id)) {
-                return;
-            }
+            if (isTaskSequenceBlocked(task, sequencing, sequentialFirstTaskIds)) return;
             addCandidate(task);
             return;
         }

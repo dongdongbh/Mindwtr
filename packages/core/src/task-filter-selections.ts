@@ -7,10 +7,12 @@ import {
 } from './filter-criteria';
 import { tFallback } from './i18n';
 import { getListSearchChipLabel } from './list-filter-state';
-import { hasActiveFilterCriteria, taskMatchesFilterCriteria } from './saved-filters';
+import { buildAdvancedFilterCriteriaChips, removeAdvancedFilterCriteriaChip } from './saved-filter-labels';
+import { hasActiveFilterCriteria, normalizeFilterCriteria, taskMatchesFilterCriteria } from './saved-filters';
 import { matchesTask as taskMatchesSearchTerm, parseSearchQuery } from './search';
 import type { TaskMetadataFilterVisibility } from './task-metadata-filter-visibility';
 import type {
+  DateRange,
   FilterCriteria,
   MultiValueFilterMatchMode,
   SavedFilter,
@@ -45,6 +47,8 @@ export type TaskFilterSelectionsOptions = {
   visibility: TaskMetadataFilterVisibility;
   /** Saved filters for this view, already filtered to non-deleted ones. */
   savedFilters?: SavedFilter[];
+  /** Original stored criteria, retained unchanged when only the date filter is edited. */
+  rawSavedFilters?: SavedFilter[];
   /** Offered tokens from older callers; explicit selections remain clearable when absent. */
   retainTokens?: string[];
   /** Project ids currently offered; selections outside the list are dropped. */
@@ -116,10 +120,13 @@ export function useTaskFilterSelections({
   t,
   visibility,
   savedFilters,
+  rawSavedFilters,
   retainProjects,
   getProjectLabel,
   onClear,
 }: TaskFilterSelectionsOptions) {
+  const [anyDateRange, updateAnyDateRange] = useState<DateRange>();
+  const [preservedCriteria, setPreservedCriteria] = useState<FilterCriteria>({});
   const [searchQuery, setSearchQuery] = useState('');
   // Both sides of the token cycle in one value: the transition reads them
   // together, so splitting them would make a toggle depend on a stale render.
@@ -165,7 +172,16 @@ export function useTaskFilterSelections({
     setProjects((current) => stableFilter(current, (projectId) => retainProjects.includes(projectId)));
   }, [projects, retainProjects]);
 
+  const forgetPreservedFields = useCallback((...fields: (keyof FilterCriteria)[]) => {
+    setPreservedCriteria((current) => {
+      const next = { ...current };
+      fields.forEach((field) => { delete next[field]; });
+      return next;
+    });
+  }, []);
+
   const toggleToken = useCallback((token: string) => {
+    forgetPreservedFields('contexts', 'tags', 'excludedContexts', 'excludedTags');
     setActiveSavedFilterId(null);
     // Tri-state cycle: neutral → included → excluded → neutral. A token lives
     // on only one side, so each transition clears the other.
@@ -181,45 +197,65 @@ export function useTaskFilterSelections({
       }
       return { included: [...current.included, token], excluded: current.excluded };
     });
-  }, []);
+  }, [forgetPreservedFields]);
 
   const removeToken = useCallback((token: string) => {
+    forgetPreservedFields('contexts', 'tags', 'excludedContexts', 'excludedTags');
     setActiveSavedFilterId(null);
     setTokenSelection((current) => ({
       included: current.included.filter((item) => item !== token),
       excluded: current.excluded.filter((item) => item !== token),
     }));
-  }, []);
+  }, [forgetPreservedFields]);
 
   const toggleProject = useCallback((projectId: string) => {
+    forgetPreservedFields('projects');
     setActiveSavedFilterId(null);
     setProjects((current) => toggleValue(current, projectId));
-  }, []);
+  }, [forgetPreservedFields]);
   const togglePriority = useCallback((priority: TaskPriority) => {
+    forgetPreservedFields('priority');
     setActiveSavedFilterId(null);
     setPriorities((current) => toggleValue(current, priority));
-  }, []);
+  }, [forgetPreservedFields]);
   const toggleEnergyLevel = useCallback((energyLevel: TaskEnergyLevel) => {
+    forgetPreservedFields('energy');
     setActiveSavedFilterId(null);
     setEnergyLevels((current) => toggleValue(current, energyLevel));
-  }, []);
+  }, [forgetPreservedFields]);
   const toggleTimeEstimate = useCallback((estimate: TimeEstimate) => {
+    forgetPreservedFields('timeEstimates', 'timeEstimateRange');
     setActiveSavedFilterId(null);
     setTimeEstimates((current) => toggleValue(current, estimate));
-  }, []);
+  }, [forgetPreservedFields]);
   const setLocation = useCallback((value: string) => {
+    forgetPreservedFields('locations');
     setActiveSavedFilterId(null);
     setLocationQuery(value);
-  }, []);
+  }, [forgetPreservedFields]);
   const setMatchMode = useCallback((kind: 'context' | 'tag', mode: MultiValueFilterMatchMode) => {
+    forgetPreservedFields(kind === 'context' ? 'contextMatchMode' : 'tagMatchMode');
     setActiveSavedFilterId(null);
     if (kind === 'context') setContextMatchMode(mode);
     else setTagMatchMode(mode);
-  }, []);
+  }, [forgetPreservedFields]);
+
+  const setAnyDateRange = useCallback((value: DateRange | undefined) => {
+    if (activeSavedFilter) {
+      // Date edits keep criteria the pickers cannot represent when detaching.
+      const preserved = { ...(rawSavedFilters?.find((filter) => filter.id === activeSavedFilter.id)?.criteria ?? activeSavedFilter.criteria) };
+      delete preserved.anyDateRange;
+      setPreservedCriteria(preserved);
+    }
+    setActiveSavedFilterId(null);
+    updateAnyDateRange(value);
+  }, [activeSavedFilter, rawSavedFilters]);
 
   const clear = useCallback(() => {
     setActiveSavedFilterId(null);
     setSearchQuery('');
+    updateAnyDateRange(undefined);
+    setPreservedCriteria({});
     setTokenSelection(NO_TOKENS);
     setProjects([]);
     setPriorities([]);
@@ -240,6 +276,8 @@ export function useTaskFilterSelections({
 
   const applySaved = useCallback((filter: SavedFilter) => {
     const selections = selectionsFromCriteria(filter.criteria);
+    updateAnyDateRange(selections.anyDateRange);
+    setPreservedCriteria({});
     setTokenSelection({ included: selections.tokens, excluded: selections.excludedTokens });
     setProjects(selections.projects);
     setPriorities(selections.priorities);
@@ -252,17 +290,23 @@ export function useTaskFilterSelections({
   }, []);
 
   const { included: tokens, excluded: excludedTokens } = tokenSelection;
-  const currentCriteria = useMemo(() => criteriaFromSelections({
-    tokens,
-    excludedTokens,
-    projects,
-    locations: visibility.location && locationQuery.trim() ? [locationQuery.trim()] : [],
-    priorities: visibility.priority ? priorities : [],
-    energyLevels: visibility.energyLevel ? energyLevels : [],
-    timeEstimates: visibility.timeEstimate ? timeEstimates : [],
-    contextMatchMode,
-    tagMatchMode,
+  const currentCriteria = useMemo(() => ({
+    ...criteriaFromSelections({
+      anyDateRange,
+      tokens,
+      excludedTokens,
+      projects,
+      locations: visibility.location && locationQuery.trim() ? [locationQuery.trim()] : [],
+      priorities: visibility.priority ? priorities : [],
+      energyLevels: visibility.energyLevel ? energyLevels : [],
+      timeEstimates: visibility.timeEstimate ? timeEstimates : [],
+      contextMatchMode,
+      tagMatchMode,
+    }),
+    ...preservedCriteria,
   }), [
+    anyDateRange,
+    preservedCriteria,
     contextMatchMode,
     energyLevels,
     excludedTokens,
@@ -310,6 +354,8 @@ export function useTaskFilterSelections({
     [tokens],
   );
 
+  const hasPreservedPriority = Array.isArray(preservedCriteria.priority) && preservedCriteria.priority.includes('none');
+  const hasPreservedEstimates = Array.isArray(preservedCriteria.timeEstimates) && preservedCriteria.timeEstimates.some((estimate) => typeof estimate === 'string' && estimate.startsWith('custom:'));
   const chips = useMemo<TaskFilterChip[]>(() => {
     const result: TaskFilterChip[] = [];
     const normalizedSearch = searchQuery.trim();
@@ -336,7 +382,7 @@ export function useTaskFilterSelections({
       if (!label) return;
       result.push({ id: `project:${projectId}`, label, onPress: () => toggleProject(projectId) });
     });
-    if (visibility.priority) {
+    if (visibility.priority && !hasPreservedPriority) {
       priorities.forEach((priority) => {
         result.push({
           id: `priority:${priority}`,
@@ -354,7 +400,7 @@ export function useTaskFilterSelections({
         });
       });
     }
-    if (visibility.timeEstimate) {
+    if (visibility.timeEstimate && !hasPreservedEstimates) {
       timeEstimates.forEach((estimate) => {
         result.push({
           id: `time:${estimate}`,
@@ -363,18 +409,58 @@ export function useTaskFilterSelections({
         });
       });
     }
+    if (visibility.priority && hasPreservedPriority) {
+      result.push({
+        id: 'preserved:priority',
+        label: `${tFallback(t, 'filters.priority', 'Priority')}: ${(preservedCriteria.priority ?? []).map((value) => value === 'none' ? tFallback(t, 'focus.group.noPriority', 'No priority') : t(`priority.${value}`)).join(', ')}`,
+        onPress: () => { forgetPreservedFields('priority'); setPriorities([]); },
+      });
+    }
+    if (visibility.timeEstimate && hasPreservedEstimates) {
+      result.push({
+        id: 'preserved:timeEstimates',
+        label: `${tFallback(t, 'filters.timeEstimate', 'Time estimate')}: ${(preservedCriteria.timeEstimates ?? []).filter((value) => typeof value === 'string').map((value) => formatTimeEstimateLabel(value)).join(', ')}`,
+        onPress: () => { forgetPreservedFields('timeEstimates'); setTimeEstimates([]); },
+      });
+    }
     const normalizedLocation = locationQuery.trim();
     // A saved filter owns its location criterion; removing it belongs to the
     // saved filter, not to this picker, so no removable chip is offered.
-    if (visibility.location && normalizedLocation && !activeSavedFilter) {
+    if (visibility.location && normalizedLocation && !activeSavedFilter && !preservedCriteria.locations) {
       result.push({
         id: 'location',
         label: `${tFallback(t, 'taskEdit.locationLabel', 'Location')}: ${normalizedLocation}`,
         onPress: () => setLocation(''),
       });
     }
+    const chipOptions = { resolveText: (key: string, fallback: string) => tFallback(t, key, fallback) };
+    const visiblePreservedCriteria = normalizeFilterCriteria({
+      ...preservedCriteria,
+      ...(visibility.location ? {} : { locations: undefined }),
+      ...(visibility.timeEstimate ? {} : { timeEstimateRange: undefined }),
+    });
+    buildAdvancedFilterCriteriaChips(visiblePreservedCriteria, chipOptions).forEach((chip) => {
+      result.push({
+        id: `advanced:${chip.id}`,
+        label: chip.label,
+        onPress: () => {
+          setPreservedCriteria((current) => removeAdvancedFilterCriteriaChip(current, chip.id));
+          if (chip.id.startsWith('location:')) setLocationQuery('');
+        },
+      });
+    });
+    if (anyDateRange) {
+      const dateChip = buildAdvancedFilterCriteriaChips({ anyDateRange }, chipOptions)[0];
+      if (dateChip) result.push({ id: 'anyDateRange', label: dateChip.label, onPress: () => setAnyDateRange(undefined) });
+    }
     return result;
   }, [
+    anyDateRange,
+    preservedCriteria,
+    hasPreservedPriority,
+    hasPreservedEstimates,
+    forgetPreservedFields,
+    setAnyDateRange,
     activeSavedFilter,
     energyLevels,
     excludedTokens,
@@ -401,6 +487,7 @@ export function useTaskFilterSelections({
   return {
     view,
     // selections
+    anyDateRange,
     searchQuery,
     tokens,
     excludedTokens,
@@ -425,6 +512,7 @@ export function useTaskFilterSelections({
     showContextMatchMode: selectedContextCount > 1,
     showTagMatchMode: selectedTagCount > 1,
     // actions
+    setAnyDateRange,
     setSearchQuery,
     setLocation,
     setMatchMode,

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import * as core from '@mindwtr/core';
 import { buildEntityMap, useTaskStore, type Task } from '@mindwtr/core';
 import type { ComponentProps } from 'react';
 
@@ -9,6 +10,8 @@ import { QuickAddModal } from './QuickAddModal';
 import { QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT } from '../lib/quick-add-saved-event';
 import { MAX_AUDIO_RECORDING_SECONDS } from '../lib/audio-capture-buffer';
 import { useUiStore } from '../store/ui-store';
+import { holdSyncSave } from '../test/hold-sync-save';
+import { writeCloudConfig } from '../lib/sync-service-config';
 // Not re-exported from the core barrel; see focused-count-selector.test.ts
 // for why the relative path (not a re-export) is used here.
 import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
@@ -18,6 +21,12 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
     ...await importOriginal<typeof import('@mindwtr/core')>(),
     isSandboxMode: () => sandboxState.enabled,
 }));
+
+vi.mock('../lib/sync-service', () => ({ SyncService: {
+    getSyncBackend: async () => 'cloud', getCloudProvider: async () => 'selfhosted',
+    getSyncEncryptionStatus: async () => ({ state: 'off' }),
+    getCloudConfig: async () => ({ url: 'https://cloud.example.com', token: 'test-token-1234567890' }),
+} }));
 
 const tauriMocks = vi.hoisted(() => ({
     emitTo: vi.fn(async () => undefined),
@@ -634,7 +643,157 @@ describe('QuickAddModal', () => {
         expect(document.activeElement).not.toBe(closeButton);
     });
 
+    it('uploads browser images only on Save and retries a failed durable save without another task or PUT', async () => {
+        const addTask = vi.fn(async (title: string, props?: Partial<Task>) => {
+            const timestamp = new Date().toISOString();
+            useTaskStore.setState({ _allTasks: [{ id: 'browser-task', title, status: 'inbox', tags: [], contexts: [], createdAt: timestamp, updatedAt: timestamp, ...props }] });
+            return { success: true, id: 'browser-task' };
+        });
+        const flush = vi.spyOn(core, 'flushPendingSave').mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValue(undefined);
+        const upload = createDeferred<Response>();
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(() => upload.promise);
+        act(() => useTaskStore.setState({ addTask }));
+        renderQuickAddModal();
+        await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Keep text' } })); });
+        const input = screen.getByPlaceholderText('Add Task');
+        fireEvent.paste(input, { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+        await screen.findByText('1 image attached');
+        expect(fetcher).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+        fireEvent.change(input, { target: { value: 'Keep text and continued typing' } });
+        fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+        expect(addTask).not.toHaveBeenCalled();
+        await act(async () => { upload.resolve(new Response(null, { status: 200 })); });
+        await waitFor(() => expect(flush).toHaveBeenCalledOnce());
+        expect(addTask).toHaveBeenCalledWith('Keep text and continued typing', expect.objectContaining({ attachments: [expect.objectContaining({ uri: '', cloudKey: expect.stringMatching(/^attachments\//) })] }));
+        expect(input).toHaveValue('Keep text and continued typing');
+        expect(screen.getByText(/Retry Save or remove the file/)).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(screen.queryByPlaceholderText('Add Task')).not.toBeInTheDocument());
+        expect(addTask).toHaveBeenCalledOnce();
+        expect(fetcher).toHaveBeenCalledOnce();
+        flush.mockRestore(); fetcher.mockRestore();
+    });
+
+    it('merges browser retry drafts onto peer changes admitted by a held sync writer', async () => {
+        const flush = vi.spyOn(core, 'flushPendingSave')
+            .mockRejectedValueOnce(new Error('storage unavailable'))
+            .mockRejectedValueOnce(new Error('storage unavailable'))
+            .mockResolvedValue(undefined);
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+        const originalAddTask = useTaskStore.getState().addTask;
+        let firstPublish: Promise<void> | undefined;
+        const addTask = vi.spyOn(useTaskStore.getState(), 'addTask').mockImplementation(async (title, props) => {
+            const result = await originalAddTask(title, props);
+            if (result.success && result.id) {
+                const created = useTaskStore.getState()._tasksById.get(result.id)!;
+                const peer = { ...created.attachments![0], id: 'first-peer', cloudKey: 'attachments/first-peer.png' };
+                firstPublish = core.runSyncStoreSave(async () => {
+                    useTaskStore.setState({ _allTasks: [{ ...created, attachments: [...created.attachments!, peer] }] });
+                });
+            }
+            return result;
+        });
+        let finish: (() => Promise<void>) | undefined;
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], settings: { deviceId: 'browser-device' } }));
+            renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Keep text' } })); });
+            const input = screen.getByPlaceholderText('Add Task');
+            fireEvent.paste(input, { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+            await screen.findByText('1 image attached');
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(flush).toHaveBeenCalledOnce());
+            await firstPublish;
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+            const admitted = useTaskStore.getState().tasks[0];
+            const peer = { ...admitted.attachments![0], id: 'peer-image', cloudKey: 'attachments/peer-image.png' };
+            finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{
+                ...admitted, title: 'Peer title', attachments: [...admitted.attachments!, peer], rev: (admitted.rev ?? 0) + 1,
+            }] }));
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+            await act(async () => { await finish!(); });
+            await waitFor(() => expect(flush).toHaveBeenCalledTimes(2));
+            expect(useTaskStore.getState().tasks[0]).toMatchObject({ title: 'Peer title', attachments: [...admitted.attachments!, peer] });
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(screen.queryByPlaceholderText('Add Task')).not.toBeInTheDocument());
+            expect(useTaskStore.getState().tasks[0]).toMatchObject({ title: 'Peer title', attachments: [...admitted.attachments!, peer] });
+            expect(addTask).toHaveBeenCalledOnce();
+            expect(fetcher).toHaveBeenCalledOnce();
+        } finally {
+            await finish?.();
+            flush.mockRestore(); fetcher.mockRestore(); addTask.mockRestore();
+        }
+    });
+
+    it.each([false, true])('checks browser configuration inside a held writer (prior admission: %s)', async (priorAdmission) => {
+        const flush = vi.spyOn(core, 'flushPendingSave').mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValue(undefined);
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+        let finish: (() => Promise<void>) | undefined;
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], settings: { deviceId: 'browser-device' } }));
+            renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Original draft' } })); });
+            const input = screen.getByPlaceholderText('Add Task');
+            fireEvent.paste(input, { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+            await screen.findByText('1 image attached');
+            if (priorAdmission) {
+                fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+                await waitFor(() => expect(flush).toHaveBeenCalledOnce());
+                await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+            }
+            const before = structuredClone(useTaskStore.getState().tasks);
+            finish = holdSyncSave(() => undefined);
+            fireEvent.change(input, { target: { value: 'Changed live draft' } });
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+            await writeCloudConfig({ url: 'https://cloud.example.com', token: 'test-token-1234567890' }, {
+                isTauriRuntimeEnv: () => false, maybeMigrateLegacyLocalStorageToConfig: async () => undefined,
+                reportError: vi.fn(), invokeNative: async <T,>() => undefined as T,
+            });
+            await act(async () => { await finish!(); });
+            await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+            expect(useTaskStore.getState().tasks).toEqual(before);
+            expect(input).toHaveValue('Changed live draft');
+            expect(screen.getByText(/The draft or sync configuration changed/)).toBeVisible();
+            expect(fetcher).toHaveBeenCalledOnce();
+        } finally {
+            await finish?.();
+            flush.mockRestore(); fetcher.mockRestore();
+        }
+    });
+
+    it('rejects an unmounted browser capture when its writer resumes after another dialog opens', async () => {
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+        const finish = holdSyncSave(() => undefined);
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], settings: { deviceId: 'browser-device' } }));
+            const first = renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Old draft' } })); });
+            fireEvent.paste(screen.getByPlaceholderText('Add Task'), { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+            await screen.findByText('1 image attached');
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+            first.unmount();
+            renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'New draft' } })); });
+            await act(async () => { await finish(); });
+            expect(useTaskStore.getState().tasks).toEqual([]);
+            expect(screen.getByPlaceholderText('Add Task')).toHaveValue('New draft');
+            expect(screen.queryByText(/The draft or sync configuration changed/)).not.toBeInTheDocument();
+            expect(fetcher.mock.calls.map(([, options]) => options?.method)).toEqual(['PUT']);
+        } finally {
+            await finish();
+            fetcher.mockRestore();
+        }
+    });
+
     it('attaches a pasted image to a text quick-add task', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
             useTaskStore.setState((state) => ({
@@ -686,6 +845,7 @@ describe('QuickAddModal', () => {
     });
 
     it('falls back to the async clipboard API when the paste event is empty (WebKitGTK)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
         // WebKitGTK delivers no items, no files, and no text for an image paste;
         // the image is only reachable through navigator.clipboard.read() (#690).
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
@@ -754,6 +914,7 @@ describe('QuickAddModal', () => {
     });
 
     it('creates a screenshot-titled task for an image-only quick add paste', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
             useTaskStore.setState((state) => ({

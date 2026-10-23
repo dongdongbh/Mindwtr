@@ -1,5 +1,5 @@
 import type { NativeHostResult } from './native-host-contract';
-import { AREA_PRESET_COLORS } from './color-constants';
+import { AREA_PRESET_COLORS, isValidProjectColorOverride } from './color-constants';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
@@ -13,7 +13,7 @@ export type NativeAreaColorToken = { name: string; color: string | null; rev: nu
 export type NativeAreaColorRequest = { requestId: string; areaId: string; color: string | null;
     expected: NativeAreaColorToken };
 export type NativeAreaColorResult = { id: string; color: string | null };
-export type NativePreparedAreaColor = PreparedAreaColor & { version: 1; request: NativeAreaColorRequest;
+export type NativePreparedAreaColor = PreparedAreaColor & { version: 1 | 2; request: NativeAreaColorRequest;
     result: NativeAreaColorResult };
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -71,7 +71,7 @@ const readPrepared = (value: unknown): NativePreparedAreaColor | null => {
     const request = readRequest(envelope.request);
     const raw = envelope.prepared;
     if (!request || !exact(raw, ['version', 'request', 'scope', 'effect', 'deviceIdBefore',
-        'deviceIdToInitialize', 'updateAt', 'result']) || raw.version !== 1 || !same(raw.request, request)
+        'deviceIdToInitialize', 'updateAt', 'result']) || (raw.version !== 1 && raw.version !== 2) || !same(raw.request, request)
         || !record(raw.scope) || !exact(raw.scope, ['area', 'projects']) || !record(raw.scope.area)
         || !Array.isArray(raw.scope.projects) || !record(raw.effect)
         || !exact(raw.effect, ['area', 'projects']) || !record(raw.effect.area)
@@ -91,12 +91,13 @@ const readPrepared = (value: unknown): NativePreparedAreaColor | null => {
             || scope.projects.some((project) => !record(project) || project.areaId !== request.areaId
                 || typeof project.id !== 'string' || !project.id || typeof project.title !== 'string'
                 || !['active', 'someday', 'waiting', 'archived'].includes(project.status)
+                || !isValidProjectColorOverride(project.colorOverride)
                 || typeof project.color !== 'string' || typeof project.order !== 'number'
                 || !Array.isArray(project.tagIds) || !project.tagIds.every((tag) => typeof tag === 'string')
                 || typeof project.createdAt !== 'string' || typeof project.updatedAt !== 'string')
             || new Set(scope.projects.map((project) => project.id)).size !== scope.projects.length) return null;
         const deviceId = prepared.deviceIdBefore ?? prepared.deviceIdToInitialize!;
-        const effect = areaColorEffect(scope, request.color ?? undefined, deviceId, prepared.updateAt);
+        const effect = areaColorEffect(scope, request.color ?? undefined, deviceId, prepared.updateAt, prepared.version);
         return hasObservableChange(effect) && same(effect, prepared.effect) ? prepared : null;
     } catch { return null; }
 };
@@ -138,7 +139,7 @@ export function createAreaColorMethods(deps: {
                 return fail('STALE_REVISION', 'Area changed; refresh before changing its color');
             const device = ensureDeviceId(state.settings);
             const updateAt = new Date().toISOString();
-            const prepared: NativePreparedAreaColor = { version: 1, request, scope,
+            const prepared: NativePreparedAreaColor = { version: 2, request, scope,
                 effect: areaColorEffect(scope, request.color ?? undefined, device.deviceId, updateAt),
                 deviceIdBefore: state.settings.deviceId ?? null,
                 deviceIdToInitialize: device.updated ? device.deviceId : null,

@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import {
     buildAdvancedFilterCriteriaChips,
     formatTimeEstimateLabel,
@@ -27,7 +28,7 @@ export type ActiveFilterChip = Omit<DesktopActiveFilterChip, 'onRemove'>;
 export type ActiveFilterChipDeps = {
     t: (key: string) => string;
     resolveText: (key: string, fallback: string) => string;
-    getProject: (projectId: string) => Pick<Project, 'title' | 'color' | 'areaId'> | undefined;
+    getProject: (projectId: string) => Pick<Project, 'title' | 'color' | 'colorOverride' | 'areaId'> | undefined;
     getAreaColor: (areaId: string) => string | undefined;
     getAreaLabel: (areaId: string) => string | undefined;
 };
@@ -83,10 +84,8 @@ export function buildSelectionChips(
             label: projectId === SAVED_FILTER_NO_PROJECT_ID
                 ? deps.resolveText('taskEdit.noProjectOption', 'No project')
                 : project?.title ?? projectId,
-            // The area owns the colour the row shows, so a project inside one
-            // reads as its area; the project's own colour is the fallback.
             dotColor: project
-                ? (project.areaId ? deps.getAreaColor(project.areaId) : undefined) || project.color || undefined
+                ? getProjectAccentColor(project, new Map(project.areaId ? [[project.areaId, { color: deps.getAreaColor(project.areaId) }]] : []))
                 : undefined,
             ...inactiveFlag(applied, 'projects', projectId),
         });

@@ -1,3 +1,4 @@
+import { getProjectAccentColor } from '@mindwtr/core';
 import { useId, useMemo, useState } from 'react';
 import {
     createProjectToSectionPreviewer,
@@ -95,7 +96,7 @@ export function ProjectToSectionDialog({ source, projects, onCancel, onSuccess, 
                 {prepared && <p>{formatI18nTemplate(tFallback(t, 'projects.convertNamedSection', 'New section: {{name}}'), { name: prepared.command.section.title })}</p>}
                 {sourceForSummary.supportNotes ? <p>{tFallback(t, 'projects.convertNotes', 'Project notes become section notes.')}</p> : null}
                 <p>{formatI18nTemplate(tFallback(t, 'projects.convertArea', 'Moved tasks use the destination Area: {{area}}.'), { area: destinationArea?.name ?? tFallback(t, 'projects.noArea', 'No Area') })}</p>
-                <p className="flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-border" style={{ backgroundColor: destinationArea?.color ?? destination?.color }} />{tFallback(t, 'projects.convertDestinationColor', 'Section follows the destination color.')}</p>
+                <p className="flex items-center gap-2"><span className="h-3 w-3 rounded-full border border-border" style={{ backgroundColor: destination ? getProjectAccentColor(destination, new Map(destinationArea ? [[destinationArea.id, destinationArea]] : [])) : undefined }} />{tFallback(t, 'projects.convertDestinationColor', 'Section follows the destination color.')}</p>
                 <p>{tFallback(t, 'projects.convertColor', 'The source project color is not carried to the section.')}</p>
                 <p>{tFallback(t, 'projects.convertSettings', 'The new section uses the destination project’s settings.')}</p>
                 <p>{tFallback(t, 'projects.convertTrash', 'The source project moves to Trash. Already-deleted tasks stay in Trash.')}</p>

@@ -1,12 +1,11 @@
 import { projectMatchesAreaFilterSelection, taskMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
 import type { DateFormatter } from './date';
 import { tFallback } from './i18n';
-import { resolveFeatureFlags } from './resolve-feature-flags';
 import { getProjectAccentColor } from './task-accent-color';
 import { formatListItemCount } from './list-count';
 import type { TaskStore } from './store-types';
 import { buildTaskGroupSections, getTaskGroupByLabel, type TaskGroupItem } from './task-group-sections';
-import { DONE_TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
+import { DONE_TASK_LIST_SORT_OPTIONS, getTaskSortByLabel, getVisibleTaskSortOptions } from './task-list-sort-options';
 import { isTaskCancelled } from './task-status';
 import { getUsedTaskTokens } from './task-token-usage';
 import { resolveTaskSortByForFeatures, sortDoneTasksForListView, sortTasksBy } from './task-utils';
@@ -66,10 +65,9 @@ export const filterArchivedTasksByArea = (
     areaById: Map<string, Area>,
 ): Task[] => tasks.filter((task) => taskMatchesAreaFilterSelection(task, selection, projectById, areaById));
 
-/** The sort menu hides Time estimate while that feature is off, like the shared sort modal (#1107). */
+/** The sort menu hides Time estimate and Priority while that feature is off, like the shared sort modal (#1107). */
 export function getArchiveSortOptions(settings: AppSettings | undefined): TaskSortBy[] {
-    const timeEstimates = resolveFeatureFlags(settings).timeEstimates;
-    return DONE_TASK_LIST_SORT_OPTIONS.filter((option) => option !== 'timeEstimate' || timeEstimates);
+    return getVisibleTaskSortOptions(DONE_TASK_LIST_SORT_OPTIONS, settings);
 }
 
 export type ArchiveMenu = {
@@ -87,8 +85,8 @@ export function getArchiveMenu(
         filtersLabel: tFallback(t, 'filters.title', 'Filters'),
         sort: {
             label: tFallback(t, 'sort.label', 'Sort'),
-            value: t(`sort.${sortBy}`),
-            options: getArchiveSortOptions(settings).map((id) => ({ id, label: t(`sort.${id}`), selected: sortBy === id })),
+            value: getTaskSortByLabel(sortBy, t),
+            options: getArchiveSortOptions(settings).map((id) => ({ id, label: getTaskSortByLabel(id, t), selected: sortBy === id })),
         },
         group: {
             label: tFallback(t, 'list.groupBy', 'Group'),

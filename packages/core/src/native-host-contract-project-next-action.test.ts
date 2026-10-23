@@ -563,4 +563,46 @@ describe('Reference prompt transactional receipt prerequisite', () => {
             const later = await raw(sqlite); value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope as never)); expect(await raw(sqlite)).toEqual(later);
         } finally { race = false; transactionReadFailure = false; await sqlite.close(); }
     }, 15_000);
+    it('creates the Add row under Skip as RN addTask does, and replays an earlier Send row unchanged', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const sqlite = await openSqliteHost(seed());
+        try { const proof = await origin(sqlite); const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
+            const add = (requestId: string) => ({ requestId, origin: options.origin, promptRevision: options.promptRevision, action: 'add' as const, text: 'Reminder default', openAfterSave: false });
+            const sendRequest = add('00000000-0000-4000-8000-000000000195');
+            const sent = value(await sqlite.host.prepareReferenceProjectNextAction({ request: sendRequest, origin: proof })).prepared;
+            if (sent.operation.kind !== 'add') throw new Error('Expected Add');
+            expect(sent.operation.task.suppressMindwtrReminders).toBe(false);
+            await useTaskStore.getState().updateSettings({ taskReminderDefault: 'skip' }); await flushPendingSave();
+            const request = add(WRITE);
+            const prepared = value(await sqlite.host.prepareReferenceProjectNextAction({ request, origin: proof })).prepared;
+            if (prepared.operation.kind !== 'add') throw new Error('Expected Add');
+            expect(prepared.operation.task.suppressMindwtrReminders).toBe(true);
+            expect(value(await sqlite.host.commitPreparedReferenceProjectNextAction({ request, prepared }))).toEqual(prepared.result);
+            expect(useTaskStore.getState()._tasksById.get(prepared.operation.task.id)?.suppressMindwtrReminders).toBe(true);
+            expect(value(sqlite.host.validatePreparedReferenceProjectNextAction({ request: sendRequest, prepared: sent }))).toEqual(sent.result);
+            const ordinary = await useTaskStore.getState().addTask('Reference', { projectId: 'project' });
+            expect(useTaskStore.getState()._tasksById.get(ordinary.id!)?.suppressMindwtrReminders).toBe(true);
+        } finally { await sqlite.close(); }
+    });
+    it('parses Add with the shared quick-add options: feature gates, time estimates and known people, as the RN prompt does', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const start = seed(); start.settings = { ...start.settings!, features: { priorities: false, timeEstimates: true } };
+        start.people = [{ id: 'person-john', name: 'John Smith', createdAt: NOW, updatedAt: NOW }];
+        const sqlite = await openSqliteHost(start);
+        try { const proof = await origin(sqlite); const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
+            const prepare = async (requestId: string, text: string) => {
+                const request = { requestId, origin: options.origin, promptRevision: options.promptRevision, action: 'add' as const, text, openAfterSave: false };
+                const prepared = value(await sqlite.host.prepareReferenceProjectNextAction({ request, origin: proof })).prepared;
+                if (prepared.operation.kind !== 'add') throw new Error('Expected Add');
+                expect(value(sqlite.host.validatePreparedReferenceProjectNextAction({ request, prepared }))).toEqual(prepared.result);
+                return prepared.operation.creation.intent;
+            };
+            const gated = await prepare('00000000-0000-4000-8000-000000000196', 'Call /priority:high');
+            expect(gated.props.priority).toBeUndefined(); expect(gated.title).toBe('Call /priority:high');
+            const estimated = await prepare('00000000-0000-4000-8000-000000000197', 'Draft /estimate:30m');
+            expect(estimated.props.timeEstimate).toBe('30min'); expect(estimated.title).toBe('Draft');
+            const assigned = await prepare('00000000-0000-4000-8000-000000000198', 'Ask %John Smith');
+            expect(assigned.props.assignedTo).toBe('John Smith'); expect(assigned.title).toBe('Ask');
+        } finally { await sqlite.close(); }
+    });
 });

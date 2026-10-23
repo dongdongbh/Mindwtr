@@ -103,6 +103,50 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         tabIconDefault: '#ADB5CB',
         tabIconSelected: '#BD93F9',
     },
+    // Gruvbox light, soft contrast: bg0_s ground, bg0 cards, bg1 inputs, bg2
+    // borders; the faded blue is the accent. Warning takes the faded orange
+    // because the faded yellow is 3.0:1 on bg0_s, with its lightness lowered
+    // a little so it clears 4.5:1 on bg1 (the desktop info badge).
+    'gruvbox-light': {
+        bg: '#F2E5BC',
+        cardBg: '#FBF1C7',
+        taskItemBg: '#FBF1C7',
+        text: '#3C3836',
+        secondaryText: '#665C54',
+        border: '#D5C4A1',
+        tint: '#076678',
+        onTint: '#FBF1C7',
+        inputBg: '#EBDBB2',
+        danger: '#9D0006',
+        success: '#79740E',
+        warning: '#AD3903',
+        filterBg: '#EBDBB2',
+        icon: '#7C6F64',
+        tabIconDefault: '#7C6F64',
+        tabIconSelected: '#076678',
+    },
+    // Gruvbox dark, medium contrast: bg0 ground, bg0_s cards, bg1 inputs, bg2
+    // borders; the accent is the bright blue with its lightness raised so it
+    // clears 4.5:1 on its own tint (status chips, the active sidebar row).
+    // secondaryText is fg3 because fg4 drops to 4.2:1 on bg1.
+    'gruvbox-dark': {
+        bg: '#282828',
+        cardBg: '#32302F',
+        taskItemBg: '#32302F',
+        text: '#EBDBB2',
+        secondaryText: '#BDAE93',
+        border: '#504945',
+        tint: '#9EB9AE',
+        onTint: '#282828',
+        inputBg: '#3C3836',
+        danger: '#FB4934',
+        success: '#B8BB26',
+        warning: '#FABD2F',
+        filterBg: '#3C3836',
+        icon: '#A89984',
+        tabIconDefault: '#A89984',
+        tabIconSelected: '#9EB9AE',
+    },
     sepia: {
         bg: '#F4ECD8',
         cardBg: '#FAF3E3',

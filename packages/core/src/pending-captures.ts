@@ -31,9 +31,14 @@ export const PENDING_CAPTURES_DIRECTORY = 'pending-captures';
 export const ANDROID_QUICK_CAPTURE_SOURCE = 'android-quick-capture';
 export const ANDROID_CAPTURE_INTENT_SOURCE = 'android-capture-intent';
 const ANDROID_WIDGET_CHECKOFF_RELEASE_CHECK = 'v1.3.0/android-widget-checkoff';
+type CaptureStatus = 'inbox' | 'next' | 'waiting' | 'someday';
+const captureStatus = (value: unknown): CaptureStatus | undefined => (
+    value === 'inbox' || value === 'next' || value === 'waiting' || value === 'someday' ? value : undefined
+);
+type CaptureDestination = { defaultStatus?: CaptureStatus; status?: CaptureStatus };
 
 // A new task to add (the iOS Shortcut and the Android dialog; `kind` absent).
-export type PendingCapture = {
+export type PendingCapture = CaptureDestination & {
     kind?: 'capture' | 'text';
     id: string;
     title: string;
@@ -59,7 +64,7 @@ export type PendingCompletion = {
     source?: string;
 };
 
-export type PendingAudioCapture = {
+export type PendingAudioCapture = CaptureDestination & {
     kind: 'audio';
     id: string;
     audioPath: string;
@@ -153,6 +158,13 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
     if (!id) return null;
     const createdAt = trimOrUndefined(record.createdAt);
     const source = trimOrUndefined(record.source);
+    // Destination metadata is optional: old/invalid fields must never lose a capture.
+    const defaultStatus = captureStatus(record.defaultStatus);
+    const status = captureStatus(record.status);
+    const destination: CaptureDestination = {
+        ...(defaultStatus ? { defaultStatus } : {}),
+        ...(status ? { status } : {}),
+    };
     const hasOutboxRetryMarker = Object.prototype.hasOwnProperty.call(record, 'outboxRetried');
     if (hasOutboxRetryMarker && (
         record.outboxRetried !== true
@@ -194,6 +206,7 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
             kind: 'audio',
             id,
             audioPath,
+            ...destination,
             ...(title ? { title } : {}),
             ...(note ? { note } : {}),
             ...(createdAt ? { createdAt } : {}),
@@ -228,6 +241,7 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
         ...(record.kind === 'capture' || record.kind === 'text' ? { kind: record.kind } : {}),
         id,
         title,
+        ...destination,
         ...(note ? { note } : {}),
         tags,
         ...(project ? { project } : {}),
@@ -255,7 +269,7 @@ function resolveStructuredProjectId(capture: PendingCapture, projects: readonly 
 }
 
 export function buildPendingCaptureTaskProps(capture: PendingCapture, projects: Project[]): Partial<Task> {
-    const props: Partial<Task> = { status: 'inbox' };
+    const props: Partial<Task> = { status: capture.status ?? capture.defaultStatus ?? 'inbox' };
     if (capture.note) props.description = capture.note;
 
     const tags = normalizeShortcutTags(capture.tags);
@@ -370,6 +384,20 @@ function logWatchOutboxRetry(log: PendingCaptureLog, kind: 'text' | 'audio', cap
     });
 }
 
+function logAndroidCaptureDestination(log: PendingCaptureLog, capture: PendingCapture | PendingAudioCapture, status: unknown, replayed: boolean): void {
+    if (capture.source !== ANDROID_QUICK_CAPTURE_SOURCE) return;
+    void log.info('Android quick capture destination ingested', {
+        scope: 'capture', force: true,
+        extra: {
+            releaseCheck: 'v1.3.7/android-widget-capture-status',
+            kind: capture.kind === 'audio' ? 'audio' : 'text',
+            destination: captureStatus(status) ?? 'other',
+            selection: capture.status ? 'explicit' : 'default',
+            outcome: replayed ? 'already-created' : 'created',
+        },
+    });
+}
+
 const isFailedResult = (result: unknown): boolean => (
     typeof result === 'object' && result !== null && (result as { success?: unknown }).success === false
 );
@@ -405,9 +433,10 @@ async function assembleCaptureTask(
             fallbackTitle: capture.title,
             projects,
             initialProps: {
-                status: 'inbox',
+                status: capture.defaultStatus ?? 'inbox',
                 ...(capture.note ? { description: capture.note } : {}),
             },
+            extraProps: capture.status ? { status: capture.status } : undefined,
             suppressDetectedDate: false,
         };
 
@@ -892,6 +921,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 }
                 await audio.delete(resolvedAudioPath).catch(() => undefined);
                 ingested += 1;
+                logAndroidCaptureDestination(log, capture, existingCaptureTask.status, true);
                 if (isAndroidQuickCapture) {
                     void log.info('Android quick capture audio ingested', {
                         scope: 'capture',
@@ -958,6 +988,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 tags: [],
                 createdAt: capture.createdAt,
                 source: capture.source,
+                ...(capture.defaultStatus ? { defaultStatus: capture.defaultStatus } : {}),
+                ...(capture.status ? { status: capture.status } : {}),
             };
             const activeTasks = currentTasks.filter((task) => !task.deletedAt && !task.purgedAt);
             const assembled = await assembleCaptureTask(textCapture, { addProject: captureAddProject(captureId), projects, areas, tasks: activeTasks, people, settings }, log);
@@ -1007,6 +1039,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             // delete can replay an item whose audio was already removed.
             await audio.delete(resolvedAudioPath).catch(() => undefined);
             ingested += 1;
+            logAndroidCaptureDestination(log, capture, props.status, false);
             if (isAndroidQuickCapture) {
                 void log.info('Android quick capture audio ingested', {
                     scope: 'capture',
@@ -1029,9 +1062,12 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         // its id is a replay and writes nothing, not even a +Project it names.
         // Non-UUID ids (the iOS Shortcut) keep the legacy path.
         const captureId = UUID_PATTERN.test(capture.id) ? capture.id.toLowerCase() : undefined;
-        const stored = captureId !== undefined && (getTasks?.() ?? tasks).some((task) => task.id.toLowerCase() === captureId);
+        const storedTask = captureId ? (getTasks?.() ?? tasks).find((task) => task.id.toLowerCase() === captureId) : undefined;
+        const stored = storedTask !== undefined;
+        let destination = storedTask?.status;
         if (!stored) {
             const assembled = await assembleCaptureTask(capture, { addProject: captureAddProject(captureId), projects, areas, tasks, people, settings }, log);
+            destination = (assembled?.props ?? buildPendingCaptureTaskProps(capture, projects)).status;
             const captureOptions: [{ captureId: string }?] = captureId ? [{ captureId }] : [];
             const result = assembled
                 ? await addTask(assembled.title, assembled.props, ...captureOptions)
@@ -1057,6 +1093,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             continue;
         }
         ingested += 1;
+        logAndroidCaptureDestination(log, capture, destination, stored);
         if (capture.source === ANDROID_QUICK_CAPTURE_SOURCE) {
             void log.info('Quick capture dialog item ingested', {
                 scope: 'capture',

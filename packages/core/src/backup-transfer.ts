@@ -1,4 +1,5 @@
 import type { AppData, Attachment, SavedFilter, SettingsSyncGroup } from './types';
+import { prepareRestoredTaxonomyCatalog, retainTaxonomyEffects } from './taxonomy-catalog';
 import { createImportDiagnostics, type ImportDiagnostic } from './import-diagnostics';
 import { logInfo } from './logger';
 import { keepSavedFilters } from './saved-filters';
@@ -286,27 +287,22 @@ const carryForwardEntitiesMissingFromBackup = <T extends RestorableEntity>(
     return carried.length > 0 ? [...restored, ...carried] : restored;
 };
 
+// The whole security group (App Lock and its relock delay) belongs to this device, as in sync.
 const stripDeviceLocalRestoreSettings = (settings: AppData['settings']): AppData['settings'] => {
-    if (settings.security?.mobileAppLockEnabled === undefined) return settings;
-    const nextSettings: AppData['settings'] = {
-        ...settings,
-        security: { ...settings.security },
-    };
-    delete nextSettings.security?.mobileAppLockEnabled;
-    if (nextSettings.security && Object.keys(nextSettings.security).length === 0) {
-        delete nextSettings.security;
-    }
+    if (settings.security === undefined) return settings;
+    const nextSettings: AppData['settings'] = { ...settings };
+    delete nextSettings.security;
     return nextSettings;
 };
 
-// App Lock is this device's own: a restore never takes it from the file (above) and never turns this device's lock off.
+// A restore never takes App Lock from the file (above) and never changes this device's App Lock.
 const keepDeviceLocalRestoreSettings = (
     restored: AppData['settings'],
     previous: AppData['settings'] | undefined,
 ): AppData['settings'] => {
-    const lock = previous?.security?.mobileAppLockEnabled;
-    if (lock === undefined) return restored;
-    return { ...restored, security: { ...restored.security, mobileAppLockEnabled: lock } };
+    const security = previous?.security;
+    if (security === undefined) return restored;
+    return { ...restored, security: { ...security } };
 };
 
 const RESTORED_SETTINGS_SYNC_GROUPS: SettingsSyncGroup[] = [
@@ -399,6 +395,8 @@ const prepareRestoredSettingsForSync = (
 
     return {
         ...restored,
+        ...(restored.taxonomy !== undefined || previous?.taxonomy !== undefined
+            ? { taxonomy: prepareRestoredTaxonomyCatalog(restored.taxonomy, previous?.taxonomy, restoredAt, SYNC_BACKUP_RESTORE_REV_BY) } : {}),
         ...(
             restored.savedFilters !== undefined || previous?.savedFilters !== undefined
                 ? { savedFilters: prepareRestoredSavedFiltersForSync(restored.savedFilters, previous?.savedFilters, restoredAt) }
@@ -490,22 +488,22 @@ export const prepareRestoredBackupDataForSync = (
     };
     const previousTasksById = new Map((previous?.tasks ?? []).map((task) => [task.id, task]));
     const previousProjectsById = new Map((previous?.projects ?? []).map((project) => [project.id, project]));
-    const tasks = prepare(data.tasks, previous?.tasks).map((task) => (
-        task.purgedAt
+    const tasks = prepare(data.tasks, previous?.tasks).map((task) => {
+        return task.purgedAt
             ? compactPurgedTaskForLocalStorage({
                 ...task,
                 attachments: previousTasksById.get(task.id)?.attachments,
             })
-            : prepareRestoredAttachmentsForSync(task, restoredAt, previousTasksById.get(task.id))
-    ));
-    const projects = prepare(data.projects, previous?.projects).map((project) => (
-        project.purgedAt
+            : prepareRestoredAttachmentsForSync(task, restoredAt, previousTasksById.get(task.id));
+    });
+    const projects = prepare(data.projects, previous?.projects).map((project) => {
+        return project.purgedAt
             ? compactPurgedProjectForLocalStorage({
                 ...project,
                 attachments: previousProjectsById.get(project.id)?.attachments,
             })
-            : prepareRestoredAttachmentsForSync(project, restoredAt, previousProjectsById.get(project.id))
-    ));
+            : prepareRestoredAttachmentsForSync(project, restoredAt, previousProjectsById.get(project.id));
+    });
     const sections = compactSectionsForPurgedProjects(
         prepare(data.sections, previous?.sections),
         projects,
@@ -527,7 +525,7 @@ export const prepareRestoredBackupDataForSync = (
         areas: prepare(data.areas, previous?.areas),
         people: prepare(data.people ?? [], previous?.people),
         settings: {
-            ...restoredSettings,
+            ...retainTaxonomyEffects(restoredSettings, tasks.map((after) => ({ after })), projects.map((after) => ({ after }))),
             pendingRemoteWriteAt: restoredAt,
             pendingRemoteWriteRetryAt: undefined,
             pendingRemoteWriteAttempts: undefined,

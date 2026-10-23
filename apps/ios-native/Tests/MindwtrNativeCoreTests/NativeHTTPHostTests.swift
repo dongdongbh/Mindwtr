@@ -354,6 +354,57 @@ final class NativeHTTPHostTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: cache), Data([1,2,3]))
     }
 
+    private func answer(_ jobs: NativeHTTPJobs) async throws -> [String: Any] {
+        for _ in 0..<500 {
+            if let reply = try jobs.next() { if reply.body { _ = try jobs.body() }; return try object(reply.json) }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw HostFailure("HTTP answer did not arrive")
+    }
+
+    /// Core admits plain HTTP to loopback, private ranges and local names
+    /// (`isAllowedInsecureUrl` + `SYNC_LOCAL_INSECURE_URL_OPTIONS`); RN sets NSAllowsLocalNetworking.
+    func testLocalNetworkHTTPIsAdmittedLikeCoreAndRedirectsStaySameOrigin() async throws {
+        let served = HTTPFixtureState(), lan = ["192.168.1.10", "nas.local", "10.0.0.2"]
+        for name in lan + ["example.com"] {
+            HTTPFixtureProtocol.install(name) { transport in
+                served.record(transport.request)
+                guard transport.request.url?.path == "/hop" else { transport.reply(Data([7])); return }
+                // A refused redirect leaves the protocol to finish with the 3xx itself.
+                transport.redirect(URL(string: "http://10.0.0.2/x")!)
+                transport.reply(status: 302, headers: ["Location": "http://10.0.0.2/x"])
+            }
+        }
+        defer { for name in lan + ["example.com"] { HTTPFixtureProtocol.remove(name) } }
+        let faults = HostIOFaults(), config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HTTPFixtureProtocol.self]; faults.httpConfiguration = config
+        let jobs = NativeHTTPJobs(registry: NativeAttachmentLocalRequests(), faults: faults)
+        defer { jobs.shutdown() }
+        let get = { (url: String) throws -> String in try jobs.submit(self.json(["url": url, "method": "GET", "redirect": "follow", "headers": []])) }
+        for name in lan {
+            _ = try get("http://\(name)/x")
+            let value = try await answer(jobs)
+            XCTAssertEqual(value["status"] as? Int, 200, name)
+        }
+        XCTAssertThrowsError(try get("http://example.com/x"))
+        _ = try get("http://192.168.1.10/hop")
+        let redirected = try await answer(jobs)
+        XCTAssertEqual(redirected["error"] as? String, "fetch failed: unexpected redirect")
+        XCTAssertEqual(served.recorded.map { $0.url?.absoluteString ?? "" },
+                       ["http://192.168.1.10/x", "http://nas.local/x", "http://10.0.0.2/x", "http://192.168.1.10/hop"])
+        let admitted = ["http://localhost:8080/", "http://127.0.0.5/", "http://172.16.0.1/", "http://172.31.255.1/", "http://100.64.0.1/",
+                        "http://100.127.1.1/", "http://[::1]/", "http://[fd00::1]/", "http://[fe80::1]/", "http://nas/", "http://box.home.arpa/",
+                        "http://pi.localdomain/", "HTTP://NAS.LOCAL/", "https://example.com/"]
+        let refused = ["http://example.com/", "http://8.8.8.8/", "http://172.32.0.1/", "http://100.128.0.1/", "http://192.169.1.1/",
+                       "http://[2001:db8::1]/", "http://nas.example/", "http://u:p@192.168.1.10/", "ftp://192.168.1.10/", "http://300.1.1.1/",
+                       // Non-canonical IPv4 spellings that core renormalizes (010.0.0.2 is public 8.0.0.2).
+                       "http://010.0.0.2/", "http://10.0.0.02/", "http://0x7f.0.0.1/", "http://0x7f000001/", "http://2130706433/",
+                       "http://167772162/", "http://10.1/", "http://10.0.1/", "http://192.168.1.10./", "http://box.0x10/"]
+        for raw in admitted { XCTAssertTrue(NativeHTTPJobs.allowedURL(URL(string: raw)!), raw) }
+        for raw in refused { XCTAssertFalse(NativeHTTPJobs.allowedURL(URL(string: raw)!), raw) }
+        XCTAssertEqual(jobs.counters.jobs, 0)
+    }
+
     func testTwoRetainedSlotsRefuseThirdAndReleaseAfterBodyDelivery() async throws {
         let faults = faults { $0.reply(Data([6]), headers: ["Content-Length":"1"]) }
         let host = try host("""
@@ -399,8 +450,8 @@ final class NativeHTTPHostTests: XCTestCase {
     }
 
     func testRealLoopbackWireCompletionDamageRedirectEncodingAndTimeout() async throws {
-        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_HTTP_FIXTURE_URL"], let url = URL(string: raw) else { throw XCTSkip("Root-controlled loopback HTTP fixture required") }
-        let faults = HostIOFaults(); faults.httpLoopbackOrigin = url; faults.httpTimeout = 0.3
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_HTTP_FIXTURE_URL"], URL(string: raw) != nil else { throw XCTSkip("Root-controlled loopback HTTP fixture required") }
+        let faults = HostIOFaults(); faults.httpTimeout = 0.3
         faults.configureHTTPJobs = { [state] in state!.capture($0) }
         let host = try host("""
         const base=\(try literal(raw)); const a=await fetch(base+'/bytes'), empty=await fetch(base+'/empty');

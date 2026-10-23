@@ -80,6 +80,46 @@ const insertOwnedRow = (id: string, order: number) => {
 };
 
 describe('prepared Project Delete and Undo', () => {
+    it('matches RN Undo taxonomy retention from the same legacy deleted document without a catalog', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(AT));
+        const original = await open();
+        const links = collectProjectTaskLinks(ID);
+        const deletion = original.prepareDelete();
+        value(await original.host.commitPreparedProjectDelete(deletion));
+        // A document saved by the earlier native Delete has no taxonomy catalog.
+        const legacyDeleted = copy(original.data()); delete legacyDeleted.settings.taxonomy;
+        const rn = await open(legacyDeleted);
+        const before = copy(rn.data());
+        await undoProjectDelete(ID, links); await flushPendingSave();
+        const expected = copy(rn.data());
+        expect(expected.settings.taxonomy?.tags?.map(row => row.token)).toContain('#kept');
+        expect(expected.settings.taxonomy?.contexts?.map(row => row.token)).toContain('@home');
+        const native = await open(legacyDeleted);
+        expect(native.data()).toEqual(before);
+        value(await native.host.commitPreparedProjectDeleteUndo(native.prepareUndo(deletion)));
+        expect(native.data()).toEqual(expected);
+    });
+
+    it.each([1, 2] as const)('retains the v%s Undo color policy after deleting its Area and cold receipt replay', async (version) => {
+        const env = await open(initial({ projects: [project({ areaId: 'area-live', areaTitle: 'Area' })] }));
+        const deletion = env.prepareDelete();
+        value(await env.host.commitPreparedProjectDelete(deletion));
+        await useTaskStore.getState().deleteArea('area-live');
+        await flushPendingSave();
+        const envelope = env.prepareUndo(deletion);
+        expect(envelope.prepared.version).toBe(2);
+        envelope.prepared.version = version;
+        if (version === 1) envelope.prepared.effect.project.after.color = envelope.prepared.scope.project.color;
+        const frozen = copy(envelope);
+        expect(value(env.host.validatePreparedProjectDeleteUndo(frozen))).toEqual({ id: ID });
+        expect(value(await env.host.commitPreparedProjectDeleteUndo(frozen))).toEqual({ id: ID });
+        expect(env.data().projects[0].areaId).toBeUndefined();
+        expect(env.data().projects[0].color).toBe(version === 1 ? '#123456' : '#94a3b8');
+        const cold = await env.reopen();
+        expect(value(await cold.host.commitPreparedProjectDeleteUndo(frozen))).toEqual({ id: ID });
+        expect(cold.saves()).toBe(0);
+    });
+
     it('deletes an archived Project, sections and linked live Tasks, preserving content and prior tombstones', async () => {
         const env = await open(initial({ projects: [project({ status: 'archived', archivedAt: AT })] }));
         const envelope = env.prepareDelete();

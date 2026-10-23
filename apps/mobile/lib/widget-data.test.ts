@@ -146,7 +146,7 @@ describe('widget-data', () => {
         expect(sectionTitles(titleSorted, 'schedule')).toEqual(['Alpha today', 'Zebra today']);
     });
 
-    it('preserves Focus pools, saved sort direction, and widget curation', () => {
+    it('scopes Focus rows by area while preserving the global selected count and saved sort direction', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-09-22T12:00:00.000Z'));
         try {
@@ -210,27 +210,31 @@ describe('widget-data', () => {
                 maxItems: 20,
                 focusFilter: { criteria: {}, sortBy: 'title', sortOrder },
             });
+            const originalData = structuredClone(data);
 
             const ascending = projection('asc');
+            expect(ascending.focusedCount).toBe(2);
             expect(ascending.sections.map((section) => [
                 section.key,
                 section.items.map((item) => item.id),
             ])).toEqual([
-                ['focus', ['focus-visible', 'focus-hidden']],
+                ['focus', ['focus-visible']],
                 ['schedule', ['section-a-first', 'section-b-first']],
             ]);
             expect(ascending.items.map((item) => item.id)).toEqual([
-                'focus-visible', 'focus-hidden', 'section-a-first', 'section-b-first',
+                'focus-visible', 'section-a-first', 'section-b-first',
             ]);
 
             const descending = projection('desc');
+            expect(descending.focusedCount).toBe(2);
             expect(descending.sections.map((section) => [
                 section.key,
                 section.items.map((item) => item.id),
             ])).toEqual([
-                ['focus', ['focus-hidden', 'focus-visible']],
+                ['focus', ['focus-visible']],
                 ['schedule', ['section-b-first', 'section-a-first']],
             ]);
+            expect(data).toEqual(originalData);
         } finally {
             vi.useRealTimers();
         }

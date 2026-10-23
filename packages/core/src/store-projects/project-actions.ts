@@ -1,3 +1,4 @@
+import { retainProjectTaxonomy, retainTaxonomyEffects } from '../taxonomy-catalog';
 import { getAttachmentUnrecoverablePatch } from '../mobile-attachment-availability';
 import {
     applyProjectLifecycleTransition,
@@ -22,12 +23,12 @@ import { TASK_SQLITE_COLUMNS, taskToSqliteRow } from '../task-sync-schema';
 import { logInfo, logWarn } from '../logger';
 import { clearDerivedCache } from '../store-settings';
 import { generateUUID as uuidv4 } from '../uuid';
-import { DEFAULT_PROJECT_COLOR } from '../color-constants';
-import { findSelectableProjectByTitleAndArea, normalizeProjectTaskSortBy } from '../project-utils';
-import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from '../project-sync-schema';
+import { DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from '../color-constants';
+import { findSelectableProjectByTitleAndArea, normalizeProjectTaskSortBy, planProjectFlowModeChange } from '../project-utils';
+import { PROJECT_SQLITE_COLUMNS, padProjectSqliteCells, projectFromSqliteRow, projectSqliteCellsFit, projectToSqliteRow } from '../project-sync-schema';
 import { taskEditValuesEqual } from '../json-value-equality';
 import { planAttachmentLinkBatch, softDeleteAttachment } from '../attachment-editor-model';
-import type { Area, Attachment, TaskSortBy } from '../types';
+import type { Area, Attachment, ProjectFlowMode, TaskSortBy } from '../types';
 import type { Project, ProjectCoreActions, ProjectActionContext, Section, Task, TaskStatus } from './shared';
 import type { PreparedProjectArea, PreparedProjectAttachmentWrite, PreparedProjectFileAddWrite, PreparedProjectFileRemoveWrite, PreparedProjectCreate, PreparedProjectDate, PreparedProjectDelete, PreparedProjectDeleteUndo, PreparedProjectDuplicate, PreparedProjectLifecycle, PreparedProjectFlow, PreparedProjectTaskSort, PreparedProjectFocus, PreparedProjectNotesWrite, PreparedProjectTagsWrite, PreparedProjectRename, PreparedProjectStatus, PreparedTaskEditResult, PreparedTrashProjectRestore, ProjectAttachmentIntent, ProjectFileRemoveIntent, ProjectFlowAction, TaskStore } from '../store-types';
 import { projectTagsForIntent, type ProjectTagsIntent } from '../project-tags';
@@ -170,7 +171,7 @@ export const sameProjectSqliteRow = (left: Project, right: Project): boolean => 
 /** Add must not silently normalize a raw scalar cell that its frozen DTO cannot retain. */
 export const projectFileAddScalarCellsMatchWriter = (project: Project): boolean => {
     const projection = projectToSqliteRow(project), raw = rawReadRow(project, projection).row;
-    return projection.every((value, index) => projectJsonColumns.has(PROJECT_SQLITE_COLUMNS[index])
+    return isValidProjectColorOverride(project.colorOverride) && projection.every((value, index) => projectJsonColumns.has(PROJECT_SQLITE_COLUMNS[index])
         || PROJECT_SQLITE_COLUMNS[index] === 'viewSectionIds'
         || Object.is(raw[index], value));
 };
@@ -195,7 +196,7 @@ export const projectFileAddLiveRowMatches = (live: Project, saved: Project): boo
 const selectedProjectAvailabilityPlan = (before: Project, rawBefore: unknown[], attachmentId: string,
     targetURI: string, deviceIdBefore: string | null, deviceIdToInitialize: string | null,
     updateAt: string, ordinary: boolean): SelectedProjectAvailabilityWrite | null => {
-    if (before.deletedAt || before.purgedAt || rawBefore.length !== PROJECT_SQLITE_COLUMNS.length
+    if (before.deletedAt || before.purgedAt || !projectSqliteCellsFit(rawBefore, before)
         || !Number.isFinite(Date.parse(updateAt)) || new Date(updateAt).toISOString() !== updateAt
         || (deviceIdBefore === null ? !deviceIdToInitialize : deviceIdToInitialize !== null)) return null;
     const matches = before.attachments?.filter((item) => item.id === attachmentId) ?? [];
@@ -234,7 +235,7 @@ export const projectWebDavAvailabilityWritePlan = (before: Project, rawBefore: u
     const matches = before.attachments?.filter(item => item.id === attachmentId) ?? [];
     const selected = matches.length === 1 ? matches[0] : undefined;
     if (!selected || selected.kind !== 'file' || selected.deletedAt || before.deletedAt || before.purgedAt
-        || rawBefore.length !== PROJECT_SQLITE_COLUMNS.length || !targetURI) return null;
+        || !projectSqliteCellsFit(rawBefore, before) || !targetURI) return null;
     if (outcome === 'available') {
         if (selected.uri !== targetURI || selected.localStatus !== 'available') return projectFileAvailabilityWritePlan(
             before, rawBefore, attachmentId, targetURI, deviceIdBefore, deviceIdToInitialize, updateAt);
@@ -264,15 +265,18 @@ export const projectWebDavAvailabilityWritePlan = (before: Project, rawBefore: u
 
 export const sameProjectAvailabilityRawRow = (project: Project, cells: unknown[]): boolean =>
     projectFileAddScalarCellsMatchWriter(project)
-    && taskEditValuesEqual(rawReadRow(project, projectToSqliteRow(project)).row, cells);
+    && taskEditValuesEqual(rawReadRow(project, projectToSqliteRow(project)).row,
+        padProjectSqliteCells(cells) ?? cells);
 
 /** The existing RN Restore policy, also used to derive native prepared effects. */
 export const projectRestoreEffect = (scope: PreparedTrashProjectRestore['scope'], deviceId: string,
-    now: string): PreparedTrashProjectRestore['effect'] => {
+    now: string, version: 1 | 2 = 2): PreparedTrashProjectRestore['effect'] => {
     const target = scope.project;
     const restoredArea = scope.area && scope.area.id === target.areaId && !scope.area.deletedAt
         ? scope.area : undefined;
     const restoredProject: Project = { ...target, deletedAt: undefined,
+        ...(version === 2 && target.areaId && !restoredArea
+            ? { color: target.colorOverride ?? DEFAULT_PROJECT_COLOR } : {}),
         areaId: restoredArea ? target.areaId : undefined,
         areaTitle: restoredArea
             ? (typeof target.areaTitle === 'string' && target.areaTitle.trim().length > 0
@@ -310,11 +314,11 @@ export const projectDeleteEffect = (scope: PreparedProjectDelete['scope'], devic
 
 /** RN Undo eligibility applied to current rows after the shared Project restore projection. */
 export const projectDeleteUndoEffect = (scope: PreparedProjectDeleteUndo['scope'],
-    links: readonly DetachedProjectTask[], deviceId: string, now: string): PreparedProjectDeleteUndo['effect'] => {
+    links: readonly DetachedProjectTask[], deviceId: string, now: string, version: 1 | 2 = 2): PreparedProjectDeleteUndo['effect'] => {
     // RN restores children owned by the Project, while the prepared witness also
     // tracks inconsistent section-only rows for the mutation-boundary CAS.
     const restored = projectRestoreEffect({ ...scope,
-        tasks: scope.tasks.filter((row) => row.projectId === scope.project.id) }, deviceId, now);
+        tasks: scope.tasks.filter((row) => row.projectId === scope.project.id) }, deviceId, now, version);
     const restoredSections = replaceEntitiesInArray(scope.sections, restored.sections.map((row) => row.after));
     const restoredTasks = replaceEntitiesInArray(scope.tasks, restored.tasks.map((row) => row.after));
     const candidates = scope.linkedTasks.flatMap(({ row }) => row ? [row] : []);
@@ -398,8 +402,11 @@ export const projectRenameEffect = (project: Project, title: string, deviceId: s
 export const projectFlowEffect = (project: Project, action: ProjectFlowAction, deviceId: string,
     now: string): PreparedProjectFlow['effect'] | null => {
     if (action.kind === 'setScope' && (!project.isSequential || project.sequentialScope === action.scope)) return null;
+    // A native toggle leaves Per section (#1429) the way the desktop/RN picker does:
+    // perSectionFlow is written false, so turning Sequential off later lands on Parallel.
     const patch: Partial<Project> = action.kind === 'toggleType'
-        ? { isSequential: !project.isSequential } : { sequentialScope: action.scope };
+        ? { isSequential: !project.isSequential, ...(project.perSectionFlow === true ? { perSectionFlow: false } : {}) }
+        : { sequentialScope: action.scope };
     const transition = applyProjectLifecycleTransition(project, patch, [], [], now, deviceId);
     return { project: { before: project, after: normalizeProjectLifecycleFields({
         ...project, ...transition.projectUpdates,
@@ -572,15 +579,23 @@ export const projectAreaSelection = (project: Project, updates: Partial<Project>
     const metadataChanged = selected && (changed || areaTitle !== project.areaTitle);
     const order = changed && !Number.isFinite(updates.order)
         ? projectAreaOrderMax(projects, areaId ?? null) + 1 : updates.order;
-    return { selected, metadataChanged, fields: selected ? { areaId, areaTitle } : {}, order };
+    const overrideSelected = Object.prototype.hasOwnProperty.call(updates, 'colorOverride');
+    const colorOverride = overrideSelected ? updates.colorOverride : project.colorOverride;
+    const color = colorOverride ?? (areaId ? areas.find((area) => area.id === areaId && !area.deletedAt)?.color : undefined) ?? DEFAULT_PROJECT_COLOR;
+    return { selected, metadataChanged, fields: {
+        ...(selected ? { areaId, areaTitle } : {}),
+        ...(selected || overrideSelected ? { color } : {}),
+    }, order };
 };
 
 /** The same Area/title/order transition as RN updateProject, with one Project row only. */
 export const projectAreaEffect = (project: Project, areaId: string | null,
     projects: readonly Project[], areas: readonly Area[], deviceId: string,
-    now: string): PreparedProjectArea['effect'] => {
-    const area = projectAreaSelection(project, { areaId: areaId ?? undefined }, projects, areas);
-    const patch = { ...area.fields, ...(Number.isFinite(area.order) ? { order: area.order } : {}) };
+    now: string, colorUpdate?: Pick<Project, 'colorOverride'>, version: 1 | 2 = 2): PreparedProjectArea['effect'] => {
+    const area = projectAreaSelection(project, { areaId: areaId ?? undefined, ...colorUpdate }, projects, areas);
+    const patch: Partial<Project> = { ...area.fields, ...colorUpdate, ...(Number.isFinite(area.order) ? { order: area.order } : {}) };
+    // Retained v1 journals predate compatibility-color refresh and must re-plan byte-for-byte.
+    if (version === 1) delete patch.color;
     const transition = applyProjectLifecycleTransition(project, patch, [], [], now, deviceId);
     return { project: { before: project, after: normalizeProjectLifecycleFields({
         ...project, ...transition.projectUpdates,
@@ -614,7 +629,8 @@ export const buildNewProject = ({
     const baseProject: Project = {
         id: id ?? uuidv4(),
         title: trimmedTitle,
-        color: color ?? DEFAULT_PROJECT_COLOR,
+        color: initialProps?.colorOverride ?? (targetAreaId
+            ? existingAreas.find((area) => area.id === targetAreaId && !area.deletedAt)?.color : undefined) ?? initialProps?.color ?? color ?? DEFAULT_PROJECT_COLOR,
         order: baseOrder,
         status: 'active',
         rev: 1,
@@ -631,6 +647,7 @@ export const buildNewProject = ({
     const project: Project = {
         ...baseProject,
         ...initialProps,
+        color: baseProject.color,
         tagIds: initialProps?.tagIds ?? [],
     };
     // Normalize the initial props as an update to the defaults, so entering a
@@ -678,7 +695,7 @@ const commitProjectAvailabilityWrite = async (input: SelectedProjectAvailability
             || (state.settings.deviceId ?? null) !== input.deviceIdBefore) return state;
         const after = { ...planned.after };
         rememberRawReadRow(after, Object.fromEntries(PROJECT_SQLITE_COLUMNS.map((column, index) =>
-            [column, planned.rawAfter[index]])), PROJECT_SQLITE_COLUMNS, projectToSqliteRow(after));
+            [column, index < planned.rawAfter.length ? planned.rawAfter[index] : null])), PROJECT_SQLITE_COLUMNS, projectToSqliteRow(after));
         const projects = replaceEntitiesInArray(durable.projects, [after]);
         const settings = input.deviceIdToInitialize
             ? { ...durable.settings, deviceId: input.deviceIdToInitialize } : durable.settings;
@@ -696,6 +713,33 @@ const commitProjectAvailabilityWrite = async (input: SelectedProjectAvailability
 };
 
 
+/** Existing permanent-project row policy; attachment cleanup remains a separate guarded settings effect. */
+export const projectPurgeEffect = (project: Project, tasks: readonly Task[], sections: readonly Section[],
+    deviceId: string, now: string) => {
+    const sectionIds = new Set(sections.filter((row) => row.projectId === project.id).map((row) => row.id));
+    return {
+        project: { before: project, after: compactPurgedProjectForLocalStorage({ ...project,
+            deletedAt: project.deletedAt ?? now, purgedAt: now, updatedAt: now,
+            rev: nextRevision(project.rev), revBy: deviceId }) },
+        sections: sections.filter((row) => sectionIds.has(row.id)).map((before) => ({ before,
+            after: compactPurgedProjectSectionTombstone({ ...before, deletedAt: now, updatedAt: now,
+                rev: nextRevision(before.rev), revBy: deviceId }, now) })),
+        tasks: tasks.filter((row) => !row.deletedAt && (row.projectId === project.id
+            || Boolean(row.sectionId && sectionIds.has(row.sectionId)))).map((before) => ({ before,
+            after: { ...before, projectId: undefined, sectionId: undefined, updatedAt: now,
+                rev: nextRevision(before.rev), revBy: deviceId } })),
+    };
+};
+
+/**
+ * Release check for #1429: proves a Flow mode write (project mode, or one
+ * section's choice) reached durable storage. No titles or identifiers.
+ */
+export const logProjectFlowModeSaved = (mode: string, sectionDefaults: number): void => {
+    logInfo('Project flow mode saved', { scope: 'store', category: 'storage',
+        context: { releaseCheck: 'v1.3.7/section-flow-mode', mode, sectionDefaults } });
+};
+
 export const createProjectCoreActions = ({
     set,
     get,
@@ -704,6 +748,10 @@ export const createProjectCoreActions = ({
     getSaveGeneration,
 }: ProjectActionContext): ProjectCoreActions => ({
     addProject: async (title: string, color: string, initialProps?: Partial<Project>) => {
+        if (!isValidProjectColorOverride(initialProps?.colorOverride)) {
+            set({ error: 'Project color must be a six-digit hex color' });
+            return null;
+        }
         const changeAt = Date.now();
         const trimmedTitle = typeof title === 'string' ? title.trim() : '';
         if (!trimmedTitle) {
@@ -742,14 +790,15 @@ export const createProjectCoreActions = ({
             });
             createdProject = newProject;
             const newAllProjects = [...state._allProjects, newProject];
+            const settings = retainProjectTaxonomy(deviceState.settings, undefined, newProject);
             persist(set, debouncedSave, state, {
                 projects: newAllProjects,
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             });
             return {
                 _allProjects: newAllProjects,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             };
         });
         if (existingProject) {
@@ -782,8 +831,8 @@ export const createProjectCoreActions = ({
             if (max !== input.orderMax
                 || findSelectableProjectByTitleAndArea(state._allProjects, input.project.title, area?.id)) return state;
             const projects = [...state._allProjects, input.project];
-            const settings = input.deviceIdToInitialize
-                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            const settings = retainProjectTaxonomy(input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings, undefined, input.project);
             persist(set, debouncedSave, state, { projects,
                 ...(settings !== state.settings ? { settings } : {}) });
             result = { success: true, id: input.project.id, outcome: 'applied' };
@@ -961,8 +1010,8 @@ export const createProjectCoreActions = ({
                 input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
             if (!planned || !taskEditValuesEqual(planned, input.effect)) return state;
             const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
-            const settings = input.deviceIdToInitialize
-                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            const settings = retainProjectTaxonomy(input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings, current, planned.project.after);
             persist(set, debouncedSave, state, { projects,
                 ...(settings !== state.settings ? { settings } : {}) });
             result = { success: true, id: current.id, outcome: 'applied' };
@@ -1171,12 +1220,16 @@ export const createProjectCoreActions = ({
                 || !sameProjectSqliteRow(current, input.scope.project)) return state;
             const selected = input.scope.selectedArea;
             const area = selected ? state._areasById.get(selected.id) : null;
-            if (selected && (!area || area.deletedAt || area.name !== selected.name)) return state;
+            if (selected && (!area || area.deletedAt || area.name !== selected.name
+                || input.version === 2 && (area.color ?? null) !== selected.color)) return state;
             if (projectAreaOrderMax(state._allProjects, input.request.areaId) !== input.scope.orderMax) return state;
             if ((current.areaId ?? null) === input.request.areaId
-                && (current.areaTitle ?? null) === (selected?.name.trim() || null)) return state;
+                && (current.areaTitle ?? null) === (selected?.name.trim() || null)
+                && (!Object.prototype.hasOwnProperty.call(input.request, 'colorOverride') || (current.colorOverride ?? null) === input.request.colorOverride
+                    && (input.request.colorOverride !== null || Boolean(current.areaId) || current.color === DEFAULT_PROJECT_COLOR || current.color === '#6B7280'))) return state;
             const planned = projectAreaEffect(current, input.request.areaId, state._allProjects,
-                state._allAreas, input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+                state._allAreas, input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt,
+                Object.prototype.hasOwnProperty.call(input.request, 'colorOverride') ? { colorOverride: input.request.colorOverride } : undefined, input.version ?? 1);
             if (!taskEditValuesEqual(planned, input.effect)) return state;
             const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
             const settings = input.deviceIdToInitialize
@@ -1188,6 +1241,61 @@ export const createProjectCoreActions = ({
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
         });
         return result;
+    },
+
+    setProjectFlowMode: async (id: string, mode: ProjectFlowMode) => {
+        const changeAt = Date.now();
+        const now = new Date().toISOString();
+        let outcome: 'missing' | 'unchanged' | 'saved' = 'missing';
+        let sectionDefaults = 0;
+        set((state) => {
+            const project = state._projectsById.get(id);
+            if (!project || project.deletedAt) return state;
+            const plan = planProjectFlowModeChange(project, state._allSections, mode);
+            if (!plan) {
+                outcome = 'unchanged';
+                return state;
+            }
+            const deviceState = ensureDeviceId(state.settings);
+            const deviceId = deviceState.deviceId;
+            const transition = applyProjectLifecycleTransition(project, plan.project, [], [], now, deviceId);
+            const nextProject = normalizeProjectLifecycleFields({
+                ...project, ...transition.projectUpdates,
+                updatedAt: now, rev: nextRevision(project.rev), revBy: deviceId,
+            });
+            const choiceById = new Map(plan.sections.map((entry) => [entry.id, entry.isSequential]));
+            const changedSections = state._allSections
+                .filter((section) => choiceById.has(section.id))
+                .map((section) => ({ ...section, isSequential: choiceById.get(section.id),
+                    updatedAt: now, rev: nextRevision(section.rev), revBy: deviceId }));
+            sectionDefaults = changedSections.length;
+            const newAllProjects = replaceEntitiesInArray(state._allProjects, [nextProject]);
+            const newAllSections = changedSections.length > 0
+                ? replaceEntitiesInArray(state._allSections, changedSections)
+                : state._allSections;
+            persist(set, debouncedSave, state, {
+                projects: newAllProjects,
+                sections: newAllSections,
+                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+            });
+            outcome = 'saved';
+            return {
+                _allProjects: newAllProjects,
+                _allSections: newAllSections,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
+                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+            };
+        });
+        if (outcome === 'missing') {
+            const message = 'Project not found';
+            set({ error: message });
+            return actionFail(message);
+        }
+        if (outcome === 'saved') {
+            await flushPendingSave();
+            logProjectFlowModeSaved(mode, sectionDefaults);
+        }
+        return actionOk();
     },
 
     cancelProject: async (id: string) => {
@@ -1309,6 +1417,11 @@ export const createProjectCoreActions = ({
     },
 
     updateProject: async (id: string, updates: Partial<Project>) => {
+        if (!isValidProjectColorOverride(updates.colorOverride)) {
+            const message = 'Project color must be a six-digit hex color';
+            set({ error: message });
+            return actionFail(message);
+        }
         const changeAt = Date.now();
         const now = new Date().toISOString();
         let missingProject = false;
@@ -1360,9 +1473,14 @@ export const createProjectCoreActions = ({
                     : {}),
             };
 
+            let settings = deviceState.settings;
+            const retainUpdatedProject = (after: Project) => {
+                settings = retainProjectTaxonomy(settings, oldProject, after);
+                return after;
+            };
             const newAllProjects = allProjects.map(project =>
                 project.id === id
-                    ? {
+                    ? retainUpdatedProject({
                         ...normalizeProjectLifecycleFields({
                             ...project,
                             ...finalProjectUpdates,
@@ -1370,7 +1488,7 @@ export const createProjectCoreActions = ({
                             rev: nextRevision(project.rev),
                             revBy: deviceState.deviceId,
                         }),
-                    }
+                    })
                     : project
             );
 
@@ -1378,14 +1496,14 @@ export const createProjectCoreActions = ({
                 tasks: newAllTasks,
                 projects: newAllProjects,
                 sections: newAllSections,
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             });
             return {
                 _allProjects: newAllProjects,
                 _allTasks: newAllTasks,
                 _allSections: newAllSections,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             };
         });
 
@@ -1404,6 +1522,11 @@ export const createProjectCoreActions = ({
                 scope: 'store', category: 'storage',
                 context: { releaseCheck: 'v1.3.3/rn-project-area-selection-metadata' },
             });
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, 'colorOverride')) {
+            await flushPendingSave();
+            logInfo('Project color saved', { scope: 'store', category: 'storage',
+                context: { releaseCheck: 'v1.3.7/project-color', mode: updates.colorOverride ? 'override' : 'area' } });
         }
 
         return actionOk();
@@ -1430,18 +1553,19 @@ export const createProjectCoreActions = ({
             const newAllSections = replaceEntitiesInArray(state._allSections, effect.sections.map((row) => row.after));
             const newAllTasks = replaceEntitiesInArray(state._allTasks, effect.tasks.map((row) => row.after));
             clearDerivedCache();
+            const settings = retainTaxonomyEffects(deviceState.settings, effect.tasks, [effect.project]);
             persist(set, debouncedSave, state, {
                 tasks: newAllTasks,
                 projects: newAllProjects,
                 sections: newAllSections,
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             });
             return {
                 _allProjects: newAllProjects,
                 _allTasks: newAllTasks,
                 _allSections: newAllSections,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             };
         });
         if (missingProject) {
@@ -1490,8 +1614,9 @@ export const createProjectCoreActions = ({
             const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
             const nextTasks = replaceEntitiesInArray(state._allTasks, planned.tasks.map((row) => row.after));
             const nextSections = replaceEntitiesInArray(state._allSections, planned.sections.map((row) => row.after));
-            const settings = input.deviceIdToInitialize
-                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            const settings = retainTaxonomyEffects(input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings,
+                planned.tasks, [planned.project]);
             clearDerivedCache();
             persist(set, debouncedSave, state, { projects, tasks: nextTasks, sections: nextSections,
                 ...(settings !== state.settings ? { settings } : {}) });
@@ -1513,7 +1638,7 @@ export const createProjectCoreActions = ({
             const { tasks, sections } = projectDeleteScopeRows(state, current.id);
             const area = state._allAreas.find((row) => row.id === input.scope.project.areaId) ?? null;
             const planned = projectDeleteUndoEffect(input.scope, links,
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, input.version ?? 1);
             if (!taskEditValuesEqual(planned, input.effect)) return state;
             const expectedTasks = afterRows(input.scope.tasks, planned.tasks);
             for (const row of planned.tasks) {
@@ -1545,8 +1670,9 @@ export const createProjectCoreActions = ({
             const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
             const nextTasks = replaceEntitiesInArray(state._allTasks, planned.tasks.map((row) => row.after));
             const nextSections = replaceEntitiesInArray(state._allSections, planned.sections.map((row) => row.after));
-            const settings = input.deviceIdToInitialize
-                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            const settings = retainTaxonomyEffects(input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings,
+                planned.tasks, [planned.project]);
             clearDerivedCache();
             persist(set, debouncedSave, state, { projects, tasks: nextTasks, sections: nextSections,
                 ...(settings !== state.settings ? { settings } : {}) });
@@ -1584,18 +1710,19 @@ export const createProjectCoreActions = ({
             const newAllSections = replaceEntitiesInArray(state._allSections, effect.sections.map((row) => row.after));
             const newAllTasks = replaceEntitiesInArray(state._allTasks, effect.tasks.map((row) => row.after));
             clearDerivedCache();
+            const settings = retainTaxonomyEffects(deviceState.settings, effect.tasks, [effect.project]);
             persist(set, debouncedSave, state, {
                 tasks: newAllTasks,
                 projects: newAllProjects,
                 sections: newAllSections,
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             });
             return {
                 _allProjects: newAllProjects,
                 _allSections: newAllSections,
                 _allTasks: newAllTasks,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             };
         });
         return missingProject ? actionFail('Project not found') : actionOk();
@@ -1611,7 +1738,7 @@ export const createProjectCoreActions = ({
             const sections = state._allSections.filter((row) => row.projectId === current.id);
             const area = state._allAreas.find((row) => row.id === input.scope.project.areaId) ?? null;
             const planned = projectRestoreEffect(input.scope,
-                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt, input.version ?? 1);
             if (!taskEditValuesEqual(planned, input.effect)) return state;
             const expectedAfterTasks = input.scope.tasks.map((row) =>
                 planned.tasks.find((pair) => pair.before.id === row.id)?.after ?? row);
@@ -1667,50 +1794,15 @@ export const createProjectCoreActions = ({
                 return state;
             }
             const deviceState = ensureDeviceId(state.settings);
-            const sectionIdsForProject = new Set(
-                state._allSections
-                    .filter((section) => section.projectId === id)
-                    .map((section) => section.id)
-            );
             const nextSettings = settingsWithPurgedParentAttachmentDeletes(deviceState.settings,
                 state._allTasks, state._allProjects, new Set(), new Set([id]));
             const settingsChanged = deviceState.updated || nextSettings !== deviceState.settings;
-
-            const newAllProjects = state._allProjects.map((project) =>
-                project.id === id
-                    ? compactPurgedProjectForLocalStorage({
-                        ...project,
-                        deletedAt: project.deletedAt ?? now,
-                        purgedAt: now,
-                        updatedAt: now,
-                        rev: nextRevision(project.rev),
-                        revBy: deviceState.deviceId,
-                    })
-                    : project
-            );
-            const newAllSections = state._allSections.map((section) =>
-                sectionIdsForProject.has(section.id)
-                    ? compactPurgedProjectSectionTombstone({
-                        ...section,
-                        deletedAt: now,
-                        updatedAt: now,
-                        rev: nextRevision(section.rev),
-                        revBy: deviceState.deviceId,
-                    }, now)
-                    : section
-            );
-            const newAllTasks = state._allTasks.map(task =>
-                !task.deletedAt && (task.projectId === id || (task.sectionId && sectionIdsForProject.has(task.sectionId)))
-                    ? {
-                        ...task,
-                        projectId: undefined,
-                        sectionId: undefined,
-                        updatedAt: now,
-                        rev: nextRevision(task.rev),
-                        revBy: deviceState.deviceId,
-                    }
-                    : task
-            );
+            const effect = projectPurgeEffect(target, state._allTasks, state._allSections, deviceState.deviceId, now);
+            const taskAfter = new Map(effect.tasks.map((pair) => [pair.before.id, pair.after]));
+            const sectionAfter = new Map(effect.sections.map((pair) => [pair.before.id, pair.after]));
+            const newAllProjects = state._allProjects.map((row) => row.id === id ? effect.project.after : row);
+            const newAllSections = state._allSections.map((row) => sectionAfter.get(row.id) ?? row);
+            const newAllTasks = state._allTasks.map((row) => taskAfter.get(row.id) ?? row);
             clearDerivedCache();
             persist(set, debouncedSave, state, {
                 tasks: newAllTasks,
@@ -1858,8 +1950,8 @@ export const createProjectCoreActions = ({
             const projects = [...state._allProjects, created.project];
             const nextSections = [...state._allSections, ...created.sections];
             const nextTasks = [...state._allTasks, ...created.tasks];
-            const settings = input.deviceIdToInitialize
-                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            const settings = retainTaxonomyEffects(input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings, created.tasks.map((after) => ({ after })), [{ after: created.project }]);
             clearDerivedCache();
             persist(set, debouncedSave, state, { projects, sections: nextSections, tasks: nextTasks,
                 ...(settings !== state.settings ? { settings } : {}) });
@@ -1890,18 +1982,19 @@ export const createProjectCoreActions = ({
             const newAllProjects = [...state._allProjects, effect.project];
             const newAllSections = [...state._allSections, ...effect.sections];
             const newAllTasks = [...state._allTasks, ...effect.tasks];
+            const settings = retainTaxonomyEffects(deviceState.settings, effect.tasks.map((after) => ({ after })), [{ after: effect.project }]);
             persist(set, debouncedSave, state, {
                 tasks: newAllTasks,
                 projects: newAllProjects,
                 sections: newAllSections,
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             });
             return {
                 _allProjects: newAllProjects,
                 _allSections: newAllSections,
                 _allTasks: newAllTasks,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                settings,
             };
         });
         return createdProject;
