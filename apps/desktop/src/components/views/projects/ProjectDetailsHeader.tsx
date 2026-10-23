@@ -192,7 +192,7 @@ export function ProjectDetailsHeader({
                 <div className="project-details-header__titleGroup flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex min-w-0 items-start gap-2">
                         <span
-                            className="sr-only"
+                            className="mt-[1.1rem] h-3 w-3 flex-none rounded-full border border-border"
                             style={{ backgroundColor: projectColor }}
                             aria-hidden="true"
                         />
@@ -236,11 +236,10 @@ export function ProjectDetailsHeader({
                         onClick={onToggleDetails}
                         aria-expanded={detailsExpanded}
                         aria-controls="project-details-fields"
-                        aria-label={detailsLabel}
-                        title={detailsLabel}
-                        className={`inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${detailsExpanded ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}`}
+                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${detailsExpanded ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}`}
                     >
-                        <SlidersHorizontal className="h-5 w-5" aria-hidden="true" />
+                        <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+                        {detailsLabel}
                     </button>
                     <div ref={menuRef} className="relative">
                         <button

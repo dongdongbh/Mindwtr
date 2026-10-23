@@ -1804,7 +1804,6 @@ export function ProjectWorkspace({
                                     {tFallback(t, 'common.loading', 'Loading...')}
                                 </div>
                             )}
-                            <div className="mb-5 text-xs text-muted-foreground">{t('projects.title')} <span aria-hidden="true" className="mx-2">/</span> {selectedProject.title}</div>
                             <ProjectDetailsHeader
                                 primaryAction={projectAddTaskButton}
                                 project={selectedProject}
