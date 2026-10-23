@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runStoreCommand, useTaskStore, type Task } from '@mindwtr/core';
+import { logInfo, runStoreCommand, useTaskStore, type Task } from '@mindwtr/core';
 
 import {
     DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY,
@@ -19,6 +19,7 @@ const flush = vi.hoisted(() => ({ impl: async () => undefined as void }));
 vi.mock('@mindwtr/core', async (importOriginal) => ({
     ...await importOriginal<typeof import('@mindwtr/core')>(),
     flushPendingSave: () => flush.impl(),
+    logInfo: vi.fn(),
 }));
 
 const NOW_ISO = new Date().toISOString();
@@ -186,6 +187,40 @@ describe('pomodoro store', () => {
         release();
         for (let i = 0; i < 50; i += 1) await Promise.resolve();
         expect(useTaskStore.getState().tasks[0].timeSpentMinutes).toBe(55);
+    });
+
+    it('stores a credit chained from a moved one at its moved time, so a quit before its save credits it once', async () => {
+        useTaskStore.setState({
+            tasks: [task({ timeSpentMinutes: 12 })],
+            _allTasks: [task({ timeSpentMinutes: 12 })],
+            updateTask: async (id: string, patch: Partial<Task>) => {
+                const current = useTaskStore.getState().tasks;
+                useTaskStore.setState({ tasks: current.map((row) => (row.id === id ? { ...row, ...patch } : row)) } as never);
+            },
+        } as never);
+        // A stored credit (5 to 30) was overtaken: the task is at 12. A focus that ended while closed (B) chains from it.
+        window.localStorage.setItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY, JSON.stringify({
+            durations: { focusMinutes: 25, breakMinutes: 5 },
+            timerState: { phase: 'focus', remainingSeconds: 5, isRunning: true, completedFocusSessions: 1 },
+            selectedTaskId: 'task-1',
+            updatedAtMs: Date.now() - 10_000,
+            sessionHistory: { totalCompletedFocusSessions: 1, completedFocusSessionsByTaskId: { 'task-1': 1 } },
+            pendingCredits: [{ taskId: 'task-1', from: 5, to: 30 }],
+        }));
+        usePomodoroStore.getState().hydratePomodoro({});
+        // Another session (C) finishes before B settles, so it chains from B.
+        usePomodoroStore.getState().commitPomodoro((prev) => ({ ...prev, sessionHistory: { ...prev.sessionHistory,
+            totalCompletedFocusSessions: prev.sessionHistory.totalCompletedFocusSessions + 1,
+            completedFocusSessionsByTaskId: { 'task-1': (prev.sessionHistory.completedFocusSessionsByTaskId['task-1'] ?? 0) + 1 } } }));
+        // B lands and leaves the session; the app quits before C is given.
+        await vi.waitFor(() => expect(JSON.parse(window.localStorage.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY)!).pendingCredits)
+            .toEqual([{ taskId: 'task-1', from: 37, to: 62 }]));
+        expect(useTaskStore.getState().tasks[0].timeSpentMinutes).toBe(37);
+        expect(logInfo).toHaveBeenCalledWith('Pomodoro credit moved onto the task time', {
+            scope: 'pomodoro', context: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' } });
+        const updates: Array<{ id: string; patch: Partial<Task> }> = [];
+        restart(37, updates);
+        await vi.waitFor(() => expect(updates).toEqual([{ id: 'task-1', patch: { timeSpentMinutes: 62 } }]));
     });
 
     it('stores a credit moved by a sync save before giving it, so a quit then credits it once', async () => {

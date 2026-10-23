@@ -6,6 +6,7 @@ import {
     createPomodoroState,
     DEFAULT_POMODORO_DURATIONS,
     flushPendingSave,
+    logInfo,
     logWarn,
     recordPomodoroFocusSessions,
     resetPomodoroState,
@@ -266,11 +267,25 @@ const settleCredits = (): Promise<void> => {
                 let to = credit.to;
                 if (time !== credit.from) {
                     if (loadedCredits.has(credit) || writtenCredits.has(credit)) return 'gone';
+                    let chainTo = credit.to;
                     to = addTimeSpentMinutes(time, credit.to - (credit.from ?? 0)) ?? credit.to;
                     credit.from = time;
                     credit.to = to;
+                    // Later credits chained from this one move with it, so each is stored at the time it will find.
+                    const pending = usePomodoroStore.getState().snapshot.pendingCredits ?? [];
+                    let movedTo = to;
+                    for (const later of pending.slice(pending.indexOf(credit) + 1)) {
+                        if (later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
+                        chainTo = later.to;
+                        later.to = addTimeSpentMinutes(movedTo, later.to - later.from) ?? later.to;
+                        later.from = movedTo;
+                        movedTo = later.to;
+                    }
                     // The moved pair is stored before the task changes: a quit before its save then finds the task at `from`.
                     if (!saveStoredPomodoroSnapshot(usePomodoroStore.getState().snapshot)) return null;
+                    void logInfo('Pomodoro credit moved onto the task time', {
+                        scope: 'pomodoro', context: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' },
+                    });
                 }
                 await updateTask(credit.taskId, { timeSpentMinutes: to });
                 writtenCredits.add(credit);
