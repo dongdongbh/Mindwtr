@@ -77,7 +77,7 @@ describe('native Getting Started: one transaction for the seed and its receipt',
         });
         await useTaskStore.getState().addProject('Other', '#3b82f6');
         const other = useTaskStore.getState().projects.find((project) => project.title === 'Other')!;
-        expect(value(env.host.getProjectDetail({ projectId: other.id, offset: 0, limit: 5 })).gettingStarted).toBeNull();
+        expect(value(env.host.getProjectDetail({ projectId: other.id, offset: 0, limit: 5 })).gettingStarted).toBeUndefined();
     });
 
     it('a request that landed replays its first reply and writes nothing, even after the seed copy changed', async () => {

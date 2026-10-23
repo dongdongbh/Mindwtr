@@ -601,8 +601,8 @@ export type NativeProjectDetail = {
     projectRevision: string;
     readOnly: boolean;
     metadata: ProjectDetailsMetadata;
-    /** RN's GettingStartedActions over a Getting Started project's list (isGettingStartedProject), else null. */
-    gettingStarted: NativeGettingStartedActions | null;
+    /** RN's GettingStartedActions over a Getting Started project's list (isGettingStartedProject); absent on other projects. */
+    gettingStarted?: NativeGettingStartedActions;
     total: number;
     items: NativeProjectDetailItem[];
 };
@@ -1443,7 +1443,8 @@ export function createNativeHostContract(options: {
                 projectRevision: revisionOf(savedProject),
                 readOnly: detail.readOnly,
                 metadata: detail.metadata,
-                gettingStarted: detail.gettingStarted,
+                // Only on a Getting Started project: every other detail keeps the shape iOS and older readers know.
+                ...(detail.gettingStarted ? { gettingStarted: detail.gettingStarted } : {}),
                 total: detail.items.length,
                 items: detail.items.slice(offset, offset + limit).map((item): NativeProjectDetailItem => (
                     item.type === 'section'
