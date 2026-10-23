@@ -115,7 +115,9 @@ try {
     const row = nodes.find((node) => node.text === en['starter.sampleBuyMilk']) ?? nodes.find((node) => (node['resource-id'] ?? '').endsWith('task-row'));
     nodes = await tapExpecting(row ?? fail('no sample Inbox item'), (current) => current.some((node) => /(^|\/)task-editor$/.test(node['resource-id'] ?? '')), 'the editor');
     const helpLabel = `${en['onboarding.help']}: ${en['taskEdit.scheduling']}`;
-    for (let step = 0; step < 6 && !withDescription(nodes, en['taskEdit.scheduling']); step += 1) {
+    // Scroll until the Scheduling heading sits clear of the bottom edge (the gesture bar takes taps there).
+    const clear = (current) => { const heading = withDescription(current, en['taskEdit.scheduling']); return heading && centerY(heading) < 1700; };
+    for (let step = 0; step < 8 && !clear(nodes); step += 1) {
         sh('input swipe 540 1700 540 1100 400');
         await sleep(700);
         nodes = await screen();
