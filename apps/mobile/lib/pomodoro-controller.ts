@@ -122,6 +122,8 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
   let pendingCredits: PomodoroCredit[] = [];
   /** The owed credits a load found (the app stopped between the two writes): the diagnostics log says how each settled. */
   let loadedCredits = new Set<PomodoroCredit>();
+  /** The credits this run gave to their task: one found at another time later was changed since, which wins. */
+  const writtenCredits = new WeakSet<PomodoroCredit>();
   const listeners = new Set<() => void>();
 
   const emit = () => listeners.forEach((listener) => listener());
@@ -146,6 +148,12 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
     }
   };
 
+  const payloadOf = (credits: PomodoroCredit[]): StoredPomodoroSession & { pendingCredits?: PomodoroCredit[] } => ({
+    ...serializePomodoroSession(state),
+    updatedAtMs: state.updatedAtMs,
+    ...(credits.length > 0 ? { pendingCredits: credits } : {}),
+  });
+
   /** Each stored credit given to its task in order; the settled ones leave the session. Answers whether any settled. */
   const settleCredits = async (credits: PomodoroCredit[]): Promise<boolean> => {
     let settled = 0;
@@ -156,9 +164,34 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
         if (!task) return 'already-applied';
         // Already at `to`: written by this run (its save may have failed) or before a restart; only its save is awaited.
         if (task.timeSpentMinutes === credit.to && credit.to !== credit.from) return 'written';
-        if (task.timeSpentMinutes !== credit.from) return 'already-applied';
+        if (task.timeSpentMinutes !== credit.from) {
+          // A stored credit at another time was taken before the stop or changed since, which wins. One this run queued
+          // and never wrote moves onto the task's time (a sync save, or an earlier credit it chained from was overtaken).
+          if (loadedCredits.has(credit) || writtenCredits.has(credit)) return 'already-applied';
+          const from = task.timeSpentMinutes;
+          let chainTo = credit.to;
+          credit.to = addTimeSpentMinutes(from, credit.to - (credit.from ?? 0)) ?? credit.to;
+          if (from === undefined) delete credit.from; else credit.from = from;
+          // Later credits chained from this one move with it, so each is stored at the time it will find.
+          let movedTo = credit.to;
+          for (const later of pendingCredits.slice(pendingCredits.indexOf(credit) + 1)) {
+            if (later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
+            chainTo = later.to;
+            later.to = addTimeSpentMinutes(movedTo, later.to - later.from) ?? later.to;
+            later.from = movedTo;
+            movedTo = later.to;
+          }
+          // The moved pair is stored before the task changes: a stop before its save then finds the task at `from`.
+          if (!await storage.setItem(POMODORO_SESSION_STORAGE_KEY, JSON.stringify(payloadOf(pendingCredits))).then(() => true, () => false)) return null;
+          void logInfo('Pomodoro credit moved onto the task time', {
+            scope: 'pomodoro',
+            extra: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' },
+          });
+        }
         const result = await getTaskStore().updateTask(credit.taskId, { timeSpentMinutes: credit.to }).catch(() => ({ success: false }));
-        return (result as { success?: boolean } | undefined)?.success === false ? null : 'applied';
+        if ((result as { success?: boolean } | undefined)?.success === false) return null;
+        writtenCredits.add(credit);
+        return 'applied';
       });
       if (!outcome) break;
       // updateTask answers from memory and saves later: the credit leaves the session only once its time is on disk, so a
@@ -187,11 +220,7 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
 
   const persist = () => {
     const credits = pendingCredits.slice();
-    const payload: StoredPomodoroSession & { pendingCredits?: PomodoroCredit[] } = {
-      ...serializePomodoroSession(state),
-      updatedAtMs: state.updatedAtMs,
-      ...(credits.length > 0 ? { pendingCredits: credits } : {}),
-    };
+    const payload = payloadOf(credits);
     persistenceQueue = persistenceQueue
       .catch(() => undefined)
       .then(() => storage.setItem(POMODORO_SESSION_STORAGE_KEY, JSON.stringify(payload)))

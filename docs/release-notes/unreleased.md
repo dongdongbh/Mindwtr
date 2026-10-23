@@ -16,3 +16,4 @@ Changes collected since the latest stable release.
 - iOS: sync reads a large library's data from the server faster, so a change made right before leaving the app uploads sooner in the background (#1434).
 - Desktop: paste an image into a task description and it is saved as an attachment and shown in the description, as the web app already did (#1403).
 - iOS: when the new iOS app takes over a Pomodoro session from an older version that had not yet saved a finished focus session's time to its task, it now gives the task that time once. Before, the takeover failed and the Pomodoro timer could not start.
+- Android and iOS: a Pomodoro focus session's time is no longer lost when its task's time changed on another device before Mindwtr gave it the time. The time now adds to the task's new total, as on desktop.
