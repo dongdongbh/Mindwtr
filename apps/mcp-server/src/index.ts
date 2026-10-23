@@ -15,6 +15,7 @@ import {
 } from '@mindwtr/core';
 import * as z from 'zod';
 
+import { listViewSectionsSchema, viewSectionIdsSchema } from './view-sections.js';
 import { createCloudService } from './cloud-service.js';
 import { createLocalApiService, validateLocalApiUrl } from './local-api-service.js';
 import { getMindwtrToolErrorCode, ReadOnlyError, ValidationError } from './errors.js';
@@ -452,6 +453,7 @@ const getSectionSchema = z.object({
 });
 
 const addProjectSchema = z.object({
+  viewSectionIds: viewSectionIdsSchema.optional(),
   title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH),
   colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   color: z.string().optional(),
@@ -467,6 +469,7 @@ const addProjectSchema = z.object({
   attachments: linkAttachmentsCreateSchema.optional(),
 });
 const updateProjectSchema = z.object({
+  viewSectionIds: viewSectionIdsSchema.nullable().optional(),
   id: z.string(),
   title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH).optional(),
   colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
@@ -592,6 +595,11 @@ export const registerMindwtrTools = (
   );
 
   if (!options.localApi) {
+    server.registerTool(
+      'mindwtr_list_view_sections',
+      { description: 'List view section IDs, titles and order for Someday, Waiting or Focus. These are separate from project sections. Read-only; create or rename view sections in the app.', inputSchema: listViewSectionsSchema },
+      withMcpErrorHandling('mindwtr_list_view_sections', async (input) => createMcpTextResponse({ viewSections: await service.listViewSections(input) })),
+    );
     server.registerTool(
       'mindwtr_list_sections',
       {

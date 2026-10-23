@@ -16,6 +16,7 @@ import {
   taskChecklistInputSchema,
 } from './input-validation.js';
 import { TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
+import { viewSectionIdsSchema } from './view-sections.js';
 
 // Per-field structural (shape-only) Zod type for every generated task field. Semantic
 // validation beyond shape (recurrence compatibility, relativeStartOffset/timeSpentMinutes/
@@ -23,6 +24,7 @@ import { TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fi
 // input-validation.ts's normalize* helpers, applied in index.ts's normalizeAddTaskInput/
 // normalizeUpdateTaskInput — mirroring how the existing hand-written recurrence field works.
 const TASK_FIELD_ZOD_SCHEMAS: Partial<Record<keyof Task, z.ZodTypeAny>> = {
+  viewSectionIds: viewSectionIdsSchema,
   cancelledAt: z.string().datetime({ offset: true }).describe('Cancellation time in ISO format; archives the task without completion or another recurrence'),
   taskMode: z.enum(['task', 'list']).describe('Task mode: task or list (checklist-first)'),
   relativeStartOffset: relativeStartOffsetInputSchema.describe(

@@ -237,7 +237,7 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
   });
 
   test('all current generated fields are transmitted without silent omission', async () => {
-    const generated: Record<string, unknown> = { cancelledAt: iso, taskMode: 'task', relativeStartOffset: { amount: -2, unit: 'day' },
+    const generated: Record<string, unknown> = { viewSectionIds: { someday: 'books' }, cancelledAt: iso, taskMode: 'task', relativeStartOffset: { amount: -2, unit: 'day' },
       showFutureRecurrence: true, pushCount: 2, checklist: [{ id: 'check-1', title: 'Step', isCompleted: false }],
       textDirection: 'rtl', location: 'Office', areaId: 'area-1', isFocusedToday: true,
       timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, reviewAt: '2026-01-02',

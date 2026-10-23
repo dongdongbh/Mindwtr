@@ -18,6 +18,8 @@ import type { Area, ListTasksInput, Project, Task, TaskStatus } from './queries.
 import type { MindwtrService } from './service.js';
 import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape } from './task-field-schemas.js';
 
+import { logViewSectionWrite, normalizeViewSectionIds } from './view-sections.js';
+
 export type LocalApiServiceOptions = {
   url: string;
   token: string;
@@ -28,7 +30,7 @@ export type LocalApiServiceOptions = {
 
 /** Native project writes intentionally expose fewer fields than SQLite/Cloud. */
 export const LOCAL_API_UNSUPPORTED_PROJECT_FIELDS = [
-  'cancelledAt', 'isFocused', 'dueDate', 'startDate', 'reviewAt', 'supportNotes', 'attachments',
+  'viewSectionIds', 'cancelledAt', 'isFocused', 'dueDate', 'startDate', 'reviewAt', 'supportNotes', 'attachments',
 ] as const;
 
 export const validateLocalApiUrl = (value: string): string => {
@@ -52,7 +54,7 @@ const TASK_FIELDS = new Set([
   'assignedTo', 'timeEstimate', 'taskMode', 'relativeStartOffset', 'showFutureRecurrence',
   'pushCount', 'checklist', 'textDirection', 'location', 'isFocusedToday',
   'timeSpentMinutes', 'suppressMindwtrReminders', 'reminderPolicy', 'repeatReminderMinutes',
-  'reviewAt', 'cancelledAt', 'order', 'boardOrder', 'focusOrder', 'attachments',
+  'viewSectionIds', 'reviewAt', 'cancelledAt', 'order', 'boardOrder', 'focusOrder', 'attachments',
 ]);
 const taskStatusSchema = z.enum(TASK_STATUS_VALUES as [TaskStatus, ...TaskStatus[]]);
 const titleSchema = z.string().trim().min(1).max(MAX_TASK_TITLE_LENGTH);
@@ -152,6 +154,7 @@ const normalizeTaskProps = (input: Record<string, unknown>, creating: boolean): 
     if (value === undefined || name === 'id' || (creating && name === 'title')) continue;
     // Rust expects arrays, not null, when clearing tags or contexts.
     if (name === 'tags' || name === 'contexts') props[name] = value ?? [];
+    else if (name === 'viewSectionIds') props[name] = normalizeViewSectionIds(value, !creating);
     else if (name === 'recurrence') props[name] = normalizeNullableTaskRecurrence(value as Parameters<typeof normalizeNullableTaskRecurrence>[0]);
     else if (name === 'relativeStartOffset') props[name] = normalizeNullableTaskRelativeStartOffset(value as Parameters<typeof normalizeNullableTaskRelativeStartOffset>[0]);
     else if (name === 'timeSpentMinutes') props[name] = normalizeNullableTaskTimeSpentMinutes(value as number | null);
@@ -358,12 +361,16 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
     addTask: async (input) => {
       assertTaskInputsSupported(input, true);
       const parsed = parseInput(createTaskSchema, input, 'task creation');
-      return entity<Task>('POST', '/tasks', 'task', { title: parsed.title, props: normalizeTaskProps(parsed, true) });
+      const task = await entity<Task>('POST', '/tasks', 'task', { title: parsed.title, props: normalizeTaskProps(parsed, true) });
+      logViewSectionWrite(options.logInfo, 'task', 'create', input.viewSectionIds);
+      return task;
     },
     updateTask: async (input) => {
       assertTaskInputsSupported(input, false);
       const parsed = parseInput(patchTaskSchema, input, 'task update');
-      return entity<Task>('PATCH', entityPath('tasks', input.id), 'task', normalizeTaskProps(parsed, false), input.id);
+      const task = await entity<Task>('PATCH', entityPath('tasks', input.id), 'task', normalizeTaskProps(parsed, false), input.id);
+      logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
+      return task;
     },
     completeTask: async (id) => entity<Task>('POST', `${entityPath('tasks', id)}/complete`, 'task', undefined, id),
     restoreTask: async (id) => entity<Task>('POST', `${entityPath('tasks', id)}/restore`, 'task', undefined, id),
@@ -379,6 +386,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): MindwtrS
       return entity<Project>('PATCH', entityPath('projects', id), 'project', patch, id);
     },
     deleteProject: async (id) => deleteEntity<Project>('projects', id),
+    listViewSections: async () => unsupported('view section catalogue'),
     listSections: async () => unsupported('section tools'),
     getSection: async () => unsupported('section tools'),
     addSection: async () => unsupported('section tools'),

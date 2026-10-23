@@ -10,6 +10,7 @@ import {
   type Project as CoreProject,
   type Section as CoreSection,
   type RelativeStartOffset,
+  type AppSettings,
 } from '@mindwtr/core';
 
 import { closeDb, openMindwtrDb, type DbOptions } from './db.js';
@@ -59,6 +60,8 @@ import {
 import { applyLinkAttachmentsWithResult, buildLinkAttachments, type LinkAttachmentInput } from './link-attachments.js';
 import { closeCoreAdapter, runCoreService, type AreaWriteResult } from './core-adapter.js';
 import { pickDefinedTaskFields, TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
+
+import { listViewSectionsFromSettings, logViewSectionWrite, normalizeViewSectionIds, type ListViewSectionsInput, type ViewSectionEntry } from './view-sections.js';
 
 type ServiceDeps = {
   openMindwtrDb: typeof openMindwtrDb;
@@ -235,7 +238,7 @@ const validateAddTaskInput = (input: AddTaskInput): AddTaskInput => {
 // needs `core`-scoped normalization timing the others don't. Adding a synced field to
 // TASK_CREATE_FIELD_NAMES needs no edit here.
 const generatedCreateTaskProps = (input: AddTaskInput): Partial<Task> => (
-  pickDefinedTaskFields(TASK_CREATE_FIELD_NAMES, input)
+  { ...pickDefinedTaskFields(TASK_CREATE_FIELD_NAMES, input), viewSectionIds: normalizeViewSectionIds(input.viewSectionIds) }
 );
 
 const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
@@ -262,7 +265,9 @@ const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
   for (const name of TASK_PATCH_FIELD_NAMES) {
     const value = input[name as keyof UpdateTaskInput];
     if (value === undefined) continue;
-    if (name === 'relativeStartOffset') {
+    if (name === 'viewSectionIds') {
+      updates.viewSectionIds = normalizeViewSectionIds(value, true);
+    } else if (name === 'relativeStartOffset') {
       updates.relativeStartOffset = normalizeNullableTaskRelativeStartOffset(value as RelativeStartOffset | null) ?? undefined;
     } else if (name === 'timeSpentMinutes') {
       updates.timeSpentMinutes = normalizeNullableTaskTimeSpentMinutes(value as number | null) ?? undefined;
@@ -294,6 +299,7 @@ export type AddProjectInput = {
   reviewAt?: string | null;
   supportNotes?: string | null;
   attachments?: LinkAttachmentInput[];
+  viewSectionIds?: CoreProject['viewSectionIds'];
 };
 
 export type UpdateProjectInput = {
@@ -311,6 +317,7 @@ export type UpdateProjectInput = {
   reviewAt?: string | null;
   supportNotes?: string | null;
   attachments?: LinkAttachmentInput[] | null;
+  viewSectionIds?: CoreProject['viewSectionIds'] | null;
 };
 
 export type AddAreaInput = {
@@ -423,6 +430,7 @@ export type MindwtrService = {
    */
   listTasks: (input: ListTasksInput) => Promise<TaskRow[]>;
   listProjects: () => Promise<Project[]>;
+  listViewSections: (input?: ListViewSectionsInput) => Promise<ViewSectionEntry[]>;
   listSections: (input?: ListSectionsInput) => Promise<Section[]>;
   listAreas: () => Promise<Area[]>;
   listPeople: (input?: ListPeopleInput) => Promise<Person[]>;
@@ -477,6 +485,11 @@ export const createService = (
   return {
     listTasks: async (input) => withDb((db) => deps.listTasks(db, input)),
     listProjects: async () => withDb((db) => deps.listProjects(db)),
+    listViewSections: async (input = {}) => withDb((db) => {
+      const row = db.prepare('SELECT data FROM settings WHERE id = 1').get<{ data: string }>();
+      const settings: AppSettings = row?.data ? JSON.parse(row.data) : {};
+      return listViewSectionsFromSettings(settings, input);
+    }),
     listSections: async (input = {}) => withDb((db) => deps.listSections(db, input)),
     listAreas: async () => withDb((db) => deps.listAreas(db)),
     listPeople: async (input = {}) => withDb((db) => deps.listPeople(db, input)),
@@ -487,7 +500,8 @@ export const createService = (
     addTask: async (input) => {
       const normalizedInput = validateAddTaskInput(input);
       const recurrence = normalizeOptionalTaskRecurrence(normalizedInput.recurrence);
-      return await runCoreWriteWithRetries(options, deps, async (core) => {
+      const generatedProps = generatedCreateTaskProps(normalizedInput);
+      const created = await runCoreWriteWithRetries(options, deps, async (core) => {
         if (normalizedInput.quickAdd) {
           const snapshot = await core.getQuickAddSnapshot();
           const { projects, areas, tasks, people, settings } = snapshot;
@@ -521,7 +535,7 @@ export const createService = (
               assignedTo: normalizedInput.assignedTo,
               timeEstimate: normalizedInput.timeEstimate,
               attachments: buildLinkAttachments(normalizedInput.attachments),
-              ...generatedCreateTaskProps(normalizedInput),
+              ...generatedProps,
             }),
           }, {
             addProject: (title, color, initialProps) => core.addProject({
@@ -561,10 +575,12 @@ export const createService = (
             assignedTo: normalizedInput.assignedTo,
             timeEstimate: normalizedInput.timeEstimate,
             attachments: buildLinkAttachments(normalizedInput.attachments),
-            ...generatedCreateTaskProps(normalizedInput),
+            ...generatedProps,
           }),
         });
       });
+      logViewSectionWrite(logInfo, 'task', 'create', input.viewSectionIds);
+      return created;
     },
     updateTask: async (input) => {
       const updates = buildTaskUpdates(input);
@@ -588,18 +604,21 @@ export const createService = (
       if (input.attachments !== undefined) {
         logLocalAttachmentLinkReplacement(logInfo, 'task', preservedNetworkLinkCount);
       }
+      logViewSectionWrite(logInfo, 'task', 'update', input.viewSectionIds);
       return updated;
     },
     completeTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.completeTask(id)),
     deleteTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteTask(id)),
     restoreTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.restoreTask(id)),
-    addProject: async (input) =>
-      runCoreWriteWithRetries(options, deps, async (core) => {
+    addProject: async (input) => {
+      const viewSectionIds = normalizeViewSectionIds(input.viewSectionIds);
+      const created = await runCoreWriteWithRetries(options, deps, async (core) => {
         const title = validateProjectTitle(input.title);
         return core.addProject({
           title,
           color: input.color ?? DEFAULT_PROJECT_COLOR,
           props: filterUndefined({
+            viewSectionIds,
             colorOverride: input.colorOverride,
             status: parseProjectStatus(input.status),
             cancelledAt: input.cancelledAt ?? undefined,
@@ -613,11 +632,16 @@ export const createService = (
             attachments: buildLinkAttachments(input.attachments),
           }) as Partial<CoreProject>,
         });
-      }),
+      });
+      logViewSectionWrite(logInfo, 'project', 'create', input.viewSectionIds);
+      return created;
+    },
     updateProject: async (input) => {
+      const viewSectionIds = normalizeViewSectionIds(input.viewSectionIds, true);
       let preservedNetworkLinkCount = 0;
       const updated = await runCoreWriteWithRetries(options, deps, async (core) => {
         const updates: Partial<CoreProject> = {};
+        if (viewSectionIds !== undefined) updates.viewSectionIds = viewSectionIds;
         if (input.title !== undefined) updates.title = validateProjectTitle(input.title);
         if (input.color !== undefined) updates.color = input.color ?? undefined;
         if (input.colorOverride !== undefined) updates.colorOverride = input.colorOverride;
@@ -648,6 +672,7 @@ export const createService = (
       if (input.attachments !== undefined) {
         logLocalAttachmentLinkReplacement(logInfo, 'project', preservedNetworkLinkCount);
       }
+      logViewSectionWrite(logInfo, 'project', 'update', input.viewSectionIds);
       return updated;
     },
     deleteProject: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteProject(id)),

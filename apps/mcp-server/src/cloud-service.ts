@@ -62,6 +62,8 @@ import type {
 import { pickDefinedTaskFields, TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fields.js';
 import { applyLinkAttachmentsWithResult, buildLinkAttachments } from './link-attachments.js';
 
+import { listViewSectionsFromSettings, logViewSectionWrite, normalizeViewSectionIds } from './view-sections.js';
+
 export type CloudServiceOptions = {
   url: string;
   token: string;
@@ -338,6 +340,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       const data = await readData();
       return data.projects.filter(isLive).map(mapProject);
     },
+    listViewSections: async (input = {}) => listViewSectionsFromSettings((await readData()).settings, input),
     listSections: async (input: ListSectionsInput = {}) => {
       const data = await readData();
       return data.sections
@@ -384,6 +387,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         // task-write-fields.ts. Spread first so the explicit, semantically-normalized
         // overrides below win for the three fields that need more than a raw pass-through.
         ...pickDefinedTaskFields(TASK_CREATE_FIELD_NAMES, input),
+        viewSectionIds: normalizeViewSectionIds(input.viewSectionIds),
         status: input.status,
         projectId: input.projectId,
         sectionId: input.sectionId,
@@ -404,6 +408,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       });
       const body = hasQuickAdd ? { input: input.quickAdd, props } : { title: input.title, props };
       const result = await request<{ task: AppData['tasks'][number] }>('POST', '/tasks', body);
+      logViewSectionWrite(options.logInfo, 'task', 'create', input.viewSectionIds);
       return mapTask(result.task);
     },
     updateTask: async (input: UpdateTaskInput) => {
@@ -431,7 +436,9 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       for (const name of TASK_PATCH_FIELD_NAMES) {
         const value = (input as Record<string, unknown>)[name];
         if (value === undefined) continue;
-        if (name === 'relativeStartOffset') {
+        if (name === 'viewSectionIds') {
+          patch.viewSectionIds = normalizeViewSectionIds(value, true);
+        } else if (name === 'relativeStartOffset') {
           patch.relativeStartOffset = normalizeNullableTaskRelativeStartOffset(value as RelativeStartOffset | null);
         } else if (name === 'timeSpentMinutes') {
           patch.timeSpentMinutes = normalizeNullableTaskTimeSpentMinutes(value as number | null);
@@ -449,9 +456,11 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           patch,
           input.attachments,
         );
+        logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
         return mapTask(task);
       }
       const result = await request<{ task: AppData['tasks'][number] }>('PATCH', `/tasks/${encodeURIComponent(input.id)}`, patch);
+      logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
       return mapTask(result.task);
     },
     completeTask: async (id: string) => {
@@ -466,6 +475,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       const result = await request<{ project: AppData['projects'][number] }>('POST', '/projects', {
         title: input.title,
         props: filterUndefined({
+          viewSectionIds: normalizeViewSectionIds(input.viewSectionIds),
           color: input.color,
           colorOverride: input.colorOverride,
           status: input.status,
@@ -480,10 +490,12 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           attachments: buildLinkAttachments(input.attachments),
         }),
       });
+      logViewSectionWrite(options.logInfo, 'project', 'create', input.viewSectionIds);
       return mapProject(result.project);
     },
     updateProject: async (input: UpdateProjectInput) => {
       const patch: Record<string, unknown> = {};
+      if (input.viewSectionIds !== undefined) patch.viewSectionIds = normalizeViewSectionIds(input.viewSectionIds, true);
       if (input.title !== undefined) patch.title = input.title;
       if (input.color !== undefined) patch.color = input.color;
       if (input.colorOverride !== undefined) patch.colorOverride = input.colorOverride;
@@ -504,9 +516,11 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           patch,
           input.attachments,
         );
+        logViewSectionWrite(options.logInfo, 'project', 'update', input.viewSectionIds);
         return mapProject(project);
       }
       const result = await request<{ project: AppData['projects'][number] }>('PATCH', `/projects/${encodeURIComponent(input.id)}`, patch);
+      logViewSectionWrite(options.logInfo, 'project', 'update', input.viewSectionIds);
       return mapProject(result.project);
     },
     deleteProject: async (id: string) => mapProject(await deleteEntity('/projects', id, (data) => data.projects, 'Project')),

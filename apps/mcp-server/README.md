@@ -128,6 +128,7 @@ Writes remain disabled unless explicitly enabled with `--write`. If the app is c
 | Update/complete/delete/restore tasks | Supported through the API's corresponding endpoints; terminal status changes cannot be submitted as ordinary edits |
 | List/get/create/update/delete projects | Supported for the API's basic project fields: title, color, status, Area and sequential behavior |
 | List areas | Supported |
+| View section catalogue and project assignments | Unavailable; task assignments by known ID are supported |
 | Sections, managed people, Area writes | Unavailable; these tools are hidden in API mode |
 | GTD availability `view` | Unavailable because the API does not expose the required section snapshot |
 | Replacing attachment links | Unavailable because the API does not provide conditional attachment updates |
@@ -465,6 +466,7 @@ Any MCP-compatible client can work as long as it can launch a **stdio** server w
   - Input: `{}`
 - `mindwtr_get_project`
   - Input: `{ id, includeDeleted? }`
+- `mindwtr_list_view_sections` — view section IDs, titles and order; optional `view`: `someday`, `waiting`, or `focus` (SQLite/Cloud)
 - `mindwtr_list_sections`
   - Input: `{ projectId?, includeDeleted? }`
 - `mindwtr_get_section`
@@ -478,9 +480,9 @@ Any MCP-compatible client can work as long as it can launch a **stdio** server w
 - `mindwtr_get_task`
   - Input: `{ id, includeDeleted? }`
 - `mindwtr_add_task` **(requires `--write`)**
-  - Input: `{ title? | quickAdd?, status?, projectId?, sectionId?, areaId?, dueDate?, startTime?, cancelledAt?, reviewAt?, recurrence?, contexts?, tags?, description?, priority?, energyLevel?, assignedTo?, timeEstimate?, taskMode?, relativeStartOffset?, showFutureRecurrence?, pushCount?, checklist?, textDirection?, location?, isFocusedToday?, timeSpentMinutes?, suppressMindwtrReminders?, reminderPolicy?, repeatReminderMinutes?, attachments? }`
+  - Input: `{ title? | quickAdd?, status?, projectId?, sectionId?, viewSectionIds?, areaId?, dueDate?, startTime?, cancelledAt?, reviewAt?, recurrence?, contexts?, tags?, description?, priority?, energyLevel?, assignedTo?, timeEstimate?, taskMode?, relativeStartOffset?, showFutureRecurrence?, pushCount?, checklist?, textDirection?, location?, isFocusedToday?, timeSpentMinutes?, suppressMindwtrReminders?, reminderPolicy?, repeatReminderMinutes?, attachments? }`
 - `mindwtr_update_task` **(requires `--write`)**
-  - Input: `{ id, title?, status?, projectId?, sectionId?, areaId?, dueDate?, startTime?, cancelledAt?, reviewAt?, recurrence?, contexts?, tags?, description?, priority?, energyLevel?, assignedTo?, timeEstimate?, taskMode?, relativeStartOffset?, showFutureRecurrence?, pushCount?, checklist?, textDirection?, location?, isFocusedToday?, timeSpentMinutes?, suppressMindwtrReminders?, reminderPolicy?, repeatReminderMinutes?, order?, boardOrder?, focusOrder?, attachments? }`
+  - Input: `{ id, title?, status?, projectId?, sectionId?, viewSectionIds?, areaId?, dueDate?, startTime?, cancelledAt?, reviewAt?, recurrence?, contexts?, tags?, description?, priority?, energyLevel?, assignedTo?, timeEstimate?, taskMode?, relativeStartOffset?, showFutureRecurrence?, pushCount?, checklist?, textDirection?, location?, isFocusedToday?, timeSpentMinutes?, suppressMindwtrReminders?, reminderPolicy?, repeatReminderMinutes?, order?, boardOrder?, focusOrder?, attachments? }`
   - `reminderPolicy` accepts `inherit`, `send`, or `skip` for start/due reminders. Use `inherit` to follow the library default; `null` is not accepted. Existing tasks retain their legacy reminder choice until explicitly changed.
   - `recurrence` accepts a recurrence object or an RFC 5545 RRULE string. Pass `null` to clear it.
   - `attachments` holds link attachments only (`{ id?, title?, uri }`, e.g. `obsidian://`, `file://` or `https://`). The list you pass is the complete set of links: links you leave out are removed, file attachments are never touched, and `null` clears every link.
@@ -492,9 +494,9 @@ Any MCP-compatible client can work as long as it can launch a **stdio** server w
 - `mindwtr_restore_task` **(requires `--write`)**
   - Input: `{ id }`
 - `mindwtr_add_project` **(requires `--write`)**
-  - Input: `{ title, color?, status?, areaId?, isSequential?, isFocused?, dueDate?, startDate?, cancelledAt?, reviewAt?, supportNotes?, attachments? }`
+  - Input: `{ title, color?, status?, areaId?, isSequential?, isFocused?, viewSectionIds?, dueDate?, startDate?, cancelledAt?, reviewAt?, supportNotes?, attachments? }`
 - `mindwtr_update_project` **(requires `--write`)**
-  - Input: `{ id, title?, color?, status?, areaId?, isSequential?, isFocused?, dueDate?, startDate?, cancelledAt?, reviewAt?, supportNotes?, attachments? }`
+  - Input: `{ id, title?, color?, status?, areaId?, isSequential?, isFocused?, viewSectionIds?, dueDate?, startDate?, cancelledAt?, reviewAt?, supportNotes?, attachments? }`
   - `attachments` follows the same rule as `mindwtr_update_task`: link attachments only, the list is the complete set of links, and `null` clears them.
 - `mindwtr_delete_project` **(requires `--write`)**
   - Input: `{ id }`
@@ -608,3 +610,24 @@ The SQLite details below apply to direct database mode. Local API mode uses the 
 
 - This MCP server targets the SQLite database used by the desktop app, with mutations routed through `@mindwtr/core`.
 - Keep an eye on schema changes across app versions (update queries if needed).
+
+### View section assignments
+
+In SQLite and Cloud mode, call `mindwtr_list_view_sections` (optionally with
+`{"view":"someday"}`) to resolve section IDs and titles. The result is
+`{"viewSections":[{"view":"someday","id":"books","title":"Books","order":0}]}`.
+These are view headings, separate from project sections returned by
+`mindwtr_list_sections`. Create or rename view headings in the Mindwtr app.
+
+Task and project create/update tools accept `viewSectionIds`, for example
+`{"someday":"books","waiting":"people"}`. Assigning a heading does not change
+the entity's status. Updates replace the **whole map**: include other view
+assignments you want to retain. Omit the field to preserve assignments; pass
+`{}` or, on update, `null` to clear all assignments. To clear one view, send the
+map containing only the other assignments. Values must be nonempty section-ID
+strings; unknown view names remain supported for compatibility with newer apps.
+
+The catalogue works in read-only mode. Assignment writes require `--write`.
+Cloud mode uses the existing data endpoint and works with Mindwtr Cloud 1.3.7.
+Desktop Local API mode supports task assignments by known ID, but does not expose
+the view section catalogue or project assignments; unsupported inputs are rejected.

@@ -72,6 +72,7 @@ export type ListTasksInput = {
 // generated, minus the hand-typed ones above that need a different pre-normalization shape:
 // recurrence's raw TaskRecurrenceInput vs Task's normalized Recurrence).
 export type TaskGeneratedCreateFields = Pick<CoreTask,
+  | 'viewSectionIds'
   | 'taskMode'
   | 'relativeStartOffset'
   | 'showFutureRecurrence'

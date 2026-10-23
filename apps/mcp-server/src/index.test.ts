@@ -93,6 +93,7 @@ const createMockService = (): MindwtrService => ({
   listTasks: async () => [mockTask()],
   listProjects: async () => [mockProject()],
   listSections: async () => [mockSection()],
+  listViewSections: async () => [],
   listAreas: async () => [mockArea()],
   listPeople: async () => [mockPerson()],
   getTask: async () => mockTask(),
@@ -242,12 +243,13 @@ describe('mcp server index', () => {
   test('registers all mindwtr tools', () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
-    expect(tools.size).toBe(27);
+    expect(tools.size).toBe(28);
     expect(tools.has('mindwtr_list_tasks')).toBe(true);
     expect(tools.has('mindwtr_add_task')).toBe(true);
     expect(tools.has('mindwtr_restore_task')).toBe(true);
     expect(tools.has('mindwtr_get_project')).toBe(true);
     expect(tools.has('mindwtr_list_sections')).toBe(true);
+    expect(tools.has('mindwtr_list_view_sections')).toBe(true);
     expect(tools.has('mindwtr_get_section')).toBe(true);
     expect(tools.has('mindwtr_add_section')).toBe(true);
     expect(tools.has('mindwtr_update_section')).toBe(true);
