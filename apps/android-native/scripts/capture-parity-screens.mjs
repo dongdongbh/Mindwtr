@@ -13,6 +13,9 @@
 // (PARITY_ONLY=d1b shoots only pass D1b's: Settings › Data with the Backup fold's end (Getting Started), the Import fold open,
 // and in light mode the Todoist question and the invalid-import warning.)
 // (PARITY_ONLY=s5 shoots only pass S5's: Settings › Sync with File chosen, at its top and at the folder card.)
+// (PARITY_ONLY=r2b shoots only pass R2b's Pomodoro card on Focus, in light mode, with the Pomodoro feature and Link task on in the
+// fixture: idle with Timer only, the task picker, a linked task, running, paused, the break, and folded. RN's run ends back at
+// the idle card with Timer only, so the native build adopts the same session.)
 // (PARITY_ONLY=r2 shoots only pass R2's screens, with the weekly review on in the fixture: Settings › Notifications from its
 // top and its end, and its day picker.)
 // RN's capture screen for each entry kind (a capture link with the keyboard up and down, a share, an assistant note, and a
@@ -59,6 +62,7 @@ const out = resolve(harness, 'parity', new Date().toISOString().replace(/[:.]/g,
 const R2_ONLY = process.env.PARITY_ONLY === 'r2';
 const D1B_ONLY = process.env.PARITY_ONLY === 'd1b';
 const S5_ONLY = process.env.PARITY_ONLY === 's5';
+const R2B_ONLY = process.env.PARITY_ONLY === 'r2b';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -172,6 +176,9 @@ const buildFixture = () => execFileSync('bun', ['-e', `
         gtd: { ...(store().settings.gtd ?? {}), viewSections: { someday: [{ id: 'someday-travel', title: 'Travel', order: 0 }] } } });
     // Pass R2's shots: the weekly review on (its day picker opens).
     if (process.env.FIXTURE_R2 === '1') await store().updateSettings({ weeklyReviewEnabled: true });
+    // Pass R2b's shots: the Pomodoro card on Focus, with its Link task row.
+    if (process.env.FIXTURE_R2B === '1') await store().updateSettings({ features: { ...(store().settings.features ?? {}), pomodoro: true },
+        gtd: { ...(store().settings.gtd ?? {}), pomodoro: { ...(store().settings.gtd?.pomodoro ?? {}), linkTask: true } } });
     await flushPendingSave();
     if (store().persistenceFailure) throw new Error('save failed: ' + store().persistenceFailure.message);
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
@@ -179,7 +186,7 @@ const buildFixture = () => execFileSync('bun', ['-e', `
     console.log(store()._allTasks.filter((task) => !task.deletedAt).length);
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, FIXTURE_DB: fixture, FIXTURE_TITLES: JSON.stringify(T), FIXTURE_TRASHED: TRASHED,
-    FIXTURE_FEED: JSON.stringify(CALENDAR_FEED), FIXTURE_FILE_TITLE: ATTACHMENT_FILE.title, FIXTURE_FILE_URI: ATTACHMENT_FILE.uri, FIXTURE_FILE_SIZE: String(ATTACHMENT_FILE.bytes.length), FIXTURE_R2: R2_ONLY ? '1' : '' } }).trim().split('\n').pop();
+    FIXTURE_FEED: JSON.stringify(CALENDAR_FEED), FIXTURE_FILE_TITLE: ATTACHMENT_FILE.title, FIXTURE_FILE_URI: ATTACHMENT_FILE.uri, FIXTURE_FILE_SIZE: String(ATTACHMENT_FILE.bytes.length), FIXTURE_R2: R2_ONLY ? '1' : '', FIXTURE_R2B: R2B_ONLY ? '1' : '' } }).trim().split('\n').pop();
 
 // ---- the device ----
 const device = connect({ serial, pkg: PKG, uiFile: '/data/local/tmp/mindwtr-parity-ui.xml' });
@@ -797,6 +804,44 @@ const shootS5 = async (prefix, suffix, rn) => {
         await sleep(900);
     }
 };
+/**
+ * Pass R2b: the Pomodoro card on Focus in each state. Both apps label the card's controls with core's en words (RN as text,
+ * native as the node's description). It ends at the idle card with Timer only, as it began.
+ */
+const shootR2b = async (prefix, rn) => {
+    const labeled = (nodes, label) => nodes.findLast((node) => node.text === label || node['content-desc'] === label);
+    const press = async (label) => {
+        const nodes = await waitFor(`"${label}"`, (current) => Boolean(labeled(current, label)), 30_000);
+        await tap(labeled(nodes, label));
+        await sleep(700);
+    };
+    if (rn) openLink('focus');
+    else {
+        const tabs = await waitFor('the native tabs', (current) => Boolean(tab(current, 'Focus')), 60_000);
+        if (!tabSelected(tabs, 'Focus')) await tap(tab(tabs, 'Focus'));
+    }
+    const shown = (...texts) => (current) => texts.every((text) => Boolean(labeled(current, text)));
+    await shoot(`${prefix}-pomodoro-idle-light`, shown(en['pomodoro.mobileTitle'], '25:00', en['pomodoro.timerOnly'], en['common.start']));
+    await press(en['pomodoro.selectedTask']);
+    await shoot(`${prefix}-pomodoro-picker-light`, shown(T.outline, en['pomodoro.timerOnly']));
+    await press(T.outline);
+    await shoot(`${prefix}-pomodoro-linked-light`, shown(en['pomodoro.taskDoneShort'], en['common.change']));
+    await press(en['common.start']);
+    await shoot(`${prefix}-pomodoro-running-light`, shown(en['common.pause']));
+    await press(en['common.pause']);
+    await shoot(`${prefix}-pomodoro-paused-light`, shown(en['common.start']));
+    await press(en['pomodoro.switchToBreak']);
+    await shoot(`${prefix}-pomodoro-break-light`, shown('05:00', en['pomodoro.switchToFocus']));
+    await press(en['pomodoro.collapse']);
+    await shoot(`${prefix}-pomodoro-collapsed-light`, shown(en['pomodoro.expand']));
+    // Back to the start: expanded, Focus, the full 25:00, Timer only.
+    await press(en['pomodoro.expand']);
+    await press(en['pomodoro.switchToFocus']);
+    await press(en['common.reset']);
+    await press(en['pomodoro.selectedTask']);
+    await press(en['pomodoro.timerOnly']);
+    await waitFor('the idle card again', shown('25:00', en['pomodoro.timerOnly'], en['common.start']), 30_000);
+};
 const c3FixesOnly = process.env.PARITY_ONLY === 'c3-fixes';
 const originalFontScale = sh('settings get system font_scale');
 /** Opens the Calendar (RN: its link; native: the Menu sheet's tile). */
@@ -953,6 +998,7 @@ try {
             await stopApp();
             device.launch(RN_ACTIVITY);
         }
+        if (R2B_ONLY) { if (mode === 'no') await shootR2b('rn', true); continue; }
         if (R2_ONLY) { await shootR2('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (S5_ONLY) { await shootS5('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (D1B_ONLY) { await shootD1b('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
@@ -996,6 +1042,7 @@ try {
     }
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         if (mode === 'yes') await setNight('yes');
+        if (R2B_ONLY) { if (mode === 'no') await shootR2b('native', false); continue; }
         if (R2_ONLY) { await shootR2('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (S5_ONLY) { await shootS5('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (D1B_ONLY) { await shootD1b('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
