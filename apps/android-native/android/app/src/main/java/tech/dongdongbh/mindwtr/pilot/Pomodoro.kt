@@ -202,14 +202,28 @@ class PomodoroModel(private val shell: InboxViewModel) {
         val controls = shell.menu.focusControls.state.toString()
         val revision = pickerRevision.ifEmpty { shell.focusRevision() }
         shell.background(listOf(Part.Pomodoro), { runtime ->
-            runtime.pomodoroTasks(JSONObject().put("offset", loaded.size).put("limit", WINDOW).put("revision", revision)
-                .put("controls", JSONObject(controls)).toString())
+            val window = { offset: Int, at: String ->
+                runtime.pomodoroTasks(JSONObject().put("offset", offset).put("limit", WINDOW).put("revision", at)
+                    .put("controls", JSONObject(controls)).toString())
+            }
+            try {
+                window(loaded.size, revision)
+            } catch (failure: Exception) {
+                if (failure.message?.startsWith("STALE_REVISION") != true) throw failure
+                // Core's Focus revision moves with the minute and each edit: one fresh Focus snapshot restarts the paging, never
+                // mixing revisions (iOS's loadMorePomodoroTasks).
+                val fresh = runtime.focus(1, controls).getString("revision")
+                window(0, fresh).put("restarted", true)
+            }
         }) { next, _ ->
             val shown = picker ?: return@background
             if (shown.size != loaded.size) return@background
+            val restarted = next.optBoolean("restarted")
             pickerTotal = next.getInt("total")
             pickerRevision = next.getString("revision")
-            picker = shown + next.menuObjects("rows")
+            picker = (if (restarted) emptyList() else shown) + next.menuObjects("rows")
+            // The screen's Focus was older than the picker's: read it again too.
+            if (restarted) shell.refreshFocus()
         }
     }
 
