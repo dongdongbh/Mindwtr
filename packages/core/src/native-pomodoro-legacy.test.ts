@@ -6,7 +6,8 @@ import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { TIME_SPENT_MAX_MINUTES } from './time-spent';
 
 const ID = '11111111-1111-4111-8111-111111111111';
-const now = Date.parse('2026-10-10T00:00:00.000Z');
+const AT = '2026-10-10T00:00:00.000Z';
+const now = Date.parse(AT);
 const request = (sessionRaw: string | null, collapsedRaw: string | null = null): Extract<NativePomodoroRequest, { action: 'adoptLegacy' }> => ({
     action: 'adoptLegacy', requestId: ID, observedAtMs: now, localDayKey: '2026-10-10',
     autoStart: { autoStartFocus: false, autoStartBreaks: false },
@@ -159,6 +160,63 @@ describe('native Pomodoro legacy adoption', () => {
             { ...plan, request: { ...plan.request, legacy: { ...request(raw).legacy, sessionRaw: '{"updatedAtMs":11}' } } },
             { ...plan, sessionAfter: plan.sessionAfter + ' ' }, { ...plan, extra: true }])
             expect(() => validatePreparedNativePomodoroTransition(forged)).toThrow();
+    });
+    describe('RN owed credits (pendingCredits)', () => {
+        const rowFor = (id: string, cells: Record<string, string | number | null> = {}) => ({ id,
+            row: TASK_SQLITE_COLUMNS.map((name) => ({ id, status: 'next', timeSpentMinutes: 4, rev: 1, ...cells } as Record<string, string | number | null>)[name] ?? null) });
+        const owing = (pendingCredits: unknown[], changes: StoredPomodoroSession = {}) => JSON.stringify({ ...running(changes), pendingCredits });
+        const adopt = (sessionRaw: string, target: ReturnType<typeof rowFor> | null, owed?: ReturnType<typeof rowFor>[]) =>
+            prepareNativePomodoroTransition({ request: request(sessionRaw), session: { raw: null, state: null }, target,
+                ...(owed ? { owed } : {}), deviceId: 'device' })!;
+        const patch = (timeSpentMinutes: number) => ({ timeSpentMinutes, rev: 2, revBy: 'device', updatedAt: new Date(now).toISOString() });
+        it('adopts a session with owed credits and credits each once: the selected task in its patch, another task in owed', () => {
+            const other = rowFor('other', { timeSpentMinutes: 10 });
+            const plan = adopt(owing([{ taskId: 'task', from: 4, to: 29 }, { taskId: 'other', from: 10, to: 35 }]), rowFor('task'), [other]);
+            // The owed 25 minutes land first; the expired focus adds its own 25 on top.
+            expect(plan.taskPatch).toEqual(patch(54));
+            expect(plan.owed).toEqual([{ target: other, taskPatch: patch(35) }]);
+            expect(plan.result).toMatchObject({ creditedMinutes: 25, creditDisposition: 'credited' });
+            expect(validatePreparedNativePomodoroTransition(plan)).toEqual(plan);
+            const paused = adopt(owing([{ taskId: 'task', from: 4, to: 29 }], { timerState: { isRunning: false, completedFocusSessions: 3 } }), rowFor('task'));
+            expect(paused.taskPatch).toEqual(patch(29)); expect(paused).not.toHaveProperty('owed');
+            expect(paused.result).toMatchObject({ creditedMinutes: 0, creditDisposition: 'none' });
+            const unlinked = adopt(owing([{ taskId: 'other', to: 25 }], { selectedTaskId: undefined }), null, [rowFor('other', { timeSpentMinutes: null })]);
+            expect(unlinked.taskPatch).toBeNull(); expect(unlinked.owed![0].taskPatch).toEqual(patch(25));
+            expect(unlinked.deviceId).toBe('device');
+        });
+        it('gives no credit to a task already past from, and chains credits in their stored order', () => {
+            const paused = { timerState: { isRunning: false, completedFocusSessions: 3 } };
+            for (const cells of [{ timeSpentMinutes: 29 }, { timeSpentMinutes: 12 }, { timeSpentMinutes: null }, { deletedAt: AT },
+                { status: 'archived' }]) {
+                const plan = adopt(owing([{ taskId: 'task', from: 4, to: 29 }], paused), rowFor('task', cells));
+                expect(plan.taskPatch).toBeNull(); expect(plan.deviceId).toBeNull();
+            }
+            expect(adopt(owing([{ taskId: 'task', from: 4, to: 29 }], paused), { id: 'task', row: null }).taskPatch).toBeNull();
+            // RN reads a stored 0 as no time, so its credit has no `from`; a `from: null` reads the same way.
+            for (const credit of [{ taskId: 'task', to: 25 }, { taskId: 'task', from: null, to: 25 }]) {
+                expect(adopt(owing([credit], paused), rowFor('task', { timeSpentMinutes: 0 })).taskPatch).toEqual(patch(25));
+                expect(adopt(owing([credit], paused), rowFor('task', { timeSpentMinutes: null })).taskPatch).toEqual(patch(25));
+            }
+            // The first credit is already on the task (its save landed before the stop); the second still takes it.
+            expect(adopt(owing([{ taskId: 'task', from: 4, to: 29 }, { taskId: 'task', from: 29, to: 54 }], paused),
+                rowFor('task', { timeSpentMinutes: 29 })).taskPatch).toEqual(patch(54));
+        });
+        it('refuses owed rows that do not match the stored credits and malformed credits', () => {
+            const raw = owing([{ taskId: 'other', from: 10, to: 35 }, { taskId: 'third', from: 1, to: 26 }, { taskId: 'other', from: 35, to: 60 }]);
+            const other = rowFor('other', { timeSpentMinutes: 10 }); const third = rowFor('third', { timeSpentMinutes: 1 });
+            expect(adopt(raw, rowFor('task'), [other, third]).owed).toHaveLength(2);
+            for (const owed of [undefined, [], [other], [third, other], [other, third, third], [other, rowFor('task')]])
+                expect(() => adopt(raw, rowFor('task'), owed)).toThrow(/Invalid native Pomodoro/);
+            for (const credits of [{}, [null], [{ taskId: 'other' }], [{ taskId: 'other', to: 1.5 }], [{ taskId: 'other', to: -1 }],
+                [{ taskId: 'other', to: TIME_SPENT_MAX_MINUTES + 1 }], [{ taskId: 'other', from: '1', to: 2 }], [{ taskId: ' other', to: 2 }],
+                [{ taskId: 'other', to: 2, extra: true }]])
+                expect(() => adopt(JSON.stringify({ ...running(), pendingCredits: credits }), rowFor('task'), [other]))
+                    .toThrow(/Invalid native Pomodoro/);
+            const plan = adopt(raw, rowFor('task'), [other, third]);
+            for (const forged of [{ ...plan, owed: [] }, { ...plan, owed: [plan.owed![1], plan.owed![0]] },
+                { ...plan, owed: [{ ...plan.owed![0], taskPatch: null }, plan.owed![1]] }])
+                expect(() => validatePreparedNativePomodoroTransition(forged)).toThrow();
+        });
     });
     it('documents both historical independent-write variants without inferring repair from task minutes', () => {
         // Saved history landed, task credit failed: the historical session is never recredited.

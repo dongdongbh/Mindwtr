@@ -11,7 +11,7 @@ import { logInfo } from './logger';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { stripSensitiveSettings } from './store-helpers';
 import { runStoreCommand } from './store-write-gate';
-import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, validatePreparedNativePomodoroTransition,
+import { decodeNativePomodoroSession, nativePomodoroOwedCreditCount, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, validatePreparedNativePomodoroTransition,
     type NativePomodoroSessionRead, type NativePomodoroResult, type PreparedNativePomodoroTransition } from './native-pomodoro-session';
 
 /**
@@ -662,6 +662,9 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             this.pomodoroBusy = true; pomodoroStoreWriteFences.add(this); requestPayloads.set(requestId, payload);
             let transaction = false; let commitAttempted = false; let taskAttempted = false; let domainAttempted = false; let proven = false; let replayed = false;
             let result = plan.result;
+            // The selected task and each task an adopted RN session still owed time to: every BEFORE row is checked, each patch written.
+            const tasks = [...(plan.target ? [{ target: plan.target, taskPatch: plan.taskPatch }] : []), ...(plan.owed ?? [])];
+            const patched = tasks.some((task) => task.taskPatch !== null);
             let refusal: NativePomodoroTransitionRefusal | null = null;
             const stale = (message: string): never => { refusal = new NativePomodoroTransitionRefusal('staleBaseline', message); throw refusal; };
             try {
@@ -676,30 +679,33 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                             if (options?.replayOnly === true) throw new Error('Saved Pomodoro receipt is required');
                             const session = await this.readPomodoroCell();
                             if (session.raw !== plan.sessionBefore) stale('Stale Pomodoro session baseline');
-                            if (plan.target) {
+                            for (const { target } of tasks) {
                                 const rows = await this.receiptClient.all<Record<string, string | number | null>>(
-                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [plan.target.id]);
+                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [target.id]);
                                 const raw = rows.length === 0 ? null : TASK_SQLITE_COLUMNS.map((name) => rows[0][name]);
-                                if (rows.length > 1 || !taskEditValuesEqual(raw, plan.target.row)) stale('Stale Pomodoro task baseline');
+                                if (rows.length > 1 || !taskEditValuesEqual(raw, target.row)) stale('Stale Pomodoro task baseline');
                             }
-                            if (plan.taskPatch) {
+                            if (patched) {
                                 const settings = await this.receiptClient.get<{ data: string }>('SELECT data FROM settings WHERE id = 1');
                                 let device: unknown;
                                 try { device = (JSON.parse(settings?.data ?? '{}') as { deviceId?: unknown }).deviceId; } catch { /* Refuse unreadable identity. */ }
                                 if (device !== plan.deviceId) stale('Pomodoro device identity changed');
                                 taskAttempted = true; domainAttempted = true;
-                                await this.receiptClient.run('UPDATE tasks SET timeSpentMinutes=?, rev=?, revBy=?, updatedAt=? WHERE id=?',
-                                    [plan.taskPatch.timeSpentMinutes, plan.taskPatch.rev, plan.taskPatch.revBy, plan.taskPatch.updatedAt, plan.target!.id]);
+                                for (const { target, taskPatch } of tasks) {
+                                    if (taskPatch) await this.receiptClient.run('UPDATE tasks SET timeSpentMinutes=?, rev=?, revBy=?, updatedAt=? WHERE id=?',
+                                        [taskPatch.timeSpentMinutes, taskPatch.rev, taskPatch.revBy, taskPatch.updatedAt, target.id]);
+                                }
                             }
                             domainAttempted = true;
                             if (plan.sessionBefore === null) await this.receiptClient.run('INSERT INTO native_pomodoro_session (id,state_json) VALUES (1,?)', [plan.sessionAfter]);
                             else await this.receiptClient.run('UPDATE native_pomodoro_session SET state_json=? WHERE id=1 AND state_json=?', [plan.sessionAfter, plan.sessionBefore]);
                             if ((await this.readPomodoroCell()).raw !== plan.sessionAfter) throw new Error('Pomodoro session readback changed');
-                            if (plan.taskPatch) {
+                            for (const { target, taskPatch } of tasks) {
+                                if (!taskPatch) continue;
                                 const rows = await this.receiptClient.all<Record<string, string | number | null>>(
-                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [plan.target!.id]);
-                                const expected = [...plan.target!.row!];
-                                for (const [name, value] of Object.entries(plan.taskPatch)) expected[TASK_SQLITE_COLUMNS.indexOf(name)] = value;
+                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [target.id]);
+                                const expected = [...target.row!];
+                                for (const [name, value] of Object.entries(taskPatch)) expected[TASK_SQLITE_COLUMNS.indexOf(name)] = value;
                                 if (rows.length !== 1 || !taskEditValuesEqual(TASK_SQLITE_COLUMNS.map((name) => rows[0][name]), expected))
                                     throw new Error('Pomodoro task readback changed');
                             }
@@ -709,12 +715,18 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                         }
                         commitAttempted = true; await this.receiptClient.run('COMMIT'); transaction = false; proven = true;
                         this.pomodoroUncertainRequest = null;
-                        if (plan.taskPatch) {
+                        if (patched) {
                             this.pomodoroReloadRequired = true; this.pomodoroReloadRequest = requestId; this.invalidateWriteBaselineAfterDirectSQL();
                         }
                         durableReceipts?.set(requestId, { fingerprint: payload, reply: result, savedAt: new Date().toISOString() });
                         try { logInfo('Native Pomodoro transition confirmed', { scope: 'storage', force: true,
                             context: { releaseCheck: 'v1.3.5/ios-pomodoro-credit', outcome: 'confirmed' } }); } catch { /* SQL proof survives diagnostic failure. */ }
+                        const owedCredits = replayed ? 0 : nativePomodoroOwedCreditCount(plan.request);
+                        if (owedCredits > 0) {
+                            try { logInfo('Native Pomodoro adoption settled owed credits', { scope: 'storage', force: true,
+                                context: { releaseCheck: 'v1.3.8/pomodoro-adopt-owed-credits', count: owedCredits,
+                                    applied: tasks.filter((task) => task.taskPatch !== null).length, outcome: 'confirmed' } }); } catch { /* SQL proof survives diagnostic failure. */ }
+                        }
                     } catch (error) {
                         let rolledBack = false;
                         if (transaction) {

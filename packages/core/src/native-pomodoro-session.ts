@@ -2,7 +2,7 @@ import { strToU8 } from 'fflate';
 import { createPomodoroState, resetPomodoroState, type PomodoroDurations, type PomodoroSessionHistory, type PomodoroState } from './pomodoro';
 import { resolvePomodoroSession, serializePomodoroSession, type StoredPomodoroSession } from './pomodoro-session';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
-import { addTimeSpentMinutes, normalizeTimeSpentMinutes } from './time-spent';
+import { addTimeSpentMinutes, normalizeTimeSpentMinutes, TIME_SPENT_MAX_MINUTES } from './time-spent';
 import { nextRevision } from './sync-revision';
 import { taskEditValuesEqual } from './json-value-equality';
 
@@ -38,11 +38,16 @@ export type NativePomodoroRequest =
         autoStart: { autoStartFocus: boolean; autoStartBreaks: boolean }; taskId: string | null };
 export type NativePomodoroTaskBefore = { id: string; row: readonly (string | number | null)[] | null };
 export type NativePomodoroTaskPatch = { timeSpentMinutes: number; rev: number; revBy: string; updatedAt: string };
+/** A task other than the selected one that an RN session still owed time to, and its write. */
+export type NativePomodoroOwedTask = { target: NativePomodoroTaskBefore; taskPatch: NativePomodoroTaskPatch | null };
 export type NativePomodoroResult = { sessionID: string; generation: number; completedFocusSessions: number;
     creditedMinutes: number; creditDisposition: 'credited' | 'unlinked' | 'unavailable' | 'capped' | 'none' };
 export type PreparedNativePomodoroTransition = { version: 1; request: NativePomodoroRequest; sessionBefore: string | null;
     sessionAfter: string; target: NativePomodoroTaskBefore | null; taskPatch: NativePomodoroTaskPatch | null;
-    deviceId: string | null; result: NativePomodoroResult };
+    deviceId: string | null; result: NativePomodoroResult;
+    /** Present only when an adopted RN session owed time to tasks other than the selected one. */
+    owed?: NativePomodoroOwedTask[] };
+type OwedCredit = { taskId: string; from?: number | null; to: number };
 
 function invalid(): never { throw new Error('Invalid native Pomodoro transition'); }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'
@@ -101,10 +106,16 @@ const parseSession = (raw: string): unknown => {
 };
 
 /** Historical fields may be missing, but malformed present values are not defaults. */
-const legacySessionOf = (raw: string | null): StoredPomodoroSession => {
+const legacySessionOf = (raw: string | null): StoredPomodoroSession & { pendingCredits?: OwedCredit[] } => {
     if (raw === null) return {};
     const value = parseSession(raw);
-    if (!exact(value, [], ['durations', 'timerState', 'sessionHistory', 'selectedTaskId', 'phaseEndsAt', 'updatedAtMs'])) invalid();
+    if (!exact(value, [], ['durations', 'timerState', 'sessionHistory', 'selectedTaskId', 'phaseEndsAt', 'updatedAtMs', 'pendingCredits'])) invalid();
+    // RN stores a finished focus's time here before its task holds it (`from` is absent for a task with no time).
+    if (Object.prototype.hasOwnProperty.call(value, 'pendingCredits') && (!Array.isArray(value.pendingCredits)
+        || value.pendingCredits.length > 10_000 || !value.pendingCredits.every((credit: unknown) => exact(credit, ['taskId', 'to'], ['from'])
+            && identity(credit.taskId, 500) && count(credit.to) && credit.to <= TIME_SPENT_MAX_MINUTES
+            && (!Object.prototype.hasOwnProperty.call(credit, 'from') || credit.from === null
+                || (typeof credit.from === 'number' && Number.isFinite(credit.from)))))) invalid();
     const present = (name: string, object = value) => Object.prototype.hasOwnProperty.call(object, name);
     if ((present('selectedTaskId') && !identity(value.selectedTaskId, 500))
         || (present('phaseEndsAt') && !date(value.phaseEndsAt)) || (present('updatedAtMs') && !time(value.updatedAtMs))) invalid();
@@ -219,10 +230,26 @@ const targetOf = (value: unknown, id: string | undefined): NativePomodoroTaskBef
     return { id, row: [...value.row] as (string | number | null)[] };
 };
 const cell = (row: readonly (string | number | null)[], name: string) => row[TASK_SQLITE_COLUMNS.indexOf(name)];
+const legacyOf = (request: NativePomodoroRequest) => request.action === 'adoptLegacy' ? legacySessionOf(request.legacy.sessionRaw) : null;
+const owedIdsOf = (legacy: ReturnType<typeof legacySessionOf> | null): string[] =>
+    [...new Set((legacy?.pendingCredits ?? []).map((credit) => credit.taskId))].filter((id) => id !== legacy?.selectedTaskId);
+/** The tasks other than the selected one whose BEFORE rows an adoption reads: each one its RN session still owed time to. */
+export function nativePomodoroOwedTaskIds(request: NativePomodoroRequest): string[] {
+    return owedIdsOf(legacyOf(requestOf(request)));
+}
+/** How many credits an adopted RN session still owed (0 for any other action). */
+export function nativePomodoroOwedCreditCount(request: NativePomodoroRequest): number {
+    return legacyOf(requestOf(request))?.pendingCredits?.length ?? 0;
+}
 
 export function prepareNativePomodoroTransition(input: { request: NativePomodoroRequest; session: NativePomodoroSessionRead;
-    target: NativePomodoroTaskBefore | null; deviceId: string | null }): PreparedNativePomodoroTransition | null {
+    target: NativePomodoroTaskBefore | null; owed?: readonly NativePomodoroTaskBefore[]; deviceId: string | null }): PreparedNativePomodoroTransition | null {
     const request = requestOf(input.request);
+    const legacySource = legacyOf(request);
+    const owedIds = owedIdsOf(legacySource);
+    const owedInput = input.owed ?? [];
+    if (!Array.isArray(owedInput) || owedInput.length !== owedIds.length) invalid();
+    const owedTargets = owedIds.map((id, index) => targetOf(owedInput[index], id)!);
     if (!exact(input.session, ['raw', 'state'])) invalid();
     let after: NativePomodoroSession; let target: NativePomodoroTaskBefore | null = null;
     let taskPatch: NativePomodoroTaskPatch | null = null; let delta = 0; let creditedMinutes = 0;
@@ -236,7 +263,7 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
                 completedFocusSessionsByTaskId: {}, todayDayKey: request.localDayKey, completedTodayFocusSessions: 0 }, updatedAtMs: request.observedAtMs } };
     } else if (request.action === 'adoptLegacy') {
         if (input.session.raw !== null || input.session.state !== null) invalid();
-        const legacy = legacySessionOf(request.legacy.sessionRaw);
+        const { pendingCredits: _owed, ...legacy } = legacySource!;
         target = targetOf(input.target, legacy.selectedTaskId);
         if (input.deviceId !== null && !identity(input.deviceId, 200)) invalid();
         // Pausing only the copy makes normalization historical, not new task credit.
@@ -292,33 +319,57 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
             session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
                 sessionHistory: resolved.sessionHistory, updatedAtMs } };
     }
+    // Each task's time as RN's settle would leave it: the owed credits in stored order, then this pass's credit.
+    const available = (before: NativePomodoroTaskBefore | null): before is { id: string; row: readonly (string | number | null)[] } =>
+        Boolean(before?.row && !cell(before.row, 'deletedAt') && cell(before.row, 'status') !== 'archived');
+    const minutesOf = new Map<string, number | null>();
+    const minutesFor = (before: { id: string; row: readonly (string | number | null)[] }): number | null => {
+        if (!minutesOf.has(before.id)) {
+            const rawMinutes = cell(before.row, 'timeSpentMinutes'); const rawRev = cell(before.row, 'rev');
+            if ((rawMinutes !== null && typeof rawMinutes !== 'number') || (rawRev !== null && !count(rawRev))) invalid();
+            minutesOf.set(before.id, rawMinutes);
+        }
+        return minutesOf.get(before.id)!;
+    };
+    for (const credit of legacySource?.pendingCredits ?? []) {
+        const before = credit.taskId === target?.id ? target : owedTargets.find((owed) => owed.id === credit.taskId)!;
+        // A missing, deleted or archived task drops its credit; a task at any time other than `from` already took it
+        // (or was changed since, which wins), as RN's settle does. RN compares its loaded task, where a stored 0 reads as no time.
+        if (!available(before)) continue;
+        const minutes = minutesFor(before); const from = credit.from ?? undefined;
+        if ((minutes ?? undefined) === from || normalizeTimeSpentMinutes(minutes) === from) minutesOf.set(before.id, credit.to);
+    }
+    // This pass's credit adds to the time the owed credits leave. (RN chains it from the owed `to`, so it drops it
+    // too when the task had changed since; native keeps it, as its own credit rule does.)
     if (delta > 0) {
         if (!target) creditDisposition = 'unlinked';
-        else if (!target.row || cell(target.row, 'deletedAt') || cell(target.row, 'status') === 'archived') creditDisposition = 'unavailable';
+        else if (!available(target)) creditDisposition = 'unavailable';
         else {
-            const rawMinutes = cell(target.row, 'timeSpentMinutes'); const rawRev = cell(target.row, 'rev');
-            if ((rawMinutes !== null && typeof rawMinutes !== 'number') || (rawRev !== null && !count(rawRev))) invalid();
+            const rawMinutes = minutesFor(target);
             const increment = delta * creditFocusMinutes;
             if (!count(increment)) invalid();
             const oldMinutes = normalizeTimeSpentMinutes(rawMinutes) ?? 0;
             const minutes = addTimeSpentMinutes(rawMinutes, increment) ?? 0;
             creditedMinutes = minutes - oldMinutes;
             if (creditedMinutes === 0) creditDisposition = 'capped';
-            else {
-                if (!identity(input.deviceId, 200)) invalid();
-                deviceId = input.deviceId;
-                taskPatch = { timeSpentMinutes: minutes, rev: nextRevision(rawRev, { warn: false }), revBy: deviceId,
-                    updatedAt: new Date(request.observedAtMs).toISOString() };
-                creditDisposition = 'credited';
-            }
+            else { minutesOf.set(target.id, minutes); creditDisposition = 'credited'; }
         }
     }
+    const patchOf = (before: NativePomodoroTaskBefore | null): NativePomodoroTaskPatch | null => {
+        if (!available(before) || !minutesOf.has(before.id) || minutesOf.get(before.id) === cell(before.row, 'timeSpentMinutes')) return null;
+        if (!identity(input.deviceId, 200)) invalid();
+        deviceId = input.deviceId;
+        return { timeSpentMinutes: minutesOf.get(before.id)!, rev: nextRevision(cell(before.row, 'rev'), { warn: false }), revBy: deviceId,
+            updatedAt: new Date(request.observedAtMs).toISOString() };
+    };
+    taskPatch = patchOf(target);
+    const owed = owedTargets.map((before) => ({ target: before, taskPatch: patchOf(before) }));
     const sessionAfter = JSON.stringify(after);
     decodeNativePomodoroSession(sessionAfter);
     const result: NativePomodoroResult = { sessionID: after.sessionID, generation: after.generation,
         completedFocusSessions: after.session.sessionHistory.totalCompletedFocusSessions, creditedMinutes, creditDisposition };
     const plan: PreparedNativePomodoroTransition = { version: 1, request, sessionBefore: input.session.raw, sessionAfter,
-        target, taskPatch, deviceId, result };
+        target, taskPatch, deviceId, result, ...(owed.length > 0 ? { owed } : {}) };
     if (!bounded(JSON.stringify(result), MAX_NATIVE_POMODORO_RESULT_BYTES)
         || !bounded(JSON.stringify(plan), MAX_NATIVE_POMODORO_PLAN_BYTES)
         || !bounded(JSON.stringify(['pomodoroTransition', plan]), MAX_NATIVE_POMODORO_PLAN_BYTES)) invalid();
@@ -326,13 +377,16 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
 }
 
 export function validatePreparedNativePomodoroTransition(value: unknown): PreparedNativePomodoroTransition {
-    if (!exact(value, ['version', 'request', 'sessionBefore', 'sessionAfter', 'target', 'taskPatch', 'deviceId', 'result'])
+    if (!exact(value, ['version', 'request', 'sessionBefore', 'sessionAfter', 'target', 'taskPatch', 'deviceId', 'result'], ['owed'])
+        || (Object.prototype.hasOwnProperty.call(value, 'owed') && (!Array.isArray(value.owed)
+            || !value.owed.every((entry: unknown) => exact(entry, ['target', 'taskPatch']))))
         || value.version !== 1 || (value.sessionBefore !== null && typeof value.sessionBefore !== 'string')
         || !exact(value.result, ['sessionID', 'generation', 'completedFocusSessions', 'creditedMinutes', 'creditDisposition'])
         || (value.taskPatch !== null && !exact(value.taskPatch, ['timeSpentMinutes', 'rev', 'revBy', 'updatedAt']))) invalid();
     const prepared = prepareNativePomodoroTransition({ request: value.request as NativePomodoroRequest,
         session: value.sessionBefore === null ? { raw: null, state: null } : { raw: value.sessionBefore, state: decodeNativePomodoroSession(value.sessionBefore) },
-        target: value.target as NativePomodoroTaskBefore | null, deviceId: value.deviceId as string | null });
+        target: value.target as NativePomodoroTaskBefore | null,
+        owed: ((value.owed ?? []) as NativePomodoroOwedTask[]).map((entry) => entry.target), deviceId: value.deviceId as string | null });
     if (!prepared || !taskEditValuesEqual(value, prepared)) invalid();
     return prepared;
 }

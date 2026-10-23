@@ -19057,7 +19057,8 @@ private final class Engine: @unchecked Sendable {
               try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
               let arguments = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], arguments.count == 1 else { throw Self.pomodoroFailure }
         let plan = try Self.pomodoroObject(arguments[0], maximum: 2_000_000)
-        guard Set(plan.keys) == Set(["version", "request", "sessionBefore", "sessionAfter", "target", "taskPatch", "deviceId", "result"]),
+        // "owed" is present only when an adopted RN session still owed time to tasks other than the selected one.
+        guard Set(plan.keys).subtracting(["owed"]) == Set(["version", "request", "sessionBefore", "sessionAfter", "target", "taskPatch", "deviceId", "result"]),
               Self.isInteger(plan["version"], equalTo: 1), let request = plan["request"] as? [String: Any],
               let after = plan["sessionAfter"] as? String,
               plan["sessionBefore"] is NSNull || plan["sessionBefore"] is String,
@@ -19066,8 +19067,9 @@ private final class Engine: @unchecked Sendable {
         _ = try Self.pomodoroPlanRequest(Self.ownedJSON(request))
         _ = try Self.pomodoroObject(after, maximum: 1_000_000)
         if let before = plan["sessionBefore"] as? String { _ = try Self.pomodoroObject(before, maximum: 1_000_000) }
-        if !(plan["target"] is NSNull) {
-            guard let target = plan["target"] as? [String: Any], Set(target.keys) == Set(["id", "row"]),
+        func checkTask(_ value: Any?, nullable: Bool) throws {
+            if nullable, value is NSNull { return }
+            guard let target = value as? [String: Any], Set(target.keys) == Set(["id", "row"]),
                   let id = target["id"] as? String, !id.isEmpty, id.utf16.count <= 500,
                   target["row"] is NSNull || (target["row"] as? [Any]).map({ row in
                     row.count <= 128 && row.first as? String == id && row.allSatisfy { cell in
@@ -19076,11 +19078,22 @@ private final class Engine: @unchecked Sendable {
                     }
                   }) == true else { throw Self.pomodoroFailure }
         }
-        if !(plan["taskPatch"] is NSNull) {
-            guard let patch = plan["taskPatch"] as? [String: Any], Set(patch.keys) == Set(["timeSpentMinutes", "rev", "revBy", "updatedAt"]),
+        func checkPatch(_ value: Any?) throws {
+            if value is NSNull { return }
+            guard let patch = value as? [String: Any], Set(patch.keys) == Set(["timeSpentMinutes", "rev", "revBy", "updatedAt"]),
                   Self.pomodoroCount(patch["timeSpentMinutes"]), Self.pomodoroCount(patch["rev"]),
                   let device = patch["revBy"] as? String, !device.isEmpty, device.utf16.count <= 200,
                   let updated = patch["updatedAt"] as? String, updated.utf8.count <= 32 else { throw Self.pomodoroFailure }
+        }
+        try checkTask(plan["target"], nullable: true)
+        try checkPatch(plan["taskPatch"])
+        if plan.keys.contains("owed") {
+            guard let owed = plan["owed"] as? [Any], !owed.isEmpty else { throw Self.pomodoroFailure }
+            for entry in owed {
+                guard let entry = entry as? [String: Any], Set(entry.keys) == Set(["target", "taskPatch"]) else { throw Self.pomodoroFailure }
+                try checkTask(entry["target"], nullable: false)
+                try checkPatch(entry["taskPatch"])
+            }
         }
         let resultJSON = try Self.ownedJSON(result)
         _ = try Self.pomodoroResult(resultJSON)

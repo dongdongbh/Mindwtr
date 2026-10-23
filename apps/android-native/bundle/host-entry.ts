@@ -156,7 +156,7 @@ import { classifyAppleReminderForImport, normalizeAppleRemindersImportSettings }
 import { prepareNativeAppleReminderImportItem, validatePreparedNativeAppleReminderImportItem,
     type NativeAppleReminderImportRequest } from '../../../packages/core/src/native-apple-reminders-import-item';
 import { createNativeAppleReminderImportOwner } from '../../../packages/core/src/native-apple-reminders-import-owner';
-import { prepareNativePomodoroTransition, validatePreparedNativePomodoroTransition,
+import { nativePomodoroOwedTaskIds, prepareNativePomodoroTransition, validatePreparedNativePomodoroTransition,
     MAX_NATIVE_POMODORO_PLAN_BYTES, type NativePomodoroRequest } from '../../../packages/core/src/native-pomodoro-session';
 import { NativePomodoroTransitionRefusal } from '../../../packages/core/src/native-request-receipts';
 import { buildNativePomodoroAlarmIntent } from '../../../packages/core/src/native-pomodoro-alarm';
@@ -4821,11 +4821,16 @@ globalThis.MindwtrHost = {
             const selected = request.action === 'adoptLegacy'
                 ? typeof legacy?.selectedTaskId === 'string' ? legacy.selectedTaskId : undefined
                 : session.state?.session.selectedTaskId;
-            const matches = selected ? data.tasks.filter((task) => task.id === selected) : [];
-            if (matches.length > 1 || (matches.length === 1 && !hasRawReadRow(matches[0]))) throw stale();
-            const row = matches.length === 1 ? [...rawReadRow(matches[0], taskToSqliteRow(matches[0])).row] as (string | number | null)[] : null;
-            if (row && row.length !== TASK_SQLITE_COLUMNS.length) throw stale();
-            const plan = prepareNativePomodoroTransition({ request, session, target: selected ? { id: selected, row } : null,
+            const before = (id: string) => {
+                const matches = data.tasks.filter((task) => task.id === id);
+                if (matches.length > 1 || (matches.length === 1 && !hasRawReadRow(matches[0]))) throw stale();
+                const row = matches.length === 1 ? [...rawReadRow(matches[0], taskToSqliteRow(matches[0])).row] as (string | number | null)[] : null;
+                if (row && row.length !== TASK_SQLITE_COLUMNS.length) throw stale();
+                return { id, row };
+            };
+            // An adopted RN session may still owe time to other tasks: their BEFORE rows ride the same plan.
+            const plan = prepareNativePomodoroTransition({ request, session, target: selected ? before(selected) : null,
+                owed: request.action === 'adoptLegacy' ? nativePomodoroOwedTaskIds(request).map(before) : [],
                 deviceId: request.action === 'initialize' ? null : typeof data.settings.deviceId === 'string' ? data.settings.deviceId : null });
             assertCurrent();
             if (!plan) return { kind: 'noop' };

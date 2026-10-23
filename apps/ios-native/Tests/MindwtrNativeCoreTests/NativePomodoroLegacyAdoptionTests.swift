@@ -148,6 +148,24 @@ final class NativePomodoroLegacyAdoptionTests: XCTestCase {
         XCTAssertEqual(try snapshot(), saved); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try await capture(core)
     }
 
+    func testOwedRNCreditsAdoptWithTheSessionOnceThroughTheJournal() async throws {
+        try await seedTask()
+        var value = try object(legacy())
+        // RN stopped after saving the session and before either task held its time.
+        value["pendingCredits"] = [["taskId": "task", "from": 4, "to": 29], ["taskId": "other", "from": 7, "to": 32]]
+        try source(json(value))
+        let core = host(); _ = try await core.start(); let original = try request()
+        let response = try object(await core.writePomodoroTransition(requestJSON: original))
+        XCTAssertEqual(response["kind"] as? String, "confirmed")
+        XCTAssertEqual(try rows("SELECT id, timeSpentMinutes FROM tasks WHERE id IN ('task','other') ORDER BY id").map { $0["timeSpentMinutes"] as? Int }, [32, 79])
+        let id = try XCTUnwrap(object(original)["requestId"] as? String)
+        let payload = try XCTUnwrap(rows("SELECT method FROM native_request_receipts WHERE request_id=?", [id]).first?["method"] as? String)
+        let plan = try XCTUnwrap((NativeJSON.jsonObject(with: Data(payload.utf8)) as? [Any])?[1] as? [String: Any])
+        XCTAssertEqual((plan["owed"] as? [[String: Any]])?.count, 1)
+        let saved = try snapshot(); await failure { _ = try await core.writePomodoroTransition(requestJSON: original) }
+        XCTAssertEqual(try snapshot(), saved)
+    }
+
     func testInlineExternalAndExternalBOMPreservePhysicalSourceAndExactLogicalReceipt() async throws {
         for mode in ["inline", "external", "bom"] {
             let previous = try enterCase(); try await seedTask(); let raw = "  " + (try legacy()) + "\n"

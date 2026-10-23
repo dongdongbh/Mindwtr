@@ -99,6 +99,9 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // ios-search-publication reuses releaseCheck, operation, outcome, enabled, and count below.
     // ios-search-snapshot reuses releaseCheck and count below.
     // pomodoro-alarm-rearm and pomodoro-credit-durable reuse releaseCheck and outcome below.
+    // pomodoro-adopt-owed-credits reuses releaseCheck, count and outcome below; count = owed credits in the RN session,
+    // applied = tasks whose time the takeover changed.
+    'applied',
     // widget-context-selection reuses releaseCheck and count below; lists counts the built context/tag/filter lists.
     'lists',
     // widget-upcoming reuses releaseCheck, platform, and count below.

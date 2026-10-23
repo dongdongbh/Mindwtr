@@ -217,6 +217,65 @@ describe('legacy Pomodoro adoption through the unchanged atomic SQLite owner', (
             const after = await env.state(); expect(after.receipts).toHaveLength(1);
             await env.adapter.savePomodoroTransitionWithReceipt(env.plan); expect(await env.state()).toEqual(after);
         });
+    async function openOwed(pendingCredits: unknown[], legacyChanges: Record<string, unknown> = {}) {
+        const env = await openLegacy();
+        await env.sql.client.run(`INSERT INTO tasks (${TASK_SQLITE_COLUMNS.join(', ')}) SELECT ${TASK_SQLITE_COLUMNS.map((name) =>
+            name === 'id' ? "'other'" : name === 'timeSpentMinutes' ? '10' : name).join(', ')} FROM tasks WHERE id='task'`);
+        await useTaskStore.getState().fetchData({ recoveryLoad: true, throwOnError: true });
+        const rows = async (id: string) => {
+            const [row] = await env.sql.client.all<Record<string, string | number | null>>('SELECT * FROM tasks WHERE id=?', [id]);
+            return { id, row: TASK_SQLITE_COLUMNS.map((name) => row[name]) };
+        };
+        if (env.plan.request.action !== 'adoptLegacy') throw new Error('fixture');
+        const legacy = JSON.parse(env.plan.request.legacy.sessionRaw!) as Record<string, unknown>;
+        const sessionRaw = JSON.stringify({ ...legacy, ...legacyChanges, pendingCredits });
+        const adopt = async () => prepareNativePomodoroTransition({ request: { ...env.plan.request, legacy: { ...env.plan.request.legacy, sessionRaw } } as typeof env.plan.request,
+            session: { raw: null, state: null }, target: await rows('task'), owed: [await rows('other')], deviceId: 'device' })!;
+        env.events.length = 0;
+        return { ...env, adopt };
+    }
+    it.each(['second UPDATE tasks', 'COMMIT'])('applies RN owed credits with the adoption once; a crash at %s leaves the RN record to adopt again', async (fault) => {
+        // The RN record: a stop after the session save left both credits owed.
+        const env = await openOwed([{ taskId: 'task', from: 4, to: 54 }, { taskId: 'other', from: 10, to: 60 }]);
+        const { adopt } = env;
+        const plan = await adopt(); const before = await env.state(); let updates = 0; let once = true;
+        env.hooks.run = async (sql) => {
+            if (sql.startsWith('UPDATE tasks')) updates += 1;
+            if (once && (fault === 'COMMIT' ? sql === 'COMMIT' : sql.startsWith('UPDATE tasks') && updates === 2)) { once = false; throw new Error('crash'); }
+        };
+        await expect(env.adapter.savePomodoroTransitionWithReceipt(plan)).rejects.toThrow(/Pomodoro/);
+        expect(once).toBe(false); expect(await env.state()).toEqual(before);
+        env.hooks.run = undefined;
+        // Nothing of the adoption landed, so the same RN record adopts again to the same plan.
+        const retry = await adopt(); expect(retry).toEqual(plan); const info = vi.spyOn(logger, 'logInfo');
+        expect((await env.adapter.savePomodoroTransitionWithReceipt(retry)).result.creditedMinutes).toBe(50);
+        expect(info).toHaveBeenCalledWith('Native Pomodoro adoption settled owed credits', { scope: 'storage', force: true,
+            context: { releaseCheck: 'v1.3.8/pomodoro-adopt-owed-credits', count: 2, applied: 2, outcome: 'confirmed' } });
+        const minutes = async () => (await env.sql.client.all<{ id: string; timeSpentMinutes: number }>(
+            'SELECT id, timeSpentMinutes FROM tasks ORDER BY id')).map((row) => [row.id, row.timeSpentMinutes]);
+        expect(await minutes()).toEqual([['other', 60], ['task', 104]]);
+        expect(useTaskStore.getState()._tasksById.get('other')!.timeSpentMinutes).toBe(60);
+        const after = await env.state(); env.events.length = 0;
+        expect((await env.adapter.savePomodoroTransitionWithReceipt(retry)).replayed).toBe(true);
+        expect(await env.state()).toEqual(after); expect(env.events.some((sql) => /^(UPDATE|INSERT)/u.test(sql))).toBe(false);
+    });
+    it.each(['other task', 'device'])('refuses an owed-only adoption whose %s changed after prepare, with no writes', async (change) => {
+        // Paused: only the other task's owed credit writes anything.
+        const env = await openOwed([{ taskId: 'other', from: 10, to: 35 }], { timerState: { phase: 'focus', remainingSeconds: 60, isRunning: false, completedFocusSessions: 3 } });
+        const plan = await env.adopt(); expect(plan.taskPatch).toBeNull(); expect(plan.owed![0].taskPatch).not.toBeNull();
+        if (change === 'other task') await env.sql.client.run('UPDATE tasks SET title=? WHERE id=?', ['Edited elsewhere', 'other']);
+        else await env.sql.client.run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify({ deviceId: 'another' })]);
+        const before = await env.state(); env.events.length = 0;
+        await expect(env.adapter.savePomodoroTransitionWithReceipt(plan)).rejects.toMatchObject({ code: 'staleBaseline' });
+        expect(await env.state()).toEqual(before); expect(env.events.some((sql) => /^(UPDATE|INSERT|DELETE)/u.test(sql))).toBe(false);
+    });
+    it('commits an owed-only adoption and reloads the store projection', async () => {
+        const env = await openOwed([{ taskId: 'other', from: 10, to: 35 }], { timerState: { phase: 'focus', remainingSeconds: 60, isRunning: false, completedFocusSessions: 3 } });
+        const plan = await env.adopt();
+        expect(await env.adapter.savePomodoroTransitionWithReceipt(plan)).toEqual({ result: plan.result, replayed: false, projectionReloaded: true });
+        expect(useTaskStore.getState()._tasksById.get('other')!.timeSpentMinutes).toBe(35);
+        expect(useTaskStore.getState()._tasksById.get('task')!.timeSpentMinutes).toBe(4);
+    });
     it('recovers an actual lost COMMIT reply from cold proof before later task/session/source availability', async () => {
         const env = await openLegacy(); let once = true;
         env.hooks.afterRun = async (sql) => { if (sql === 'COMMIT' && once) { once = false; throw new Error('lost reply'); } };
