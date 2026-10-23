@@ -2042,12 +2042,42 @@ describe('browser description image paste', () => {
         expect(textarea.value).toBe('Before typingcaption\n\n![Image](mindwtr://attachment/image-1)');
     });
 
-    it('does not enable the pending native description paste feature', () => {
+    it('reads the image through the async clipboard when WebKitGTK sends an empty paste (#1403)', async () => {
         (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
-        const addDroppedFileAttachments = vi.fn(async () => []);
-        const { getByRole } = render(<DraftFieldHarness fieldId="description" attachments={{ addDroppedFileAttachments }} />);
-        fireEvent.paste(getByRole('textbox', { name: 'Description' }), { clipboardData: { items: [], files: [new File(['x'], 'image.png', { type: 'image/png' })], getData: () => '' } });
-        expect(addDroppedFileAttachments).not.toHaveBeenCalled();
+        const png = new Blob(['png'], { type: 'image/png' });
+        const read = vi.fn(async () => [{ types: ['image/png'], getType: async () => png }]);
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read } });
+        const attachment = { id: 'linux-image', kind: 'file' as const, title: 'clipboard-0', uri: '/data/attachments/linux-image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt };
+        const addDroppedFileAttachments = vi.fn(async (_files: File[]) => [attachment]);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: '' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        await act(async () => {
+            fireEvent.paste(textarea, { clipboardData: { items: [], files: [], types: [], getData: () => '' } });
+        });
+        await vi.waitFor(() => expect(textarea.value).toBe('![Image](mindwtr://attachment/linux-image)'));
+        expect(read).toHaveBeenCalledOnce();
+        expect(addDroppedFileAttachments.mock.calls[0][0][0]).toMatchObject({ type: 'image/png' });
+        Reflect.deleteProperty(navigator, 'clipboard');
+        delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    });
+
+    it('imports a pasted image in the desktop app and inserts its managed reference (#1403)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        logMocks.logInfo.mockClear();
+        const attachment = { id: 'desktop-image', kind: 'file' as const, title: 'image.png', uri: '/data/attachments/desktop-image.png', mimeType: 'image/png', createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt };
+        const addDroppedFileAttachments = vi.fn(async () => [attachment]);
+        const { getByRole } = render(<DraftFieldHarness fieldId="description" initialDraft={{ description: 'Notes' }} attachments={{ addDroppedFileAttachments }} />);
+        const textarea = getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement;
+        textarea.setSelectionRange(5, 5);
+        await act(async () => {
+            fireEvent.paste(textarea, { clipboardData: { items: [], files: [new File(['x'], 'image.png', { type: 'image/png' })], getData: () => '' } });
+        });
+        expect(addDroppedFileAttachments).toHaveBeenCalledOnce();
+        expect(textarea.value).toBe('Notes![Image](mindwtr://attachment/desktop-image)');
+        expect(logMocks.logInfo).toHaveBeenCalledWith('Description clipboard image references inserted', {
+            scope: 'attachment',
+            extra: { releaseCheck: 'v1.3.8/description-clipboard-images', count: 1 },
+        });
         delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
     });
 });

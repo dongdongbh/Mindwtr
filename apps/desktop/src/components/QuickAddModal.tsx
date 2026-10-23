@@ -49,7 +49,7 @@ import { cn } from '../lib/utils';
 import { isMacRuntime, isTauriRuntime } from '../lib/runtime';
 import { reportError } from '../lib/report-error';
 import { logWarn } from '../lib/app-log';
-import { getClipboardImageFiles, getImageExtension } from '../lib/clipboard-images';
+import { getClipboardImageFiles, getImageExtension, isEmptyPasteEvent, readAsyncClipboardImageFiles } from '../lib/clipboard-images';
 import { createWebAttachmentDraft, getWebAttachmentUploadTarget, webAttachmentUploadMessage } from '../lib/web-attachment-upload';
 import { createDesktopRecoverySnapshot } from '../lib/data-transfer';
 import { MAX_AUDIO_RECORDING_SECONDS } from '../lib/audio-capture-buffer';
@@ -570,30 +570,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         });
     }, [cleanupPastedImageAttachments, createPastedImageAttachment, t]);
 
-    // WebKitGTK (Linux) delivers an entirely empty DOM paste event for a
-    // clipboard image — no items, no files, no text — so an empty paste falls
-    // back to the async clipboard API, which the Rust side unlocks by allowing
-    // WebKit's clipboard permission request (#690). Anywhere the paste event
-    // already carried the image or any text, this never runs.
+    // WebKitGTK (Linux) delivers an empty DOM paste event for a clipboard image; anywhere
+    // the paste event already carried the image or any text, this never runs.
     const attachImagesFromAsyncClipboard = useCallback(async () => {
         if (isSandboxMode()) return;
-        if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
         const session = activeSubmissionSessionRef.current;
-        let clipboardFiles: File[];
-        try {
-            const items = await navigator.clipboard.read();
-            const blobs = await Promise.all(items.map(async (item) => {
-                const imageType = item.types.find((type) => type.toLowerCase().startsWith('image/'));
-                return imageType ? { blob: await item.getType(imageType), type: imageType } : null;
-            }));
-            clipboardFiles = blobs
-                .filter((entry): entry is { blob: Blob; type: string } => entry !== null)
-                .map(({ blob, type }, index) => new File([blob], `clipboard-${index}`, { type }));
-        } catch {
-            // Permission denied or unsupported — identical outcome to the old
-            // behavior, where an image paste simply did nothing here.
-            return;
-        }
+        const clipboardFiles = await readAsyncClipboardImageFiles();
         if (clipboardFiles.length > 0 && isOpenRef.current && activeSubmissionSessionRef.current === session) {
             attachPastedImageFiles(clipboardFiles);
         }
@@ -615,7 +597,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         }
 
         const pastedText = event.clipboardData?.getData('text/plain') ?? '';
-        if (!pastedText && (event.clipboardData?.types?.length ?? 0) === 0) {
+        if (isEmptyPasteEvent(event.clipboardData)) {
             void attachImagesFromAsyncClipboard();
             return;
         }

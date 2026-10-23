@@ -358,3 +358,14 @@ describe('useTaskItemSubmit attachment durability', () => {
         });
     });
 });
+
+
+it('blocks every save path while file import is pending', async () => {
+    const updateTask = vi.fn(async () => ({ success: true }));
+    const setIsEditing = vi.fn();
+    const params = { baselineTask: task, task, draft: { ...createTaskDraft(task), title: 'Edited' }, editAttachments: [], isImportingFiles: true, editingTaskId: task.id, setEditingTaskId: vi.fn(), setIsEditing, showToast: vi.fn(), t: (key: string) => key, updateTask, beginAttachmentSave: vi.fn(), cancelAttachmentSaveBeforeStoreUpdate: vi.fn(), settlePersistedAttachmentSave: vi.fn() };
+    const { result } = renderHook(() => useTaskItemSubmit(params));
+    await expect(result.current(undefined, { keepEditing: true })).resolves.toBeUndefined();
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(setIsEditing).not.toHaveBeenCalled();
+});

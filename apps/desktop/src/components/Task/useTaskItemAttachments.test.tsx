@@ -840,3 +840,22 @@ describe('UpNote Add Link compatibility', () => {
         vi.mocked(openAttachmentTarget).mockReset().mockResolvedValue(undefined);
     });
 });
+
+
+it('discards an image import that finishes after cancelling the draft', async () => {
+    invokeMock.mockRejectedValue(new Error('get_managed_data_dir not supported'));
+    let finishWrite!: () => void;
+    writeFileMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finishWrite = resolve; }));
+    const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
+    let importing!: Promise<Attachment[] | null>;
+    await act(async () => { importing = result.current.addDroppedFileAttachments([new File(['png'], 'image.png', { type: 'image/png' })]); });
+    await vi.waitFor(() => expect(finishWrite).toBeTypeOf('function'));
+    expect(result.current.isImportingFiles).toBe(true);
+    act(() => result.current.resetAttachmentState([]));
+    let imported!: Attachment[] | null;
+    await act(async () => { finishWrite(); imported = await importing; });
+    expect(imported).toBeNull();
+    expect(result.current.editAttachments).toEqual([]);
+    expect(result.current.isImportingFiles).toBe(false);
+    expect(removeMock).toHaveBeenCalledWith(expect.stringMatching(/attachments\/.+\.png$/));
+});

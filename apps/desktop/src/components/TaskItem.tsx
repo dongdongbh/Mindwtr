@@ -1351,8 +1351,8 @@ export const TaskItem = memo(function TaskItem({
     // Attachments count as pending edits too: their records are draft-buffered
     // in useTaskItemAttachments and only persist on Save.
     const hasPendingEdits = useCallback(
-        () => isTaskDraftDirty(draft, task) || areDraftAttachmentsDirty(editAttachments, task),
-        [draft, editAttachments, task],
+        () => isImportingFiles || isTaskDraftDirty(draft, task) || areDraftAttachmentsDirty(editAttachments, task),
+        [draft, editAttachments, isImportingFiles, task],
     );
     const recordExitDecision = useCallback((outcome: 'saved' | 'discarded' | 'stayed') => {
         void logInfo('Task editor exit decided', {
@@ -1659,6 +1659,7 @@ export const TaskItem = memo(function TaskItem({
             onPromoteToProject={!effectiveReadOnly ? handlePromoteTaskToProject : undefined}
             onConvertToSection={!effectiveReadOnly && Boolean(draft.projectId) ? handleConvertTaskToSection : undefined}
             onCancel={handleEditorCancel}
+            isImportingFiles={isImportingFiles}
             onSubmit={handleSubmit}
             onFilesDropped={(files) => void addDroppedFileAttachments(files)}
         />
