@@ -5953,8 +5953,9 @@ final class FoundationUITests: XCTestCase {
             return CGPoint(x: target.midX, y: sourceFrame.midY < target.midY ? target.minY + inset : target.maxY - inset)
         }
         // Scroll before admission only. Changing the viewport during a drag cancels it.
+        // Keep the handle and drop point away from scroll edges before admission.
         for _ in 0..<8 {
-            let viewport = app.frame.intersection(scroll.frame), sourceFrame = handle.frame, target = body.frame
+            let viewport = app.frame.intersection(scroll.frame).insetBy(dx: 0, dy: 44), sourceFrame = handle.frame, target = body.frame
             guard finite(viewport), finite(sourceFrame), finite(target) else {
                 XCTFail("Cross-column drag requires finite measured source, body and viewport")
                 throw CocoaError(.coderReadCorrupt)
@@ -5974,7 +5975,7 @@ final class FoundationUITests: XCTestCase {
         }
         var prior: [CGRect] = []
         let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let viewport = app.frame.intersection(scroll.frame), frames = [handle.frame, body.frame, viewport]
+            let viewport = app.frame.intersection(scroll.frame).insetBy(dx: 0, dy: 44), frames = [handle.frame, body.frame, viewport]
             let settled = prior == frames; prior = frames
             return settled && frames.allSatisfy(finite) && viewport.contains(handle.frame)
                 && viewport.contains(targetPoint(handle.frame, body.frame)) && handle.isHittable
