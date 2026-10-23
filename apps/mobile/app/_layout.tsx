@@ -44,8 +44,21 @@ import {
   useTaskStore,
   isSandboxMode,
   resolveAndroidInstallerSource,
+  resolveMobileDonationPromptAllowed,
+  resolveMobileUpdateReminderAllowed,
+  fetchMobileUpdateReminderInfo,
+  buildUpdateReminderAnnouncement,
+  ANNOUNCEMENT_STARTUP_DELAY_MS,
+  DONATION_PROMPT_STARTUP_DELAY_MS,
+  UPDATE_REMINDER_STARTUP_DELAY_MS,
+  UPDATE_REMINDER_FETCH_TIMEOUT_MS,
+  UPDATE_REMINDER_RELEASES_URL,
+  UPDATE_NOW_ACTION_LABEL,
+  VIEW_RELEASE_ACTION_LABEL,
+  type AndroidInstallerSource,
   type AppAnnouncement,
   type AppAnnouncementAction,
+  type MobileUpdateReminderInfo,
   type StartupPromptDescriptor,
   type UserPromptState,
 } from '@mindwtr/core';
@@ -146,91 +159,9 @@ type MobileExtraConfig = {
 const parseBool = (value: unknown): boolean =>
   value === true || value === 1 || value === '1' || value === 'true';
 
-const resolveMobileDonationPromptAllowed = async (options: {
-  isExpoGo: boolean;
-  donationPromptEnabled: boolean;
-}): Promise<boolean> => {
-  if (!options.donationPromptEnabled) return false;
-  if (options.isExpoGo) return false;
-  return Platform.OS === 'android' || Platform.OS === 'ios';
-};
-
-const ANNOUNCEMENT_STARTUP_DELAY_MS = 250;
-const DONATION_PROMPT_STARTUP_DELAY_MS = 2000;
-const UPDATE_REMINDER_STARTUP_DELAY_MS = 1750;
-// fetchMobileUpdateReminderInfo is a plain fetch with no timeout; cap present()
-// so a hung network never holds the single prompt slot for the whole session.
-const UPDATE_REMINDER_FETCH_TIMEOUT_MS = 15000;
-const UPDATE_REMINDER_RELEASES_API = 'https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest';
-const UPDATE_REMINDER_RELEASES_URL = 'https://github.com/dongdongbh/Mindwtr/releases/latest';
 const APP_STORE_APP_ID = '6758597144';
 const APP_STORE_REVIEW_URL = `itms-apps://itunes.apple.com/app/id${APP_STORE_APP_ID}?action=write-review`;
 const APP_STORE_LISTING_URL = `https://apps.apple.com/app/mindwtr/id${APP_STORE_APP_ID}`;
-const UPDATE_NOW_ACTION_LABEL = 'Update now';
-const VIEW_RELEASE_ACTION_LABEL = 'View release';
-
-type MobileUpdateReminderInfo = {
-  currentVersion: string;
-  latestVersion: string;
-  latestReleasedAt: string | null;
-  releaseUrl: string;
-  actionLabel?: string;
-  testOnly?: boolean;
-};
-
-type AndroidInstallerSource = 'play-store' | 'sideload' | 'unknown';
-
-type GitHubLatestRelease = {
-  tag_name?: unknown;
-  html_url?: unknown;
-  published_at?: unknown;
-};
-
-const resolveMobileUpdateReminderAllowed = async (options: {
-  androidInstallerSource: AndroidInstallerSource;
-  isExpoGo: boolean;
-  isFossBuild: boolean;
-}): Promise<boolean> => {
-  if (options.isExpoGo) return false;
-  if (Platform.OS !== 'android') return false;
-  if (options.isFossBuild) return false;
-  return options.androidInstallerSource === 'sideload';
-};
-
-const fetchMobileUpdateReminderInfo = async (currentVersion: string): Promise<MobileUpdateReminderInfo> => {
-  const response = await fetch(UPDATE_REMINDER_RELEASES_API, {
-    headers: {
-      Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'Mindwtr-App',
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status}`);
-  }
-  const release = await response.json() as GitHubLatestRelease;
-  const latestVersion = String(release.tag_name || '').trim().replace(/^v/i, '');
-  if (!latestVersion) throw new Error('GitHub release returned no version');
-  return {
-    currentVersion,
-    latestVersion,
-    latestReleasedAt: typeof release.published_at === 'string' ? release.published_at : null,
-    releaseUrl: typeof release.html_url === 'string' && release.html_url.trim()
-      ? release.html_url.trim()
-      : UPDATE_REMINDER_RELEASES_URL,
-    actionLabel: UPDATE_NOW_ACTION_LABEL,
-  };
-};
-
-const buildUpdateReminderAnnouncement = (info: MobileUpdateReminderInfo): AppAnnouncement => ({
-  id: `update-reminder-${info.latestVersion}`,
-  title: 'Update available',
-  body: `Mindwtr ${info.latestVersion} is available. You are using ${info.currentVersion}. Update when you have a minute to keep fixes and improvements current.`,
-  action: {
-    type: 'url',
-    label: info.actionLabel ?? VIEW_RELEASE_ACTION_LABEL,
-    url: info.releaseUrl,
-  },
-});
 
 const getAndroidPackageName = (): string => (
   Constants.expoConfig?.android?.package || Application.applicationId || 'tech.dongdongbh.mindwtr'
@@ -793,7 +724,7 @@ function RootLayoutContentInner() {
           });
       },
       present: async (signal) => {
-        const info = await fetchMobileUpdateReminderInfo(appVersion);
+        const info = await fetchMobileUpdateReminderInfo(appVersion, fetch);
         if (signal.aborted) return false;
         const latestPromptState = await readLocalUserPromptState();
         if (signal.aborted) return false;
@@ -1145,7 +1076,7 @@ function RootLayoutContentInner() {
       return;
     }
     let cancelled = false;
-    resolveMobileDonationPromptAllowed({ donationPromptEnabled, isExpoGo })
+    resolveMobileDonationPromptAllowed({ platform: Platform.OS, donationPromptEnabled, isExpoGo })
       .then((allowed) => {
         if (!cancelled) setDonationPromptAllowed(allowed);
       })
@@ -1167,7 +1098,7 @@ function RootLayoutContentInner() {
       return;
     }
     let cancelled = false;
-    resolveMobileUpdateReminderAllowed({ androidInstallerSource, isExpoGo, isFossBuild })
+    resolveMobileUpdateReminderAllowed({ platform: Platform.OS, androidInstallerSource, isExpoGo, isFossBuild })
       .then((allowed) => {
         if (!cancelled) setUpdateReminderAllowed(allowed);
       })
