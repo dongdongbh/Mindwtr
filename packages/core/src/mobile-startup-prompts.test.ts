@@ -8,8 +8,10 @@ import {
     fetchMobileUpdateReminderInfo,
     resolveMobileDonationPromptAllowed,
     resolveMobileUpdateReminderAllowed,
+    translateDonationPromptAnnouncement,
     type MobileStartupPromptInput,
 } from './mobile-startup-prompts';
+import { DONATION_PROMPT_ANNOUNCEMENT } from './announcements';
 import { LOCAL_USER_PROMPT_STATE_KEY } from './user-prompts';
 
 const reply = (body: unknown, ok = true, status = 200) => vi.fn(async () => ({ ok, status, json: async () => body }));
@@ -180,5 +182,19 @@ describe('buildMobileStartupPromptDescriptors', () => {
         expect(build({ donationPromptAllowed: null }).byId.donation.isEligible()).toBe(false);
         const recent = build({ getSupportPrompt: () => ({ lastShownAt: new Date().toISOString() }) as never });
         expect(recent.byId.donation.isEligible()).toBe(false);
+    });
+});
+
+describe('the donation ask in the app language', () => {
+    it('takes its title, body, dismiss and action words from the app, keeping the link', () => {
+        const resolveText = (key: string) => `[${key}]`;
+        expect(translateDonationPromptAnnouncement(resolveText)).toEqual({
+            ...DONATION_PROMPT_ANNOUNCEMENT,
+            title: '[donationPrompt.title]',
+            body: '[donationPrompt.body]',
+            dismissLabel: '[donationPrompt.dismiss]',
+            action: { ...DONATION_PROMPT_ANNOUNCEMENT.action, label: '[donationPrompt.action]' },
+        });
+        expect(translateDonationPromptAnnouncement((_key, fallback) => fallback)).toEqual(DONATION_PROMPT_ANNOUNCEMENT);
     });
 });

@@ -21,7 +21,6 @@ import { LanguageProvider, useLanguage } from '../contexts/language-context';
 import {
   ACTIVE_APP_ANNOUNCEMENT,
   APP_ANNOUNCEMENT_DISMISSED_VALUE,
-  DONATION_PROMPT_ANNOUNCEMENT,
   addBreadcrumb,
   buildCoreLogExtra,
   consoleLogger,
@@ -43,6 +42,7 @@ import {
   fetchMobileUpdateReminderInfo,
   buildUpdateReminderAnnouncement,
   buildMobileStartupPromptDescriptors,
+  translateDonationPromptAnnouncement,
   UPDATE_REMINDER_RELEASES_URL,
   UPDATE_NOW_ACTION_LABEL,
   VIEW_RELEASE_ACTION_LABEL,
@@ -323,21 +323,7 @@ function RootLayoutContentInner() {
     translateWithFallback(t, key, fallback)
   ), [t]);
 
-  const donationPromptAnnouncement = useMemo<AppAnnouncement>(() => ({
-    ...DONATION_PROMPT_ANNOUNCEMENT,
-    title: resolveText('donationPrompt.title', DONATION_PROMPT_ANNOUNCEMENT.title),
-    body: resolveText('donationPrompt.body', DONATION_PROMPT_ANNOUNCEMENT.body),
-    dismissLabel: resolveText(
-      'donationPrompt.dismiss',
-      DONATION_PROMPT_ANNOUNCEMENT.dismissLabel ?? DONATION_PROMPT_ANNOUNCEMENT.title,
-    ),
-    action: DONATION_PROMPT_ANNOUNCEMENT.action
-      ? {
-        ...DONATION_PROMPT_ANNOUNCEMENT.action,
-        label: resolveText('donationPrompt.action', DONATION_PROMPT_ANNOUNCEMENT.action.label),
-      }
-      : undefined,
-  }), [resolveText]);
+  const donationPromptAnnouncement = useMemo<AppAnnouncement>(() => translateDonationPromptAnnouncement(resolveText), [resolveText]);
 
   const buildQuickCaptureInitialProps = useCallback((initialProps?: QuickCaptureOptions['initialProps']) => {
     const nextInitialProps = initialProps ? { ...initialProps } : {};

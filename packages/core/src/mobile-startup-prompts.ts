@@ -1,6 +1,7 @@
 import type { AndroidInstallerSource } from './about-settings-model';
 import {
     ACTIVE_APP_ANNOUNCEMENT,
+    DONATION_PROMPT_ANNOUNCEMENT,
     getAnnouncementDismissalStorageKey,
     shouldShowAppAnnouncement,
     type AppAnnouncement,
@@ -129,6 +130,23 @@ export const buildUpdateReminderAnnouncement = (
         },
     };
 };
+
+/** The donation ask in the app language (its words: donationPrompt.*). */
+export const translateDonationPromptAnnouncement = (resolveText: ResolveText): AppAnnouncement => ({
+    ...DONATION_PROMPT_ANNOUNCEMENT,
+    title: resolveText('donationPrompt.title', DONATION_PROMPT_ANNOUNCEMENT.title),
+    body: resolveText('donationPrompt.body', DONATION_PROMPT_ANNOUNCEMENT.body),
+    dismissLabel: resolveText(
+        'donationPrompt.dismiss',
+        DONATION_PROMPT_ANNOUNCEMENT.dismissLabel ?? DONATION_PROMPT_ANNOUNCEMENT.title,
+    ),
+    action: DONATION_PROMPT_ANNOUNCEMENT.action
+        ? {
+            ...DONATION_PROMPT_ANNOUNCEMENT.action,
+            label: resolveText('donationPrompt.action', DONATION_PROMPT_ANNOUNCEMENT.action.label),
+        }
+        : undefined,
+});
 
 export type MobileStartupPromptInput = {
     /** The device's key-value store (RN's AsyncStorage; the native app's RKStorage). */
