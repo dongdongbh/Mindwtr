@@ -1815,6 +1815,15 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       name.startsWith('.mindwtr-encryption-stage-') || name.startsWith('.mindwtr-encryption-quarantine-')
     );
     const isTransitionScratch = (name: string) => name.includes('.mindwtr-et-') || name.endsWith('.enctransition');
+    // Not an attachment, and skipped by Enable (mobile-file-sync-remote.ts): RN's installer lock, and a transition's scratch, which a
+    // Disable whose quarantine delete the provider refused can leave sealed beside plaintext (S5 review2 P3-A, P3-B).
+    const isNotAttachment = (name: string) => name === '.mindwtr-attachment-installer.lock' || isTransitionScratch(name) || isRecoveryFolderName(name);
+    // An entry listed and gone since: its read names a missing file (a path's ENOENT, a SAF document's FileNotFoundException).
+    const isEntryGoneError = (error: unknown): boolean => {
+      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code.toUpperCase() : '';
+      if (code === 'ENOENT' || code === 'ERR_FILE_NOT_FOUND') return true;
+      return /\bENOENT\b|no such file or directory|FileNotFoundException|missing file/i.test(error instanceof Error ? error.message : String(error ?? ''));
+    };
     const sortedNames = (listed: Map<string, ListedEntry>) => [...listed.keys()].sort(compareSyncTransitionEntryNames);
     let folderProvenPlaintext = false;
     const assertFolderHoldsNoCiphertext = async (): Promise<void> => {
@@ -1827,7 +1836,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           plaintextSizes.set(remoteFilenameFor(attachment.cloudKey, attachment), typeof attachment.size === 'number' ? attachment.size : null);
         }
       }
-      const coreOrder = sortedNames(top).filter((name) => !isRecoveryFolderName(name));
+      const coreOrder = sortedNames(top).filter((name) => !isNotAttachment(name));
       const judged = new Map<string, ListedEntry>();
       for (const name of [coreOrder[0], coreOrder[coreOrder.length - 1], ...coreOrder.filter((each) => plaintextSizes.has(each))]) {
         if (name !== undefined) judged.set(name, top.get(name)!);
@@ -1836,7 +1845,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       let folder = top;
       let prefix = '';
       for (let depth = 0; depth < 8; depth += 1) {
-        const first = sortedNames(folder).find((name) => !isTransitionScratch(name) && !isRecoveryFolderName(name));
+        const first = sortedNames(folder).find((name) => !isNotAttachment(name));
         if (first === undefined) break;
         const entry = folder.get(first)!;
         if (!(await entry.directory())) {
@@ -1852,7 +1861,11 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         if (typeof plaintextSize === 'number' && await entry.size() === plaintextSize) continue;
         // A subfolder has no header (desktop's first file inside one is judged above); nor has an entry gone since the listing.
         if (await entry.directory()) continue;
-        const head = await fs.readBytesRange(entry.uri, 0, 64).catch(() => null);
+        // Any other failed read fails closed: the upload waits for a cycle that can read it, as the WebDAV and Dropbox probe does.
+        const head = await fs.readBytesRange(entry.uri, 0, 64).catch((error: unknown) => {
+          if (isEntryGoneError(error)) return null;
+          throw error;
+        });
         if (!head || inspectSyncArtifact(head).kind === 'plaintext') continue;
         files.logAttachmentWarn('File Sync attachment upload refused: the folder holds encrypted attachments', undefined, {
           releaseCheck: 'v1.3.8/file-partly-encrypted-upload',

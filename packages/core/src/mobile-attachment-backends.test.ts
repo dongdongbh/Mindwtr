@@ -1709,6 +1709,53 @@ describe('File Sync attachment pass', () => {
         .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
     });
 
+    // Enable skips the installer's lock file (mobile-file-sync-remote.ts), so it never takes the first slot (S5 review2 P3-A).
+    it('judges the first real entry, not the installer lock file that sorts before it', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}.mindwtr-attachment-installer.lock`, new Uint8Array(0));
+      memory.put(`${SYNC_DIR}a.txt`, await encryptSyncArtifact(plain(0), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}c.txt`, plain(2));
+
+      await expect(backends.syncFileAttachments(withRecords(referenced(2, { id: 'c', title: 'c.txt', cloudKey: 'attachments/c.txt' })), 'file:///sdcard/Mindwtr/data.json'))
+        .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+    });
+
+    // A Disable on a provider that refused to delete its quarantine copy leaves `.mindwtr-et-q-*` sealed bytes in a plaintext
+    // folder; it is no attachment, and judging it would pause the folder for good (S5 review2 P3-B).
+    it('does not refuse a plaintext folder for a sealed transition scratch copy left in attachments/', async () => {
+      const { backends, memory } = setup();
+      memory.put(LOCAL_URI, LOCAL);
+      memory.put(`${SYNC_DIR}.mindwtr-et-q-0001-r0.txt`, await encryptSyncArtifact(plain(0), material, defaultSyncCryptoPrimitives));
+      memory.put(`${SYNC_DIR}r0.txt`, plain(0));
+      memory.put(`${SYNC_DIR}r1.txt`, plain(1));
+
+      const result = await backends.syncFileAttachments(withRecords(referenced(0), referenced(1)), 'file:///sdcard/Mindwtr/data.json');
+
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+    });
+
+    // A header read that fails for a present entry (a cloud provider that has not downloaded a peer's file yet) proves nothing:
+    // the upload waits for the next cycle, as the WebDAV and Dropbox probe does (S5 review2 P3-C). Only an entry gone passes.
+    it('fails closed when a present entry cannot be read, and passes an entry gone since the listing', async () => {
+      const unreadable = setup();
+      unreadable.memory.put(LOCAL_URI, LOCAL);
+      unreadable.memory.put(`${SYNC_DIR}a.txt`, plain(0));
+      unreadable.memory.put(`${SYNC_DIR}c.txt`, plain(2));
+      unreadable.memory.fail('readBytesRange', new Error('The provider could not open the document'), `${SYNC_DIR}a.txt`);
+      const waited = await unreadable.backends.syncFileAttachments(withRecords(), 'file:///sdcard/Mindwtr/data.json');
+      // The upload failed and waits for the next cycle: no plaintext generation joined the folder.
+      expect(waited === false || !attachmentOf(waited)?.cloudKey).toBe(true);
+      expect(unreadable.memory.calls.some((call) => call.startsWith(`writeBytes ${SYNC_DIR}`) || call.startsWith(`copy `) && call.includes(`-> ${SYNC_DIR}`))).toBe(false);
+
+      const gone = setup();
+      gone.memory.put(LOCAL_URI, LOCAL);
+      gone.memory.put(`${SYNC_DIR}c.txt`, plain(2));
+      gone.memory.fail('readBytesRange', Object.assign(new Error(`ENOENT: no such file or directory ${SYNC_DIR}a.txt`), { code: 'ENOENT' }), `${SYNC_DIR}c.txt`);
+      const result = await gone.backends.syncFileAttachments(withRecords(), 'file:///sdcard/Mindwtr/data.json');
+      expect(attachmentOf(result)?.cloudKey).toBeDefined();
+    });
+
     // Desktop's Enable (sync.rs collect_sync_folder_attachments) also seals files in a subfolder of attachments/ that is not a
     // recovery folder, in path order: one that sorts first is where a cut-off desktop Enable starts.
     it('judges the first file of a subfolder that sorts before every other entry', async () => {
