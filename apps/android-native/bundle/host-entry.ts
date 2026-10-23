@@ -1317,6 +1317,10 @@ const ABOUT_REQUESTS: Record<string, (input: never) => Promise<Reply>> = {
     sendAboutHeartbeat: () => contract.sendAboutHeartbeat(),
     recordAboutPromptActivity: () => contract.recordAboutPromptActivity(),
     attemptAboutStoreReview: (input) => contract.attemptAboutStoreReview(input),
+    // The startup prompts (native-host-contract-startup-prompts.ts): the update reminder's GitHub read and the queue's delays
+    // wait without holding the engine.
+    beginStartupPrompts: (input) => contract.beginStartupPrompts(input),
+    startupPromptAction: (input) => contract.startupPromptAction(input),
 };
 /**
  * Settings › Calendar's device calls and the screens' calendar reloads (native-host-contract-settings-calendar.ts): each waits on

@@ -353,6 +353,7 @@ import { createSettingsMethods, type NativePersistentCaptureHost } from './nativ
 import { createSyncSettingsMethods, type NativeSyncSettingsHost } from './native-host-contract-settings-sync';
 import { createAIMethods, type NativeAIHost } from './native-host-contract-ai';
 import { createAboutMethods, type NativeAboutHost } from './native-host-contract-about';
+import { createStartupPromptMethods } from './native-host-contract-startup-prompts';
 export type { NativeAboutHost, NativeAboutNotice, NativeAboutSettings } from './native-host-contract-about';
 export { NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS, type NativeSyncSettingsHost } from './native-host-contract-settings-sync';
 import { createCalendarSettingsMethods, type NativeCalendarHost } from './native-host-contract-settings-calendar';
@@ -1832,6 +1833,8 @@ export function createNativeHostContract(options: {
         // Settings: the menu, General and Manage: native-host-contract-settings.ts.
         // Settings › About, the heartbeat and the store review prompt: native-host-contract-about.ts.
         ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
+        // The startup prompts after the boot (onboarding, announcement, update reminder, donation): native-host-contract-startup-prompts.ts.
+        ...createStartupPromptMethods({ readiness, t: () => translate, host: () => options.about ?? null }),
         ...createSettingsMethods({
             readiness,
             save,
