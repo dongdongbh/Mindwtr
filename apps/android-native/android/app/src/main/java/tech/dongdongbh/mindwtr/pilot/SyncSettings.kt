@@ -381,6 +381,7 @@ internal fun SyncSettings(model: InboxViewModel, view: JSONObject) {
         }
     }
     val backend = view.getJSONObject("backend")
+    OnboardingHandoffCard(model)
     Card {
         Column(Modifier.padding(16.dp)) {
             Text(backend.getString("title"), style = rnText(16, 500, 21), color = c.text)

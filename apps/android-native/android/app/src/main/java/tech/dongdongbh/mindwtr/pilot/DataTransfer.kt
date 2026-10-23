@@ -559,9 +559,10 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
     /**
      * RN's Getting Started row (addGettingStartedContent): core's seed under a request UUID made now and the app language core's
      * model gave the row, both journaled with the write; core commits the seed's rows and its receipt together (D1b §6). RN's
-     * toasts: ready with Open (the project), not created, or failed.
+     * toasts: ready with Open (the project), not created, or failed. The welcome sheet's handoff card ([openProject]) opens the
+     * project at once instead, and its ready toast has no Open.
      */
-    fun gettingStarted() {
+    fun gettingStarted(openProject: Boolean = false) {
         if (busy) return
         val row = words()?.optJSONObject("gettingStarted") ?: return
         action = "gettingStarted"
@@ -577,6 +578,7 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
             shell.ui {
                 finish()
                 if (projectId == null) shell.showToast(null, row.getString("notCreated"), "info")
+                else if (openProject) { menu.openProjects(projectId); shell.showToast(null, row.getString("ready"), "success") }
                 else shell.showToast(null, row.getString("ready"), "success", row.getString("open")) { menu.openProjects(projectId) }
             }
         }

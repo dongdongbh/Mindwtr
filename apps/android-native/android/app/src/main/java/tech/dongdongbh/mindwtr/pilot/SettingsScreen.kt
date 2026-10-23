@@ -348,6 +348,7 @@ private fun GeneralSettings(model: InboxViewModel, view: JSONObject) = with(mode
 private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
+    OnboardingHandoffCard(model)
     BackupCard(model, view.getJSONObject("backup"))
     ImportCard(model, view.getJSONObject("importData"))
     val diagnostics = view.getJSONObject("diagnostics")
@@ -1323,6 +1324,31 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                 .clearAndSetSemantics { contentDescription = done; role = Role.Button; onClick { close(); true } }.clickable { close() }, contentAlignment = Alignment.Center) {
                 Text(done, style = rnText(15, 700), color = theme.filledText)
             }
+        }
+    }
+}
+
+/**
+ * RN's Sync and Data screens' Getting Started card (sync-settings-screen.tsx onboardingHandoffCard), shown when the welcome
+ * sheet's Set up sync or Import tasks opened the screen: Start using Mindwtr seeds Getting Started and opens it. Off while a
+ * Data action or a sync runs, as RN's isGettingStartedActionBusy.
+ */
+@Composable
+internal fun OnboardingHandoffCard(model: InboxViewModel) {
+    val settings = model.menu.settings
+    if (!settings.local.optBoolean("onboardingHandoff")) return
+    val c = LocalTheme.current.colors
+    val transfer = settings.transfer
+    val seeding = transfer.action == "gettingStarted"
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.cardBg).padding(16.dp)) {
+        Text(t("settings.gettingStartedContentContinueTitle"), style = rnText(16, 500, 21), color = c.text)
+        Text(t("settings.gettingStartedContentContinueDesc"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
+        val busy = transfer.busy
+        val shape = RoundedCornerShape(16.dp)
+        Box(Modifier.padding(top = 12.dp).clip(shape).background(if (busy) c.filterBg else c.tint).border(1.dp, if (busy) c.border else c.tint, shape)
+            .clickable(enabled = !busy, role = Role.Button) { transfer.gettingStarted(openProject = true) }.semantics { if (busy) disabled() }
+            .testTag("mobile-onboarding-start-fresh-handoff").padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text(t(if (seeding) "common.loading" else "onboarding.startFreshTitle"), style = rnText(13, 700, 17), color = if (busy) c.secondaryText else c.onTint)
         }
     }
 }
