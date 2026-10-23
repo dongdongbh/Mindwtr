@@ -332,6 +332,7 @@ export * from './widget-lists';
 export * from './widget-payload';
 export * from './widget-list-destination';
 export * from './startup-prompts';
+export * from './startup-prompt-run';
 export * from './area-sync-schema';
 export * from './person-sync-schema';
 export * from './import-source-reader';

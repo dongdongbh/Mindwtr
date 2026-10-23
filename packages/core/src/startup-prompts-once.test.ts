@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runStartupPromptsOnce, type StartupPromptDescriptor } from './startup-prompts';
+import { runStartupPromptsOnce } from './startup-prompt-run';
+import type { StartupPromptDescriptor } from './startup-prompts';
 
 type DescriptorOverrides = Partial<StartupPromptDescriptor> & Pick<StartupPromptDescriptor, 'id' | 'priority'>;
 
@@ -72,7 +73,7 @@ describe('runStartupPromptsOnce', () => {
             makeDescriptor({ id: 'announcement', priority: 30, onSelect: () => { throw new Error('select'); } }),
             makeDescriptor({ id: 'update', priority: 20, present: () => { throw new Error('present'); } }),
             makeDescriptor({ id: 'donation', priority: 10 }),
-        ], onLog);
+        ], { onLog });
         await vi.runAllTimersAsync();
         await expect(run).resolves.toBe('donation');
         expect(onLog.mock.calls.map(([, context]) => context)).toEqual([
@@ -100,6 +101,32 @@ describe('runStartupPromptsOnce', () => {
         await vi.runAllTimersAsync();
         await expect(won).resolves.toBe('update');
         expect(updateSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it('goes on to the next prompt after the open one is dismissed, as the hook does', async () => {
+        const descriptors = [
+            makeDescriptor({ id: 'update', priority: 20 }),
+            makeDescriptor({ id: 'donation', priority: 10, delayMs: 2000 }),
+        ];
+        const first = runStartupPromptsOnce(descriptors);
+        await vi.runAllTimersAsync();
+        await expect(first).resolves.toBe('update');
+        const next = runStartupPromptsOnce(descriptors, { retired: ['update'] });
+        await vi.runAllTimersAsync();
+        await expect(next).resolves.toBe('donation');
+    });
+
+    it('stops when its signal aborts, aborting the prompt being presented', async () => {
+        let presentSignal: AbortSignal | undefined;
+        const stop = new AbortController();
+        const run = runStartupPromptsOnce([
+            makeDescriptor({ id: 'update', priority: 20, present: (next) => { presentSignal = next; return new Promise<boolean>(() => undefined); } }),
+            makeDescriptor({ id: 'donation', priority: 10 }),
+        ], { signal: stop.signal });
+        await vi.advanceTimersByTimeAsync(0);
+        stop.abort();
+        await expect(run).resolves.toBeNull();
+        expect(presentSignal?.aborted).toBe(true);
     });
 
     it('resolves to null when no prompt opens', async () => {
