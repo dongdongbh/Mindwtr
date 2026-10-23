@@ -13,3 +13,4 @@ Changes collected since the latest stable release.
 - Mobile: the sync dot turns green as soon as a sync has uploaded your change. Before, it could stay amber for up to several minutes while a second sync waited to run, even with nothing left to send (#1435).
 - Mobile: the welcome sheet no longer opens when your tasks failed to load, so "Start using Mindwtr" can no longer add a second Getting Started project to a library that was not empty.
 - Mobile: the update reminder and the announcement window now show in your app language (in the fully translated languages; the others keep English for now). Before, the reminder's title, text and buttons and the window's "Not now" and close button were always in English.
+- iOS: sync reads a large library's data from the server faster, so a change made right before leaving the app uploads sooner in the background (#1434).

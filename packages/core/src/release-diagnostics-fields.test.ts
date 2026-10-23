@@ -34,6 +34,9 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // ios-reminder-actions reuses releaseCheck, stage, action, reason, and appState below.
     // ios-task-badge reuses releaseCheck, count, and enabled below.
     'result',
+    // follow-up-idle-badge reuses releaseCheck and backend below.
+    // ios-native-text-decode: bytes is the response body's size; no content or URL.
+    'bytes',
     // local-change-upload reuses releaseCheck, source and delayMs; adaptiveWaitMs is the skipped adaptive wait.
     'adaptiveWaitMs',
     // windowless-sync: existing periodic timer timing and lifecycle gates only.

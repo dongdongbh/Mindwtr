@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { webdavPutJson } from '@mindwtr/core';
+import { readResponseText, webdavPutJson } from '@mindwtr/core';
+
+const nativeText = vi.hoisted(() => ({ module: null as null | { decodeBase64Utf8: (base64: string) => string | null } }));
+const logInfo = vi.hoisted(() => vi.fn(async () => null));
+vi.mock('@/modules/native-utf8-text', () => ({ getNativeUtf8TextNative: () => nativeText.module }));
+vi.mock('./app-log', () => ({ logInfo }));
 
 class FakeXhr {
   static instances: FakeXhr[] = [];
@@ -51,6 +56,8 @@ describe('backgroundSafeFetch', () => {
     FakeXhr.instances = [];
     vi.stubGlobal('XMLHttpRequest', FakeXhr);
     vi.useFakeTimers();
+    nativeText.module = null;
+    logInfo.mockClear();
   });
 
   afterEach(() => {
@@ -183,5 +190,73 @@ describe('backgroundSafeFetch', () => {
     const response = await backgroundSafeFetch('https://dav.example/a', { method: 'HEAD' });
     expect(fetchMock).toHaveBeenCalledWith('https://dav.example/a', { method: 'HEAD' });
     expect(await response.text()).toBe('ok');
+  });
+
+  describe('native UTF-8 text (#1434)', () => {
+    const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
+    // React Native's XHR holds an 'arraybuffer' reply as base64 in _response and decodes it only when response is read.
+    const answer = (bytes: Uint8Array) => {
+      const xhr = FakeXhr.instances[FakeXhr.instances.length - 1] as FakeXhr & { _response?: string };
+      const responseRead = vi.fn(() => bytes.slice().buffer);
+      xhr._response = toBase64(bytes);
+      Object.defineProperty(xhr, 'response', { get: responseRead });
+      xhr.status = 200;
+      xhr.onload?.();
+      return responseRead;
+    };
+
+    it('reads a valid UTF-8 body through Swift under core\'s byte limit, skipping the JavaScript buffer', async () => {
+      const decode = vi.fn((base64: string) => new TextDecoder().decode(Buffer.from(base64, 'base64')));
+      nativeText.module = { decodeBase64Utf8: decode };
+      const { backgroundSafeFetch } = await loadModule();
+      const bytes = new TextEncoder().encode('{"title":"wörld 任务 🎯"}');
+      const pending = backgroundSafeFetch('https://cloud.example/v1/data');
+      const responseRead = answer(bytes);
+      const response = await pending;
+
+      expect((response as { mindwtrDecodedTextBytes?: number }).mindwtrDecodedTextBytes).toBe(bytes.length);
+      await expect(readResponseText(response, bytes.length)).resolves.toBe('{"title":"wörld 任务 🎯"}');
+      await expect(readResponseText(response.clone(), bytes.length - 1)).rejects.toThrow();
+      expect(decode).toHaveBeenCalledOnce();
+      expect(responseRead).not.toHaveBeenCalled();
+      expect(logInfo).toHaveBeenCalledOnce();
+      expect(logInfo.mock.calls[0]).toEqual(['Response text decoded natively', expect.objectContaining({
+        force: true, extra: { releaseCheck: 'v1.3.8/ios-native-text-decode', bytes: String(bytes.length) },
+      })]);
+    });
+
+    it.each([1, 2, 3])('counts the bytes of a body whose base64 has padding for length mod 3 = %i', async (extra) => {
+      nativeText.module = { decodeBase64Utf8: (base64) => new TextDecoder().decode(Buffer.from(base64, 'base64')) };
+      const { backgroundSafeFetch } = await loadModule();
+      const bytes = new TextEncoder().encode('abc'.repeat(4) + 'x'.repeat(extra));
+      const pending = backgroundSafeFetch('https://cloud.example/v1/data');
+      answer(bytes);
+      expect(((await pending) as { mindwtrDecodedTextBytes?: number }).mindwtrDecodedTextBytes).toBe(bytes.length);
+    });
+
+    it('decodes invalid UTF-8 in JavaScript as before when Swift declines it', async () => {
+      nativeText.module = { decodeBase64Utf8: vi.fn(() => null) };
+      const { backgroundSafeFetch } = await loadModule();
+      const bytes = new Uint8Array([0x7b, 0xff, 0x7d]);
+      const pending = backgroundSafeFetch('https://cloud.example/v1/data');
+      const responseRead = answer(bytes);
+      const response = await pending;
+
+      expect((response as { mindwtrDecodedTextBytes?: number }).mindwtrDecodedTextBytes).toBeUndefined();
+      await expect(readResponseText(response, 100)).resolves.toBe(new TextDecoder().decode(bytes));
+      expect(responseRead).toHaveBeenCalledOnce();
+      expect(logInfo).not.toHaveBeenCalled();
+    });
+
+    it('never asks Swift about a binary read', async () => {
+      const decode = vi.fn(() => 'unused');
+      nativeText.module = { decodeBase64Utf8: decode };
+      const { backgroundSafeFetch } = await loadModule();
+      const bytes = new Uint8Array([0, 1, 2, 250]);
+      const pending = backgroundSafeFetch('https://cloud.example/attachment');
+      answer(bytes);
+      expect(new Uint8Array(await (await pending).arrayBuffer())).toEqual(bytes);
+      expect(decode).not.toHaveBeenCalled();
+    });
   });
 });
