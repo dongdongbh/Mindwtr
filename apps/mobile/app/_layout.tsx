@@ -639,16 +639,27 @@ function RootLayoutContentInner() {
   const startupPromptsEnabled = !sandboxMode && process.env.NODE_ENV !== 'test';
   // A failed load marks data ready with an empty store; the welcome sheet then waits (core's descriptors), and this line
   // proves it held.
+  // Forced: a failed load leaves the store's settings empty, so the diagnostics switch reads off.
   const onboardingHeldLogged = useRef(false);
+  const dataLoadFailed = useTaskStore((state) => Boolean(state.error));
   useEffect(() => {
-    if (!startupPromptsEnabled || onboardingHeldLogged.current) return;
-    if (!dataReady || canonicalDataReady || mobileOnboardingDismissed || visibleDataCount !== 0) return;
+    if (!startupPromptsEnabled || onboardingHeldLogged.current || !mobileOnboardingDismissalLoaded) return;
+    if (!dataReady || canonicalDataReady || !dataLoadFailed || mobileOnboardingDismissed || visibleDataCount !== 0) return;
     onboardingHeldLogged.current = true;
     void logWarn('First-run onboarding held: the local data did not load', {
       scope: 'onboarding',
+      force: true,
       extra: { releaseCheck: 'v1.3.8/onboarding-waits-for-canonical-load', outcome: 'held' },
     });
-  }, [canonicalDataReady, dataReady, mobileOnboardingDismissed, startupPromptsEnabled, visibleDataCount]);
+  }, [
+    canonicalDataReady,
+    dataLoadFailed,
+    dataReady,
+    mobileOnboardingDismissalLoaded,
+    mobileOnboardingDismissed,
+    startupPromptsEnabled,
+    visibleDataCount,
+  ]);
   const startupPromptGateOpen = isFirstPaintReady && mobileOnboardingDismissalLoaded;
   const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => buildMobileStartupPromptDescriptors({
     storage: AsyncStorage,
