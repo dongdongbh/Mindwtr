@@ -89,6 +89,7 @@ describe('the update reminder in the app language', () => {
             action: { type: 'url', label: 'Jetzt aktualisieren', url: 'https://example.test/r' },
         });
         expect(buildUpdateReminderAnnouncement(info, resolveText).action?.label).toBe('Release ansehen');
+        expect(buildUpdateReminderAnnouncement({ ...info, actionLabel: 'Open Play Store' }, resolveText).action?.label).toBe('Open Play Store');
     });
 });
 

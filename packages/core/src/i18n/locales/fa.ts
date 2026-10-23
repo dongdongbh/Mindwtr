@@ -185,7 +185,7 @@ export const faOverrides: Record<string, string> = {
         'updateReminder.body': 'Mindwtr {{latestVersion}} منتشر شده است. شما از نسخه {{currentVersion}} استفاده می‌کنید. وقتی فرصت داشتید به‌روزرسانی کنید تا آخرین اصلاحات و بهبودها را داشته باشید.',
         'updateReminder.updateNow': 'اکنون به‌روزرسانی کنید',
         'updateReminder.viewRelease': 'دیدن نسخه',
-        'common.notNow': 'اکنون نه',
+        'common.notNow': 'فعلاً نه',
         'announcement.dismiss': 'بستن اطلاعیه',
         'settings.donateLinkValue': 'کمک مالی',
         'settings.documentationLinkValue': 'مستندات',
