@@ -1857,6 +1857,11 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     // S5: File Sync on the host's SAF and lock channels, its encryption transitions and its diagnostics line (bun).
     const fileSyncTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-file-sync.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(fileSyncTested.status, 0, `bundle/host-file-sync.test.ts: ${fileSyncTested.stderr.slice(-1500)}`);
+    // S5 review: one test per RN File Sync fix (the inventory), and the lock channel a host cancel never strands; one file per process.
+    for (const file of ['host-file-sync-inventory.test.ts', 'host-sync-lock-channel.test.ts']) {
+        const tested = spawnSync('bun', ['test', `apps/android-native/bundle/${file}`], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+        assert.equal(tested.status, 0, `bundle/${file}: ${tested.stderr.slice(-1500)}`);
+    }
     // C3: the external calendars' device binding and each screen's feed (bundle/host-calendar.test.ts, bun).
     const calendarTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-calendar.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(calendarTested.status, 0, `bundle/host-calendar.test.ts: ${calendarTested.stderr.slice(-1500)}`);

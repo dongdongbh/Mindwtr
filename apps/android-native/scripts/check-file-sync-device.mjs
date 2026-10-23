@@ -455,7 +455,12 @@ const restoreBackend = async () => {
         // removed test folders do not pile up.
         if (persistedGrant(`Download%2F${FOLDER}`)) await probe(false, 'revoke', `--es uri '${TREE}'`);
         sh(`rm -rf ${PHONE_DIR}`);
-        console.log(`info - sync encryption is off, the stored sync backend is Off again, its grant released and ${PHONE_DIR} removed`);
+        if (encrypted) {
+            console.error(`LEFT: the stored sync encryption is still on; ${PHONE_DIR} is removed and the stored backend is Off. Turn encryption off in the dev app`);
+            process.exitCode = 1;
+        } else {
+            console.log(`info - sync encryption is off, the stored sync backend is Off again, its grant released and ${PHONE_DIR} removed`);
+        }
         await toTabs().catch(() => undefined);
     } catch (error) {
         console.error(`LEFT: the dev app may still point at ${PHONE_DIR}${encrypted ? ' with sync encryption on' : ''}`
