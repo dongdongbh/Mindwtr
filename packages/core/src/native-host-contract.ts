@@ -1,3 +1,5 @@
+import { getDocsGuideUrl } from './docs-guidance';
+import { isGettingStartedProject } from './getting-started-seed';
 import { getFocusHiddenByAreaLabel } from './focus-controls';
 import { getPomodoroTaskChoices } from './pomodoro';
 import { createReferenceProjectNextActionMethods } from './native-host-contract-project-next-action';
@@ -599,8 +601,16 @@ export type NativeProjectDetail = {
     projectRevision: string;
     readOnly: boolean;
     metadata: ProjectDetailsMetadata;
+    /** RN's GettingStartedActions over a Getting Started project's list (isGettingStartedProject), else null. */
+    gettingStarted: NativeGettingStartedActions | null;
     total: number;
     items: NativeProjectDetailItem[];
+};
+export type NativeGettingStartedActions = {
+    text: string;
+    /** RN's order: Capture to Inbox, Open Inbox, Open Focus. */
+    actions: { id: 'capture' | 'inbox' | 'focus'; label: string }[];
+    guide: { label: string; url: string };
 };
 export type NativeProjectDetailView = Omit<NativeProjectDetail, 'items'> & {
     items: (Extract<NativeProjectDetailItem, { type: 'task' }> | {
@@ -668,6 +678,7 @@ export type NativeProjectNotes = {
 export type NativeProjectNotesReferenceTarget = { kind: 'task' | 'project'; id: string };
 type ProjectDetailCache = {
     readOnly: boolean;
+    gettingStarted: NativeGettingStartedActions | null;
     groupCompletedTasksLast: boolean;
     hasReorderTargets: boolean;
     metadata: ProjectDetailsMetadata;
@@ -1387,6 +1398,12 @@ export function createNativeHostContract(options: {
         const area = state.areas.find((candidate) => candidate.id === project.areaId);
         cachedProjectDetail = {
             readOnly: options.readOnly,
+            gettingStarted: isGettingStartedProject(project, projectTasks) ? {
+                text: translate('onboarding.tryWorkflow'),
+                actions: ([['capture', 'onboarding.captureAction'], ['inbox', 'starter.processInbox.check1'], ['focus', 'starter.focus.check1']] as const)
+                    .map(([id, label]) => ({ id, label: translate(label) })),
+                guide: { label: translate('onboarding.readGuide'), url: getDocsGuideUrl('start/getting-started', language, 'basic-workflow') },
+            } : null,
             groupCompletedTasksLast: options.groupCompletedTasksLast,
             hasReorderTargets: model.sections.length > 1 || model.items.some((item) => item.type === 'task'
                     && item.task.status !== 'reference'
@@ -1426,6 +1443,7 @@ export function createNativeHostContract(options: {
                 projectRevision: revisionOf(savedProject),
                 readOnly: detail.readOnly,
                 metadata: detail.metadata,
+                gettingStarted: detail.gettingStarted,
                 total: detail.items.length,
                 items: detail.items.slice(offset, offset + limit).map((item): NativeProjectDetailItem => (
                     item.type === 'section'

@@ -117,7 +117,7 @@ private val CUE_KEYS = mapOf("available" to "projects.availableNextAction", "lat
  * [metadata] for the project's Details (getProjectDetailsPresentation: the summary and every value's label).
  */
 data class ProjectDetail(val revision: String, val projectId: String, val readOnly: Boolean, val total: Int, val items: List<DetailItem>,
-                         val metadata: JSONObject? = null) {
+                         val metadata: JSONObject? = null, val gettingStarted: JSONObject? = null) {
     /** Adds one later window after the items already loaded. */
     fun append(window: JSONObject): ProjectDetail {
         val next = parse(window)
@@ -130,7 +130,8 @@ data class ProjectDetail(val revision: String, val projectId: String, val readOn
             check(json.getInt("version") == 1) { "Unsupported core contract" }
             val items = json.getJSONArray("items")
             return ProjectDetail(json.getString("revision"), json.getString("projectId"), json.getBoolean("readOnly"),
-                json.getInt("total"), metadata = json.optJSONObject("metadata"), items = List(items.length()) { index ->
+                json.getInt("total"), metadata = json.optJSONObject("metadata"), gettingStarted = json.optJSONObject("gettingStarted"),
+                items = List(items.length()) { index ->
                     items.getJSONObject(index).let { item ->
                         if (item.getString("type") == "section") {
                             DetailSection(item.getString("id"), item.getString("title"), item.getInt("count"), item.getBoolean("muted"))

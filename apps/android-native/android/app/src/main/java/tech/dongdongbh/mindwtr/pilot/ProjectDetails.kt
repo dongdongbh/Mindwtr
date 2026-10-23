@@ -69,6 +69,7 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -441,6 +442,8 @@ private fun MetadataRow(label: String, value: String, enabled: Boolean, tag: Str
  */
 fun LazyListScope.projectDetailsItems(model: InboxViewModel, projectId: String, detail: ProjectDetail?) {
     val metadata = detail?.metadata?.takeIf { detail.projectId == projectId } ?: return
+    // RN's GettingStartedActions, above the Details toggle in the list header of a Getting Started project.
+    detail.gettingStarted?.let { actions -> item(key = "getting-started") { GettingStartedActions(model, actions) } }
     item(key = "details") { DetailsToggle(model, detail, metadata) }
     if (!model.projectDetails.open) return
     item(key = "details-status") { DetailsStatus(model, detail, metadata) }
@@ -991,3 +994,48 @@ internal fun projectEdit(requestId: String, projectId: String, kind: String, fie
     JSONObject().put("requestId", requestId).put("projectId", projectId).put("kind", kind).apply {
         for (name in fields.keys()) put(name, fields.get(name))
     }
+
+/**
+ * RN's GettingStartedActions (components/GettingStartedActions.tsx): core's workflow line, Capture to Inbox, Open Inbox and Open
+ * Focus (each closes the project first, as RN's project sheet closes), and the guide link in the app language.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun GettingStartedActions(model: InboxViewModel, view: JSONObject) {
+    val c = LocalTheme.current.colors
+    val context = LocalContext.current
+    val actions = view.getJSONArray("actions")
+    Column(Modifier.fillMaxWidth().padding(12.dp).testTag("getting-started-actions"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(view.getString("text"), style = rnText(14, 400, 21), color = c.secondaryText)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (index in 0 until actions.length()) {
+                val action = actions.getJSONObject(index)
+                val id = action.getString("id")
+                val shape = RoundedCornerShape(8.dp)
+                Row(Modifier.heightIn(min = 44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+                    .clickable(role = Role.Button) {
+                        model.closeProject()
+                        when (id) {
+                            "capture" -> model.openCapture()
+                            "inbox" -> { model.menu.toTabs(); model.show(Screen.Inbox) }
+                            "focus" -> { model.menu.toTabs(); model.show(Screen.Focus) }
+                        }
+                    }.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(when (id) { "capture" -> GettingStartedPlus; "inbox" -> Lucide.Inbox; else -> Lucide.Star }, null, tint = c.text, modifier = Modifier.size(16.dp))
+                    Text(action.getString("label"), style = rnText(14, 500), color = c.text)
+                }
+            }
+        }
+        val guide = view.getJSONObject("guide")
+        Row(Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) {
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, guide.getString("url").toUri())) }
+        }, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(guide.getString("label"), style = rnText(14, 500).copy(textDecoration = TextDecoration.Underline), color = c.tint)
+            Icon(GuideExternalLink, null, tint = c.tint, modifier = Modifier.size(14.dp))
+        }
+    }
+}
+
+/** RN's GettingStartedActions draws Plus and ExternalLink at lucide's default stroke 2 (Lucide's are the capture button's and the windows'). */
+private val GettingStartedPlus = lucide("Plus", "M5 12h14", "M12 5v14")
+private val GuideExternalLink = lucide("ExternalLink", "M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6")
