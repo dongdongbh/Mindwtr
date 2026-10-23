@@ -9,6 +9,9 @@ import { LOCAL_USER_PROMPT_STATE_KEY, recordPromptActivity } from './user-prompt
  * The native hosts' startup prompts: core's RN descriptors and queue on the host's device keys, after the validated boot.
  */
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Sandbox mode is fixed per runtime (initializeSandboxRuntime); one test switches what the contract reads.
+const sandbox = vi.hoisted(() => ({ on: false }));
+vi.mock('./sandbox', async (importOriginal) => ({ ...await importOriginal<typeof import('./sandbox')>(), isSandboxMode: () => sandbox.on }));
 const value = <T,>(result: NativeHostResult<T>): T => {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
     return result.value;
@@ -107,7 +110,6 @@ describe('native host contract: startup prompts', () => {
         expect(bound.fetched).toEqual(['http://127.0.0.1:9/latest']);
         expect(prompt).toEqual({
             id: 'update-reminder',
-            version: '1.4.0',
             notNow: 'Not now',
             closeLabel: 'Dismiss announcement',
             announcement: {
@@ -117,7 +119,7 @@ describe('native host contract: startup prompts', () => {
                 action: { type: 'url', label: 'Update now', url: 'https://github.com/dongdongbh/Mindwtr/releases/tag/v1.4.0' },
             },
         });
-        value(await contract.startupPromptAction({ id: 'update-reminder', action: 'dismiss', version: '1.4.0' }));
+        value(await contract.startupPromptAction({ id: 'update-reminder', action: 'dismiss' }));
         expect(JSON.parse(bound.storage.get(LOCAL_USER_PROMPT_STATE_KEY)!).update.dismissedVersion).toBe('1.4.0');
         // RN's queue goes on after a dismissal; this user is too new for the donation ask, so nothing else opens, and the
         // update reminder is not checked again this session.
@@ -148,12 +150,45 @@ describe('native host contract: startup prompts', () => {
         }
     });
 
+    it('writes nothing for the welcome sheet\'s Sync and Import handoffs, and nothing for a donation dismissal', async () => {
+        const bound = device();
+        const contract = await openContract(bound);
+        value(await contract.startupPromptAction({ id: 'onboarding', action: 'act' }));
+        value(await contract.startupPromptAction({ id: 'donation', action: 'dismiss' }));
+        value(await contract.startupPromptAction({ id: 'update-reminder', action: 'dismiss' }));
+        expect([...bound.storage.keys()]).toEqual([]);
+    });
+
+    it('opens nothing in the sandbox', async () => {
+        const bound = device();
+        const contract = await openContract(bound);
+        sandbox.on = true;
+        try {
+            expect(value(await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: true }))).toEqual({ prompt: null });
+            expect([...bound.storage.keys()]).toEqual([]);
+        } finally {
+            sandbox.on = false;
+        }
+    });
+
+    it('refuses before the boot is ready, and answers unavailable without a device', async () => {
+        const early = createNativeHostContract({ about: device().host });
+        expect((await early.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false })).ok).toBe(false);
+        // A loaded store, then a contract with no device.
+        await openContract(device());
+        const hostless = createNativeHostContract({});
+        value(await hostless.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' }));
+        value(await hostless.activate({ writeSafetyReady: true }));
+        const answer = await hostless.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false });
+        expect(answer.ok ? null : answer.error.code).toBe('ACTION_FAILED');
+        expect((await hostless.startupPromptAction({ id: 'onboarding', action: 'dismiss' })).ok).toBe(false);
+    });
+
     it('refuses malformed input', async () => {
         const contract = await openContract(device());
         expect((await contract.beginStartupPrompts({ installerSource: 'market', donationEnabled: false })).ok).toBe(false);
         expect((await contract.beginStartupPrompts({ installerSource: 'sideload' })).ok).toBe(false);
         expect((await contract.startupPromptAction({ id: 'donation', action: 'open' })).ok).toBe(false);
-        expect((await contract.startupPromptAction({ id: 'update-reminder', action: 'dismiss', version: 'x y' })).ok).toBe(false);
     });
     // Last: the store keeps this run's task ids, so a later empty library would be refused as a partial save.
     it('never offers the welcome sheet over data', async () => {

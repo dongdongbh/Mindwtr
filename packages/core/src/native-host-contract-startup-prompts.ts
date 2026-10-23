@@ -56,14 +56,11 @@ export type NativeStartupPrompt =
         /** The window's dismiss label when the prompt has none, and its close button's label. */
         notNow: string;
         closeLabel: string;
-        /** The update reminder's version, sent back with its dismissal. */
-        version?: string;
     };
 
 const INSTALLER_SOURCES = new Set<string>(['play-store', 'sideload', 'unknown']);
 const PROMPT_IDS = new Set<string>(NATIVE_STARTUP_PROMPT_IDS);
 const ACTIONS = new Set<string>(['dismiss', 'act', 'shown']);
-const VERSION = /^[0-9A-Za-z.+-]{1,40}$/;
 
 const unavailable = () => fail('ACTION_FAILED', 'Startup prompts are not available on this host');
 
@@ -72,6 +69,8 @@ export function createStartupPromptMethods(deps: Deps) {
     // activity was recorded.
     const retired = new Set<string>();
     let activityRecorded = false;
+    // The update reminder that opened: its dismissal records this version (RN's updateReminderInfo).
+    let openedUpdateVersion: string | null = null;
     const resolveText = (key: string, fallback: string) => translateWithFallback(deps.t(), key, fallback);
     const warn = (host: NativeAboutHost, message: string, error: unknown) => {
         try { host.logWarn(message, error); } catch { /* best effort */ }
@@ -157,7 +156,8 @@ export function createStartupPromptMethods(deps: Deps) {
             }
             if (id === 'update-reminder' && updateInfo) {
                 const info: MobileUpdateReminderInfo = updateInfo;
-                return { ok: true, value: { prompt: { id, announcement: buildUpdateReminderAnnouncement(info, resolveText), version: info.latestVersion, ...words } } };
+                openedUpdateVersion = info.latestVersion;
+                return { ok: true, value: { prompt: { id, announcement: buildUpdateReminderAnnouncement(info, resolveText), ...words } } };
             }
             if (id === 'donation') {
                 return { ok: true, value: { prompt: { id, announcement: translateDonationPromptAnnouncement(resolveText), ...words } } };
@@ -174,9 +174,8 @@ export function createStartupPromptMethods(deps: Deps) {
             const host = deps.host();
             if (!host) return unavailable();
             if (!isObjectRecord(input) || typeof input.id !== 'string' || !PROMPT_IDS.has(input.id)
-                || typeof input.action !== 'string' || !ACTIONS.has(input.action)
-                || !(input.version === undefined || (typeof input.version === 'string' && VERSION.test(input.version)))) {
-                return fail('INVALID_INPUT', 'startupPromptAction takes a prompt id, an action and the update version');
+                || typeof input.action !== 'string' || !ACTIONS.has(input.action)) {
+                return fail('INVALID_INPUT', 'startupPromptAction takes a prompt id and an action');
             }
             const storage = host.storage;
             const { id, action } = input;
@@ -185,8 +184,8 @@ export function createStartupPromptMethods(deps: Deps) {
                     await writeMobileOnboardingDismissed(storage);
                 } else if (id === 'announcement' && action !== 'shown' && ACTIVE_APP_ANNOUNCEMENT) {
                     await storage.setItem(getAnnouncementDismissalStorageKey(ACTIVE_APP_ANNOUNCEMENT.id), APP_ANNOUNCEMENT_DISMISSED_VALUE);
-                } else if (id === 'update-reminder' && action !== 'shown' && typeof input.version === 'string') {
-                    const latestVersion = input.version;
+                } else if (id === 'update-reminder' && action !== 'shown' && openedUpdateVersion) {
+                    const latestVersion = openedUpdateVersion;
                     await updateLocalUserPromptState(storage, (state) => recordUpdateReminderDismissed(state, latestVersion));
                 } else if (id === 'donation' && action === 'shown') {
                     const nowMs = Date.now();
