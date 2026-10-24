@@ -187,6 +187,9 @@ export const clearAttachmentUploadRefusal: Files['clearAttachmentUploadRefusal']
 export const clearAttachmentUploadRefusals: Files['clearAttachmentUploadRefusals'] = () => (
   mobileAttachmentFiles().clearAttachmentUploadRefusals()
 );
+export const clearWebdavDownloadBackoffs: Files['clearWebdavDownloadBackoffs'] = () => (
+  mobileAttachmentFiles().clearWebdavDownloadBackoffs()
+);
 export const shouldAttemptAttachmentUpload: Files['shouldAttemptAttachmentUpload'] = (...args) => (
   mobileAttachmentFiles().shouldAttemptAttachmentUpload(...args)
 );

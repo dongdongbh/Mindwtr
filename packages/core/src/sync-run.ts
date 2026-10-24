@@ -2261,7 +2261,10 @@ class SharedSyncRunMachine {
         this.hooks.onMergePhaseStart?.();
         // Rows kept without their file here: another device's upload of one wins the merge's key.
         // A record that cannot be read only costs this one preference; the passes still guard the rows.
-        const unreachable = this.options.activationProbe ? null : await this.readUnreachableAttachments().catch(() => null);
+        const unreachable = this.options.activationProbe ? null : await this.readUnreachableAttachments().catch((error) => {
+            this.notifier.logWarning('Kept attachment record could not be read before the merge', error);
+            return null;
+        });
         const keptIds = unreachable?.record[unreachable.scope];
         const syncResult = await this.performSyncCycleImpl(this.buildSyncCycleIO(keptIds?.length ? new Set(keptIds) : undefined));
         if (syncResult.status === 'skipped') {

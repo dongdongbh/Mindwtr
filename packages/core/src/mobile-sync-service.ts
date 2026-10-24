@@ -350,6 +350,8 @@ export type MobileSyncAttachmentsPort = {
   hasCompletedPresenceReconciliation(): Promise<boolean>;
   hasPendingWork(data: AppData, options: { contentCheckEnabled?: boolean }): Promise<boolean>;
   runCleanup(options: MobileSyncAttachmentCleanupOptions): Promise<{ appData: AppData; shouldInvalidateFastSyncState: boolean }>;
+  /** Drops every id-keyed download backoff: the sync settings changed, so another location may answer. */
+  clearDownloadBackoff?(): void;
 };
 
 /** iCloud (iOS only). A host without it never offers the `cloudkit` backend. */
@@ -782,8 +784,10 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     return value;
   };
 
+  /** The sync settings changed: cached config and the per-file download backoff belong to the old ones. */
   const clearMobileSyncConfigCache = (): void => {
     syncConfigCache.clear();
+    host.attachments.clearDownloadBackoff?.();
   };
 
   const getCachedConfigValue = async (key: string): Promise<string | null> => {

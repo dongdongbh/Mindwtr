@@ -727,6 +727,17 @@ describe('mobile sync service behind fake ports', () => {
     expect(elsewhere, String(elsewhere.error)).toMatchObject({ success: true });
   });
 
+  it('drops the attachment download backoff when the sync settings change', () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES, secrets: { [WEBDAV_PASSWORD_KEY]: 'secret' } });
+    const clearDownloadBackoff = vi.fn();
+    fake.host.attachments.clearDownloadBackoff = clearDownloadBackoff;
+    const service = createMobileSyncService(fake.host);
+
+    service.clearMobileSyncConfigCache();
+
+    expect(clearDownloadBackoff).toHaveBeenCalledOnce();
+  });
+
   it('refuses a plaintext attachment pass into a location whose attachments hold ciphertext, and remembers the location', async () => {
     const fake = createFakeHost({ values: WEBDAV_VALUES, secrets: { [WEBDAV_PASSWORD_KEY]: 'secret' } });
     const attachmentPasses = vi.fn(async () => false as const);

@@ -851,7 +851,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         // Rate-limit and 404 are handled inside onDownload's own try/catch above, since only
         // onDownload's return value can signal a mutation back to the lifecycle. Only "other"
         // (retry-exhausted / hash-validation / write) errors reach here.
-        files.setWebdavDownloadBackoff(attachment.id, error);
+        if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, error);
         reportProgress(
           attachment.id,
           'download',
@@ -1414,6 +1414,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         : 'confirmed-not-found';
       if (localPresence === 'unreadable') continue;
       const existsLocally = localPresence === 'present';
+      if (existsLocally) files.clearWebdavDownloadBackoff(attachment.id);
       const nextStatus = getAttachmentLocalStatus(uri, localPresence);
       if (attachment.localStatus !== nextStatus) {
         attachment.localStatus = nextStatus;

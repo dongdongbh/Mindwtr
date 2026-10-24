@@ -5303,7 +5303,7 @@ describe('activation with attachment files that no device location can serve', (
     });
 
     it('merges without the kept ids when the record cannot be read', async () => {
-        const { run } = createHarness({
+        const { harness, run } = createHarness({
             local: createData([remoteOnlyTask()]),
             remote: createData([remoteOnlyTask()]),
             locationScope: SCOPE,
@@ -5314,6 +5314,7 @@ describe('activation with attachment files that no device location can serve', (
         });
 
         expect(await run({ manual: true })).toMatchObject({ success: true });
+        expect(harness.warnings.map((warning) => warning.message)).toContain('Kept attachment record could not be read before the merge');
     });
 
     it('keeps the active location through a refused probe of another one', async () => {

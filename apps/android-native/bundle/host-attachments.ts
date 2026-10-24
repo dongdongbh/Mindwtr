@@ -250,6 +250,7 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         hasCompletedPresenceReconciliation: () => files.hasCompletedAttachmentPresenceReconciliation(),
         hasPendingWork: (data, options) => files.hasPendingAttachmentSyncWork(data, options),
         runCleanup: (options) => runMobileAttachmentCleanup(options, { fs, retireLocalAttachment: bindings.retireLocalAttachment }),
+        clearDownloadBackoff: () => files.clearWebdavDownloadBackoffs(),
     };
 
     return { contractHost, syncPort, prepareAttachmentAvailableDetailed: availability.prepareAttachmentAvailableDetailed };

@@ -368,6 +368,11 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
     webdavDownloadBackoff.deleteEntry(attachmentId);
   };
 
+  /** Another sync location: its files answer for themselves. */
+  const clearWebdavDownloadBackoffs = (): void => {
+    webdavDownloadBackoff.clear();
+  };
+
   const pruneWebdavDownloadBackoff = (): void => {
     webdavDownloadBackoff.prune();
   };
@@ -1075,6 +1080,7 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
     getWebdavDownloadBackoff,
     setWebdavDownloadBackoff,
     clearWebdavDownloadBackoff,
+    clearWebdavDownloadBackoffs,
     pruneWebdavDownloadBackoff,
     readAttachmentBytesForUpload,
     writeBytesSafely,

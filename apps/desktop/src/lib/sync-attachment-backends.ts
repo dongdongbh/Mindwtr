@@ -970,7 +970,7 @@ export async function syncWebdavAttachments(
             // Rate-limit and 404 are handled inside onDownload's own try/catch above, since only
             // onDownload's return value can signal a mutation back to the lifecycle. Only "other"
             // (retry-exhausted / hash-validation / write) errors reach here.
-            setWebdavDownloadBackoff(attachment.id, error);
+            if (helpers?.activationProbe !== true) setWebdavDownloadBackoff(attachment.id, error);
             reportProgress(
                 attachment.id,
                 'download',

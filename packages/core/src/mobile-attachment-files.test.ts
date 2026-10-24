@@ -337,6 +337,17 @@ describe('mobile attachment files: upload refusals and download backoff', () => 
     files.clearWebdavDownloadBackoff('att-1');
     expect(files.getWebdavDownloadBackoff('att-1')).toBeNull();
   });
+
+  it('drops every download backoff at once, for a switch to another sync location', () => {
+    const { files } = setup();
+    files.setWebdavDownloadBackoff('att-1', { status: 404 });
+    files.setWebdavDownloadBackoff('att-2', { status: 500 });
+
+    files.clearWebdavDownloadBackoffs();
+
+    expect(files.getWebdavDownloadBackoff('att-1')).toBeNull();
+    expect(files.getWebdavDownloadBackoff('att-2')).toBeNull();
+  });
 });
 
 describe('mobile attachment files: stored configs and Dropbox', () => {
