@@ -1137,7 +1137,7 @@ final class NativeBoardMoveTests: XCTestCase {
             _ = try await core.call("logLine", argumentsJSON: json([stageMessage,
                 #"{"releaseCheck":"v1.3.5/ios-board-drag-stage","stage":"begin","reason":"ready","reason":"private"}"#]))
         }
-        // Exercise the same numeric formatter used by App cancellation and the real host boundary.
+        // Exercise the same numeric formatter used by App geometry and the real host boundary.
         let geometryMessage = NativeBoardDragGeometry.message
         let sample = CGRect(x: 0.125, y: 12.0000001, width: 342.5, height: 53.25)
         func geometryPayload(_ viewport: CGRect? = nil, area: CGRect? = nil, row: CGRect? = nil) throws -> [String: Any] {
@@ -1162,6 +1162,12 @@ final class NativeBoardMoveTests: XCTestCase {
             _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(value)]))
             geometryContexts.append(value)
         }
+        let rebasedGeometry = try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-scroll-rebased",
+            originalViewport: sample, currentViewport: sample,
+            originalArea: sample, currentArea: sample.offsetBy(dx: 0, dy: -2), originalRow: sample, currentRow: sample))
+        XCTAssertTrue(NativeBoardDragGeometry.accepts(rebasedGeometry))
+        _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(rebasedGeometry)]))
+        geometryContexts.append(rebasedGeometry)
         let missing = try XCTUnwrap(geometryContexts[5]["currentViewport"] as? [String: Any])
         XCTAssertEqual(missing["validity"] as? String, "missing")
         let nonfinite = try XCTUnwrap(geometryContexts[6]["currentViewport"] as? [String: Any])
@@ -1282,7 +1288,7 @@ final class NativeBoardMoveTests: XCTestCase {
         for (line, expected) in zip(geometryLines, geometryContexts) {
             let exported = try XCTUnwrap(line["context"] as? [String: Any])
             XCTAssertEqual(exported["releaseCheck"] as? String, NativeBoardDragGeometry.releaseCheck)
-            XCTAssertEqual(exported["reason"] as? String, "geometry-area")
+            XCTAssertEqual(exported["reason"] as? String, expected["reason"] as? String)
             for field in ["originalViewport", "currentViewport", "originalArea", "currentArea", "originalRow", "currentRow"] {
                 let serialized = try XCTUnwrap(exported[field] as? String)
                 let decoded = try object(serialized)

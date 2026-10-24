@@ -127,6 +127,27 @@ struct BoardDragState {
         invalidate(); self.capture = capture; self.measurements = measurements
     }
 
+    mutating func rebaseForVerticalScroll(_ next: BoardDragMeasurements) -> Bool {
+        guard claim == nil, let capture, let original = measurements,
+              original.viewports.count == 1, next.viewports.count == 1,
+              original.viewports[0] == next.viewports[0], BoardDragGeometry.valid(next.viewports[0]),
+              original.columns.count == next.columns.count,
+              let first = original.columns.first, let current = next.columns.first else { return false }
+        let delta = current.frame.minY - first.frame.minY
+        guard delta.isFinite, delta != 0,
+              zip(original.columns, next.columns).allSatisfy({ prior, current in
+                  prior.status.utf8.elementsEqual(current.status.utf8)
+                      && BoardDragGeometry.valid(prior.frame) && BoardDragGeometry.valid(current.frame)
+                      && current.frame == prior.frame.offsetBy(dx: 0, dy: delta)
+              }), original.rows.count == next.rows.count,
+              zip(original.rows, next.rows).allSatisfy({ prior, current in
+                  prior.status.utf8.elementsEqual(current.status.utf8)
+                      && prior.id.utf8.elementsEqual(current.id.utf8) && prior.frame == current.frame
+              }), next.geometry(for: capture)?.canBegin(capture) == true else { return false }
+        measurements = next
+        return true
+    }
+
     func reusableCapture(matching candidate: BoardOrderDragCapture, measurements: BoardDragMeasurements) -> BoardOrderDragCapture? {
         guard claim == nil, let capture, self.measurements == measurements,
               capture.hostID == candidate.hostID, capture.moveAllowed == candidate.moveAllowed,
@@ -183,7 +204,7 @@ struct BoardDragState {
 
 // Nonobservable, diagnostic-only slots; callbacks retain their original attempt.
 final class BoardDragDiagnostics {
-    enum Stage: String, CaseIterable { case begin, cancel, validate, hover, drop, load }
+    enum Stage: String, CaseIterable { case begin, cancel, validate, hover, drop, load, rebase }
     final class Attempt {
         private var emitted = Set<Stage>()
         func take(_ stage: Stage) -> Bool { emitted.insert(stage).inserted }
@@ -260,8 +281,16 @@ struct BoardScreen: View {
         .onChange(of: model.areaPickerPresented) { if $0 { endInput() } }
         .onPreferenceChange(BoardDragFrames.self) { value in
             if dragMeasurements != value {
-                let reason = geometryCancellationReason(value)
-                cancelDrag(reason: reason, next: value); dragMeasurements = value
+                let original = drag.measurements
+                if drag.rebaseForVerticalScroll(value) {
+                    if let attempt = dragDiagnostics.attempt, attempt.take(.rebase) {
+                        logDragGeometry(reason: "geometry-scroll-rebased", original: original, next: value, capture: drag.capture)
+                    }
+                } else {
+                    let reason = geometryCancellationReason(value)
+                    cancelDrag(reason: reason, next: value)
+                }
+                dragMeasurements = value
             }
         }
         .onReceive(dragInvalidations) { cancelDrag(reason: "model") }
@@ -508,6 +537,14 @@ struct BoardScreen: View {
         guard drag.capture != nil || drag.claim != nil || dropIndicator != nil else { return }
         // Copy existing measurements before invalidation; this adds no layout observation.
         let original = drag.measurements, capture = drag.capture
+        drag.invalidate(); dropIndicator = nil
+        guard let attempt = dragDiagnostics.attempt, attempt.take(.cancel) else { return }
+        model.logBoardDragStage("cancel", reason: reason)
+        if next != nil { logDragGeometry(reason: reason, original: original, next: next, capture: capture) }
+    }
+
+    private func logDragGeometry(reason: String, original: BoardDragMeasurements?, next: BoardDragMeasurements?,
+                                 capture: BoardOrderDragCapture?) {
         func viewport(_ value: BoardDragMeasurements?) -> CGRect? {
             guard let value, value.viewports.count == 1 else { return nil }
             return value.viewports[0]
@@ -522,13 +559,8 @@ struct BoardScreen: View {
         }
         let originalViewport = viewport(original), currentViewport = viewport(next)
         let originalArea = area(original), currentArea = area(next), originalRow = row(original), currentRow = row(next)
-        drag.invalidate(); dropIndicator = nil
-        guard let attempt = dragDiagnostics.attempt, attempt.take(.cancel) else { return }
-        model.logBoardDragStage("cancel", reason: reason)
-        if next != nil {
-            model.logBoardDragGeometry(reason: reason, originalViewport: originalViewport, currentViewport: currentViewport,
-                originalArea: originalArea, currentArea: currentArea, originalRow: originalRow, currentRow: currentRow)
-        }
+        model.logBoardDragGeometry(reason: reason, originalViewport: originalViewport, currentViewport: currentViewport,
+            originalArea: originalArea, currentArea: currentArea, originalRow: originalRow, currentRow: currentRow)
     }
 
     private func dragTarget(_ point: CGPoint, status: String) -> BoardDropTarget? {

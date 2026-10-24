@@ -2,12 +2,12 @@ import Foundation
 import CoreFoundation
 import CoreGraphics
 
-/// Fixed, content-free cancellation snapshot shared by App emission and host admission.
+/// Fixed, content-free geometry snapshot shared by App emission and host admission.
 public enum NativeBoardDragGeometry {
     public static let message = "Native iOS Board drag geometry"
     public static let releaseCheck = "v1.3.8/ios-board-drag-geometry"
     private static let rectangles = ["originalViewport", "currentViewport", "originalArea", "currentArea", "originalRow", "currentRow"]
-    private static let reasons = ["geometry-missing", "geometry-viewport", "geometry-area", "geometry-rows", "geometry-other"]
+    private static let reasons = ["geometry-missing", "geometry-viewport", "geometry-area", "geometry-rows", "geometry-other", "geometry-scroll-rebased"]
 
     public static func payload(reason: String, originalViewport: CGRect?, currentViewport: CGRect?,
                                originalArea: CGRect?, currentArea: CGRect?, originalRow: CGRect?, currentRow: CGRect?) -> [String: Any]? {
