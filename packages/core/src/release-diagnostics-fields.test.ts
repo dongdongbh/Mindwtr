@@ -13,8 +13,9 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
-    // ios-board-drag-geometry: six closed numeric rectangle records, never entity/content fields.
+    // ios-board-drag-geometry: closed guard reasons, ordinal and numeric rectangles, never entity/content fields.
     'originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow',
+    'rebaseReason', 'columnOrdinal', 'originalColumn', 'currentColumn',
     'validity', 'x', 'y', 'height',
     // auto-archive-converge reuses releaseCheck/count; count = archive-twin task pairs joined in one merge pass.
     // gmail-capture reuses releaseCheck/count; gmail-capture-storage reuses stage/errorKind. Never account or mail content.
@@ -339,15 +340,23 @@ describe('release diagnostics field names', () => {
             releaseCheck: 'v1.3.8/ios-board-drag-geometry', reason: 'geometry-area',
             originalViewport: finite, currentViewport: finite, originalArea: finite, currentArea: finite,
             originalRow: missing, currentRow: nonfinite,
+            rebaseReason: 'not-recorded', columnOrdinal: -1, originalColumn: missing, currentColumn: missing,
         };
         for (const reason of [context.reason, 'geometry-scroll-roundoff-rebased']) {
             const exported = sanitizeLogContext({ ...context, reason });
             expect(exported?.releaseCheck).toBe(context.releaseCheck);
             expect(exported?.reason).toBe(reason);
-            for (const field of ['originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow'] as const) {
+            for (const field of ['originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow', 'originalColumn', 'currentColumn'] as const) {
                 expect(JSON.parse(exported?.[field] ?? 'null')).toEqual(context[field]);
             }
+            expect(exported?.rebaseReason).toBe('not-recorded');
+            expect(exported?.columnOrdinal).toBe('-1');
         }
+        const rejected = sanitizeLogContext({ ...context, rebaseReason: 'column-size', columnOrdinal: 2,
+            originalColumn: finite, currentColumn: { ...finite, height: 53.25000000000001 } });
+        expect(rejected?.rebaseReason).toBe('column-size');
+        expect(rejected?.columnOrdinal).toBe('2');
+        expect(JSON.parse(rejected?.currentColumn ?? 'null').height).toBe(53.25000000000001);
     });
 
     it('survive the log sanitizer intact', () => {

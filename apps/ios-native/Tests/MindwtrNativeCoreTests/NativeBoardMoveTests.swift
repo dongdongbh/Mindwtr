@@ -1202,6 +1202,38 @@ final class NativeBoardMoveTests: XCTestCase {
         XCTAssertTrue(NativeBoardDragGeometry.accepts(roundoffGeometry))
         _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(roundoffGeometry)]))
         geometryContexts.append(roundoffGeometry)
+        let columnMismatch = try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-area",
+            originalViewport: sample, currentViewport: sample, originalArea: sample, currentArea: sample,
+            originalRow: sample, currentRow: sample, rebaseReason: .columnSize, columnOrdinal: 2,
+            originalColumn: sample, currentColumn: CGRect(x: sample.minX, y: sample.minY, width: sample.width, height: sample.height.nextUp)))
+        XCTAssertTrue(NativeBoardDragGeometry.accepts(columnMismatch))
+        XCTAssertEqual(columnMismatch["rebaseReason"] as? String, "column-size")
+        XCTAssertEqual(columnMismatch["columnOrdinal"] as? Int, 2)
+        _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(columnMismatch)]))
+        geometryContexts.append(columnMismatch)
+        let rowMismatch = try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-rows",
+            originalViewport: sample, currentViewport: sample, originalArea: sample, currentArea: sample,
+            originalRow: sample, currentRow: sample, rebaseReason: .rowFrame))
+        XCTAssertTrue(NativeBoardDragGeometry.accepts(rowMismatch))
+        XCTAssertEqual(rowMismatch["columnOrdinal"] as? Int, -1)
+        XCTAssertEqual((rowMismatch["originalColumn"] as? [String: Any])?["validity"] as? String, "missing")
+        _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(rowMismatch)]))
+        geometryContexts.append(rowMismatch)
+        XCTAssertNil(NativeBoardDragGeometry.payload(reason: "geometry-area", originalViewport: sample,
+            currentViewport: sample, originalArea: sample, currentArea: sample, originalRow: sample, currentRow: sample,
+            rebaseReason: .columnSize, columnOrdinal: 5, originalColumn: sample, currentColumn: sample))
+        for (field, value) in [("rebaseReason", "arbitrary"), ("columnOrdinal", true), ("columnOrdinal", -2),
+                               ("columnOrdinal", 5), ("columnOrdinal", 1e100), ("columnOrdinal", 0.5), ("columnOrdinal", "2")] as [(String, Any)] {
+            var forged = columnMismatch; forged[field] = value
+            XCTAssertFalse(NativeBoardDragGeometry.accepts(forged))
+            await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forged)])) }
+        }
+        var mixed = columnMismatch; mixed["rebaseReason"] = "row-frame"
+        XCTAssertFalse(NativeBoardDragGeometry.accepts(mixed))
+        var extraColumn = try XCTUnwrap(columnMismatch["originalColumn"] as? [String: Any]); extraColumn["text"] = "private"
+        mixed = columnMismatch; mixed["originalColumn"] = extraColumn
+        XCTAssertFalse(NativeBoardDragGeometry.accepts(mixed))
+        await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(mixed)])) }
         let missing = try XCTUnwrap(geometryContexts[5]["currentViewport"] as? [String: Any])
         XCTAssertEqual(missing["validity"] as? String, "missing")
         let nonfinite = try XCTUnwrap(geometryContexts[6]["currentViewport"] as? [String: Any])
@@ -1243,6 +1275,19 @@ final class NativeBoardMoveTests: XCTestCase {
         forgedGeometry = geometryContext; forgedGeometry["currentViewport"] = forgedRect
         XCTAssertFalse(NativeBoardDragGeometry.accepts(forgedGeometry))
         await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(forgedGeometry)])) }
+        let invalidColumn = try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-area",
+            originalViewport: sample, currentViewport: sample, originalArea: sample, currentArea: sample,
+            originalRow: sample, currentRow: sample, rebaseReason: .columnInvalid, columnOrdinal: 1,
+            originalColumn: sample, currentColumn: CGRect(x: 0, y: CGFloat.infinity, width: 1, height: 1)))
+        XCTAssertTrue(NativeBoardDragGeometry.accepts(invalidColumn))
+        let invalidColumnRecord = try XCTUnwrap(invalidColumn["currentColumn"] as? [String: Any])
+        XCTAssertEqual(invalidColumnRecord["validity"] as? String, "nonfinite")
+        for field in ["x", "y", "width", "height"] { XCTAssertEqual(invalidColumnRecord[field] as? Double, 0) }
+        _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(invalidColumn)]))
+        geometryContexts.append(invalidColumn)
+        mixed = columnMismatch; mixed["currentColumn"] = missing
+        XCTAssertFalse(NativeBoardDragGeometry.accepts(mixed))
+        await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(mixed)])) }
         // New numeric records must not widen the old three-field stage schema.
         var forgedStage: [String: Any] = stageContext; forgedStage["currentViewport"] = numeric
         await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([stageMessage, json(forgedStage)])) }

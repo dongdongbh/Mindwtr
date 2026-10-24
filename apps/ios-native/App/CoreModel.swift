@@ -17565,10 +17565,13 @@ final class CoreModel: ObservableObject {
 
     /// A numeric observation only, emitted alongside the existing once-per-attempt cancel slot.
     func logBoardDragGeometry(reason: String, originalViewport: CGRect?, currentViewport: CGRect?,
-                              originalArea: CGRect?, currentArea: CGRect?, originalRow: CGRect?, currentRow: CGRect?) {
+                              originalArea: CGRect?, currentArea: CGRect?, originalRow: CGRect?, currentRow: CGRect?,
+                              rebaseReason: NativeBoardDragGeometry.RebaseRejection? = nil, columnOrdinal: Int? = nil,
+                              originalColumn: CGRect? = nil, currentColumn: CGRect? = nil) {
         guard let value = NativeBoardDragGeometry.payload(reason: reason, originalViewport: originalViewport,
             currentViewport: currentViewport, originalArea: originalArea, currentArea: currentArea,
-            originalRow: originalRow, currentRow: currentRow) else { return }
+            originalRow: originalRow, currentRow: currentRow, rebaseReason: rebaseReason, columnOrdinal: columnOrdinal,
+            originalColumn: originalColumn, currentColumn: currentColumn) else { return }
         let diagnosticHost = host
         Task {
             _ = try? await diagnosticHost?.call("logLine", argumentsJSON: json([

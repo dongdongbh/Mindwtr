@@ -128,23 +128,42 @@ struct BoardDragState {
         invalidate(); self.capture = capture; self.measurements = measurements
     }
 
-    mutating func rebaseForVerticalScroll(_ next: BoardDragMeasurements) -> Bool {
-        guard claim == nil, let capture, let original = measurements,
-              original.viewports.count == 1, next.viewports.count == 1,
-              original.viewports[0] == next.viewports[0], BoardDragGeometry.valid(next.viewports[0]),
-              original.columns.count == next.columns.count,
-              let first = original.columns.first, let current = next.columns.first else { return false }
+    mutating func rebaseForVerticalScroll(_ next: BoardDragMeasurements,
+        rejected: (NativeBoardDragGeometry.RebaseRejection, Int?, CGRect?, CGRect?) -> Void = { _, _, _, _ in }) -> Bool {
+        func refuse(_ reason: NativeBoardDragGeometry.RebaseRejection, column: Int? = nil,
+                    original: CGRect? = nil, current: CGRect? = nil) -> Bool {
+            rejected(reason, column, original, current)
+            return false
+        }
+        guard claim == nil else { return refuse(.claimed) }
+        guard let capture, let original = measurements else { return refuse(.captureUnavailable) }
+        guard original.viewports.count == 1, next.viewports.count == 1 else { return refuse(.viewportCount) }
+        guard original.viewports[0] == next.viewports[0] else { return refuse(.viewportChanged) }
+        guard BoardDragGeometry.valid(next.viewports[0]) else { return refuse(.viewportInvalid) }
+        guard original.columns.count == next.columns.count else { return refuse(.columnCount) }
+        guard let first = original.columns.first, let current = next.columns.first else { return refuse(.columnsUnavailable) }
         let delta = current.frame.minY - first.frame.minY
-        guard delta.isFinite, delta != 0,
-              zip(original.columns, next.columns).allSatisfy({ prior, current in
-                  prior.status.utf8.elementsEqual(current.status.utf8)
-                      && BoardDragGeometry.valid(prior.frame) && BoardDragGeometry.valid(current.frame)
-                      && NativeBoardDragGeometry.matchesVerticalTranslation(prior.frame, current.frame, delta: delta)
-              }), original.rows.count == next.rows.count,
-              zip(original.rows, next.rows).allSatisfy({ prior, current in
-                  prior.status.utf8.elementsEqual(current.status.utf8)
-                      && prior.id.utf8.elementsEqual(current.id.utf8) && prior.frame == current.frame
-              }), next.geometry(for: capture)?.canBegin(capture) == true else { return false }
+        guard delta.isFinite else { return refuse(.translationNonfinite) }
+        guard delta != 0 else { return refuse(.translationZero) }
+        for (ordinal, pair) in zip(original.columns, next.columns).enumerated() {
+            let (prior, current) = pair
+            guard prior.status.utf8.elementsEqual(current.status.utf8) else {
+                return refuse(.columnIdentity, column: ordinal, original: prior.frame, current: current.frame)
+            }
+            guard BoardDragGeometry.valid(prior.frame), BoardDragGeometry.valid(current.frame) else {
+                return refuse(.columnInvalid, column: ordinal, original: prior.frame, current: current.frame)
+            }
+            let matches = NativeBoardDragGeometry.matchesVerticalTranslation(prior.frame, current.frame, delta: delta,
+                rejected: { rejected($0, ordinal, prior.frame, current.frame) })
+            guard matches else { return false }
+        }
+        guard original.rows.count == next.rows.count else { return refuse(.rowCount) }
+        for (prior, current) in zip(original.rows, next.rows) {
+            guard prior.status.utf8.elementsEqual(current.status.utf8) else { return refuse(.rowStatus) }
+            guard prior.id.utf8.elementsEqual(current.id.utf8) else { return refuse(.rowIdentity) }
+            guard prior.frame == current.frame else { return refuse(.rowFrame) }
+        }
+        guard next.geometry(for: capture)?.canBegin(capture) == true else { return refuse(.sourceIneligible) }
         measurements = next
         return true
     }
@@ -283,7 +302,14 @@ struct BoardScreen: View {
         .onPreferenceChange(BoardDragFrames.self) { value in
             if dragMeasurements != value {
                 let original = drag.measurements
-                if drag.rebaseForVerticalScroll(value) {
+                var rebaseReason: NativeBoardDragGeometry.RebaseRejection?
+                var columnOrdinal: Int?
+                var originalColumn: CGRect?
+                var currentColumn: CGRect?
+                if drag.rebaseForVerticalScroll(value, rejected: { reason, ordinal, before, after in
+                    rebaseReason = reason; columnOrdinal = ordinal
+                    originalColumn = before; currentColumn = after
+                }) {
                     if let attempt = dragDiagnostics.attempt, let original,
                        let before = original.columns.first, let after = value.columns.first {
                         let delta = after.frame.minY - before.frame.minY
@@ -297,7 +323,8 @@ struct BoardScreen: View {
                     }
                 } else {
                     let reason = geometryCancellationReason(value)
-                    cancelDrag(reason: reason, next: value)
+                    cancelDrag(reason: reason, next: value, rebaseReason: rebaseReason,
+                               columnOrdinal: columnOrdinal, originalColumn: originalColumn, currentColumn: currentColumn)
                 }
                 dragMeasurements = value
             }
@@ -542,18 +569,26 @@ struct BoardScreen: View {
         return "geometry-other"
     }
 
-    private func cancelDrag(reason: String, next: BoardDragMeasurements? = nil) {
+    private func cancelDrag(reason: String, next: BoardDragMeasurements? = nil,
+                            rebaseReason: NativeBoardDragGeometry.RebaseRejection? = nil, columnOrdinal: Int? = nil,
+                            originalColumn: CGRect? = nil, currentColumn: CGRect? = nil) {
         guard drag.capture != nil || drag.claim != nil || dropIndicator != nil else { return }
         // Copy existing measurements before invalidation; this adds no layout observation.
         let original = drag.measurements, capture = drag.capture
         drag.invalidate(); dropIndicator = nil
         guard let attempt = dragDiagnostics.attempt, attempt.take(.cancel) else { return }
         model.logBoardDragStage("cancel", reason: reason)
-        if next != nil { logDragGeometry(reason: reason, original: original, next: next, capture: capture) }
+        if next != nil {
+            logDragGeometry(reason: reason, original: original, next: next, capture: capture,
+                            rebaseReason: rebaseReason, columnOrdinal: columnOrdinal,
+                            originalColumn: originalColumn, currentColumn: currentColumn)
+        }
     }
 
     private func logDragGeometry(reason: String, original: BoardDragMeasurements?, next: BoardDragMeasurements?,
-                                 capture: BoardOrderDragCapture?) {
+                                 capture: BoardOrderDragCapture?,
+                                 rebaseReason: NativeBoardDragGeometry.RebaseRejection? = nil, columnOrdinal: Int? = nil,
+                                 originalColumn: CGRect? = nil, currentColumn: CGRect? = nil) {
         func viewport(_ value: BoardDragMeasurements?) -> CGRect? {
             guard let value, value.viewports.count == 1 else { return nil }
             return value.viewports[0]
@@ -569,7 +604,9 @@ struct BoardScreen: View {
         let originalViewport = viewport(original), currentViewport = viewport(next)
         let originalArea = area(original), currentArea = area(next), originalRow = row(original), currentRow = row(next)
         model.logBoardDragGeometry(reason: reason, originalViewport: originalViewport, currentViewport: currentViewport,
-            originalArea: originalArea, currentArea: currentArea, originalRow: originalRow, currentRow: currentRow)
+            originalArea: originalArea, currentArea: currentArea, originalRow: originalRow, currentRow: currentRow,
+            rebaseReason: rebaseReason, columnOrdinal: columnOrdinal,
+            originalColumn: originalColumn, currentColumn: currentColumn)
     }
 
     private func dragTarget(_ point: CGPoint, status: String) -> BoardDropTarget? {
