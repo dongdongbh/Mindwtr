@@ -10,6 +10,7 @@ import { validateAttachmentForUpload } from './attachment-validation';
 import { formatI18nTemplate, tFallback } from './i18n';
 import { isLikelyFilePath } from './mobile-sync-utils';
 import { isImageAttachment } from './task-view-model';
+import { isAttachmentKeptWithoutFile } from './unreachable-attachments';
 import { taskEditValuesEqual } from './json-value-equality';
 import { logInfo } from './logger';
 
@@ -413,7 +414,7 @@ export const getAttachmentRowState = (attachment: Attachment): AttachmentRowStat
         kind: attachment.kind,
         title: getAttachmentDisplayTitle(attachment),
         missing,
-        canDownload: missing && Boolean(attachment.cloudKey),
+        canDownload: missing && Boolean(attachment.cloudKey) && !isAttachmentKeptWithoutFile(attachment),
         downloading: attachment.localStatus === 'downloading',
     };
 };

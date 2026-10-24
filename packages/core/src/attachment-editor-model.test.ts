@@ -3,6 +3,7 @@ import {
     addPickedAttachment,
     describeAttachmentUriForLog,
     findTaskDraftAttachmentForIdentity,
+    getAttachmentRowState,
     mergeTaskDraftAttachments,
     planAttachmentOpen,
     preparePickedAttachment,
@@ -11,6 +12,7 @@ import {
     type PickedAttachmentAsset,
 } from './attachment-editor-model';
 import { getAttachmentDownloadIdentity, hasAttachmentDownloadIdentity } from './mobile-attachment-availability';
+import { rememberUnreachableAttachments } from './unreachable-attachments';
 import type { Attachment } from './types';
 
 const AT = '2026-09-01T00:00:00.000Z';
@@ -296,5 +298,16 @@ describe('attachment editor model', () => {
         expect(planAttachmentOpen(memo, { audio: true, t })).toEqual({ kind: 'audio', attachment: memo });
         expect(planAttachmentOpen(memo, { audio: false, t })).toMatchObject({ kind: 'file', viewMimeType: '*/*' });
         expect(resolveAttachmentViewMimeType('file:///a/x.unknown', ' text/plain ')).toBe('text/plain');
+    });
+
+    it('offers no Download for a row kept without its file, as React Native and desktop show "Missing file"', () => {
+        const kept = file('kept', { uri: '', cloudKey: 'attachments/kept.pdf', localStatus: 'missing' });
+        expect(getAttachmentRowState(kept)).toMatchObject({ missing: true, canDownload: true });
+        rememberUnreachableAttachments({ scope: { kept: ['attachments/kept.pdf'] } });
+        try {
+            expect(getAttachmentRowState(kept)).toMatchObject({ missing: true, canDownload: false });
+        } finally {
+            rememberUnreachableAttachments({});
+        }
     });
 });
