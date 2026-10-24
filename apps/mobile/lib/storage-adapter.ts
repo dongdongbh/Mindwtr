@@ -11,6 +11,7 @@ import { markStartupPhase, measureStartupPhase } from './startup-profiler';
 const DATA_KEY = WIDGET_DATA_KEY;
 const STARTUP_BACKUP_VERSION_KEY = `${DATA_KEY}:startup-backup-version`;
 const STARTUP_BACKUP_UPDATED_AT_KEY = `${DATA_KEY}:startup-backup-updated-at`;
+const STARTUP_BACKUP_OUTGROWN_AT_KEY = `${DATA_KEY}:startup-backup-outgrown-at`;
 // Set while the JSON backup holds writes SQLite refused. Survives the process,
 // because the loss it prevents only shows up on the NEXT launch: SQLite reads
 // keep succeeding, so without this marker the app happily serves the stale
@@ -411,6 +412,58 @@ let jsonBackupOversizeChars = 0;
 
 const isJsonBackupUsable = (): boolean => !jsonBackupSkippedOversize;
 
+// The oversize flag above lives only in memory, so on a cold start a library
+// past the cap looked like it had a fallback: the first read failed fast into
+// a backup that was never written (an empty library, which the store treats
+// as a fresh install) or one left from when the library still fit (an old
+// copy). Every backup write sets its updated-at stamp, so the stamp says a
+// backup exists; the outgrown marker says it is older than the library.
+let jsonBackupStored: boolean | null = null;
+let jsonBackupOutgrown: boolean | null = null;
+
+const readJsonBackupOutgrown = async (): Promise<boolean> => {
+    if (jsonBackupOutgrown === null) {
+        jsonBackupOutgrown = await AsyncStorage.getItem(STARTUP_BACKUP_OUTGROWN_AT_KEY) != null;
+    }
+    return jsonBackupOutgrown;
+};
+
+// Written after a skipped deferred write, and never while the copy holds writes
+// SQLite never took (json-ahead). SQLite usually holds the data by then; after
+// a failed first-launch migration it is empty and the copy is the only one.
+// So nothing is deleted: the migration, the reconcile and the json-ahead
+// recovery still read the copy. Only the fallbacks refuse it.
+const markJsonBackupOutgrown = async (): Promise<void> => {
+    if (jsonBackupOutgrown === true || jsonAheadOfSqlite) return;
+    try {
+        await AsyncStorage.setItem(STARTUP_BACKUP_OUTGROWN_AT_KEY, String(Date.now()));
+        jsonBackupOutgrown = true;
+        jsonBackupStored = false;
+    } catch (error) {
+        logStorageWarn('[Storage] Failed to mark the JSON backup as outgrown', error);
+    }
+};
+
+const hasStoredJsonBackup = async (): Promise<boolean> => {
+    if (jsonBackupStored !== null) return jsonBackupStored;
+    try {
+        jsonBackupStored = await readStartupJsonBackupUpdatedAt(AsyncStorage) !== null
+            && !await readJsonBackupOutgrown();
+    } catch {
+        return false;
+    }
+    if (!jsonBackupStored) {
+        // Forced: this runs inside the first read, before the settings that
+        // enable diagnostics logging have loaded.
+        void logWarn('[Storage] No JSON backup stored; SQLite is the only readable copy', {
+            scope: 'storage',
+            force: true,
+            extra: { releaseCheck: 'v1.3.8/rn-load-no-backup' },
+        });
+    }
+    return jsonBackupStored;
+};
+
 // The #975 read-authority rule: reads come from the JSON backup while it is
 // preferred (fast path) or holds writes SQLite hasn't taken yet (json-ahead).
 // getData() applies the same rule in expanded form for per-branch telemetry.
@@ -463,6 +516,16 @@ const saveStartupJsonBackup = async (
     await measureStartupPhase(`${phasePrefix}.json_backup_updated_at_set`, async () =>
         AsyncStorage.setItem(STARTUP_BACKUP_UPDATED_AT_KEY, String(updatedAtMs))
     );
+    if (jsonBackupOutgrown !== false) {
+        // Last, so a crash before it leaves a fresh copy refused, never an old one trusted.
+        try {
+            await AsyncStorage.removeItem(STARTUP_BACKUP_OUTGROWN_AT_KEY);
+            jsonBackupOutgrown = false;
+        } catch (error) {
+            logStorageWarn('[Storage] Failed to clear the outgrown JSON backup marker', error);
+        }
+    }
+    jsonBackupStored = jsonBackupOutgrown === false;
     return { sizeChars: jsonValue.length, skipped: false };
 };
 
@@ -624,14 +687,20 @@ const createCoalescingWriter = <TData, TResult>(options: CoalescingWriterOptions
         lastEndedAtMs = 0;
     };
 
-    return { schedule, flush, reset };
+    const hasPending = (): boolean => pending !== null || inFlight;
+
+    return { schedule, flush, reset, hasPending };
 };
 
 const jsonBackupCoalescer = createCoalescingWriter<AppData, { sizeChars: number; skipped: boolean }>({
     coalesceMs: JSON_BACKUP_COALESCE_MS,
     minIntervalMs: JSON_BACKUP_MIN_INTERVAL_MS,
     mergeMinimumUpdatedAtMs: (prevMs, nextMs) => Math.max(prevMs, nextMs),
-    write: (pending) => saveStartupJsonBackup(AsyncStorage, pending.data, pending.phasePrefix, pending.minimumUpdatedAtMs),
+    write: async (pending) => {
+        const result = await saveStartupJsonBackup(AsyncStorage, pending.data, pending.phasePrefix, pending.minimumUpdatedAtMs);
+        if (result.skipped) await markJsonBackupOutgrown();
+        return result;
+    },
     onSlow: (elapsedMs, pending, result) => {
         logStorageInfo('[Storage] Slow post-save backup', {
             jsonBackupMs: String(elapsedMs),
@@ -756,7 +825,7 @@ const assertJsonBackupFreshEnough = async (AsyncStorage: any, phase: string): Pr
 
 export const getMobileStartupSnapshotFromBackup = async (): Promise<AppData | null> => {
     const backupVersion = await AsyncStorage.getItem(STARTUP_BACKUP_VERSION_KEY);
-    if (backupVersion !== STARTUP_BACKUP_VERSION) {
+    if (backupVersion !== STARTUP_BACKUP_VERSION || await readJsonBackupOutgrown()) {
         return null;
     }
     const jsonValue = await getLegacyJson(AsyncStorage);
@@ -1093,13 +1162,13 @@ const createStorage = (): StorageAdapter => {
     return {
         getData: async (): Promise<AppData> => {
             markStartupPhase('mobile.storage.get_data.start');
-            // allowEmptyOnAbsent: the SQLite-genuinely-failed callers (json_fast_path,
-            // json_preferred_sqlite_disabled, get_data_fallback) have always treated an
-            // absent backup as a fresh install. The json_ahead caller must not: SQLite
-            // is healthy there, so an absent backup means "nothing to serve from this
-            // path", not "empty library" — the caller falls through to the SQLite read
-            // instead (#975).
-            const loadJsonBackup = async (phase = 'get_data', allowEmptyOnAbsent = true) => {
+            // allowEmptyOnAbsent: an absent backup is a fresh install only when SQLite
+            // is unavailable and the JSON copy is the only store. With SQLite there,
+            // a populated database may sit behind a slow or failed read, so an
+            // absent backup means "nothing to serve from this path", never "empty
+            // library"; the json_ahead caller then falls through to the SQLite read
+            // (#975).
+            const loadJsonBackup = async (phase = 'get_data', allowEmptyOnAbsent = !shouldUseSqlite) => {
                 // A deferred backup may still be pending; land it before trusting
                 // the stored copy (and before the freshness assert reads its stamp).
                 await flushPendingStartupJsonBackup();
@@ -1109,11 +1178,16 @@ const createStorage = (): StorageAdapter => {
                     logStorageWarn('[Storage] Refusing oversized JSON backup fallback', undefined, { phase });
                     throw new Error('The library is too large for the local JSON backup; SQLite is the only readable copy.');
                 }
+                if (shouldUseSqlite && await readJsonBackupOutgrown()) {
+                    // Older than the library SQLite holds, legacy keys included.
+                    logStorageWarn('[Storage] Refusing outgrown JSON backup fallback', undefined, { phase });
+                    throw new Error('The JSON backup is older than the library; SQLite is the only readable copy.');
+                }
                 await assertJsonBackupFreshEnough(AsyncStorage, phase);
                 const jsonValue = await getLegacyJson(AsyncStorage);
                 if (jsonValue == null) {
                     if (!allowEmptyOnAbsent) {
-                        throw new Error('JSON backup is absent; nothing to serve from the json-ahead path.');
+                        throw new Error(`JSON backup is absent; nothing to serve from ${phase}.`);
                     }
                     return { ...EMPTY_APP_DATA };
                 }
@@ -1153,12 +1227,17 @@ const createStorage = (): StorageAdapter => {
                     logStorageWarn('[Storage] Failed to load the JSON-ahead backup; falling back to SQLite read', error);
                 }
             }
+            // Recomputed below when SQLite is available. It stays true when SQLite
+            // is unavailable, so the catch reads the JSON copy, the only store there.
+            let hasJsonFallback = true;
             try {
                 if (!shouldUseSqlite) {
                     throw new Error(sqliteUnavailableReason ?? 'SQLite unavailable');
                 }
                 // Fail fast only when the JSON backup can actually catch us.
-                const hasJsonFallback = isJsonBackupUsable();
+                // A pending backup counts: the fallback read flushes it first.
+                hasJsonFallback = isJsonBackupUsable()
+                    && (jsonBackupCoalescer.hasPending() || await hasStoredJsonBackup());
                 const readTimeoutMs = hasJsonFallback
                     ? SQLITE_STARTUP_TIMEOUT_MS
                     : SQLITE_NO_FALLBACK_READ_TIMEOUT_MS;
@@ -1214,12 +1293,13 @@ const createStorage = (): StorageAdapter => {
                 markStartupPhase('mobile.storage.get_data.end');
                 return data;
             } catch (e) {
-                if (!isJsonBackupUsable()) {
+                if (!hasJsonFallback || !isJsonBackupUsable()) {
                     // There is no readable fallback, so pinning reads to it would
                     // only stall every read for the whole cooldown and fail the
-                    // sync cycle waiting behind it. Surface the SQLite failure and
-                    // let the next read retry SQLite instead (#766).
-                    logStorageWarn('[Storage] SQLite load failed and the JSON backup is oversized; retrying SQLite next read', e);
+                    // sync cycle waiting behind it, or serve an empty library over
+                    // the real one. Surface the SQLite failure and let the next
+                    // read retry SQLite instead (#766).
+                    logStorageWarn('[Storage] SQLite load failed and no JSON backup can serve it; retrying SQLite next read', e);
                     markStartupPhase('mobile.storage.get_data.error');
                     throw e;
                 }
@@ -1228,8 +1308,9 @@ const createStorage = (): StorageAdapter => {
                 } else {
                     logStorageWarn('[Storage] SQLite load failed, falling back to JSON backup', e);
                 }
-                markPreferJsonBackup();
                 const fallbackData = await measureStartupPhase('mobile.storage.get_data.json_fallback_read', async () => loadJsonBackup('get_data_fallback'));
+                // Only a fallback that served data may pin later reads to it.
+                markPreferJsonBackup();
                 markStartupPhase('mobile.storage.get_data.end');
                 return fallbackData;
             }
@@ -1515,6 +1596,8 @@ export const __mobileStorageTestUtils = {
         jsonBackupSkippedOversize = false;
         jsonBackupOversizeAtMs = 0;
         jsonBackupOversizeChars = 0;
+        jsonBackupStored = null;
+        jsonBackupOutgrown = null;
         widgetRefreshCoalescer.reset();
         initializeSqliteState = initSqliteState;
         jsonAheadOfSqlite = false;
