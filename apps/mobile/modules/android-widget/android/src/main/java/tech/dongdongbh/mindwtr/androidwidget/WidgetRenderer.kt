@@ -422,7 +422,7 @@ object WidgetRenderer {
     return HeaderActions(
       openList = navigationTarget(appWidgetId, payload.openUriFor(resolvedListId)),
       openTargetIds = listOf(R.id.mindwtr_widget_title_target),
-      openHome = homeTarget(appWidgetId, payload),
+      openHome = NavigationTarget(REQUEST_HOME_BASE + appWidgetId, payload.openUriFor(resolvedListId)),
       openHomeTargetIds = listOf(R.id.mindwtr_widget_root, R.id.mindwtr_widget_empty, R.id.mindwtr_widget_spacer),
       openChooserRequestCode = REQUEST_CHOOSER_BASE + appWidgetId,
       openChooserTargetId = R.id.mindwtr_widget_chooser,

@@ -10,6 +10,7 @@ startupProfiler?.markStartupPhase?.('js.index.polyfills_loaded');
 startupProfiler?.markStartupPhase?.('js.index.metro_runtime_require:loaded');
 
 require('./lib/background-sync-task');
+require('./lib/widget-refresh-task');
 require('./lib/context-automation-headless-task');
 
 const installKeepAwakeActivationGuard = () => {

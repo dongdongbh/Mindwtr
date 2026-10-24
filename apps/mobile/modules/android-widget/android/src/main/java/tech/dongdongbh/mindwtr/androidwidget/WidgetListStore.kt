@@ -3,6 +3,8 @@ package tech.dongdongbh.mindwtr.androidwidget
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
+import java.net.URLDecoder
 
 /** Which list each placed Tasks widget shows (#1173): SharedPreferences `mindwtr_widget_lists`, key = widget id. */
 object WidgetListStore {
@@ -14,6 +16,25 @@ object WidgetListStore {
   const val TAG_PREFIX = "tag:"
   fun isTokenList(id: String): Boolean = id.startsWith(CONTEXT_PREFIX) || id.startsWith(TAG_PREFIX)
   const val FILTER_PREFIX = "filter:"
+  private const val GROUP_PREFIX = "group:"
+  val GROUPINGS = listOf("none", "context", "project", "priority")
+
+  fun grouping(listId: String): Pair<String, String>? {
+    if (!listId.startsWith(GROUP_PREFIX)) return null
+    val parts = listId.split(":", limit = 3)
+    if (parts.size != 3 || parts[1] !in GROUPINGS) return null
+    val base = try { URLDecoder.decode(parts[2].replace("+", "%2B"), Charsets.UTF_8.name()) }
+      catch (_: IllegalArgumentException) { return null }
+    if (base == DEFAULT_LIST || base.startsWith(GROUP_PREFIX)) return null
+    return parts[1] to base
+  }
+
+  fun baseListId(listId: String): String = grouping(listId)?.second ?: listId
+
+  fun withGrouping(listId: String, grouping: String?): String {
+    val base = baseListId(listId)
+    return if (base == DEFAULT_LIST || grouping !in GROUPINGS) base else "$GROUP_PREFIX$grouping:${Uri.encode(base)}"
+  }
 
   // Core's SIMPLE_ / HIERARCHICAL_TASK_TOKEN_RE: quick-add reads these unaided as typed (`@Todd`, `@person/todd`).
   private val PLAIN_CAPTURE_TOKEN = Regex("[\\p{L}\\p{N}_-]+(?:/[\\p{L}\\p{N}_-]+)*")
@@ -28,9 +49,10 @@ object WidgetListStore {
 
   /** Capture text for a widget showing one context or tag (#1418), e.g. `@Todd `, `@"Two words" `; empty otherwise. */
   fun captureText(listId: String): String {
+    val baseListId = baseListId(listId)
     val token = when {
-      listId.startsWith(CONTEXT_PREFIX) -> listId.removePrefix(CONTEXT_PREFIX).takeIf { it.startsWith("@") }
-      listId.startsWith(TAG_PREFIX) -> listId.removePrefix(TAG_PREFIX).takeIf { it.startsWith("#") }
+      baseListId.startsWith(CONTEXT_PREFIX) -> baseListId.removePrefix(CONTEXT_PREFIX).takeIf { it.startsWith("@") }
+      baseListId.startsWith(TAG_PREFIX) -> baseListId.removePrefix(TAG_PREFIX).takeIf { it.startsWith("#") }
       else -> null
     } ?: return ""
     val value = token.substring(1)

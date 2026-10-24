@@ -244,7 +244,7 @@ class QuickCaptureActivity : AppCompatActivity() {
         require(modelClass.isAssignableFrom(AudioSessionModel::class.java))
         val widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         val kind = intent.getStringExtra(WidgetRenderer.EXTRA_KIND)
-        val widgetList = if (widgetId >= 0 && kind == WidgetKind.TASKS.name) WidgetListStore.read(appContext, widgetId) else null
+        val widgetList = if (widgetId >= 0 && kind == WidgetKind.TASKS.name) WidgetListStore.baseListId(WidgetListStore.read(appContext, widgetId)) else null
         val session = QuickCaptureAudioSessionStore.acquire(captureOwner(intent)) {
           lateinit var retainedSession: QuickCaptureAudioSession
           retainedSession = QuickCaptureAudioSession(

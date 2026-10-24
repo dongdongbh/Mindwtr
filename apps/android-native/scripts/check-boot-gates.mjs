@@ -3881,9 +3881,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(widgetGradle, /namespace = "tech\.dongdongbh\.mindwtr\.androidwidget"/, 'RN\'s R and namespace');
     assert.match(widgetGradle, /val rnExcluded = listOf\("AndroidWidgetModule", "CaptureSyncHeadlessService"\)/, 'only the Expo bridge and the headless task stay out');
     assert.equal(realpathSync(resolve(app, 'android/widget/src/main/res')), realpathSync(resolve(app, '../mobile/modules/android-widget/android/src/main/res')), 'the module\'s resources are RN\'s');
-    // The widget module's hook is CoreWork's ingest job, set before any component runs.
+    // Capture and selection refresh each await their durable CoreWork enqueue before any component runs.
     assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MindwtrApplication.kt'), 'utf8'),
-        /CaptureSyncHeadlessService\.install\(this\) \{ context -> CoreWork\.enqueue\(context, CoreJob\.INGEST\)\.result\.get\(DURABLE_WAIT_SECONDS, TimeUnit\.SECONDS\) \}/, 'the wake returns once WorkManager stored the job');
+        /CaptureSyncHeadlessService\.install\(this,\s+queued = \{ context -> CoreWork\.enqueue\(context, CoreJob\.INGEST\)\.result\.get\(DURABLE_WAIT_SECONDS, TimeUnit\.SECONDS\) \},\s+widgetRefresh = \{ context -> CoreWork\.enqueue\(context, CoreJob\.WIDGET_REFRESH\)\.result\.get\(DURABLE_WAIT_SECONDS, TimeUnit\.SECONDS\) \}\)/,
+        'capture and widget-selection wakes return once WorkManager stored their distinct jobs');
     assert.match(readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8'), /android:name="\.MindwtrApplication"/);
     // The Android bridge's two calls are guarded in CoreHost and published off the engine thread (HostWidgets).
     const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');

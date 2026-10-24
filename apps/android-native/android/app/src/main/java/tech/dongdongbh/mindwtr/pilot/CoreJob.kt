@@ -27,7 +27,8 @@ internal object CoreJob {
     const val REMINDER_SNOOZE = "reminderSnooze"
     /** RN's scheduled background sync (expo-background-task's worker): core's scheduled run, then the next run queued. */
     const val SYNC = "backgroundSync"
-    private val JOBS = setOf(INGEST, CONTEXT, REMINDERS, REMINDER_DONE, REMINDER_SNOOZE, SYNC)
+    const val WIDGET_REFRESH = "widgetRefresh"
+    private val JOBS = setOf(INGEST, CONTEXT, REMINDERS, REMINDER_DONE, REMINDER_SNOOZE, SYNC, WIDGET_REFRESH)
 
     enum class Outcome { Success, Retry, Failure }
 
@@ -85,6 +86,11 @@ internal object CoreJob {
             val host = boot()
             if (!host.recover() || !host.drain()) Outcome.Retry
             else when (name) {
+                WIDGET_REFRESH -> {
+                    refreshWidgets()
+                    line.put("releaseCheck", "v1.3.8/widget-selection-refresh").put("refresh", "requested")
+                    Outcome.Success
+                }
                 INGEST -> {
                     // What the drain stored (a capture, a widget's check-off) reaches the widgets now, not after the sync's wait.
                     refreshWidgets()
@@ -126,7 +132,7 @@ internal object CoreJob {
             if (recovered || refused) Outcome.Failure else Outcome.Retry
         }
         log(LINE, line.put("outcome", outcome.name.lowercase()))
-        if (outcome == Outcome.Success) refreshWidgets()
+        if (outcome == Outcome.Success && name != WIDGET_REFRESH) refreshWidgets()
         return outcome
     }
 }

@@ -10,6 +10,7 @@ import {
 } from './date';
 import { resolveAreaFilterSelection, isTaskVisibleInArea } from './area-filter';
 import { TASK_PRIORITY_COLORS } from './color-constants';
+import { buildFocusTaskGroups } from './focus-grouping';
 import { buildFocusPools, buildFocusTaskSections, deriveFocusTaskLists } from './focus-sections';
 import { NO_FOCUS_WIDGET_FILTER, type FocusWidgetFilter } from './focus-widget-filter';
 import { computeTodayFocusTasks, resolveWidgetTaskSort } from './focus-widget-selection';
@@ -32,6 +33,7 @@ import {
     buildWidgetTokenOptions,
     buildWidgetTokenTaskIndex,
     buildWidgetTaskList,
+    parseWidgetListSelection,
     WIDGET_FIXED_LIST_IDS,
     type WidgetTaskList,
     WIDGET_SAVED_FILTER_LIST_PREFIX,
@@ -67,6 +69,7 @@ export interface WidgetTaskItem {
     upcomingLabel?: string;
     title: string;
     statusLabel: string;
+    showStatus?: boolean;
     dueLabel: string | null;
     dueEmphasis: boolean;
     // Deep link that opens this task (the app routes mindwtr://open?task=<id>);
@@ -145,6 +148,7 @@ export interface WidgetSavedFilterOption {
 }
 
 export interface TasksWidgetPayload {
+    prioritiesEnabled?: boolean;
     headerTitle: string;
     // Today's date for the widget header band, localized ("Saturday, Sep 6").
     dateLabel: string;
@@ -620,7 +624,10 @@ export function createWidgetPayloadProjection(
     const inboxCount = activeTasks.filter((task) => task.status === 'inbox').length;
     const dateLabel = formatDateLabel(now, language, 'long');
     const listContext = { data, activeTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
-        tokenTaskIndex: options?.listIds?.some((id) => id.startsWith('context:') || id.startsWith('tag:'))
+        tokenTaskIndex: options?.listIds?.some((id) => {
+            const base = parseWidgetListSelection(id)?.listId ?? '';
+            return base.startsWith('context:') || base.startsWith('tag:');
+        })
             ? buildWidgetTokenTaskIndex(activeTasks) : undefined };
     const listTitles = widgetListTitles(tr);
     const savedFilters = buildWidgetSavedFilterOptions(data);
@@ -633,7 +640,10 @@ export function createWidgetPayloadProjection(
     if (options?.includeSavedFilterLists) {
         for (const { id } of savedFilters) requestedListIds.add(`${WIDGET_SAVED_FILTER_LIST_PREFIX}${id}`);
     }
-    for (const listId of requestedListIds) {
+    for (const selection of requestedListIds) {
+        const parsed = parseWidgetListSelection(selection);
+        if (!parsed) continue;
+        const { listId, groupBy } = parsed;
         if (listId === 'focus') continue;
         const projectId = listId.startsWith(WIDGET_PROJECT_LIST_PREFIX)
             ? listId.slice(WIDGET_PROJECT_LIST_PREFIX.length)
@@ -647,7 +657,7 @@ export function createWidgetPayloadProjection(
             }
             : null;
         const list = projectId ? projectList : buildWidgetTaskList(listId, listContext);
-        if (list) taskLists.set(listId, list);
+        if (list) taskLists.set(selection, { ...list, ...(groupBy ? { groupBy } : {}) });
     }
     const scheduleById = new Map(lists.schedule.map((task) => [task.id, task]));
 
@@ -709,19 +719,41 @@ export function createWidgetPayloadProjection(
                     openUri: WIDGET_LIST_DIRECT_URIS.focus,
                 },
             };
-            for (const [listId, list] of taskLists) {
+            for (const [selection, list] of taskLists) {
+                const listId = parseWidgetListSelection(selection)!.listId;
                 const directUri = WIDGET_LIST_DIRECT_URIS[listId as keyof typeof WIDGET_LIST_DIRECT_URIS];
                 const openUri = directUri
                     ?? `mindwtr:///widget-list/${encodeURIComponent(listId)}`;
-                listPayloads[listId] = {
+                const toListItem = (task: Task): WidgetTaskItem => ({
+                    ...(listId === 'upcoming' ? toUpcomingItem(task) : toItem(task)),
+                    ...(list.showStatus ? { showStatus: true } : {}),
+                });
+                const groupBy = list.groupBy === 'priority' && !prioritiesEnabled ? 'none' : list.groupBy;
+                const groups = groupBy && groupBy !== 'none' ? buildFocusTaskGroups({
+                    groupBy, tasks: list.tasks, projects, areas: data.areas || [],
+                    resolveText: (key, fallback) => tr[key] || fallback,
+                }) : [];
+                let budget = maxItems;
+                const groupedSections: WidgetTaskSection[] = [];
+                for (const group of groups) {
+                    if (budget <= 0) break;
+                    const visible = group.tasks.slice(0, budget);
+                    budget -= visible.length;
+                    groupedSections.push({ key: group.key, title: group.label,
+                        detail: String(group.tasks.length), items: visible.map(toListItem) });
+                }
+                listPayloads[selection] = {
                     title: list.title,
-                    items: list.tasks.slice(0, maxItems).map(listId === 'upcoming' ? toUpcomingItem : toItem),
+                    items: groups.length ? groupedSections.flatMap((section) => section.items)
+                        : list.tasks.slice(0, maxItems).map(toListItem),
+                    ...(groups.length ? { sections: groupedSections } : {}),
                     totalCount: list.tasks.length,
                     openUri,
                 };
             }
 
             return {
+                prioritiesEnabled,
                 headerTitle: tr['agenda.todaysFocus'] ?? 'Today',
                 dateLabel,
                 subtitle: subtitleParts.join(' · '),
@@ -801,8 +833,8 @@ export interface WidgetPublicationInput {
  * offers every saved filter, context and tag by name, but their lists (and
  * legacy project lists) are built only for what placed widgets chose
  * (`listSelections`): one list per label made every refresh grow with the
- * labels (#1399). A newly chosen one shows under its name, empty, until the
- * app's next publication.
+ * labels (#1399). The chooser requests a background publication when its
+ * selected snapshot is not cached yet.
  */
 export function androidWidgetProjectionOptions(
     input: WidgetPublicationInput & { listSelections: readonly string[] },

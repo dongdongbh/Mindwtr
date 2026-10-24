@@ -43,6 +43,7 @@ data class WidgetPayload(
   val taskPeek: TaskPeekLabels,
   val chooseListLabel: String = "Change",
   val viewAllLabel: String = "View all {{count}} tasks",
+  val prioritiesEnabled: Boolean = true,
 ) {
   data class DisplaySnapshot(val sourceTaskIds: Set<String>, val payload: WidgetPayload)
 
@@ -64,12 +65,14 @@ data class WidgetPayload(
     val priorityLabel: String?,
     val upcomingDate: String? = null,
     val upcomingLabel: String? = null,
+    val statusLabel: String? = null,
+    val showStatus: Boolean = false,
   )
 
   enum class DueTone { OVERDUE, TODAY, NORMAL }
 
   /** A Focus screen section (#1173): title plus its rows, in screen order. */
-  data class Section(val title: String, val detail: String?, val items: List<Item>)
+  data class Section(val title: String, val detail: String?, val items: List<Item>, val key: String? = null)
 
   /** One list a placed Tasks widget can show (#1173). */
   data class ListPayload(
@@ -88,7 +91,7 @@ data class WidgetPayload(
     }
 
     fun renderedTaskCount(): Int =
-      if (sections.isEmpty()) items.size else sections.sumOf { it.items.size }
+      (if (sections.isEmpty()) items else sections.flatMap { it.items }).distinctBy { it.id }.size
 
     fun eligibleTaskCount(): Int = totalCount ?: renderedTaskCount()
   }
@@ -164,16 +167,21 @@ data class WidgetPayload(
    * committed check-offs can still be reconciled after the app ingests them.
    */
   fun displaySnapshot(hiddenTaskIds: Set<String>, timeZone: TimeZone = TimeZone.getDefault()): DisplaySnapshot {
-    if (hiddenTaskIds.isEmpty() && UPCOMING_LIST_ID !in lists) return DisplaySnapshot(allTaskIds(), this)
+    if (hiddenTaskIds.isEmpty() && lists.keys.none { WidgetListStore.baseListId(it) == UPCOMING_LIST_ID }) return DisplaySnapshot(allTaskIds(), this)
     fun visible(items: List<Item>): List<Item> = items.filterNot { it.id in hiddenTaskIds }
     fun visible(sections: List<Section>): List<Section> = sections.mapNotNull { section ->
-      section.copy(items = visible(section.items)).takeIf { it.items.isNotEmpty() }
+      val groupCount = section.detail?.toIntOrNull()?.takeIf {
+        section.key?.substringBefore(":") in setOf("context", "project", "priority", "area", "tag", "energy", "person")
+      }
+      val hidden = section.items.filter { it.id in hiddenTaskIds }.distinctBy { it.id }.size
+      section.copy(items = visible(section.items), detail = groupCount?.let { (it - hidden).coerceAtLeast(0).toString() } ?: section.detail)
+        .takeIf { it.items.isNotEmpty() }
     }
     fun visible(list: ListPayload): ListPayload {
       val hiddenInList = list.taskIds().count { it in hiddenTaskIds }
       val visibleSections = visible(list.sections)
       val visibleItems = visible(list.items)
-      val visibleRowCount = if (visibleSections.isEmpty()) visibleItems.size else visibleSections.sumOf { it.items.size }
+      val visibleRowCount = (if (visibleSections.isEmpty()) visibleItems else visibleSections.flatMap { it.items }).distinctBy { it.id }.size
       return list.copy(
         sections = visibleSections,
         items = visibleItems,
@@ -187,7 +195,7 @@ data class WidgetPayload(
         sections = visible(sections),
         lists = lists.mapValues { (id, list) ->
           val unhidden = visible(list)
-          if (id == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(timeZone) else unhidden
+          if (WidgetListStore.baseListId(id) == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(timeZone) else unhidden
         },
       ),
     )
@@ -232,6 +240,7 @@ data class WidgetPayload(
   /** A list the chooser offers, named even before the app has built its rows. */
   fun titleFor(listId: String): String? =
     lists[listId]?.title
+      ?: WidgetListStore.grouping(listId)?.second?.let(::titleFor)
       ?: listTitles[listId]
       ?: savedFilters.firstOrNull { listId == WidgetListStore.FILTER_PREFIX + it.id }?.name
       ?: (contexts + tags).firstOrNull { it.id == listId }?.name
@@ -241,7 +250,7 @@ data class WidgetPayload(
   /** Unknown/retired selections draw and navigate as Focus; known legacy project payloads remain usable. */
   fun resolvedListId(listId: String): String =
     navigableListIdOrNull(listId)?.takeIf {
-      !it.startsWith(WidgetListStore.PROJECT_PREFIX) || titleFor(it) != null
+      !WidgetListStore.baseListId(it).startsWith(WidgetListStore.PROJECT_PREFIX) || titleFor(it) != null
     }
       ?: WidgetListStore.DEFAULT_LIST
 
@@ -269,13 +278,14 @@ data class WidgetPayload(
     val safeFocusUri = listAppUriOrNull(focusUri, WidgetListStore.DEFAULT_LIST) ?: DEFAULT_FOCUS_URI
     val validListId = resolvedListId(listId)
     lists[validListId]?.openUri?.let { return it }
-    return when (validListId) {
+    val baseListId = WidgetListStore.baseListId(validListId)
+    return when (baseListId) {
       WidgetListStore.DEFAULT_LIST -> safeFocusUri
       "inbox" -> "mindwtr:///inbox"
-      NEXT_LIST_ID -> listRoute(validListId)
+      NEXT_LIST_ID -> listRoute(baseListId)
       "waiting" -> "mindwtr:///waiting"
       "someday" -> "mindwtr:///someday"
-      else -> listRoute(validListId)
+      else -> listRoute(baseListId)
     }
   }
 
@@ -378,7 +388,7 @@ data class WidgetPayload(
           val list = listsJson.optJSONObject(key) ?: continue
           val listSections = parseSections(list.optJSONArray("sections"))
           val listItems = parseItems(list.optJSONArray("items"))
-          val rowCount = if (listSections.isEmpty()) listItems.size else listSections.sumOf { it.items.size }
+          val rowCount = (if (listSections.isEmpty()) listItems else listSections.flatMap { it.items }).distinctBy { it.id }.size
           lists[key] = ListPayload(
             title = list.stringOr("title", key),
             dateLabel = list.optString("dateLabel").trim().takeIf { it.isNotEmpty() && !list.isNull("dateLabel") },
@@ -460,6 +470,7 @@ data class WidgetPayload(
         quickCapture = quickCapture,
         taskPeek = taskPeek,
         viewAllLabel = root.stringOr("viewAllLabel", defaults.viewAllLabel),
+        prioritiesEnabled = root.optBoolean("prioritiesEnabled", true),
       )
     }
 
@@ -472,7 +483,8 @@ data class WidgetPayload(
         val section = json.optJSONObject(index) ?: continue
         val sectionItems = parseItems(section.optJSONArray("items"), remaining)
         if (sectionItems.isEmpty()) continue
-        sections.add(Section(section.stringOr("title", ""), section.optString("detail").trim().takeIf { it.isNotEmpty() && !section.isNull("detail") }, sectionItems))
+        sections.add(Section(section.stringOr("title", ""), section.optString("detail").trim().takeIf { it.isNotEmpty() && !section.isNull("detail") },
+          sectionItems, section.optString("key").trim().takeIf { it.isNotEmpty() && !section.isNull("key") }))
         remaining -= sectionItems.size
       }
       return sections
@@ -507,6 +519,8 @@ data class WidgetPayload(
             priorityLabel = item.optString("priorityLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("priorityLabel") },
             upcomingDate = item.optString("upcomingDate").takeIf { !item.isNull("upcomingDate") },
             upcomingLabel = item.optString("upcomingLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("upcomingLabel") },
+            statusLabel = item.optString("statusLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("statusLabel") },
+            showStatus = item.optBoolean("showStatus", false),
           ),
         )
       }
@@ -543,7 +557,7 @@ data class WidgetPayload(
 
     /** List navigation accepts only hostless, hierarchical routes owned by this app. */
     private fun listAppUriOrNull(value: String?, listId: String): String? {
-      val validListId = navigableListIdOrNull(listId) ?: return null
+      val validListId = navigableListIdOrNull(listId)?.let(WidgetListStore::baseListId) ?: return null
       val candidate = value?.trim()?.takeIf { it.length in 1..MAX_LIST_URI_LENGTH } ?: return null
       val uri = try {
         URI(candidate)
@@ -606,6 +620,8 @@ data class WidgetPayload(
     }
 
     private fun navigableListIdOrNull(listId: String): String? = when {
+      listId.startsWith("group:") && listId.length <= MAX_LIST_ID_LENGTH * 12 + 32 ->
+        WidgetListStore.grouping(listId)?.second?.let(::navigableListIdOrNull)?.let { listId }
       listId in FIXED_LIST_IDS -> listId
       WidgetListStore.isTokenList(listId) &&
         listId.length <= MAX_LIST_ID_LENGTH && listId.substringAfter(":").isNotBlank() &&

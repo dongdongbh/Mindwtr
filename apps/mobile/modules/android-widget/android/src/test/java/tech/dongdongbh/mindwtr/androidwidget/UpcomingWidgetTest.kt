@@ -83,13 +83,21 @@ class UpcomingWidgetTest {
 
   @Test
   fun labelsAreAbsoluteAndReformattedInTheCurrentZone() {
-    val payload = payload(listOf(item("instant", "2026-10-19T00:30:00Z")))
-    val east = payload.displaySnapshot(emptySet(), timeZone = utc).payload.listFor("upcoming").items.single()
-    val west = payload.displaySnapshot(emptySet(), timeZone = TimeZone.getTimeZone("America/Los_Angeles")).payload.listFor("upcoming").items.single()
-    assertTrue(east.dueLabel!!.startsWith("Starts "))
-    assertNotEquals(east.dueLabel, west.dueLabel)
-    assertFalse(east.dueEmphasis)
-    assertEquals(WidgetPayload.DueTone.NORMAL, east.dueTone)
+    for (listId in listOf("upcoming", "group:project:upcoming")) {
+      val published = payload(listOf(item("instant", "2026-10-19T00:30:00Z")))
+      val list = published.listFor("upcoming")
+      val payload = published.copy(lists = mapOf(listId to list.copy(
+        sections = listOf(WidgetPayload.Section("Project", "1", list.items, "project:p1")),
+      )))
+      val eastList = payload.displaySnapshot(emptySet(), timeZone = utc).payload.listFor(listId)
+      val east = eastList.items.single()
+      val west = payload.displaySnapshot(emptySet(), timeZone = TimeZone.getTimeZone("America/Los_Angeles")).payload.listFor(listId).items.single()
+      assertTrue(east.dueLabel!!.startsWith("Starts "))
+      assertNotEquals(east.dueLabel, west.dueLabel)
+      assertFalse(east.dueEmphasis)
+      assertEquals(WidgetPayload.DueTone.NORMAL, east.dueTone)
+      assertEquals(east.dueLabel, eastList.sections.single().items.single().dueLabel)
+    }
   }
 
   @Test

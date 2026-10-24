@@ -95,6 +95,20 @@ final class MindwtrWidgetPayloadTests: XCTestCase {
     precondition(MindwtrWidgetActionProjection.timelineDates(pendingActions: [], now: before) == [before], "idle snapshot gained a timeline boundary")
     precondition(MindwtrWidgetActionProjection.timelineDates(pendingActions: actions, now: before) == [before, midnight], "completion expiry timeline changed")
 
+    var groupedJSON = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    groupedJSON["lists"] = ["filter:grouped": ["title": "Grouped", "items": [], "sections": [
+        ["key": "context:@a", "title": "A", "detail": "8", "items": [
+            ["id": "focused", "title": "Completed", "completionToken": "focus-token"],
+            ["id": "other", "title": "Other"]]],
+        ["key": "context:@b", "title": "B", "detail": "3", "items": [
+            ["id": "focused", "title": "Completed", "completionToken": "focus-token"],
+            ["id": "another", "title": "Another"]]]
+    ]]] as [String: Any]
+    let grouped = try JSONDecoder().decode(MindwtrTasksWidgetPayload.self, from: JSONSerialization.data(withJSONObject: groupedJSON))
+    let hidden = grouped.selectingList("filter:grouped", pendingActions: actions, at: midnight)
+    precondition(hidden.sections?.map(\.detail) == ["7", "2"], "group counts did not mask completed appearances")
+    precondition(grouped.selectingList("filter:grouped", pendingActions: [], at: midnight).sections?.map(\.detail) == ["8", "3"], "undo lost full counts")
+
     var fresh = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
     var lists = fresh["lists"] as! [String: Any]
     lists["upcoming"] = ["title": "Upcoming", "dateLabel": "Published Mar 8", "items": [], "sections": []] as [String: Any]

@@ -5,6 +5,7 @@ struct MindwtrWidgetTaskItem: Decodable {
     let id: String
     let title: String
     let statusLabel: String?
+    let showStatus: Bool?
     let dueLabel: String?
     let dueTone: String?
     let openUri: String?
@@ -29,7 +30,7 @@ struct MindwtrWidgetTaskItem: Decodable {
     }
 
     var detailLabel: String? {
-        let labels = [contextsLabel, Self.nonEmpty(contextLabel)].compactMap { $0 }
+        let labels = [showStatus == true ? Self.nonEmpty(statusLabel) : nil, contextsLabel, Self.nonEmpty(contextLabel)].compactMap { $0 }
         return labels.isEmpty ? nil : labels.joined(separator: " · ")
     }
 

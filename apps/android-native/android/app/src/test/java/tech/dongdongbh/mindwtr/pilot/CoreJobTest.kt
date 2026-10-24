@@ -48,9 +48,27 @@ class CoreJobTest {
         refreshWidgets = { events += "widgets" },
         syncAgain = { events += "again"; nextStored },
         ensureSync = { events += "ensure"; ensured },
-        log = { message, fields -> lines += "$message ${fields.optString("job")} ${fields.optString("outcome")} ${fields.optString("error")}".trim() })
+        log = { message, fields ->
+            diagnostics += fields
+            lines += "$message ${fields.optString("job")} ${fields.optString("outcome")} ${fields.optString("error")}".trim()
+        })
 
     private val lines = mutableListOf<String>()
+    private val diagnostics = mutableListOf<JSONObject>()
+
+    @Test fun selectingAWidgetListRecoversThenRefreshesWithoutRequestingSync() {
+        assertEquals(CoreJob.Outcome.Success, run(CoreJob.WIDGET_REFRESH))
+        assertEquals(listOf("boot", "recover", "drain", "widgets"), events)
+        assertEquals(listOf("Native Android core work widgetRefresh success"), lines)
+        assertEquals("v1.3.8/widget-selection-refresh", diagnostics.single().getString("releaseCheck"))
+        assertEquals("requested", diagnostics.single().getString("refresh"))
+    }
+
+    @Test fun selectingAWidgetListWaitsForCanonicalRecovery() {
+        recovered = false
+        assertEquals(CoreJob.Outcome.Retry, run(CoreJob.WIDGET_REFRESH))
+        assertEquals(listOf("boot", "recover"), events)
+    }
 
     @Test fun theHostBootsBeforeTheJobAndWidgetsRefreshAfterIt() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))

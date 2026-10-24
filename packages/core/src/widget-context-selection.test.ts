@@ -94,7 +94,7 @@ describe('Android context/tag widget selection', () => {
         for (const id of ['context:@retained', 'context:@deleted', 'context:@hidden']) {
             expect(payload.lists[id]).toMatchObject({ title: id.slice('context:'.length), items: [], totalCount: 0 });
         }
-        expect(resolveWidgetListDestination(data([]), 'en', 'context:@removed')).toEqual({ title: '@removed', tasks: [] });
+        expect(resolveWidgetListDestination(data([]), 'en', 'context:@removed')).toEqual({ title: '@removed', tasks: [], showStatus: true });
     });
 
     it('does not expose Android chooser metadata in iOS publication', () => {

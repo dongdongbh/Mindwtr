@@ -8,6 +8,13 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
         return try JSONDecoder().decode(MindwtrWidgetTaskItem.self, from: JSONSerialization.data(withJSONObject: row))
     }
 
+    func testMixedListStatusSharesTheMetadataLine() throws {
+        XCTAssertEqual(try decode(["statusLabel": "Waiting", "showStatus": true,
+            "contextLabel": "Project"]).detailLabel, "Waiting · Project")
+        XCTAssertEqual(try decode(["statusLabel": "Waiting", "contextLabel": "Project"]).detailLabel, "Project")
+        XCTAssertEqual(try decode(["statusLabel": "Waiting", "showStatus": false]).detailLabel, nil)
+    }
+
     func testCachedRowsWithoutContextsStillDecode() throws {
         let item = try decode(["contextLabel": "Project"])
         XCTAssertNil(item.contexts)

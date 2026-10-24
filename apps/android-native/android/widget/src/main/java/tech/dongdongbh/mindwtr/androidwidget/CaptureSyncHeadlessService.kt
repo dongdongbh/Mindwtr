@@ -18,14 +18,19 @@ import java.util.concurrent.Executors
 object CaptureSyncHeadlessService {
   private const val TAG = "Mindwtr"
   @Volatile private var queued: ((Context) -> Unit)? = null
+  @Volatile private var widgetRefresh: ((Context) -> Unit)? = null
   // A FileObserver stops watching once collected: this keeps the one on the queue folder.
   private var watcher: FileObserver? = null
 
   /** Sets the app's hook ([queued], null to remove it); called once per process before any widget component runs. */
   @Synchronized
-  fun install(context: Context, queued: ((Context) -> Unit)?) {
+  fun install(context: Context, queued: ((Context) -> Unit)?) = install(context, queued, queued)
+
+  @Synchronized
+  fun install(context: Context, queued: ((Context) -> Unit)?, widgetRefresh: ((Context) -> Unit)?) {
     val app = context.applicationContext
     this.queued = queued
+    this.widgetRefresh = widgetRefresh
     watcher?.stopWatching()
     watcher = null
     // RN's capture intent receiver: its queued capture's wake runs on the receiver's thread before the broadcast finishes, so the
@@ -50,8 +55,12 @@ object CaptureSyncHeadlessService {
    * queue folder's watcher) this waits for it; on the main thread (the dialog's Save, while it still shows) it waits on a thread
    * of its own.
    */
-  fun start(context: Context) {
-    val hook = queued ?: return
+  fun start(context: Context) = wake(context, queued)
+
+  fun startWidgetRefresh(context: Context) = wake(context, widgetRefresh)
+
+  private fun wake(context: Context, callback: ((Context) -> Unit)?) {
+    val hook = callback ?: return
     val app = context.applicationContext
     val wake: () -> Unit = {
       try {

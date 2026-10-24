@@ -431,6 +431,11 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
             )
             : await updateIosWidgetPayloads(iosProjection as WidgetPayloadProjection);
         if (widgetUpdated) {
+            await logInfo('Widget list presentation published', {
+                scope: 'widget', force: true,
+                extra: { releaseCheck: 'v1.3.8/widget-list-presentation',
+                    lists: Object.values(fingerprintPayload.lists).filter((list) => list.sections?.length).length },
+            });
             lastRenderedWidgetFingerprint = widgetFingerprint;
             // Awaited (still error-swallowed): the headless background-sync
             // instance this cache targets can tear down as soon as this

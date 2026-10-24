@@ -5,7 +5,7 @@ import { compareSomedayTasks, compareWaitingTasks } from './menu-views-model';
 import { applyFilter, normalizeSavedFilters } from './saved-filters';
 import { logInfo } from './logger';
 import { sortTasksBy, sortTasksBySavedPreference } from './task-utils';
-import type { AppData, SavedFilter, Task, TaskSortBy } from './types';
+import type { AppData, FocusGroupBy, SavedFilter, Task, TaskSortBy } from './types';
 
 // The lists a placed Tasks widget can show (#1173): Mindwtr's own GTD lists,
 // each in the order its screen uses, plus saved filters and context/tag lists. `focus` is the
@@ -17,6 +17,22 @@ export const WIDGET_SAVED_FILTER_LIST_PREFIX = 'filter:';
 export const WIDGET_SAVED_FILTER_OPTION_CAP = 50;
 export const WIDGET_CONTEXT_LIST_PREFIX = 'context:';
 export const WIDGET_TAG_LIST_PREFIX = 'tag:';
+
+export type WidgetGroupBy = 'none' | 'context' | 'project' | 'priority';
+
+/** A presentation variant stays local to its widget; navigation uses the base list. */
+export function parseWidgetListSelection(selection: string): { listId: string; groupBy?: WidgetGroupBy } | null {
+    if (!selection.startsWith('group:')) return { listId: selection };
+    const match = /^group:(none|context|project|priority):(.+)$/.exec(selection);
+    if (!match || selection.length > 12 * 1024 + 32) return null;
+    try {
+        const listId = decodeURIComponent(match[2]);
+        if (!listId || listId.length > 1024 || listId === 'focus' || listId.startsWith('group:')) return null;
+        return { listId, groupBy: match[1] as WidgetGroupBy };
+    } catch {
+        return null;
+    }
+}
 
 /** Canonical IDs use the same legacy-token normalization as shared filtering. */
 export function normalizeWidgetTokenListId(value: string): string | null {
@@ -81,18 +97,26 @@ const LIST_TITLE_KEYS: Record<WidgetFixedListId, [string, string]> = {
 
 // The fixed list titles plus the group label the picker puts above its
 // saved-filter rows.
-export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters', string> {
+export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters' | 'groupBy' | 'groupDefault' | 'groupNone' | 'groupContext' | 'groupProject' | 'groupPriority', string> {
     return {
         ...(Object.fromEntries(
             WIDGET_FIXED_LIST_IDS.map((id) => [id, tr[LIST_TITLE_KEYS[id][0]] ?? LIST_TITLE_KEYS[id][1]]),
         ) as Record<WidgetFixedListId, string>),
         savedFilters: tr['settings.syncPreferenceSavedFilters'] ?? 'Saved filters',
+        groupBy: tr['list.groupBy'] ?? 'Group',
+        groupDefault: tr['sort.default'] ?? 'Default',
+        groupNone: tr['list.groupByNone'] ?? 'No grouping',
+        groupContext: tr['list.groupByContext'] ?? 'Context',
+        groupProject: tr['list.groupByProject'] ?? 'Project',
+        groupPriority: tr['taskEdit.priorityLabel'] ?? 'Priority',
     };
 }
 
 export interface WidgetTaskList {
     title: string;
     tasks: Task[];
+    groupBy?: FocusGroupBy;
+    showStatus?: boolean;
 }
 
 export interface WidgetListContext {
@@ -148,7 +172,7 @@ function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): 
             sortOrder: filter.sortOrder,
         })
         : sortTasksBy(matched, sortBy);
-    return { title: filter.name, tasks };
+    return { title: filter.name, tasks, groupBy: filter.groupBy, showStatus: !status };
 }
 
 /** Null when the id names no list (an unknown or deleted saved filter). */
@@ -178,7 +202,7 @@ export function buildWidgetTaskList(listId: string, context: WidgetListContext):
         const token = tokenListId.slice(prefix.length);
         const candidates = context.tokenTaskIndex?.get(`${prefix}${token.replace(/\/+$/, '')}`)
             ?? (context.tokenTaskIndex ? [] : activeTasks);
-        return { title: token, tasks: sortTasksBy(applyFilter(candidates, { [field]: [token] }, {
+        return { title: token, showStatus: true, tasks: sortTasksBy(applyFilter(candidates, { [field]: [token] }, {
             projects: data.projects || [], tokenMatchMode: 'all',
         }), sortBy) };
     }

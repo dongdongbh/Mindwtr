@@ -13,7 +13,9 @@ class MindwtrApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         // The wake returns once WorkManager stored the job: a process started only for a capture may end soon after.
-        CaptureSyncHeadlessService.install(this) { context -> CoreWork.enqueue(context, CoreJob.INGEST).result.get(DURABLE_WAIT_SECONDS, TimeUnit.SECONDS) }
+        CaptureSyncHeadlessService.install(this,
+            queued = { context -> CoreWork.enqueue(context, CoreJob.INGEST).result.get(DURABLE_WAIT_SECONDS, TimeUnit.SECONDS) },
+            widgetRefresh = { context -> CoreWork.enqueue(context, CoreJob.WIDGET_REFRESH).result.get(DURABLE_WAIT_SECONDS, TimeUnit.SECONDS) })
         // RN's background sync worker goes on the first start after the upgrade (a no-op later): the native job replaces it.
         runCatching { CoreWork.cancelRnSync(this) }
         // RN's NotificationOpenIntentsPackage: any process start (a receiver, a widget, the app) posts the persistent capture

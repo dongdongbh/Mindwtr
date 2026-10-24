@@ -43,6 +43,17 @@ class CaptureSyncHeadlessServiceTest {
   }
 
   @Test
+  fun selectingAListUsesTheRefreshHookWithoutStartingCaptureSync() {
+    val refreshed = mutableListOf<Context>()
+    CaptureSyncHeadlessService.install(context, queued = { started += it }, widgetRefresh = { refreshed += it })
+    offMain { CaptureSyncHeadlessService.startWidgetRefresh(context) }
+    assertEquals(emptyList<Context>(), started)
+    assertEquals(listOf(context.applicationContext), refreshed)
+    offMain { CaptureSyncHeadlessService.start(context) }
+    assertEquals(listOf(context.applicationContext), started)
+  }
+
+  @Test
   fun theDialogsStartReachesTheAppsHookOffTheMainThreadWithTheApplicationContext() {
     CaptureSyncHeadlessService.start(context)
     assertEquals("no hook yet: nothing starts, nothing throws", 0, started.size)

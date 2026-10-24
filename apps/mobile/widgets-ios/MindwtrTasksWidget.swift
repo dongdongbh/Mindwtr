@@ -236,10 +236,14 @@ struct MindwtrTasksWidgetPayload: Decodable {
         let visibleSections = sections?.compactMap { section -> MindwtrWidgetSection? in
             let items = section.items.filter(isVisible)
             guard !items.isEmpty else { return nil }
+            let groupPrefixes = ["context:", "tag:", "project:", "area:", "energy:", "priority:", "person:"]
+            let grouped = groupPrefixes.contains { section.key?.hasPrefix($0) == true }
+            let hiddenCount = Set(section.items.filter { !isVisible($0) }.map(\.id)).count
+            let detail = grouped ? section.detail.flatMap { Int($0) }.map { String(max(0, $0 - hiddenCount)) } : section.detail
             return MindwtrWidgetSection(
                 key: section.key,
                 title: section.title,
-                detail: section.detail,
+                detail: detail,
                 items: items
             )
         }

@@ -84,6 +84,11 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
         if (payload === last && !input.stale) return false;
         bridge.publish(payload);
         last = payload;
+        logInfo('Widget list presentation published', {
+            scope: 'widget', force: true,
+            context: { releaseCheck: 'v1.3.8/widget-list-presentation',
+                lists: Object.values(publication.lists).filter((list) => list.sections?.length).length },
+        });
         logInfo('Android widget context and tag snapshots published', {
             scope: 'widget', force: true,
             context: {

@@ -88,7 +88,7 @@ class TasksWidgetFactory(
         // click cannot receive their taps. Use its existing explicit row template.
         setOnClickFillInIntent(
           R.id.mindwtr_widget_section,
-          Intent().setData(Uri.parse(WidgetPayload.DEFAULT_FOCUS_URI)),
+          Intent().setData(Uri.parse(payload.openUriFor(listId))),
         )
         setTextViewText(R.id.mindwtr_widget_section_title, row.title)
         setViewVisibility(R.id.mindwtr_widget_section_detail, if (row.detail == null) View.GONE else View.VISIBLE)
@@ -134,7 +134,8 @@ class TasksWidgetFactory(
     if (item.id.isNotEmpty()) {
       views.setOnClickFillInIntent(R.id.mindwtr_widget_item_ring_target, Intent().setData(Uri.parse(WidgetTapActivity.checkoffUri(item.id))))
     }
-    val contextLabel = item.contextLabel?.let(::boundedDisplayText)
+    val contextLabel = listOfNotNull(item.statusLabel.takeIf { item.showStatus }, item.contextLabel)
+      .joinToString(" · ").takeIf { it.isNotEmpty() }?.let(::boundedDisplayText)
     views.setViewVisibility(R.id.mindwtr_widget_item_context_row, if (contextLabel == null) View.GONE else View.VISIBLE)
     if (contextLabel != null) {
       views.setTextViewText(R.id.mindwtr_widget_item_context, contextLabel)
@@ -233,7 +234,7 @@ class TasksWidgetFactory(
 
   internal fun rowsForTaskLimit(taskLimit: Int): List<Row> {
     val limited = takeTaskRows(baseRows, taskLimit.coerceAtMost(publishedTaskCount()))
-    val renderedCount = limited.count { it is Row.Task }
+    val renderedCount = limited.filterIsInstance<Row.Task>().distinctBy { it.item.id }.size
     val totalCount = listPayload.eligibleTaskCount()
     if (renderedCount >= totalCount) return limited
     return limited + requireNotNull(footerRow)
