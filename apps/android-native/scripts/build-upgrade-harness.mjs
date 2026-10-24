@@ -1,16 +1,17 @@
-// Builds the three APKs of the Android upgrade harness. All three are package
+// Builds the four APKs of the Android upgrade harness. All four are package
 // tech.dongdongbh.mindwtr.upgradetest and all are signed with one harness key,
 // so `adb install -r` upgrades each over the other in place:
 //
 //   152  the real RN app from tag v1.3.2 (release build, embedded Hermes bundle)
 //   153  this worktree's native app, build type `upgradetest`
 //   154  RN recovery, built from RECOVERY_COMMIT with only versionCode raised
+//   155  RN with its Pomodoro alarm re-arm fix (45dff1573), built from RN_FIX_COMMIT the same way
 //
 //   node apps/android-native/scripts/build-upgrade-harness.mjs [--rebuild-rn]
 //
 // Each RN build comes from a `git archive` of its pinned commit in a throwaway
 // folder under $MINDWTR_HARNESS_DIR (default /home/dd/.mindwtr-harness). Only
-// upgradetest-rn-identity.patch changes it. apps/mobile/scripts/android_build.sh,
+// upgradetest-rn-identity.patch changes it (upgradetest-rn-identity-155.patch, the same change, for RN_FIX_COMMIT's app.config.ts). apps/mobile/scripts/android_build.sh,
 // the release build script, prepares it (`--prep-only`), Gradle builds it with
 // the wanted versionCode, and then the folder is deleted. Dependencies are a link
 // farm into this checkout's node_modules, with @mindwtr/core pointing at the
@@ -31,6 +32,9 @@ const V132 = 'ee82a9e3e9a1d4e0c406f5ffff80e768a1f1f812';
 // on a stale AsyncStorage snapshot and hides native edits. The identity patch
 // must still apply to it.
 const RECOVERY_COMMIT = 'df495e07691b71657932cf7bb406121c3e89d703';
+// The RN 155 source: a main commit with RN's Pomodoro alarm re-arm fix (45dff1573), for the upgrade check's RN-over-native
+// mid-phase scenario (9c). Its bun.lock must equal this checkout's, as RECOVERY_COMMIT's.
+const RN_FIX_COMMIT = '101f81ee1abb5daf6c9504b14217785cd7db4e51';
 const repo = resolve(import.meta.dirname, '../../..');
 const home = process.env.MINDWTR_HARNESS_DIR ?? '/home/dd/.mindwtr-harness';
 const sdk = '/home/dd/Android/Sdk';
@@ -42,6 +46,8 @@ const ALIAS = 'upgradetest';
 const STORE_SECRET = 'mindwtr-upgradetest-harness';
 const apks = resolve(home, 'apks');
 const patch = resolve(import.meta.dirname, 'upgradetest-rn-identity.patch');
+// The same identity change, for RN_FIX_COMMIT's app.config.ts (the Gmail lines moved the first patch's context).
+const patchFix = resolve(import.meta.dirname, 'upgradetest-rn-identity-155.patch');
 const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, TMPDIR: resolve(home, 'tmp') };
 
 const run = (command, args, options = {}) => execFileSync(command, args, { stdio: 'inherit', env, ...options });
@@ -66,7 +72,8 @@ const linkFarm = (from, to, skip) => {
 };
 
 const patchId = sha256(patch).slice(0, 12);
-const rnApk = (commit, code) => resolve(apks, `rn-${commit.slice(0, 12)}-${patchId}-${code}.apk`);
+const patchFor = (commit) => (commit === RN_FIX_COMMIT ? patchFix : patch);
+const rnApk = (commit, code) => resolve(apks, `rn-${commit.slice(0, 12)}-${sha256(patchFor(commit)).slice(0, 12)}-${code}.apk`);
 
 const checkRnIdentity = (mobile) => {
     const manifest = readFileSync(resolve(mobile, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
@@ -97,7 +104,7 @@ const buildRn = (commit, versionCodes) => {
         mkdirSync(resolve(src, 'node_modules/@mindwtr'));
         symlinkSync('../../packages/core', resolve(src, 'node_modules/@mindwtr/core'));
         linkFarm(resolve(repo, 'apps/mobile/node_modules'), resolve(src, 'apps/mobile/node_modules'));
-        run('git', ['apply', '--verbose', patch], { cwd: src });
+        run('git', ['apply', '--verbose', patchFor(commit)], { cwd: src });
         const mobile = resolve(src, 'apps/mobile');
         // APP_VARIANT must also reach Gradle: expo-constants reads app.config.ts again there
         // and embeds it, and the running app reads its analytics URL from that copy.
@@ -148,12 +155,12 @@ try {
     }
     const tagCommit = out('git', ['-C', repo, 'rev-parse', `${TAG}^{commit}`]);
     if (tagCommit !== V132) fail(`${TAG} resolves to ${tagCommit}, not the pinned ${V132}`);
-    const wanted = [[V132, 152], [RECOVERY_COMMIT, 154]]
+    const wanted = [[V132, 152], [RECOVERY_COMMIT, 154], [RN_FIX_COMMIT, 155]]
         .filter(([commit, code]) => process.argv.includes('--rebuild-rn') || !existsSync(rnApk(commit, code)));
     for (const commit of new Set(wanted.map(([source]) => source))) {
         buildRn(commit, wanted.filter(([source]) => source === commit).map(([, code]) => code));
     }
-    if (wanted.length === 0) console.log(`RN APKs cached for ${V132.slice(0, 12)} and ${RECOVERY_COMMIT.slice(0, 12)} / patch ${patchId}`);
+    if (wanted.length === 0) console.log(`RN APKs cached for ${V132.slice(0, 12)}, ${RECOVERY_COMMIT.slice(0, 12)} and ${RN_FIX_COMMIT.slice(0, 12)} / patch ${patchId}`);
 
     const nativeDir = resolve(repo, 'apps/android-native/android');
     run('./gradlew', [':app:assemblePlayUpgradetest', '--offline'], { cwd: nativeDir });
@@ -167,10 +174,12 @@ try {
         rn152: describe(rnApk(V132, 152), 152, true),
         native153: describe(nativeApk, 153, false),
         rn154: describe(rnApk(RECOVERY_COMMIT, 154), 154, true),
+        rnFixSource: RN_FIX_COMMIT,
+        rn155: describe(rnApk(RN_FIX_COMMIT, 155), 155, true),
     };
-    if (new Set([result.rn152.signer, result.native153.signer, result.rn154.signer]).size !== 1) fail('the three APKs have different signers');
+    if (new Set([result.rn152.signer, result.native153.signer, result.rn154.signer, result.rn155.signer]).size !== 1) fail('the four APKs have different signers');
     writeFileSync(resolve(apks, 'manifest.json'), `${JSON.stringify(result, null, 2)}\n`);
-    console.log(`\nAll three APKs are ${PKG}, signed by ${result.rn152.signer}\n${resolve(apks, 'manifest.json')}`);
+    console.log(`\nAll four APKs are ${PKG}, signed by ${result.rn152.signer}\n${resolve(apks, 'manifest.json')}`);
 } catch (error) {
     console.error(`FAIL: ${error.message}`);
     process.exitCode = 1;

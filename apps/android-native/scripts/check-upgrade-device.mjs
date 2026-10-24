@@ -2,7 +2,7 @@
 // upgradetest build, then by a newer RN recovery build.
 //
 //   node apps/android-native/scripts/build-upgrade-harness.mjs
-//   node apps/android-native/scripts/check-upgrade-device.mjs <adb-serial> [--only=1,4,2,4b,2b,3,3b,5,5b,6,7,8,9,10,11] [--keep]
+//   node apps/android-native/scripts/check-upgrade-device.mjs <adb-serial> [--only=1,4,2,4b,2b,3,3b,5,5b,6,7,8,9,9b,9c,10,11] [--keep]
 //
 // Scenarios, each from a fresh RN v1.3.2 install:
 //   1   happy upgrade: the native app shows the RN data, imports the capture RN
@@ -44,10 +44,18 @@
 //       completes that task once, through the queue, and a relaunch writes nothing more.
 //   9   an RN user's running Pomodoro timer, folded card and persistent capture notification (pass R2): RN v1.3.2, through its own
 //       screens (Settings › GTD › Pomodoro turns the feature on, Settings › Notifications the capture switch), starts the timer
-//       from its Focus card and folds it; its alarm is set. The native app (no Pomodoro until pass R2b) keeps RN's session, fold
-//       and Pomodoro record byte for byte, cancels RN's alarm with RN's others (R1), makes no Pomodoro alarm and shows no card;
-//       the persistent capture notification is shown. Then RN 154 over the
-//       native app holds no native alarm of any kind.
+//       from its Focus card and folds it; its alarm is set. The native app's first start (pass R2b) adopts RN's session into its
+//       own (native_pomodoro_session: same phase, end and minutes) and shows the card folded and running; it keeps RN's session,
+//       fold and Pomodoro record byte for byte, cancels RN's alarm with RN's others (R1), arms its own Pomodoro alarm at the same
+//       phase end, once (core's record in shared_prefs/mindwtr_pomodoro_alarms.xml names it), and shows no alert, since RN's was
+//       not yet due; the persistent capture notification is shown. Then RN 154 over the native app holds no native reminder alarm.
+//   9b  RN's alert due after the update (design R2b §3b K6): RN v1.3.2 with 1-minute focus and break starts the timer; the native
+//       app is installed over it before the phase ends and opened only after RN's alarm time, so RN's receiver (gone) never
+//       showed it. The native first start shows RN's focus alert once with core's words and records it in its ledger; the adopted
+//       session settles the ended phase and arms nothing; a second start posts it no second time.
+//   9c  an RN build with the alarm re-arm fix (RN 155, 45dff1573) installed over the native app mid-phase: RN v1.3.2 runs a
+//       2-minute focus, the native app adopts it and arms its own alarm, then RN 155 arms its alarm again (the library no longer
+//       held it), and RN's focus alert arrives at the phase end, once.
 //   11  an RN user's File Sync folder (pass S5): RN v1.3.2 picks Download/mts5u<run> in its own Sync screen (File, Select
 //       Folder, the system folder picker) and syncs into it. The native app shows RN's folder on its Sync screen, and its Sync
 //       now writes into data.json (a capture RN left queued, which the native boot imports) with no new pick: RN's grant is
@@ -75,7 +83,7 @@ import { bootFailure, box, button, check, connect, draftText, evidenced, fail, f
 import { serveWebdav, webdavDocument } from './sync-harness.mjs';
 import { PUBLISHED, REFRESHED, WIDGET_PREFS, WIDGET_LIST_PREFS, widgetSelections, corePublication, count, firstDifference, isRnPayloadPrefsWrite, publicationContext, widgetPrefs } from './widget-payload.mjs';
 
-const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '7', '8', '9', '10', '11'];
+const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '7', '8', '9', '9b', '9c', '10', '11'];
 const USAGE = `usage: node check-upgrade-device.mjs <adb-serial> [--only=${SCENARIOS.join(',')}] [--keep]`;
 const args = process.argv.slice(2);
 const serials = args.filter((arg) => !arg.startsWith('--'));
@@ -101,11 +109,11 @@ try {
     console.error(`REFUSED: no ${harness}/apks/manifest.json; run build-upgrade-harness.mjs first`);
     process.exit(2);
 }
-if (built.rnSource !== V132 || !built.recoverySource) {
+if (built.rnSource !== V132 || !built.recoverySource || !built.rn155) {
     console.error('REFUSED: apks/manifest.json predates the pinned sources; rerun build-upgrade-harness.mjs');
     process.exit(2);
 }
-const APKS = { rn152: built.rn152.path, native153: built.native153.path, rn154: built.rn154.path };
+const APKS = { rn152: built.rn152.path, native153: built.native153.path, rn154: built.rn154.path, rn155: built.rn155.path };
 // install -r would upgrade whatever package the APK names: allow only the throwaway one.
 for (const apk of Object.values(APKS)) {
     const apkPackage = execFileSync(aapt2, ['dump', 'packagename', apk], { encoding: 'utf8' }).trim();
@@ -1349,18 +1357,36 @@ const scenarioAlarms = async () => {
 
 // ---- 9: RN's Pomodoro session, its fold and the persistent capture notification at the upgrade ----
 const POMODORO_KEYS = { session: '@mindwtr_pomodoro_state', fold: '@mindwtr_pomodoro_collapsed', rnAlarm: 'mindwtr:local:pomodoro-alarm:v1',
-    nativeAlarm: 'mindwtr:native:pomodoro-alarm:v1', capture: 'mindwtr:persistentCaptureNotification' };
+    capture: 'mindwtr:persistentCaptureNotification' };
 const captureShown = () => sh('dumpsys notification --noredact').split(/\n(?=\s*NotificationRecord\()/)
     .filter((block) => block.includes(`pkg=${PKG}`) && /\bid=41120\b/.test(block) && block.includes('mindwtr-persistent-capture')).length;
 const RN_POMODORO_FEATURE = 'Pomodoro timer'; // v1.3.2's settings.featurePomodoro
 const RN_FOCUS_MINUTES = 'Focus minutes'; // v1.3.2's settings.pomodoroFocusMinutes
+const RN_BREAK_MINUTES = 'Break minutes'; // v1.3.2's settings.pomodoroBreakMinutes
 const RN_CAPTURE_SWITCH = 'Quick capture in notification bar'; // v1.3.2's settings.persistentCaptureLabel
+// The native Pomodoro's alarms (PomodoroAlarms.kt): its broadcast, and its book (core's record, `armed:`, the `fired:` ledger).
+const POMODORO_FIRE = 'tech.dongdongbh.mindwtr.pomodoro.FIRE';
+const pomodoroAlarms = () => sh('dumpsys alarm').split(/\n(?=\s*(?:RTC_WAKEUP|RTC|ELAPSED_WAKEUP|ELAPSED) #\d+: Alarm\{)/)
+    .filter((block) => block.includes(PKG) && block.includes(`*walarm*:${POMODORO_FIRE}`))
+    .map((block) => Number(/origWhen[= ](\d+)/.exec(block)?.[1] ?? NaN)).filter((at) => at > 1e12);
+const unxml = (value) => value.replace(/&quot;/g, '"').replace(/&apos;/g, '\'').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))).replace(/&amp;/g, '&');
+const pomodoroBook = () => new Map([...runAs('cat shared_prefs/mindwtr_pomodoro_alarms.xml 2>/dev/null || true')
+    .matchAll(/<string name="([^"]*)">([^<]*)<\/string>/g)].map(([, name, value]) => [unxml(name), unxml(value)]));
+/** This package's alarm in core's record (the library scope is the package and its SHA-256). */
+const pomodoroRecorded = (book) => JSON.parse(book.get('record') ?? '{"libraries":[]}').libraries
+    .find((library) => library.scope === `${PKG}:${createHash('sha256').update(PKG).digest('hex')}`)?.alarm ?? null;
+const nativeSession = (name) => JSON.parse(rows(pullDatabase(name), 'SELECT state_json FROM native_pomodoro_session WHERE id = 1')[0]?.state_json ?? 'null');
+/** The Pomodoro alerts with [text] in the tray, each with its tag and the time Android last posted it. */
+const pomodoroShown = (text) => sh('dumpsys notification --noredact').split(/\n(?=\s*NotificationRecord\()/)
+    .filter((block) => block.includes(`pkg=${PKG}`) && block.includes(text))
+    .map((block) => ({ tag: /\btag=([^\s,)]+)/.exec(block)?.[1] ?? '', posted: /\bmUpdateTimeMs=(\d+)/.exec(block)?.[1] ?? /\bpostTime=(\d+)/.exec(block)?.[1] ?? '' }));
 const rnField = (nodes, label) => nodes.find((node) => node.class === 'android.widget.EditText' && (node['content-desc'] === label || node.hint === label));
 /**
  * A fresh RN v1.3.2 set up through its own screens, as a user would: its onboarding skipped, Settings › GTD › Pomodoro's feature
- * turned on, and Settings › Notifications' capture switch turned on.
+ * turned on (and its minute fields typed when [minutes] is given), and Settings › Notifications' capture switch turned on.
  */
-const rnPomodoroSetup = async (n) => {
+const rnPomodoroSetup = async (n, minutes) => {
     fresh();
     device.launch(RN_ACTIVITY);
     await until('RN\'s settings row', () => rows(pullDatabase(`${n}-first`), 'SELECT id FROM settings WHERE id = 1').length === 1, 60_000);
@@ -1372,29 +1398,53 @@ const rnPomodoroSetup = async (n) => {
     const skip = first.find((node) => node.text === RN_SKIP_ONBOARDING);
     if (skip) await tap(skip);
     await sleep(2_000);
-    const stored = () => rows(pullDatabase(`${n}-settings`), "SELECT json_extract(data, '$.features.pomodoro') AS pomodoro FROM settings WHERE id = 1")[0] ?? {};
+    const stored = () => rows(pullDatabase(`${n}-settings`), "SELECT json_extract(data, '$.features.pomodoro') AS pomodoro, "
+        + "json_extract(data, '$.gtd.pomodoro.customDurations.focusMinutes') AS focus, json_extract(data, '$.gtd.pomodoro.customDurations.breakMinutes') AS brk "
+        + 'FROM settings WHERE id = 1')[0] ?? {};
     openLink('mindwtr-upgradetest://settings?settingsScreen=gtd-pomodoro');
     let nodes = await waitFor('RN\'s Settings › GTD › Pomodoro', (current) => current.some((node) => node.text === RN_POMODORO_FEATURE), 60_000);
     await tap(button(nodes, RN_POMODORO_FEATURE) ?? nodes.find((node) => node.text === RN_POMODORO_FEATURE));
     nodes = await waitFor('RN\'s Pomodoro settings', (current) => Boolean(rnField(current, RN_FOCUS_MINUTES)), 20_000);
     await until('RN to store the Pomodoro feature', () => stored().pomodoro === 1, 30_000);
+    if (minutes) {
+        // RN commits both fields on a field's blur: the break field's tap blurs the focus field, a tap on the focus field again blurs the last.
+        for (const label of [RN_FOCUS_MINUTES, RN_BREAK_MINUTES]) {
+            await tap(rnField(nodes, label));
+            sh('input keyevent KEYCODE_MOVE_END');
+            for (let i = 0; i < 4; i += 1) sh('input keyevent KEYCODE_DEL');
+            sh(`input text ${minutes}`);
+            nodes = await screen();
+        }
+        await tap(rnField(nodes, RN_FOCUS_MINUTES));
+        sh('input keyevent KEYCODE_BACK');
+        await until(`RN to store ${minutes}/${minutes} minutes`, () => stored().focus === Number(minutes) && stored().brk === Number(minutes), 30_000);
+    }
     openLink('mindwtr-upgradetest://settings?settingsScreen=notifications');
     const captureSwitch = (current) => current.find((node) => node.class === 'android.widget.Switch' && node['content-desc'] === RN_CAPTURE_SWITCH);
     nodes = await waitFor('RN\'s Settings › Notifications', (current) => Boolean(captureSwitch(current)), 30_000);
     if (captureSwitch(nodes).checked !== 'true') await tap(captureSwitch(nodes));
     await until('RN to store the capture switch', () => asyncStorage(`${n}-capture`).get(POMODORO_KEYS.capture) === 'true', 20_000);
 };
+/** RN's Focus card at the [preset] (its label, as `1/1`), started; RN's session and its alarm record once stored. */
+const rnStart = async (n, preset) => {
+    openLink('mindwtr-upgradetest://focus');
+    let nodes = await waitFor('RN\'s Pomodoro card', (current) => current.some((node) => node.text === 'Pomodoro Timer') && current.some((node) => node.text === 'Start')
+        && (!preset || current.some((node) => node.text === preset)), 60_000);
+    if (preset) {
+        await tap(nodes.find((node) => node.text === preset));
+        nodes = await waitFor(`RN's ${preset} clock`, (current) => current.some((node) => node.text === `${preset.split('/')[0].padStart(2, '0')}:00`), 15_000);
+    }
+    await tap(nodes.find((node) => node.text === 'Start'));
+    await until('RN\'s running session', () => JSON.parse(asyncStorage(`${n}-rn-run`).get(POMODORO_KEYS.session) ?? '{}').timerState?.isRunning === true, 20_000);
+    await until('RN\'s Pomodoro alarm record', () => JSON.parse(asyncStorage(`${n}-rn-alarm`).get(POMODORO_KEYS.rnAlarm) ?? '{}').id !== undefined, 30_000);
+};
 const scenarioPomodoro = async () => {
     console.log('\n# 9 Pomodoro session, fold and persistent capture notification carried over');
     await rnPomodoroSetup('9');
-    openLink('mindwtr-upgradetest://focus');
-    let nodes = await waitFor('RN\'s Pomodoro card', (current) => current.some((node) => node.text === 'Pomodoro Timer') && current.some((node) => node.text === 'Start'), 60_000);
-    await tap(nodes.find((node) => node.text === 'Start'));
-    await until('RN\'s running session', () => JSON.parse(asyncStorage('9-rn-run').get(POMODORO_KEYS.session) ?? '{}').timerState?.isRunning === true, 20_000);
-    nodes = await waitFor('RN\'s fold button', (current) => current.some((node) => node['content-desc'] === 'Collapse timer'), 15_000);
+    await rnStart('9');
+    let nodes = await waitFor('RN\'s fold button', (current) => current.some((node) => node['content-desc'] === 'Collapse timer'), 15_000);
     await tap(nodes.find((node) => node['content-desc'] === 'Collapse timer'));
     await until('RN\'s fold stored', () => asyncStorage('9-rn-fold').get(POMODORO_KEYS.fold) === 'true', 20_000);
-    await until('RN\'s Pomodoro alarm record', () => JSON.parse(asyncStorage('9-rn-alarm').get(POMODORO_KEYS.rnAlarm) ?? '{}').id !== undefined, 30_000);
     const rnState = asyncStorage('9-rn');
     const session = JSON.parse(rnState.get(POMODORO_KEYS.session));
     const fireAtMs = Date.parse(session.phaseEndsAt);
@@ -1415,19 +1465,27 @@ const scenarioPomodoro = async () => {
     install(APKS.native153, true);
     device.launch(NATIVE_ACTIVITY);
     check(!unavailable(await nativeScreen()), '(9) native boot succeeded');
-    const nativeAt = (alarm) => alarm.native && Math.abs(alarm.at - fireAtMs) < 60_000;
-    // The native app has no Pomodoro yet (pass R2b): RN's alarm goes with RN's others (R1), and the native app makes none.
-    await sleep(10_000);
+    // The first start adopts RN's session, then plans the running phase's alert.
+    await until('the native Pomodoro alarm', () => pomodoroAlarms().includes(fireAtMs), 60_000);
+    await sleep(3000);
     const after = asyncStorage('9-native');
-    check(!packageAlarms().some(rnAt) && !packageAlarms().some(nativeAt), '(9) after: RN\'s Pomodoro alarm is cancelled with RN\'s others; the native app makes no Pomodoro alarm');
-    check(after.get(POMODORO_KEYS.rnAlarm) === rnState.get(POMODORO_KEYS.rnAlarm) && after.get(POMODORO_KEYS.nativeAlarm) === undefined,
-        '(9) RN\'s Pomodoro record is kept as RN left it; the native app writes no Pomodoro record');
-    check(after.get(POMODORO_KEYS.session) === rnState.get(POMODORO_KEYS.session) && after.get(POMODORO_KEYS.fold) === 'true',
-        '(9) RN\'s session and fold are kept as RN stored them, byte for byte');
+    check(!packageAlarms().some(rnAt) && pomodoroAlarms().length === 1,
+        '(9) after: RN\'s Pomodoro alarm is cancelled with RN\'s others; the native app arms one Pomodoro alarm at the same phase end');
+    const recorded = pomodoroRecorded(pomodoroBook());
+    const adopted = nativeSession('9-native-db');
+    check(recorded?.phase === 'focus' && recorded.fireAtMs === fireAtMs && recorded.sessionID === adopted?.sessionID,
+        '(9) core\'s alarm record names the adopted session\'s focus phase and its end');
+    check(adopted?.session?.timerState?.isRunning === true && adopted.session.phaseEndsAt === session.phaseEndsAt
+        && JSON.stringify(adopted.session.durations) === JSON.stringify(session.durations),
+        '(9) the native session is RN\'s, adopted: running, the same phase end and minutes');
+    check(after.get(POMODORO_KEYS.rnAlarm) === rnState.get(POMODORO_KEYS.rnAlarm) && after.get(POMODORO_KEYS.session) === rnState.get(POMODORO_KEYS.session)
+        && after.get(POMODORO_KEYS.fold) === 'true', '(9) RN\'s session, fold and Pomodoro record are kept as RN stored them, byte for byte');
+    check(pomodoroShown(en['pomodoro.focusComplete']).length === 0, '(9) no Pomodoro alert shows (RN\'s was not due yet)');
     nodes = await waitFor('the native tabs', (current) => Boolean(tab(current, 'Focus')), 30_000);
     await tap(tab(nodes, 'Focus'));
-    await sleep(3000);
-    check(!tagged(await screen(), 'pomodoro-card'), '(9) the native Focus screen shows no Pomodoro card (as main)');
+    await waitFor('the folded running card', (current) => Boolean(tagged(current, 'pomodoro-card')) && Boolean(tagged(current, 'pomodoro-fold'))
+        && current.some((node) => node.text === 'FOCUS · RUNNING'), 30_000);
+    check(true, '(9) the native Focus card shows RN\'s timer, folded and running');
     await until('the persistent capture notification', () => captureShown() >= 1, 20_000);
     check(after.get(POMODORO_KEYS.capture) === 'true', '(9) the persistent capture notification shows, and RN\'s key is kept');
     await killWithoutStop();
@@ -1441,13 +1499,75 @@ const scenarioPomodoro = async () => {
     // Computed at RN's hydration, before now: at least what is left now, and no more than RN stored.
     const leftNow = Math.floor((Date.parse(session.phaseEndsAt) - Date.now()) / 1000) - 2;
     const same = (path) => JSON.stringify(path(recovered)) === JSON.stringify(path(session));
-    check(!packageAlarms().some((alarm) => alarm.native), '(9) RN recovery over the native app: no native alarm of any kind');
+    check(!packageAlarms().some((alarm) => alarm.native), '(9) RN recovery over the native app: no native reminder alarm');
     check(same((x) => x.durations) && same((x) => x.timerState?.phase) && same((x) => x.timerState?.isRunning) && same((x) => x.phaseEndsAt)
         && same((x) => x.selectedTaskId) && same((x) => x.sessionHistory?.totalCompletedFocusSessions) && same((x) => x.timerState?.completedFocusSessions)
         && recovered.timerState.remainingSeconds <= session.timerState.remainingSeconds
         && recovered.timerState.remainingSeconds >= leftNow,
         `(9) RN recovery keeps RN's session: same phase, durations, phase end, task and totals; remaining ${session.timerState.remainingSeconds} s -> ${recovered.timerState?.remainingSeconds} s (at least ${leftNow} s left now)`);
-    console.log(`info - RN recovery's Pomodoro alarms at the phase end: ${packageAlarms().filter(rnAt).length} (its record still names the cancelled one; pass R2b)`);
+    // RN 154 predates RN's re-arm fix (45dff1573): its record matches its phase, so it arms nothing (9c runs the fixed build).
+    // Android keeps a package's alarms across an update: the native one stays, and fires into no receiver of RN's.
+    console.log(`info - RN recovery's Pomodoro alarms at the phase end: ${packageAlarms().filter(rnAt).length}; the native Pomodoro alarms left: ${pomodoroAlarms().length}`);
+    await killWithoutStop();
+};
+
+// ---- 9b: RN's Pomodoro alert, due after the update, shows once in the native app ----
+const scenarioPomodoroDue = async () => {
+    console.log('\n# 9b RN\'s Pomodoro alert due after the update shows once');
+    await rnPomodoroSetup('9b', '1');
+    await rnStart('9b', '1/1');
+    const rnRecord = JSON.parse(asyncStorage('9b-rn').get(POMODORO_KEYS.rnAlarm));
+    check(rnRecord.fireAtMs - Date.now() > 20_000, `(9b) before: RN armed its alert for ${new Date(rnRecord.fireAtMs).toISOString()}, still ahead`);
+    await killWithoutStop();
+    install(APKS.native153, true);
+    // Not opened until after RN's time: RN's alarm fires into RN's receiver, which the native app no longer has.
+    await sleep(Math.max(0, rnRecord.fireAtMs - Date.now()) + 15_000);
+    check(pomodoroShown(en['pomodoro.focusComplete']).length === 0, '(9b) at RN\'s alarm time nothing showed (RN\'s receiver is gone)');
+    device.launch(NATIVE_ACTIVITY);
+    check(!unavailable(await nativeScreen()), '(9b) native boot succeeded');
+    await until('the owed focus alert', () => pomodoroShown(en['pomodoro.focusComplete']).length === 1, 30_000);
+    await sleep(5000);
+    const [owed] = pomodoroShown(en['pomodoro.focusComplete']);
+    const book = pomodoroBook();
+    check(pomodoroShown(en['pomodoro.focusComplete']).length === 1 && owed.tag.startsWith('rn:') && book.has(`fired:${owed.tag}`),
+        `(9b) the native start shows RN's owed focus alert once, with core's words, and its ledger holds it (${owed.tag})`);
+    check(pomodoroAlarms().length === 0 && nativeSession('9b-native-db')?.session?.timerState?.isRunning === false,
+        '(9b) the adopted session settles the ended phase and arms nothing');
+    await killWithoutStop();
+    device.launch(NATIVE_ACTIVITY);
+    check(!unavailable(await nativeScreen()), '(9b) native second boot succeeded');
+    await sleep(8000);
+    const again = pomodoroShown(en['pomodoro.focusComplete']);
+    check(again.length === 1 && again[0].posted === owed.posted && pomodoroAlarms().length === 0,
+        `(9b) a second start posts it no second time (last posted ${owed.posted}, now ${again[0]?.posted}) and arms nothing`);
+    await killWithoutStop();
+};
+
+// ---- 9c: RN with its re-arm fix over the native app mid-phase: RN's alert arrives ----
+const scenarioPomodoroRnFix = async () => {
+    console.log('\n# 9c RN 155 (alarm re-arm fix) over the native app mid-phase');
+    await rnPomodoroSetup('9c', '2');
+    await rnStart('9c', '2/2');
+    const session = JSON.parse(asyncStorage('9c-rn').get(POMODORO_KEYS.session));
+    const fireAtMs = Date.parse(session.phaseEndsAt);
+    const rnAt = (alarm) => alarm.rn && Math.abs(alarm.at - fireAtMs) < 60_000;
+    await until('RN\'s Pomodoro alarm', () => packageAlarms().some(rnAt), 30_000);
+    await killWithoutStop();
+    install(APKS.native153, true);
+    device.launch(NATIVE_ACTIVITY);
+    check(!unavailable(await nativeScreen()), '(9c) native boot succeeded');
+    await until('the native Pomodoro alarm', () => pomodoroAlarms().includes(fireAtMs), 60_000);
+    check(!packageAlarms().some(rnAt), '(9c) the native app cancelled RN\'s alarm and armed its own at the phase end');
+    await killWithoutStop();
+    install(APKS.rn155, true);
+    device.launch(RN_ACTIVITY);
+    await until('RN 155\'s Pomodoro alarm again', () => packageAlarms().some(rnAt), 60_000);
+    check(packageAlarms().filter(rnAt).length === 1 && Date.now() < fireAtMs,
+        '(9c) RN 155 arms its Pomodoro alarm again before the phase end, once (its record matched, its library held none)');
+    await killWithoutStop();
+    await until('RN\'s focus alert', () => pomodoroShown(en['pomodoro.focusComplete']).length === 1, Math.max(0, fireAtMs - Date.now()) + 60_000);
+    await sleep(10_000);
+    check(pomodoroShown(en['pomodoro.focusComplete']).length === 1, '(9c) RN\'s focus alert arrives at the phase end, once');
     await killWithoutStop();
 };
 
@@ -1489,6 +1609,8 @@ try {
     if (want('7')) await scenarioAlarms();
     if (want('8')) await scenarioPendingCheckoff();
     if (want('9')) await scenarioPomodoro();
+    if (want('9b')) await scenarioPomodoroDue();
+    if (want('9c')) await scenarioPomodoroRnFix();
     if (want('10')) await scenarioRecoverySnapshots();
     if (want('11')) await scenarioFileSync();
     console.log(`\nUpgrade device check passed${blocked4 ? '; scenario 4 BLOCKED (see above)' : ''}`);
