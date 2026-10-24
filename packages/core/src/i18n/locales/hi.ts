@@ -556,6 +556,7 @@ export const hiOverrides: Record<string, string> = {
         "filters.taskDates": "कार्य की तारीखें",
         "filters.anyTime": "किसी भी समय",
         "filters.datePreset.next_7_days": "अगले 7 दिन",
+        "filters.datePreset.overdue_next_7_days": "समय सीमा पार + अगले 7 दिन",
         "filters.datePreset.next_14_days": "अगले 14 दिन",
         "filters.datePreset.next_30_days": "अगले 30 दिन",
         "filters.datePreset.upcoming": "सभी आगामी तारीखें",

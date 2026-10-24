@@ -765,6 +765,7 @@ export const svOverrides: Record<string, string> = {
         "filters.taskDates": "Uppgiftsdatum",
         "filters.anyTime": "När som helst",
         "filters.datePreset.next_7_days": "Nästa 7 dagar",
+        "filters.datePreset.overdue_next_7_days": "Förfallna + nästa 7 dagar",
         "filters.datePreset.next_14_days": "Nästa 14 dagar",
         "filters.datePreset.next_30_days": "Nästa 30 dagar",
         "filters.datePreset.upcoming": "Alla kommande",

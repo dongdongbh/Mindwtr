@@ -634,6 +634,7 @@ export const deOverrides: Record<string, string> = {
         "filters.taskDates": "Aufgabendaten",
         "filters.anyTime": "Jederzeit",
         "filters.datePreset.next_7_days": "Nächste 7 Tage",
+        "filters.datePreset.overdue_next_7_days": "Überfällig + nächste 7 Tage",
         "filters.datePreset.next_14_days": "Nächste 14 Tage",
         "filters.datePreset.next_30_days": "Nächste 30 Tage",
         "filters.datePreset.upcoming": "Alle kommenden",

@@ -564,6 +564,7 @@ export const trOverrides: Record<string, string> = {
         "filters.taskDates": "Görev tarihleri",
         "filters.anyTime": "Herhangi bir zaman",
         "filters.datePreset.next_7_days": "Önümüzdeki 7 gün",
+        "filters.datePreset.overdue_next_7_days": "Gecikmiş + önümüzdeki 7 gün",
         "filters.datePreset.next_14_days": "Önümüzdeki 14 gün",
         "filters.datePreset.next_30_days": "Önümüzdeki 30 gün",
         "filters.datePreset.upcoming": "Tüm yaklaşan tarihler",

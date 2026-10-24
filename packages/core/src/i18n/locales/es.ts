@@ -752,6 +752,7 @@ export const esOverrides: Record<string, string> = {
 "filters.taskDates": "Fechas de tareas",
 "filters.anyTime": "Cualquier fecha",
 "filters.datePreset.next_7_days": "Próximos 7 días",
+"filters.datePreset.overdue_next_7_days": "Vencidas + próximos 7 días",
 "filters.datePreset.next_14_days": "Próximos 14 días",
 "filters.datePreset.next_30_days": "Próximos 30 días",
 "filters.datePreset.upcoming": "Todas las próximas",

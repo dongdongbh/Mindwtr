@@ -552,6 +552,7 @@ export const ruOverrides: Record<string, string> = {
         "filters.taskDates": "Даты задач",
         "filters.anyTime": "Любое время",
         "filters.datePreset.next_7_days": "Следующие 7 дней",
+        "filters.datePreset.overdue_next_7_days": "Просроченные + следующие 7 дней",
         "filters.datePreset.next_14_days": "Следующие 14 дней",
         "filters.datePreset.next_30_days": "Следующие 30 дней",
         "filters.datePreset.upcoming": "Все предстоящие",

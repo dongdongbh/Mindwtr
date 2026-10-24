@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe('task date saved filters', () => {
-    it.each(['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const)('normalizes and retains %s as a rolling preset', (preset) => {
+    it.each(['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const)('normalizes and retains %s as a rolling preset', (preset) => {
         const criteria = { anyDateRange: { preset } };
         expect(normalizeFilterCriteria(criteria)).toEqual(criteria);
         expect(normalizeFilterCriteria(normalizeFilterCriteria(criteria))).toEqual(criteria);
@@ -101,6 +101,47 @@ describe('task date saved filters', () => {
             .toEqual(['midnight-utc', 'date-only', 'next-midnight', 'far-future']);
     });
 
+    it('combines overdue due dates with the next seven local days without treating past starts or reviews as overdue', () => {
+        const tasks = [
+            task('old-due', { dueDate: '2020-01-01' }),
+            task('timed-overdue', { dueDate: '2026-10-17T11:00:00-04:00' }),
+            task('today-later', { startTime: '2026-10-17T23:00:00-04:00' }),
+            task('today-date-only', { dueDate: '2026-10-17' }),
+            task('last-day', { reviewAt: '2026-10-23T23:59:59.999-04:00' }),
+            task('old-start', { startTime: '2026-10-16' }),
+            task('old-review', { reviewAt: '2026-10-16' }),
+            task('outside-window', { startTime: '2026-10-24T00:00:00-04:00' }),
+            task('none'),
+            task('invalid', { startTime: 'invalid', dueDate: 'invalid', reviewAt: 'invalid' }),
+            task('wrong-status', { dueDate: '2026-10-16', status: 'done' }),
+            task('deleted', { dueDate: '2026-10-16', deletedAt: '2026-10-17T00:00:00Z' }),
+            task('other-context', { dueDate: '2026-10-16', contexts: ['@home'] }),
+        ].map((item) => item.id === 'other-context' ? item : { ...item, contexts: ['@desk'] });
+        const criteria = { ...saved('overdue_next_7_days').criteria, statuses: ['next' as const], contexts: ['@desk'] };
+        expect(applyFilter(tasks, criteria).map(({ id }) => id))
+            .toEqual(['old-due', 'timed-overdue', 'today-later', 'today-date-only', 'last-day']);
+        expect(buildAdvancedFilterCriteriaChips(criteria)).toContainEqual({
+            id: 'anyDateRange', label: 'Task dates: Overdue + next 7 days',
+        });
+    });
+
+    it.each(['2026-03-07T12:00:00-05:00', '2026-10-31T12:00:00-04:00'])(
+        'keeps the overdue and seven-day window local across DST from %s', (instant) => {
+            const now = new Date(instant);
+            const before = format(addDays(now, -1), 'yyyy-MM-dd');
+            const last = format(addDays(now, 6), 'yyyy-MM-dd');
+            const after = format(addDays(now, 7), 'yyyy-MM-dd');
+            const tasks = [
+                task('overdue', { dueDate: before }),
+                task('past-start', { startTime: before }),
+                task('last', { reviewAt: last + 'T23:59:59.999' }),
+                task('after', { dueDate: after }),
+            ];
+            expect(applyFilter(tasks, saved('overdue_next_7_days').criteria, { now }).map(({ id }) => id))
+                .toEqual(['overdue', 'last']);
+        },
+    );
+
     it('requires all task date fields to be absent for no_date', () => {
         const tasks = [task('none'), task('start', { startTime: '2026-10-17' }), task('due', { dueDate: '2026-10-17' }), task('review', { reviewAt: '2026-10-17' })];
         expect(applyFilter(tasks, { anyDateRange: { preset: 'no_date' } }).map(({ id }) => id)).toEqual(['none']);
@@ -134,6 +175,38 @@ describe('task date saved filters', () => {
         } finally {
             setLogger(consoleLogger);
         }
+    });
+
+    it('publishes an overdue plus next seven days saved selection through both existing widget builders', () => {
+        const source = data([
+            task('overdue-date', { dueDate: '2020-01-01', contexts: ['@desk'] }),
+            task('overdue-time', { dueDate: '2026-10-17T11:00:00-04:00', contexts: ['@desk'] }),
+            task('today-later', { startTime: '2026-10-17T23:00:00-04:00', contexts: ['@desk'] }),
+            task('last-day', { reviewAt: '2026-10-23T23:59:59.999-04:00', contexts: ['@desk'] }),
+            task('new-day', { reviewAt: '2026-10-24', contexts: ['@desk'] }),
+            task('old-start', { startTime: '2026-10-16', contexts: ['@desk'] }),
+            task('old-review', { reviewAt: '2026-10-16', contexts: ['@desk'] }),
+            task('other-context', { dueDate: '2026-10-16', contexts: ['@home'] }),
+            task('done', { status: 'done', dueDate: '2026-10-16', contexts: ['@desk'] }),
+            task('deleted', { dueDate: '2026-10-16', contexts: ['@desk'], deletedAt: '2026-10-16T00:00:00Z' }),
+            task('inactive', { dueDate: '2026-10-16', contexts: ['@desk'], projectId: 'inactive' }),
+        ]);
+        source.settings.savedFilters = [{ ...saved('overdue_next_7_days'), criteria: {
+            ...saved('overdue_next_7_days').criteria, contexts: ['@desk'],
+        } }];
+        source.projects = [{ id: 'inactive', title: 'Inactive', status: 'someday', color: '#000000', order: 0, tagIds: [], createdAt: '2026-01-01', updatedAt: '2026-01-01' }];
+        const reloaded: AppData = JSON.parse(JSON.stringify(source));
+        const android = buildAndroidWidgetPublication(reloaded, 'en', { listSelections: ['filter:dates'] });
+        const ios = createWidgetPayloadProjection(reloaded, 'en', iosWidgetProjectionOptions({})).build(50);
+        for (const payload of [android, ios]) {
+            expect(payload.lists['filter:dates'].items.map(({ id }) => id).sort())
+                .toEqual(['last-day', 'overdue-date', 'overdue-time', 'today-later']);
+        }
+        vi.setSystemTime(new Date('2026-10-18T04:00:00Z'));
+        const refreshed = createWidgetPayloadProjection(reloaded, 'en', { includeSavedFilterLists: true }).build(50);
+        expect(refreshed.lists['filter:dates'].items.map(({ id }) => id).sort())
+            .toEqual(['last-day', 'new-day', 'overdue-date', 'overdue-time']);
+        expect(reloaded.settings.savedFilters?.[0].criteria.anyDateRange).toEqual({ preset: 'overdue_next_7_days' });
     });
 
     it('publishes both widgets with existing exclusions and advances a reloaded preset on app refresh', () => {

@@ -2,7 +2,7 @@ import type { DateRange } from '@mindwtr/core';
 import { cn } from '../../../lib/utils';
 import { FILTER_OPTION_BASE, FilterCategory } from './FilterDisclosure';
 
-const PRESETS = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
+const PRESETS = ['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
 
 export function TaskDateFilter({ id, value, onChange, expanded, onToggle, t }: {
     id: string;

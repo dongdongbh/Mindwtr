@@ -560,6 +560,7 @@ export const arOverrides: Record<string, string> = {
         "filters.taskDates": "تواريخ المهام",
         "filters.anyTime": "أي وقت",
         "filters.datePreset.next_7_days": "الأيام السبعة القادمة",
+        "filters.datePreset.overdue_next_7_days": "المتأخرة + الأيام السبعة القادمة",
         "filters.datePreset.next_14_days": "الأيام الـ 14 القادمة",
         "filters.datePreset.next_30_days": "الأيام الـ 30 القادمة",
         "filters.datePreset.upcoming": "كل التواريخ القادمة",

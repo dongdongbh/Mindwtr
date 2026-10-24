@@ -189,20 +189,23 @@ describe('native host contract: Focus controls', () => {
         freezeClock();
         const host = await openHost('base');
         const saved = { id: 'date-filter', name: 'Dates', view: 'focus' as const,
-            criteria: { anyDateRange: { preset: 'next_7_days' as const }, dueDateRange: { preset: 'today' as const }, statuses: ['next' as const], futureDateRule: { keep: true },
+            criteria: { anyDateRange: { preset: 'overdue_next_7_days' as const }, dueDateRange: { preset: 'today' as const }, statuses: ['next' as const], futureDateRule: { keep: true },
                 priority: ['none' as const], timeEstimates: ['custom:45'], locations: ['Office', 'Home'] },
             createdAt: fixture.now, updatedAt: fixture.now };
         useTaskStore.setState((state) => ({ settings: { ...state.settings, savedFilters: [saved] } }));
         const applied = value(host.getFocus({ limit: 100, controlEdit: { type: 'applySavedFilter', id: saved.id } }));
         const options = applied.controls.filterSheet.taskDates.options;
-        expect(options.map((option) => option.value)).toEqual(['', 'today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
-        expect(options.find((option) => option.selected)?.value).toBe('next_7_days');
-        expect(applied.controls.widgetFilter.criteria).toMatchObject({ anyDateRange: { preset: 'next_7_days' }, dueDateRange: { preset: 'today' } });
+        expect(options.map((option) => option.value)).toEqual(['', 'today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
+        expect(options.find((option) => option.selected)?.value).toBe('overdue_next_7_days');
+        expect(applied.controls.widgetFilter.criteria).toMatchObject({ anyDateRange: { preset: 'overdue_next_7_days' }, dueDateRange: { preset: 'today' } });
         expect(applied.controls.filterSheet.advancedChips.map((chip) => chip.criterionId)).not.toContain('anyDateRange');
         const next30 = options.find((option) => option.value === 'next_30_days')!;
         const edited = value(host.getFocus({ limit: 100, controls: applied.controls.state, controlEdit: next30.edit }));
         expect(edited.controls.state.savedFilterId).toBeNull();
         expect(edited.controls.widgetFilter.criteria).toEqual({ ...saved.criteria, anyDateRange: { preset: 'next_30_days' } });
+        const overdueEdit = options.find((option) => option.value === 'overdue_next_7_days')!.edit;
+        expect(value(host.getFocus({ limit: 100, controls: edited.controls.state, controlEdit: overdueEdit }))
+            .controls.widgetFilter.criteria.anyDateRange).toEqual({ preset: 'overdue_next_7_days' });
         expect(edited.controls.filterSheet.chips.map((chip) => chip.id)).toEqual(expect.arrayContaining([
             'preserved:priority', 'preserved:timeEstimates', 'preserved:location:Office', 'preserved:location:Home',
         ]));

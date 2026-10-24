@@ -751,6 +751,7 @@ export const koOverrides: Record<string, string> = {
         "filters.taskDates": "작업 날짜",
         "filters.anyTime": "언제든지",
         "filters.datePreset.next_7_days": "향후 7일",
+        "filters.datePreset.overdue_next_7_days": "기한 경과 + 향후 7일",
         "filters.datePreset.next_14_days": "향후 14일",
         "filters.datePreset.next_30_days": "향후 30일",
         "filters.datePreset.upcoming": "모든 예정 날짜",

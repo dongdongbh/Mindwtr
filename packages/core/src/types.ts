@@ -318,7 +318,7 @@ export type FilterPriority = 'none' | TaskPriority;
 export type MultiValueFilterMatchMode = 'any' | 'all';
 
 export type DateRange =
-    | { preset: 'today' | 'this_week' | 'this_month' | 'overdue' | 'no_date' | 'next_7_days' | 'next_14_days' | 'next_30_days' | 'upcoming' }
+    | { preset: 'today' | 'this_week' | 'this_month' | 'overdue' | 'no_date' | 'next_7_days' | 'overdue_next_7_days' | 'next_14_days' | 'next_30_days' | 'upcoming' }
     | { from?: string; to?: string };
 
 export interface FilterCriteria {

@@ -435,7 +435,7 @@ export const buildNativeTaskDateFilter = (state: ListFilterState, t: (key: strin
     label: tFallback(t, 'filters.taskDates', 'Task dates'),
     options: [
         { value: '', label: tFallback(t, 'filters.anyTime', 'Any time'), selected: !state.anyDateRange, edit: { type: 'setAnyDateRange', value: null } },
-        ...(['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const).map((preset) => ({
+        ...(['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const).map((preset) => ({
             value: preset, label: t(`filters.datePreset.${preset}`),
             selected: state.anyDateRange !== undefined && 'preset' in state.anyDateRange && state.anyDateRange.preset === preset,
             edit: { type: 'setAnyDateRange' as const, value: { preset } },

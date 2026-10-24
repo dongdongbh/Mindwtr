@@ -658,6 +658,7 @@ export const csOverrides: Record<string, string> = {
         "filters.taskDates": "Data úkolů",
         "filters.anyTime": "Kdykoliv",
         "filters.datePreset.next_7_days": "Příštích 7 dní",
+        "filters.datePreset.overdue_next_7_days": "Po termínu + příštích 7 dní",
         "filters.datePreset.next_14_days": "Příštích 14 dní",
         "filters.datePreset.next_30_days": "Příštích 30 dní",
         "filters.datePreset.upcoming": "Všechna nadcházející",

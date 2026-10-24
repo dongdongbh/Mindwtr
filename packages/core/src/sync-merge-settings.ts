@@ -82,8 +82,20 @@ const chooseDeletedSavedFilter = (localFilter: SavedFilter, incomingFilter: Save
 // missing createdAt became its load time (`inventedAt`) — and kept updatedAt.
 const legacySavedFilterProjection = (filter: SavedFilter, inventedAt: string | undefined): SavedFilter | null => {
     const value = filter as unknown as Record<string, unknown>;
+    const criteria = isObjectRecord(value.criteria) ? { ...value.criteria } : {};
+    // v1.3.2 knew neither task-date criteria nor the rolling date presets.
+    delete criteria.anyDateRange;
+    for (const field of ['dueDateRange', 'startDateRange']) {
+        const range = criteria[field];
+        if (isObjectRecord(range) && typeof range.preset === 'string'
+            && !['today', 'this_week', 'this_month', 'overdue', 'no_date'].includes(range.preset)) {
+            const { preset: _preset, ...bounds } = range;
+            criteria[field] = bounds;
+        }
+    }
     const legacy = {
         ...value,
+        criteria,
         id: typeof value.id === 'string' ? value.id.trim() : value.id,
         createdAt: typeof value.createdAt === 'string' && value.createdAt.trim() ? value.createdAt : inventedAt,
     };
@@ -95,7 +107,13 @@ const legacySavedFilterProjection = (filter: SavedFilter, inventedAt: string | u
 const chooseTiedSavedFilter = (localFilter: SavedFilter, incomingFilter: SavedFilter): SavedFilter => {
     const incomingIsLegacy = isDeepJsonEqual(legacySavedFilterProjection(localFilter, incomingFilter.createdAt), incomingFilter);
     const localIsLegacy = isDeepJsonEqual(legacySavedFilterProjection(incomingFilter, localFilter.createdAt), localFilter);
-    if (incomingIsLegacy !== localIsLegacy) return incomingIsLegacy ? localFilter : incomingFilter;
+    if (incomingIsLegacy !== localIsLegacy) {
+        logInfo('Saved filter retained over legacy rewrite', {
+            scope: 'saved-filters', category: 'sync', force: true,
+            context: { releaseCheck: 'v1.3.8/saved-filter-date-preserved', count: 1, outcome: 'kept-full' },
+        });
+        return incomingIsLegacy ? localFilter : incomingFilter;
+    }
     return chooseDeterministicWinner(localFilter, incomingFilter);
 };
 

@@ -27,6 +27,7 @@ const DATE_RANGE_PRESET_LABELS: Record<string, string> = {
     overdue: 'Overdue',
     no_date: 'No date',
     next_7_days: 'Next 7 days',
+    overdue_next_7_days: 'Overdue + next 7 days',
     next_14_days: 'Next 14 days',
     next_30_days: 'Next 30 days',
     upcoming: 'All upcoming',

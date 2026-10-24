@@ -102,21 +102,21 @@ describe('prepared Focus saved filter', () => {
         expect(host.saves()).toBe(saves);
     });
 
-    it('saves rolling task dates with retained advanced criteria and reloads the preset', async () => {
+    it.each(['next_14_days', 'overdue_next_7_days'] as const)('saves %s with retained advanced criteria and reloads the preset', async (preset) => {
         const host = await open();
         const controls = { ...DEFAULT_FOCUS_CONTROL_STATE,
-            filters: { ...DEFAULT_FOCUS_CONTROL_STATE.filters, anyDateRange: { preset: 'next_14_days' as const } },
+            filters: { ...DEFAULT_FOCUS_CONTROL_STATE.filters, anyDateRange: { preset } },
             preservedCriteria: { dueDateRange: { preset: 'today' as const }, statuses: ['next' as const],
                 futureCriterion: { preserved: ['opaque'] }, priority: ['none' as const], timeEstimates: ['custom:45'], locations: ['Office', 'Home'] } };
-        const request = host.request({ type: 'save' }, controls, 'Fortnight');
+        const request = host.request({ type: 'save' }, controls, 'Dates');
         const prepared = host.prepared(request);
-        expect(prepared.after.criteria).toEqual({ ...controls.preservedCriteria, anyDateRange: { preset: 'next_14_days' } });
+        expect(prepared.after.criteria).toEqual({ ...controls.preservedCriteria, anyDateRange: { preset } });
         expect(host.methods.validatePreparedFocusSavedFilter({ request, prepared })).toEqual({ ok: true, value: prepared.result });
         expect(await host.methods.commitPreparedFocusSavedFilter({ request, prepared })).toEqual({ ok: true, value: prepared.result });
         await useTaskStore.getState().fetchData({ throwOnError: true });
         const saved = useTaskStore.getState().settings.savedFilters!.find((entry) => entry.id === uuid)!;
         expect(saved.criteria).toEqual(prepared.after.criteria);
-        expect(applyFocusSavedFilter(DEFAULT_FOCUS_CONTROL_STATE, saved).filters.anyDateRange).toEqual({ preset: 'next_14_days' });
+        expect(applyFocusSavedFilter(DEFAULT_FOCUS_CONTROL_STATE, saved).filters.anyDateRange).toEqual({ preset });
     });
 
     it('rejects a self-consistent cold journal that omits a selected save criterion', async () => {

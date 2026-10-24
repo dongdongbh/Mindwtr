@@ -770,6 +770,7 @@ export const faOverrides: Record<string, string> = {
         "filters.taskDates": "تاریخ‌های کارها",
         "filters.anyTime": "هر زمان",
         "filters.datePreset.next_7_days": "۷ روز آینده",
+        "filters.datePreset.overdue_next_7_days": "عقب‌افتاده + ۷ روز آینده",
         "filters.datePreset.next_14_days": "۱۴ روز آینده",
         "filters.datePreset.next_30_days": "۳۰ روز آینده",
         "filters.datePreset.upcoming": "همه تاریخ‌های آینده",

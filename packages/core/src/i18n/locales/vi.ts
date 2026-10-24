@@ -680,6 +680,7 @@ export const viOverrides: Record<string, string> = {
         "filters.taskDates": "Ngày của công việc",
         "filters.anyTime": "Bất kỳ lúc nào",
         "filters.datePreset.next_7_days": "7 ngày tới",
+        "filters.datePreset.overdue_next_7_days": "Quá hạn + 7 ngày tới",
         "filters.datePreset.next_14_days": "14 ngày tới",
         "filters.datePreset.next_30_days": "30 ngày tới",
         "filters.datePreset.upcoming": "Tất cả ngày sắp tới",

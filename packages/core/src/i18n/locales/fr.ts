@@ -633,6 +633,7 @@ export const frOverrides: Record<string, string> = {
         "filters.taskDates": "Dates des tâches",
         "filters.anyTime": "À tout moment",
         "filters.datePreset.next_7_days": "7 prochains jours",
+        "filters.datePreset.overdue_next_7_days": "En retard + 7 prochains jours",
         "filters.datePreset.next_14_days": "14 prochains jours",
         "filters.datePreset.next_30_days": "30 prochains jours",
         "filters.datePreset.upcoming": "Toutes les dates à venir",

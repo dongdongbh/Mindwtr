@@ -782,6 +782,7 @@ export const en: Record<string, string> = {
         "filters.taskDates": "Task dates",
         "filters.anyTime": "Any time",
         "filters.datePreset.next_7_days": "Next 7 days",
+        "filters.datePreset.overdue_next_7_days": "Overdue + next 7 days",
         "filters.datePreset.next_14_days": "Next 14 days",
         "filters.datePreset.next_30_days": "Next 30 days",
         "filters.datePreset.upcoming": "All upcoming",

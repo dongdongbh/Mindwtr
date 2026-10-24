@@ -768,6 +768,7 @@ export const daOverrides: Record<string, string> = {
     "filters.taskDates": "Opgavedatoer",
     "filters.anyTime": "Når som helst",
     "filters.datePreset.next_7_days": "Næste 7 dage",
+    "filters.datePreset.overdue_next_7_days": "Forfaldne + næste 7 dage",
     "filters.datePreset.next_14_days": "Næste 14 dage",
     "filters.datePreset.next_30_days": "Næste 30 dage",
     "filters.datePreset.upcoming": "Alle kommende",

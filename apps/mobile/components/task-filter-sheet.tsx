@@ -35,7 +35,7 @@ import { useKeyboardInset } from '@/lib/use-android-keyboard-inset';
  */
 
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
-const DATE_PRESETS = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
+const DATE_PRESETS = ['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
 const ENERGY_LEVEL_OPTIONS: TaskEnergyLevel[] = ['low', 'medium', 'high'];
 
 export type TaskFilterSheetColors = {

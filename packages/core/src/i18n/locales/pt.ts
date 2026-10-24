@@ -567,6 +567,7 @@ export const ptOverrides: Record<string, string> = {
         "filters.taskDates": "Datas das tarefas",
         "filters.anyTime": "Qualquer data",
         "filters.datePreset.next_7_days": "Próximos 7 dias",
+        "filters.datePreset.overdue_next_7_days": "Atrasadas + próximos 7 dias",
         "filters.datePreset.next_14_days": "Próximos 14 dias",
         "filters.datePreset.next_30_days": "Próximos 30 dias",
         "filters.datePreset.upcoming": "Todas as próximas",

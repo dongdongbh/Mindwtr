@@ -437,7 +437,7 @@ describe('mergeSettingsForSync > savedFilters', () => {
     };
 
     it('preserves rolling task date criteria from a peer and converges on the second merge', () => {
-        const filters = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
+        const filters = ['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
             ...localFilter, id: `date-${preset}`, criteria: { anyDateRange: { preset } },
         })) as NonNullable<Settings['savedFilters']>;
         const previousPeer: Settings = { savedFilters: [localFilter] };
@@ -565,6 +565,64 @@ describe('mergeSettingsForSync > savedFilters', () => {
         expect(v132NormalizeSavedFilters(published.savedFilters)).toEqual(oldPeerList);
     });
 
+    it.each(['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const)(
+        'retains same-id %s task-date criteria when a v1.3.2 peer strips them', (preset) => {
+            const full: SavedFilter = { ...older, id: 'dates', name: 'Dates', criteria: {
+                contexts: ['@desk'], anyDateRange: { preset },
+                ...(preset !== 'today' ? { dueDateRange: { preset }, startDateRange: { preset } } : {}),
+            } };
+            const stripped = v132NormalizeSavedFilters([full]);
+            expect(stripped).toEqual([{ ...full, criteria: { contexts: ['@desk'] } }]);
+            let completePeer = settingsWith([full], OLDER);
+            const oldPeer = settingsWith(stripped, NEWER);
+            for (let round = 0; round < 3; round += 1) {
+                expect(mergeSettingsForSync(oldPeer, completePeer).savedFilters).toEqual([full]);
+                completePeer = mergeSettingsForSync(completePeer, oldPeer);
+                expect(completePeer.savedFilters).toEqual([full]);
+                expect(v132NormalizeSavedFilters(completePeer.savedFilters)).toEqual(stripped);
+            }
+            // A real edit is distinguished by updatedAt, even when it removes the date criterion.
+            const edited = { ...stripped[0], updatedAt: LATEST };
+            expect(mergeSettingsForSync(completePeer, settingsWith([edited], NEWER)).savedFilters).toEqual([edited]);
+            expect(mergeSettingsForSync(settingsWith([edited], NEWER), completePeer).savedFilters).toEqual([edited]);
+        },
+    );
+
+    it('logs a privacy-safe receipt only when retaining a full filter over a legacy rewrite', () => {
+        const full: SavedFilter = { ...older, criteria: { anyDateRange: { preset: 'overdue_next_7_days' } } };
+        const stripped = v132NormalizeSavedFilters([full]);
+        const logs: LogPayload[] = [];
+        setLogger((payload) => logs.push(payload));
+        try {
+            mergeSettingsForSync(settingsWith([full], OLDER), settingsWith(stripped, NEWER));
+            mergeSettingsForSync(settingsWith([full], OLDER), settingsWith([full], NEWER));
+            mergeSettingsForSync(settingsWith([full], OLDER), settingsWith([{ ...stripped[0], updatedAt: LATEST }], NEWER));
+        } finally {
+            setLogger(consoleLogger);
+        }
+        const receipts = logs.filter((entry) => entry.context?.releaseCheck === 'v1.3.8/saved-filter-date-preserved');
+        expect(receipts).toEqual([{
+            level: 'info', message: 'Saved filter retained over legacy rewrite',
+            scope: 'saved-filters', category: 'sync', force: true,
+            context: { releaseCheck: 'v1.3.8/saved-filter-date-preserved', count: 1, outcome: 'kept-full' },
+        }]);
+        expect(JSON.stringify(receipts)).not.toMatch(/Desk|filter-older|criteria|overdue_next_7_days/);
+    });
+
+    it('recognizes the old bounded-range fallback for presets v1.3.2 did not understand', () => {
+        const full: SavedFilter = { ...older, criteria: {
+            dueDateRange: { preset: 'next_7_days', from: '2026-10-01', to: '2026-10-31' },
+            startDateRange: { preset: 'overdue_next_7_days', from: '2026-10-01' },
+        } };
+        const stripped = v132NormalizeSavedFilters([full]);
+        expect(stripped[0].criteria).toEqual({
+            dueDateRange: { from: '2026-10-01', to: '2026-10-31' },
+            startDateRange: { from: '2026-10-01', to: undefined },
+        });
+        expect(mergeSettingsForSync(settingsWith([full], OLDER), settingsWith(stripped, NEWER)).savedFilters).toEqual([full]);
+        expect(mergeSettingsForSync(settingsWith(stripped, NEWER), settingsWith([full], OLDER)).savedFilters).toEqual([full]);
+    });
+
     it('lets a newer edit made on a v1.3.2 peer win by time (documented limit)', () => {
         const full = { ...newer, view: 'calendar', color: 'red' } as unknown as SavedFilter;
         const editedOnOldPeer = { ...v132NormalizeSavedFilters([full])[0]!, name: 'Renamed on v1.3.2', updatedAt: LATEST };
@@ -597,8 +655,9 @@ describe('mergeSettingsForSync > savedFilters', () => {
 
 const LATEST = '2026-09-01T00:00:00.000Z';
 
-// v1.3.2's saved-filter normalizer, verbatim (packages/core/src/saved-filters.ts
-// at tag v1.3.2; normalizeFilterCriteria is unchanged since). Every v1.3.2 load,
+// v1.3.2's saved-filter behavior (packages/core/src/saved-filters.ts
+// at tag v1.3.2). Other criterion normalization is unchanged; freeze the old
+// date surface below rather than teaching this fixture new fields/presets. Every v1.3.2 load,
 // save, merge and remote comparison ran its list through this.
 const V132_VIEWS = new Set(['focus', 'next', 'waiting', 'someday', 'contexts', 'all']);
 const V132_GROUP_BY = new Set(['none', 'context', 'project', 'area', 'energy', 'priority', 'person', 'tag']);
@@ -618,12 +677,21 @@ function v132NormalizeSavedFilter(value: unknown): SavedFilter | null {
     const groupBy = typeof record.groupBy === 'string' && V132_GROUP_BY.has(record.groupBy) ? record.groupBy : undefined;
     const icon = typeof record.icon === 'string' && record.icon.trim() ? record.icon.trim() : undefined;
     const deletedAt = typeof record.deletedAt === 'string' && record.deletedAt.trim() ? record.deletedAt.trim() : undefined;
+    const criteria = normalizeFilterCriteria(record.criteria);
+    delete criteria.anyDateRange;
+    const rawCriteria = typeof record.criteria === 'object' && record.criteria !== null
+        ? record.criteria as Record<string, unknown> : {};
+    for (const field of ['dueDateRange', 'startDateRange'] as const) {
+        const range = v132NormalizeDateRange(rawCriteria[field]);
+        if (range) criteria[field] = range;
+        else delete criteria[field];
+    }
     return {
         id: record.id.trim(),
         name: record.name.trim(),
         ...(icon ? { icon } : {}),
         view,
-        criteria: normalizeFilterCriteria(record.criteria),
+        criteria,
         ...(sortBy ? { sortBy } : {}),
         ...(sortOrder ? { sortOrder } : {}),
         ...(groupBy ? { groupBy } : {}),
@@ -631,6 +699,16 @@ function v132NormalizeSavedFilter(value: unknown): SavedFilter | null {
         updatedAt,
         ...(deletedAt ? { deletedAt } : {}),
     } as SavedFilter;
+}
+// v1.3.2 date-range reader, including fallback to explicit bounds.
+function v132NormalizeDateRange(value: unknown): import('./types').DateRange | undefined {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    if (record.preset === 'today' || record.preset === 'this_week' || record.preset === 'this_month'
+        || record.preset === 'overdue' || record.preset === 'no_date') return { preset: record.preset };
+    const from = typeof record.from === 'string' && record.from.trim() ? record.from.trim() : undefined;
+    const to = typeof record.to === 'string' && record.to.trim() ? record.to.trim() : undefined;
+    return from || to ? { from, to } : undefined;
 }
 function v132NormalizeSavedFilters(value: unknown): SavedFilter[] {
     if (!Array.isArray(value)) return [];

@@ -3345,7 +3345,7 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
     });
 
     it('retains rolling task date criteria through settings JSON, table recovery, and a second save', async () => {
-        const filters = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
+        const filters = ['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
             ...older, id: `date-${preset}`, criteria: { anyDateRange: { preset } },
         })) as NonNullable<AppData['settings']['savedFilters']>;
         const adapter = new SqliteAdapter(createClient(db));

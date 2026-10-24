@@ -554,6 +554,7 @@ export const plOverrides: Record<string, string> = {
         "filters.taskDates": "Daty zadań",
         "filters.anyTime": "Dowolny termin",
         "filters.datePreset.next_7_days": "Następne 7 dni",
+        "filters.datePreset.overdue_next_7_days": "Zaległe + następne 7 dni",
         "filters.datePreset.next_14_days": "Następne 14 dni",
         "filters.datePreset.next_30_days": "Następne 30 dni",
         "filters.datePreset.upcoming": "Wszystkie nadchodzące",

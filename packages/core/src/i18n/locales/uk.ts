@@ -761,6 +761,7 @@ export const ukOverrides: Record<string, string> = {
     "filters.taskDates": "Дати завдань",
     "filters.anyTime": "Будь-коли",
     "filters.datePreset.next_7_days": "Наступні 7 днів",
+    "filters.datePreset.overdue_next_7_days": "Прострочені + наступні 7 днів",
     "filters.datePreset.next_14_days": "Наступні 14 днів",
     "filters.datePreset.next_30_days": "Наступні 30 днів",
     "filters.datePreset.upcoming": "Усі майбутні",

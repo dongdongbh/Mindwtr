@@ -69,7 +69,7 @@ const SORT_FIELD_VALUES = new Set<SortField>([
 export const isSavedFilterSortField = (value: unknown): value is SortField =>
     typeof value === 'string' && SORT_FIELD_VALUES.has(value as SortField);
 
-const DATE_PRESET_VALUES = new Set(['today', 'this_week', 'this_month', 'overdue', 'no_date', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
+const DATE_PRESET_VALUES = new Set(['today', 'this_week', 'this_month', 'overdue', 'no_date', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -267,7 +267,7 @@ const matchesDateRange = (
     value: string | undefined,
     range: DateRange | undefined,
     parser: (input: string | undefined) => Date | null,
-    options: Required<Pick<ApplyFilterOptions, 'now' | 'weekStartsOn'>>
+    options: Required<Pick<ApplyFilterOptions, 'now' | 'weekStartsOn'>> & { includeOverdueDue?: boolean }
 ): boolean => {
     if (!range) return true;
     if ('preset' in range && range.preset === 'no_date') {
@@ -284,6 +284,10 @@ const matchesDateRange = (
                 const todayEnd = endOfDay(options.now);
                 return (isAfter(date, todayStart) || isEqual(date, todayStart))
                     && (isBefore(date, todayEnd) || isEqual(date, todayEnd));
+            }
+            case 'overdue_next_7_days': {
+                const end = endOfDay(addDays(options.now, 6));
+                return date <= end && (date >= todayStart || (options.includeOverdueDue === true && date < options.now));
             }
             case 'next_7_days':
             case 'next_14_days':
@@ -416,7 +420,7 @@ const taskMatchesPreparedFilterCriteria = (
 
     if (normalized.energy?.length && (!task.energyLevel || !normalized.energy.includes(task.energyLevel))) return false;
     if (!matchesPriority(normalized.priority, task.priority)) return false;
-    if (!matchesDateRange(task.dueDate, normalized.dueDateRange, safeParseDueDate, { now, weekStartsOn })) return false;
+    if (!matchesDateRange(task.dueDate, normalized.dueDateRange, safeParseDueDate, { now, weekStartsOn, includeOverdueDue: true })) return false;
     if (!matchesDateRange(task.startTime, normalized.startDateRange, safeParseDate, { now, weekStartsOn })) return false;
     if (normalized.anyDateRange) {
         const options = { now, weekStartsOn };
@@ -425,7 +429,7 @@ const taskMatchesPreparedFilterCriteria = (
         const matches = 'preset' in range && range.preset === 'no_date'
             ? !task.startTime && !task.dueDate && !task.reviewAt
             : matchesDateRange(task.startTime, range, safeParseDate, options)
-                || matchesDateRange(task.dueDate, range, safeParseDueDate, options)
+                || matchesDateRange(task.dueDate, range, safeParseDueDate, { ...options, includeOverdueDue: true })
                 || matchesDateRange(task.reviewAt, range, safeParseDate, options);
         if (!matches) return false;
     }

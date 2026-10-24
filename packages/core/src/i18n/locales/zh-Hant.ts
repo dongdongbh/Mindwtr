@@ -776,6 +776,7 @@ export const zhHant: Record<string, string> = {
         "filters.taskDates": "任務日期",
         "filters.anyTime": "不限時間",
         "filters.datePreset.next_7_days": "未來 7 天",
+        "filters.datePreset.overdue_next_7_days": "已逾期 + 未來 7 天",
         "filters.datePreset.next_14_days": "未來 14 天",
         "filters.datePreset.next_30_days": "未來 30 天",
         "filters.datePreset.upcoming": "所有將來的日期",

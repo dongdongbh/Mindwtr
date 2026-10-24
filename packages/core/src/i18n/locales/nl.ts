@@ -645,6 +645,7 @@ export const nlOverrides: Record<string, string> = {
         "filters.taskDates": "Taakdatums",
         "filters.anyTime": "Elk moment",
         "filters.datePreset.next_7_days": "Komende 7 dagen",
+        "filters.datePreset.overdue_next_7_days": "Achterstallig + komende 7 dagen",
         "filters.datePreset.next_14_days": "Komende 14 dagen",
         "filters.datePreset.next_30_days": "Komende 30 dagen",
         "filters.datePreset.upcoming": "Alle toekomstige",

@@ -752,6 +752,7 @@ export const huOverrides: Record<string, string> = {
     "filters.taskDates": "Feladatdátumok",
     "filters.anyTime": "Bármikor",
     "filters.datePreset.next_7_days": "Következő 7 nap",
+    "filters.datePreset.overdue_next_7_days": "Lejárt + következő 7 nap",
     "filters.datePreset.next_14_days": "Következő 14 nap",
     "filters.datePreset.next_30_days": "Következő 30 nap",
     "filters.datePreset.upcoming": "Összes közelgő",

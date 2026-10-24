@@ -794,6 +794,7 @@ export const jaOverrides: Record<string, string> = {
         "filters.taskDates": "タスクの日付",
         "filters.anyTime": "指定なし",
         "filters.datePreset.next_7_days": "今後7日間",
+        "filters.datePreset.overdue_next_7_days": "期限切れ + 今後7日間",
         "filters.datePreset.next_14_days": "今後14日間",
         "filters.datePreset.next_30_days": "今後30日間",
         "filters.datePreset.upcoming": "今後すべて",

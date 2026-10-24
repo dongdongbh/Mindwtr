@@ -610,6 +610,7 @@ export const itOverrides: Record<string, string> = {
         "filters.taskDates": "Date delle attività",
         "filters.anyTime": "Qualsiasi data",
         "filters.datePreset.next_7_days": "Prossimi 7 giorni",
+        "filters.datePreset.overdue_next_7_days": "Scadute + prossimi 7 giorni",
         "filters.datePreset.next_14_days": "Prossimi 14 giorni",
         "filters.datePreset.next_30_days": "Prossimi 30 giorni",
         "filters.datePreset.upcoming": "Tutte le date future",

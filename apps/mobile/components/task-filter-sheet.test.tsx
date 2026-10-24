@@ -172,10 +172,10 @@ afterEach(() => {
 describe('TaskFilterSheet', () => {
   it('discloses task dates and clears just the range with Any time', () => {
     const handle = renderSheet();
-    expect(hasText('filters.datePreset.next_7_days')).toBe(false);
+    expect(hasText('filters.datePreset.overdue_next_7_days')).toBe(false);
     openCategory('filters.taskDates');
-    act(() => findButtonByText('filters.datePreset.next_7_days').props.onPress());
-    expect(handle.current.criteria).toEqual({ anyDateRange: { preset: 'next_7_days' } });
+    act(() => findButtonByText('filters.datePreset.overdue_next_7_days').props.onPress());
+    expect(handle.current.criteria).toEqual({ anyDateRange: { preset: 'overdue_next_7_days' } });
     expect(handle.current.activeCount).toBe(1);
     act(() => findButtonByText('filters.anyTime').props.onPress());
     expect(handle.current.criteria).toEqual({});
