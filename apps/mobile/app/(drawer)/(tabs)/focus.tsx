@@ -112,6 +112,8 @@ import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { PullSyncIndicator } from '@/components/PullSyncIndicator';
 import { useManualPullSync } from '@/hooks/use-manual-pull-sync';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useCollapsedTaskGroups } from '@/lib/view-state/task-group-collapse-state';
+import { logInfo as logAppInfo } from '@/lib/app-log';
 import { projectMatchesAreaFilterSelection } from '@mindwtr/core';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import {
@@ -917,6 +919,8 @@ export default function FocusScreen() {
     [projectById],
   );
 
+  const { collapsedGroupIds: collapsedNextGroups, toggleGroup: toggleNextGroup } = useCollapsedTaskGroups('focus-next', effectiveFocusGroupBy);
+  const { collapsedGroupIds: collapsedScheduleGroups, toggleGroup: toggleScheduleGroup } = useCollapsedTaskGroups('focus-schedule', 'schedule');
   const sections = useMemo<FocusSection[]>(() => {
     if (!focusViewStateHydrated) return [];
 
@@ -927,11 +931,11 @@ export default function FocusScreen() {
       items.map((project) => ({ type: 'project' as const, project }))
     );
     const buildScheduleItems = (): FocusListItem[] => (
-      expandedSections.schedule ? buildFocusScheduleItems(scheduleByStartTime, t) : []
+      expandedSections.schedule ? buildFocusScheduleItems(scheduleByStartTime, t, collapsedScheduleGroups) : []
     );
     const buildGroupedNextItems = (): FocusListItem[] => (
       expandedSections.next
-        ? buildFocusNextItems({ groupBy: effectiveFocusGroupBy, tasks: nextActions, projects, areas, t, theme: themePreset })
+        ? buildFocusNextItems({ groupBy: effectiveFocusGroupBy, tasks: nextActions, projects, areas, t, theme: themePreset, collapsedGroupIds: collapsedNextGroups })
         : []
     );
     // Same buckets, order and titles as the widget (@mindwtr/core focus-sections).
@@ -962,6 +966,8 @@ export default function FocusScreen() {
     return nextSections;
   }, [
     areas,
+    collapsedNextGroups,
+    collapsedScheduleGroups,
     effectiveFocusGroupBy,
     expandedSections,
     focusViewStateHydrated,
@@ -999,7 +1005,7 @@ export default function FocusScreen() {
             item.project.updatedAt ?? '',
           ].join(':');
         }
-        return ['group', item.id, item.count].join(':');
+        return ['group', item.id, item.count, item.collapsed ? 'collapsed' : 'expanded'].join(':');
       }).join(',');
       return [section.type, section.expanded ? 'expanded' : 'collapsed', section.totalCount, itemVersion].join('|');
     }).join('||')
@@ -1198,12 +1204,21 @@ export default function FocusScreen() {
     );
     if (item.type === 'groupHeader') {
       return measureRow(
-        <View
+        <TouchableOpacity
           accessible
-          accessibilityRole="header"
+          accessibilityRole="button"
           accessibilityLabel={`${item.title} ${item.count}`}
+          accessibilityState={{ expanded: !item.collapsed }}
+          onPress={() => {
+            (section.type === 'schedule' ? toggleScheduleGroup : toggleNextGroup)(item.id);
+            void logAppInfo('Focus subgroup toggled', { scope: 'focus', force: true, extra: {
+              releaseCheck: 'v1.3.8/focus-subgroup-collapse', section: section.type,
+              grouping: section.type === 'schedule' ? 'schedule' : effectiveFocusGroupBy, collapsed: !item.collapsed,
+            } });
+          }}
           style={styles.contextGroupHeader}
         >
+          <Text style={[styles.sectionChevron, { color: tc.secondaryText }]}>{item.collapsed ? '▸' : '▾'}</Text>
           <View
             style={[
               styles.contextGroupDot,
@@ -1221,7 +1236,7 @@ export default function FocusScreen() {
           <Text style={[styles.contextGroupCount, { color: tc.secondaryText }]}>
             {item.count}
           </Text>
-        </View>
+        </TouchableOpacity>
       );
     }
 
@@ -2269,6 +2284,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   contextGroupHeader: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

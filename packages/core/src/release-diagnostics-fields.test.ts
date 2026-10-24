@@ -13,6 +13,8 @@ import { sanitizeLogContext } from './log-sanitize';
  * Update this list when the ledger's version section changes.
  */
 const RELEASE_CHECK_FIELD_NAMES = [
+    // Widget presentation/archive convergence reuse lists/entityType/count/outcome; Focus uses bounded UI state.
+    'section', 'grouping', 'collapsed', 'refresh',
     // MCP view-section writes reuse operation below; entityType is task/project, never an ID.
     'entityType',
     // Android modal IME recovery and background reminder widget publication; no identifiers.

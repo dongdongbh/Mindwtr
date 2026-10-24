@@ -3010,6 +3010,45 @@ describe('InboxProcessingModal', () => {
       expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
     });
 
+    it.each(['guided', 'quick'] as const)('starts replacement steps at the top in %s mode', async (mode) => {
+      asyncStorageMock.getItem.mockResolvedValue(mode);
+      const scrollTo = vi.fn();
+      const scrollToEnd = vi.fn();
+      const frame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+        callback(0);
+        return 0;
+      });
+      let tree!: ReturnType<typeof create>;
+      try {
+        await act(async () => {
+          tree = create(<InboxProcessingModal visible onClose={vi.fn()} />, {
+            createNodeMock: (element) => element.type === 'ScrollView' ? { scrollTo, scrollToEnd } : null,
+          });
+          await Promise.resolve();
+        });
+        const root = tree.root;
+        scrollTo.mockClear();
+        scrollToEnd.mockClear();
+
+        pressStep(root, 'Start later');
+        expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
+        expect(scrollToEnd).not.toHaveBeenCalled();
+        expect(findNodesWithText(root, 'When should it start?').length).toBeGreaterThan(0);
+
+        scrollTo.mockClear();
+        pressStep(root, '‹ Back');
+        expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
+        if (mode === 'guided') chooseActionableLonger(root);
+        scrollTo.mockClear();
+        pressStep(root, 'inbox.delegate');
+        expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
+        expect(scrollToEnd).not.toHaveBeenCalled();
+      } finally {
+        act(() => tree?.unmount());
+        frame.mockRestore();
+      }
+    });
+
     it('files Waiting identically in both modes', async () => {
       const guided = await openFlow();
       chooseActionableLonger(guided);

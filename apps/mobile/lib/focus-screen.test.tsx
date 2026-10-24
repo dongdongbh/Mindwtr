@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, AppState, Modal, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
+import { Alert, AppState, Modal, ScrollView, SectionList, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppData, AppSettings, Area, Project, StorageAdapter, Task } from '@mindwtr/core';
@@ -1266,8 +1266,8 @@ describe('FocusScreen', () => {
     });
 
     expect(
-      tree.root.findAllByType(View)
-        .filter((node) => node.props.accessibilityRole === 'header')
+      tree.root.findAllByType(TouchableOpacity)
+        .filter((node) => node.props.accessibilityRole === 'button' && typeof node.props.accessibilityState?.expanded === 'boolean' && typeof node.props.accessibilityLabel === 'string')
         .map((node) => node.props.accessibilityLabel),
     ).toEqual([]);
     expect(
@@ -1343,8 +1343,8 @@ describe('FocusScreen', () => {
     });
 
     expect(
-      tree.root.findAllByType(View)
-        .filter((node) => node.props.accessibilityRole === 'header')
+      tree.root.findAllByType(TouchableOpacity)
+        .filter((node) => node.props.accessibilityRole === 'button' && typeof node.props.accessibilityState?.expanded === 'boolean' && typeof node.props.accessibilityLabel === 'string')
         .map((node) => node.props.accessibilityLabel),
     ).toEqual(['No context 1', '@home 1', '@work 1']);
     expect(
@@ -1369,6 +1369,65 @@ describe('FocusScreen', () => {
     const next = (list.props.sections as { type: string; data: unknown[] }[]).find((section) => section.type === 'next')!;
     const keys = next.data.map((item) => list.props.keyExtractor(item));
     expect(keys).toEqual(['context:@home', 'context:@home:both', 'context:@work', 'context:@work:both']);
+  });
+
+  it('folds Focus subgroups locally and rebuilds the visible rows and layout frames', () => {
+    storeState.settings = { gtd: { focusGroupBy: 'context' } };
+    storeState.tasks = [makeTask('both', { contexts: ['@home', '@work'] })];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen />); });
+    const list = () => tree.root.findByType(SectionList);
+    const home = () => findButtonByLabel(tree, '@home 1');
+    const sectionRows = () => list().props.sections.find((section: { type: string }) => section.type === 'next').data;
+    const version = list().props.extraData;
+    const lastFrame = () => list().props.getItemLayout(null, list().props.sections.reduce(
+      (count: number, section: { data: unknown[] }) => count + section.data.length + 2, 0,
+    ) - 1);
+    const fullFrame = lastFrame();
+
+    act(() => { home().props.onPress(); });
+
+    expect(home().props.accessibilityState).toEqual({ expanded: false });
+    expect(sectionRows()).toMatchObject([
+      { type: 'groupHeader', id: 'context:@home', count: 1 },
+      { type: 'groupHeader', id: 'context:@work', count: 1 },
+      { type: 'task', groupId: 'context:@work', task: { id: 'both' } },
+    ]);
+    expect(tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id)).toEqual(['both']);
+    expect(list().props.extraData).not.toEqual(version);
+    expect(lastFrame().offset).toBeLessThan(fullFrame.offset);
+    expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
+      'mindwtr:view:group-collapse:focus-next:v1', JSON.stringify({ context: ['context:@home'] }),
+    );
+    expect(storeState.updateSettings).not.toHaveBeenCalled();
+
+    act(() => { home().props.onPress(); });
+    expect(home().props.accessibilityState).toEqual({ expanded: true });
+    expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(2);
+  });
+
+  it('restores Focus subgroup folds per grouping mode without affecting their counts', () => {
+    asyncStorageMock.getItem.mockImplementation((storageName: string) => createImmediatePromise(
+      storageName === 'mindwtr:view:group-collapse:focus-next:v1'
+        ? JSON.stringify({ context: ['context:@home'] }) : null,
+    ));
+    storeState.settings = { gtd: { focusGroupBy: 'context' } };
+    storeState.tasks = [makeTask('home', { contexts: ['@home'], tags: ['#home'] })];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen />); });
+    expect(findButtonByLabel(tree, '@home 1').props.accessibilityState).toEqual({ expanded: false });
+    expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(0);
+
+    act(() => {
+      storeState.settings = { gtd: { focusGroupBy: 'tag' } };
+      tree.update(<FocusScreen />);
+    });
+    expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(1);
+    act(() => {
+      storeState.settings = { gtd: { focusGroupBy: 'context' } };
+      tree.update(<FocusScreen />);
+    });
+    expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(0);
   });
 
   it('updates the mobile Focus list identity when grouping changes to a single context group', () => {
@@ -1396,8 +1455,8 @@ describe('FocusScreen', () => {
 
     expect(tree.root.findByType(SectionList).props.extraData).not.toEqual(initialListVersion);
     expect(
-      tree.root.findAllByType(View)
-        .filter((node) => node.props.accessibilityRole === 'header')
+      tree.root.findAllByType(TouchableOpacity)
+        .filter((node) => node.props.accessibilityRole === 'button' && typeof node.props.accessibilityState?.expanded === 'boolean' && typeof node.props.accessibilityLabel === 'string')
         .map((node) => node.props.accessibilityLabel),
     ).toEqual(['@work 2']);
     expect(
@@ -1617,7 +1676,17 @@ describe('FocusScreen', () => {
       'later-today',
     ]);
     expect(tree.root.findByProps({ accessibilityLabel: 'Later today 1' }).props.accessibilityRole)
-      .toBe('header');
+      .toBe('button');
+    act(() => { findButtonByLabel(tree, 'Later today 1').props.onPress(); });
+    const foldedToday = tree.root.findByType(SectionList).props.sections.find((section: { type: string }) => section.type === 'schedule');
+    expect(foldedToday.totalCount).toBe(3);
+    expect(foldedToday.data.map((item: { type: string; task?: Task }) => item.task?.id ?? item.type)).toEqual([
+      'date-only', 'already-started', 'groupHeader',
+    ]);
+    expect(findButtonByLabel(tree, 'Later today 1').props.accessibilityState).toEqual({ expanded: false });
+    expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
+      'mindwtr:view:group-collapse:focus-schedule:v1', JSON.stringify({ schedule: ['focus:schedule:later-today'] }),
+    );
   });
 
   it('omits the Later today group when Today has only ready rows', () => {

@@ -42,7 +42,6 @@ import {
   rankProcessInboxTokenSuggestions,
   resolveProcessInboxPlan,
   resolveProcessInboxProjectSearchSubmit,
-  resolveProcessInboxStep,
   restoreTaskSnapshot,
   safeFormatDate,
   safeParseDate,
@@ -78,7 +77,7 @@ import { useToast } from '../../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
-import { logWarn } from '../../lib/app-log';
+import { logInfo, logWarn } from '../../lib/app-log';
 import { readAppleClarificationBackend } from '../../lib/apple-clarification-preference';
 import {
   APPLE_CLARIFICATION_RELEASE_CHECK,
@@ -381,16 +380,13 @@ export function useInboxProcessingController({
     [areas, selectedAreaId],
   );
 
-  // Answering a question appends the next one below the fold, so on a phone the tap looks like it
-  // did nothing until you scroll. Follow the reveal down instead.
+  // Expanding More options appends fields below the current step.
   const scrollProcessingToRevealedStep = useCallback(() => {
     requestAnimationFrame(() => {
       processingScrollRef.current?.scrollToEnd?.({ animated: true });
     });
   }, []);
 
-  // "More options" reveals below the fold exactly like answering a question
-  // does, so expanding follows the reveal down too; collapsing stays put.
   const toggleAdvancedOptions = useCallback(() => {
     setShowAdvancedOptions((previous) => {
       if (!previous) scrollProcessingToRevealedStep();
@@ -405,7 +401,14 @@ export function useInboxProcessingController({
 
   const scrollProcessingToTop = useCallback((animated: boolean = false) => {
     requestAnimationFrame(() => {
-      processingScrollRef.current?.scrollTo?.({ y: 0, animated });
+      const scroll = processingScrollRef.current;
+      if (!scroll?.scrollTo) return;
+      scroll.scrollTo({ y: 0, animated });
+      if (animated) {
+        void logInfo('Inbox processing step scroll reset', {
+          scope: 'inbox', force: true, extra: { releaseCheck: 'v1.3.8/inbox-processing-step-scroll' },
+        });
+      }
     });
   }, []);
 
@@ -667,16 +670,15 @@ export function useInboxProcessingController({
       parseTitle: parseProcessingTitle,
     });
     if (outcome.type !== 'flow') return outcome;
-    const step = resolveProcessInboxStep(answers, mode, processInboxPlan);
     setAnswers(outcome.answers);
     setConvertToProject(outcome.draft.convertToProject);
     setNextActionDraft(outcome.draft.nextAction);
     setExtraActionDrafts(outcome.draft.extraActions);
     setSelectedProjectId(outcome.draft.projectId);
     setProjectSearch(outcome.draft.projectSearch);
-    if (choice !== 'back' && step !== 'oneAction') scrollProcessingToRevealedStep();
+    scrollProcessingToTop(true);
     return outcome;
-  }, [answers, buildDraft, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToRevealedStep]);
+  }, [answers, buildDraft, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToTop]);
 
   // Returns whether the decision was committed, so the presentation can hold
   // its completion feedback (haptic, Undo toast) until it lands.

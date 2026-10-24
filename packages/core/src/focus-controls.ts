@@ -353,7 +353,7 @@ export function getFocusReorderSecondaryLabel(task: Task, projectById: ReadonlyM
 
 /** `groupId` is the Next group heading the row sits under: grouping by context or tag can show a task under several. */
 export type FocusListTaskItem = { type: 'task'; task: Task; grouped: boolean; groupId?: string };
-export type FocusListGroupHeader = { type: 'groupHeader'; id: string; title: string; count: number; muted?: boolean; dotColor?: string };
+export type FocusListGroupHeader = { type: 'groupHeader'; id: string; title: string; count: number; muted?: boolean; dotColor?: string; collapsed?: boolean };
 export type FocusListItem = FocusListTaskItem | FocusListGroupHeader;
 
 const taskItems = (tasks: readonly Task[], grouped = false, groupId?: string): FocusListTaskItem[] => (
@@ -361,7 +361,8 @@ const taskItems = (tasks: readonly Task[], grouped = false, groupId?: string): F
 );
 
 /** Today's rows: ready ones, then a muted "Later today" heading over the timed starts still to come. */
-export function buildFocusScheduleItems(split: { ready: Task[]; laterToday: Task[] }, t: Translate): FocusListItem[] {
+export function buildFocusScheduleItems(split: { ready: Task[]; laterToday: Task[] }, t: Translate, collapsedGroupIds?: ReadonlySet<string>): FocusListItem[] {
+    const collapsed = collapsedGroupIds?.has('focus:schedule:later-today') === true;
     return [
         ...taskItems(split.ready),
         ...(split.laterToday.length > 0
@@ -372,8 +373,9 @@ export function buildFocusScheduleItems(split: { ready: Task[]; laterToday: Task
                     title: tFallback(t, 'agenda.laterToday', 'Later today'),
                     count: split.laterToday.length,
                     muted: true,
+                    ...(collapsedGroupIds ? { collapsed } : {}),
                 },
-                ...taskItems(split.laterToday, true),
+                ...(collapsed ? [] : taskItems(split.laterToday, true)),
             ]
             : []),
     ];
@@ -387,6 +389,7 @@ export function buildFocusNextItems(input: {
     areas: Area[];
     t: Translate;
     theme?: string;
+    collapsedGroupIds?: ReadonlySet<string>;
 }): FocusListItem[] {
     if (input.groupBy === 'none') return taskItems(input.tasks);
     const groups: FocusTaskGroup[] = buildFocusTaskGroups({
@@ -405,8 +408,9 @@ export function buildFocusNextItems(input: {
             count: group.tasks.length,
             muted: group.muted,
             dotColor: group.dotColor,
+            ...(input.collapsedGroupIds ? { collapsed: input.collapsedGroupIds.has(group.key) } : {}),
         },
-        ...taskItems(group.tasks, true, group.key),
+        ...(input.collapsedGroupIds?.has(group.key) ? [] : taskItems(group.tasks, true, group.key)),
     ]);
 }
 

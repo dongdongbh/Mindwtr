@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
     applyFocusControlEdit,
+    buildFocusNextItems,
+    buildFocusScheduleItems,
     canReorderFocusTasks,
     DEFAULT_FOCUS_CONTROL_STATE,
     getFocusEmptyState,
@@ -24,7 +26,7 @@ import {
 import { loadTranslations } from './i18n/i18n-loader';
 import { EMPTY_LIST_FILTER_STATE } from './list-filter-state';
 import { flushPendingSave, resetForTests } from './store';
-import type { SavedFilter } from './types';
+import type { SavedFilter, Task } from './types';
 
 const fixture = loadFocusControlsFixture();
 
@@ -69,6 +71,24 @@ describe('Focus controls', () => {
             { contexts: ['@work/calls', '@home'], tags: ['#deep', '#ops/night'] },
             { contexts: [], tags: [] },
         ] as never)).toEqual(['@home', '@work', '@work/calls', '#deep', '#ops', '#ops/night']);
+    });
+
+    it('keeps folded Focus headings and counts while removing only their task occurrences', () => {
+        const both: Task = { id: 'both', title: 'Both', status: 'next', contexts: ['@home', '@work'], tags: [], createdAt: 'x', updatedAt: 'x' };
+        const input = { groupBy: 'context' as const, tasks: [both], projects: [], areas: [], t };
+        const folded = buildFocusNextItems({ ...input, collapsedGroupIds: new Set(['context:@home']) });
+        expect(folded).toMatchObject([
+            { type: 'groupHeader', id: 'context:@home', count: 1, collapsed: true },
+            { type: 'groupHeader', id: 'context:@work', count: 1, collapsed: false },
+            { type: 'task', task: { id: 'both' }, groupId: 'context:@work' },
+        ]);
+        expect(buildFocusNextItems({ ...input, collapsedGroupIds: new Set() }).filter((item) => item.type === 'task')).toHaveLength(2);
+        expect(buildFocusNextItems(input).filter((item) => item.type === 'groupHeader').every((item) => !('collapsed' in item))).toBe(true);
+
+        expect(buildFocusScheduleItems({ ready: [both], laterToday: [both] }, t, new Set(['focus:schedule:later-today']))).toMatchObject([
+            { type: 'task', task: { id: 'both' } },
+            { type: 'groupHeader', id: 'focus:schedule:later-today', count: 1, collapsed: true },
+        ]);
     });
 
     it('offers and honours priority sort and grouping only while Priorities is on', () => {
