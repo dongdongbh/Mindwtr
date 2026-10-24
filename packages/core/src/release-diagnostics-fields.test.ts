@@ -23,6 +23,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // gmail-capture reuses releaseCheck/count; gmail-capture-storage reuses stage/errorKind. Never account or mail content.
     // focus-area-selection: aggregate selected slots only.
     'globalCount', 'hiddenByAreaCount',
+    // file-sync-transition-cost reuses releaseCheck and elapsedMs; entries and writes are counts, never names.
+    'entries', 'writes',
     // project-color reuses releaseCheck and mode; no identity or color values.
     // section-flow-mode reuses releaseCheck and mode; sectionDefaults is a count. No titles or identifiers.
     'sectionDefaults',

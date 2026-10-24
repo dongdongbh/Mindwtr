@@ -310,8 +310,9 @@ export type SyncEncryptionRemotePort = {
      * transition's authoritative document; it is never persisted by the port. */
     captureInventory?(recoveryPassphrase?: string): Promise<SyncEncryptionRemoteInventory>;
     read(name: string): Promise<SyncEncryptionRemoteRead>;
-    /** `null` is create-only; a value replaces only the generation returned by `read`. */
-    write(name: string, bytes: Uint8Array, expectedVersion: string | null): Promise<void>;
+    /** `null` is create-only; a value replaces only the generation returned by `read`. A port that read the written
+     *  artifact back as part of the write may answer that read; core then verifies it instead of reading again. */
+    write(name: string, bytes: Uint8Array, expectedVersion: string | null): Promise<SyncEncryptionRemoteRead | void>;
     /** Only ever called on a plaintext original after its `.enc` counterpart has been
      *  written AND read back and verified — never on speculation. */
     remove(name: string, expectedVersion: string): Promise<void>;
@@ -515,12 +516,17 @@ const snapshotRemoteRead = (
     name: string,
 ): SyncEncryptionRemoteRead => snapshot.get(name) ?? { bytes: null, version: null };
 
-const verifyRemoteBytes = async (
+/** Writes `bytes` over the generation `expectedVersion` names and verifies the bytes read back: the port's own read-back
+ *  when its write answered one (File Sync reads the installed document before deleting the old copy), else a new read. */
+const writeVerifiedRemoteBytes = async (
     remote: SyncEncryptionRemotePort,
     name: string,
+    bytes: Uint8Array,
+    expectedVersion: string | null,
     verify: (bytes: Uint8Array) => Promise<void> | void,
 ): Promise<SyncEncryptionRemoteRead> => {
-    const written = await remote.read(name);
+    const answered = await remote.write(name, bytes, expectedVersion);
+    const written = answered ?? await remote.read(name);
     if (!written.bytes) throw new Error(`sync encryption transition: failed to read back ${name}`);
     if (!written.version) {
         throw new SyncEncryptionRemoteVersionUnavailableError(name);
@@ -900,8 +906,7 @@ export async function runEnableSyncEncryptionOverRemote(
             if (inspected.kind === 'plaintext') {
                 const sealed = await encryptSyncArtifact(bytes, material, prims);
                 await ensureTransitionJournal();
-                await remote.write(entry.name, sealed, version);
-                const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                const verified = await writeVerifiedRemoteBytes(remote, entry.name, sealed, version, async (verify) => {
                     const plain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
                     if (!bytesEqual(plain, bytes)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
@@ -913,8 +918,7 @@ export async function runEnableSyncEncryptionOverRemote(
                 const plain = await decryptRemoteArtifactOrThrow(bytes, oldMaterial.key, prims);
                 const sealed = await encryptSyncArtifact(plain, material, prims);
                 await ensureTransitionJournal();
-                await remote.write(entry.name, sealed, version);
-                const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                const verified = await writeVerifiedRemoteBytes(remote, entry.name, sealed, version, async (verify) => {
                     const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
                     if (!bytesEqual(verifiedPlain, plain)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
@@ -945,8 +949,7 @@ export async function runEnableSyncEncryptionOverRemote(
             const plain = await decryptRemoteArtifactOrThrow(current.bytes, oldMaterial.key, prims);
             const sealed = await encryptSyncArtifact(plain, material, prims);
             await ensureTransitionJournal();
-            await remote.write(entry.name, sealed, version);
-            const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
+            const verified = await writeVerifiedRemoteBytes(remote, entry.name, sealed, version, async (verify) => {
                 const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
                 if (!bytesEqual(verifiedPlain, plain)) {
                     throw new SyncEncryptionRemoteConflictError(
@@ -982,8 +985,7 @@ export async function runEnableSyncEncryptionOverRemote(
                     }
                 } else {
                     await ensureTransitionJournal();
-                    await remote.write(encName, sealed, null);
-                    const verified = await verifyRemoteBytes(remote, encName, async (verify) => {
+                    const verified = await writeVerifiedRemoteBytes(remote, encName, sealed, null, async (verify) => {
                         const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
                         if (!bytesEqual(verifiedPlain, bytes)) {
                             throw new SyncEncryptionRemoteConflictError(`${encName} changed during sync encryption enable verification`);
@@ -1076,8 +1078,7 @@ export async function runDisableSyncEncryptionOverRemote(
             if (inspected.kind === 'encrypted') {
                 const plain = plaintextByName.get(entry.name)!;
                 await ensureTransitionJournal();
-                await remote.write(entry.name, plain, version);
-                const verified = await verifyRemoteBytes(remote, entry.name, (verify) => {
+                const verified = await writeVerifiedRemoteBytes(remote, entry.name, plain, version, (verify) => {
                     if (!bytesMatchWithTrailingPadding(verify, plain)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption disable verification`);
                     }
@@ -1110,8 +1111,7 @@ export async function runDisableSyncEncryptionOverRemote(
                 }
             } else {
                 await ensureTransitionJournal();
-                await remote.write(plainName, plain, null);
-                const verified = await verifyRemoteBytes(remote, plainName, (verify) => {
+                const verified = await writeVerifiedRemoteBytes(remote, plainName, plain, null, (verify) => {
                     if (!bytesMatchWithTrailingPadding(verify, plain)) {
                         throw new SyncEncryptionRemoteConflictError(`${plainName} changed during sync encryption disable verification`);
                     }
@@ -1261,8 +1261,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         if (!plain) return; // absent or already migrated under this run's new material
         const sealed = await encryptSyncArtifact(plain, newMaterial, prims);
         await ensureTransitionJournal();
-        await remote.write(name, sealed, version);
-        const verified = await verifyRemoteBytes(remote, name, async (verify) => {
+        const verified = await writeVerifiedRemoteBytes(remote, name, sealed, version, async (verify) => {
             const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, newMaterial.key, prims);
             if (!bytesEqual(verifiedPlain, plain)) {
                 throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption passphrase verification`);

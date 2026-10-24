@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { FILE_SYNC_ABSENT_FINGERPRINT, createMobileFileSync, type MobileFileSyncFullHost } from './mobile-file-sync';
 import { fileSyncErrorCode } from './mobile-file-sync-remote';
 import { defaultSyncCryptoPrimitives } from './sync-crypto';
-import { compareSyncTransitionEntryNames, runEnableSyncEncryptionOverRemote, type SyncEncryptionLocalState } from './sync-encryption';
+import { compareSyncTransitionEntryNames, runDisableSyncEncryptionOverRemote, runEnableSyncEncryptionOverRemote, type SyncEncryptionLocalState } from './sync-encryption';
 import type { AppData } from './types';
 
 // File Sync's log contexts never carry the sync folder's path or a document URI: a provider's or the file system's error text
@@ -206,5 +206,98 @@ describe('File Sync encryption enable order', () => {
 
         expect(sealed).toEqual([...names].sort(compareSyncTransitionEntryNames));
         expect(sealed).toEqual(['10.txt', '9.txt', 'A.txt', 'B.txt', 'Z-z.txt', '_x.txt', 'a-1.txt', 'a.1.txt', 'b.txt']);
+    });
+});
+
+/** A SAF tree in memory that counts the provider calls: a listing costs one call and one row per child. */
+const safFolder = () => {
+    const root = `${SAF_TREE}/document/primary%3A${PRIVATE}`;
+    const docs = new Map<string, { parent: string; name: string; bytes: Uint8Array | null }>();
+    const calls = { list: 0, rows: 0, read: 0 };
+    const add = (parent: string, name: string, bytes: Uint8Array | null) => {
+        const uri = `${parent}%2F${encodeURIComponent(name)}`;
+        docs.set(uri, { parent, name, bytes });
+        return uri;
+    };
+    const row = (uri: string) => ({ uri, name: docs.get(uri)!.name, size: docs.get(uri)!.bytes?.length ?? null });
+    const port = {
+        listChildren: async (dir: string) => {
+            const children = [...docs].filter(([, doc]) => doc.parent === dir).map(([uri]) => row(uri));
+            calls.list += 1;
+            calls.rows += children.length;
+            return children;
+        },
+        stat: async (uri: string) => (docs.has(uri) ? row(uri) : null),
+        readBytes: async (uri: string) => {
+            calls.read += 1;
+            const doc = docs.get(uri);
+            if (!doc?.bytes) throw new Error('SAF_DOCUMENT_UNAVAILABLE');
+            return { bytes: doc.bytes, lengthVerified: true };
+        },
+        writeBytes: async (uri: string, bytes: Uint8Array) => { docs.get(uri)!.bytes = bytes; },
+        writeText: async () => undefined,
+        createFile: async (dir: string, name: string) => {
+            const taken = (candidate: string) => [...docs.values()].some((doc) => doc.parent === dir && doc.name === candidate);
+            let shown = name;
+            for (let n = 1; taken(shown); n += 1) shown = `${name} (${n})`;
+            return add(dir, shown, new Uint8Array(0));
+        },
+        delete: async (uri: string) => { docs.delete(uri); },
+        rename: async (uri: string, name: string) => {
+            const doc = docs.get(uri)!;
+            docs.delete(uri);
+            return { uri: add(doc.parent, name, doc.bytes), name };
+        },
+    };
+    return { root, docs, calls, port, add };
+};
+
+describe('File Sync encryption transition cost', () => {
+    // Each SAF listing reads the whole folder, and a provider call costs tens of milliseconds on a phone: Enable and Disable
+    // over hundreds of attachments took minutes on the S23. Each attachment may cost at most two listings (the exact-name
+    // checks before its old copy is moved aside and after its new copy is created) and five reads (the copy as it stands,
+    // the staged copy, the moved-aside copy twice and the installed copy), plus one read each in the inventory and the final check.
+    const run = async (count: number) => {
+        const folder = safFolder();
+        const encode = (text: string) => new TextEncoder().encode(text);
+        folder.add(folder.root, 'data.json', encode(JSON.stringify(data)));
+        const attachmentsDir = folder.add(folder.root, 'attachments', null);
+        for (let i = 0; i < count; i += 1) folder.add(attachmentsDir, `file-${i}.txt`, encode(`attachment ${i} `.repeat(20)));
+        const { host, logged } = fakeHost({ saf: folder.port as never, crypto: defaultSyncCryptoPrimitives });
+        const sync = createMobileFileSync(host);
+        let state: SyncEncryptionLocalState | null = null;
+        let key: Uint8Array | null = null;
+        const keyCache = { getKey: async () => key, setKey: async (next: Uint8Array) => { key = next; }, clearKey: async () => { key = null; } };
+        const localState = { read: () => state, write: (next: SyncEncryptionLocalState | null) => { state = next; } };
+        const cost = async (transition: () => Promise<unknown>) => {
+            const before = { ...folder.calls };
+            await transition();
+            return { list: folder.calls.list - before.list, read: folder.calls.read - before.read };
+        };
+        const open = async () => (await sync.createFileSyncEncryptionRemotePort(safChild('data.json')))!;
+        const enable = await cost(async () => runEnableSyncEncryptionOverRemote('correct horse', await open(), keyCache, localState,
+            undefined, defaultSyncCryptoPrimitives, { mKib: 8, t: 1, p: 1 }));
+        const sealed = [...folder.docs.values()].filter((doc) => doc.parent === attachmentsDir);
+        expect(sealed).toHaveLength(count);
+        expect(sealed.every((doc) => new TextDecoder().decode(doc.bytes!.subarray(0, 6)) === 'MWENC1')).toBe(true);
+        const disable = await cost(async () => runDisableSyncEncryptionOverRemote(await open(), keyCache, localState));
+        const opened = [...folder.docs.values()].filter((doc) => doc.parent === attachmentsDir);
+        expect(opened.map((doc) => new TextDecoder().decode(doc.bytes!)).sort())
+            .toEqual(Array.from({ length: count }, (_, i) => `attachment ${i} `.repeat(20)).sort());
+        expect(folder.docs.size).toBe(count + 2);
+        // The diagnostics line a tester's log shows once per transition (v1.3.8/file-sync-transition-cost).
+        const lines = logged.filter((entry) => entry.message === 'File Sync transition final check listed names only');
+        expect(lines.map((entry) => (entry.context as { extra: { entries: number; writes: number } }).extra))
+            .toMatchObject([{ entries: count + 10, writes: count + 1 }, { entries: count + 10, writes: count + 1 }]);
+        return { enable, disable };
+    };
+
+    it('costs each attachment at most two folder listings and seven reads, Enable and Disable alike', async () => {
+        const small = await run(10);
+        const large = await run(30);
+        for (const kind of ['enable', 'disable'] as const) {
+            expect((large[kind].list - small[kind].list) / 20, `${kind} listings per attachment`).toBeLessThanOrEqual(2);
+            expect((large[kind].read - small[kind].read) / 20, `${kind} reads per attachment`).toBeLessThanOrEqual(7);
+        }
     });
 });

@@ -593,7 +593,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
                 },
                 write: async (name, bytes, expectedVersion) => {
                     await assertHeld();
-                    await remote.write(name, bytes, expectedVersion);
+                    return remote.write(name, bytes, expectedVersion);
                 },
                 remove: async (name, expectedVersion) => {
                     await assertHeld();
@@ -704,7 +704,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
             },
             write: async (name, bytes, expectedVersion) => {
                 await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
-                await remote.write(name, bytes, expectedVersion);
+                return remote.write(name, bytes, expectedVersion);
             },
             remove: async (name, expectedVersion) => {
                 await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);

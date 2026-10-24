@@ -898,9 +898,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 host.crypto,
             )
             : new TextEncoder().encode(content);
-        await remote.write(name, payload, expectedVersion);
-
-        const written = await remote.read(name);
+        // The port's write answers its read-back of the installed document; a port that does not is read again.
+        const written = (await remote.write(name, payload, expectedVersion)) ?? await remote.read(name);
         if (!written.bytes) throw new Error('Sync file write verification failed: file is empty after write.');
         if (material) {
             const plaintext = await decryptRemoteArtifactOrThrow(

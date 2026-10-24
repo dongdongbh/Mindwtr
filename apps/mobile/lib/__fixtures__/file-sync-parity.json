@@ -64,18 +64,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-0",
@@ -84,10 +72,6 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ],
    [
     "saf.write",
@@ -124,20 +108,12 @@
     }
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.read",
     "content://provider/tree/root/document/root/data.json"
    ],
    [
     "saf.delete",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json"
    ]
   ]
  },
@@ -196,10 +172,6 @@
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0",
     "<text:188:c6e70b8417215ced>",
@@ -247,10 +219,6 @@
     }
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.read",
     "content://provider/tree/root/document/root/data.json"
    ],
@@ -265,10 +233,6 @@
    [
     "saf.delete",
     "content://provider/tree/root/document/root/.mindwtr-et-q-1"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json"
    ]
   ]
  },
@@ -350,18 +314,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-0",
@@ -369,14 +321,6 @@
    ],
    [
     "native.stat",
-    "content://provider/tree/root/document/root/.mindwtr-et-s-0"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.read",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
    ],
    [
@@ -406,10 +350,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc",
     "<text:280:60b277c39a238a26>",
@@ -418,20 +358,12 @@
     }
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.read",
     "content://provider/tree/root/document/root/data.json.enc"
    ],
    [
     "saf.delete",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
    ],
    [
     "native.listChildren",
@@ -484,10 +416,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc.bak"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc.bak",
     "<text:280:60b277c39a238a26>",
@@ -515,14 +443,6 @@
    ],
    [
     "native.stat",
-    "content://provider/tree/root/document/root/.mindwtr-et-s-1"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.read",
     "content://provider/tree/root/document/root/.mindwtr-et-s-1"
    ],
    [
@@ -565,20 +485,12 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc",
     "<text:280:0137285d97119365>",
     {
      "encoding": "base64"
     }
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ],
    [
     "native.read",
@@ -595,10 +507,6 @@
    [
     "saf.delete",
     "content://provider/tree/root/document/root/.mindwtr-et-q-2"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
    ]
   ]
  },
@@ -751,14 +659,6 @@
     "file://sync/.mindwtr-et-s-0"
    ],
    [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
     "file.write",
     "file://sync/.mindwtr-et-s-0",
     "<bytes:213:58760cafaea5cad0>"
@@ -784,21 +684,9 @@
     "file://sync/data.json.enc"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
     "file.write",
     "file://sync/data.json.enc",
     "<bytes:213:58760cafaea5cad0>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc"
    ],
    [
     "file.exists",
@@ -811,18 +699,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -876,98 +752,6 @@
    [
     "fs.list",
     "file://sync/"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
-   ],
-   [
-    "fs.list",
-    "file://sync/"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -1228,14 +1012,6 @@
     "file://sync/.mindwtr-et-s-0"
    ],
    [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
     "file.write",
     "file://sync/.mindwtr-et-s-0",
     "<bytes:213:d01b072d82f56d64>"
@@ -1278,21 +1054,9 @@
     "file://sync/data.json.enc"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
     "file.write",
     "file://sync/data.json.enc",
     "<bytes:213:d01b072d82f56d64>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc"
    ],
    [
     "file.exists",
@@ -1323,112 +1087,8 @@
     "token-2"
    ],
    [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-2"
-   ],
-   [
     "fs.list",
     "file://sync/"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
-   ],
-   [
-    "fs.list",
-    "file://sync/"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -1685,14 +1345,6 @@
     "file://sync/.mindwtr-et-s-0"
    ],
    [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
     "file.write",
     "file://sync/.mindwtr-et-s-0",
     "<bytes:143:07bd80adb3d8f96a>"
@@ -1718,21 +1370,9 @@
     "file://sync/data.json"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
     "file.write",
     "file://sync/data.json",
     "<bytes:143:07bd80adb3d8f96a>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -1745,18 +1385,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-2"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
    ],
    [
     "native.lock.revalidate",
@@ -1810,98 +1438,6 @@
    [
     "fs.list",
     "file://sync/"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
-   ],
-   [
-    "fs.list",
-    "file://sync/"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -2114,10 +1650,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.read",
     "content://provider/tree/root/document/root/data.json.enc"
    ]
@@ -2131,10 +1663,6 @@
    "content://provider/tree/root/document/root/data.json": "<bytes:150:133f6d4711551cba>"
   },
   "calls": [
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
    [
     "native.listChildren",
     "content://provider/tree/root/document/root"
@@ -2276,10 +1804,6 @@
    [
     "native.listChildren",
     "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ]
   ]
  },
@@ -2341,14 +1865,6 @@
     "file://sync/data.json.bak"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.bak"
-   ],
-   [
     "file.write",
     "file://sync/data.json.bak",
     "<bytes:143:ac3c159fae095caa>"
@@ -2380,14 +1896,6 @@
      "intermediates": true,
      "overwrite": false
     }
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-0"
    ],
    [
     "file.exists",
@@ -2436,21 +1944,9 @@
     "file://sync/data.json"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
     "file.write",
     "file://sync/data.json",
     "<bytes:140:57c413e97964162f>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -2475,14 +1971,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-q-1"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
    ],
    [
     "fs.list",
@@ -2538,14 +2026,6 @@
     "file://sync/data.json.bak"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.bak"
-   ],
-   [
     "file.write",
     "file://sync/data.json.bak",
     "<bytes:140:57c413e97964162f>"
@@ -2581,14 +2061,6 @@
      "intermediates": true,
      "overwrite": false
     }
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-3"
-   ],
-   [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-3"
    ],
    [
     "file.exists",
@@ -2637,21 +2109,9 @@
     "file://sync/data.json"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
     "file.write",
     "file://sync/data.json",
     "<bytes:140:a713b0ef50bdc204>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -2676,14 +2136,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-q-4"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
    ]
   ]
  },
@@ -2731,42 +2183,6 @@
    ],
    [
     "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
     "content://provider/tree/root/document/root/attachments"
    ],
    [
@@ -2784,42 +2200,6 @@
    [
     "native.read",
     "content://provider/tree/root/document/root/data.json"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ],
    [
     "native.lock.revalidate",
@@ -2841,14 +2221,6 @@
    ],
    [
     "native.stat",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-0"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
-   ],
-   [
-    "native.read",
     "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-0"
    ],
    [
@@ -2891,20 +2263,12 @@
     "content://provider/tree/root/document/root/attachments"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/attachments/a1.png"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/attachments/a1.png",
     "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp53DeyddMHZOdux1eKxcAAAAAAAAAD4uk3dTE65HlFOnCUDeTvCXhqqjTYpA=",
     {
      "encoding": "base64"
     }
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
    ],
    [
     "native.read",
@@ -2928,14 +2292,6 @@
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/attachments/a1.png"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "native.read",
     "content://provider/tree/root/document/root/attachments/a2.txt"
    ],
    [
@@ -2946,14 +2302,6 @@
    ],
    [
     "native.stat",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-2"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
-   ],
-   [
-    "native.read",
     "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-2"
    ],
    [
@@ -2996,20 +2344,12 @@
     "content://provider/tree/root/document/root/attachments"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/attachments/a2.txt"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/attachments/a2.txt",
     "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp5ywM1uiG9IX5NNKY6R4AAAAAAAAA7dIBNtP879U5WhRT6Ph+rZ4VldDffc7I8xhtGT1U",
     {
      "encoding": "base64"
     }
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
    ],
    [
     "native.read",
@@ -3032,18 +2372,6 @@
     "token-1"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/attachments/a2.txt"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-4",
@@ -3051,14 +2379,6 @@
    ],
    [
     "native.stat",
-    "content://provider/tree/root/document/root/.mindwtr-et-s-4"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.read",
     "content://provider/tree/root/document/root/.mindwtr-et-s-4"
    ],
    [
@@ -3088,10 +2408,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc",
     "<text:284:4f75a8e07d0e2f6b>",
@@ -3100,24 +2416,12 @@
     }
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.read",
     "content://provider/tree/root/document/root/data.json.enc"
    ],
    [
     "saf.delete",
     "content://provider/tree/root/document/root/.mindwtr-et-s-4"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -3162,123 +2466,19 @@
    ],
    [
     "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
     "content://provider/tree/root/document/root/attachments"
    ],
    [
-    "native.read",
-    "content://provider/tree/root/document/root/attachments/a1.png"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/attachments/a2.txt"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.read",
-    "content://provider/tree/root/document/root/data.json.enc"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
+    "native.lock.revalidate",
+    "token-1"
    ],
    [
     "native.lock.revalidate",
     "token-1"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.lock.revalidate",
     "token-1"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ],
    [
     "native.lock.revalidate",
@@ -3293,48 +2493,24 @@
     "token-1"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
+    "native.lock.revalidate",
+    "token-1"
    ],
    [
     "native.lock.revalidate",
     "token-1"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
+    "native.lock.revalidate",
+    "token-1"
    ],
    [
     "native.lock.revalidate",
     "token-1"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.lock.revalidate",
     "token-1"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ],
    [
     "native.lock.revalidate",
@@ -3544,14 +2720,6 @@
     "file://sync/attachments/.mindwtr-et-s-0"
    ],
    [
-    "file.bytes",
-    "file://sync/attachments/.mindwtr-et-s-0"
-   ],
-   [
-    "file.exists",
-    "file://sync/attachments/.mindwtr-et-s-0"
-   ],
-   [
     "file.write",
     "file://sync/attachments/.mindwtr-et-s-0",
     "<bytes:77:5ae4f5c2295479fc>"
@@ -3594,21 +2762,9 @@
     "file://sync/attachments/a1.png"
    ],
    [
-    "file.bytes",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "file.exists",
-    "file://sync/attachments/a1.png"
-   ],
-   [
     "file.write",
     "file://sync/attachments/a1.png",
     "<bytes:77:5ae4f5c2295479fc>"
-   ],
-   [
-    "fs.info",
-    "file://sync/attachments/a1.png"
    ],
    [
     "file.exists",
@@ -3639,18 +2795,6 @@
     "token-1"
    ],
    [
-    "file.exists",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "file.bytes",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
     "fs.info",
     "file://sync/data.json.enc"
    ],
@@ -3661,14 +2805,6 @@
      "intermediates": true,
      "overwrite": false
     }
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-2"
-   ],
-   [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-2"
    ],
    [
     "file.exists",
@@ -3700,21 +2836,9 @@
     "file://sync/data.json.enc"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
     "file.write",
     "file://sync/data.json.enc",
     "<bytes:213:9c81b4a5b65a2095>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc"
    ],
    [
     "file.exists",
@@ -3727,18 +2851,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-s-2"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-1"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -3794,108 +2906,8 @@
     "file://sync/"
    ],
    [
-    "fs.info",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
-   ],
-   [
     "fs.list",
     "file://sync/attachments/"
-   ],
-   [
-    "file.exists",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "file.bytes",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "fs.list",
-    "file://sync/"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -4174,14 +3186,6 @@
     "file://sync/attachments/.mindwtr-et-s-4"
    ],
    [
-    "file.bytes",
-    "file://sync/attachments/.mindwtr-et-s-4"
-   ],
-   [
-    "file.exists",
-    "file://sync/attachments/.mindwtr-et-s-4"
-   ],
-   [
     "file.write",
     "file://sync/attachments/.mindwtr-et-s-4",
     "<bytes:7:ec7d54fd847577c2>"
@@ -4224,21 +3228,9 @@
     "file://sync/attachments/a1.png"
    ],
    [
-    "file.bytes",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "file.exists",
-    "file://sync/attachments/a1.png"
-   ],
-   [
     "file.write",
     "file://sync/attachments/a1.png",
     "<bytes:7:ec7d54fd847577c2>"
-   ],
-   [
-    "fs.info",
-    "file://sync/attachments/a1.png"
    ],
    [
     "file.exists",
@@ -4269,18 +3261,6 @@
     "token-2"
    ],
    [
-    "file.exists",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "file.bytes",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-2"
-   ],
-   [
     "fs.info",
     "file://sync/data.json"
    ],
@@ -4291,14 +3271,6 @@
      "intermediates": true,
      "overwrite": false
     }
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-6"
-   ],
-   [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-6"
    ],
    [
     "file.exists",
@@ -4330,21 +3302,9 @@
     "file://sync/data.json"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
     "file.write",
     "file://sync/data.json",
     "<bytes:143:07bd80adb3d8f96a>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -4357,18 +3317,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-s-6"
-   ],
-   [
-    "native.lock.revalidate",
-    "token-2"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
    ],
    [
     "native.lock.revalidate",
@@ -4424,108 +3372,8 @@
     "file://sync/"
    ],
    [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
-   ],
-   [
     "fs.list",
     "file://sync/attachments/"
-   ],
-   [
-    "file.exists",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "file.bytes",
-    "file://sync/attachments/a1.png"
-   ],
-   [
-    "fs.list",
-    "file://sync/"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.bak.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.enc.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json.previous"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json"
-   ],
-   [
-    "fs.info",
-    "file://sync/mindwtr-sync.json.enc"
    ],
    [
     "native.lock.revalidate",
@@ -4833,10 +3681,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "native.read",
     "content://provider/tree/root/document/root/data.json.enc"
    ]
@@ -4939,10 +3783,6 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ],
    [
     "saf.write",
@@ -5058,10 +3898,6 @@
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0",
     "<text:188:c6e70b8417215ced>",
@@ -5172,18 +4008,6 @@
     "content://provider/tree/root/document/root"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
-   ],
-   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-0",
@@ -5192,10 +4016,6 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root"
    ],
    [
     "saf.write",
@@ -5289,14 +4109,6 @@
     "file://sync/data.json.bak"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.bak"
-   ],
-   [
     "file.write",
     "file://sync/data.json.bak",
     "<bytes:143:ac3c159fae095caa>"
@@ -5328,14 +4140,6 @@
      "intermediates": true,
      "overwrite": false
     }
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-0"
    ],
    [
     "file.exists",
@@ -5737,14 +4541,6 @@
     "file://sync/data.json.bak"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.bak"
-   ],
-   [
     "file.write",
     "file://sync/data.json.bak",
     "<bytes:143:ac3c159fae095caa>"
@@ -5776,14 +4572,6 @@
      "intermediates": true,
      "overwrite": false
     }
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-0"
-   ],
-   [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-0"
    ],
    [
     "file.exists",
@@ -5832,21 +4620,9 @@
     "file://sync/data.json"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
     "file.write",
     "file://sync/data.json",
     "<bytes:140:57c413e97964162f>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -5871,14 +4647,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-q-1"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
    ],
    [
     "fs.list",
@@ -5934,14 +4702,6 @@
     "file://sync/data.json.bak"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json.bak"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json.bak"
-   ],
-   [
     "file.write",
     "file://sync/data.json.bak",
     "<bytes:140:57c413e97964162f>"
@@ -5977,14 +4737,6 @@
      "intermediates": true,
      "overwrite": false
     }
-   ],
-   [
-    "file.exists",
-    "file://sync/.mindwtr-et-s-3"
-   ],
-   [
-    "file.bytes",
-    "file://sync/.mindwtr-et-s-3"
    ],
    [
     "file.exists",
@@ -6033,21 +4785,9 @@
     "file://sync/data.json"
    ],
    [
-    "file.bytes",
-    "file://sync/data.json"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
     "file.write",
     "file://sync/data.json",
     "<bytes:140:a713b0ef50bdc204>"
-   ],
-   [
-    "fs.info",
-    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -6072,14 +4812,6 @@
    [
     "fs.delete",
     "file://sync/.mindwtr-et-q-4"
-   ],
-   [
-    "file.exists",
-    "file://sync/data.json"
-   ],
-   [
-    "file.bytes",
-    "file://sync/data.json"
    ]
   ]
  }

@@ -289,8 +289,10 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         resolve(name: string, options: { createIfMissing: boolean; mimeType?: string }): Promise<string | null>;
         listExact(name: string): Promise<string[]>;
         /** `repairDecoratedName: false` refuses a provider-decorated create instead of renaming it
-         *  onto `name` (a rename that may replace a document a peer just published there). */
-        createNew(name: string, mimeType?: string, options?: { repairDecoratedName?: boolean }): Promise<string>;
+         *  onto `name` (a rename that may replace a document a peer just published there). `scratch`
+         *  skips the closing listing that proves no peer holds `name` too: a transition scratch name
+         *  is random, and the provider's own report of the created name still has to match. */
+        createNew(name: string, mimeType?: string, options?: { repairDecoratedName?: boolean; scratch?: boolean }): Promise<string>;
         rename(uri: string, name: string): Promise<string>;
     };
 
@@ -399,6 +401,10 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 }
                 if (!created) {
                     throw new SyncEncryptionRemoteConflictError(`${name} was created or renamed by another writer`);
+                }
+                if (options.scratch) {
+                    entries.set(name, created);
+                    return created;
                 }
                 const matches = await listExact(name);
                 if (matches.length !== 1 || matches[0] !== created) {
@@ -680,6 +686,8 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         syncFileUri: string,
         testHooks: FileSyncTransitionTestHooks = {},
     ): Promise<FileSyncRemotePort | null> => {
+        const openedAt = Date.now();
+        let writes = 0;
         const target = await resolveFileSyncEncryptionTarget(syncFileUri);
         if (!target) return null;
 
@@ -703,7 +711,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             }
         };
 
-        const locate = async (name: string, createIfMissing: boolean): Promise<string | null> => {
+        const locate = async (name: string): Promise<string | null> => {
             const recovery = desktopRecoveryLocations.get(name);
             if (recovery) return recovery.directory.resolve(recovery.leaf, { createIfMissing: false });
             if (name.startsWith(ATTACHMENT_PREFIX)) {
@@ -711,10 +719,12 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 // identity-keyed and immutable), so a missing one is never created here.
                 return attachments ? attachments.resolve(name.slice(ATTACHMENT_PREFIX.length), { createIfMissing: false }) : null;
             }
-            return documents.resolve(name, {
-                createIfMissing,
-                mimeType: name.endsWith('.json') ? 'application/json' : DEFAULT_ARTIFACT_MIME,
-            });
+            // On SAF the sync root's last listing answers: every inventory and the final check list it first, and this
+            // port's own creates, renames and deletes keep it current. A name absent from it is absent, with no listing per
+            // name (most of FIXED_SYNC_DOCUMENT_NAMES are absent in every folder); a peer's create meanwhile still fails each
+            // write's exact-name check and changes the final check's listing. A path folder looks a name up for free.
+            if (isSaf(target.dirUri)) return documents.entries.get(name) ?? null;
+            return documents.resolve(name, { createIfMissing: false });
         };
 
         const locationFor = (name: string): ArtifactLocation | null => {
@@ -742,7 +752,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         };
 
         const read = async (name: string) => {
-            const uri = await locate(name, false);
+            const uri = await locate(name);
             if (!uri) return { bytes: null, version: null };
             const bytes = await readSyncArtifactBytes(uri);
             if (!bytes) throw new Error(`sync encryption: failed to read existing artifact ${name}`);
@@ -850,7 +860,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             // authoritative bytes in quarantine for recovery.
             try {
                 const restoredUri = await location.directory.createNew(location.leaf, location.mimeType);
-                await writeSyncArtifactBytes(restoredUri, displaced);
+                await writeArtifactPayload(restoredUri, displaced);
                 const canonical = await location.directory.listExact(location.leaf);
                 const restored = await readSyncArtifactBytes(restoredUri);
                 if (
@@ -881,7 +891,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             // provider's rename may replace a backup a peer published meanwhile). createNew fails
             // closed when that name is taken; the old backup then stays in its quarantine.
             const installedUri = await documents.createNew(name, mimeType, { repairDecoratedName: false });
-            await writeSyncArtifactBytes(installedUri, bytes);
+            await writeArtifactPayload(installedUri, bytes);
             const installed = await documents.listExact(name);
             const written = await readSyncArtifactBytes(installedUri);
             if (
@@ -900,10 +910,21 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
 
         return {
             rotateBackup,
-            list: async (): Promise<SyncEncryptionRemoteEntry[]> => (await captureInventory()).entries,
+            // Names only: core's final check reads every listed entry itself, so the inventory's reads would be a second copy.
+            list: async (): Promise<SyncEncryptionRemoteEntry[]> => {
+                await documents.refresh();
+                const listed = [...documentEntries(), ...await nonDocumentEntries()];
+                // A transition's final check is this port's only list call: the time since the port opened is the transition's.
+                host.log.info('File Sync transition final check listed names only', {
+                    scope: 'sync',
+                    extra: { releaseCheck: 'v1.3.8/file-sync-transition-cost', entries: listed.length, writes, elapsedMs: Date.now() - openedAt },
+                });
+                return listed;
+            },
             captureInventory,
             read,
             write: async (name, bytes, expectedVersion) => {
+                writes += 1;
                 const current = await read(name);
                 if (current.version !== expectedVersion) {
                     throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
@@ -911,8 +932,8 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 const location = locationFor(name);
                 if (!location) throw new Error(`sync encryption: cannot create ${name} in the sync folder`);
                 const stageName = transitionScratchName('stage');
-                const stageUri = await location.directory.createNew(stageName, location.mimeType);
-                await writeSyncArtifactBytes(stageUri, bytes);
+                const stageUri = await location.directory.createNew(stageName, location.mimeType, { scratch: true });
+                await writeArtifactPayload(stageUri, bytes);
                 const stagedBytes = await readSyncArtifactBytes(stageUri);
                 if (!stagedBytes || await versionFor(stagedBytes) !== await versionFor(bytes)) {
                     throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after transition staging`);
@@ -940,14 +961,13 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 // may alter rename names to resolve collisions and filesystem rename commonly
                 // replaces an existing target. createNew verifies the exact canonical name and
                 // therefore fails closed when a peer creates it after quarantine/staging.
+                // createNew's closing listing proved the canonical name is this one new document; the
+                // write into it changes no name, so a second listing would repeat that proof.
                 const installedUri = await location.directory.createNew(location.leaf, location.mimeType);
-                await writeSyncArtifactBytes(installedUri, stagedBytes);
-                const canonical = await location.directory.listExact(location.leaf);
-                if (canonical.length !== 1 || canonical[0] !== installedUri) {
-                    throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
-                }
+                await writeArtifactPayload(installedUri, stagedBytes);
                 const written = await readSyncArtifactBytes(installedUri);
-                if (!written || await versionFor(written) !== await versionFor(bytes)) {
+                const writtenVersion = written ? await versionFor(written) : null;
+                if (!written || writtenVersion !== await versionFor(bytes)) {
                     throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after transition write`);
                 }
                 if (quarantineUri) {
@@ -962,6 +982,8 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                     await deleteSyncArtifact(quarantineUri);
                     location.directory.entries.delete(quarantineName);
                 }
+                // Core verifies these read-back bytes instead of reading the document once more.
+                return { bytes: written, version: writtenVersion };
             },
             remove: async (name, expectedVersion) => {
                 const current = await read(name);
