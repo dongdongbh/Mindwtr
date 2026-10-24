@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -261,8 +262,8 @@ internal fun pomodoroClock(totalSeconds: Long): String {
 /** Core's remaining seconds from the phase's end (pomodoro-session.ts getRemainingSecondsFromPhaseEnd): rounded up, 0 once ended. */
 internal fun pomodoroRemaining(endsAtMs: Long, nowMs: Long): Long = if (endsAtMs <= nowMs) 0 else maxOf(1L, (endsAtMs - nowMs + 999) / 1000)
 
-/** The shown panel while the Pomodoro feature is on and core's session is ready, else null (the card draws nothing). */
-internal fun JSONObject?.pomodoroShown(): JSONObject? = this?.takeIf { it.optBoolean("visible") && it.optString("kind") == "ready" }
+/** The shown panel while the Pomodoro feature is on, else null (the card draws nothing). Before the adoption core's panel is the default timer. */
+internal fun JSONObject?.pomodoroShown(): JSONObject? = this?.takeIf { it.optBoolean("visible") && it.optString("kind") in setOf("ready", "uninitialized") }
 
 /**
  * RN's card (components/pomodoro-panel.tsx) on core's panel: the folded time row or the full card. While the timer runs and the
@@ -294,14 +295,18 @@ fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
     val c = LocalTheme.current.colors
     val theme = LocalTheme.current
     val text = shown.getJSONObject("text")
-    val enabled = model.menu.idle
+    // RN's card while its session loads: the default timer with its controls off (presets at 0.6, Start at 0.5) and a Loading row.
+    val loading = shown.getString("kind") == "uninitialized"
+    val enabled = model.menu.idle && !loading
     val phaseColor = if (shown.getString("phase") == "focus") c.tint else c.success
     val shape = RoundedCornerShape(14.dp)
     val collapsed = shown.getBoolean("collapsed")
     @Composable fun Fold() {
         val label = text.getString("collapse")
-        Box(Modifier.clearAndSetSemantics { testTag = "pomodoro-fold"; contentDescription = label; role = Role.Button; if (enabled) onClick { toggleCollapsed(); true } else disabled() }
-            .clickable(enabled = enabled) { toggleCollapsed() }.padding(horizontal = 6.dp, vertical = 2.dp)) {
+        // RN's fold stays on while the session loads.
+        val foldable = model.menu.idle
+        Box(Modifier.clearAndSetSemantics { testTag = "pomodoro-fold"; contentDescription = label; role = Role.Button; if (foldable) onClick { toggleCollapsed(); true } else disabled() }
+            .clickable(enabled = foldable) { toggleCollapsed() }.padding(horizontal = 6.dp, vertical = 2.dp)) {
             Icon(if (collapsed) Lucide.ChevronDownPlain else Lucide.ChevronUp, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         }
     }
@@ -323,7 +328,11 @@ fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
             Text(text.getString("phase").uppercase(), style = cardText(11, 700), color = phaseColor, modifier = Modifier.padding(top = 2.dp))
             Fold()
         }
-        Presets(shown, enabled)
+        if (loading) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(20.dp), color = c.tint, strokeWidth = 2.dp)
+            Text(text.getString("loading"), style = cardText(12, 500), color = c.secondaryText)
+        }
+        Box(Modifier.fade(if (loading) 0.6f else 1f)) { Presets(shown, enabled) }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(clock, style = cardText(36, 800, letterSpacing = 1f).copy(fontFeatureSettings = "tnum"), color = c.text,
                 modifier = Modifier.testTag("pomodoro-clock"))
@@ -332,7 +341,9 @@ fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
         if (shown.optBoolean("linkTaskEnabled")) LinkRow(shown, text, enabled)
         @OptIn(ExperimentalLayoutApi::class)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            CardButton(text.getString("toggle"), enabled, theme.filledBg, theme.filledBg, theme.filledText, 14, "pomodoro-primary") { act("toggle") }
+            Box(Modifier.fade(if (loading) 0.5f else 1f)) {
+                CardButton(text.getString("toggle"), enabled, theme.filledBg, theme.filledBg, theme.filledText, 14, "pomodoro-primary") { act("toggle") }
+            }
             CardButton(text.getString("reset"), enabled, c.filterBg, c.border, c.secondaryText, 12, "pomodoro-reset") { act("reset") }
             CardButton(text.getString("switchPhase"), enabled, c.filterBg, c.border, c.secondaryText, 12, "pomodoro-switch") { act("switchPhase") }
         }

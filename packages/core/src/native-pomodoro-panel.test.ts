@@ -42,6 +42,10 @@ describe('native Pomodoro presentation using RN timer helpers', () => {
     it('distinguishes hidden, absent and malformed storage without inventing a timer', () => {
         expect(panel(null, { settings: {} })).toMatchObject({ kind: 'uninitialized', visible: false });
         expect(panel(null)).toMatchObject({ kind: 'uninitialized', visible: true });
+        // RN's card while its session loads: the default timer with its controls off and a Loading row, no session of its own.
+        expect(panel(null)).toMatchObject({ sessionID: null, generation: null, clock: '25:00', phase: 'focus', isRunning: false,
+            needsReconcile: false, selectionMissing: false, selectedTask: null, completedToday: 0,
+            text: { loading: 'Loading...', toggle: 'Start', state: 'Paused' } });
         for (const raw of ['{}', 'null', '{', JSON.stringify({ ...initial(), generation: -1 })])
             expect(() => panel(raw)).toThrow();
         for (const nowMs of [NaN, Infinity, 1.5, 8_640_000_000_000_001])

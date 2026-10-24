@@ -1,7 +1,7 @@
 import { tFallback } from './i18n';
 import { decodeNativePomodoroSession } from './native-pomodoro-session';
 import { taskRevisionOf } from './native-request-receipts';
-import { formatPomodoroClock, getPomodoroFocusSessionsCompletedToday, getPomodoroLocalDayKey,
+import { createPomodoroState, DEFAULT_POMODORO_DURATIONS, formatPomodoroClock, getPomodoroFocusSessionsCompletedToday, getPomodoroLocalDayKey,
     getPomodoroPresetOptions, type PomodoroEvent } from './pomodoro';
 import { resolvePomodoroSession } from './pomodoro-session';
 import { resolveFeatureFlags } from './resolve-feature-flags';
@@ -26,7 +26,7 @@ export function readNativePomodoroPresentation(value: unknown): { collapsed: boo
     return { collapsed: input.collapsed, lastEvent: { sessionID: event.sessionID, generation: event.generation, value: event.value } };
 }
 
-export function buildNativePomodoroPanel(input: {
+function buildPanel(input: {
     raw: string | null;
     settings: AppSettings;
     liveTasks: readonly Task[];
@@ -98,4 +98,18 @@ export function buildNativePomodoroPanel(input: {
             noTask: tr('pomodoro.noTask', 'No available focus task'),
         },
     };
+}
+
+export function buildNativePomodoroPanel(input: Parameters<typeof buildPanel>[0]) {
+    const panel = buildPanel(input);
+    if (panel.kind === 'ready') return panel;
+    // RN's card while its session loads (pomodoro-panel.tsx isHydrating): the default timer, its controls off, a Loading row.
+    const defaults = buildPanel({ ...input, lastEvent: null, raw: JSON.stringify({ version: 1,
+        sessionID: '00000000-0000-4000-8000-000000000000', generation: 0, session: { durations: DEFAULT_POMODORO_DURATIONS,
+            timerState: createPomodoroState(DEFAULT_POMODORO_DURATIONS), sessionHistory: { totalCompletedFocusSessions: 0,
+                completedFocusSessionsByTaskId: {}, todayDayKey: getPomodoroLocalDayKey(input.nowMs), completedTodayFocusSessions: 0 },
+            updatedAtMs: 0 } }) });
+    if (defaults.kind !== 'ready') throw new Error('Invalid Pomodoro presentation');
+    return { ...defaults, kind: 'uninitialized' as const, sessionID: null, generation: null,
+        text: { ...defaults.text, loading: tFallback(input.t, 'common.loading', 'Loading...') } };
 }
