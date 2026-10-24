@@ -224,6 +224,17 @@ describe('native host contract: startup prompts', () => {
         expect((await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, preview: 'other' })).ok).toBe(false);
     });
 
+    it('retires a previewed prompt, so the welcome sheet\'s handoff in a preview does not reopen it; FOSS answers RN\'s toast', async () => {
+        const contract = await openContract(device());
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        expect((await begin(contract, { preview: 'onboarding' }))?.id).toBe('onboarding');
+        expect(await begin(contract, {})).toBeNull();
+        vi.useRealTimers();
+        const foss = await openContract(device({ foss: true }));
+        expect(value(await foss.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, preview: 'update-reminder' })))
+            .toEqual({ prompt: null, notice: 'Updates are managed by this build channel.' });
+    });
+
     it('refuses malformed input', async () => {
         const contract = await openContract(device());
         expect((await contract.beginStartupPrompts({ installerSource: 'market', donationEnabled: false })).ok).toBe(false);

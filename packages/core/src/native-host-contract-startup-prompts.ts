@@ -108,7 +108,7 @@ export function createStartupPromptMethods(deps: Deps) {
          * a prompt this process already opened, declined or failed is never tried again. The first ask records today's activity
          * first, as RN does at first paint, so the donation and update rules count this launch.
          */
-        async beginStartupPrompts(input: unknown): Promise<NativeHostResult<{ prompt: NativeStartupPrompt | null }>> {
+        async beginStartupPrompts(input: unknown): Promise<NativeHostResult<{ prompt: NativeStartupPrompt | null; notice?: string }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const host = deps.host();
@@ -124,10 +124,15 @@ export function createStartupPromptMethods(deps: Deps) {
                 if (typeof input.preview !== 'string' || !PROMPT_IDS.has(input.preview)) return fail('INVALID_INPUT', 'preview takes a prompt id');
                 // RN's update test target (getMobileUpdateTestTarget): none on FOSS, the Play listing for a Play install, the release
                 // page otherwise, and "View release" when the installer is unknown.
+                // A previewed prompt is retired, as RN's hook retires a test prompt it closes: Sync or Import from a previewed
+                // welcome sheet does not reopen it.
+                retired.add(input.preview);
                 const source = input.installerSource;
                 const target = host.app.isFossBuild ? null
                     : source === 'play-store' ? { label: UPDATE_NOW_ACTION_LABEL, url: `https://play.google.com/store/apps/details?id=${host.app.packageName}` }
                         : { label: source === 'sideload' ? UPDATE_NOW_ACTION_LABEL : VIEW_RELEASE_ACTION_LABEL, url: UPDATE_REMINDER_RELEASES_URL };
+                // RN's test toast when this build gets its updates from its store (FOSS).
+                if (input.preview === 'update-reminder' && !target) return { ok: true, value: { prompt: null, notice: 'Updates are managed by this build channel.' } };
                 return { ok: true, value: { prompt: view(input.preview as NativeStartupPromptId, target && {
                     currentVersion: host.app.version, latestVersion: '99.99.99', latestReleasedAt: new Date().toISOString(),
                     releaseUrl: target.url, actionLabel: target.label, testOnly: true,

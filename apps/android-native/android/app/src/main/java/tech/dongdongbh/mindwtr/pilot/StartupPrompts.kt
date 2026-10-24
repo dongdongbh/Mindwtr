@@ -82,6 +82,8 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
      */
     private val preview = if (BuildConfig.DEBUG) debugProperty("startup_prompt") else ""
     private var previewing = false
+    /** Core's line when a preview has no window (RN's toast for an update preview on a FOSS build). */
+    @Volatile private var previewNotice: String? = null
     /** The donation window whose showing was recorded (RN's onShown runs once per showing; a rotation redraws it). */
     private var recordedShowing: JSONObject? = null
 
@@ -108,9 +110,10 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
                 val input = JSONObject().put("installerSource", shell.menu.settings.about.installerSource(host))
                     .put("donationEnabled", BuildConfig.DONATION_PROMPT)
                 previewId?.let { input.put("preview", it) }
-                host.aboutRequest("beginStartupPrompts", input.toString()).optJSONObject("prompt")
+                host.aboutRequest("beginStartupPrompts", input.toString()).also { previewNotice = it.optString("notice").ifEmpty { null } }.optJSONObject("prompt")
             }.onSuccess { next ->
                 shell.ui { previewing = previewId != null && next != null; prompt = next; seedError = null }
+                if (next == null && previewId != null) previewNotice?.let { notice -> shell.ui { shell.showToast(null, notice, "info") } }
             }.onFailure { Log.w(CoreHost.TAG, "Startup prompts not read ${failureForLog(it)}") }
         }
     }
@@ -238,10 +241,11 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
     LaunchedEffect(open) { prompts.shown(open) }
     val dismiss = { prompts.close("dismiss") }
     FullScreenDialog(dismiss) {
-        Box(Modifier.fillMaxSize().background(theme.announcementScrim).clickable(role = Role.Button, onClick = dismiss)
-            // TalkBack names the backdrop by the window's title, as ThemedAlert does (RN leaves it unnamed).
-            .semantics { contentDescription = announcement.getString("title") }.systemBarsPadding().padding(18.dp),
-            contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // The backdrop is the card's sibling, so its tap target never merges the card's text (TalkBack names it by the title).
+            Box(Modifier.matchParentSize().background(theme.announcementScrim).clickable(role = Role.Button, onClick = dismiss)
+                .semantics { contentDescription = announcement.getString("title") })
+            Box(Modifier.systemBarsPadding().padding(18.dp), contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(12.dp)
             val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
             Column(Modifier.widthIn(max = 460.dp).fillMaxWidth().heightIn(max = maxHeight).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
@@ -276,6 +280,7 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
                         }
                     }
                 }
+            }
             }
         }
     }

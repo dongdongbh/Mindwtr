@@ -6,9 +6,9 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
- * A host method's reply as CoreHost reads it. Core answers some methods with no value (recordAboutPromptActivity,
- * closeSyncSettings): reading that as a JSON object threw JSONException after the method had done its work, so every start
- * logged "Prompt activity not recorded" and every Sync screen close "Sync screen close failed".
+ * A host method's reply as CoreHost reads it. Core answers some methods with no value (closeSyncSettings; before O2f also the
+ * prompt activity request): reading that as a JSON object threw JSONException after the method had done its work, so every
+ * start logged "Prompt activity not recorded" and every Sync screen close "Sync screen close failed".
  */
 class CoreHostReplyTest {
     @Test fun aReplyWithNoValueIsAnEmptyObject() {
