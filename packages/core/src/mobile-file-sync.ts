@@ -212,17 +212,17 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
      * When macOS/iOS evicts a file, the real file disappears and a hidden
      * `.filename.icloud` placeholder appears instead.
      */
-    const isICloudEvicted = (fileUri: string): boolean => {
+    const isICloudEvicted = async (fileUri: string): Promise<boolean> => {
         if (host.os() !== 'ios') return false;
         if (!fileUri.startsWith('file://')) return false;
         try {
-            if (host.path.exists(fileUri)) return false; // Real file is present
+            if (await host.path.exists(fileUri)) return false; // Real file is present
             // Check for .Name.icloud placeholder
             const parts = fileUri.split('/');
             const name = parts.pop() ?? '';
             const parentUri = parts.join('/');
             const placeholderUri = `${parentUri}/.${name}.icloud`;
-            return host.path.exists(placeholderUri);
+            return await host.path.exists(placeholderUri);
         } catch {
             return false;
         }
@@ -619,7 +619,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             }
 
             // Detect iCloud Optimize Storage eviction before attempting reads.
-            if (isICloudEvicted(resolvedUri)) {
+            if (await isICloudEvicted(resolvedUri)) {
                 host.log.warn(ICLOUD_EVICTED_MESSAGE, { scope: 'sync' });
                 // Try the backup file before giving up.
                 const backupUri = resolvedUri.replace(/\/[^/]+$/, '/' + BACKUP_FILE_NAME);

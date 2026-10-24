@@ -943,6 +943,51 @@ describe('mobile sync service behind fake ports', () => {
     expect(fence.release).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['completed', 'rejected'])('holds the File Sync lease and idle waiters through an aborted %s provider write', async (outcome) => {
+    const fake = createFakeHost();
+    const events: string[] = [];
+    let entered!: () => void;
+    const reached = new Promise<void>((resolve) => { entered = resolve; });
+    let complete!: () => void;
+    let reject!: (reason: unknown) => void;
+    const gate = new Promise<void>((resolve, fail) => { complete = resolve; reject = fail; });
+    fake.host.fileSync.write = async () => {
+      events.push('write-enter');
+      entered();
+      try { await gate; } finally { events.push('write-settled'); }
+    };
+    const release = vi.spyOn(fake.host.fileSync, 'releaseLease').mockImplementation(async () => { events.push('lease-release'); });
+    const service = createMobileSyncService({ ...fake.host, allowQueuedFollowUp: false });
+    const active = service.performMobileSync(undefined, {
+      manual: true, configOverride: { backend: 'file', syncPath: 'file:///sync/data.json' },
+    });
+    let activeSettled = false;
+    void active.then(() => { activeSettled = true; }, () => { activeSettled = true; });
+    await reached;
+    const idle = service.waitForMobileSyncIdle();
+    let idleSettled = false;
+    void idle.then(() => { idleSettled = true; }, () => { idleSettled = true; });
+    try {
+      expect(service.abortMobileSync()).toBe(true);
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+      expect(activeSettled).toBe(false);
+      expect(idleSettled).toBe(false);
+      expect(release).not.toHaveBeenCalled();
+      expect(events).toEqual(['write-enter']);
+      if (outcome === 'rejected') reject(new Error('Provider write unavailable'));
+      else complete();
+      await Promise.allSettled([active, idle]);
+      expect(activeSettled).toBe(true);
+      expect(idleSettled).toBe(true);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(events).toEqual(['write-enter', 'write-settled', 'lease-release']);
+    } finally {
+      complete();
+      await Promise.allSettled([active, idle]);
+      service.__mobileSyncTestUtils.reset();
+    }
+  });
+
   it('withholds an acquired File Sync lease after fatal cleanup and preserves earlier merge writes', async () => {
     const fake = createFakeHost();
     const fatal = new NativeAttachmentCleanupUnconfirmedError();

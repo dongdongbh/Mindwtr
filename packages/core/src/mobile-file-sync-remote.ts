@@ -77,7 +77,7 @@ export type MobileFileSyncSafPort = {
 
 /** Plain `file://` folders (iOS; React Native's expo-file-system ladders). */
 export type MobileFileSyncPathPort = {
-    exists(uri: string): boolean;
+    exists(uri: string): boolean | Promise<boolean>;
     info(uri: string): Promise<{ exists?: boolean; size?: number }>;
     /** The file's names in a folder. */
     list(dirUri: string): Promise<string[]>;
@@ -90,10 +90,10 @@ export type MobileFileSyncPathPort = {
     /** Creates the file only if it does not exist: 'exists' when another writer made it first. */
     createExclusive(uri: string): Promise<'created' | 'exists'>;
     /** Writes into the file createExclusive just made. */
-    writeCreated(uri: string, bytes: Uint8Array): void;
+    writeCreated(uri: string, bytes: Uint8Array): void | Promise<void>;
     delete(uri: string): Promise<void>;
     /** Renames the file within its folder and answers its new URI; throws when the name is taken. */
-    rename(uri: string, name: string): string;
+    rename(uri: string, name: string): string | Promise<string>;
 };
 
 export type MobileFileSyncLog = {
@@ -231,7 +231,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             if (await host.path.createExclusive(uri) === 'exists') {
                 throw new SyncEncryptionRemoteConflictError(`${uri} was created by another writer`);
             }
-            host.path.writeCreated(uri, bytes);
+            await host.path.writeCreated(uri, bytes);
             return;
         }
         const isSealed = inspectSyncArtifact(bytes).kind === 'encrypted';
@@ -477,7 +477,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 const previousName = getLeafName(uri);
                 let renamedUri: string;
                 try {
-                    renamedUri = host.path.rename(uri, name);
+                    renamedUri = await host.path.rename(uri, name);
                 } catch (error) {
                     if ((await listExact(name)).length > 0) {
                         throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
@@ -486,6 +486,10 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 }
                 entries.delete(previousName);
                 entries.set(name, renamedUri);
+                host.log.info('File Sync path rename completed', {
+                    scope: 'sync',
+                    extra: { releaseCheck: 'v1.3.8/file-sync-path-await', operation: 'rename', outcome: 'completed' },
+                });
                 return renamedUri;
             },
         };
