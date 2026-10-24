@@ -189,8 +189,13 @@ const openSettings = async (labels, row, screenId) => {
 const pickWeekStart = async (labels, label) => {
     const week = `${labels.general.weekStart.label}: `;
     const regional = `${labels.general.regional.label}: `;
-    // A read during the picker's closing animation shows neither row (run 48), so wait for one.
-    let nodes = await waitFor('the Regional formats rows', (current) => Boolean(withPrefix(current, week) || withPrefix(current, regional)), 10_000);
+    // A read during the picker's closing animation shows neither row (run 48), so let the screen settle first. Since General
+    // gained rows (O2d's Expose to system search), the rows can sit below the fold on a fresh visit: scroll down to them.
+    let nodes = await device.settle();
+    if (!withPrefix(nodes, week) && !withPrefix(nodes, regional)) {
+        await device.revealNode((current) => withPrefix(current, week) ?? withPrefix(current, regional), 'the Regional formats rows', false);
+        nodes = await screen();
+    }
     const weekRow = () => withPrefix(nodes, week);
     if (!weekRow()) nodes = await tapExpecting(withPrefix(nodes, regional), (current) => Boolean(withPrefix(current, week)), 'Regional formats open');
     // The opened rows can end at the screen's bottom edge, where a tap meets the gesture bar: move them up first.
