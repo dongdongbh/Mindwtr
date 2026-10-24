@@ -502,19 +502,20 @@ describe('mobile attachment availability', () => {
     expect(webdavGetFile).toHaveBeenCalledTimes(1);
   });
 
-  it('never asks for a row the user kept without its file, in any location', async () => {
+  it('still asks for a row the user kept without its file, and takes its not-found as no news', async () => {
     const { availability, webdavGetFile } = setup({
-      storage: {
-        ...webdav,
-        [UNREACHABLE_ATTACHMENTS_KEY]: JSON.stringify({ '["webdav","https://dav.example/Mindwtr","me"]': { 'att-1': ['attachments/att-1.txt'] } }),
-      },
+      storage: { ...webdav, [UNREACHABLE_ATTACHMENTS_KEY]: JSON.stringify({ '["webdav","https://dav.example/Mindwtr","me"]': ['att-1'] }) },
     });
+    webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
+    const fileHash = await computeSha256Hex(REMOTE);
+    const kept = remoteAttachment({ fileHash });
 
-    await expect(availability.ensureAttachmentAvailableDetailed(remoteAttachment())).resolves.toEqual({ status: 'unavailable' });
-    expect(webdavGetFile).not.toHaveBeenCalled();
-    // A key the record does not hold is someone's fresh upload: it downloads as usual.
-    await availability.ensureAttachmentAvailableDetailed(remoteAttachment({ cloudKey: 'attachments/att-1-new.txt' }));
-    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+    await expect(availability.ensureAttachmentAvailableDetailed(kept)).resolves.toEqual({ status: 'unavailable' });
+    expect(kept).toMatchObject({ cloudKey: 'attachments/att-1.txt', fileHash, localStatus: 'missing' });
+    expect(kept.deletedAt).toBeUndefined();
+    // Another device uploaded the file there: it arrives.
+    await expect(availability.ensureAttachmentAvailableDetailed(kept)).resolves.toMatchObject({ status: 'available' });
+    expect(webdavGetFile).toHaveBeenCalledTimes(2);
   });
 
   it.each([

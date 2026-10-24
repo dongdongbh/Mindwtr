@@ -303,11 +303,11 @@ describe('attachment editor model', () => {
     it('offers no Download for a row kept without its file, as React Native and desktop show "Missing file"', () => {
         const kept = file('kept', { uri: '', cloudKey: 'attachments/kept.pdf', localStatus: 'missing' });
         expect(getAttachmentRowState(kept)).toMatchObject({ missing: true, canDownload: true });
-        rememberUnreachableAttachments({ scope: { kept: ['attachments/kept.pdf'] } });
+        rememberUnreachableAttachments({ scope: ['kept'] }, 'scope');
         try {
             expect(getAttachmentRowState(kept)).toMatchObject({ missing: true, canDownload: false });
         } finally {
-            rememberUnreachableAttachments({});
+            rememberUnreachableAttachments({}, null);
         }
     });
 });

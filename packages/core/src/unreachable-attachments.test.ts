@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { AppData, Attachment, Task } from './types';
-import { formatActivationMissingAttachments, isAttachmentKeptWithoutFile, isUnreachableAttachment, rememberUnreachableAttachments, parseUnreachableAttachments, pruneUnreachableAttachments } from './unreachable-attachments';
+import { formatActivationMissingAttachments, isAttachmentKeptWithoutFile, rememberUnreachableAttachments, parseUnreachableAttachments, pruneUnreachableAttachments } from './unreachable-attachments';
 
 const STAMP = '2026-07-01T00:00:00.000Z';
 const file = (overrides: Partial<Attachment> = {}): Attachment => ({
@@ -16,36 +16,32 @@ const data = (attachments: Attachment[], taskDeleted = false): AppData => ({
 });
 
 describe('unreachable attachment record', () => {
+    afterEach(() => rememberUnreachableAttachments({}, null));
+
     it('reads only well-formed entries', () => {
         expect(parseUnreachableAttachments('not json')).toEqual({});
-        expect(parseUnreachableAttachments(JSON.stringify({ s: { a1: ['k', 3], a2: 'x' }, t: [] }))).toEqual({ s: { a1: ['k'] } });
+        expect(parseUnreachableAttachments(JSON.stringify({ s: ['a1', 3, ''], t: 'x', u: [] }))).toEqual({ s: ['a1'] });
     });
 
-    it('matches a recorded id only while it carries a recorded key', () => {
-        const record = { s: { a1: ['k-old'] } };
-        expect(isUnreachableAttachment(record, file())).toBe(true);
-        expect(isUnreachableAttachment(record, file({ cloudKey: 'k-new' }))).toBe(false);
-        expect(isUnreachableAttachment(record, file({ cloudKey: undefined }))).toBe(false);
-    });
-
-    it('keeps an entry while its row is still missing and answers the same object', () => {
-        const record = { s: { a1: ['k-old'] } };
+    it('keeps an id while its row is still missing, or has its file with an upload pending, and answers the same object', () => {
+        const record = { s: ['a1'] };
         expect(pruneUnreachableAttachments(record, data([file()]), 's')).toBe(record);
+        expect(pruneUnreachableAttachments(record, data([file({ localStatus: 'available', pendingContentUpload: true })]), 's')).toBe(record);
     });
 
     it.each([
-        ['the file is here again', data([file({ localStatus: 'available' })])],
+        ['its file is here with nothing to upload', data([file({ uri: '/f', localStatus: 'available' })])],
         ['the row is deleted', data([file({ deletedAt: STAMP })])],
         ['the owner is deleted', data([file()], true)],
         ['the row is gone', data([])],
-        ['a new key was uploaded at this location', data([file({ cloudKey: 'k-new' })])],
-    ])('drops an entry when %s', (_case, current) => {
-        expect(pruneUnreachableAttachments({ s: { a1: ['k-old'] } }, current, 's')).toEqual({});
+    ])('drops an id when %s', (_case, current) => {
+        expect(pruneUnreachableAttachments({ s: ['a1'] }, current, 's')).toEqual({});
     });
 
-    it('judges a new key only for the active location', () => {
-        const record = { other: { a1: ['k-old'] } };
-        expect(pruneUnreachableAttachments(record, data([file({ cloudKey: 'k-new' })]), 's')).toBe(record);
+    it('judges a file being here only for the active location', () => {
+        const record = { other: ['a1'] };
+        expect(pruneUnreachableAttachments(record, data([file({ uri: '/f', localStatus: 'available' })]), 's')).toBe(record);
+        expect(pruneUnreachableAttachments(record, data([]), 's')).toEqual({});
     });
 
     it('lists the first files and counts the rest', () => {
@@ -56,10 +52,16 @@ describe('unreachable attachment record', () => {
             .toBe('• a.pdf (Taxes)\n• b.pdf\nand 1 more');
     });
 
-    it('labels a row from the record this process last saw', () => {
-        rememberUnreachableAttachments({ s: { a1: ['k-old'] } });
+    it('labels a row from the record and location this process last saw', () => {
+        rememberUnreachableAttachments({ s: ['a1'] });
+        // The location is not known yet: any location counts.
         expect(isAttachmentKeptWithoutFile(file())).toBe(true);
-        rememberUnreachableAttachments({});
+        rememberUnreachableAttachments({ s: ['a1'] }, 'other');
+        expect(isAttachmentKeptWithoutFile(file())).toBe(false);
+        // The on-demand download refreshes the record and keeps the location.
+        rememberUnreachableAttachments({ other: ['a1'] });
+        expect(isAttachmentKeptWithoutFile(file())).toBe(true);
+        rememberUnreachableAttachments({}, 'other');
         expect(isAttachmentKeptWithoutFile(file())).toBe(false);
     });
 });

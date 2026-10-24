@@ -3,32 +3,39 @@ import type { ActivationMissingAttachment } from './sync-run-ports';
 
 /**
  * Attachment files the user chose to continue without when activating a sync location
- * (`acceptMissingAttachmentIds`). This device keeps the rows live with their keys, so the
- * synced document never carries a tombstone for them, and never asks that location for
- * those keys: its 404 would mark the row unrecoverable, a tombstone that would also win at
+ * (`acceptMissingAttachmentIds`). The rows stay live with their keys, and this device still
+ * tries to download them there, so a file another device uploads arrives. For a recorded
+ * row, that location's "not found" is no news: the row stays live and keyed and shows
+ * "Missing file". It is never marked unrecoverable, since that tombstone would also win at
  * the location still holding the file and let that location's cleanup delete it.
  *
- * Device-local, never synced: `{ [location scope]: { [attachment id]: keys } }`, the keys
- * the row carried when the user accepted. A row leaves the record once its file is here
- * again, once it carries a key not in the record (some device uploaded the file), or once
- * it is gone, so the record cannot grow without bound.
+ * Device-local, never synced: `{ [location scope]: [attachment id] }`. An id leaves its
+ * location once the row's file is on this device with no upload pending (a download
+ * succeeded, or this device uploaded its bytes there), and every location once the row is
+ * gone or deleted, so the record cannot grow without bound.
  */
 export const UNREACHABLE_ATTACHMENTS_KEY = 'mindwtr-unreachable-attachments';
 
-export type UnreachableAttachments = Record<string, Record<string, string[]>>;
+export type UnreachableAttachments = Record<string, string[]>;
 
-// The record as this process last read or wrote it, for the screen's "Missing file" label only.
-// Data paths read the stored record themselves.
-let lastKnownRecord: UnreachableAttachments = {};
+// The record and the active location as this process last read or wrote them, for the
+// screen's "Missing file" label and the on-demand download. Sync passes read the stored record.
+let lastKnown: { record: UnreachableAttachments; scope: string | null } = { record: {}, scope: null };
 
-export const rememberUnreachableAttachments = (record: UnreachableAttachments): void => {
-    lastKnownRecord = record;
+/** `scope` is left as it was when omitted: the on-demand download reads the record but not the location. */
+export const rememberUnreachableAttachments = (record: UnreachableAttachments, scope?: string | null): void => {
+    lastKnown = { record, scope: scope === undefined ? lastKnown.scope : scope };
 };
 
-/** The row is kept without its file on this device: show it as missing, never as downloadable. */
-export const isAttachmentKeptWithoutFile = (attachment: Attachment): boolean => (
-    isUnreachableAttachment(lastKnownRecord, attachment)
-);
+/**
+ * The row is kept without its file at the active location: show it as missing, and treat that
+ * location's "not found" as no news. Before this process knows the location, any location counts.
+ */
+export const isAttachmentKeptWithoutFile = (attachment: Pick<Attachment, 'id'>): boolean => {
+    const { record, scope } = lastKnown;
+    if (scope) return record[scope]?.includes(attachment.id) === true;
+    return Object.values(record).some((ids) => ids.includes(attachment.id));
+};
 
 export const parseUnreachableAttachments = (raw: string | null | undefined): UnreachableAttachments => {
     if (!raw) return {};
@@ -36,15 +43,10 @@ export const parseUnreachableAttachments = (raw: string | null | undefined): Unr
         const parsed = JSON.parse(raw) as unknown;
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
         const result: UnreachableAttachments = {};
-        for (const [scope, entries] of Object.entries(parsed as Record<string, unknown>)) {
-            if (!entries || typeof entries !== 'object' || Array.isArray(entries)) continue;
-            const scoped: Record<string, string[]> = {};
-            for (const [id, keys] of Object.entries(entries as Record<string, unknown>)) {
-                if (!Array.isArray(keys)) continue;
-                const valid = keys.filter((key): key is string => typeof key === 'string' && key.length > 0);
-                if (valid.length > 0) scoped[id] = valid;
-            }
-            if (Object.keys(scoped).length > 0) result[scope] = scoped;
+        for (const [scope, ids] of Object.entries(parsed as Record<string, unknown>)) {
+            if (!Array.isArray(ids)) continue;
+            const valid = ids.filter((id): id is string => typeof id === 'string' && id.length > 0);
+            if (valid.length > 0) result[scope] = valid;
         }
         return result;
     } catch {
@@ -52,17 +54,9 @@ export const parseUnreachableAttachments = (raw: string | null | undefined): Unr
     }
 };
 
-/** A recorded row still carrying a recorded key, in any location: no download may ask for it. */
-export const isUnreachableAttachment = (record: UnreachableAttachments, attachment: Attachment): boolean => {
-    const key = attachment.cloudKey;
-    if (!key) return false;
-    return Object.values(record).some((entries) => entries[attachment.id]?.includes(key) === true);
-};
-
 /**
- * Drop every entry, in every location, whose row is gone, deleted, or has its file here
- * again (`localStatus: 'available'`), and, in `scope`, every entry whose row now carries a
- * key the record does not hold. Answers the same object when nothing changed.
+ * Drop every id, in every location, whose row is gone or deleted, and, in `scope`, every id
+ * whose row has its file here with no upload pending. Answers the same object when nothing changed.
  */
 export const pruneUnreachableAttachments = (
     record: UnreachableAttachments,
@@ -78,17 +72,17 @@ export const pruneUnreachableAttachments = (
     }
     let changed = false;
     const next: UnreachableAttachments = {};
-    for (const [entryScope, entries] of Object.entries(record)) {
-        const kept: Record<string, string[]> = {};
-        for (const [id, keys] of Object.entries(entries)) {
+    for (const [entryScope, ids] of Object.entries(record)) {
+        const kept = ids.filter((id) => {
             const attachment = live.get(id);
-            const keep = attachment
-                && attachment.localStatus !== 'available'
-                && (entryScope !== scope || !attachment.cloudKey || keys.includes(attachment.cloudKey));
-            if (keep) kept[id] = keys;
-            else changed = true;
-        }
-        if (Object.keys(kept).length > 0) next[entryScope] = kept;
+            return attachment !== undefined && (
+                entryScope !== scope
+                || attachment.localStatus !== 'available'
+                || attachment.pendingContentUpload === true
+            );
+        });
+        if (kept.length !== ids.length) changed = true;
+        if (kept.length > 0) next[entryScope] = kept;
     }
     return changed ? next : record;
 };

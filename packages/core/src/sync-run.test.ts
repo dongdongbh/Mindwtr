@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AppData, Project, Task } from './types';
+import type { AppData, Attachment, Project, Task } from './types';
 import type {
     SyncBackendIO,
     SyncRunNotifier,
@@ -33,7 +33,8 @@ import {
     SyncRemoteMutationFenceLostError,
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
-import { AttachmentUploadTooLargeError } from './attachment-transfer';
+import { AttachmentUploadTooLargeError, applyAttachmentPatches, runAttachmentTransferLifecycle } from './attachment-transfer';
+import { buildCloudKey } from './attachment-paths';
 import { markAttachmentUnrecoverable } from './attachment-validation';
 import { createMobileAttachmentFiles } from './mobile-attachment-files';
 import { createMobileAttachmentCommon } from './mobile-attachment-common';
@@ -5135,7 +5136,7 @@ describe('activation with attachment files that no device location can serve', (
         expect(published).toMatchObject({ id: 'attachment-old-only', cloudKey: OLD_KEY, fileHash: HASH, updatedAt: STAMP });
         expect(published?.deletedAt).toBeUndefined();
         expect(storage.persistLocal).not.toHaveBeenCalled();
-        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: { 'attachment-old-only': [OLD_KEY] } });
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
         const line = harness.infos.find((info) => info.extra?.releaseCheck === 'v1.3.8/activation-continue-without-files');
         expect(line?.extra).toEqual({
             releaseCheck: 'v1.3.8/activation-continue-without-files',
@@ -5165,7 +5166,7 @@ describe('activation with attachment files that no device location can serve', (
         expect(published?.deletedAt).toBeUndefined();
         expect(published?.cloudKey).toBeTruthy();
         expect(published?.fileHash).toBe(HASH);
-        expect(JSON.parse(device.record!)[SCOPE]['attachment-old-only'].sort()).toEqual([deadKey, OLD_KEY].sort());
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
     });
 
     it('publishes the key of the location that holds the file, so a return there downloads it', async () => {
@@ -5218,8 +5219,8 @@ describe('activation with attachment files that no device location can serve', (
             expect(attachment?.cloudKey).toBe(OLD_KEY);
         }
         expect(harness.persisted.tasks[0]?.attachments?.[0]?.localStatus).toBe('available');
-        expect(await run({ manual: true })).toMatchObject({ success: true });
-        expect(JSON.parse(device.record!)).toEqual({});
+        // Only that location's own answers can drop its entry.
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
     });
 
     it('refuses again when a row the user did not accept is also missing', async () => {
@@ -5271,9 +5272,9 @@ describe('activation with attachment files that no device location can serve', (
         expect(io.writeRemote).not.toHaveBeenCalled();
     });
 
-    it('never asks the location for a recorded key and never tombstones the row afterwards', async () => {
+    it('asks the location again, and its not-found never turns the row into a tombstone', async () => {
         const requested: string[] = [];
-        const { harness, run } = withRecord({
+        const { harness, device, run } = withRecord({
             local: createData([remoteOnlyTask()]),
             io: { syncAttachments: emptyLocationAdapter(requested) },
         });
@@ -5285,29 +5286,35 @@ describe('activation with attachment files that no device location can serve', (
         expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
         expect(await run({ manual: true })).toMatchObject({ success: true });
 
-        expect(requested).toEqual([]);
+        expect(requested.length).toBeGreaterThan(0);
+        expect(new Set(requested)).toEqual(new Set([OLD_KEY]));
         for (const data of [harness.persisted, harness.remote!]) {
             const attachment = data.tasks[0]?.attachments?.[0];
             expect(attachment?.deletedAt).toBeUndefined();
             expect(attachment?.cloudKey).toBe(OLD_KEY);
+            expect(attachment?.fileHash).toBe(HASH);
         }
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
     });
 
-    it('drops a row from the record once its file uploads again', async () => {
-        const { device, run } = withRecord({
+    it('downloads the file once another device uploads it there, and drops the row from the record', async () => {
+        const blobs = new Set<string>();
+        const requested: string[] = [];
+        const { harness, device, run } = withRecord({
             local: createData([remoteOnlyTask()]),
             io: {
-                syncAttachments: vi.fn(async (data: AppData, helpers?: { activationProbe?: boolean }) => {
-                    // During the activation the file is still nowhere.
-                    if (helpers?.activationProbe) return false;
+                syncAttachments: vi.fn(async (data: AppData) => {
                     const next = cloneAppData(data);
-                    const attachment = next.tasks[0]!.attachments![0]!;
-                    // The file is back on this device: a keyless row with bytes uploads.
-                    if (!attachment.cloudKey) {
-                        attachment.cloudKey = 'attachments/uploaded-again.pdf';
-                        attachment.localStatus = 'available';
-                    } else if (attachment.localStatus !== 'available') {
-                        markAttachmentUnrecoverable(attachment);
+                    for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                        if (attachment.kind !== 'file' || attachment.deletedAt || !attachment.cloudKey) continue;
+                        if (attachment.localStatus === 'available') continue;
+                        requested.push(attachment.cloudKey);
+                        if (blobs.has(attachment.cloudKey)) {
+                            attachment.uri = '/local/scan.pdf';
+                            attachment.localStatus = 'available';
+                        } else {
+                            markAttachmentUnrecoverable(attachment);
+                        }
                     }
                     return next;
                 }),
@@ -5316,9 +5323,141 @@ describe('activation with attachment files that no device location can serve', (
 
         expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
             .toMatchObject({ success: true });
-        expect(JSON.parse(device.record!)[SCOPE]).toBeDefined();
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
+        // Another device holding the file uploads it under the same id-based key.
+        blobs.add(OLD_KEY);
+        requested.length = 0;
         expect(await run({ manual: true })).toMatchObject({ success: true });
 
+        expect(requested).toEqual([OLD_KEY]);
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toMatchObject({ cloudKey: OLD_KEY, localStatus: 'available' });
         expect(JSON.parse(device.record!)).toEqual({});
+    });
+
+    it('uploads a kept file that comes back on this device with other bytes, and never deletes the row', async () => {
+        // The real shared lifecycle, wired as the desktop and mobile adapters wire it.
+        const H1 = '1111111111111111111111111111111111111111111111111111111111111111';
+        const URI = '/managed/attachment-old-only.pdf';
+        const disk = new Map<string, { hash: string; mtimeMs: number; size: number }>();
+        const blobs = new Map<string, string>();
+        const log: string[] = [];
+        const adapter = vi.fn(async (data: AppData, helpers?: { phase?: 'prepare' | 'post-merge' }) => {
+            const attachmentsById = new Map<string, Attachment>();
+            for (const owner of [...data.tasks, ...data.projects]) {
+                if (owner.deletedAt) continue;
+                for (const attachment of owner.attachments ?? []) attachmentsById.set(attachment.id, attachment);
+            }
+            const { patches } = await runAttachmentTransferLifecycle({
+                attachmentsById,
+                getLocalFilePresence: async (path) => (disk.has(path) ? 'present' : 'confirmed-not-found'),
+                getLocalFileStat: async (path) => {
+                    const stat = disk.get(path);
+                    return stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
+                },
+                computeLocalFileHash: async (path) => disk.get(path)?.hash ?? null,
+                createUploadSnapshot: async (path) => {
+                    const stat = disk.get(path);
+                    return stat
+                        ? { sourcePath: path, fileHash: stat.hash, stat: { mtimeMs: stat.mtimeMs, size: stat.size }, dispose: async () => {} }
+                        : null;
+                },
+                deferUploads: helpers?.phase === 'prepare',
+                contentChangePhase: helpers?.phase,
+                onUpload: async (attachment, _path, snapshot) => {
+                    const key = buildCloudKey(attachment);
+                    blobs.set(key, snapshot!.fileHash);
+                    attachment.cloudKey = key;
+                    log.push(`PUT ${key}`);
+                    return true;
+                },
+                onDownload: async (attachment) => {
+                    if (!attachment.cloudKey) return false;
+                    log.push(`GET ${attachment.cloudKey}`);
+                    const hash = blobs.get(attachment.cloudKey);
+                    if (!hash) return markAttachmentUnrecoverable(attachment);
+                    disk.set(URI, { hash, mtimeMs: 99, size: 99 });
+                    attachment.uri = URI;
+                    attachment.localStatus = 'available';
+                    return true;
+                },
+                onUploadError: () => {},
+                onDownloadError: () => {},
+            });
+            const next = applyAttachmentPatches(data, patches);
+            return next !== data ? next : false;
+        });
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask({ uri: URI, contentMtimeMs: 1, contentSize: 10 })]),
+            io: { syncAttachments: adapter },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+        // An older copy of the managed file comes back (a backup restore, a remounted drive).
+        disk.set(URI, { hash: H1, mtimeMs: 2, size: 11 });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        for (const data of [harness.persisted, harness.remote!]) {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.deletedAt).toBeUndefined();
+            expect(attachment?.cloudKey).toBeTruthy();
+            expect(attachment?.fileHash).toBe(H1);
+            expect(attachment?.contentRev).toBe(1);
+        }
+        expect(log).toContain(`PUT ${harness.persisted.tasks[0]!.attachments![0]!.cloudKey}`);
+        expect(blobs.get(harness.persisted.tasks[0]!.attachments![0]!.cloudKey!)).toBe(H1);
+        expect(JSON.parse(device.record!)).toEqual({});
+    });
+
+    it('lets a second device holding the file join a File Sync folder this device continued at', async () => {
+        const FOLDER_SCOPE = '["file","/b/data.json"]';
+        const folder = new Set<string>();
+        // As desktop syncFileAttachments: a key the folder lacks stays live and keyed; a
+        // keyless row whose local file exists is copied in under a generation key.
+        const folderAdapter = (localFiles: Set<string>) => vi.fn(async (data: AppData) => {
+            const next = cloneAppData(data);
+            for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+                if (!attachment.cloudKey) {
+                    if (attachment.uri && localFiles.has(attachment.uri)) {
+                        attachment.cloudKey = `attachments/${attachment.id}.${HASH}.pdf`;
+                        folder.add(attachment.cloudKey);
+                        attachment.localStatus = 'available';
+                        attachment.pendingContentUpload = undefined;
+                    }
+                    continue;
+                }
+                if (attachment.localStatus === 'available') continue;
+                if (folder.has(attachment.cloudKey)) {
+                    attachment.uri = '/downloaded/scan.pdf';
+                    attachment.localStatus = 'available';
+                }
+            }
+            return next;
+        });
+        const first = withRecord({
+            backend: 'file',
+            locationScope: FOLDER_SCOPE,
+            local: createData([remoteOnlyTask()]),
+            io: { syncAttachments: folderAdapter(new Set()) },
+        });
+        expect(await first.run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+
+        const second = createHarness({
+            backend: 'file',
+            local: createData([remoteOnlyTask({ uri: '/second/scan.pdf', localStatus: 'available' })]),
+            remote: cloneAppData(first.harness.remote!),
+            io: { syncAttachments: folderAdapter(new Set(['/second/scan.pdf'])) },
+        });
+        const joined = await second.run({ activationProbe: true });
+
+        expect(joined).toMatchObject({ success: true });
+        const published = second.harness.remote?.tasks[0]?.attachments?.[0];
+        expect(published?.deletedAt).toBeUndefined();
+        expect(folder.has(published!.cloudKey!)).toBe(true);
     });
 });
