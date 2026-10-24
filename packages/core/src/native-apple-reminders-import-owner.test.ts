@@ -106,6 +106,26 @@ describe('inactive native Apple Reminders item receipt owner', () => {
         expect(env.statements.filter((sql) => /^(UPDATE|INSERT|DELETE)/u.test(sql)).every((sql) => sql.startsWith('INSERT INTO native_request_receipts'))).toBe(true);
     });
 
+    it('replays an exact saved 47-cell existing-item plan after the schema grows without writing again', async () => {
+        const env = await open(true);
+        const envelope = structuredClone(env.envelope);
+        if (envelope.prepared.target.row === null) throw new Error('Expected existing row');
+        envelope.prepared.target.row = envelope.prepared.target.row.slice(0, 47);
+        const frozen = JSON.stringify(envelope);
+        expect(await env.owner.commit(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
+        const saved = await env.snapshot();
+        expect(saved.receipts).toHaveLength(1);
+        await env.client.run('UPDATE tasks SET dueReminderLeadMinutes=15,deletedAt=? WHERE id=?', [AT, TASK]);
+        const owner = await env.restart(); env.setReady(false);
+        const before = await env.snapshot(); env.statements.length = 0;
+        expect(await owner.outcome(JSON.parse(frozen))).toEqual({ ok: true, value: envelope.prepared.result });
+        expect(await owner.commit(JSON.parse(frozen))).toEqual({ ok: true, value: envelope.prepared.result });
+        expect(await env.snapshot()).toEqual(before);
+        expect(before.receipts).toEqual(saved.receipts);
+        expect(env.statements.some((sql) => /^(UPDATE|INSERT|DELETE)/u.test(sql))).toBe(false);
+        expect(JSON.stringify(envelope)).toBe(frozen);
+    });
+
     it('proves cold replay before changed creation witnesses, readiness or current task liveness', async () => {
         const env = await open(); expect((await env.owner.commit(env.envelope)).ok).toBe(true);
         await env.client.run('UPDATE tasks SET title=?,deletedAt=? WHERE id=?', ['Later edit', AT, TASK]);

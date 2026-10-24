@@ -223,7 +223,9 @@ const targetOf = (value: unknown, id: string | undefined): NativePomodoroTaskBef
     if (!id) { if (value !== null) invalid(); return null; }
     if (!exact(value, ['id', 'row']) || value.id !== id) invalid();
     if (value.row === null) return { id, row: null };
-    const legacyLayout = Array.isArray(value.row) && value.row.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length
+    const legacyLayout = Array.isArray(value.row) && (value.row.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length
+            || (value.row.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length + 1
+                && TASK_SQLITE_COLUMNS[NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length] === 'reminderPolicy'))
         && NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.every((name, index) => TASK_SQLITE_COLUMNS[index] === name);
     if (!Array.isArray(value.row) || (value.row.length !== TASK_SQLITE_COLUMNS.length && !legacyLayout) || value.row[0] !== id
         || !value.row.every((cell) => cell === null || typeof cell === 'string' || (typeof cell === 'number' && Number.isFinite(cell)))) invalid();

@@ -59,6 +59,63 @@ const translations = {
     'settings.notifications': 'Notifications',
 };
 
+describe('desktop advance reminders', () => {
+    const initial = useTaskStore.getState();
+    const tick = new Date('2026-06-17T09:00:00Z');
+    const advanceTask: Task = { ...baseTask, dueDate: '2026-06-17T10:01:00Z', dueReminderLeadMinutes: 60 };
+    let delivered: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(tick);
+        delivered = vi.fn();
+        vi.stubGlobal('Notification', Object.assign(function (...args: unknown[]) { delivered(...args); }, { permission: 'granted' }));
+        useTaskStore.setState({ _allTasks: [advanceTask], _allProjects: [], settings: { notificationsEnabled: true } });
+    });
+    afterEach(() => {
+        stopDesktopNotifications();
+        useTaskStore.setState(initial, true);
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('waits until the fire time, sends once, and retains the original due alert', async () => {
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        expect(delivered.mock.calls[0][1]).toMatchObject({ tag: 'mindwtr-reminder:task:task-1' });
+        expect(logMock.logInfo).toHaveBeenCalledWith('Advance reminder delivered', expect.objectContaining({
+            extra: { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'delivered' },
+        }));
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(60 * 60_000);
+        expect(delivered).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not catch up a prealert that was already past when configured', async () => {
+        useTaskStore.setState({ _allTasks: [{ ...advanceTask, dueReminderLeadMinutes: 0 }] });
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(65_000);
+        useTaskStore.setState({ _allTasks: [advanceTask], lastDataChangeAt: Date.now() });
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).not.toHaveBeenCalled();
+    });
+
+    it('discards a changed deadline and admits the new future occurrence independently', async () => {
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(30_000);
+        useTaskStore.setState({ _allTasks: [{ ...advanceTask, dueDate: '2026-06-17T10:02:00Z' }], lastDataChangeAt: Date.now() });
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('desktop notification service', () => {
     it('includes the reminder type before the task description', () => {
         const task: Task = {

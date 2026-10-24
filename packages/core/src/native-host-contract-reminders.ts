@@ -250,8 +250,8 @@ const isSnoozedTaskSkipped = (entry: SnoozeReminder, tasks: ReadonlyMap<string, 
     if (!key.startsWith('task:') || !isObjectRecord(entry.details.data)) return false;
     const kind = entry.details.data.kind;
     // Old task Snoozes omit kind; an explicit review Snooze remains independent.
-    if (kind !== undefined && kind !== 'task-start' && kind !== 'task-due' && kind !== 'task-reminder') return false;
-    const task = tasks.get(key.slice('task:'.length).replace(/:r\d+$/, ''));
+    if (kind !== undefined && kind !== 'task-start' && kind !== 'task-due' && kind !== 'task-due-advance' && kind !== 'task-reminder') return false;
+    const task = tasks.get(key.slice('task:'.length).replace(/:(?:r\d+|a\d+:-?\d+)$/, ''));
     return Boolean(task && !shouldSendTaskReminders(task, settings));
 };
 

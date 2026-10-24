@@ -6,7 +6,7 @@ import { normalizeOptionalContainerId, resolveTaskContainerAssignment } from './
 import { resolveDefaultNewTaskAreaId } from './area-utils';
 import { normalizeCancellationTimestamp, normalizeTaskLifecycleFields } from './task-status';
 import { normalizeRecurrenceForLoad } from './recurrence';
-import { normalizeRepeatReminderMinutes } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { resolveTaskFocusCreation } from './focus-star';
 import { isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, type FocusDateLookup } from './task-utils';
 
@@ -82,6 +82,7 @@ export function buildNewTask({
         pushCount: initialTaskProps.pushCount ?? 0,
         recurrence: normalizeRecurrenceForLoad(initialTaskProps.recurrence),
         repeatReminderMinutes: normalizeRepeatReminderMinutes(initialTaskProps.repeatReminderMinutes),
+        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(initialTaskProps.dueReminderLeadMinutes),
         rev: 1,
         revBy: deviceId,
         createdAt: now,

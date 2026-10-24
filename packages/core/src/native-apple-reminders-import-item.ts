@@ -19,6 +19,17 @@ export type PreparedNativeAppleReminderImportItem = CommonPlan & (
     { mode: 'new'; factory: NativeAppleReminderImportFactory; task: Task }
     | { mode: 'existing' });
 
+// Frozen accepted schema5 row layout; replay must retain these cells and receipt bytes unchanged.
+const SCHEMA5_TASK_COLUMNS = [
+    'id', 'title', 'status', 'priority', 'energyLevel', 'assignedTo', 'taskMode', 'startTime',
+    'relativeStartOffset', 'dueDate', 'recurrence', 'showFutureRecurrence', 'pushCount', 'repeatReminderMinutes', 'tags',
+    'contexts', 'checklist', 'description', 'textDirection', 'attachments', 'location', 'projectId', 'sectionId', 'areaId',
+    'orderNum', 'boardOrder', 'focusOrder', 'isFocusedToday', 'timeEstimate', 'timeSpentMinutes', 'suppressMindwtrReminders',
+    'reviewAt', 'completedAt', 'statusBeforeProjectArchive', 'completedAtBeforeProjectArchive', 'isFocusedTodayBeforeProjectArchive',
+    'projectArchivedAt', 'rev', 'revBy', 'createdAt', 'updatedAt', 'deletedAt', 'purgedAt', 'viewSectionIds', 'cancelledAt', 'archivedAt',
+    'reminderPolicy',
+] as const;
+
 const MAX_PLAN_BYTES = 8 * 1024 * 1024;
 const MAX_SOURCE_TEXT_BYTES = 1024 * 1024;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u;
@@ -64,7 +75,9 @@ const readRequest = (value: unknown): NativeAppleReminderImportRequest => {
 };
 const readTarget = (value: unknown, id: string): NativeAppleReminderImportTarget => {
     if (!exact(value, ['id', 'row']) || value.id !== id) invalid();
-    if (value.row !== null && (!Array.isArray(value.row) || value.row.length !== TASK_SQLITE_COLUMNS.length
+    const legacyLayout = Array.isArray(value.row) && value.row.length === SCHEMA5_TASK_COLUMNS.length
+        && SCHEMA5_TASK_COLUMNS.every((name, index) => TASK_SQLITE_COLUMNS[index] === name);
+    if (value.row !== null && (!Array.isArray(value.row) || (value.row.length !== TASK_SQLITE_COLUMNS.length && !legacyLayout)
         || value.row[0] !== id || !value.row.every((cell) => cell === null || typeof cell === 'string'
             || (typeof cell === 'number' && Number.isFinite(cell))))) invalid();
     return value as NativeAppleReminderImportTarget;

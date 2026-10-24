@@ -1951,16 +1951,16 @@ describe('TaskItemFieldRenderer reminder policy', () => {
         useTaskStore.setState({ settings: previous });
     });
 
-    it('stays hidden for a date-only due date until a suppressible time exists', () => {
+    it('explains why the advance reminder is disabled for a date-only due date', () => {
         const { queryByRole, getByRole, rerender } = render(
             <TaskItemFieldRenderer fieldId="dueDate" {...createProps({ draft: { dueDate: '2026-04-19' } })} />
         );
-        expect(queryByRole('button', { name: /^Start\/due reminders:/ })).toBeNull();
+        openReminders(getByRole);
+        expect(getByRole('combobox', { name: 'Advance reminder' })).toBeDisabled();
 
         rerender(
             <TaskItemFieldRenderer fieldId="dueDate" {...createProps({ draft: { dueDate: '2026-04-19T11:45' } })} />
         );
-        openReminders(getByRole);
         expect(queryByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
     });
 
@@ -1975,6 +1975,27 @@ describe('TaskItemFieldRenderer reminder policy', () => {
         // No due time, so the summary carries no repeat clause.
         openReminders(getByRole);
         expect(getByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
+    });
+
+    it('selects advance presets, preserves the choice while inactive, and turns it Off explicitly', () => {
+        const { getByRole, getByText } = render(
+            <DraftFieldHarness fieldId="dueDate" initialDraft={{ dueDate: '2026-04-19T11:45', dueReminderLeadMinutes: 90 }} />
+        );
+        openReminders(getByRole);
+        const advance = getByRole('combobox', { name: 'Advance reminder' });
+        expect(advance).toHaveValue('90');
+        expect(getByRole('option', { name: '90 min before' })).toBeInTheDocument();
+        fireEvent.change(advance, { target: { value: '1440' } });
+        expect(advance).toHaveValue('1440');
+        fireEvent.change(getByRole('combobox', { name: 'Start/due reminders' }), { target: { value: 'skip' } });
+        expect(advance).toBeDisabled();
+        expect(advance).toHaveValue('1440');
+        expect(getByText(/Enable start\/due reminders for this task/)).toBeInTheDocument();
+        fireEvent.change(getByRole('combobox', { name: 'Start/due reminders' }), { target: { value: 'send' } });
+        expect(advance).not.toBeDisabled();
+        expect(advance).toHaveValue('1440');
+        fireEvent.change(advance, { target: { value: '0' } });
+        expect(advance).toHaveValue('0');
     });
 
     it('serializes legacy controls as explicit reminder policies', () => {

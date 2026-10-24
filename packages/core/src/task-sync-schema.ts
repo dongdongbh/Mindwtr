@@ -8,6 +8,7 @@
 // workflow only) additionally fails while anything is still pending. RCs may ship
 // with a field pending; stable releases may not.
 import schemaFixture from './task-sync-schema.fixture.json';
+import { normalizeDueReminderLeadMinutes } from './due-reminder-lead';
 import type { Task } from './types';
 import { normalizeTaskStatus } from './task-status';
 import { normalizeTaskReminderPolicy } from './task-reminder-policy';
@@ -181,6 +182,7 @@ const taskColumnValues = (task: Task): Record<string, unknown> => {
         showFutureRecurrence: toBool(task.showFutureRecurrence),
         pushCount: task.pushCount ?? null,
         repeatReminderMinutes: task.repeatReminderMinutes ?? null,
+        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(task.dueReminderLeadMinutes) ?? null,
         tags: toJson(task.tags ?? []),
         contexts: toJson(task.contexts ?? []),
         checklist: toJson(toChecklist(task.checklist)),
@@ -245,6 +247,7 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         repeatReminderMinutes: row.repeatReminderMinutes === null || row.repeatReminderMinutes === undefined
             ? undefined
             : Number(row.repeatReminderMinutes),
+        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(row.dueReminderLeadMinutes),
         tags: toStringArray(fromJson<unknown>(row.tags, [])),
         contexts: toStringArray(fromJson<unknown>(row.contexts, [])),
         checklist: toChecklist(fromJson<unknown>(row.checklist, undefined)),

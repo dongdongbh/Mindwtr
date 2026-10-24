@@ -1,5 +1,13 @@
 // Danish translation. Keep at full key parity with en.ts.
 export const daOverrides: Record<string, string> = {
+    "taskEdit.advanceReminderLabel": "Forhåndspåmindelse",
+    "taskEdit.advanceReminderMinutes": "{count} min før",
+    "taskEdit.advanceReminderHour": "1 time før",
+    "taskEdit.advanceReminderDay": "1 dag før",
+    "taskEdit.advanceReminderTwoDays": "2 dage før",
+    "taskEdit.advanceReminderWeek": "1 uge før",
+    "taskEdit.advanceReminderNeedsDueTime": "Tilføj en forfaldsdato og et klokkeslæt for at indstille en forhåndspåmindelse.",
+    "taskEdit.advanceReminderSkipped": "Aktivér påmindelser om start og forfald for denne opgave for at bruge en forhåndspåmindelse.",
     "settings.gmailCapture": "Gmail",
     "settings.gmailCaptureDesc": "Tilslut Google, og indsaml e-mails fra en etiket, du vælger.",
     "settings.gmailCaptureDisclosure": "Google giver skrivebeskyttet adgang til hele din postkasse, selvom Mindwtr kun importerer e-mails med den valgte etiket. Mindwtr ændrer aldrig e-mails eller etiketter. Importerede afsenderoplysninger og e-mailtekst bliver almindelige opgavedata og kan indgå i din konfigurerede synkronisering, sikkerhedskopiering, eksport eller valgfrie AI-funktioner. Brug kun en særligt udpeget testkonto.",

@@ -48,6 +48,7 @@ import { clearGlobalSearchActiveChip, DEFAULT_GLOBAL_SEARCH_FILTERS, fetchGlobal
 import type { SearchProjectResult } from './storage';
 import { createSearchHighlighter } from './search-highlight';
 import { createDateFormatter, hasTimeComponent, normalizeClockTimeInput, safeParseDate, setHostSystemLocale, type DateFormatter, type DateFormattingConfig } from './date';
+import { normalizeDueReminderLeadMinutes } from './schedule-utils';
 import { WEEKDAY_ORDER } from './recurrence-constants';
 import {
     editTaskDraftRecurrence,
@@ -763,7 +764,7 @@ const normalizeEditorValue = (field: keyof NativeEditableFields, value: unknown)
 
 const DRAFT_FIELD_SET = new Set<string>(TASK_DRAFT_FIELD_KEYS);
 // JSON has no undefined: these draft fields accept null for "not set".
-const UNSET_DRAFT_FIELDS = new Set<string>(['relativeStartOffset', 'viewSectionIds', 'timeSpentMinutes', 'repeatReminderMinutes']);
+const UNSET_DRAFT_FIELDS = new Set<string>(['relativeStartOffset', 'viewSectionIds', 'timeSpentMinutes', 'repeatReminderMinutes', 'dueReminderLeadMinutes']);
 const isString = (value: unknown): value is string => typeof value === 'string';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isDraftDate = (value: unknown) => value === '' || isValidEditorDate(value);
@@ -799,6 +800,7 @@ const DRAFT_VALUE_CHECKS: Record<TaskDraftField, (value: unknown) => boolean> = 
     energyLevel: isOneOf(['', ...TASK_EDITOR_ENERGY_LEVEL_OPTIONS]),
     assignedTo: isString,
     reviewAt: isDraftDate,
+    dueReminderLeadMinutes: (value) => value === undefined || normalizeDueReminderLeadMinutes(value) !== undefined,
     repeatReminderMinutes: isUnsetOrMinutes,
     suppressMindwtrReminders: isBoolean,
     reminderPolicy: (value) => value === 'inherit' || value === 'send' || value === 'skip',

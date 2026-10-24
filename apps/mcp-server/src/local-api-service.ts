@@ -10,6 +10,7 @@ import {
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   taskRecurrenceInputSchema,
 } from './input-validation.js';
@@ -53,7 +54,7 @@ const TASK_FIELDS = new Set([
   'recurrence', 'contexts', 'tags', 'description', 'priority', 'energyLevel',
   'assignedTo', 'timeEstimate', 'taskMode', 'relativeStartOffset', 'showFutureRecurrence',
   'pushCount', 'checklist', 'textDirection', 'location', 'isFocusedToday',
-  'timeSpentMinutes', 'suppressMindwtrReminders', 'reminderPolicy', 'repeatReminderMinutes',
+  'timeSpentMinutes', 'suppressMindwtrReminders', 'reminderPolicy', 'repeatReminderMinutes', 'dueReminderLeadMinutes',
   'viewSectionIds', 'reviewAt', 'cancelledAt', 'order', 'boardOrder', 'focusOrder', 'attachments',
 ]);
 const taskStatusSchema = z.enum(TASK_STATUS_VALUES as [TaskStatus, ...TaskStatus[]]);
@@ -158,6 +159,7 @@ const normalizeTaskProps = (input: Record<string, unknown>, creating: boolean): 
     else if (name === 'recurrence') props[name] = normalizeNullableTaskRecurrence(value as Parameters<typeof normalizeNullableTaskRecurrence>[0]);
     else if (name === 'relativeStartOffset') props[name] = normalizeNullableTaskRelativeStartOffset(value as Parameters<typeof normalizeNullableTaskRelativeStartOffset>[0]);
     else if (name === 'timeSpentMinutes') props[name] = normalizeNullableTaskTimeSpentMinutes(value as number | null);
+    else if (name === 'dueReminderLeadMinutes') props[name] = normalizeNullableTaskDueReminderLeadMinutes(value as number | null) ?? 0;
     else if (name === 'repeatReminderMinutes') props[name] = normalizeNullableTaskRepeatReminderMinutes(value as number | null);
     else if (name === 'attachments') {
       try { props[name] = buildLinkAttachments(value as Parameters<typeof buildLinkAttachments>[0]); } catch {

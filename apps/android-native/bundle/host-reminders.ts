@@ -69,7 +69,7 @@ export type NativeReminderBindings = {
 
 const log = (message: string, context: Record<string, unknown>, warn = false) => {
     try {
-        (warn ? logWarn : logInfo)(`[Local Notifications] ${message}`, { scope: 'notifications', context });
+        (warn ? logWarn : logInfo)(`[Local Notifications] ${message}`, { scope: 'notifications', context, force: context.releaseCheck === 'v1.3.8/due-advance-reminder' });
     } catch { /* a diagnostic line must never fail its caller */ }
 };
 
@@ -97,6 +97,10 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
         const same = (next: string, previous: string | null) => next === previous || (previous === null && next === '{}');
         const unchanged = plan.schedule.length === 0 && plan.cancel.length === 0 && same(plan.alarms, stored.alarms);
         bindings.apply(JSON.stringify({ ...plan, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME, unchanged, state: same(plan.state, stored.state) ? null : plan.state }));
+        if (plan.schedule.some((item) => item && typeof item === 'object' && 'details' in item
+            && item.details && typeof item.details === 'object' && 'data' in item.details
+            && item.details.data && typeof item.details.data === 'object' && 'kind' in item.details.data
+            && item.details.data.kind === 'task-due-advance')) log('Advance reminder scheduled', { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'scheduled' });
         rebuilt = true;
         if (topUpTimer) clearTimeout(topUpTimer);
         topUpTimer = plan.topUpDelayMs === null ? null : setTimeout(() => {

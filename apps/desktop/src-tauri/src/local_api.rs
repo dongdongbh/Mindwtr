@@ -3441,6 +3441,7 @@ fn create_next_recurring_task_for_local_api(
             "areaId",
             "timeEstimate",
             "repeatReminderMinutes",
+            "dueReminderLeadMinutes",
             "reminderPolicy",
         ],
     );
@@ -3910,12 +3911,14 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
         "timeEstimate",
         "suppressMindwtrReminders",
         "repeatReminderMinutes",
+        "dueReminderLeadMinutes",
         "showFutureRecurrence",
         "focusOrder",
         "boardOrder",
     ] {
         task.remove(key);
     }
+    task.insert("dueReminderLeadMinutes".to_string(), json!(0));
     task.insert("isFocusedToday".to_string(), Value::Bool(false));
     task.insert("pushCount".to_string(), Value::Number(0.into()));
 }
@@ -4525,12 +4528,14 @@ fn normalize_task_triage_patch(
             "timeEstimate",
             "suppressMindwtrReminders",
             "repeatReminderMinutes",
+            "dueReminderLeadMinutes",
             "showFutureRecurrence",
             "focusOrder",
             "boardOrder",
         ] {
             sanitized.insert(field.to_string(), Value::Null);
         }
+        sanitized.insert("dueReminderLeadMinutes".to_string(), json!(0));
         sanitized.insert("isFocusedToday".to_string(), Value::Bool(false));
         sanitized.insert("pushCount".to_string(), Value::Number(0.into()));
     }
@@ -4545,6 +4550,9 @@ fn normalize_task_triage_patch(
 }
 
 fn normalize_task_reminder_patch(patch: &mut Map<String, Value>, default_skip: bool) {
+    if patch.get("dueReminderLeadMinutes").is_some_and(Value::is_null) {
+        patch.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
     if let Some(policy) = patch.get("reminderPolicy").and_then(Value::as_str) {
         let skip = policy == "skip" || (policy == "inherit" && default_skip);
         patch.insert("suppressMindwtrReminders".to_string(), Value::Bool(skip));
@@ -4644,6 +4652,9 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
             }
             "pushCount" | "timeSpentMinutes" => {
                 value.is_null() || value.as_i64().is_some_and(|number| number >= 0)
+            }
+            "dueReminderLeadMinutes" => {
+                value.is_null() || value.as_i64().is_some_and(|minutes| (0..=10080).contains(&minutes))
             }
             "repeatReminderMinutes" => {
                 value.is_null()
@@ -5401,6 +5412,20 @@ fn hex_value(value: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn advance_reminder_patch_validation_and_clear() {
+        for minutes in [json!(0), json!(1), json!(1440), json!(10080), Value::Null] {
+            let mut patch = json!({"dueReminderLeadMinutes": minutes}).as_object().unwrap().clone();
+            super::sanitize_task_patch_map(&mut patch).unwrap();
+            super::normalize_task_reminder_patch(&mut patch, false);
+            assert_eq!(patch["dueReminderLeadMinutes"], if minutes.is_null() { json!(0) } else { minutes });
+        }
+        for minutes in [json!(-1), json!(1.5), json!(10081), json!("15"), json!(true)] {
+            let mut patch = json!({"dueReminderLeadMinutes": minutes}).as_object().unwrap().clone();
+            assert!(super::sanitize_task_patch_map(&mut patch).is_err());
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -7994,6 +8019,7 @@ mod tests {
         assert_eq!(task["status"], "reference");
         assert_eq!(task["isFocusedToday"], false);
         assert_eq!(task["pushCount"], 0);
+        assert_eq!(task["dueReminderLeadMinutes"], 0);
         for field in [
             "startTime",
             "dueDate",
@@ -9481,6 +9507,7 @@ mod tests {
         )
         .expect("reference transition");
         assert_eq!(reference["status"], "reference");
+        assert_eq!(reference["dueReminderLeadMinutes"], 0);
         for field in [
             "startTime",
             "dueDate",

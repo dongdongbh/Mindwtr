@@ -19,7 +19,7 @@ export function checklistProjectBlockReason(task: Partial<Task>, settings: Pick<
     if (!task.checklist?.length || task.checklist.some(item => !item.title.trim())) return 'task.expandChecklistInvalid';
     if (task.deletedAt || task.purgedAt || task.cancelledAt || task.archivedAt
         || (task.status && !['inbox', 'next', 'done'].includes(task.status))) return 'task.expandChecklistInactive';
-    if (task.recurrence || task.relativeStartOffset || task.repeatReminderMinutes || task.reviewAt?.includes('T')
+    if (task.recurrence || task.relativeStartOffset || task.repeatReminderMinutes || task.dueReminderLeadMinutes || task.reviewAt?.includes('T')
         || (shouldSendTaskReminders(task, settings) && [task.startTime, task.dueDate].some(value => value?.includes('T'))))
         return 'task.expandChecklistSchedule';
     if (task.assignedTo || task.location || task.timeEstimate || task.timeSpentMinutes)

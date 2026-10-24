@@ -31,6 +31,7 @@ const TASK_FIELDS: &[&str] = &[
     "suppressMindwtrReminders",
     "reminderPolicy",
     "repeatReminderMinutes",
+    "dueReminderLeadMinutes",
     "reviewAt",
     "cancelledAt",
     "order",
@@ -120,6 +121,7 @@ fn field_schema(field: &str, project: bool) -> Value {
         "offset" => json!({"type":"integer", "minimum":0, "maximum":100000}),
         "order" | "boardOrder" | "focusOrder" => json!({"type":"integer"}),
         "pushCount" | "timeSpentMinutes" => json!({"type":"integer", "minimum":0}),
+        "dueReminderLeadMinutes" => json!({"type":"integer","minimum":0,"maximum":10080}),
         "repeatReminderMinutes" => json!({"enum":[0,5,10,15,30,60]}),
         "relativeStartOffset" => {
             json!({"type":"object", "properties":{"amount":{"type":"number"}, "unit":{"enum":["minute","hour","day","week"]}}, "required":["amount","unit"], "additionalProperties":false})

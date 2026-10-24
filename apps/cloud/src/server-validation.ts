@@ -7,6 +7,7 @@ import {
     normalizeRecurrenceForLoad,
     normalizeRelativeStartOffset,
     normalizeRepeatReminderMinutes,
+    normalizeDueReminderLeadMinutes,
     normalizeTimeSpentMinutes,
     filterTasksBySearch,
     taskMatchesQuery,
@@ -63,6 +64,14 @@ function validateTaskRepeatReminderMinutes(value: Record<string, unknown>): stri
     if (minutes === undefined || minutes === null || minutes === 0) return null;
     if (normalizeRepeatReminderMinutes(minutes) === minutes) return null;
     return 'Invalid task repeatReminderMinutes';
+}
+
+function validateTaskDueReminderLeadMinutes(value: Record<string, unknown>): string | null {
+    if (!hasOwnField(value, 'dueReminderLeadMinutes')) return null;
+    const minutes = value.dueReminderLeadMinutes;
+    if (minutes === undefined || minutes === null || minutes === 0) return null;
+    if (normalizeDueReminderLeadMinutes(minutes) === minutes) return null;
+    return 'Invalid task dueReminderLeadMinutes';
 }
 
 function validateTaskTimeSpentMinutes(value: Record<string, unknown>): string | null {
@@ -184,6 +193,7 @@ function validateTaskPropValues(value: Record<string, unknown>): string | null {
         ?? validateAttachments(value, 'task')
         ?? validateTaskReminderPolicy(value)
         ?? validateTaskRepeatReminderMinutes(value)
+        ?? validateTaskDueReminderLeadMinutes(value)
         ?? validateTaskTimeSpentMinutes(value)
         ?? validateTaskRelativeStartOffset(value)
         ?? validateTaskRecurrence(value)

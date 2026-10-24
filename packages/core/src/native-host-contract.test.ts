@@ -2447,6 +2447,21 @@ describe('native host contract', () => {
                 expect(JSON.parse(JSON.stringify(model.fields))).toEqual(model.fields);
             });
 
+            it('validates advance reminder draft edits and preserves the choice when due time is removed', async () => {
+                const host = await activateEditor([editTask({ dueDate: '2026-09-26T21:00:00.000Z' })]);
+                const draft = openDraft(host);
+                const chosen = edited(host, draft, { type: 'fields', patch: { dueReminderLeadMinutes: 30 } });
+                expect(chosen.fields.reminders.advanceValueLabel).toBe('30 min before');
+                const dateOnly = edited(host, chosen.draft, { type: 'fields', patch: { dueDate: '2026-09-26' } });
+                expect(dateOnly.fields.reminders.showAdvance).toBe(false);
+                expect(dateOnly.draft.dueReminderLeadMinutes).toBe(30);
+                expect(edited(host, chosen.draft, { type: 'fields', patch: { dueReminderLeadMinutes: 0 } }).draft.dueReminderLeadMinutes).toBe(0);
+                expect(edited(host, chosen.draft, { type: 'fields', patch: { dueReminderLeadMinutes: null } }).draft.dueReminderLeadMinutes).toBeUndefined();
+                for (const value of [-1, 0.5, 10081, '30', true]) {
+                    expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'fields', patch: { dueReminderLeadMinutes: value } } })).toMatchObject({ ok: false });
+                }
+            });
+
             it('refuses an invalid draft or edit, and waits for storage', async () => {
                 const host = createNativeHostContract();
                 expect(host.editTaskDraft({ id: 'edit', draft: {} as TaskDraft })).toMatchObject({ ok: false, error: { code: 'NOT_READY' } });

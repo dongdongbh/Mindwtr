@@ -35,11 +35,13 @@ import {
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   normalizeNullableTaskTokens,
   normalizeOptionalTaskRecurrence,
   normalizeOptionalTaskRelativeStartOffset,
   normalizeOptionalTaskRepeatReminderMinutes,
+  normalizeOptionalTaskDueReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   normalizeOptionalTaskTokens,
   taskRecurrenceInputSchema,
@@ -371,6 +373,7 @@ const normalizeAddTaskInput = (data: z.infer<typeof addTaskSchema>) => {
     relativeStartOffset: normalizeOptionalTaskRelativeStartOffset(generated.relativeStartOffset),
     timeSpentMinutes: normalizeOptionalTaskTimeSpentMinutes(generated.timeSpentMinutes),
     repeatReminderMinutes: normalizeOptionalTaskRepeatReminderMinutes(generated.repeatReminderMinutes),
+    dueReminderLeadMinutes: normalizeOptionalTaskDueReminderLeadMinutes(generated.dueReminderLeadMinutes),
   };
 };
 
@@ -412,6 +415,7 @@ const normalizeUpdateTaskInput = (data: z.infer<typeof updateTaskSchema>) => {
     relativeStartOffset: normalizeNullableTaskRelativeStartOffset(generated.relativeStartOffset),
     timeSpentMinutes: normalizeNullableTaskTimeSpentMinutes(generated.timeSpentMinutes),
     repeatReminderMinutes: normalizeNullableTaskRepeatReminderMinutes(generated.repeatReminderMinutes),
+    dueReminderLeadMinutes: normalizeNullableTaskDueReminderLeadMinutes(generated.dueReminderLeadMinutes),
   };
 };
 

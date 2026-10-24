@@ -25,6 +25,7 @@ import { invokeNative } from './tauri-invoke';
 import { logInfo, logWarn } from './app-log';
 
 const notifiedAtByTask = new Map<string, string>();
+const advanceObservedByTask = new Map<string, string>();
 const repeatNotifiedByTask = new Map<string, string>();
 const notifiedAtByProject = new Map<string, string>();
 const digestSentOnByKind = new Map<'morning' | 'evening', string>();
@@ -217,8 +218,8 @@ function classifyLinuxNotificationError(error: unknown): string {
  * runtime and panic after IPC already reported success (#1232). Flatpak keeps the portal;
  * native packages await org.freedesktop.Notifications.Notify on the existing runtime.
  */
-async function handleLinuxNotification(title: string, body?: string, tag?: string): Promise<boolean> {
-    if (!isTauriRuntime() || (!isLinuxRuntime() && !isFlatpakRuntime())) return false;
+async function handleLinuxNotification(title: string, body?: string, tag?: string): Promise<boolean | null> {
+    if (!isTauriRuntime() || (!isLinuxRuntime() && !isFlatpakRuntime())) return null;
 
     const flatpak = isFlatpakRuntime();
     const backend = flatpak ? 'linux-portal' : 'linux-dbus';
@@ -237,6 +238,7 @@ async function handleLinuxNotification(title: string, body?: string, tag?: strin
                 outcome: 'submitted',
             },
         });
+        return true;
     } catch (error) {
         void logWarn('Linux desktop notification delivery failed', {
             scope: 'notification',
@@ -250,7 +252,7 @@ async function handleLinuxNotification(title: string, body?: string, tag?: strin
 
     // A timeout may mean the daemon accepted Notify but its reply was lost. Never resend through
     // the plugin (or the web API) after any Linux native attempt.
-    return true;
+    return false;
 }
 
 /**
@@ -300,26 +302,25 @@ async function sendReplacingNotification(title: string, body: string | undefined
  * so a task's start, due and every due-time repeat show as one notification that alerts again,
  * instead of one more notification per occurrence.
  */
-async function sendNotification(title: string, body?: string, tag?: string) {
-    if (await handleLinuxNotification(title, body, tag)) {
-        return;
-    }
+async function sendNotification(title: string, body?: string, tag?: string): Promise<boolean> {
+    const linuxSent = await handleLinuxNotification(title, body, tag);
+    if (linuxSent !== null) return linuxSent;
 
     if (await sendWindowsPackagedNotification(title, body, tag)) {
         logNotificationSent('windows-packaged');
-        return;
+        return true;
     }
 
     if (tag && await sendReplacingNotification(title, body, tag)) {
         logNotificationSent('replacing');
-        return;
+        return true;
     }
 
     if (tauriNotificationApi?.sendNotification) {
         try {
             tauriNotificationApi.sendNotification({ title, body });
             logNotificationSent('plugin');
-            return;
+            return true;
         } catch (error) {
             logNotificationFailed('plugin', error);
             // Fall back to Web Notifications below.
@@ -332,10 +333,12 @@ async function sendNotification(title: string, body?: string, tag?: string) {
             const options = { ...(body ? { body } : {}), ...(tag ? { tag, renotify: true } : {}) } as NotificationOptions;
             new Notification(title, Object.keys(options).length > 0 ? options : undefined);
             logNotificationSent('web');
+            return true;
         } catch (error) {
             logNotificationFailed('web', error);
         }
     }
+    return false;
 }
 
 /**
@@ -433,6 +436,15 @@ function checkDueAndNotify() {
         const taskId = request.data.taskId;
         const projectId = request.data.projectId;
         if (taskId) {
+            if (request.data.kind === 'task-due-advance') {
+                // Admit only reminders observed while future: editing a deadline never catches up a past prealert.
+                if (request.fireAt.getTime() > now.getTime() || advanceObservedByTask.get(taskId) !== request.key) continue;
+                void sendNotification(request.title, request.message, getReminderNotificationTag(request.key)).then((sent) => {
+                    if (sent) void logInfo('Advance reminder delivered', { scope: 'notifications', force: true,
+                        extra: { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'delivered' } });
+                });
+                continue;
+            }
             if (notifiedAtByTask.get(taskId) === fireIso) continue;
             logReminderFired('task', fireIso);
             void sendNotification(request.title, request.message, getReminderNotificationTag(request.key));
@@ -445,6 +457,12 @@ function checkDueAndNotify() {
         } else {
             console.warn('resolveDueReminders returned a request with neither taskId nor projectId', request);
         }
+    }
+
+    advanceObservedByTask.clear();
+    for (const task of gates.taskRemindersEnabled ? tasks : []) {
+        const advance = getTaskReminderPlan(task, now, { includeDueDate, taskReminderDefault: settings.taskReminderDefault }).advance;
+        if (advance) advanceObservedByTask.set(task.id, advance.key);
     }
 
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
@@ -550,6 +568,7 @@ export function stopDesktopNotifications() {
 
     notifiedAtByTask.clear();
     repeatNotifiedByTask.clear();
+    advanceObservedByTask.clear();
     notifiedAtByProject.clear();
     lastPollAt = null;
     digestSentOnByKind.clear();

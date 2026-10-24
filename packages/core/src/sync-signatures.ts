@@ -136,6 +136,7 @@ export const normalizeTaskForContentComparison = (task: Task): Record<string, un
         reminderPolicy: normalizeTaskReminderPolicy(task.reminderPolicy),
         pushCount: task.pushCount === 0 ? undefined : task.pushCount,
         repeatReminderMinutes: task.repeatReminderMinutes ? task.repeatReminderMinutes : undefined,
+        dueReminderLeadMinutes: task.dueReminderLeadMinutes || undefined,
         reviewAt: task.reviewAt,
         completedAt: task.completedAt,
         cancelledAt: task.cancelledAt,

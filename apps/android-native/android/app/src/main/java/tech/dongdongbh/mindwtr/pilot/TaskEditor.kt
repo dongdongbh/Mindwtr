@@ -875,6 +875,24 @@ private fun Reminders(model: InboxViewModel, editor: TaskEditor, locked: Boolean
         Text(reminders.getString("hint"), style = rnText(12, 400, 16), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
         if (!reminders.isNull("disabledHint")) Text(reminders.getString("disabledHint"), style = rnText(12, 400, 16), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
     }
+    if (!reminders.getBoolean("showSkip") && editor.text("dueDate").isEmpty() && ((editor.value("dueReminderLeadMinutes") as? Number)?.toInt() ?: 0) == 0) return
+    var advanceExpanded by rememberSaveable(editor.id) { mutableStateOf(false) }
+    val advanceEnabled = reminders.getBoolean("showAdvance")
+    val advanceLabel = reminders.getString("advanceLabel")
+    val advanceValue = reminders.getString("advanceValueLabel")
+    TextButton(enabled = !locked && advanceEnabled, onClick = { advanceExpanded = !advanceExpanded }) {
+        Text("$advanceLabel: $advanceValue", style = rnText(13, 600))
+    }
+    if (!reminders.isNull("advanceHint")) Text(reminders.getString("advanceHint"), style = rnText(12, 400, 16), color = c.secondaryText)
+    if (advanceEnabled && advanceExpanded) FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (option in reminders.getJSONArray("advanceOptions").objects()) {
+            val text = option.getString("label")
+            Chip(option.getBoolean("selected"), !locked, text, {
+                editFields(mapOf("dueReminderLeadMinutes" to option.getInt("value")))
+                advanceExpanded = false
+            }) { color -> Text(text, style = rnText(14, 400), color = color) }
+        }
+    }
     if (!reminders.getBoolean("showRepeat")) return
     var expanded by rememberSaveable(editor.id) { mutableStateOf(false) }
     val options = reminders.getJSONArray("repeatOptions").objects()

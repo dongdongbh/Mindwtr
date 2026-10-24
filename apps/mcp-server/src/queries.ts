@@ -86,6 +86,7 @@ export type TaskGeneratedCreateFields = Pick<CoreTask,
   | 'suppressMindwtrReminders'
   | 'reminderPolicy'
   | 'repeatReminderMinutes'
+  | 'dueReminderLeadMinutes'
   | 'reviewAt'
   | 'cancelledAt'
 >;

@@ -290,7 +290,7 @@ export function getActiveCancelReason(
     if (key.startsWith('digest:')) return requested ? 'expired' : 'withdrawn';
     const { diagnostics } = context;
     if (key.startsWith('task:')) {
-        const task = context.tasks.get(key.slice('task:'.length).replace(/:r\d+$/, ''));
+        const task = context.tasks.get(key.slice('task:'.length).replace(/:(?:r\d+|a\d+:-?\d+)$/, ''));
         if (!diagnostics.taskRemindersEnabled || !task || task.deletedAt || !isTaskActionable(task)) return 'withdrawn';
         const firedAtMs = getSignedFireAtMs(entry);
         if (firedAtMs === null) return 'expired';
@@ -300,7 +300,7 @@ export function getActiveCancelReason(
             includeReviewAt: diagnostics.includeReviewAt,
             taskReminderDefault: context.settings.taskReminderDefault,
         });
-        return [plan.next, ...plan.repeats].some((intent) => intent?.key === key && intent.scheduledAt.getTime() === firedAtMs)
+        return [plan.next, plan.advance, ...plan.repeats].some((intent) => intent?.key === key && intent.scheduledAt.getTime() === firedAtMs)
             ? 'expired'
             : 'withdrawn';
     }
@@ -462,8 +462,9 @@ export async function cancelReminderAlarm(
 }
 
 /**
- * Makes one requested alarm unless the held one matches. A duplicate-minute refusal retries
- * a minute later. False when the library refused it: the refusal is logged, never thrown.
+ * Makes one requested alarm unless the held one matches. Duplicate-minute refusals retry a
+ * minute later, except advance reminders, whose requested lead time must stay exact.
+ * False when the library refused it: the refusal is logged, never thrown.
  */
 async function scheduleReminderAlarm(
     alarms: Map<string, ReminderAlarmEntry>,
@@ -499,10 +500,13 @@ async function scheduleReminderAlarm(
                 retryCount: retry,
                 scheduleType: config.repeatInterval ? 'repeat' : 'once',
             });
+            if (config.data?.kind === 'task-due-advance') {
+                port.logInfo('Advance reminder scheduled', { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'scheduled' });
+            }
             alarms.set(key, { id: Math.floor(id), signature, ...(retry > 0 ? { fireAtMs: fireAt.getTime() } : {}) });
             return true;
         } catch (error) {
-            if (isDuplicateReminderAlarmError(error) && retry < MAX_DUPLICATE_ALARM_RETRIES) {
+            if (config.data?.kind !== 'task-due-advance' && isDuplicateReminderAlarmError(error) && retry < MAX_DUPLICATE_ALARM_RETRIES) {
                 continue;
             }
             port.logError(`Failed to schedule alarm (${key})`, error);
@@ -631,7 +635,7 @@ export function readNativeAlarmData(value: unknown): Record<string, string> {
 
 /** Whether the task or project an alarm key names is gone, done or archived; a key of another kind has none to lose. */
 export function isReminderOwnerGone(key: string, tasks: ReadonlyMap<string, Task>, projects: ReadonlyMap<string, Project>): boolean {
-    const task = key.startsWith('task:') ? tasks.get(key.slice('task:'.length).replace(/:r\d+$/, '')) : undefined;
+    const task = key.startsWith('task:') ? tasks.get(key.slice('task:'.length).replace(/:(?:r\d+|a\d+:-?\d+)$/, '')) : undefined;
     const project = key.startsWith('project:') ? projects.get(key.slice('project:'.length)) : undefined;
     return (key.startsWith('task:') && (!task || Boolean(task.deletedAt) || !isTaskActionable(task)))
         || (key.startsWith('project:') && (!project || Boolean(project.deletedAt) || project.status === 'archived'));
@@ -664,8 +668,8 @@ export function findStaleNativeReminderAlarms(input: {
         if (!Number.isSafeInteger(id) || id <= 0 || input.trackedIds.has(id) || isPomodoroNativeAlarm(row)) continue;
         const data = readNativeAlarmData(row.data);
         const key = data.alarmKey ?? '';
-        const task = key.startsWith('task:') ? tasks.get(key.slice('task:'.length).replace(/:r\d+$/, '')) : undefined;
-        const taskDateReminder = data.kind === 'task-start' || data.kind === 'task-due' || data.kind === 'task-reminder';
+        const task = key.startsWith('task:') ? tasks.get(key.slice('task:'.length).replace(/:(?:r\d+|a\d+:-?\d+)$/, '')) : undefined;
+        const taskDateReminder = data.kind === 'task-start' || data.kind === 'task-due' || data.kind === 'task-due-advance' || data.kind === 'task-reminder';
         const remindersSkipped = taskDateReminder && task && !shouldSendTaskReminders(task, input.settings);
         const ownerGone = isReminderOwnerGone(key, tasks, projects);
         const fireAtMs = new Date(

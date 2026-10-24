@@ -61,7 +61,7 @@ describe('schedule-utils', () => {
         expect(getNextScheduledAt({ ...task, reminderPolicy: undefined, suppressMindwtrReminders: true }, now)).toBeNull();
         expect(task.repeatReminderMinutes).toBe(30);
         expect(getTaskReminderPlan({ ...task, startTime: '2026-03-17', dueDate: '2026-03-17', reviewAt: undefined }, now))
-            .toEqual({ next: null, repeats: [] });
+            .toEqual({ next: null, repeats: [], advance: null });
     });
 
     it('uses the default in the complete schedule and retains category gates', () => {

@@ -993,7 +993,7 @@ export function TaskItemFieldRenderer({
             {
                 const { date: dateValue, time: timeValue } = splitDateTime(editDueDate);
                 const hasTime = Boolean(timeValue);
-                const hasReminderHandoffSchedule = hasTimeComponent(editStartTime) || hasTime;
+                const hasReminderHandoffSchedule = hasTimeComponent(editStartTime) || Boolean(editDueDate) || (draft.dueReminderLeadMinutes ?? 0) > 0;
                 const parsed = editDueDate ? safeParseDate(editDueDate) : null;
                 const updateDueDate = (nextDueDate: string) => {
                     setEditDueDate(nextDueDate);
@@ -1045,9 +1045,10 @@ export function TaskItemFieldRenderer({
                             const repeatLabel = reminders.repeatLabel;
                             const current = editRepeatReminderMinutes ?? 0;
                             const showRepeat = reminders.showRepeat;
-                            const isDefault = draft.reminderPolicy === 'inherit' && (!showRepeat || current === 0);
+                            const isDefault = draft.reminderPolicy === 'inherit' && (!showRepeat || current === 0) && !(draft.dueReminderLeadMinutes ?? 0);
                             const summary = [
                                 `${reminders.policyLabel}: ${reminders.policyValueLabel}`,
+                                ...((draft.dueReminderLeadMinutes ?? 0) > 0 ? [`${reminders.advanceLabel}: ${reminders.advanceValueLabel}`] : []),
                                 ...(showRepeat ? [`${repeatLabel}: ${reminders.repeatValueLabel}`] : []),
                             ].join(' · ');
                             return (
@@ -1079,6 +1080,19 @@ export function TaskItemFieldRenderer({
                                                 </select>
                                                 <span className="mt-1 block leading-snug">{reminders.hint}</span>
                                                 {reminders.disabledHint && <span className="mt-1 block leading-snug">{reminders.disabledHint}</span>}
+                                            </label>
+                                            <label className="block text-xs text-muted-foreground">
+                                                <span>{reminders.advanceLabel}</span>
+                                                <select
+                                                    aria-label={reminders.advanceLabel}
+                                                    disabled={!reminders.showAdvance}
+                                                    value={draft.dueReminderLeadMinutes ?? 0}
+                                                    onChange={(event) => setField('dueReminderLeadMinutes', Number(event.target.value))}
+                                                    className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50"
+                                                >
+                                                    {reminders.advanceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                                </select>
+                                                {reminders.advanceHint && <span className="mt-1 block leading-snug">{reminders.advanceHint}</span>}
                                             </label>
                                             {showRepeat && (
                                                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={repeatLabel}>

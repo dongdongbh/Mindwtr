@@ -19,7 +19,7 @@ import { tFallback } from './i18n';
 import { buildRRuleString, editRRuleString, getProjectedRecurringTaskCalendarDate, isMonthlyWeekdaySet, MONTHLY_WEEKDAYS, parseRRuleString, RECURRENCE_INTERVAL_MAX, type RRuleEditOverrides } from './recurrence';
 import { getLocalizedWeekdayButtons, getLocalizedWeekdayLabels, WEEKDAY_ORDER } from './recurrence-constants';
 import { resolveFeatureFlags } from './resolve-feature-flags';
-import { REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
 import type { TaskDraft } from './task-draft';
 import { computeRelativeStartTime } from './task-relative-start';
 import { getTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
@@ -255,7 +255,14 @@ export function getTaskEditorRelativeStart(
 // ---------------------------------------------------------------------------
 // Reminders
 
+export const DUE_REMINDER_LEAD_OPTIONS = [5, 15, 30, 60, 1440, 2880, 10080] as const;
+
 export type TaskEditorReminders = {
+    showAdvance: boolean;
+    advanceLabel: string;
+    advanceValueLabel: string;
+    advanceHint: string | null;
+    advanceOptions: Array<{ value: number; label: string; selected: boolean }>;
     /** "Skip reminders" shows when the start or due has a time. */
     showSkip: boolean;
     /** "Repeat reminder" shows under a timed due, unless reminders are skipped. */
@@ -273,7 +280,7 @@ export type TaskEditorReminders = {
 };
 
 export function getTaskEditorReminders(
-    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'> & Partial<Pick<TaskDraft, 'reminderPolicy'>>,
+    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'> & Partial<Pick<TaskDraft, 'reminderPolicy' | 'dueReminderLeadMinutes'>>,
     t: Translate,
     settings: Pick<NotificationSettings, 'taskReminderDefault' | 'notificationsEnabled'> = {},
 ): TaskEditorReminders {
@@ -290,7 +297,26 @@ export function getTaskEditorReminders(
         { value: 'send', label: send, selected: policy === 'send' },
         { value: 'skip', label: skip, selected: policy === 'skip' },
     ];
+    const advanceCurrent = normalizeDueReminderLeadMinutes(draft.dueReminderLeadMinutes) ?? 0;
+    const advanceValues: number[] = [0, ...DUE_REMINDER_LEAD_OPTIONS];
+    if (!advanceValues.includes(advanceCurrent)) advanceValues.push(advanceCurrent);
+    const advanceLabel = (minutes: number): string => {
+        if (minutes === 0) return off;
+        if (minutes === 10080) return tFallback(t, 'taskEdit.advanceReminderWeek', '1 week before');
+        if (minutes === 1440) return tFallback(t, 'taskEdit.advanceReminderDay', '1 day before');
+        if (minutes === 2880) return tFallback(t, 'taskEdit.advanceReminderTwoDays', '2 days before');
+        if (minutes === 60) return tFallback(t, 'taskEdit.advanceReminderHour', '1 hour before');
+        return tFallback(t, 'taskEdit.advanceReminderMinutes', '{count} min before').replace('{count}', String(minutes));
+    };
+    const showAdvance = hasTimeComponent(draft.dueDate) && !!safeParseDate(draft.dueDate) && shouldSendTaskReminders(draft, settings);
     return {
+        showAdvance,
+        advanceLabel: tFallback(t, 'taskEdit.advanceReminderLabel', 'Advance reminder'),
+        advanceValueLabel: advanceLabel(advanceCurrent),
+        advanceHint: !hasTimeComponent(draft.dueDate) || !safeParseDate(draft.dueDate)
+            ? tFallback(t, 'taskEdit.advanceReminderNeedsDueTime', 'Add a due date and time to set an advance reminder.')
+            : !showAdvance ? tFallback(t, 'taskEdit.advanceReminderSkipped', 'Enable start/due reminders for this task to use an advance reminder.') : null,
+        advanceOptions: advanceValues.map((value) => ({ value, label: advanceLabel(value), selected: value === advanceCurrent })),
         showSkip: hasTimeComponent(draft.startTime) || hasTimeComponent(draft.dueDate),
         showRepeat: hasTimeComponent(draft.dueDate) && shouldSendTaskReminders(draft, settings),
         policyLabel: tFallback(t, 'taskEdit.reminders', 'Start/due reminders'),

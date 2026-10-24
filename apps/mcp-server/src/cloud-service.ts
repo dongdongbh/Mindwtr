@@ -22,11 +22,13 @@ import {
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   normalizeNullableTaskTokens,
   normalizeOptionalTaskRecurrence,
   normalizeOptionalTaskRelativeStartOffset,
   normalizeOptionalTaskRepeatReminderMinutes,
+  normalizeOptionalTaskDueReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   normalizeOptionalTaskTokens,
 } from './input-validation.js';
@@ -404,6 +406,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         relativeStartOffset: normalizeOptionalTaskRelativeStartOffset(input.relativeStartOffset),
         timeSpentMinutes: normalizeOptionalTaskTimeSpentMinutes(input.timeSpentMinutes),
         repeatReminderMinutes: normalizeOptionalTaskRepeatReminderMinutes(input.repeatReminderMinutes),
+        dueReminderLeadMinutes: normalizeOptionalTaskDueReminderLeadMinutes(input.dueReminderLeadMinutes),
         attachments: buildLinkAttachments(input.attachments),
       });
       const body = hasQuickAdd ? { input: input.quickAdd, props } : { title: input.title, props };
@@ -442,6 +445,8 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           patch.relativeStartOffset = normalizeNullableTaskRelativeStartOffset(value as RelativeStartOffset | null);
         } else if (name === 'timeSpentMinutes') {
           patch.timeSpentMinutes = normalizeNullableTaskTimeSpentMinutes(value as number | null);
+        } else if (name === 'dueReminderLeadMinutes') {
+          patch.dueReminderLeadMinutes = normalizeNullableTaskDueReminderLeadMinutes(value as number | null) ?? 0;
         } else if (name === 'repeatReminderMinutes') {
           patch.repeatReminderMinutes = normalizeNullableTaskRepeatReminderMinutes(value as number | null);
         } else {

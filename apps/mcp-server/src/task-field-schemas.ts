@@ -43,6 +43,7 @@ const TASK_FIELD_ZOD_SCHEMAS: Partial<Record<keyof Task, z.ZodTypeAny>> = {
   repeatReminderMinutes: z.number().int().nonnegative().describe(
     'Repeat the due-time reminder every N minutes (presets 5|10|15|30|60); 0/absent = off'
   ),
+  dueReminderLeadMinutes: z.number().int().min(0).max(10080).describe('Minutes before an explicit due time; 0 = off, maximum one week'),
   reviewAt: isoDateLikeSchema.describe('Tickler/review date in ISO format'),
   order: z.number().int().describe('Manual ordering within a sequential project'),
   boardOrder: z.number().int().describe('Manual ordering within a Board status column'),

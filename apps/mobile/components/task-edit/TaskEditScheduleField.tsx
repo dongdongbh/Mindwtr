@@ -72,6 +72,7 @@ export function TaskEditScheduleField({
     tc,
     task,
 }: TaskEditScheduleFieldProps) {
+    const [advanceReminderOptionsExpanded, setAdvanceReminderOptionsExpanded] = React.useState(false);
     const [repeatReminderOptionsExpanded, setRepeatReminderOptionsExpanded] = React.useState(false);
     const reminderSettings = useTaskStore((state) => state.settings);
     if (!draft) return null;
@@ -201,6 +202,43 @@ export function TaskEditScheduleField({
                 </Text>
                 {reminders.disabledHint && (
                     <Text style={{ marginTop: 4, color: tc.secondaryText, fontSize: 12, lineHeight: 16 }}>{reminders.disabledHint}</Text>
+                )}
+            </View>
+        );
+    };
+    const renderAdvanceReminderControl = () => {
+        if (fieldId !== 'dueDate' || (!draft.dueDate && !draft.dueReminderLeadMinutes && !reminders.showSkip)) return null;
+        return (
+            <View style={{ marginTop: 8 }}>
+                <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`${reminders.advanceLabel}: ${reminders.advanceValueLabel}`}
+                    accessibilityState={{ disabled: !reminders.showAdvance, expanded: advanceReminderOptionsExpanded }}
+                    disabled={!reminders.showAdvance}
+                    style={[styles.dateBtn, { backgroundColor: tc.cardBg, borderColor: tc.border, opacity: reminders.showAdvance ? 1 : 0.5 }]}
+                    onPress={() => setAdvanceReminderOptionsExpanded((expanded) => !expanded)}
+                >
+                    <Text style={[styles.modalLabel, { color: tc.text }]}>{reminders.advanceLabel}: {reminders.advanceValueLabel}</Text>
+                </TouchableOpacity>
+                {reminders.advanceHint && <Text style={{ marginTop: 4, color: tc.secondaryText, fontSize: 12, lineHeight: 16 }}>{reminders.advanceHint}</Text>}
+                {reminders.showAdvance && advanceReminderOptionsExpanded && (
+                    <View style={[styles.statusContainer, { marginTop: 8 }]} accessibilityRole="radiogroup" accessibilityLabel={reminders.advanceLabel}>
+                        {reminders.advanceOptions.map((option) => (
+                            <TouchableOpacity
+                                key={option.value}
+                                accessibilityRole="radio"
+                                accessibilityLabel={option.label}
+                                accessibilityState={{ checked: option.selected }}
+                                style={getStatusChipStyle(option.selected)}
+                                onPress={() => {
+                                    setDraftField('dueReminderLeadMinutes', option.value);
+                                    setAdvanceReminderOptionsExpanded(false);
+                                }}
+                            >
+                                <Text style={getStatusTextStyle(option.selected)}>{option.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
                 )}
             </View>
         );
@@ -669,6 +707,7 @@ export function TaskEditScheduleField({
                         {renderQuickDateChips('due', parsed)}
                         {renderInlineIOSDatePicker(['due'])}
                         {renderReminderHandoffControl()}
+                        {renderAdvanceReminderControl()}
                         {renderRepeatReminderControl()}
                     </View>
                 );
@@ -724,6 +763,7 @@ export function TaskEditScheduleField({
                         {renderDateIssue()}
                         {renderInlineIOSDatePicker(['due', 'due-time'])}
                         {renderReminderHandoffControl()}
+                        {renderAdvanceReminderControl()}
                         {renderRepeatReminderControl()}
                     </View>
                 </View>

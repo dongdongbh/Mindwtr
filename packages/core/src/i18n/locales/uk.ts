@@ -1,5 +1,13 @@
 // Ukrainian app strings. Keep placeholders and slash-command syntax in sync with en.ts.
 export const ukOverrides: Record<string, string> = {
+    "taskEdit.advanceReminderLabel": "Завчасне нагадування",
+    "taskEdit.advanceReminderMinutes": "За {count} хв",
+    "taskEdit.advanceReminderHour": "За 1 годину",
+    "taskEdit.advanceReminderDay": "За 1 день",
+    "taskEdit.advanceReminderTwoDays": "За 2 дні",
+    "taskEdit.advanceReminderWeek": "За 1 тиждень",
+    "taskEdit.advanceReminderNeedsDueTime": "Додайте дату й час терміну, щоб налаштувати завчасне нагадування.",
+    "taskEdit.advanceReminderSkipped": "Увімкніть нагадування про початок і термін для цього завдання, щоб отримувати завчасне нагадування.",
     "settings.gmailCapture": "Gmail",
     "settings.gmailCaptureDesc": "Підключіть Google та збирайте листи з вибраною міткою.",
     "settings.gmailCaptureDisclosure": "Google надає доступ лише для читання до всієї вашої поштової скриньки, хоча Mindwtr імпортує тільки листи з вибраною міткою. Mindwtr ніколи не змінює листи чи мітки. Імпортовані дані відправника й текст листа стають звичайними даними завдань і можуть потрапляти до налаштованої синхронізації, резервних копій, експорту або необов’язкових функцій ШІ. Використовуйте лише спеціально призначений тестовий обліковий запис.",

@@ -48,7 +48,7 @@ const validFilters = (value: unknown): value is BoardFilterState => record(value
     && (value.duePreset === null || ['today', 'this_week', 'this_month', 'overdue', 'no_date'].includes(String(value.duePreset)));
 const validTask = (value: unknown): value is Task => {
     if (!record(value) || !text(value.id) || !validRawTask(value, value.id)) return false;
-    const numbers = new Set(['pushCount', 'timeSpentMinutes', 'repeatReminderMinutes', 'rev', 'order', 'orderNum', 'boardOrder', 'focusOrder']);
+    const numbers = new Set(['pushCount', 'timeSpentMinutes', 'repeatReminderMinutes', 'dueReminderLeadMinutes', 'rev', 'order', 'orderNum', 'boardOrder', 'focusOrder']);
     const booleans = new Set(['showFutureRecurrence', 'isFocusedToday', 'suppressMindwtrReminders', 'isFocusedTodayBeforeProjectArchive']);
     for (const [name, part] of Object.entries(value)) {
         if (part === null) continue;

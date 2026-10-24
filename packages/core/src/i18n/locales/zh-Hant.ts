@@ -1,5 +1,13 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHant: Record<string, string> = {
+    "taskEdit.advanceReminderLabel": "提前提醒",
+    "taskEdit.advanceReminderMinutes": "提前 {count} 分鐘",
+    "taskEdit.advanceReminderHour": "提前 1 小時",
+    "taskEdit.advanceReminderDay": "提前 1 天",
+    "taskEdit.advanceReminderTwoDays": "提前 2 天",
+    "taskEdit.advanceReminderWeek": "提前 1 週",
+    "taskEdit.advanceReminderNeedsDueTime": "請設定截止日期和時間以使用提前提醒。",
+    "taskEdit.advanceReminderSkipped": "請為此任務啟用開始/截止提醒以使用提前提醒。",
     "settings.gmailCapture": "Gmail",
     "settings.gmailCaptureDesc": "連接 Google，擷取所選標籤下的郵件。",
     "settings.gmailCaptureDisclosure": "Google 會授予整個信箱的唯讀存取權限，即使 Mindwtr 只匯入帶有所選標籤的郵件。Mindwtr 不會變更郵件或標籤。匯入的寄件者和郵件內文會成為一般任務資料，可能進入你設定的同步、備份、匯出或選用 AI 功能。僅限使用專門指定的測試帳號。",

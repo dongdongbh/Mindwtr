@@ -1,3 +1,4 @@
+import { logInfo } from '@mindwtr/core';
 import type { NativeReminderAlarm, NativeReminderAlarmPlan } from '../../../packages/core/src/native-host-contract-reminders';
 import type { NativeHostResult } from '../../../packages/core/src/native-host-contract';
 
@@ -154,6 +155,7 @@ export function createIosReminderMethods(deps: Dependencies) {
     let owner: { token: string; current: () => void } | null = null;
     // Saved repeating alarms whose signature carries a time zone, from the last prepare; its acknowledgment logs the count.
     let zoned = 0;
+    let advanceScheduled = false;
     let revision = 0, unsubscribe: (() => void) | null = null, resolvedLanguage: string | null = null;
     const changed = () => { revision += 1; };
     const current = (token: string) => {
@@ -186,6 +188,7 @@ export function createIosReminderMethods(deps: Dependencies) {
         },
         begin(token: string) {
             if (owner || typeof token !== 'string' || !/^[0-9a-f-]{36}$/.test(token)) throw unavailable();
+            advanceScheduled = false;
             const check = deps.capture(); check(); owner = { token, current: check }; return null;
         },
         current(token: string) { current(token); return null; },
@@ -215,6 +218,7 @@ export function createIosReminderMethods(deps: Dependencies) {
             if (!result.ok) throw unavailable();
             readOwnedIosReminderMaps(result.value.alarms, result.value.state);
             if (result.value.writeAhead !== null) readOwnedIosReminderMaps(result.value.writeAhead, storedState);
+            advanceScheduled = result.value.schedule.some((alarm) => record(alarm.details.data) && alarm.details.data.kind === 'task-due-advance');
             return { storedAlarms, storedState, plan: result.value };
         },
         async acknowledge(token: string, mode: string, scheduled: number, cancelled: number, collapsed = 0, rearmed = 0) {
@@ -225,6 +229,11 @@ export function createIosReminderMethods(deps: Dependencies) {
                 || !Number.isInteger(rearmed) || rearmed < 0 || rearmed > scheduled || rearmed > 64) throw unavailable();
             const admitted = zoned; zoned = 0;
             try { await deps.acknowledged(mode, scheduled, cancelled, collapsed, rearmed, admitted); } catch { /* Confirmed persistence survives logging failure. */ }
+            const advanceConfirmed = advanceScheduled && scheduled > 0; advanceScheduled = false;
+            try {
+                if (advanceConfirmed) logInfo('Advance reminder scheduled', { scope: 'notifications', force: true,
+                    context: { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'scheduled' } });
+            } catch { /* Confirmed scheduling survives logging failure. */ }
             return null;
         },
     };

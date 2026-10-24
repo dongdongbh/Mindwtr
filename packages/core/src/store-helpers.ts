@@ -1,3 +1,4 @@
+import { normalizeDueReminderLeadMinutes } from './schedule-utils';
 import { normalizeTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
 import type { ProjectTaskSummary } from './project-row-meta';
 import { buildNextRecurringTask, canonicalRecurringFollowUp, createNextRecurringTask, normalizeRecurrenceForLoad, type RecurrenceProjection } from './recurrence';
@@ -100,6 +101,7 @@ export const getReferenceTaskFieldClears = (): Partial<Task> => ({
     timeEstimate: undefined,
     suppressMindwtrReminders: undefined,
     repeatReminderMinutes: undefined,
+    dueReminderLeadMinutes: 0,
     showFutureRecurrence: undefined,
     isFocusedToday: false,
     focusOrder: undefined,
@@ -305,6 +307,10 @@ export const normalizeTaskUpdate = (
         futureDates?: import('./task-utils').FocusDateLookup },
 ): Partial<Task> => {
     let adjustedUpdates = updates;
+    if (hasOwnField(updates, 'dueReminderLeadMinutes')) {
+        adjustedUpdates = { ...adjustedUpdates, dueReminderLeadMinutes: updates.dueReminderLeadMinutes == null
+            ? 0 : normalizeDueReminderLeadMinutes(updates.dueReminderLeadMinutes) };
+    }
     if (hasOwnField(updates, 'reminderPolicy')) {
         const policy = normalizeTaskReminderPolicy(updates.reminderPolicy);
         if (policy) {

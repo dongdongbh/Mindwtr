@@ -1847,8 +1847,30 @@ private struct TaskScheduleField: View {
                 Text(issue).rnFont(13).foregroundStyle(palette.warning).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(prefix + "-issue")
             }
+            if field == "dueDate" && (!part.text("value").isEmpty || model.taskEditor.object("draft").number("dueReminderLeadMinutes") > 0) { advanceReminder }
             if field == "startTime" && !relative.isEmpty { relativeControls }
             if !pickerMode.isEmpty { inlinePicker }
+        }
+    }
+
+    private var advanceReminder: some View {
+        let reminders = model.taskEditor.object("fields").object("reminders")
+        return VStack(alignment: .leading, spacing: 4) {
+            Picker(reminders.text("advanceLabel"), selection: Binding(
+                get: { model.taskEditor.object("draft").number("dueReminderLeadMinutes") },
+                set: { minutes in beforeAction(); model.setTaskAdvanceReminder(minutes) })) {
+                ForEach(reminders.objects("advanceOptions").indices, id: \.self) { index in
+                    let option = reminders.objects("advanceOptions")[index]
+                    Text(option.text("label")).tag(option.number("value"))
+                }
+            }
+            .pickerStyle(.menu).tint(palette.tint)
+            .disabled(!reminders.flag("showAdvance") || model.busy || model.taskScheduleUpdating)
+            .accessibilityIdentifier("task-advance-reminder")
+            if !reminders.text("advanceHint").isEmpty {
+                Text(reminders.text("advanceHint")).rnFont(12).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

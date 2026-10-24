@@ -162,6 +162,7 @@ beforeAll(async () => {
         globalThis.fixture = { seed: () => useTaskStore.setState({ _allTasks: [{ id:'one', title:'PRIVATE_REMINDER', status:'next',
             tags:[], contexts:[], createdAt:new Date(${now}).toISOString(), updatedAt:new Date(${now}).toISOString(),
             dueDate:new Date(${now}+3600000).toISOString() }], settings:{ notificationsEnabled:true, dueDateNotificationsEnabled:true } }),
+            advance:()=>useTaskStore.setState({_allTasks:useTaskStore.getState().tasks.map(task=>({...task,dueReminderLeadMinutes:15}))}),
             save:()=>useTaskStore.getState().addTask('PRIVATE_QUEUED'), flush:flushPendingSave,
             bookkeeping:()=>useTaskStore.setState({settings:{...useTaskStore.getState().settings,lastSyncAt:'synthetic'}}) };`,
         resolveDir: import.meta.dir, loader: 'ts' }, bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent' });
@@ -182,7 +183,7 @@ const fixture = () => {
             iosReminderAcknowledged(id: string, mode: string, scheduled: number, cancelled: number, collapsed?: number, rearmed?: number): string;
             iosReminderObserve(): string; iosReminderObservation(): string; iosReminderDisposeObservation(): string;
             language(stored: string, system: string): string },
-        fixture: undefined as unknown as { seed(): void; save(): void; flush(): Promise<void>; bookkeeping(): void },
+        fixture: undefined as unknown as { seed(): void; advance(): void; save(): void; flush(): Promise<void>; bookkeeping(): void },
         __mindwtrNative: {
             sqlExec: (sql: string) => { writes.push('SQL'); database.exec(sql); return null; },
             sqlRun: (sql: string, params: string) => { writes.push('SQL'); database.query(sql).run(...JSON.parse(params)); return null; },
@@ -222,6 +223,19 @@ describe('actual iOS effects planning bridge with native-owned storage/effects',
         const entry = JSON.parse(f.log().trim());
         expect(entry.context).toEqual({ releaseCheck: 'v1.3.5/ios-reminder-apply', outcome: 'confirmed', mode: 'active', scheduled: '1', cancelled: '0' });
         expect(f.log()).not.toContain('PRIVATE'); expect(f.log()).not.toContain('task:one');
+    });
+    it('records the advance marker only after native scheduling acknowledgment, without task content', async () => {
+        const f = fixture(); await f.boot(); f.state.fixture.advance(); await f.begin();
+        const result = await f.prepare();
+        expect(result.value.plan.schedule).toHaveLength(2);
+        expect(f.log()).toBe('');
+        expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 2, 0))).toEqual({ ok: true, value: null });
+        const lines = f.log().trim().split('\n').map((line) => JSON.parse(line));
+        expect(lines.some((entry) => entry.message === 'Advance reminder scheduled'
+            && entry.context.releaseCheck === 'v1.3.8/due-advance-reminder' && entry.context.outcome === 'scheduled')).toBe(true);
+        expect(f.log()).not.toContain('PRIVATE'); expect(f.log()).not.toContain('task:one');
+        await f.prepare(); f.failLog();
+        expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 2, 0))).toEqual({ ok: true, value: null });
     });
     it('never writes malformed/legacy ownership and accepts neither another owner nor stale saves', async () => {
         const f = fixture(); await f.boot(); await f.begin();

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   timeSpentMinutes INTEGER,
   suppressMindwtrReminders INTEGER,
   repeatReminderMinutes INTEGER,
+  dueReminderLeadMinutes INTEGER,
   reviewAt TEXT,
   completedAt TEXT,
   cancelledAt TEXT,

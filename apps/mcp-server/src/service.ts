@@ -23,11 +23,13 @@ import {
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   normalizeNullableTaskTokens,
   normalizeOptionalTaskRecurrence,
   normalizeOptionalTaskRelativeStartOffset,
   normalizeOptionalTaskRepeatReminderMinutes,
+  normalizeOptionalTaskDueReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   normalizeOptionalTaskTokens,
 } from './input-validation.js';
@@ -228,6 +230,7 @@ const validateAddTaskInput = (input: AddTaskInput): AddTaskInput => {
     relativeStartOffset: normalizeOptionalTaskRelativeStartOffset(input.relativeStartOffset),
     timeSpentMinutes: normalizeOptionalTaskTimeSpentMinutes(input.timeSpentMinutes),
     repeatReminderMinutes: normalizeOptionalTaskRepeatReminderMinutes(input.repeatReminderMinutes),
+    dueReminderLeadMinutes: normalizeOptionalTaskDueReminderLeadMinutes(input.dueReminderLeadMinutes),
   };
 };
 
@@ -271,6 +274,8 @@ const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
       updates.relativeStartOffset = normalizeNullableTaskRelativeStartOffset(value as RelativeStartOffset | null) ?? undefined;
     } else if (name === 'timeSpentMinutes') {
       updates.timeSpentMinutes = normalizeNullableTaskTimeSpentMinutes(value as number | null) ?? undefined;
+    } else if (name === 'dueReminderLeadMinutes') {
+      updates.dueReminderLeadMinutes = normalizeNullableTaskDueReminderLeadMinutes(value as number | null) ?? 0;
     } else if (name === 'repeatReminderMinutes') {
       updates.repeatReminderMinutes = normalizeNullableTaskRepeatReminderMinutes(value as number | null) ?? undefined;
     } else if (typeof value === 'boolean') {

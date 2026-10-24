@@ -1,5 +1,5 @@
 {
-    "schemaVersion": 5,
+    "schemaVersion": 6,
     "sinceVersionPolicy": "Contract versions start at 1 for every field present when this table was introduced; they are independent of SQLite migration versions.",
     "fields": [
         { "name": "id", "sync": "identity", "nullability": "required", "sinceVersion": 1, "signature": "content", "sqliteColumn": "id", "cloudKit": null, "cloudWrite": "managed", "sqliteOrder": 0, "sqliteType": null },
@@ -31,6 +31,7 @@
         { "name": "timeSpentMinutes", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "timeSpentMinutes", "cloudKit": { "key": "timeSpentMinutes", "kind": "integer" }, "cloudWrite": "create-patch", "sqliteOrder": 29, "sqliteType": "INTEGER" },
         { "name": "suppressMindwtrReminders", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "suppressMindwtrReminders", "cloudKit": { "key": "suppressMindwtrReminders", "kind": "boolean" }, "cloudWrite": "create-patch", "sqliteOrder": 30, "sqliteType": "INTEGER" },
         { "name": "reminderPolicy", "sync": "content", "nullability": "optional", "sinceVersion": 5, "signature": "content", "sqliteColumn": "reminderPolicy", "cloudKit": { "key": "reminderPolicy", "kind": "string" }, "cloudWrite": "create-patch", "sqliteOrder": 46, "sqliteType": "TEXT" },
+        { "name": "dueReminderLeadMinutes", "sync": "content", "nullability": "optional", "sinceVersion": 6, "signature": "content", "sqliteColumn": "dueReminderLeadMinutes", "cloudKit": { "key": "dueReminderLeadMinutes", "kind": "integer" }, "cloudWrite": "create-patch", "sqliteOrder": 47, "sqliteType": "INTEGER" },
         { "name": "repeatReminderMinutes", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "repeatReminderMinutes", "cloudKit": { "key": "repeatReminderMinutes", "kind": "integer" }, "cloudWrite": "create-patch", "sqliteOrder": 13, "sqliteType": "INTEGER" },
         { "name": "reviewAt", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "reviewAt", "cloudKit": { "key": "reviewAt", "kind": "date" }, "cloudWrite": "create-patch", "sqliteOrder": 31, "sqliteType": "TEXT" },
         { "name": "completedAt", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "completedAt", "cloudKit": { "key": "completedAt", "kind": "date" }, "cloudWrite": "managed", "sqliteOrder": 32, "sqliteType": "TEXT" },
@@ -89,6 +90,7 @@
         "suppressMindwtrReminders": false,
         "reminderPolicy": "inherit",
         "repeatReminderMinutes": 15,
+        "dueReminderLeadMinutes": 1440,
         "reviewAt": "2026-07-20T12:00:00.000Z",
         "completedAt": "2026-07-14T11:00:00.000Z",
         "cancelledAt": "2026-07-14T11:15:00.000Z",

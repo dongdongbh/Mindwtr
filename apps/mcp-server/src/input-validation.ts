@@ -4,6 +4,7 @@ import {
   normalizeRecurrenceForLoad,
   normalizeRelativeStartOffset,
   normalizeRepeatReminderMinutes,
+  normalizeDueReminderLeadMinutes,
   normalizeTimeSpentMinutes,
   RECURRENCE_INTERVAL_MAX,
   type Recurrence,
@@ -318,4 +319,24 @@ export const normalizeNullableTaskRepeatReminderMinutes = (
   value: number | null | undefined,
 ): number | null | undefined => (
   value === undefined || value === null ? value : normalizeTaskRepeatReminderMinutesValue(value)
+);
+
+const normalizeTaskDueReminderLeadMinutesValue = (value: number): number => {
+  if (value === 0) return value;
+  if (normalizeDueReminderLeadMinutes(value) !== value) {
+    throw new ValidationError('Invalid task dueReminderLeadMinutes');
+  }
+  return value;
+};
+
+export const normalizeOptionalTaskDueReminderLeadMinutes = (
+  value: number | undefined,
+): number | undefined => (
+  value === undefined ? undefined : normalizeTaskDueReminderLeadMinutesValue(value)
+);
+
+export const normalizeNullableTaskDueReminderLeadMinutes = (
+  value: number | null | undefined,
+): number | null | undefined => (
+  value === undefined || value === null ? value : normalizeTaskDueReminderLeadMinutesValue(value)
 );

@@ -994,6 +994,7 @@ export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
         reminderPolicy: getTaskReminderPolicy(task),
         suppressMindwtrReminders: task.suppressMindwtrReminders,
         repeatReminderMinutes: task.repeatReminderMinutes,
+        dueReminderLeadMinutes: task.dueReminderLeadMinutes,
         showFutureRecurrence: task.showFutureRecurrence,
         isFocusedToday: task.isFocusedToday,
         focusOrder: task.focusOrder,

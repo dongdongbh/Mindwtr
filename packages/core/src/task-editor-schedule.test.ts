@@ -6,7 +6,7 @@ import { loadTranslations } from './i18n/i18n-loader';
 import { normalizeRecurrenceForLoad } from './recurrence';
 import { WEEKDAY_ORDER } from './recurrence-constants';
 import { applyTaskUpdates } from './store-helpers';
-import { createTaskDraft, setTaskDraftField, type TaskDraft, type TaskDraftField } from './task-draft';
+import { createTaskDraft, setTaskDraftField, taskDraftToChangedUpdatePatch, type TaskDraft, type TaskDraftField } from './task-draft';
 import { getTaskEditorDateIssueLabel } from './task-date-coherence';
 import {
     buildTaskEditUpdatePatch,
@@ -629,5 +629,47 @@ describe('task reminder policy controls', () => {
         expect(model.showSkip).toBe(false);
         expect(model.showRepeat).toBe(false);
         expect(draft.dueDate).toBe('2026-10-15');
+    });
+});
+
+
+describe('advance reminder editor', () => {
+    const task: Task = { id: 'advance', title: 'advance', status: 'next', tags: [], contexts: [],
+        createdAt: '2026-10-14', updatedAt: '2026-10-14', dueDate: '2026-10-15T10:00' };
+    const t = (key: string) => key;
+    it('defaults Off and offers the bounded presets with human labels', () => {
+        const model = getTaskEditorReminders(createTaskDraft(task), t);
+        expect(model.showAdvance).toBe(true);
+        expect(model.advanceValueLabel).toBe('Off');
+        expect(model.advanceOptions.map(({ value }) => value)).toEqual([0, 5, 15, 30, 60, 1440, 2880, 10080]);
+        expect(model.advanceOptions.map(({ label }) => label)).toEqual(['Off', '5 min before', '15 min before', '30 min before', '1 hour before', '1 day before', '2 days before', '1 week before']);
+    });
+    it('shows a valid stored nonpreset without offering custom input', () => {
+        const model = getTaskEditorReminders(createTaskDraft({ ...task, dueReminderLeadMinutes: 90 }), t);
+        expect(model.advanceValueLabel).toBe('90 min before');
+        expect(model.advanceOptions.filter(({ selected }) => selected)).toEqual([{ value: 90, label: '90 min before', selected: true }]);
+    });
+    it('keeps the option through date-only or skipped reminders, with an explanation', () => {
+        const draft = createTaskDraft({ ...task, dueReminderLeadMinutes: 1440 });
+        for (const inactive of [setTaskDraftField(draft, 'dueDate', '2026-10-15'), setTaskDraftField(draft, 'dueDate', ''), setTaskDraftField(draft, 'reminderPolicy', 'skip')]) {
+            const model = getTaskEditorReminders(inactive, t);
+            expect(model.showAdvance).toBe(false);
+            expect(model.advanceHint).toBeTruthy();
+            expect(inactive.dueReminderLeadMinutes).toBe(1440);
+            expect(model.advanceOptions.find(({ selected }) => selected)?.value).toBe(1440);
+        }
+    });
+    it('saves, reloads and explicitly clears without changing the deadline or repeat', () => {
+        const saved = { ...task, repeatReminderMinutes: 15 };
+        const chosen = setTaskDraftField(createTaskDraft(saved), 'dueReminderLeadMinutes', 30);
+        const updates = taskDraftToChangedUpdatePatch(chosen, saved);
+        expect(updates).toMatchObject({ dueReminderLeadMinutes: 30 });
+        const reloaded = createTaskDraft({ ...saved, ...updates });
+        expect(getTaskEditorReminders(reloaded, t).advanceValueLabel).toBe('30 min before');
+        const off = setTaskDraftField(reloaded, 'dueReminderLeadMinutes', 0);
+        const cleared = { ...saved, ...updates, ...taskDraftToChangedUpdatePatch(off, { ...saved, ...updates }) };
+        expect(createTaskDraft(cleared).dueReminderLeadMinutes).toBe(0);
+        expect(cleared.dueDate).toBe(saved.dueDate);
+        expect(cleared.repeatReminderMinutes).toBe(15);
     });
 });

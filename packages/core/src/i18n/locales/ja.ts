@@ -10,6 +10,14 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+    "taskEdit.advanceReminderLabel": "事前リマインダー",
+    "taskEdit.advanceReminderMinutes": "{count} 分前",
+    "taskEdit.advanceReminderHour": "1 時間前",
+    "taskEdit.advanceReminderDay": "1 日前",
+    "taskEdit.advanceReminderTwoDays": "2 日前",
+    "taskEdit.advanceReminderWeek": "1 週間前",
+    "taskEdit.advanceReminderNeedsDueTime": "事前リマインダーを設定するには、期限の日付と時刻を追加してください。",
+    "taskEdit.advanceReminderSkipped": "事前リマインダーを使うには、このタスクの開始・期限リマインダーを有効にしてください。",
     "settings.gmailCapture": "Gmail",
     "settings.gmailCaptureDesc": "Google に接続して、選択したラベルのメールを取り込みます。",
     "settings.gmailCaptureDisclosure": "Google はメールボックス全体への読み取り専用アクセスを許可しますが、Mindwtr が取り込むのは選択したラベルのメールだけです。Mindwtr はメールやラベルを変更しません。取り込んだ送信者情報とメール本文は通常のタスクデータとなり、設定済みの同期、バックアップ、エクスポート、または任意の AI 機能の対象になる場合があります。専用のテストアカウントのみを使用してください。",

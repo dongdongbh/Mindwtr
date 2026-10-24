@@ -435,7 +435,7 @@ describe('TaskEditScheduleField', () => {
         act(() => { useTaskStore.setState({ settings: previousSettings }); timedTree.unmount(); });
     });
 
-    it('collapses repeat reminder options until the compact row is pressed', () => {
+    it.each(['repeat', 'advance'] as const)('collapses %s reminder options until the compact row is pressed', (kind) => {
         const setDraftField = vi.fn();
 
         let tree!: renderer.ReactTestRenderer;
@@ -472,20 +472,34 @@ describe('TaskEditScheduleField', () => {
             );
         });
 
-        const collapsedRow = tree.root.findByProps({ accessibilityLabel: 'Repeat reminder: Off' });
+        const label = kind === 'repeat' ? 'Repeat reminder' : 'Advance reminder';
+        const optionLabel = kind === 'repeat' ? '5 min' : '5 min before';
+        const collapsedRow = tree.root.findByProps({ accessibilityLabel: `${label}: Off` });
         expect(collapsedRow.props.accessibilityRole).toBe('button');
-        expect(tree.root.findAllByProps({ accessibilityLabel: '5 min' })).toHaveLength(0);
+        expect(tree.root.findAllByProps({ accessibilityLabel: optionLabel })).toHaveLength(0);
 
         act(() => {
             collapsedRow.props.onPress();
         });
 
-        const fiveMinuteOption = tree.root.findByProps({ accessibilityLabel: '5 min' });
+        const fiveMinuteOption = tree.root.findByProps({ accessibilityLabel: optionLabel });
         act(() => {
             fiveMinuteOption.props.onPress();
         });
 
-        expect(setDraftField).toHaveBeenCalledWith('repeatReminderMinutes', 5);
+        expect(setDraftField).toHaveBeenCalledWith(kind === 'repeat' ? 'repeatReminderMinutes' : 'dueReminderLeadMinutes', 5);
+        if (kind === 'advance') {
+            act(() => { tree.root.findByProps({ accessibilityLabel: `${label}: Off` }).props.onPress(); });
+            act(() => { tree.root.findByProps({ accessibilityRole: 'radio', accessibilityLabel: 'Off' }).props.onPress(); });
+            expect(setDraftField).toHaveBeenCalledWith('dueReminderLeadMinutes', 0);
+            const props = tree.root.findByType(TaskEditScheduleField).props as ComponentProps<typeof TaskEditScheduleField>;
+            setDraftField.mockClear();
+            act(() => { tree.update(<TaskEditScheduleField {...props} draft={makeDraft({ dueDate: '2026-04-28', dueReminderLeadMinutes: 30 })} />); });
+            const inactive = tree.root.findByProps({ accessibilityLabel: `${label}: 30 min before` });
+            expect(inactive.props.disabled).toBe(true);
+            expect(setDraftField).not.toHaveBeenCalled();
+        }
+        act(() => { tree.unmount(); });
     });
 
     it.each(['due', 'due-time', 'start', 'start-time', 'review', 'recurrence-end'])('renders the iOS %s picker with a calendar for dates and a wheel for times', (pickerMode) => {

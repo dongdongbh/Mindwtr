@@ -163,7 +163,7 @@ const logNotificationError = (message: string, error?: unknown) => {
 };
 
 const logNotificationInfo = (message: string, extra?: Record<string, unknown>) => {
-  void logInfo(`[Local Notifications] ${message}`, { scope: 'notifications', extra });
+  void logInfo(`[Local Notifications] ${message}`, { scope: 'notifications', extra, force: extra?.releaseCheck === 'v1.3.8/due-advance-reminder' });
 };
 
 const logNotificationWarn = (message: string, extra?: Record<string, unknown>) => {
@@ -604,7 +604,7 @@ async function rearmRetainedNativeAlarms(api: AlarmNotificationsApi): Promise<vo
       if (Number.isSafeInteger(id) && id > 0 && !stale.has(id) && row.scheduleType === 'once'
         && areTaskRemindersEnabled(settings)
         && data.kind?.startsWith('task-') && data.alarmKey?.startsWith('task:')
-        && (data.kind === 'task-review' || shouldSendTaskReminders(taskMap.get(data.alarmKey.slice('task:'.length).replace(/:r\d+$/, '')) ?? {}, settings))
+        && (data.kind === 'task-review' || shouldSendTaskReminders(taskMap.get(data.alarmKey.slice('task:'.length).replace(/:(?:r\d+|a\d+:-?\d+)$/, '')) ?? {}, settings))
         && !isReminderOwnerGone(data.alarmKey, taskMap, projectMap)) ids.add(id);
     }
     const result = await native.rearmAlarms(Array.from(ids));

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { prepareNativeAppleReminderImportItem, validatePreparedNativeAppleReminderImportItem,
     type NativeAppleReminderImportRequest, type NativeAppleReminderImportFactory,
     type NativeAppleReminderImportTarget } from './native-apple-reminders-import-item';
@@ -44,6 +45,23 @@ describe('native Apple Reminders pure item preparation', () => {
         expect(target.row[TASK_SQLITE_COLUMNS.indexOf('tags')]).toBe(' [ ] ');
         expect(Object.prototype.hasOwnProperty.call(plan, 'task')).toBe(false);
         expect(Object.prototype.hasOwnProperty.call(plan, 'factory')).toBe(false);
+    });
+    it('validates the frozen 47-cell Apple Reminders plan without changing its row or payload bytes', () => {
+        const source = input(); const id = SOURCE_UUID.toLowerCase();
+        const request = { ...source.request, reminder: { ...source.request.reminder, id: SOURCE_UUID }, generatedTaskId: null };
+        const row: (string | number | null)[] = new Array(47).fill(null);
+        row[0] = id; row[1] = 'Existing title'; row[2] = 'next'; row[14] = ' [ ] ';
+        const prepared = { version: 1, request, mode: 'existing', target: { id, row },
+            result: { taskId: id, importKey: SOURCE_UUID, mode: 'existing' } };
+        const bytes = JSON.stringify(prepared);
+        const validated = validatePreparedNativeAppleReminderImportItem({ request, prepared: JSON.parse(bytes) });
+        expect(validated.target.row).toHaveLength(47);
+        expect(JSON.stringify(validated)).toBe(bytes);
+        expect(createHash('sha256').update(JSON.stringify(validated)).digest('hex')).toBe('c134076809b3875e00feafaa6ca8784aa4f666648e34529aef17258a13d1894c');
+        for (const length of [0, 1, 46, 49]) {
+            const malformed = { ...prepared, target: { id, row: [...row.slice(0, length), ...new Array(Math.max(0, length - row.length)).fill(null)] } };
+            expect(() => validatePreparedNativeAppleReminderImportItem({ request, prepared: malformed })).toThrow();
+        }
     });
     it('matches RN normalized-list fallback while retaining exact colon/Unicode provider bytes', () => {
         const source = input(); source.request.list = { id: ' list:one ', sourceId: ' source:e\u0301:é ' };

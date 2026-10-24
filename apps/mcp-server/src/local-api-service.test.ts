@@ -240,7 +240,7 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
     const generated: Record<string, unknown> = { viewSectionIds: { someday: 'books' }, cancelledAt: iso, taskMode: 'task', relativeStartOffset: { amount: -2, unit: 'day' },
       showFutureRecurrence: true, pushCount: 2, checklist: [{ id: 'check-1', title: 'Step', isCompleted: false }],
       textDirection: 'rtl', location: 'Office', areaId: 'area-1', isFocusedToday: true,
-      timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, reviewAt: '2026-01-02',
+      timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, dueReminderLeadMinutes: 1440, reviewAt: '2026-01-02',
       order: 2, boardOrder: 3, focusOrder: 4 };
     const { service, calls } = fixture(() => jsonResponse({ task: task() }));
     const createFields = Object.fromEntries(TASK_CREATE_FIELD_NAMES.map((name) => [name, generated[name]]));
@@ -256,11 +256,11 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
   test('task patch is flat and clears nullable tokens with arrays, other fields with null', async () => {
     const { service, calls } = fixture(() => jsonResponse({ task: task() }));
     await service.updateTask({ id: 'task-1', title: 'Rename', status: 'waiting', projectId: null, sectionId: null,
-      tags: null, contexts: null, recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null });
+      tags: null, contexts: null, recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: null });
     expect(calls[0].method).toBe('PATCH');
     expect(calls[0].url).toBe(`${origin}/tasks/task-1`);
     expect(calls[0].body).toEqual({ title: 'Rename', status: 'waiting', projectId: null, sectionId: null,
-      tags: [], contexts: [], recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null });
+      tags: [], contexts: [], recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: 0 });
   });
 
   test('completion and restore use dedicated endpoints and deletion reads the actual persisted tombstone', async () => {

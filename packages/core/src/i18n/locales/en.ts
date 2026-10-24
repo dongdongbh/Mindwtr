@@ -1,5 +1,13 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const en: Record<string, string> = {
+    "taskEdit.advanceReminderLabel": "Advance reminder",
+    "taskEdit.advanceReminderMinutes": "{count} min before",
+    "taskEdit.advanceReminderHour": "1 hour before",
+    "taskEdit.advanceReminderDay": "1 day before",
+    "taskEdit.advanceReminderTwoDays": "2 days before",
+    "taskEdit.advanceReminderWeek": "1 week before",
+    "taskEdit.advanceReminderNeedsDueTime": "Add a due date and time to set an advance reminder.",
+    "taskEdit.advanceReminderSkipped": "Enable start/due reminders for this task to use an advance reminder.",
     "settings.gmailCapture": "Gmail",
     "settings.gmailCaptureDesc": "Connect Google and capture emails from a label you choose.",
     "settings.gmailCaptureDisclosure": "Google grants read-only access to your whole mailbox, even though Mindwtr imports only emails with your selected label. Mindwtr never changes email or labels. Imported sender and email text become ordinary task data and may enter your configured sync, backups, exports, or optional AI features. Only use a designated test account.",

@@ -12,6 +12,8 @@ import { TASK_RECURRENCE_FIELD_KEYS } from '@mindwtr/core';
 
 import {
   normalizeNullableTaskTimeSpentMinutes,
+  normalizeNullableTaskDueReminderLeadMinutes,
+  normalizeOptionalTaskDueReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   TASK_RECURRENCE_INPUT_FIELD_KEYS,
 } from './input-validation.js';
@@ -54,5 +56,21 @@ describe('timeSpentMinutes: 0 is a valid "no time logged" value, not a validatio
 
   test('a genuinely invalid non-zero value still throws', () => {
     expect(() => normalizeOptionalTaskTimeSpentMinutes(-5)).toThrow('Invalid task timeSpentMinutes');
+  });
+});
+
+
+describe('dueReminderLeadMinutes boundary validation', () => {
+  test('accepts absent, explicit Off, and bounded integer offsets', () => {
+    expect(normalizeOptionalTaskDueReminderLeadMinutes(undefined)).toBeUndefined();
+    for (const minutes of [0, 1, 15, 1440, 10080]) {
+      expect(normalizeOptionalTaskDueReminderLeadMinutes(minutes)).toBe(minutes);
+    }
+    expect(normalizeNullableTaskDueReminderLeadMinutes(null)).toBe(null);
+  });
+  test('rejects fractional, negative, and excessive offsets', () => {
+    for (const minutes of [-1, 1.5, 10081, NaN, Infinity]) {
+      expect(() => normalizeOptionalTaskDueReminderLeadMinutes(minutes)).toThrow('Invalid task dueReminderLeadMinutes');
+    }
   });
 });

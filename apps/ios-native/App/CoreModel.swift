@@ -30928,6 +30928,13 @@ final class CoreModel: ObservableObject {
         enqueueTaskScheduleEdit("relativeStart", edit: edit)
     }
 
+    func setTaskAdvanceReminder(_ minutes: Int) {
+        let reminders = taskEditor.object("fields").object("reminders")
+        guard taskDateFieldAvailable("dueDate"), !busy, reminders.flag("showAdvance"),
+              reminders.objects("advanceOptions").contains(where: { $0.number("value") == minutes }) else { return }
+        enqueueTaskScheduleEdit("dueReminderLeadMinutes", edit: ["type": "fields", "patch": ["dueReminderLeadMinutes": minutes]])
+    }
+
     func setTaskPickedDate(_ field: String, mode: String, value: String) {
         guard taskDateFieldAvailable(field), ["date", "time"].contains(mode), mode != "time" || field != "reviewAt" else { return }
         enqueueTaskScheduleEdit(field + ":" + mode,
