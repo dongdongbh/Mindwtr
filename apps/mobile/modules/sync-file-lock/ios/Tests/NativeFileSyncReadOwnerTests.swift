@@ -9,6 +9,7 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     private let lock = NSLock()
     private var values = [String: Int]()
     func increment(_ name: String) { lock.lock(); values[name, default: 0] += 1; lock.unlock() }
+    func set(_ name: String, _ value: Int) { lock.lock(); values[name] = value; lock.unlock() }
     func count(_ name: String) -> Int { lock.lock(); defer { lock.unlock() }; return values[name, default: 0] }
   }
   private func fixture() throws -> URL {
@@ -29,7 +30,12 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     return value
   }
   private func owner(_ root: URL, _ counts: Counts, access supplied: Owner.Access? = nil) -> Owner {
-    Owner(selection: .pickedDirectory(root), access: supplied ?? access(counts), diagnostic: { _ in counts.increment("admitted") })
+    Owner(selection: .pickedDirectory(root), access: supplied ?? access(counts), diagnostic: { event in
+      switch event {
+      case .admitted: counts.increment("admitted")
+      case .createdWriteCompleted: counts.increment("write-completed")
+      }
+    })
   }
   private func refuses(_ work: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
     do { try await work(); XCTFail("Expected refusal", file: file, line: line) } catch { }
@@ -68,6 +74,230 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     let metadata = try await reader.metadata("missing", using: handle)
     XCTAssertEqual(empty, .bytes(Data())); XCTAssertEqual(absent, .absent); XCTAssertNil(metadata)
     try await reader.close(handle)
+  }
+
+  func testExclusiveCreationAndBothWritePathsCompleteUnderRealLease() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), sentinel = Data([0, 255, 7]), counts = Counts()
+    for name in ["unknown", "data.json", "data.json.bak", "data.json.previous"] { try sentinel.write(to: root.appendingPathComponent(name)) }
+    var io = access(counts)
+    let syncFile = io.syncFile
+    io.syncFile = { fd in
+      counts.increment("file-sync"); counts.set("fd-\(counts.count("file-sync"))", Int(fd))
+      try syncFile(fd)
+    }
+    io.write = { fd, buffer, length in
+      counts.increment("write")
+      if counts.count("write") == 1 { errno = EINTR; return -1 }
+      return Darwin.write(fd, buffer, min(length, 4096))
+    }
+    io.stopScope = { _ in
+      for index in 1...2 { XCTAssertEqual(Darwin.fcntl(Int32(counts.count("fd-\(index)")), F_GETFD), -1) }
+      counts.increment("scope-stop")
+    }
+    let writer = owner(root, counts, access: io), handle = try await writer.open()
+    let first = try await writer.createExclusive("empty", using: handle)
+    XCTAssertEqual(first, .created)
+    try await writer.writeCreated("empty", bytes: Data(), using: handle)
+    let payload = Data(repeating: 42, count: 180_000)
+    let second = try await writer.createExclusive("normal", using: handle)
+    XCTAssertEqual(second, .created)
+    try await writer.writeBytes("normal", bytes: payload, using: handle)
+    let empty = try await writer.read("empty", using: handle), normal = try await writer.read("normal", using: handle)
+    XCTAssertEqual(empty, .bytes(Data())); XCTAssertEqual(normal, .bytes(payload))
+    let metadata = try await writer.metadata("normal", using: handle)
+    XCTAssertEqual(metadata?.byteCount, Int64(payload.count)); XCTAssertGreaterThan(counts.count("write"), 2)
+    XCTAssertEqual(counts.count("write-completed"), 2)
+    let competing = SyncFileLockEngine(); defer { competing.drain() }
+    XCTAssertThrowsError(try competing.acquireDirectory(root))
+    try await writer.close(handle)
+    let token = try competing.acquireDirectory(root); try competing.release(token)
+    XCTAssertEqual(counts.count("scope-stop"), 1)
+    for name in ["unknown", "data.json", "data.json.bak", "data.json.previous"] { XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(name)), sentinel) }
+  }
+
+  func testExistingNodesAndUnownedNamesNeverGrantWriteAuthority() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for kind in ["file", "directory", "symlink", "missing"] {
+      let root = try folder(parent, kind), target = root.appendingPathComponent("target"), foreign = parent.appendingPathComponent("foreign-" + kind)
+      let sentinel = Data([9, 8, 7]); try sentinel.write(to: foreign)
+      if kind == "file" { try sentinel.write(to: target) }
+      if kind == "directory" { try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false) }
+      if kind == "symlink" { try FileManager.default.createSymbolicLink(at: target, withDestinationURL: foreign) }
+      let counts = Counts(); var io = access(counts)
+      io.write = { fd, buffer, length in counts.increment("write"); return Darwin.write(fd, buffer, length) }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      if kind != "missing" {
+        let result = try await writer.createExclusive("target", using: handle)
+        XCTAssertEqual(result, .exists)
+      }
+      await refuses { try await writer.writeBytes("target", bytes: Data([1]), using: handle) }
+      XCTAssertEqual(counts.count("write"), 0); XCTAssertEqual(counts.count("write-completed"), 0)
+      XCTAssertEqual(try Data(contentsOf: foreign), sentinel)
+      if kind == "file" { XCTAssertEqual(try Data(contentsOf: target), sentinel) }
+      XCTAssertEqual(counts.count("scope-stop"), 1)
+    }
+  }
+
+  func testInvalidForeignAndUnicodeLookalikeNamesCannotRetargetCreatedFiles() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let a = try folder(parent, "a"), b = try folder(parent, "b"), counts = Counts()
+    var io = access(counts)
+    io.write = { fd, buffer, length in counts.increment("write"); return Darwin.write(fd, buffer, length) }
+    let writer = owner(a, counts, access: io), other = owner(b, Counts())
+    let handle = try await writer.open(), foreign = try await other.open()
+    for name in ["", ".", "..", "../foreign", "/target", "bad\0name", "folder/target", ".mindwtr.lock"] {
+      await refuses { _ = try await writer.createExclusive(name, using: handle) }
+      await refuses { try await writer.writeCreated(name, bytes: Data([1]), using: handle) }
+    }
+    await refuses { _ = try await writer.createExclusive("target", using: foreign) }
+    await refuses { try await writer.writeBytes("target", bytes: Data([1]), using: foreign) }
+    let created = try await writer.createExclusive("\u{e9}", using: handle)
+    XCTAssertEqual(created, .created)
+    await refuses { try await writer.writeBytes("e\u{301}", bytes: Data([1]), using: handle) }
+    XCTAssertEqual(counts.count("write"), 0)
+    XCTAssertEqual(try Data(contentsOf: a.appendingPathComponent("\u{e9}")), Data())
+    try await other.close(foreign)
+  }
+
+  func testCreatedFileAndRootReplacementAreRefusedBeforeAnyWrite() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for mode in ["replace", "modify", "hardlink", "root"] {
+      let root = try folder(parent, mode), target = root.appendingPathComponent("target"), counts = Counts()
+      var io = access(counts)
+      io.write = { fd, buffer, length in counts.increment("write"); return Darwin.write(fd, buffer, length) }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      let created = try await writer.createExclusive("target", using: handle); XCTAssertEqual(created, .created)
+      if mode == "replace" { try FileManager.default.removeItem(at: target) }
+      if mode == "root" {
+        try FileManager.default.moveItem(at: root, to: parent.appendingPathComponent("moved"))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+      }
+      if mode == "hardlink" { try FileManager.default.linkItem(at: target, to: root.appendingPathComponent("alias")) }
+      else { try Data([9]).write(to: target) }
+      await refuses { try await writer.writeCreated("target", bytes: Data([1, 2]), using: handle) }
+      XCTAssertEqual(counts.count("write"), 0); XCTAssertEqual(counts.count("write-completed"), 0)
+      XCTAssertEqual(try Data(contentsOf: target), mode == "hardlink" ? Data() : Data([9]))
+      XCTAssertEqual(counts.count("scope-stop"), 1)
+    }
+  }
+
+  func testCompletedCreationCannotBeRewritten() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), counts = Counts(), writer = owner(root, counts), handle = try await writer.open()
+    let created = try await writer.createExclusive("target", using: handle); XCTAssertEqual(created, .created)
+    try await writer.writeCreated("target", bytes: Data([1, 2, 3]), using: handle)
+    await refuses { try await writer.writeBytes("target", bytes: Data([9]), using: handle) }
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("target")), Data([1, 2, 3]))
+    XCTAssertEqual(counts.count("write-completed"), 1); XCTAssertEqual(counts.count("scope-stop"), 1)
+  }
+
+  func testPartialZeroFlushAndReadbackFailuresRetainBytesWithoutCompletion() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let payload = Data(repeating: 42, count: 32)
+    for mode in ["zero", "partial", "file-flush", "directory-flush", "readback"] {
+      let root = try folder(parent, mode), counts = Counts(); var io = access(counts)
+      let syncFile = io.syncFile, syncDirectory = io.syncDirectory
+      io.write = { fd, buffer, length in
+        counts.set("fd", Int(fd)); counts.increment("write")
+        if mode == "zero" { return 0 }
+        if mode == "partial" {
+          if counts.count("write") == 1 { return Darwin.write(fd, buffer, 3) }
+          errno = EIO; return -1
+        }
+        return Darwin.write(fd, buffer, length)
+      }
+      io.syncFile = { fd in try syncFile(fd); if mode == "file-flush" { throw Owner.Failure.incompleteWrite } }
+      io.syncDirectory = { fd in
+        try syncDirectory(fd); counts.increment("directory-flush")
+        if mode == "directory-flush", counts.count("directory-flush") == 2 { throw Owner.Failure.incompleteWrite }
+      }
+      io.read = { fd, buffer, length in
+        let count = Darwin.read(fd, buffer, length)
+        if mode == "readback", count > 0 { buffer.storeBytes(of: UInt8(0), as: UInt8.self) }
+        return count
+      }
+      io.stopScope = { _ in
+        XCTAssertEqual(Darwin.fcntl(Int32(counts.count("fd")), F_GETFD), -1)
+        counts.increment("scope-stop")
+      }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      let created = try await writer.createExclusive("target", using: handle); XCTAssertEqual(created, .created)
+      await refuses { try await writer.writeCreated("target", bytes: payload, using: handle) }
+      let expected = mode == "zero" ? Data() : mode == "partial" ? Data(payload.prefix(3)) : payload
+      XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("target")), expected)
+      XCTAssertEqual(counts.count("write-completed"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+      let writes = counts.count("write")
+      await refuses { try await writer.writeBytes("target", bytes: payload, using: handle) }
+      XCTAssertEqual(counts.count("write"), writes)
+      let competing = SyncFileLockEngine(); defer { competing.drain() }
+      let token = try competing.acquireDirectory(root); try competing.release(token)
+    }
+  }
+
+  func testWriteCoordinatorMustSettleExactlyOnceAtTheIntendedURL() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for mode in 0...3 {
+      let root = try folder(parent, "mode-\(mode)"), counts = Counts(); var io = access(counts)
+      let coordinate = io.coordinateWrite
+      io.coordinateWrite = { url, body in
+        counts.increment("write-coordinate")
+        if counts.count("write-coordinate") == 1 { try coordinate(url, body); return }
+        if mode == 0 { return }
+        if mode == 1 { body(url.deletingLastPathComponent()); return }
+        try coordinate(url, body)
+        if mode == 2 { body(url) }
+        if mode == 3 { throw Owner.Failure.coordination }
+      }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      let created = try await writer.createExclusive("target", using: handle); XCTAssertEqual(created, .created)
+      await refuses { try await writer.writeCreated("target", bytes: Data([1]), using: handle) }
+      XCTAssertEqual(counts.count("write-completed"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+      XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("target")), mode < 2 ? Data() : Data([1]))
+    }
+  }
+
+  func testCloseAndCancellationDrainEnteredWritesAndCloseCreatedFDsBeforeScopeRelease() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for mode in ["close", "cancel", "error"] {
+      let root = try folder(parent, mode), counts = Counts()
+      let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+      let closeStarted = DispatchSemaphore(value: 0), closed = DispatchSemaphore(value: 0)
+      var io = access(counts)
+      io.write = { fd, buffer, length in
+        counts.set("fd", Int(fd)); counts.increment("write"); entered.signal()
+        guard release.wait(timeout: .now() + 5) == .success else { errno = EIO; return -1 }
+        if mode == "error" { errno = EIO; return -1 }
+        return Darwin.write(fd, buffer, length)
+      }
+      io.stopScope = { _ in
+        XCTAssertEqual(Darwin.fcntl(Int32(counts.count("fd")), F_GETFD), -1)
+        counts.increment("scope-stop")
+      }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      let created = try await writer.createExclusive("target", using: handle); XCTAssertEqual(created, .created)
+      let writing = Task { try await writer.writeCreated("target", bytes: Data([1, 2, 3]), using: handle) }
+      XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+      var closing: Task<Void, Error>?
+      if mode == "cancel" { writing.cancel() }
+      else {
+        closing = Task { closeStarted.signal(); defer { closed.signal() }; try await writer.close(handle) }
+        XCTAssertEqual(closeStarted.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(closed.wait(timeout: .now() + 0.05), .timedOut)
+      }
+      XCTAssertEqual(counts.count("scope-stop"), 0)
+      let competing = SyncFileLockEngine(); defer { competing.drain() }
+      XCTAssertThrowsError(try competing.acquireDirectory(root))
+      let late = Task { try await writer.createExclusive("late", using: handle) }
+      release.signal()
+      await refuses { try await writing.value }
+      if let closing { try await closing.value }
+      await refuses { _ = try await late.value }
+      XCTAssertEqual(counts.count("scope-stop"), 1); XCTAssertEqual(counts.count("write-completed"), 0)
+      XCTAssertEqual(counts.count("write"), 1)
+      XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("late").path))
+      let token = try competing.acquireDirectory(root); try competing.release(token)
+    }
   }
 
   func testTraversalAndForeignHandlesCannotRetargetOrReleaseEitherOwner() async throws {
@@ -363,6 +593,84 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     if let destination = ProcessInfo.processInfo.environment["NATIVE_FILE_SYNC_READ_ARTIFACT"] {
       let bytes = try JSONSerialization.data(withJSONObject: ["schema": "actual-native-read-owner-v1", "cases": cases], options: [.sortedKeys])
       try bytes.write(to: URL(fileURLWithPath: destination), options: [.withoutOverwriting])
+    }
+  }
+
+  func testCreatedWriteArtifactComesFromActualOwnerOperations() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let payload = Data("native created bytes".utf8), prior = Data([9, 8, 7])
+    var cases = [[String: Any]]()
+    for mode in ["createOnly", "writeBytes", "exists", "partial"] {
+      let root = try folder(parent, mode), name = "artifact-" + mode, counts = Counts()
+      if mode == "exists" { try prior.write(to: root.appendingPathComponent(name)) }
+      var io = access(counts)
+      if mode == "partial" {
+        io.write = { fd, buffer, _ in
+          counts.increment("write")
+          if counts.count("write") == 1 { return Darwin.write(fd, buffer, 3) }
+          errno = EIO; return -1
+        }
+      }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      let result = try await writer.createExclusive(name, using: handle)
+      var calls = [[String: Any]]()
+      var sample: [String: Any] = ["mode": mode, "name": name, "payloadBase64": payload.base64EncodedString()]
+      if mode == "writeBytes" {
+        guard result == .created else { throw Owner.Failure.unavailable }
+        sample["setupCreate"] = "created"
+        let before = try await writer.read(name, using: handle)
+        guard case .bytes(let bytes) = before else { throw Owner.Failure.incompleteRead }
+        XCTAssertEqual(bytes, Data())
+        calls.append(["op": "readBytes", "name": name, "result": "bytes", "base64": bytes.base64EncodedString()])
+      } else {
+        XCTAssertEqual(result, mode == "exists" ? .exists : .created)
+        calls.append(["op": "createExclusive", "name": name, "result": result == .created ? "created" : "exists"])
+      }
+      if mode != "exists" {
+        let op = mode == "writeBytes" ? "writeBytes" : "writeCreated"
+        do {
+          if mode == "writeBytes" { try await writer.writeBytes(name, bytes: payload, using: handle) }
+          else { try await writer.writeCreated(name, bytes: payload, using: handle) }
+          guard mode != "partial" else { throw Owner.Failure.unavailable }
+          calls.append(["op": op, "name": name, "result": "completed", "base64": payload.base64EncodedString()])
+        } catch {
+          guard mode == "partial", (error as? Owner.Failure) == .incompleteWrite else { throw error }
+          calls.append(["op": op, "name": name, "result": "failed", "base64": payload.base64EncodedString()])
+        }
+      }
+      if mode != "partial" {
+        let read = try await writer.read(name, using: handle)
+        guard case .bytes(let bytes) = read else { throw Owner.Failure.incompleteRead }
+        XCTAssertEqual(bytes, mode == "exists" ? prior : payload)
+        calls.append(["op": "readBytes", "name": name, "result": "bytes", "base64": bytes.base64EncodedString()])
+        try await writer.close(handle)
+      }
+      let after = try Data(contentsOf: root.appendingPathComponent(name))
+      XCTAssertEqual(after, mode == "exists" ? prior : mode == "partial" ? Data(payload.prefix(3)) : payload)
+      XCTAssertEqual(counts.count("write-completed"), mode == "exists" || mode == "partial" ? 0 : 1)
+      XCTAssertEqual(counts.count("scope-stop"), 1)
+      sample["calls"] = calls; sample["afterBase64"] = after.base64EncodedString()
+      sample["createdWriteEvents"] = counts.count("write-completed"); sample["scopeStops"] = counts.count("scope-stop")
+      cases.append(sample)
+    }
+    if let destination = ProcessInfo.processInfo.environment["NATIVE_FILE_SYNC_CREATED_WRITE_ARTIFACT"] {
+      let bytes = try JSONSerialization.data(withJSONObject: ["schema": "actual-native-created-write-v1", "cases": cases], options: [.sortedKeys])
+      try bytes.write(to: URL(fileURLWithPath: destination), options: [.withoutOverwriting])
+    }
+  }
+
+  func testCreatedWriteDiagnosticHasOnlyTheFixedCompletedContext() {
+    let event = Owner.Diagnostic.createdWriteCompleted
+    XCTAssertEqual(event.eventMessage, "Native iOS File Sync created-file write completed")
+    XCTAssertEqual(event.context, ["releaseCheck": "v1.3.8/ios-file-sync-created-write", "operation": "createdWrite", "outcome": "completed"])
+    XCTAssertTrue(Owner.Diagnostic.accepts(event.context))
+    for extra in ["path", "uri", "bookmark", "token", "fileName", "namespace", "count"] {
+      var changed: [String: Any] = event.context; changed[extra] = "private"
+      XCTAssertFalse(Owner.Diagnostic.accepts(changed))
+    }
+    for (field, value) in [("releaseCheck", Owner.Diagnostic.marker), ("operation", "write"), ("outcome", "failed")] {
+      var changed: [String: Any] = event.context; changed[field] = value
+      XCTAssertFalse(Owner.Diagnostic.accepts(changed))
     }
   }
 

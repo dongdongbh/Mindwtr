@@ -1,9 +1,10 @@
 import Darwin
 import Foundation
 
-/// Hidden selected-folder reader. It cannot configure sync or publish any document.
+/// Hidden selected-folder IO. Writes are limited to this owner's newly created files; no sync provider is exposed.
 final class NativeFileSyncReadOwner: @unchecked Sendable {
-  enum Failure: Error, Equatable { case unavailable, staleBookmark, scopeUnproven, invalidName, invalidHandle, closed, incompleteRead, coordination }
+  enum Failure: Error, Equatable { case unavailable, staleBookmark, scopeUnproven, invalidName, invalidHandle, closed, incompleteRead, incompleteWrite, coordination }
+  enum CreateResult: Equatable { case created, exists }
   enum Selection { case pickedDirectory(URL), bookmark(Data) }
   struct Handle: Hashable, Sendable { fileprivate let identity: UUID }
   struct Entry: Equatable {
@@ -13,16 +14,24 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     let byteCount: Int64?
   }
   enum Read: Equatable { case absent, bytes(Data) }
-  enum Diagnostic {
-    case admitted
+  enum Diagnostic: Equatable {
+    case admitted, createdWriteCompleted
     static let message = "Native iOS File Sync read owner admitted"
     static let marker = "v1.3.8/ios-file-sync-read-owner"
-    var context: [String: String] { ["releaseCheck": Self.marker, "operation": "admission", "outcome": "confirmed"] }
+    static let createdWriteMessage = "Native iOS File Sync created-file write completed"
+    static let createdWriteMarker = "v1.3.8/ios-file-sync-created-write"
+    var eventMessage: String { self == .admitted ? Self.message : Self.createdWriteMessage }
+    var context: [String: String] {
+      switch self {
+      case .admitted: return ["releaseCheck": Self.marker, "operation": "admission", "outcome": "confirmed"]
+      case .createdWriteCompleted: return ["releaseCheck": Self.createdWriteMarker, "operation": "createdWrite", "outcome": "completed"]
+      }
+    }
     static func accepts(_ value: [String: Any]) -> Bool {
-      Set(value.keys) == Set(["releaseCheck", "operation", "outcome"])
-        && value["releaseCheck"] as? String == marker
-        && value["operation"] as? String == "admission"
-        && value["outcome"] as? String == "confirmed"
+      guard Set(value.keys) == Set(["releaseCheck", "operation", "outcome"]) else { return false }
+      return [Diagnostic.admitted, .createdWriteCompleted].contains { event in
+        event.context.allSatisfy { value[$0.key] as? String == $0.value }
+      }
     }
   }
 
@@ -45,24 +54,42 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
       NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [], error: &error, byAccessor: body)
       if let error { throw error }
     }
+    var coordinateWrite: (URL, (URL) -> Void) throws -> Void = { url, body in
+      var error: NSError?
+      NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: [], error: &error, byAccessor: body)
+      if let error { throw error }
+    }
     var read: (Int32, UnsafeMutableRawPointer, Int) -> Int = { Darwin.read($0, $1, $2) }
+    var write: (Int32, UnsafeRawPointer, Int) -> Int = { Darwin.write($0, $1, $2) }
+    var syncFile: (Int32) throws -> Void = { fd in
+      guard Darwin.fsync(fd) == 0, Darwin.fcntl(fd, F_FULLFSYNC) == 0 else { throw Failure.incompleteWrite }
+    }
+    var syncDirectory: (Int32) throws -> Void = { fd in
+      guard Darwin.fsync(fd) == 0 else { throw Failure.incompleteWrite }
+    }
     // A false scope start is only accepted for a proven app-local directory, not an arbitrary external path.
     var applicationContainer = FileManager.default.homeDirectoryForCurrentUser
   }
 
   private struct Node: Equatable {
-    let device: UInt64, inode: UInt64
+    let device: UInt64, inode: UInt64, links: UInt64
     let mode: mode_t
     let size: Int64, modifiedSeconds: Int64, modifiedNanos: Int64, changedSeconds: Int64, changedNanos: Int64
     init(_ value: Darwin.stat) throws {
       guard value.st_size >= 0 else { throw Failure.unavailable }
-      device = UInt64(value.st_dev); inode = UInt64(value.st_ino); mode = value.st_mode
+      device = UInt64(value.st_dev); inode = UInt64(value.st_ino); links = UInt64(value.st_nlink); mode = value.st_mode
       size = Int64(value.st_size)
       modifiedSeconds = Int64(value.st_mtimespec.tv_sec); modifiedNanos = Int64(value.st_mtimespec.tv_nsec)
       changedSeconds = Int64(value.st_ctimespec.tv_sec); changedNanos = Int64(value.st_ctimespec.tv_nsec)
     }
     var kind: mode_t { mode & S_IFMT }
     func sameIdentity(_ other: Node) -> Bool { device == other.device && inode == other.inode && kind == other.kind }
+  }
+
+  private struct CreatedFile {
+    let fd: Int32
+    let before: Node
+    var completed = false
   }
 
   private let selection: Selection
@@ -80,6 +107,7 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   private var token: String?
   private var scoped = false
   private var cleanupError: Error?
+  private var created: [Data: CreatedFile] = [:]
 
   init(selection: Selection, access: Access = Access(), diagnostic: @escaping (Diagnostic) -> Void) {
     self.selection = selection; self.access = access; self.diagnostic = diagnostic
@@ -136,21 +164,68 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
         let fd = name.withCString { openat(self.rootFD, $0, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC) }
         guard fd >= 0 else { throw Failure.unavailable }
         defer { _ = Darwin.close(fd) }
-        guard try self.node(fd) == before else { throw Failure.incompleteRead }
-        var data = Data(); var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-        while true {
-          let count = buffer.withUnsafeMutableBytes { self.access.read(fd, $0.baseAddress!, $0.count) }
-          if count < 0 && errno == EINTR { continue }
-          guard count >= 0 && count <= buffer.count else { throw Failure.incompleteRead }
-          if count == 0 { break }
-          guard Int64(data.count) <= before.size - Int64(count) else { throw Failure.incompleteRead }
-          data.append(contentsOf: buffer.prefix(count))
-        }
-        guard Int64(data.count) == before.size, try self.node(fd) == before,
-              try self.lookup(name) == before else { throw Failure.incompleteRead }
-        try self.validateRoot()
-        return .bytes(data)
+        return .bytes(try self.readComplete(name, fd: fd, before: before))
       }
+    }
+  }
+
+  func createExclusive(_ name: String, using handle: Handle) async throws -> CreateResult {
+    try Self.validWriteName(name)
+    return try await submit(handle) {
+      guard let root = self.root else { throw Failure.closed }
+      return try self.coordinated(root, writing: true) {
+        let fd = name.withCString { openat(self.rootFD, $0, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600)) }
+        if fd < 0 {
+          if errno == EEXIST { return .exists }
+          throw Failure.unavailable
+        }
+        var retained = false
+        defer { if !retained { _ = Darwin.close(fd) } }
+        let key = Data(name.utf8), before = try self.node(fd)
+        guard self.created[key] == nil else { throw Failure.unavailable }
+        self.created[key] = CreatedFile(fd: fd, before: before)
+        retained = true
+        guard before.kind == S_IFREG, before.size == 0, before.links == 1,
+              try self.lookup(name) == before else { throw Failure.unavailable }
+        try self.access.syncDirectory(self.rootFD)
+        guard try self.node(fd) == before, try self.lookup(name) == before else { throw Failure.unavailable }
+        return .created
+      }
+    }
+  }
+
+  func writeCreated(_ name: String, bytes: Data, using handle: Handle) async throws {
+    try await writeBytes(name, bytes: bytes, using: handle)
+  }
+
+  func writeBytes(_ name: String, bytes: Data, using handle: Handle) async throws {
+    try Self.validWriteName(name)
+    try await submit(handle) {
+      guard let root = self.root else { throw Failure.closed }
+      let key = Data(name.utf8)
+      try self.coordinated(root.appendingPathComponent(name), writing: true) {
+        guard let file = self.created[key], !file.completed else { throw Failure.unavailable }
+        guard file.before.kind == S_IFREG, file.before.size == 0, file.before.links == 1,
+              try self.node(file.fd) == file.before, try self.lookup(name) == file.before else { throw Failure.unavailable }
+        try bytes.withUnsafeBytes { buffer in
+          var offset = 0
+          while offset < buffer.count {
+            let count = self.access.write(file.fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 && count <= buffer.count - offset else { throw Failure.incompleteWrite }
+            offset += count
+          }
+        }
+        try self.access.syncFile(file.fd)
+        try self.access.syncDirectory(self.rootFD)
+        let written = try self.node(file.fd)
+        guard written.sameIdentity(file.before), written.links == 1, written.size == Int64(bytes.count),
+              Darwin.lseek(file.fd, 0, SEEK_SET) == 0,
+              try self.readComplete(name, fd: file.fd, before: written) == bytes else { throw Failure.incompleteWrite }
+      }
+      try self.requireAccepting()
+      self.created[key]?.completed = true
+      self.diagnostic(.createdWriteCompleted)
     }
   }
 
@@ -231,6 +306,8 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     lifecycle.lock()
     guard state != 2 else { lifecycle.unlock(); return }
     state = 1; lifecycle.unlock()
+    for file in created.values { _ = Darwin.close(file.fd) }
+    created.removeAll()
     if let token {
       do { try engine.release(token) } catch { cleanupError = error }
       self.token = nil
@@ -254,12 +331,13 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     return try Node(value)
   }
 
-  private func coordinated<T>(_ url: URL, _ body: () throws -> T) throws -> T {
+  private func coordinated<T>(_ url: URL, writing: Bool = false, _ body: () throws -> T) throws -> T {
     try validateRoot()
     var calls = 0
     var result: Result<T, Error>?
     do {
-      try access.coordinate(url) { supplied in
+      let coordinate = writing ? access.coordinateWrite : access.coordinate
+      try coordinate(url) { supplied in
         calls += 1
         guard calls == 1 else { return }
         result = Result {
@@ -278,6 +356,28 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
 
   private static func validName(_ name: String) throws {
     guard !name.isEmpty, name != ".", name != "..", !name.utf8.contains(0), !name.contains("/") else { throw Failure.invalidName }
+  }
+
+  private static func validWriteName(_ name: String) throws {
+    try validName(name)
+    guard name != ".mindwtr.lock" else { throw Failure.invalidName }
+  }
+
+  private func readComplete(_ name: String, fd: Int32, before: Node) throws -> Data {
+    guard try node(fd) == before else { throw Failure.incompleteRead }
+    var data = Data(); var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+    while true {
+      let count = buffer.withUnsafeMutableBytes { access.read(fd, $0.baseAddress!, $0.count) }
+      if count < 0 && errno == EINTR { continue }
+      guard count >= 0 && count <= buffer.count else { throw Failure.incompleteRead }
+      if count == 0 { break }
+      guard Int64(data.count) <= before.size - Int64(count) else { throw Failure.incompleteRead }
+      data.append(contentsOf: buffer.prefix(count))
+    }
+    guard Int64(data.count) == before.size, try node(fd) == before,
+          try lookup(name) == before else { throw Failure.incompleteRead }
+    try validateRoot()
+    return data
   }
 
   private func lookup(_ name: String) throws -> Node? {
