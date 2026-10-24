@@ -129,6 +129,20 @@ Each distinct token gets its own private dataset on the server, so several peopl
 
 `MINDWTR_CLOUD_TOKEN` is still accepted for backward compatibility, but deprecated.
 
+## Online-only web deployments
+
+For HTTP Basic Auth deployments, set `MINDWTR_PWA_ENABLED=false` on
+`mindwtr-app` (or in `.env` with the bundled Compose). This serves an online-only
+replacement at `/sw.js`; leave that exact path outside proxy authentication and
+route it to the app. Existing workers can then update without credentials.
+The replacement does not reload tabs or delete local tasks/settings, but offline
+app-shell loading is unavailable. If an old worker still blocks login, unregister
+only Mindwtr's worker in browser developer tools, close its tabs/PWA windows, and
+reopen. Do not clear site data. Keep `/v1/*` on bearer authentication. Proxy login
+controls server access, not access to previously downloaded browser data.
+See the [deployment guide](https://docs.mindwtr.app/power-users/docker-deployment)
+for the Caddy configuration. Default `true` retains normal PWA behavior.
+
 ## Preseed the web app's sync settings
 
 A fresh browser opening the PWA can have the Cloud URL filled in already, so people only enter their token:

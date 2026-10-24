@@ -19,6 +19,7 @@ import { invokeNative, preloadNativeTransport } from './lib/tauri-invoke';
 import { reportError } from './lib/report-error';
 import { webStorage } from './lib/storage-adapter-web';
 import { isDiagnosticsEnabled, logError, logInfo, logWarn, setupGlobalErrorLogging } from './lib/app-log';
+import { registerWebServiceWorker } from './lib/web-service-worker';
 import {
     THEME_STORAGE_KEY,
     applyNativeTheme,
@@ -255,7 +256,12 @@ async function bootstrap() {
     // The Vite dev server serves ~1000 unbundled modules; routing each through
     // the caching worker can stall a reload's module fetches for good.
     if (!import.meta.env.DEV && !isQuickAddWindow && !isTauriRuntime() && 'serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+        registerWebServiceWorker(() => {
+            void logInfo('Online-only service worker controls this page', {
+                scope: 'pwa', force: true,
+                extra: { releaseCheck: 'v1.3.8/web-online-only' },
+            });
+        });
     }
 
     if (!isTauriRuntime()) {
