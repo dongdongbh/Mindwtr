@@ -275,6 +275,14 @@ describe('native host contract: Focus controls', () => {
         expect(grouped.revision).not.toBe(after.revision);
     });
 
+    it('sends the grey default dot for a Project with no Area and no color, which the native headers paint (#1422)', async () => {
+        freezeClock();
+        const host = await openHost('base');
+        value(await host.setFocusGroupBy({ requestId: generateUUID(), controls: DEFAULT_FOCUS_CONTROL_STATE, groupBy: 'project' }));
+        const next = value(host.getFocus({ limit: 100, controls: DEFAULT_FOCUS_CONTROL_STATE })).sections.find((section) => section.key === 'next')!;
+        expect(next.groups?.find((group) => group.id === 'project:p-alpha')?.dotColor).toBe('#94a3b8');
+    });
+
     it('changes the revision on a control edit or a relevant store edit, and refuses a stale page', async () => {
         freezeClock();
         const host = await openHost('base');
