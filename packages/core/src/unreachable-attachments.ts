@@ -28,14 +28,20 @@ export const rememberUnreachableAttachments = (record: UnreachableAttachments, s
 };
 
 /**
- * The row is kept without its file at the active location: show it as missing, and treat that
- * location's "not found" as no news. Before this process knows the location, any location counts.
+ * The row is kept without its file at the active location: show it as missing, not as
+ * downloadable. Before this process knows the location, any location counts.
  */
 export const isAttachmentKeptWithoutFile = (attachment: Pick<Attachment, 'id'>): boolean => {
     const { record, scope } = lastKnown;
     if (scope) return record[scope]?.includes(attachment.id) === true;
-    return Object.values(record).some((ids) => ids.includes(attachment.id));
+    return isAttachmentKeptAnywhere(attachment);
 };
+
+/** The row is kept without its file at some location: an on-demand "not found" is no news. The
+ *  on-demand download cannot be sure which location is active, so it never tombstones such a row. */
+export const isAttachmentKeptAnywhere = (attachment: Pick<Attachment, 'id'>): boolean => (
+    Object.values(lastKnown.record).some((ids) => ids.includes(attachment.id))
+);
 
 export const parseUnreachableAttachments = (raw: string | null | undefined): UnreachableAttachments => {
     if (!raw) return {};

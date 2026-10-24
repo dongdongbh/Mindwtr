@@ -121,6 +121,8 @@ export type SyncCycleIO = {
      *  is authoritative during this one merge; local URI/status still win as
      *  usual so downloaded bytes are not discarded. */
     preferIncomingAttachmentCloudKeys?: boolean;
+    /** Attachments kept without their file at this location: see `MergeAppDataOptions` in sync.ts. */
+    preferIncomingAttachmentCloudKeyIds?: ReadonlySet<string>;
     /**
      * True only for the local-only upload fast path, where `readRemote` answers
      * "absent" by construction. Merging a document against an absent remote is

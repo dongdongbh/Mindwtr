@@ -21,7 +21,7 @@ import { getErrorStatus } from './sync-runtime-utils';
 import { isSandboxMode } from './sandbox';
 import { CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, type SyncKeyValueStoragePort } from './sync-storage-keys';
 import { webdavGetFile } from './webdav';
-import { isAttachmentKeptWithoutFile, parseUnreachableAttachments, rememberUnreachableAttachments, UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
+import { isAttachmentKeptAnywhere, parseUnreachableAttachments, rememberUnreachableAttachments, UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './mobile-sync-utils';
 import { isHttpAttachmentUri, type MobileAttachmentFiles } from './mobile-attachment-files';
 import { assertAttachmentSyncNotAborted, type MobileAttachmentCommon, type PreparedAttachmentDownloadBytes } from './mobile-attachment-common';
@@ -164,7 +164,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       notFound ? 'Attachment is no longer available' : error instanceof Error ? error.message : String(error)
     );
     // The user kept this row without its file: "not found" is no news, and a tombstone would win where the file lives.
-    if (notFound && isAttachmentKeptWithoutFile(attachment)) return null;
+    if (notFound && isAttachmentKeptAnywhere(attachment)) return null;
     if (notFound) {
       markAttachmentUnrecoverable(attachment);
       files.logAttachmentWarn(terminalLog.message, error, { releaseCheck: terminalLog.releaseCheck });
@@ -371,7 +371,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
           ? 'Attachment is no longer available'
           : error instanceof Error ? error.message : String(error),
       );
-      if (terminalNotFound && isAttachmentKeptWithoutFile(attachment)) return null;
+      if (terminalNotFound && isAttachmentKeptAnywhere(attachment)) return null;
       if (terminalNotFound) {
         markAttachmentUnrecoverable(attachment);
         files.logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);

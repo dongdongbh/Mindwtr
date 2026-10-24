@@ -9,7 +9,7 @@ import { globalProgressTracker } from './attachment-progress';
 import { CLOUD_PROVIDER_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, WEBDAV_PASSWORD_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from './sync-storage-keys';
 import { DropboxFileNotFoundError } from './dropbox';
 import { withRetry } from './retry-utils';
-import { UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
+import { rememberUnreachableAttachments, UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 
 const now = '2026-09-28T00:00:00.000Z';
@@ -516,6 +516,22 @@ describe('mobile attachment availability', () => {
     // Another device uploaded the file there: it arrives.
     await expect(availability.ensureAttachmentAvailableDetailed(kept)).resolves.toMatchObject({ status: 'available' });
     expect(webdavGetFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes not-found as no news for a kept row even while this process believes another location is active', async () => {
+    rememberUnreachableAttachments({}, '["webdav","https://other.example/dav","me"]');
+    try {
+      const { availability, webdavGetFile } = setup({
+        storage: { ...webdav, [UNREACHABLE_ATTACHMENTS_KEY]: JSON.stringify({ '["webdav","https://dav.example/Mindwtr","me"]': ['att-1'] }) },
+      });
+      webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
+      const kept = remoteAttachment();
+
+      await expect(availability.ensureAttachmentAvailableDetailed(kept)).resolves.toEqual({ status: 'unavailable' });
+      expect(kept.deletedAt).toBeUndefined();
+    } finally {
+      rememberUnreachableAttachments({}, null);
+    }
   });
 
   it.each([

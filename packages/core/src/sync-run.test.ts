@@ -35,6 +35,7 @@ import {
 } from './sync-remote-fence';
 import { AttachmentUploadTooLargeError, applyAttachmentPatches, runAttachmentTransferLifecycle } from './attachment-transfer';
 import { buildCloudKey } from './attachment-paths';
+import { isAttachmentKeptWithoutFile } from './unreachable-attachments';
 import { markAttachmentUnrecoverable } from './attachment-validation';
 import { createMobileAttachmentFiles } from './mobile-attachment-files';
 import { createMobileAttachmentCommon } from './mobile-attachment-common';
@@ -5295,6 +5296,92 @@ describe('activation with attachment files that no device location can serve', (
             expect(attachment?.fileHash).toBe(HASH);
         }
         expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
+        const restoredLines = harness.infos.filter((info) => info.extra?.releaseCheck === 'v1.3.8/kept-attachment-not-found');
+        expect(restoredLines.length).toBeGreaterThan(0);
+        expect(restoredLines[0]!.extra).toEqual({ releaseCheck: 'v1.3.8/kept-attachment-not-found', backend: 'cloud', restored: '1' });
+        expect(JSON.stringify(harness.infos)).not.toContain('scan.pdf');
+    });
+
+    it('keeps the active location through a refused probe of another one', async () => {
+        const OTHER_SCOPE = '["webdav","https://other.example/dav","me"]';
+        const { hooks, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask()]),
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] })).toMatchObject({ success: true });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+        expect(isAttachmentKeptWithoutFile({ id: 'attachment-old-only' })).toBe(true);
+
+        const activeSetup = vi.mocked(hooks.setupCycle).getMockImplementation()!;
+        vi.mocked(hooks.setupCycle).mockImplementation(async (...args) => ({
+            ...(await activeSetup(...args)),
+            locationScope: OTHER_SCOPE,
+        }) as Awaited<ReturnType<typeof activeSetup>>);
+        // The user tries another location that lacks the file too, and cancels.
+        expect(await run({ activationProbe: true })).toMatchObject({ success: false });
+
+        expect(isAttachmentKeptWithoutFile({ id: 'attachment-old-only' })).toBe(true);
+    });
+
+    it('leaves an idle library on the fast path while a kept row answers not-found', async () => {
+        const { io, storage, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask()]),
+            fastSyncScope: 'fast-scope',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                syncAttachments: vi.fn(async (data: AppData) => {
+                    const next = cloneAppData(data);
+                    let changed = false;
+                    for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                        if (attachment.kind === 'file' && !attachment.deletedAt && attachment.cloudKey && attachment.localStatus !== 'available') {
+                            markAttachmentUnrecoverable(attachment);
+                            changed = true;
+                        }
+                    }
+                    return changed ? next : false;
+                }),
+            },
+        });
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] })).toMatchObject({ success: true });
+        vi.mocked(io.readRemote).mockClear();
+
+        for (let cycle = 0; cycle < 4; cycle += 1) expect(await run()).toMatchObject({ success: true });
+
+        expect(storage.writeFastSyncState).toHaveBeenCalled();
+        expect(io.readRemote).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes the key another device uploaded here even when it sorts before the kept key', async () => {
+        const uploadedKey = `attachments/attachment-old-only.${'f'.repeat(64)}.pdf`;
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            io: {
+                syncAttachments: vi.fn(async (data: AppData) => {
+                    const next = cloneAppData(data);
+                    for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                        if (attachment.kind !== 'file' || attachment.deletedAt || attachment.localStatus === 'available') continue;
+                        if (attachment.cloudKey === uploadedKey) {
+                            attachment.uri = '/local/scan.pdf';
+                            attachment.localStatus = 'available';
+                        } else if (attachment.cloudKey) {
+                            markAttachmentUnrecoverable(attachment);
+                        }
+                    }
+                    return next;
+                }),
+            },
+        });
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] })).toMatchObject({ success: true });
+        // Another device uploaded the file here under its own key format.
+        harness.remote = createData([remoteOnlyTask({ cloudKey: uploadedKey })]);
+
+        // A plain cycle: the one-time post-activation key preference does not apply.
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toMatchObject({ cloudKey: uploadedKey, localStatus: 'available' });
+        expect(JSON.parse(device.record!)).toEqual({});
     });
 
     it('downloads the file once another device uploads it there, and drops the row from the record', async () => {

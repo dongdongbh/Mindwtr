@@ -807,7 +807,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }
           const status = getErrorStatus(error);
           if (status === 404) {
-            files.clearWebdavDownloadBackoff(attachment.id);
+            // A row kept without its file stays live after this; the backoff frees its download slot.
+            files.setWebdavDownloadBackoff(attachment.id, error);
             const mutated = markAttachmentUnrecoverable(attachment);
             files.logAttachmentInfo('Cleared missing WebDAV cloud key after 404', { id: attachment.id });
             return mutated;

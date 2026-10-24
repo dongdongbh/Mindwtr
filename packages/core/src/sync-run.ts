@@ -153,6 +153,7 @@ type SharedSyncRunState = {
     fileAttachmentUploadBlocked: 'too-large' | null;
     /** Activation probe: rows the user chose to keep without their file. */
     acceptedMissingAttachments: string[];
+    keptAttachmentNotFoundLogged: boolean;
     /** `setup.locationScope`: where the unreachable-attachment record of this cycle lives. */
     locationScope: string | null;
 };
@@ -400,7 +401,7 @@ const prepareActivationFallbackRetry = (
     data: AppData,
     localFallbacks: ReadonlyMap<string, Attachment>,
     consumedFallbackIds: Set<string> = new Set<string>(),
-    /** The pass was not cut short by its batch cap, so a row still missing is a failed download. */
+    /** File Sync only, after a pass not cut short by its batch cap: a row still missing is a blob the folder lacks. */
     includeLiveMissing = false,
 ): { data: AppData; count: number } => {
     if (localFallbacks.size === 0) return { data, count: 0 };
@@ -465,6 +466,14 @@ export class ActivationMissingAttachmentsError extends ActivationAttachmentProof
 }
 
 /** `data` with each listed live attachment replaced by `replace(original)`; owners without one are left as they are. */
+/** `next` holds the same tasks, projects and settings as `data` (same objects, or equal ones). */
+const sameAttachmentOwners = (data: AppData, next: AppData): boolean => {
+    const same = <T>(left: T, right: T) => left === right || JSON.stringify(left) === JSON.stringify(right);
+    const sameList = <T>(left: T[], right: T[]) => left === right
+        || (left.length === right.length && left.every((item, index) => same(item, right[index])));
+    return sameList(data.tasks, next.tasks) && sameList(data.projects, next.projects) && same(data.settings, next.settings);
+};
+
 const replaceAttachments = (
     data: AppData,
     ids: ReadonlySet<string>,
@@ -714,6 +723,7 @@ class SharedSyncRunMachine {
         hadAttachmentWarning: false,
         fileAttachmentUploadBlocked: null,
         acceptedMissingAttachments: [],
+        keptAttachmentNotFoundLogged: false,
         locationScope: null,
     };
 
@@ -1885,7 +1895,7 @@ class SharedSyncRunMachine {
                     provenData,
                     activationSnapshot.localFallbacks,
                     consumedFallbackIds,
-                    !primary.deferred,
+                    !primary.deferred && this.backend === 'file',
                 );
                 fallbackRetries += fallbackRetry.count;
                 if (fallbackRetry.count > 0) {
@@ -2029,13 +2039,18 @@ class SharedSyncRunMachine {
         const scope = this.state.locationScope;
         if (!scope || !this.storage.readUnreachableAttachments || !this.storage.writeUnreachableAttachments) return null;
         const record = parseUnreachableAttachments(await this.storage.readUnreachableAttachments());
-        rememberUnreachableAttachments(record, scope);
+        rememberUnreachableAttachments(record, this.rememberedScope(scope));
         return { scope, record };
     }
 
     private async writeUnreachableAttachments(record: UnreachableAttachments, scope: string): Promise<void> {
         await this.storage.writeUnreachableAttachments?.(JSON.stringify(record));
-        rememberUnreachableAttachments(record, scope);
+        rememberUnreachableAttachments(record, this.rememberedScope(scope));
+    }
+
+    /** A probe touches a location that is not active (yet): the screen keeps the active one. */
+    private rememberedScope(scope: string): string | undefined {
+        return this.options.activationProbe ? undefined : scope;
     }
 
     /** After the location accepted the document: its "not found" for the accepted rows is no news from now on. */
@@ -2059,7 +2074,8 @@ class SharedSyncRunMachine {
     /**
      * Every normal attachment pass. Recorded rows go to the adapter as they are, so a file another
      * device uploads here still arrives. This location's "not found" for one is no news: a pass that
-     * turned a recorded row into a tombstone (#1119's 404 rule) gets the row back as it was.
+     * turned a recorded row into a tombstone (#1119's 404 rule) gets the row back as it was, and a
+     * pass whose only change was such a tombstone answers "unchanged", so an idle library stays idle.
      */
     private async syncAttachmentsKeepingUnreachable(
         data: AppData,
@@ -2077,12 +2093,33 @@ class SharedSyncRunMachine {
         });
         const result = await syncAttachments(data, helpers);
         const next = result && typeof result === 'object' ? result : result ? data : null;
-        const restored = next && before.size > 0
-            ? replaceAttachments(next, ids, (attachment) => (attachment.deletedAt && before.has(attachment.id) ? before.get(attachment.id)! : attachment))
-            : next;
-        const pruned = pruneUnreachableAttachments(record, restored ?? data, scope);
+        let restored = 0;
+        if (next && before.size > 0) {
+            for (const owner of [...next.tasks, ...next.projects]) {
+                if (owner.deletedAt) continue;
+                for (const attachment of owner.attachments ?? []) {
+                    const original = before.get(attachment.id);
+                    if (!original || !attachment.deletedAt) continue;
+                    // In place: the adapter's answer keeps its identity and its meaning.
+                    for (const field of Object.keys(attachment) as (keyof Attachment)[]) delete attachment[field];
+                    Object.assign(attachment, original);
+                    restored += 1;
+                }
+            }
+        }
+        const pruned = pruneUnreachableAttachments(record, next ?? data, scope);
         if (pruned !== record) await this.writeUnreachableAttachments(pruned, scope);
-        return restored && restored !== next ? restored : result;
+        if (restored === 0) return result;
+        // One line per cycle, not one per pass.
+        if (!this.state.keptAttachmentNotFoundLogged) {
+            this.state.keptAttachmentNotFoundLogged = true;
+            this.notifier.logInfo('Kept attachment not found at this sync location; row left as it is', {
+                releaseCheck: 'v1.3.8/kept-attachment-not-found',
+                backend: this.backend,
+                restored: String(restored),
+            });
+        }
+        return result !== true && sameAttachmentOwners(data, next!) ? false : result;
     }
 
     private async runPostMergeAttachmentPhase(
@@ -2149,7 +2186,7 @@ class SharedSyncRunMachine {
         }
     }
 
-    private buildSyncCycleIO(): SyncCycleIO {
+    private buildSyncCycleIO(keptAttachmentIds?: ReadonlySet<string>): SyncCycleIO {
         return {
             readLocal: async () => {
                 const localData = await this.readLocalDataForSyncCycle();
@@ -2206,6 +2243,7 @@ class SharedSyncRunMachine {
             },
             preferIncomingAttachmentCloudKeys:
                 this.options.ignorePendingRemoteWriteBackoff === true,
+            preferIncomingAttachmentCloudKeyIds: keptAttachmentIds,
             // Read lazily: the fast path arms before the merge phase builds this
             // object, but nothing here should depend on that ordering.
             skipEmptyRemoteMerge: () => this.state.localOnlyUploadFingerprint !== null,
@@ -2221,7 +2259,10 @@ class SharedSyncRunMachine {
 
     private async runMergePhase(): Promise<SyncRunResult> {
         this.hooks.onMergePhaseStart?.();
-        const syncResult = await this.performSyncCycleImpl(this.buildSyncCycleIO());
+        // Rows kept without their file here: another device's upload of one wins the merge's key.
+        const unreachable = this.options.activationProbe ? null : await this.readUnreachableAttachments();
+        const keptIds = unreachable?.record[unreachable.scope];
+        const syncResult = await this.performSyncCycleImpl(this.buildSyncCycleIO(keptIds?.length ? new Set(keptIds) : undefined));
         if (syncResult.status === 'skipped') {
             this.notifier.logInfo('Sync skipped while pending remote write backoff is active', {
                 backend: this.backend,

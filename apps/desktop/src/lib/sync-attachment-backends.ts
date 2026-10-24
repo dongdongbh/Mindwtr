@@ -919,7 +919,8 @@ export async function syncWebdavAttachments(
                     return false;
                 }
                 if (getErrorStatus(error) === 404) {
-                    webdavDownloadBackoff.deleteEntry(attachment.id);
+                    // A row kept without its file stays live after this; the backoff frees its download slot.
+                    webdavDownloadBackoff.setFromError(attachment.id, error);
                     const mutated = markAttachmentUnrecoverable(attachment);
                     deps.logSyncInfo('Cleared missing WebDAV cloud key after 404', { id: attachment.id });
                     return mutated;

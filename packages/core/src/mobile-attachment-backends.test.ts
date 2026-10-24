@@ -1082,6 +1082,19 @@ describe('WebDAV attachment pass', () => {
     expect(attachment?.deletedAt).toBeTruthy();
   });
 
+  it('backs off a download that answered 404, so the next pass does not ask again', async () => {
+    // A row kept without its file (unreachable-attachments) comes back live after each 404;
+    // without the backoff it would take a download slot on every pass.
+    const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(404); });
+    const { backends } = setup({ core: { webdavGetFile } });
+    const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
+
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL);
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL);
+
+    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the local bytes when a remote-winner download fails', async () => {
     const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(500); });
     const { backends, memory } = setup({

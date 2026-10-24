@@ -276,6 +276,9 @@ type MergeableEntity = {
 type MergeAppDataOptions = {
     nowIso?: string;
     preferIncomingAttachmentCloudKeys?: boolean;
+    /** Attachments this device keeps without their file at this location (unreachable-attachments.ts):
+     *  a live, keyed incoming row is another device's upload here, so its key wins whatever its format. */
+    preferIncomingAttachmentCloudKeyIds?: ReadonlySet<string>;
 };
 
 const getRecurrenceSeriesShape = (value: Task['recurrence']): string | null => {
@@ -1015,6 +1018,13 @@ export function* mergeAppDataWithStatsPass(local: AppData, incoming: AppData, op
             ) {
                 return incomingAttachment.cloudKey;
             }
+            if (
+                incomingAttachment?.cloudKey
+                && !incomingAttachment.deletedAt
+                && options.preferIncomingAttachmentCloudKeyIds?.has(mergedAttachment.id)
+            ) {
+                return incomingAttachment.cloudKey;
+            }
             return mergedAttachment.cloudKey
                 || localAttachment?.cloudKey
                 || incomingAttachment?.cloudKey;
@@ -1539,6 +1549,7 @@ async function performSyncCycleUnlocked(io: SyncCycleIO): Promise<SyncCycleResul
         : await runSliced('sync:merge', mergeAppDataWithStatsPass(localData, remoteData, {
             nowIso,
             preferIncomingAttachmentCloudKeys: io.preferIncomingAttachmentCloudKeys,
+            preferIncomingAttachmentCloudKeyIds: io.preferIncomingAttachmentCloudKeyIds,
         }), slicer);
     if (!skipMerge) {
         logInfo('Full sync merge completed', {

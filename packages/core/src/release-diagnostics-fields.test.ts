@@ -30,6 +30,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'sectionDefaults',
     // activation-continue-without-files reuses releaseCheck and backend; missing is a count. No names or ids.
     'missing',
+    // kept-attachment-not-found reuses releaseCheck and backend; restored is a count. No names or ids.
+    'restored',
 
     // web-attachment-upload reuses releaseCheck, stage and count; only acknowledged PUTs.
     // android-widget-capture-status: bounded creation status and picker origin; kind/outcome below.

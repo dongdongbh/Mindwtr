@@ -499,6 +499,35 @@ describe('desktop sync attachment backends', () => {
         });
     });
 
+    it('backs off a WebDAV download that answered 404, so the next pass does not ask again', async () => {
+        // A row kept without its file (unreachable-attachments) comes back live after each 404;
+        // without the backoff it would take a download slot on every pass.
+        const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
+        const appData = createCandidateAttachmentData();
+        Object.assign(appData.tasks[0].attachments![0], { uri: '', localStatus: 'missing' });
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        };
+        const run = () => syncWebdavAttachments(
+            appData,
+            { url: 'https://dav.example/mindwtr', username: 'alice' },
+            'https://dav.example/mindwtr',
+            deps,
+        );
+        const gets = () => fetcher.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('attachments/attachment-1.txt')
+            && ((call as unknown[])[1] as RequestInit | undefined)?.method !== 'HEAD').length;
+
+        await run();
+        const first = gets();
+        expect(first).toBeGreaterThan(0);
+        await run();
+        expect(gets()).toBe(first);
+    });
+
     it('marks cloud attachments unrecoverable when the remote file is missing', async () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
         const logSyncWarning = vi.fn();
