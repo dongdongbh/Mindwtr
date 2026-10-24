@@ -9,7 +9,6 @@ import java.net.URLEncoder
 import java.text.DateFormat
 import java.text.ParsePosition
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -164,7 +163,7 @@ data class WidgetPayload(
    * payload. [sourceTaskIds] deliberately comes from the unfiltered payload so
    * committed check-offs can still be reconciled after the app ingests them.
    */
-  fun displaySnapshot(hiddenTaskIds: Set<String>, now: Date = Date(), timeZone: TimeZone = TimeZone.getDefault()): DisplaySnapshot {
+  fun displaySnapshot(hiddenTaskIds: Set<String>, timeZone: TimeZone = TimeZone.getDefault()): DisplaySnapshot {
     if (hiddenTaskIds.isEmpty() && UPCOMING_LIST_ID !in lists) return DisplaySnapshot(allTaskIds(), this)
     fun visible(items: List<Item>): List<Item> = items.filterNot { it.id in hiddenTaskIds }
     fun visible(sections: List<Section>): List<Section> = sections.mapNotNull { section ->
@@ -188,26 +187,17 @@ data class WidgetPayload(
         sections = visible(sections),
         lists = lists.mapValues { (id, list) ->
           val unhidden = visible(list)
-          if (id == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(now, timeZone) else unhidden
+          if (id == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(timeZone) else unhidden
         },
       ),
     )
   }
 
-  private fun ListPayload.upcomingSnapshot(now: Date, timeZone: TimeZone): ListPayload {
-    val today = Calendar.getInstance(timeZone).apply {
-      time = now
-      set(Calendar.HOUR_OF_DAY, 0)
-      set(Calendar.MINUTE, 0)
-      set(Calendar.SECOND, 0)
-      set(Calendar.MILLISECOND, 0)
-    }
-    val tomorrow = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) }.time
-    val afterWindow = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 8) }.time
-    fun preview(items: List<Item>): List<Item> = items.mapNotNull { item ->
-      val raw = item.upcomingDate ?: return@mapNotNull null
-      val date = parseUpcomingDate(raw, timeZone) ?: return@mapNotNull null
-      if (date.before(tomorrow) || !date.before(afterWindow)) return@mapNotNull null
+  private fun ListPayload.upcomingSnapshot(timeZone: TimeZone): ListPayload {
+    // Keep membership with the published Focus generation until core rebuilds both lists.
+    fun preview(items: List<Item>): List<Item> = items.map { item ->
+      val raw = item.upcomingDate ?: return@map item
+      val date = parseUpcomingDate(raw, timeZone) ?: return@map item
       val format = if (DATE_ONLY.matches(raw)) DateFormat.getDateInstance(DateFormat.MEDIUM)
       else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
       format.timeZone = timeZone
@@ -221,11 +211,9 @@ data class WidgetPayload(
     val nextSections = sections.mapNotNull { section ->
       section.copy(items = preview(section.items)).takeIf { it.items.isNotEmpty() }
     }
-    val removed = taskIds() - (nextItems.map { it.id } + nextSections.flatMap { it.items.map { item -> item.id } }).toSet()
     return copy(
       items = nextItems,
       sections = nextSections,
-      totalCount = totalCount?.let { (it - removed.size).coerceAtLeast(if (nextSections.isEmpty()) nextItems.size else nextSections.sumOf { section -> section.items.size }) },
     )
   }
 

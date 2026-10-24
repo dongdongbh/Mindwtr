@@ -226,8 +226,9 @@ struct MindwtrTasksWidgetPayload: Decodable {
         upcomingOnly: Bool
     ) -> MindwtrTasksWidgetPayload {
         func isVisible(_ item: MindwtrWidgetTaskItem) -> Bool {
+            // Membership and headers belong to the same app-published snapshot.
             if upcomingOnly || item.isUpcomingPreview {
-                return MindwtrWidgetUpcomingProjection.isVisible(item.upcomingDate, at: date)
+                return true
             }
             return !MindwtrWidgetActionProjection.isHidden(item.actionIdentity, by: pendingActions, at: date)
         }
@@ -344,13 +345,10 @@ enum MindwtrTasksWidgetSnapshotStore {
     ) -> [MindwtrTasksWidgetEntry] {
         let payload = loadPayload(for: family)
         let pendingActions = (try? MindwtrWidgetActionStore.appGroupStore().pendingActions()) ?? []
-        var dates = MindwtrWidgetActionProjection.timelineDates(
+        let dates = MindwtrWidgetActionProjection.timelineDates(
             pendingActions: pendingActions,
             now: now
         )
-        if listId == "upcoming" {
-            dates.append(contentsOf: MindwtrWidgetUpcomingProjection.timelineDates(now: now))
-        }
         return Set(dates).sorted().map { date in
             MindwtrTasksWidgetEntry(
                 date: date,
@@ -527,9 +525,7 @@ private struct MindwtrTasksWidgetView: View {
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     var body: some View {
-        let payload = entry.listId == "upcoming"
-            ? entry.payload.selectingList("upcoming", pendingActions: entry.pendingActions, at: max(entry.date, Date()))
-            : entry.payload
+        let payload = entry.payload
         let palette = resolvePalette(payload)
         let metrics = MindwtrWidgetMetrics.resolve(for: widgetFamily).scaled(by: typeScale)
         let columnCount = widgetFamily == .systemExtraLarge ? 2 : 1

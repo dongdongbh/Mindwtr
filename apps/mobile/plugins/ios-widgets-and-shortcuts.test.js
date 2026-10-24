@@ -101,21 +101,21 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(intentsSource).not.toContain('store.pendingActions().contains');
   });
 
-  it('ships read-only Upcoming rows with local-day expiry and midnight timeline entries', () => {
+  it('keeps read-only Upcoming membership in the app-published snapshot', () => {
     const widgetsDir = path.resolve(__dirname, '..', 'widgets-ios');
     const tasksSource = fs.readFileSync(path.join(widgetsDir, 'MindwtrTasksWidget.swift'), 'utf8');
     const itemSource = fs.readFileSync(path.resolve(__dirname, '..', IOS_WIDGET_MODULE_FOLDER, 'MindwtrWidgetTaskItem.swift'), 'utf8');
     expect(itemSource).toContain('let upcomingDate: String?');
     expect(itemSource).toContain('let upcomingLabel: String?');
     expect(tasksSource).toContain('upcomingOnly: resolvedId == "upcoming"');
-    expect(tasksSource).toContain('MindwtrWidgetUpcomingProjection.isVisible(item.upcomingDate, at: date)');
-    expect(tasksSource).toContain('MindwtrWidgetUpcomingProjection.timelineDates(now: now)');
+    expect(tasksSource).not.toContain('MindwtrWidgetUpcomingProjection.isVisible(');
+    expect(tasksSource).not.toContain('MindwtrWidgetUpcomingProjection.timelineDates(');
     expect(tasksSource).toContain('if !item.isUpcomingPreview {\n                MindwtrWidgetTaskAction(');
     expect(tasksSource).toContain('Button(intent: MindwtrOpenWidgetTaskIntent(taskId: item.id))');
     expect(tasksSource).toContain('nonEmpty(item.displayDueLabel)');
     expect(tasksSource).toContain('!item.isUpcomingPreview && item.id == taskId');
     expect(tasksSource).toContain('completionToken: isUpcomingPreview ? nil : completionToken');
-    expect(tasksSource).toContain('at: max(entry.date, Date())');
+    expect(tasksSource).toContain('let payload = entry.payload');
   });
 
   it('pairs the small Upcoming task foreground action with the app task launcher', () => {

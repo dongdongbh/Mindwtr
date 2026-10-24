@@ -205,10 +205,10 @@ describe('widget-service', () => {
         expect(upcoming.items).toHaveLength(1);
         expect(upcoming.items[0].upcomingDate).toBe(tomorrow.toISOString());
         expect(upcoming.items[0].completionToken).toBeUndefined();
-        expect(mockLogInfo).toHaveBeenCalledWith('Upcoming widget snapshot published', {
+        expect(mockLogInfo).toHaveBeenCalledWith('Widget lists published from one snapshot', {
             scope: 'widget',
             force: true,
-            extra: { releaseCheck: 'v1.3.7/widget-upcoming', platform, count: 1 },
+            extra: { releaseCheck: 'v1.3.8/widget-snapshot-rollover', platform, count: 1 },
         });
     });
 

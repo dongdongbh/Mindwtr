@@ -41,20 +41,8 @@ struct MindwtrWidgetTaskItem: Decodable {
     }
 }
 
-// Cached previews expire by local day even when the app has not republished.
+// Absolute labels stay honest while the app-published membership is cached.
 enum MindwtrWidgetUpcomingProjection {
-    static func isVisible(_ value: String?, at now: Date, calendar: Calendar = .current) -> Bool {
-        guard let value, let date = parsedDate(value, calendar: calendar),
-              let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)),
-              let windowEnd = calendar.date(byAdding: .day, value: 8, to: calendar.startOfDay(for: now))
-        else { return false }
-        return date >= tomorrow && date < windowEnd
-    }
-
-    static func timelineDates(now: Date, calendar: Calendar = .current) -> [Date] {
-        (1...7).compactMap { calendar.date(byAdding: .day, value: $0, to: calendar.startOfDay(for: now)) }
-    }
-
     static func label(
         date value: String?, prefix: String?, calendar: Calendar = .current, locale: Locale = .current
     ) -> String? {

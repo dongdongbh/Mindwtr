@@ -92,10 +92,10 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
                 lists: Object.keys(publication.lists).filter((id) => /^(context|tag|filter):/.test(id)).length,
             },
         });
-        logInfo('Upcoming widget snapshot published', {
+        logInfo('Widget lists published from one snapshot', {
             scope: 'widget',
             force: true,
-            context: { releaseCheck: 'v1.3.7/widget-upcoming', platform: 'android', count: publication.lists.upcoming?.items.length ?? 0 },
+            context: { releaseCheck: 'v1.3.8/widget-snapshot-rollover', platform: 'android', count: publication.lists.upcoming?.items.length ?? 0 },
         });
         logInfo('Native Android widget payload published', {
             scope: 'widget',

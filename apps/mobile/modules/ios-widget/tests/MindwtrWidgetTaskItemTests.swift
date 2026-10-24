@@ -85,10 +85,6 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
         return result
     }
 
-    private func instant(_ value: String) -> Date {
-        ISO8601DateFormatter().date(from: value)!
-    }
-
     func testUpcomingRowsAreReadOnlyAndLabelsSurviveCachedDecoding() throws {
         let row = try decode([
             "upcomingDate": "2026-03-08", "upcomingLabel": "Starts", "dueLabel": "Starts Mar 8, 2026",
@@ -99,29 +95,19 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
         XCTAssertEqual(try decode(["dueLabel": "Today"]).displayDueLabel, "Today")
     }
 
-    func testUpcomingWindowUsesLocalDaysAndRejectsMalformedValues() {
-        let now = instant("2026-03-07T20:00:00Z")
+    func testUpcomingLabelsRejectMalformedDatesWithoutExpiringCachedRows() {
         let local = calendar("America/New_York")
-        for date in ["2026-03-08", "2026-03-14", "2026-03-14T23:59:59-04:00", "2026-03-08T09:30"] {
-            XCTAssertTrue(MindwtrWidgetUpcomingProjection.isVisible(date, at: now, calendar: local), date)
+        for date in ["2026-03-07", "2026-03-08", "2026-03-15", "2026-03-14T23:59:59-04:00", "2026-03-08T09:30"] {
+            XCTAssertNotNil(MindwtrWidgetUpcomingProjection.label(date: date, prefix: "Starts", calendar: local), date)
         }
-        for date in [nil, "", "invalid", "2026-02-30", "2026-02-30T12:00:00Z", "2026-03-08T24:00:00Z", "2026-03-07", "2026-03-07T23:59:59-05:00", "2026-03-15", "2026-03-15T00:00:00-04:00"] {
-            XCTAssertFalse(MindwtrWidgetUpcomingProjection.isVisible(date, at: now, calendar: local), date ?? "nil")
+        for date in [nil, "", "invalid", "2026-02-30", "2026-02-30T12:00:00Z", "2026-03-08T24:00:00Z"] {
+            XCTAssertNil(MindwtrWidgetUpcomingProjection.label(date: date, prefix: "Starts", calendar: local), date ?? "nil")
         }
-        XCTAssertFalse(MindwtrWidgetUpcomingProjection.isVisible(
-            "2026-03-08", at: instant("2026-03-08T05:00:00Z"), calendar: local
-        ))
     }
 
     func testUpcomingDatesAndLabelsFollowTimezoneWithoutShiftingDateOnlyValues() {
-        let now = instant("2026-03-07T20:00:00Z")
         let west = calendar("America/Los_Angeles")
         let east = calendar("Asia/Tokyo")
-        XCTAssertTrue(MindwtrWidgetUpcomingProjection.isVisible("2026-03-08", at: now, calendar: west))
-        XCTAssertFalse(MindwtrWidgetUpcomingProjection.isVisible("2026-03-08", at: now, calendar: east))
-        XCTAssertFalse(MindwtrWidgetUpcomingProjection.isVisible("2026-03-08T00:30:00Z", at: now, calendar: west))
-        XCTAssertTrue(MindwtrWidgetUpcomingProjection.isVisible("2026-03-08T00:30:00", at: now, calendar: west))
-        XCTAssertTrue(MindwtrWidgetUpcomingProjection.isVisible("2026-03-08T00:30:00.123", at: now, calendar: west))
         let locale = Locale(identifier: "en_US")
         func label(_ value: String, _ calendar: Calendar) -> String? {
             MindwtrWidgetUpcomingProjection.label(date: value, prefix: "Returns", calendar: calendar, locale: locale)
@@ -132,13 +118,4 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
         XCTAssertTrue(label("2026-03-08", west)?.contains("2026") == true)
     }
 
-    func testUpcomingTimelineSchedulesMidnightAcrossDaylightSaving() {
-        let now = instant("2026-03-07T20:00:00Z")
-        let local = calendar("America/New_York")
-        let dates = MindwtrWidgetUpcomingProjection.timelineDates(now: now, calendar: local)
-        XCTAssertEqual(dates.count, 7)
-        XCTAssertEqual(dates[0], instant("2026-03-08T05:00:00Z"))
-        XCTAssertEqual(dates[1], instant("2026-03-09T04:00:00Z"))
-        XCTAssertTrue(dates.allSatisfy { local.component(.hour, from: $0) == 0 && $0 > now })
-    }
 }

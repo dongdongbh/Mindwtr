@@ -7,7 +7,6 @@ import android.widget.RemoteViews
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import org.json.JSONArray
@@ -30,52 +29,77 @@ class UpcomingWidgetTest {
     context = ApplicationProvider.getApplicationContext()
     context.getSharedPreferences(WidgetListStore.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
     context.getSharedPreferences(CheckoffStore.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences(WidgetPayloadStore.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
   }
 
   @Test
-  fun cachedSnapshotDropsTodayInvalidAndBeyondSevenDaysWithoutMutatingSource() {
+  fun switchingCachedListsAfterMidnightKeepsThePublishedGenerationUntilTheAppPublishesAgain() {
+    val start = item("starts-today", "2000-10-25")
+    val cached = JSONObject().put("lists", JSONObject()
+      .put("focus", JSONObject().put("title", "Focus").put("dateLabel", "Oct 24").put("items", JSONArray()))
+      .put("upcoming", JSONObject().put("title", "Upcoming").put("items", JSONArray().put(start)).put("totalCount", 1)))
+      .toString()
+    assertTrue(WidgetPayloadStore.write(context, cached))
+
+    fun selectedRows(listId: String): List<String> {
+      WidgetListStore.write(context, 9, listId)
+      val factory = TasksWidgetFactory(context, WidgetKind.TASKS, 9)
+      factory.onCreate()
+      return factory.baseRows().filterIsInstance<TasksWidgetFactory.Row.Task>().map { it.item.id }
+    }
+    assertEquals(listOf("starts-today"), selectedRows("upcoming"))
+    assertEquals(emptyList<String>(), selectedRows("focus"))
+    assertEquals("Oct 24", WidgetRenderer.tasksChrome(WidgetPayloadStore.read(context).displaySnapshot(emptySet()).payload, "focus").title)
+    assertEquals(listOf("starts-today"), selectedRows("upcoming"))
+    assertEquals(cached, WidgetPayloadStore.readRaw(context))
+
+    val fresh = JSONObject(cached).apply {
+      getJSONObject("lists").getJSONObject("focus").put("dateLabel", "Oct 25").put("items", JSONArray().put(start))
+      getJSONObject("lists").getJSONObject("upcoming").put("items", JSONArray()).put("totalCount", 0)
+    }.toString()
+    assertTrue(WidgetPayloadStore.write(context, fresh))
+    assertEquals(listOf("starts-today"), selectedRows("focus"))
+    assertEquals("Oct 25", WidgetRenderer.tasksChrome(WidgetPayloadStore.read(context).displaySnapshot(emptySet()).payload, "focus").title)
+    assertEquals(emptyList<String>(), selectedRows("upcoming"))
+    assertEquals(fresh, WidgetPayloadStore.readRaw(context))
+  }
+
+  @Test
+  fun cachedDatesAndMissingMetadataNeverReclassifyPublishedRowsButCommittedCheckoffsStillHide() {
     val payload = payload(listOf(
-      item("today", "2026-10-17T23:59:00Z"),
-      item("tomorrow", "2026-10-18"),
-      item("last", "2026-10-24T23:59:59.9Z"),
-      item("outside", "2026-10-25"),
+      item("past", "2000-10-17"),
+      item("future", "2100-10-25"),
       item("invalid", "2026-02-30"),
       item("missing", null),
     ))
-    val snapshot = payload.displaySnapshot(emptySet(), date("2026-10-17"), utc)
-    assertEquals(listOf("tomorrow", "last"), snapshot.payload.listFor("upcoming").items.map { it.id })
-    assertEquals(2, snapshot.payload.listFor("upcoming").eligibleTaskCount())
-    assertEquals(6, payload.listFor("upcoming").items.size)
+    val snapshot = payload.displaySnapshot(setOf("past"))
+    assertEquals(listOf("future", "invalid", "missing"), snapshot.payload.listFor("upcoming").items.map { it.id })
+    assertEquals(3, snapshot.payload.listFor("upcoming").eligibleTaskCount())
+    assertEquals(listOf("stale", "stale"), snapshot.payload.listFor("upcoming").items.drop(1).map { it.dueLabel })
+    assertEquals(4, payload.listFor("upcoming").items.size)
     assertEquals(payload.allTaskIds(), snapshot.sourceTaskIds)
     assertEquals(listOf("focus"), snapshot.payload.listFor("focus").items.map { it.id })
-    val rolled = payload.displaySnapshot(emptySet(), date("2026-10-18"), utc).payload
-    assertEquals(listOf("last", "outside"), rolled.listFor("upcoming").items.map { it.id })
-  }
-
-  @Test
-  fun dateOnlyUsesLocalCalendarAndTimestampUsesItsInstantAcrossTimezoneAndDstChanges() {
-    val payload = payload(listOf(item("day", "2026-03-08"), item("instant", "2026-03-08T00:30:00Z")))
-    val now = date("2026-03-07T12:00:00Z")
-    val west = TimeZone.getTimeZone("America/Los_Angeles")
-    assertEquals(listOf("day", "instant"), payload.displaySnapshot(emptySet(), now, utc).payload.listFor("upcoming").items.map { it.id })
-    assertEquals(listOf("day"), payload.displaySnapshot(emptySet(), now, west).payload.listFor("upcoming").items.map { it.id })
-    assertEquals(emptyList<String>(), payload.displaySnapshot(emptySet(), date("2026-03-08T12:00:00Z"), west).payload.listFor("upcoming").items.map { it.id })
-    val edge = payload(listOf(item("last", "2026-03-14T23:59:59-07:00"), item("outside", "2026-03-15")))
-    assertEquals(listOf("last"), edge.displaySnapshot(emptySet(), now, west).payload.listFor("upcoming").items.map { it.id })
-    val midnightDst = payload(listOf(item("day", "2018-11-04")))
-    assertEquals(listOf("day"), midnightDst.displaySnapshot(emptySet(), date("2018-11-03T12:00:00Z"), TimeZone.getTimeZone("America/Sao_Paulo")).payload.listFor("upcoming").items.map { it.id })
   }
 
   @Test
   fun labelsAreAbsoluteAndReformattedInTheCurrentZone() {
     val payload = payload(listOf(item("instant", "2026-10-19T00:30:00Z")))
-    val now = date("2026-10-17T12:00:00Z")
-    val east = payload.displaySnapshot(emptySet(), now, utc).payload.listFor("upcoming").items.single()
-    val west = payload.displaySnapshot(emptySet(), now, TimeZone.getTimeZone("America/Los_Angeles")).payload.listFor("upcoming").items.single()
+    val east = payload.displaySnapshot(emptySet(), timeZone = utc).payload.listFor("upcoming").items.single()
+    val west = payload.displaySnapshot(emptySet(), timeZone = TimeZone.getTimeZone("America/Los_Angeles")).payload.listFor("upcoming").items.single()
     assertTrue(east.dueLabel!!.startsWith("Starts "))
     assertNotEquals(east.dueLabel, west.dueLabel)
     assertFalse(east.dueEmphasis)
     assertEquals(WidgetPayload.DueTone.NORMAL, east.dueTone)
+  }
+
+  @Test
+  fun dateOnlyLabelsKeepTheirCalendarDayAcrossZonesAndAMidnightDstTransition() {
+    val payload = payload(listOf(item("day", "2018-11-04")))
+    val expected = payload.displaySnapshot(emptySet(), timeZone = utc).payload.listFor("upcoming").items.single().dueLabel
+    for (zone in listOf("America/Los_Angeles", "America/Sao_Paulo")) {
+      val item = payload.displaySnapshot(emptySet(), timeZone = TimeZone.getTimeZone(zone)).payload.listFor("upcoming").items.single()
+      assertEquals(expected, item.dueLabel)
+    }
   }
 
   @Test
@@ -114,10 +138,6 @@ class UpcomingWidgetTest {
     val pendingRow = factory.getViewAt(0).apply(context, null)
     assertTrue(pendingRow.findViewById<TextView>(R.id.mindwtr_widget_item_title).text is android.text.Spanned)
   }
-
-  private fun date(raw: String): Date = SimpleDateFormat(
-    if (raw.length == 10) "yyyy-MM-dd" else "yyyy-MM-dd'T'HH:mm:ssX", Locale.ROOT,
-  ).apply { timeZone = utc }.parse(raw)!!
 
   private fun item(id: String, upcomingDate: String?): JSONObject = JSONObject()
     .put("id", id).put("title", id)
