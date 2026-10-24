@@ -195,6 +195,12 @@ describe('buildFocusTaskGroups', () => {
             expect(groups.find((g) => g.key === 'project:none')?.dotColor).toBeUndefined();
         });
 
+        it('gives a project with no Area and no color of its own the grey default dot, like an Area bucket (#1422)', () => {
+            const groups = build('project', { tasks: [makeTask({ id: 'a', projectId: 'p1' })],
+                projects: [makeProject({ id: 'p1', color: DEFAULT_AREA_COLOR })] });
+            expect(groups.find((g) => g.key === 'project:p1')?.dotColor).toBe(DEFAULT_AREA_COLOR);
+        });
+
         it('colors area buckets by area.color (default when unset), none-bucket bare', () => {
             const areas = [
                 makeArea({ id: 'a1', color: '#abcdef' }),

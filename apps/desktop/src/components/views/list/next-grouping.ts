@@ -292,8 +292,9 @@ export function groupTasksByProject({
             // Same precedence the task rows' project chips and the Agenda's
             // project dots use: the area color is the identity color, the
             // project's own color is the fallback — a header dot must not
-            // disagree with the chips right under it.
-            dotColor: getProjectAccentColor(project, areaById),
+            // disagree with the chips right under it. No color keeps the grey
+            // default dot, as on mobile, so the header text stays aligned.
+            dotColor: getProjectAccentColor(project, areaById) ?? DEFAULT_AREA_COLOR,
         });
     });
 

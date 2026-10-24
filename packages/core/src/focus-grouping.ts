@@ -189,7 +189,7 @@ export function buildFocusTaskGroups({
                     key: `project:${project.id}`,
                     label: project.title,
                     sortOrder: Number.isFinite(project.order) ? project.order : Number.POSITIVE_INFINITY,
-                    dotColor: getProjectAccentColor(project, areaById),
+                    dotColor: getProjectAccentColor(project, areaById) ?? DEFAULT_AREA_COLOR,
                 };
             });
         }

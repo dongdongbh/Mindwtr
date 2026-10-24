@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Area, Project, Task } from '@mindwtr/core';
+import { DEFAULT_AREA_COLOR, type Area, type Project, type Task } from '@mindwtr/core';
 import {
     CONTEXTS_AXES,
     emptyCollapsedGroups,
@@ -297,6 +297,16 @@ describe('groupTasksByProject', () => {
 
         expect(groups.find((group) => group.title === 'In area')?.dotColor).toBe('#3B82F6');
         expect(groups.find((group) => group.title === 'No area')?.dotColor).toBe('#22C55E');
+    });
+
+    it('keeps the grey default dot for a project with no Area and no color of its own (#1422)', () => {
+        const projectMap = new Map<string, Project>([['p1', {
+            id: 'p1', title: 'Plain', status: 'active', color: DEFAULT_AREA_COLOR, order: 0, tagIds: [],
+            createdAt: '2026-03-01T00:00:00.000Z', updatedAt: '2026-03-01T00:00:00.000Z',
+        }]]);
+        const groups = groupTasksByProject({ tasks: [baseTask({ id: 't1', title: 'A', projectId: 'p1' })], projectMap,
+            areas: [], noProjectLabel: 'No project' });
+        expect(groups.find((group) => group.title === 'Plain')?.dotColor).toBe(DEFAULT_AREA_COLOR);
     });
 });
 
