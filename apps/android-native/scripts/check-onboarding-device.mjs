@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { check, connect, evidenced, fail, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, seedApk, shotsArg] = process.argv.slice(2);
 if (!serial || !seedApk) {
@@ -29,6 +29,8 @@ const UI_FILE = '/data/local/tmp/mindwtr-onboarding-ui.xml';
 const PROPS = ['startup_prompt', 'about_stub'];
 const shots = shotsArg ?? resolve(process.env.HOME, '.mindwtr-harness/onboarding');
 const { en } = await import(resolve(app, '../../packages/core/src/i18n/locales/en.ts'));
+const { STARTER_SEED_STRINGS } = await import(resolve(app, '../../packages/core/src/i18n/starter-seed-strings.ts'));
+const STARTER_TITLE = STARTER_SEED_STRINGS.en['starter.projectTitle'];
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: process.env.ADB ?? '/home/dd/Android/Sdk/platform-tools/adb' });
 const { adbRaw, sh, home, front, requireAppFront, screen, waitFor, tap, tapExpecting } = device;
@@ -107,6 +109,8 @@ try {
     nodes = await tapExpecting(tagged(nodes, 'welcome-start') ?? fail('no Start using Mindwtr'), (current) => Boolean(tagged(current, 'getting-started-actions')), 'Getting Started', 60_000);
     check(Boolean(byText(nodes, en['onboarding.captureAction'])) && Boolean(byText(nodes, en['onboarding.readGuide'])),
         '(c) Start using Mindwtr opens Getting Started with Capture to Inbox and the guide link');
+    nodes = await waitFor('the Getting Started title', (current) => projectTitled(current, STARTER_TITLE), 15_000);
+    check(true, '(c) the project screen shows the Getting Started title');
     shot('getting-started');
     nodes = await tapExpecting(byText(nodes, en['starter.processInbox.check1']) ?? fail('no Open Inbox'), (current) => tabSelected(current, en['tab.inbox']), 'the Inbox');
     check(tabSelected(nodes, en['tab.inbox']), '(c) Open Inbox closes the project and shows the Inbox');
