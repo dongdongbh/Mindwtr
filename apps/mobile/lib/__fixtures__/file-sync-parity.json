@@ -64,6 +64,10 @@
     "content://provider/tree/root/document/root"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-0",
@@ -72,6 +76,10 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "saf.write",
@@ -106,6 +114,10 @@
     {
      "encoding": "base64"
     }
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "native.read",
@@ -172,6 +184,10 @@
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0",
     "<text:188:c6e70b8417215ced>",
@@ -217,6 +233,10 @@
     {
      "encoding": "base64"
     }
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "native.read",
@@ -314,6 +334,10 @@
     "content://provider/tree/root/document/root"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-0",
@@ -322,6 +346,10 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "saf.write",
@@ -356,6 +384,10 @@
     {
      "encoding": "base64"
     }
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "native.read",
@@ -446,6 +478,10 @@
     "content://provider/tree/root/document/root/.mindwtr-et-s-1"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-1",
     "<text:280:0137285d97119365>",
@@ -491,6 +527,10 @@
     {
      "encoding": "base64"
     }
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "native.read",
@@ -687,6 +727,10 @@
     "file.write",
     "file://sync/data.json.enc",
     "<bytes:213:58760cafaea5cad0>"
+   ],
+   [
+    "fs.info",
+    "file://sync/data.json.enc"
    ],
    [
     "file.exists",
@@ -1059,6 +1103,10 @@
     "<bytes:213:d01b072d82f56d64>"
    ],
    [
+    "fs.info",
+    "file://sync/data.json.enc"
+   ],
+   [
     "file.exists",
     "file://sync/data.json.enc"
    ],
@@ -1373,6 +1421,10 @@
     "file.write",
     "file://sync/data.json",
     "<bytes:143:07bd80adb3d8f96a>"
+   ],
+   [
+    "fs.info",
+    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -1949,6 +2001,10 @@
     "<bytes:140:57c413e97964162f>"
    ],
    [
+    "fs.info",
+    "file://sync/data.json"
+   ],
+   [
     "file.exists",
     "file://sync/data.json"
    ],
@@ -2114,6 +2170,10 @@
     "<bytes:140:a713b0ef50bdc204>"
    ],
    [
+    "fs.info",
+    "file://sync/data.json"
+   ],
+   [
     "file.exists",
     "file://sync/data.json"
    ],
@@ -2222,6 +2282,10 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-0"
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root/attachments"
    ],
    [
     "saf.write",
@@ -2372,6 +2436,10 @@
     "token-1"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-4",
@@ -2414,6 +2482,10 @@
     {
      "encoding": "base64"
     }
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "native.read",
@@ -2841,6 +2913,10 @@
     "<bytes:213:9c81b4a5b65a2095>"
    ],
    [
+    "fs.info",
+    "file://sync/data.json.enc"
+   ],
+   [
     "file.exists",
     "file://sync/data.json.enc"
    ],
@@ -3305,6 +3381,10 @@
     "file.write",
     "file://sync/data.json",
     "<bytes:143:07bd80adb3d8f96a>"
+   ],
+   [
+    "fs.info",
+    "file://sync/data.json"
    ],
    [
     "file.exists",
@@ -3785,6 +3865,10 @@
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0",
     "<text:188:c6e70b8417215ced>",
@@ -3898,6 +3982,10 @@
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0",
     "<text:188:c6e70b8417215ced>",
@@ -4008,6 +4096,10 @@
     "content://provider/tree/root/document/root"
    ],
    [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
+   ],
+   [
     "saf.create",
     "content://provider/tree/root/document/root",
     ".mindwtr-et-s-0",
@@ -4016,6 +4108,10 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0"
+   ],
+   [
+    "native.listChildren",
+    "content://provider/tree/root/document/root"
    ],
    [
     "saf.write",
@@ -4625,6 +4721,10 @@
     "<bytes:140:57c413e97964162f>"
    ],
    [
+    "fs.info",
+    "file://sync/data.json"
+   ],
+   [
     "file.exists",
     "file://sync/data.json"
    ],
@@ -4788,6 +4888,10 @@
     "file.write",
     "file://sync/data.json",
     "<bytes:140:a713b0ef50bdc204>"
+   ],
+   [
+    "fs.info",
+    "file://sync/data.json"
    ],
    [
     "file.exists",
