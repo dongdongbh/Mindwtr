@@ -4806,6 +4806,8 @@ globalThis.MindwtrHost = {
      * writes `writeAhead` before any effect and `published` after them, as iOS does.
      */
     pomodoroAlarmPlan(granted: boolean, raw: string | null, scope: string, pendingJSON: string, deliveredJSON: string): string {
+        // The QuickJS wrapper hands Kotlin's null (no record yet) over as undefined.
+        raw ??= null;
         return submit(async () => {
             if (typeof granted !== 'boolean') throw new Error('INVALID_INPUT: Invalid Pomodoro permission');
             const settings = useTaskStore.getState().settings;
@@ -4838,6 +4840,8 @@ globalThis.MindwtrHost = {
      * (PackageInfo.lastUpdateTime, read at the first native start and kept); never firstInstallTime, which is RN's.
      */
     pomodoroLegacyAlert(raw: string | null, upgradedAtMs: number): string {
+        // Kotlin's null (no RN record) arrives as undefined, as in pomodoroAlarmPlan.
+        raw ??= null;
         return submit(async () => {
             pomodoroAdapter();
             if ((raw !== null && typeof raw !== 'string') || !Number.isSafeInteger(upgradedAtMs) || upgradedAtMs <= 0)
