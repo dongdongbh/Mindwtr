@@ -1,4 +1,5 @@
 import { resolveSystemPath } from '@mindwtr/core';
+import { recordWidgetLaunchRouting } from '@/lib/widget-launch-routing';
 
 const logShareHandoffRouted = (initial: boolean): void => {
     try {
@@ -67,6 +68,7 @@ const logControlCaptureRouted = (path: string, initial: boolean): void => {
 // original URL via Linking.useURL()) resolves the real entity once data is
 // ready and re-navigates.
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string {
+    recordWidgetLaunchRouting(path);
     // The rules are core's (resolveSystemPath), shared with the native Android app; the diagnostics stay here.
     // - expo-share-intent uses the scheme-derived App Group entry name, not an application route: its original
     //   Linking URL stays intact for the provider. A cold launch needs a valid base route; on a warm delivery Expo

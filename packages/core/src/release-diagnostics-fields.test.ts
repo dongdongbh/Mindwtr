@@ -32,6 +32,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // app-search-owed-wipe reuses releaseCheck and outcome below.
     // native-app-search reuses releaseCheck and outcome below.
     // onboarding-waits-for-canonical-load reuses releaseCheck and outcome below.
+    // widget-launch-destination reuses releaseCheck, stage and outcome; never routes, URLs or delivery identifiers.
     // restore-attachment-presence reuses releaseCheck and count below; no names or paths.
     // leftover-undo-hold reuses releaseCheck and outcome below.
     // large-library-no-undo reuses releaseCheck, operation and outcome below; no names or paths.
@@ -289,6 +290,12 @@ const RELEASE_CHECK_FIELD_NAMES = [
 ];
 
 describe('release diagnostics field names', () => {
+    it('preserves the content-free widget launch acknowledgement and recovery receipts', () => {
+        for (const stage of ['acknowledged', 'fallback', 'cancelled']) {
+            const receipt = { releaseCheck: 'v1.3.8/widget-launch-destination', stage, outcome: 'preserved-draft' };
+            expect(sanitizeLogContext(receipt)).toEqual(receipt);
+        }
+    });
     it('preserves the saved taxonomy persistence proof without token content', () => {
         const receipt = { releaseCheck: 'v1.3.7/saved-taxonomy', taxonomyKind: 'context', operation: 'create', outcome: 'persisted' };
         expect(sanitizeLogContext(receipt)).toEqual(receipt);

@@ -124,7 +124,13 @@ class MainActivity : ReactActivity() {
     expect(output).toContain('"context"');
     expect(output).toContain('NotificationOpenPayloadStore.cache(payload)');
     expect(output).toContain('override fun onNewIntent(intent: Intent)');
-    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    super.onNewIntent(intent)');
+    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    WidgetLaunchCover.receive(this, intent)\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    super.onNewIntent(intent)');
+    expect(output.match(/WidgetLaunchCover\.receive\(this, intent\)/g)).toHaveLength(2);
+    expect(output).toContain('WidgetLaunchCover.receive(this, intent)\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    startupMark("native.main_activity.on_create:end")');
+    expect(output).toContain('override fun onPause() {\n    WidgetLaunchCover.cancel(this)\n    super.onPause()');
+    expect(output).toContain('override fun onResume() {\n    super.onResume()\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    WidgetLaunchCover.resume(this)');
+    expect(output).toContain('override fun onDestroy() {\n    WidgetLaunchCover.cancel(this)\n    super.onDestroy()');
+    expect(patchMainActivity(output)).toBe(output);
     expect(output).toContain('copyNestedData(extras.get("data"))');
     expect(output).toContain('value != JSONObject.NULL');
     expect(output).toContain('emit("OnNotificationOpened", JSONObject(payload).toString())');
@@ -349,7 +355,7 @@ class MainActivity : ReactActivity() {
     expect(output).toContain('private fun normalizeCreateNoteIntent(intent: Intent?)');
     expect(output).toContain('private fun normalizeContextAutomationIntent(intent: Intent?)');
     expect(output).toContain('override fun onNewIntent(intent: Intent)');
-    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    super.onNewIntent(intent)');
+    expect(output).toContain('normalizeCreateNoteIntent(intent)\n    normalizeContextAutomationIntent(intent)\n    WidgetLaunchCover.receive(this, intent)\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n    super.onNewIntent(intent)');
     expect(output).not.toContain('fun consumePendingNotificationOpenPayload()');
     expect(output).not.toContain('override fun onNewIntent(intent: Intent?)');
     expect(output).not.toContain('pendingNotificationOpenPayload = LinkedHashMap(payload)');

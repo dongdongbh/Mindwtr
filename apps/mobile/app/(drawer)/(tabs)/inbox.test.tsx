@@ -60,6 +60,7 @@ vi.mock('../../../contexts/language-context', () => ({
 vi.mock('@/hooks/use-startup-screen-ready', () => ({
   useStartupScreenReady: () => vi.fn(),
 }));
+vi.mock('@/hooks/use-widget-launch', () => ({ WidgetLaunchDestination: () => null }));
 
 vi.mock('@/hooks/use-theme-colors', () => ({
   useThemeColors: () => ({

@@ -7,6 +7,7 @@ const appLogMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/app-log', () => appLogMocks);
+vi.mock('@/lib/widget-launch-routing', () => ({ recordWidgetLaunchRouting: vi.fn() }));
 
 describe('redirectSystemPath', () => {
     beforeEach(() => {

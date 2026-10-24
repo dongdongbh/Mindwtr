@@ -28,6 +28,11 @@ vi.mock('@react-navigation/native', async () => {
 });
 
 const referenceClipboard = vi.hoisted(() => ({ write: vi.fn(), toast: vi.fn() }));
+const widgetLaunchListeners = vi.hoisted(() => new Set<() => string>());
+vi.mock('@/hooks/use-widget-launch', () => ({ subscribeWidgetLaunch: (listener: () => string) => {
+  widgetLaunchListeners.add(listener);
+  return () => { widgetLaunchListeners.delete(listener); };
+} }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: referenceClipboard.write }));
 
 const taskEditStore = vi.hoisted(() => ({ current: null as Record<string, any> | null }));
@@ -279,6 +284,25 @@ describe('TaskEditModal', () => {
       expect(editor.onClose).toHaveBeenCalledTimes(1);
       expect(editor.onSave).not.toHaveBeenCalled();
       await act(async () => editor.tree.unmount());
+    });
+
+    it('clears a pristine editor for a same-route widget delivery and preserves an unsaved draft', async () => {
+      const pristine = await openEditor();
+      let outcomes: string[] = [];
+      act(() => { outcomes = [...widgetLaunchListeners].map((listener) => listener()); });
+      expect(outcomes).toContain('closed-clean');
+      expect(pristine.onClose).toHaveBeenCalledOnce();
+      expect(pristine.onSave).not.toHaveBeenCalled();
+      act(() => pristine.tree.unmount());
+
+      const draft = await openEditor();
+      act(() => draft.tree.root.findByType('TaskEditFormTab' as any).props.onTitleDraftChange('Unsaved title'));
+      act(() => { outcomes = [...widgetLaunchListeners].map((listener) => listener()); });
+      expect(outcomes).toContain('preserved-draft');
+      expect(draft.onClose).not.toHaveBeenCalled();
+      expect(draft.onSave).not.toHaveBeenCalled();
+      expect(draft.tree.root.findByType('TaskEditFormTab' as any).props.titleDraft).toBe('Unsaved title');
+      act(() => draft.tree.unmount());
     });
 
     it.each(['title', 'description', 'metadata', 'checklist', 'contexts', 'tags'] as const)(

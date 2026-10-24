@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
+import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Brain, ListChecks } from 'lucide-react-native';
@@ -128,6 +129,7 @@ export default function InboxScreen() {
 
   return (
     <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
+      <WidgetLaunchDestination path="/inbox" />
       <TaskList
         statusFilter="inbox"
         title={screen.title}

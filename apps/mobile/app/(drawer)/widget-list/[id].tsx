@@ -12,6 +12,7 @@ import { useLocalDayKey } from '@/hooks/use-local-day-key';
 import { resolveWidgetListDestination } from '@/lib/widget-list-destination';
 import { logInfo } from '@/lib/app-log';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
+import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
 
 /** An exact widget list destination, not an additional main navigation item. */
 export default function WidgetListScreen() {
@@ -72,6 +73,7 @@ export default function WidgetListScreen() {
   }, [fetchData]);
   return (
     <View style={{ flex: 1, backgroundColor: tc.bg }}>
+      <WidgetLaunchDestination path={`/widget-list/${typeof id === 'string' ? id : ''}`} />
       <Stack.Screen options={{ title }} />
       {/* This pool is already filtered and ordered by the widget's shared core
           projection. Do not apply unrelated in-app area/filter selections again. */}

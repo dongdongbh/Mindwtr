@@ -85,6 +85,7 @@ import { createSomedaySection } from '../lib/someday-section-actions';
 import { logInfo } from '../lib/app-log';
 import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
 import { resolveTaskOpenTab, useTaskOpenMode } from '@/lib/view-state/task-open-mode';
+import { subscribeWidgetLaunch } from '@/hooks/use-widget-launch';
 
 
 const EMPTY_COPILOT_TAGS: string[] = [];
@@ -1143,24 +1144,26 @@ function TaskEditModalInner({
         || isTagInputFocused;
 
     const navigation = React.useContext(NavigationContext);
-    const navigationBlurRef = useRef(() => {});
+    const navigationBlurRef = useRef<() => 'list' | 'closed-clean' | 'preserved-draft'>(() => 'list');
     navigationBlurRef.current = () => {
-        if (!visible) return;
+        if (!visible) return 'list';
         if (!readOnly && (isDirtyRef.current || draftLifecycle.hasPendingChanges()
             || pendingAttachmentImportsRef.current > 0 || isAIWorking || audioLoading || audioTranscribing
             || audioModalVisible || linkModalVisible || imagePreviewAttachment || aiModal
             || showDatePicker || showAreaPicker || showProjectPicker || showSectionPicker
             || customRecurrenceVisible || waitingAssignmentModalVisible || completedAtPickerVisible
-            || projectConversionOpen || descriptionEditor.descriptionExpanded)) return;
+            || projectConversionOpen || descriptionEditor.descriptionExpanded)) return 'preserved-draft';
         if (readOnly) onClose();
         else draftLifecycle.discard();
         void logInfo('Mobile task editor dismissed on navigation', {
             scope: 'task-edit',
             extra: { releaseCheck: 'v1.3.7/mobile-editor-navigation', outcome: 'closed-clean' },
         });
+        return 'closed-clean';
     };
     // Blurred screens can freeze before another render; subscribe to the owner route directly.
     useEffect(() => navigation?.addListener('blur', () => navigationBlurRef.current()), [navigation]);
+    useEffect(() => subscribeWidgetLaunch(() => navigationBlurRef.current()), []);
 
     if (!task) return null;
 

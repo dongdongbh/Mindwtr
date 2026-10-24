@@ -81,6 +81,7 @@ import { AppAnnouncementModal } from '@/components/app-announcement-modal';
 import { MobileOnboardingFlow } from '@/components/MobileOnboardingFlow';
 import { MobileAppLockGate } from '@/components/mobile-app-lock-gate';
 import { useIncomingUrl } from '@/hooks/use-incoming-url';
+import { useWidgetLaunch, WidgetLaunchContext } from '@/hooks/use-widget-launch';
 import { PersistenceFailureBanner } from '@/components/persistence-failure-banner';
 import { MobileWorkspaceBootGate } from '@/components/mobile-workspace-boot-gate';
 import { MobileWorkspaceSwitchOverlay, SandboxWorkspaceBanner } from '@/components/sandbox-workspace-banner';
@@ -268,6 +269,7 @@ function RootLayoutContentInner() {
   const navigationRef = useNavigationContainerRef();
   const pathname = usePathname();
   const { url: incomingUrl, key: incomingUrlKey } = useIncomingUrl();
+  const widgetLaunch = useWidgetLaunch(incomingUrlKey);
   const { isDark, isReady: themeReady } = useTheme();
   const tc = useThemeColors();
   const { language, setLanguage, isReady: languageReady, t } = useLanguage();
@@ -402,7 +404,7 @@ function RootLayoutContentInner() {
     if (!isFirstPaintReady || !recoveredActivityNavigationState) return undefined;
     // A freshly delivered URL/share owns startup routing. The recovered root
     // never replays or displaces an external one-shot action.
-    if (incomingUrlKey > 0 || hasShareIntent) {
+    if (incomingUrlKey > 0 || hasShareIntent || widgetLaunch.pending) {
       setRecoveredActivityNavigationState(null);
       return undefined;
     }
@@ -436,6 +438,7 @@ function RootLayoutContentInner() {
     isFirstPaintReady,
     navigationRef,
     recoveredActivityNavigationState,
+    widgetLaunch.pending,
   ]);
 
   useRootLayoutNotificationOpenHandler({
@@ -1053,6 +1056,7 @@ function RootLayoutContentInner() {
             <PersistenceFailureBanner />
           <SandboxWorkspaceBanner />
           <MobileWorkspaceSwitchOverlay />
+          <WidgetLaunchContext.Provider value={widgetLaunch}>
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false, animation: 'none' }} />
             <Stack.Screen name="(drawer)" options={{ headerShown: false, animation: 'none' }} />
@@ -1093,6 +1097,7 @@ function RootLayoutContentInner() {
               }}
             />
           </Stack>
+          </WidgetLaunchContext.Provider>
           <MobileOnboardingFlow
             busy={mobileOnboardingBusy}
             error={mobileOnboardingError}

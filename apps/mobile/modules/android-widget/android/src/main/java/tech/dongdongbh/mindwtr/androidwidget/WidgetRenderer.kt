@@ -522,6 +522,7 @@ object WidgetRenderer {
     Intent(Intent.ACTION_VIEW).apply {
       if (uri != null) data = Uri.parse(linkInScheme(uri, context.getString(R.string.mindwtr_link_scheme)))
       setClassName(context.packageName, "${context.packageName}.MainActivity")
+      putExtra(WidgetLaunchCover.EXTRA_DESTINATION, true)
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 

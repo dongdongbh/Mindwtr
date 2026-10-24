@@ -7,6 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useLanguage } from '../../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { WidgetLaunchContext } from '@/hooks/use-widget-launch';
+import { getWidgetLaunchState } from '@/modules/android-widget';
 
 function DrawerHeader({
   title,
@@ -70,10 +72,14 @@ export default function AppLayout() {
   const tc = useThemeColors();
   const { t } = useLanguage();
   const backAccessibilityLabel = t('common.back');
+  const { pending: widgetLaunch } = React.useContext(WidgetLaunchContext);
+  // Linking may change the route before the root hook's effect runs. Read the already-held native token in that commit.
+  const widgetTransition = widgetLaunch || getWidgetLaunchState()?.stage === 'pending';
 
   return (
     <Stack
       screenOptions={{
+        ...(widgetTransition ? { animation: 'none' as const } : {}),
         header: ({ navigation, route, options, back }) => (
           <DrawerHeader
             backgroundColor={tc.cardBg}

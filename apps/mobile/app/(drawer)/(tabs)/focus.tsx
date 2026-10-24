@@ -1,6 +1,7 @@
 import { getProjectAccentColor } from '@mindwtr/core';
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
+import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import {
   View,
@@ -1411,6 +1412,7 @@ export default function FocusScreen() {
 
   return (
     <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
+      <WidgetLaunchDestination path="/focus" />
       {focusReorderMode ? (
         <View style={styles.reorderContainer}>
           <View style={[styles.reorderHeader, { borderBottomColor: tc.border }]}>
