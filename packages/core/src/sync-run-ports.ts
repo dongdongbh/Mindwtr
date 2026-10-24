@@ -94,6 +94,20 @@ export type SyncRunResult = {
     fileGenerationCorrupt?: boolean;
     /** Provider-time-derived lower bound before the deferred retry is useful. */
     retryAfterMs?: number;
+    /** An activation probe refused only because these attachment files are on
+     *  neither this device nor the new location. For the screen only: names
+     *  are never logged. A probe with `acceptMissingAttachmentIds` set to these
+     *  ids activates and keeps the rows as missing files. */
+    activationMissingAttachments?: ActivationMissingAttachment[];
+};
+
+export type ActivationMissingAttachment = {
+    id: string;
+    ownerType: 'task' | 'project';
+    ownerId: string;
+    /** The attachment's title (its file name). */
+    title: string;
+    ownerTitle: string;
 };
 
 /** Transport metadata from one remote write. Adapters normalize backend-specific
@@ -198,6 +212,10 @@ export interface SyncRunStorage {
     persistSyncStatus(updates: SyncStatusUpdates): Promise<void>;
     readFastSyncState(scope: string): Promise<FastSyncState | null>;
     writeFastSyncState(state: FastSyncState): Promise<void>;
+    /** The device-local unreachable-attachment record (unreachable-attachments.ts), raw.
+     *  A platform without both cannot continue an activation without a file. */
+    readUnreachableAttachments?(): Promise<string | null>;
+    writeUnreachableAttachments?(raw: string): Promise<void>;
     /** Inject platform-cached external calendars into a local snapshot before merge. */
     injectExternalCalendars(data: AppData): Promise<AppData>;
     /** Persist merged external calendars back to the platform cache. */
@@ -287,6 +305,10 @@ export type SyncRunCycleSetup =
         io: SyncBackendIO;
         /** From `buildFastSyncScope`; null disables the fast-check skip. */
         fastSyncScope: string | null;
+        /** From `buildSyncLocationScope` for the configuration this cycle touches (the
+         *  candidate's, in an activation probe). Keys the unreachable-attachment record;
+         *  without it no activation can continue without a file. */
+        locationScope?: string | null;
     };
 
 export type SyncRunErrorContext = {
@@ -499,6 +521,10 @@ export type SyncRunOptions = {
      *  destination. The pending-write marker remains so the normal cycle
      *  clears it only after a successful local and remote commit. */
     ignorePendingRemoteWriteBackoff?: boolean;
+    /** Activation probe only: the user chose to continue without these
+     *  attachment files (`activationMissingAttachments` of an earlier probe).
+     *  Their rows stay live, keyless and missing on both sides. */
+    acceptMissingAttachmentIds?: readonly string[];
 };
 
 export interface SyncRunPorts {

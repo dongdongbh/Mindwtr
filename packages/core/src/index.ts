@@ -93,6 +93,7 @@ export * from './sync-configuration-transaction';
 export * from './sync-service-utils';
 export * from './sync-run';
 export * from './sync-run-ports';
+export * from './unreachable-attachments';
 export * from './sync-payload-trace';
 export * from './sync-backend-io';
 export * from './sync-fast-sync';

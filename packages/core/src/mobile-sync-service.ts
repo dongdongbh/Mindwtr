@@ -15,6 +15,7 @@ import { buildSyncLocationScope, isSyncEncryptionPartlyEncryptedError, markRemot
 import { SyncEncryptionNoKeyError, SyncEncryptionStateUnavailableError, type SyncEncryptionStateStore } from './sync-encryption-local-state';
 import type { SyncCryptoPrimitives, SyncKeyMaterial } from './sync-crypto';
 import type { AttachmentTransferAdmission } from './attachment-transfer';
+import { UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
 import type { SyncEncryptionService } from './sync-encryption-service';
 import { acquireSyncRemoteMutationFence, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS } from './sync-remote-fence';
 import { createDropboxSyncRemoteMutationFencePort, createWebdavSyncRemoteMutationFencePort, webdavMutationFenceUrl } from './sync-remote-fence-providers';
@@ -227,6 +228,7 @@ type MobileSyncRequest = {
   syncPathOverride?: string;
   manual?: boolean;
   activationProbe?: boolean;
+  acceptMissingAttachmentIds?: readonly string[];
   fileSyncLockBusyRetryAttempt?: number;
   ignorePendingRemoteWriteBackoff?: boolean;
   configOverride?: MobileSyncConfigOverride;
@@ -932,6 +934,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     private readonly syncPathOverride: string | undefined;
     private readonly manual: boolean;
     private readonly activationProbe: boolean;
+    private readonly acceptMissingAttachmentIds: readonly string[] | undefined;
     private readonly fileSyncLockBusyRetryAttempt: number;
     private readonly ignorePendingRemoteWriteBackoff: boolean;
     private readonly configOverride: MobileSyncConfigOverride | undefined;
@@ -1027,6 +1030,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       this.syncPathOverride = request?.syncPathOverride;
       this.manual = request?.manual === true;
       this.activationProbe = request?.activationProbe === true;
+      this.acceptMissingAttachmentIds = request?.acceptMissingAttachmentIds;
       this.fileSyncLockBusyRetryAttempt = request?.fileSyncLockBusyRetryAttempt ?? 0;
       this.ignorePendingRemoteWriteBackoff = request?.ignorePendingRemoteWriteBackoff === true;
       this.configOverride = request?.configOverride;
@@ -1049,6 +1053,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
           options: {
             manual: this.manual,
             activationProbe: this.activationProbe,
+            acceptMissingAttachmentIds: this.acceptMissingAttachmentIds,
             fileSyncLockBusyRetryAttempt: this.fileSyncLockBusyRetryAttempt,
             ignorePendingRemoteWriteBackoff: this.ignorePendingRemoteWriteBackoff,
           },
@@ -1460,6 +1465,8 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
         },
         readFastSyncState: (scope) => readFastSyncState(scope),
         writeFastSyncState: (state) => writeFastSyncState(state),
+        readUnreachableAttachments: () => host.storage.getItem(UNREACHABLE_ATTACHMENTS_KEY),
+        writeUnreachableAttachments: (raw) => host.storage.setItem(UNREACHABLE_ATTACHMENTS_KEY, raw),
         injectExternalCalendars: (data) => injectExternalCalendars(data),
         persistExternalCalendars: (data) => persistExternalCalendars(data),
       };
@@ -1851,6 +1858,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             cloudProvider: this.cloudProvider,
             io: this.createBackendIO(),
             fastSyncScope,
+            locationScope: this.buildLocationScope(),
           };
         },
         requestFollowUp: () => this.queueFollowUp(),
@@ -2682,6 +2690,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     options?: {
       manual?: boolean;
       activationProbe?: boolean;
+      acceptMissingAttachmentIds?: readonly string[];
       ignorePendingRemoteWriteBackoff?: boolean;
       configOverride?: MobileSyncConfigOverride;
     }
@@ -2704,6 +2713,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       syncPathOverride,
       manual: options?.manual,
       activationProbe: options?.activationProbe,
+      acceptMissingAttachmentIds: options?.acceptMissingAttachmentIds,
       ignorePendingRemoteWriteBackoff: options?.ignorePendingRemoteWriteBackoff,
       configOverride: options?.configOverride,
     });

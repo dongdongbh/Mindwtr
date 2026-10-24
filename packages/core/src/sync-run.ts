@@ -21,8 +21,10 @@ import type {
     SyncRunResult,
     SyncRunStorage,
     SyncRunStoreBridge,
+    ActivationMissingAttachment,
 } from './sync-run-ports';
 import { SyncRemoteWriteConflict, type SyncFollowUpReason } from './sync-run-ports';
+import { parseUnreachableAttachments, pruneUnreachableAttachments, rememberUnreachableAttachments, type UnreachableAttachments } from './unreachable-attachments';
 import { LocalSyncAbort, captureInMemoryAppDataSnapshot, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
@@ -149,6 +151,10 @@ type SharedSyncRunState = {
     webdavRemoteCorrupted: boolean;
     hadAttachmentWarning: boolean;
     fileAttachmentUploadBlocked: 'too-large' | null;
+    /** Activation probe: rows the user chose to keep without their file, with every key each carried. */
+    acceptedMissingAttachments: Map<string, string[]>;
+    /** `setup.locationScope`: where the unreachable-attachment record of this cycle lives. */
+    locationScope: string | null;
 };
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -318,6 +324,8 @@ const prepareActivationAttachmentSnapshot = (
     localFallbacks: Map<string, Attachment>;
     metadataOnlyIds: Set<string>;
     noLocalBytesIds: Set<string>;
+    /** This device holds no file for the record (it may still know another location's key). */
+    noLocalFileIds: Set<string>;
     /** The key each record carried before the trial cleared it, so a refusal can
      *  still say which sync location the file lives on (#1151). */
     originalCloudKeys: Map<string, string>;
@@ -339,6 +347,7 @@ const prepareActivationAttachmentSnapshot = (
     const localFallbacks = new Map<string, Attachment>();
     const metadataOnlyIds = new Set<string>();
     const noLocalBytesIds = new Set<string>();
+    const noLocalFileIds = new Set<string>();
     const originalCloudKeys = new Map<string, string>();
     const count = visitLiveFileAttachments(candidate, (attachment) => {
         expectedIds.add(attachment.id);
@@ -348,8 +357,9 @@ const prepareActivationAttachmentSnapshot = (
         if (originalKey) originalCloudKeys.set(attachment.id, originalKey);
         // This device holds no bytes for the record (never had it, or already knew
         // the file is missing) and cannot reach it on the previous backend either.
-        const noLocalBytes = !localAttachment?.cloudKey
-            && (!localAttachment || !localAttachment.uri?.trim() || localAttachment.localStatus === 'missing');
+        const noLocalFile = !localAttachment || !localAttachment.uri?.trim() || localAttachment.localStatus === 'missing';
+        if (noLocalFile) noLocalFileIds.add(attachment.id);
+        const noLocalBytes = noLocalFile && !localAttachment?.cloudKey;
         if (noLocalBytes) noLocalBytesIds.add(attachment.id);
         // ...and the candidate has no blob for it: metadata only, nowhere to fetch from.
         if (noLocalBytes && !candidateAttachment?.cloudKey) metadataOnlyIds.add(attachment.id);
@@ -383,7 +393,7 @@ const prepareActivationAttachmentSnapshot = (
         }
         attachment.localStatus = 'missing';
     });
-    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds, noLocalBytesIds, originalCloudKeys };
+    return { data: candidate, count, expectedIds, localFallbacks, metadataOnlyIds, noLocalBytesIds, noLocalFileIds, originalCloudKeys };
 };
 
 const prepareActivationFallbackRetry = (
@@ -431,6 +441,36 @@ export class ActivationAttachmentProofError extends Error {
         this.name = 'ActivationAttachmentProofError';
     }
 }
+
+/**
+ * Every unproven attachment is a file this device does not hold and the new location cannot serve. `attachments` names them
+ * for the screen only; the message, like its parent's, carries ids. A probe that accepts exactly these ids activates.
+ */
+export class ActivationMissingAttachmentsError extends ActivationAttachmentProofError {
+    constructor(readonly attachments: ActivationMissingAttachment[]) {
+        const ids = attachments.map((attachment) => attachment.id).join(', ');
+        const names = attachments
+            .map((attachment) => `"${clipTitle(attachment.title) || attachment.id}"${attachment.ownerTitle ? ` on ${attachment.ownerType} "${clipTitle(attachment.ownerTitle)}"` : ''}`)
+            .join(', ');
+        const reason = 'the file is on neither this device nor the new sync location';
+        super(`Candidate attachment proof failed for ${ids}: ${reason}`, `Candidate attachment proof failed for ${names}: ${reason}`);
+        this.name = 'ActivationMissingAttachmentsError';
+    }
+}
+
+/** `data` with each listed live attachment replaced by `replace(original)`; owners without one are left as they are. */
+const replaceAttachments = (
+    data: AppData,
+    ids: ReadonlySet<string>,
+    replace: (attachment: Attachment) => Attachment,
+): AppData => {
+    const patchOwner = <T extends { attachments?: Attachment[] }>(owner: T): T => (
+        owner.attachments?.some((attachment) => ids.has(attachment.id))
+            ? { ...owner, attachments: owner.attachments.map((attachment) => (ids.has(attachment.id) ? replace(attachment) : attachment)) }
+            : owner
+    );
+    return { ...data, tasks: data.tasks.map(patchOwner), projects: data.projects.map(patchOwner) };
+};
 
 const describeUnprovenAttachment = (
     ownerType: 'task' | 'project',
@@ -538,9 +578,13 @@ const assertActivationAttachmentsProven = (
     noLocalBytesIds: ReadonlySet<string>,
     backend: SyncBackend,
     originalCloudKeys: ReadonlyMap<string, string>,
-): string[] => {
+    noLocalFileIds: ReadonlySet<string>,
+    /** null: this platform cannot keep a row without its file, so such a row refuses like any other. */
+    acceptedMissingIds: ReadonlySet<string> | null,
+): { deferred: string[]; missing: string[] } => {
     const resolved = new Set<string>();
     const deferred: string[] = [];
+    const missing: ActivationMissingAttachment[] = [];
     const owners: Array<['task' | 'project', { id?: string; title?: string; deletedAt?: string; attachments?: Attachment[] }]> = [
         ...data.tasks.map((task) => ['task', task] as ['task', typeof task]),
         ...data.projects.map((project) => ['project', project] as ['project', typeof project]),
@@ -575,6 +619,28 @@ const assertActivationAttachmentsProven = (
                 if (expectedIds.has(attachment.id)) resolved.add(attachment.id);
                 continue;
             }
+            // No bytes here, and nothing the new location can serve: no key, or a
+            // tombstone, which without local bytes can only be its 404. Waiting
+            // cannot prove it, so the user may continue without the file. Every
+            // other failure (a local file that did not upload, a download of a key
+            // the location does hold) can still succeed and keeps the refusal.
+            if (
+                acceptedMissingIds
+                && !owner.deletedAt
+                && expectedIds.has(attachment.id)
+                && noLocalFileIds.has(attachment.id)
+                && (Boolean(attachment.deletedAt) || !attachment.cloudKey)
+            ) {
+                missing.push({
+                    id: attachment.id,
+                    ownerType,
+                    ownerId: owner.id ?? '',
+                    title: attachment.title ?? '',
+                    ownerTitle: owner.title ?? '',
+                });
+                resolved.add(attachment.id);
+                continue;
+            }
             throw describeUnprovenAttachment(ownerType, owner, attachment, backend, originalCloudKeys.get(attachment.id));
         }
     }
@@ -583,7 +649,10 @@ const assertActivationAttachmentsProven = (
     if (resolved.size !== expectedIds.size) {
         throw new Error(`Candidate attachment proof incomplete: expected ${expectedIds.size}, proved ${resolved.size}`);
     }
-    return deferred;
+    if (missing.some((attachment) => !acceptedMissingIds?.has(attachment.id))) {
+        throw new ActivationMissingAttachmentsError(missing);
+    }
+    return { deferred, missing: missing.map((attachment) => attachment.id) };
 };
 
 class SharedSyncRunMachine {
@@ -638,6 +707,8 @@ class SharedSyncRunMachine {
         webdavRemoteCorrupted: false,
         hadAttachmentWarning: false,
         fileAttachmentUploadBlocked: null,
+        acceptedMissingAttachments: new Map<string, string[]>(),
+        locationScope: null,
     };
 
     constructor(ports: SyncRunPorts) {
@@ -716,6 +787,7 @@ class SharedSyncRunMachine {
         this.state.backend = setup.backend;
         this.state.cloudProvider = setup.cloudProvider ?? 'selfhosted';
         this.state.fastSyncScope = setup.fastSyncScope;
+        this.state.locationScope = setup.locationScope ?? null;
         this.io = setup.io;
 
         if (this.policy.preSyncAttachmentsBeforeFastCheck) {
@@ -1690,7 +1762,7 @@ class SharedSyncRunMachine {
             }
             // No eager fence acquisition: the helpers passed below take it on
             // the first mutation, so an idle pre-sync pass issues no PUT/DELETE.
-            const result = await io.syncAttachments(localData, this.attachmentHelpers('prepare'));
+            const result = await this.syncAttachmentsKeepingUnreachable(localData, this.attachmentHelpers('prepare'));
             await this.assertRemoteMutationFenceHeld();
             const mutated = result === true || (Boolean(result) && typeof result === 'object');
             const mutatedData = result && typeof result === 'object' ? result : localData;
@@ -1830,14 +1902,54 @@ class SharedSyncRunMachine {
                 if (!primary.deferred || !madeRoundProgress) break;
                 usedBatchContinuation = true;
             }
-            const deferredIds = assertActivationAttachmentsProven(
+            const unreachable = await this.readUnreachableAttachments();
+            const { deferred: deferredIds, missing: missingIds } = assertActivationAttachmentsProven(
                 provenData,
                 activationSnapshot.expectedIds,
                 activationSnapshot.metadataOnlyIds,
                 activationSnapshot.noLocalBytesIds,
                 this.backend,
                 activationSnapshot.originalCloudKeys,
+                activationSnapshot.noLocalFileIds,
+                // Without a record to keep them in, no row can be kept safely: refuse as before.
+                unreachable
+                    ? new Set([
+                        ...(this.options.acceptMissingAttachmentIds ?? []),
+                        ...Object.keys(unreachable.record[unreachable.scope] ?? {}),
+                    ])
+                    : null,
             );
+            if (missingIds.length > 0) {
+                // The user chose to continue without these files. Publish the merged
+                // row, live and keyed, never the trial's tombstone or a keyless row (the
+                // remote sanitizer publishes that as a tombstone): either would win at
+                // the old location too and let its cleanup delete the real file.
+                const accepted = new Set(missingIds);
+                const keysById = new Map<string, Set<string>>();
+                const collectKeys = (source: AppData | null | undefined) => {
+                    if (!source) return;
+                    visitLiveFileAttachments(source, (attachment) => {
+                        if (!accepted.has(attachment.id) || !attachment.cloudKey) return;
+                        const keys = keysById.get(attachment.id) ?? new Set<string>();
+                        keys.add(attachment.cloudKey);
+                        keysById.set(attachment.id, keys);
+                    });
+                };
+                collectKeys(data);
+                collectKeys(this.state.localDataCache?.data);
+                collectKeys(this.state.remoteDataForCompare);
+                const merged = new Map<string, Attachment>();
+                visitLiveFileAttachments(data, (attachment) => {
+                    if (accepted.has(attachment.id)) merged.set(attachment.id, attachment);
+                });
+                provenData = replaceAttachments(provenData, accepted, (attachment) => {
+                    const original = merged.get(attachment.id) ?? attachment;
+                    return { ...original, localStatus: 'missing', pendingContentUpload: undefined };
+                });
+                this.state.acceptedMissingAttachments = new Map(
+                    missingIds.map((id) => [id, [...(keysById.get(id) ?? [])]]),
+                );
+            }
             if (usedBatchContinuation) {
                 this.notifier.logInfo(
                     'Sync activation proved attachments across transfer batches',
@@ -1885,7 +1997,7 @@ class SharedSyncRunMachine {
             await this.ensureNetwork();
         }
         await this.ensureRemoteMutationFence();
-        const result = await io.syncAttachments(data, this.attachmentHelpers('post-merge'));
+        const result = await this.syncAttachmentsKeepingUnreachable(data, this.attachmentHelpers('post-merge'));
         await this.assertRemoteMutationFenceHeld();
         const nextData = result && typeof result === 'object' ? result : data;
         const remainingUploads = findPendingAttachmentUploads(nextData);
@@ -1899,6 +2011,82 @@ class SharedSyncRunMachine {
             remainingUploads,
         );
         return nextData;
+    }
+
+    /** The record of this location, or null when the platform keeps none (it then cannot accept a missing file). */
+    private async readUnreachableAttachments(): Promise<{ scope: string; record: UnreachableAttachments } | null> {
+        const scope = this.state.locationScope;
+        if (!scope || !this.storage.readUnreachableAttachments || !this.storage.writeUnreachableAttachments) return null;
+        const record = parseUnreachableAttachments(await this.storage.readUnreachableAttachments());
+        rememberUnreachableAttachments(record);
+        return { scope, record };
+    }
+
+    private async writeUnreachableAttachments(record: UnreachableAttachments): Promise<void> {
+        await this.storage.writeUnreachableAttachments?.(JSON.stringify(record));
+        rememberUnreachableAttachments(record);
+    }
+
+    /** After the location accepted the document: this device must never ask it for the accepted rows' keys. */
+    private async recordAcceptedMissingAttachments(): Promise<void> {
+        const accepted = this.state.acceptedMissingAttachments;
+        if (accepted.size === 0) return;
+        const unreachable = await this.readUnreachableAttachments();
+        if (!unreachable) throw new Error('Activation accepted missing attachments without a record to keep them');
+        const { scope, record } = unreachable;
+        await this.writeUnreachableAttachments({
+            ...record,
+            [scope]: { ...record[scope], ...Object.fromEntries(accepted) },
+        });
+        this.notifier.logInfo('Sync activation continued without attachment files', {
+            releaseCheck: 'v1.3.8/activation-continue-without-files',
+            backend: this.backend,
+            missing: String(accepted.size),
+        });
+    }
+
+    /**
+     * Every normal attachment pass. Recorded rows reach the adapter without their key, so no
+     * backend downloads them or marks them unrecoverable (#1119's 404 rule); a file found here
+     * again uploads as any keyless file does. The key comes back on the way out, and no pass
+     * may turn a recorded row into a tombstone.
+     */
+    private async syncAttachmentsKeepingUnreachable(
+        data: AppData,
+        helpers: ReturnType<SharedSyncRunMachine['attachmentHelpers']>,
+    ): Promise<AppData | boolean | null | undefined> {
+        const syncAttachments = this.requireIo().syncAttachments!;
+        const unreachable = await this.readUnreachableAttachments();
+        if (!unreachable || Object.keys(unreachable.record).length === 0) return syncAttachments(data, helpers);
+        const { scope } = unreachable;
+        const record = pruneUnreachableAttachments(unreachable.record, data, scope);
+        const entries = record[scope] ?? {};
+        const hidden = new Map<string, Attachment>();
+        visitLiveFileAttachments(data, (attachment) => {
+            if (attachment.cloudKey && entries[attachment.id]?.includes(attachment.cloudKey)) {
+                hidden.set(attachment.id, attachment);
+            }
+        });
+        if (hidden.size === 0) {
+            if (record !== unreachable.record) await this.writeUnreachableAttachments(record);
+            return syncAttachments(data, helpers);
+        }
+        const ids = new Set(hidden.keys());
+        const input = replaceAttachments(data, ids, (attachment) => ({ ...attachment, cloudKey: undefined }));
+        const result = await syncAttachments(input, helpers);
+        const next = result && typeof result === 'object' ? result : result ? input : null;
+        if (!next) {
+            if (record !== unreachable.record) await this.writeUnreachableAttachments(record);
+            return result;
+        }
+        const restored = replaceAttachments(next, ids, (attachment) => {
+            const original = hidden.get(attachment.id)!;
+            if (attachment.deletedAt) return original;
+            return attachment.cloudKey ? attachment : { ...attachment, cloudKey: original.cloudKey };
+        });
+        const pruned = pruneUnreachableAttachments(record, restored, scope);
+        if (pruned !== unreachable.record) await this.writeUnreachableAttachments(pruned);
+        return restored;
     }
 
     private async runPostMergeAttachmentPhase(
@@ -1927,7 +2115,7 @@ class SharedSyncRunMachine {
             // document instead of writing to this one), so cloning a whole library here was
             // dead weight that also invalidated the storage layer's identity-keyed row cache
             // for every unchanged row (#766).
-            const result = await io.syncAttachments(currentData, this.attachmentHelpers('post-merge'));
+            const result = await this.syncAttachmentsKeepingUnreachable(currentData, this.attachmentHelpers('post-merge'));
             await this.assertRemoteMutationFenceHeld();
             const nextData = result && typeof result === 'object'
                 ? result
@@ -2080,6 +2268,7 @@ class SharedSyncRunMachine {
         }
 
         if (this.options.activationProbe) {
+            await this.recordAcceptedMissingAttachments();
             return { success: true, stats };
         }
 
@@ -2251,6 +2440,7 @@ class SharedSyncRunMachine {
                 success: false,
                 // Only this answer to the screen names a refused attachment's file and owner (#1151); logs and status keep IDs.
                 error: this.hooks.formatErrorMessage(error instanceof ActivationAttachmentProofError ? new Error(error.displayMessage) : error, this.backend),
+                ...(error instanceof ActivationMissingAttachmentsError ? { activationMissingAttachments: error.attachments } : {}),
                 ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
                 ...(fileGenerationCorrupt ? { fileGenerationCorrupt: true } : {}),
             };

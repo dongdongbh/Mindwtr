@@ -6,7 +6,8 @@
 //
 // Data safety: a failed download never deletes local bytes, a target already on disk is used
 // only when its bytes prove they are the current remote generation, and a CloudKit not-found, a
-// WebDAV or self-hosted cloud 404, or a Dropbox path-not-found is terminal (the attachment is marked unrecoverable).
+// WebDAV or self-hosted cloud 404, or a Dropbox path-not-found is terminal (the attachment is marked unrecoverable),
+// and a row the user kept without its file (unreachable-attachments.ts) is never downloaded.
 import type { Attachment } from './types';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
 import { extractExtension, getBaseSyncUrl, getCloudBaseUrl } from './attachment-paths';
@@ -20,6 +21,7 @@ import { getErrorStatus } from './sync-runtime-utils';
 import { isSandboxMode } from './sandbox';
 import { CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, type SyncKeyValueStoragePort } from './sync-storage-keys';
 import { webdavGetFile } from './webdav';
+import { isUnreachableAttachment, parseUnreachableAttachments, rememberUnreachableAttachments, UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './mobile-sync-utils';
 import { isHttpAttachmentUri, type MobileAttachmentFiles } from './mobile-attachment-files';
 import { assertAttachmentSyncNotAborted, type MobileAttachmentCommon, type PreparedAttachmentDownloadBytes } from './mobile-attachment-common';
@@ -419,6 +421,11 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     // A selected existing generation needs its stored hash, not a remote key.
     // A missing selection still cannot acquire bytes without remote identity.
     if (preparing && !localAttachment.cloudKey) return null;
+    // The user kept this row without its file when activating a sync location: its key
+    // belongs to another location, and the 404 here would mark it unrecoverable.
+    const unreachable = parseUnreachableAttachments(await host.storage.getItem(UNREACHABLE_ATTACHMENTS_KEY));
+    rememberUnreachableAttachments(unreachable);
+    if (isUnreachableAttachment(unreachable, localAttachment)) return null;
     const backend = preparing ? preparedBackend : await host.storage.getItem(SYNC_BACKEND_KEY);
     if (backend === 'file') {
       const syncPath = await host.storage.getItem(SYNC_PATH_KEY);

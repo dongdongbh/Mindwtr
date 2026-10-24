@@ -28,6 +28,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // project-color reuses releaseCheck and mode; no identity or color values.
     // section-flow-mode reuses releaseCheck and mode; sectionDefaults is a count. No titles or identifiers.
     'sectionDefaults',
+    // activation-continue-without-files reuses releaseCheck and backend; missing is a count. No names or ids.
+    'missing',
 
     // web-attachment-upload reuses releaseCheck, stage and count; only acknowledged PUTs.
     // android-widget-capture-status: bounded creation status and picker origin; kind/outcome below.

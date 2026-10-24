@@ -1,4 +1,5 @@
 import { getAttachmentDisplayTitle } from './attachment-link-utils';
+import { isAttachmentKeptWithoutFile } from './unreachable-attachments';
 import { tFallback } from './i18n';
 import { formatRecurrenceLabel, getRecurringTaskPreviewDate } from './recurrence';
 import { hasTimeComponent } from './date';
@@ -184,7 +185,9 @@ export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
                 const isDownloading = attachment.localStatus === 'downloading';
                 const note = isDownloading
                     ? t('common.loading')
-                    : isMissing && attachment.cloudKey ? t('attachments.download') : isMissing ? t('attachments.missing') : null;
+                    : isMissing && attachment.cloudKey && !isAttachmentKeptWithoutFile(attachment)
+                        ? t('attachments.download')
+                        : isMissing ? t('attachments.missing') : null;
                 return {
                     attachment,
                     title: getAttachmentDisplayTitle(attachment),

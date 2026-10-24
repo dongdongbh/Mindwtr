@@ -9,6 +9,7 @@ import { globalProgressTracker } from './attachment-progress';
 import { CLOUD_PROVIDER_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, WEBDAV_PASSWORD_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from './sync-storage-keys';
 import { DropboxFileNotFoundError } from './dropbox';
 import { withRetry } from './retry-utils';
+import { UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 
 const now = '2026-09-28T00:00:00.000Z';
@@ -498,6 +499,21 @@ describe('mobile attachment availability', () => {
     }));
     if (outcome.status !== 'unrecoverable') throw new Error('Expected a terminal outcome');
     await expect(availability.ensureAttachmentAvailableDetailed(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
+    expect(webdavGetFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks for a row the user kept without its file, in any location', async () => {
+    const { availability, webdavGetFile } = setup({
+      storage: {
+        ...webdav,
+        [UNREACHABLE_ATTACHMENTS_KEY]: JSON.stringify({ '["webdav","https://dav.example/Mindwtr","me"]': { 'att-1': ['attachments/att-1.txt'] } }),
+      },
+    });
+
+    await expect(availability.ensureAttachmentAvailableDetailed(remoteAttachment())).resolves.toEqual({ status: 'unavailable' });
+    expect(webdavGetFile).not.toHaveBeenCalled();
+    // A key the record does not hold is someone's fresh upload: it downloads as usual.
+    await availability.ensureAttachmentAvailableDetailed(remoteAttachment({ cloudKey: 'attachments/att-1-new.txt' }));
     expect(webdavGetFile).toHaveBeenCalledTimes(1);
   });
 

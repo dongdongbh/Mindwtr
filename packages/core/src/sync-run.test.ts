@@ -34,6 +34,7 @@ import {
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
 import { AttachmentUploadTooLargeError } from './attachment-transfer';
+import { markAttachmentUnrecoverable } from './attachment-validation';
 import { createMobileAttachmentFiles } from './mobile-attachment-files';
 import { createMobileAttachmentCommon } from './mobile-attachment-common';
 import { createMobileAttachmentBackends } from './mobile-attachment-backends';
@@ -90,6 +91,7 @@ type HarnessConfig = {
     remote?: AppData | null;
     backend?: SyncBackend;
     fastSyncScope?: string | null;
+    locationScope?: string | null;
     manual?: boolean;
     activationProbe?: boolean;
     ignorePendingRemoteWriteBackoff?: boolean;
@@ -194,6 +196,7 @@ const createHarness = (config: HarnessConfig = {}) => {
             cloudProvider: 'selfhosted' as const,
             io,
             fastSyncScope: config.fastSyncScope ?? null,
+            locationScope: config.locationScope ?? null,
         })),
         requestFollowUp: vi.fn(),
         requestFollowUpAfter: vi.fn(),
@@ -216,10 +219,12 @@ const createHarness = (config: HarnessConfig = {}) => {
         activationProbe?: boolean;
         fileSyncLockBusyRetryAttempt?: number;
         ignorePendingRemoteWriteBackoff?: boolean;
+        acceptMissingAttachmentIds?: readonly string[];
     } = {}) => runSharedSyncCycle({
         options: {
             manual: config.manual ?? options.manual,
             activationProbe: config.activationProbe ?? options.activationProbe,
+            acceptMissingAttachmentIds: options.acceptMissingAttachmentIds,
             fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
             ignorePendingRemoteWriteBackoff: config.ignorePendingRemoteWriteBackoff
                 ?? options.ignorePendingRemoteWriteBackoff,
@@ -5022,5 +5027,244 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
         expect(bundle.storage.readPersistedLocal).not.toHaveBeenCalled();
         expect(third.success).toBe(true);
         expect((await bundle.adapter.getData()).tasks.map((task) => task.id).sort()).toEqual(['t-local', 't-remote']);
+    });
+});
+
+describe('activation with attachment files that no device location can serve', () => {
+    const SCOPE = '["webdav","https://new.example/dav","me"]';
+    const OLD_KEY = 'attachments/attachment-old-only.pdf';
+    const HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const remoteOnlyTask = (overrides: Partial<NonNullable<Task['attachments']>[number]> = {}): Task => {
+        const task = createTask('t-old-file', 'Tax return');
+        task.attachments = [{
+            id: 'attachment-old-only',
+            kind: 'file',
+            title: 'scan.pdf',
+            uri: '',
+            cloudKey: OLD_KEY,
+            fileHash: HASH,
+            localStatus: 'missing',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+            ...overrides,
+        }];
+        return task;
+    };
+    // The new location holds no blobs: a key it is asked for answers 404, which the real
+    // adapters turn into markAttachmentUnrecoverable. A row without a key and without
+    // local bytes is left alone, as the shared lifecycle does.
+    const emptyLocationAdapter = (requested: string[] = []) => vi.fn(async (data: AppData) => {
+        const next = cloneAppData(data);
+        for (const task of next.tasks) {
+            for (const attachment of task.attachments ?? []) {
+                if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+                if (attachment.cloudKey && attachment.localStatus !== 'available') {
+                    requested.push(attachment.cloudKey);
+                    markAttachmentUnrecoverable(attachment);
+                }
+            }
+        }
+        return next;
+    });
+    const withRecord = (config: HarnessConfig) => {
+        const device = { record: null as string | null };
+        const harness = createHarness({
+            locationScope: SCOPE,
+            ...config,
+            storage: {
+                readUnreachableAttachments: vi.fn(async () => device.record),
+                writeUnreachableAttachments: vi.fn(async (raw: string) => { device.record = raw; }),
+                ...config.storage,
+            },
+        });
+        return { ...harness, device };
+    };
+
+    it('names the rows whose files are neither on this device nor at the new location', async () => {
+        const { io, storage, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed'),
+            activationMissingAttachments: [{
+                id: 'attachment-old-only',
+                ownerType: 'task',
+                ownerId: 't-old-file',
+                title: 'scan.pdf',
+                ownerTitle: 'Tax return',
+            }],
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(storage.writeUnreachableAttachments).not.toHaveBeenCalled();
+    });
+
+    it('keeps the plain refusal on a platform that keeps no record', async () => {
+        const { io, run } = createHarness({
+            local: createData([remoteOnlyTask()]),
+            locationScope: SCOPE,
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Candidate attachment proof failed for attachment-old-only');
+        expect(result.activationMissingAttachments).toBeUndefined();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('activates with the accepted rows live and keyed, and records them for this location', async () => {
+        const { harness, storage, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result).toMatchObject({ success: true });
+        const published = harness.remote?.tasks[0]?.attachments?.[0];
+        expect(published).toMatchObject({ id: 'attachment-old-only', cloudKey: OLD_KEY, fileHash: HASH, updatedAt: STAMP });
+        expect(published?.deletedAt).toBeUndefined();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: { 'attachment-old-only': [OLD_KEY] } });
+        const line = harness.infos.find((info) => info.extra?.releaseCheck === 'v1.3.8/activation-continue-without-files');
+        expect(line?.extra).toEqual({
+            releaseCheck: 'v1.3.8/activation-continue-without-files',
+            backend: 'cloud',
+            missing: '1',
+        });
+        expect(JSON.stringify(harness.infos)).not.toContain('scan.pdf');
+        expect(JSON.stringify(harness.infos)).not.toContain('Tax return');
+    });
+
+    it('keeps the row live when the new location lists its key but answers 404', async () => {
+        const deadKey = 'attachments/dead-on-candidate.pdf';
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask({ cloudKey: deadKey })]),
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        expect(await run({ activationProbe: true })).toMatchObject({
+            success: false,
+            activationMissingAttachments: [expect.objectContaining({ id: 'attachment-old-only' })],
+        });
+        const accepted = await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(accepted).toMatchObject({ success: true });
+        const published = harness.remote?.tasks[0]?.attachments?.[0];
+        expect(published?.deletedAt).toBeUndefined();
+        expect(published?.cloudKey).toBeTruthy();
+        expect(published?.fileHash).toBe(HASH);
+        expect(JSON.parse(device.record!)[SCOPE]['attachment-old-only'].sort()).toEqual([deadKey, OLD_KEY].sort());
+    });
+
+    it('refuses again when a row the user did not accept is also missing', async () => {
+        const task = remoteOnlyTask();
+        task.attachments!.push({ ...task.attachments![0]!, id: 'attachment-second', title: 'second.pdf', cloudKey: 'attachments/second.pdf' });
+        const { io, storage, run } = withRecord({
+            local: createData([task]),
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.activationMissingAttachments?.map((item) => item.id).sort())
+            .toEqual(['attachment-old-only', 'attachment-second']);
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.writeUnreachableAttachments).not.toHaveBeenCalled();
+    });
+
+    it('keeps the plain refusal for a local file that did not upload', async () => {
+        const { io, run } = withRecord({
+            local: createData([remoteOnlyTask({ uri: '/local/scan.pdf', localStatus: 'available' })]),
+            activationProbe: true,
+            io: { syncAttachments: vi.fn(async (data: AppData) => data) },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Candidate attachment proof failed for attachment-old-only');
+        expect(result.activationMissingAttachments).toBeUndefined();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('keeps the plain refusal when the new location holds a key whose download failed', async () => {
+        const { io, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask({ cloudKey: 'attachments/on-candidate.pdf' })]),
+            activationProbe: true,
+            // A network failure leaves the row as it was: live, keyed, missing.
+            io: { syncAttachments: vi.fn(async () => false) },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.activationMissingAttachments).toBeUndefined();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('never asks the location for a recorded key and never tombstones the row afterwards', async () => {
+        const requested: string[] = [];
+        const { harness, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            io: { syncAttachments: emptyLocationAdapter(requested) },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        requested.length = 0;
+        // A requeued first cycle leaves only plain cycles; both shapes must hold the row.
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(requested).toEqual([]);
+        for (const data of [harness.persisted, harness.remote!]) {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.deletedAt).toBeUndefined();
+            expect(attachment?.cloudKey).toBe(OLD_KEY);
+        }
+    });
+
+    it('drops a row from the record once its file uploads again', async () => {
+        const { device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            io: {
+                syncAttachments: vi.fn(async (data: AppData, helpers?: { activationProbe?: boolean }) => {
+                    // During the activation the file is still nowhere.
+                    if (helpers?.activationProbe) return false;
+                    const next = cloneAppData(data);
+                    const attachment = next.tasks[0]!.attachments![0]!;
+                    // The file is back on this device: a keyless row with bytes uploads.
+                    if (!attachment.cloudKey) {
+                        attachment.cloudKey = 'attachments/uploaded-again.pdf';
+                        attachment.localStatus = 'available';
+                    } else if (attachment.localStatus !== 'available') {
+                        markAttachmentUnrecoverable(attachment);
+                    }
+                    return next;
+                }),
+            },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        expect(JSON.parse(device.record!)[SCOPE]).toBeDefined();
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(JSON.parse(device.record!)).toEqual({});
     });
 });
