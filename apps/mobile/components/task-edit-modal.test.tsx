@@ -1346,6 +1346,34 @@ describe('TaskEditModal', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it('hides the Focus star during Reference conversion and keeps Status available (#1416)', async () => {
+    const task: Task = {
+      id: 'reference-conversion', title: 'Reference conversion', status: 'next', contexts: [], tags: [],
+      createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    let tree!: ReturnType<typeof renderer.create>;
+    act(() => { tree = renderer.create(<TaskEditModal visible task={task} onSave={vi.fn()} onClose={vi.fn()} />); });
+    const form = () => tree.root.findByType('TaskEditFormTab' as never);
+    const status = () => form().props.renderField('status');
+    let statusTree!: ReturnType<typeof renderer.create>;
+    act(() => { statusTree = renderer.create(status()); });
+    const choose = (label: string) => {
+      act(() => statusTree.root.find((node) => node.props.accessibilityLabel === `taskEdit.statusLabel: ${label}` && typeof node.type !== 'string').props.onPress());
+      act(() => statusTree.update(status()));
+    };
+    choose('reference');
+    expect(form().props.basicFields).toContain('status');
+    expect(form().props.detailsFields).toContain('checklist');
+    expect(tree.root.findAllByProps({ testID: 'task-edit-focus-star' })).toHaveLength(0);
+    choose('next');
+    expect(form().props.draft.status).toBe('next');
+    expect(tree.root.findAllByProps({ testID: 'task-edit-focus-star' }).length).toBeGreaterThan(0);
+    choose('reference');
+    expect(form().props.draft.status).toBe('reference');
+    expect(tree.root.findAllByProps({ testID: 'task-edit-focus-star' })).toHaveLength(0);
+    act(() => { statusTree.unmount(); tree.unmount(); });
+  });
+
   it('keeps the Focus star in the draft until Save and drops it on discard', async () => {
     const task: Task = {
       id: 'focus-edit', title: 'Focus edit', status: 'next', tags: [], contexts: [],

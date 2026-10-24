@@ -157,7 +157,6 @@ export function useTaskItemFieldLayout({
 
     const isFieldVisible = useCallback(
         (fieldId: TaskEditorFieldId) => {
-            if (isReference && fieldId === 'checklist') return hasValue(fieldId);
             if (isReference && referenceHiddenFields.has(fieldId)) return false;
             if (fieldId === 'assignedTo' && editStatus === 'waiting' && !isAssignedToExplicitlyHidden) return true;
             return !hiddenSet.has(fieldId) || hasValue(fieldId);

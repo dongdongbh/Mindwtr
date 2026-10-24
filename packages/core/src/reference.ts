@@ -3,7 +3,7 @@ import type { Project, Task, TaskEditorFieldId } from './types';
 
 /** Action metadata stays out of Reference presentation, without changing the entity. */
 export const REFERENCE_HIDDEN_TASK_FIELDS = [
-    'status', 'startTime', 'dueDate', 'reviewAt', 'recurrence', 'priority',
+    'startTime', 'dueDate', 'reviewAt', 'recurrence', 'priority',
     'energyLevel', 'timeEstimate', 'contexts', 'location',
 ] as const satisfies readonly TaskEditorFieldId[];
 

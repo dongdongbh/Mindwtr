@@ -156,6 +156,16 @@ describe('TaskEditFormTab keyboard handling', () => {
     mockMeasureInWindow.mockReset();
   });
 
+  it('removes the entire Focus button when the Reference editor supplies no star', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskEditFormTab {...baseProps} draft={{ ...baseDraft, status: 'reference' }} />);
+    });
+    expect(tree.root.findAllByProps({ testID: 'task-edit-focus-star' })).toHaveLength(0);
+    expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'Editor layout help').length).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
   it('hides the inactive form and all descendants from accessibility', () => {
     let tree!: ReturnType<typeof create>;
     act(() => {

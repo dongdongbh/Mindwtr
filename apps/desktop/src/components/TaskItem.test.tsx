@@ -280,6 +280,29 @@ describe('TaskItem', () => {
         expect(view.getByDisplayValue('Unsaved promotion title')).toBeInTheDocument();
     });
 
+    it('keeps Reference status bidirectional and allows its first checklist item (#1416)', async () => {
+        const referenceTask: Task = { ...mockTask, id: 'reference-empty-list', status: 'reference' };
+        act(() => useTaskStore.setState({
+            tasks: [referenceTask], _allTasks: [referenceTask],
+            _tasksById: new Map([[referenceTask.id, referenceTask]]),
+        }));
+        const view = render(<LanguageProvider><TaskItem task={referenceTask} /></LanguageProvider>);
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+        expect(view.queryByRole('button', { name: /add to.*focus/i })).toBeNull();
+        fireEvent.click(view.getByRole('button', { name: 'Details' }));
+        fireEvent.click(view.getByRole('button', { name: /add item/i }));
+        fireEvent.change(view.getByPlaceholderText(/item name/i), { target: { value: 'Reusable step' } });
+        fireEvent.click(view.getByRole('button', { name: 'Next' }));
+        expect(view.getByDisplayValue('Reusable step')).toBeInTheDocument();
+        expect(view.getByRole('button', { name: /add to.*focus/i })).toBeInTheDocument();
+        fireEvent.click(view.getByRole('button', { name: 'Reference' }));
+        expect(view.queryByRole('button', { name: /add to.*focus/i })).toBeNull();
+        expect(view.getByDisplayValue('Reusable step')).toBeInTheDocument();
+        fireEvent.click(view.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(useTaskStore.getState()._allTasks.find((task) => task.id === referenceTask.id))
+            .toMatchObject({ status: 'reference', checklist: [{ title: 'Reusable step', isCompleted: false }] }));
+    });
+
     it('saves an edited Reference without erasing fields hidden by its editor', async () => {
         const referenceTask: Task = {
             ...mockTask,

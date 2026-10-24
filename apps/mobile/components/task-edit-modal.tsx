@@ -647,7 +647,8 @@ function TaskEditModalInner({
         ? getTaskEditorBackdatedCompletionStart(task, taskEditDraft?.draft ?? createTaskDraft(task))
         : null, [task, taskEditDraft?.draft]);
     const focusStar = useMemo(() => {
-        if (!task || !taskEditDraft || readOnly || task.deletedAt || task.status === 'archived') return undefined;
+        if (!task || !taskEditDraft || readOnly || task.deletedAt || task.status === 'archived'
+            || taskEditDraft.draft.status === 'reference') return undefined;
         const limit = normalizeFocusTaskLimit(settings.gtd?.focusTaskLimit);
         const action = resolveTaskEditorFocusStar(task, taskEditDraft.draft, {
             tasks: collectFocusEligibilityTasks(activeTasksByStatus),

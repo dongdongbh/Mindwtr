@@ -416,13 +416,17 @@ describe('task editor model rules', () => {
         expect(layoutOf({ taskPatch: { projectId: 'p' }, hasProjectSections: true, taskEditor: migrated }).all).toContain('section');
     });
 
-    it('hides action fields for Reference and shows its checklist only with items', () => {
+    it('keeps Reference status and an empty checklist editable while hiding action metadata', () => {
         const reference = { status: 'reference' as const, dueDate: '2026-10-01', priority: 'high' as const, contexts: ['@a'] };
         const plain = layoutOf({ taskPatch: reference });
-        for (const field of ['status', 'dueDate', 'startTime', 'priority', 'contexts', 'checklist'] as const) {
+        for (const field of ['dueDate', 'startTime', 'priority', 'contexts'] as const) {
             expect(plain.all).not.toContain(field);
         }
-        expect(plain.showStatusField).toBe(false);
+        expect(plain.showStatusField).toBe(true);
+        expect(plain.all).toEqual(expect.arrayContaining(['status', 'checklist']));
+        const hidden = layoutOf({ taskPatch: reference, taskEditor: { hidden: ['status', 'checklist'] } });
+        expect(hidden.all).not.toContain('status');
+        expect(hidden.all).not.toContain('checklist');
         const withItems = layoutOf({ taskPatch: { ...reference, checklist: [{ id: 'c', title: 'Item', isCompleted: false }] } });
         expect(withItems.all).toContain('checklist');
     });

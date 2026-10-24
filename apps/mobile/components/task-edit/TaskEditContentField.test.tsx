@@ -325,6 +325,19 @@ describe('TaskEditContentField', () => {
     expect(checkmark.props.color).toBe(baseProps.tc.onTint);
   });
 
+  it('adds the first item to an empty Reference checklist (#1416)', () => {
+    const applyChecklistUpdate = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskEditContentField {...baseProps} draft={{ status: 'reference' }}
+        checklist={[]} fieldId="checklist" applyChecklistUpdate={applyChecklistUpdate} />);
+    });
+    act(() => {
+      tree.root.findByProps({ testID: 'mobile-checklist-add-item' }).props.onPress();
+    });
+    expect(applyChecklistUpdate).toHaveBeenCalledWith([{ id: expect.any(String), title: '', isCompleted: false }]);
+  });
+
   it('gives a draft Reference list checkboxes that tick an entry, struck when checked, with Reset (#1416)', () => {
     const checklist = [
       { id: 'check-1', title: 'Completed **source**', isCompleted: true },

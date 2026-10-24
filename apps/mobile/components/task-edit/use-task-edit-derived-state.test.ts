@@ -443,10 +443,10 @@ describe('useTaskEditDerivedState', () => {
         REFERENCE_HIDDEN_TASK_FIELDS.forEach((fieldId) => {
             expect(visibleFields).not.toContain(fieldId);
         });
-        expect(derived?.showStatusField).toBe(false);
+        expect(derived?.showStatusField).toBe(true);
     });
 
-    it('uses draft Reference status and reveals only a contentful list', () => {
+    it('uses draft Reference status and keeps an empty list available', () => {
         let derived: ReturnType<typeof useTaskEditDerivedState> | undefined;
         let checklist: Task['checklist'] = [
             { id: 'step-1', title: 'Keep source order', isCompleted: true },
@@ -459,7 +459,7 @@ describe('useTaskEditDerivedState', () => {
                 task: baseTask,
                 checklist,
                 draft,
-                settings: { gtd: { taskEditor: { hidden: [...DEFAULT_TASK_EDITOR_ORDER] } } },
+                settings: { gtd: { taskEditor: { hidden: [] } } },
                 projects: [],
                 sections: [],
                 prioritiesEnabled: true,
@@ -486,7 +486,7 @@ describe('useTaskEditDerivedState', () => {
             view.update(React.createElement(Probe));
         });
 
-        expect(derived?.detailsFields).not.toContain('checklist');
+        expect(derived?.detailsFields).toContain('checklist');
         renderer.act(() => view.unmount());
     });
     // The preset editor is gone from Settings, so a one-item list saved by an

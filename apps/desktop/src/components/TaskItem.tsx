@@ -1630,7 +1630,7 @@ export const TaskItem = memo(function TaskItem({
             isDoneActionActive={draft.status === 'done'}
             onMarkDone={canCompleteFromEditor ? handleEditorMarkDone : undefined}
             onRequestBackdatedComplete={canCompleteFromEditor ? requestEditorBackdatedComplete : undefined}
-            focusStar={quickActionFocus && canCompleteFromEditor ? (() => {
+            focusStar={quickActionFocus && isTaskActionable(draft.status) ? (() => {
                 // Draft toggle, applied on Save like every other editor field —
                 // an immediate write would re-filter the list mid-edit and yank
                 // the row (and its open editor) into another view. The editor is

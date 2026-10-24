@@ -338,7 +338,7 @@ describe('TaskItemEditor', () => {
         expect(onMarkDone).toHaveBeenCalledTimes(1);
     });
 
-    it('offers a secondary conversion path when Reference hides the status field', () => {
+    it('keeps the secondary Convert to action shortcut for Reference', () => {
         const setField = vi.fn();
         const referenceTask: Task = {
             ...baseTask,

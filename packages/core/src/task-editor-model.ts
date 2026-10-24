@@ -228,7 +228,6 @@ export function getTaskEditorFieldLayout(input: TaskEditorFieldLayoutInput): Tas
         }
     };
     const isVisible = (fieldId: TaskEditorFieldId): boolean => {
-        if (isReference && fieldId === 'checklist') return hasValue(fieldId);
         if (isReference && REFERENCE_HIDDEN_FIELDS.has(fieldId)) return false;
         if (fieldId === 'section') return showSectionField;
         if (fieldId === 'assignedTo' && editStatus === 'waiting' && !isAssignedToExplicitlyHidden) return true;
