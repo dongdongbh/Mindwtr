@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Combine
+import MindwtrNativeCore
 
 // MARK: Board drag geometry and claim (Foundation-only seam)
 struct BoardDragRowFrame: Equatable {
@@ -138,7 +139,7 @@ struct BoardDragState {
               zip(original.columns, next.columns).allSatisfy({ prior, current in
                   prior.status.utf8.elementsEqual(current.status.utf8)
                       && BoardDragGeometry.valid(prior.frame) && BoardDragGeometry.valid(current.frame)
-                      && current.frame == prior.frame.offsetBy(dx: 0, dy: delta)
+                      && NativeBoardDragGeometry.matchesVerticalTranslation(prior.frame, current.frame, delta: delta)
               }), original.rows.count == next.rows.count,
               zip(original.rows, next.rows).allSatisfy({ prior, current in
                   prior.status.utf8.elementsEqual(current.status.utf8)
@@ -204,7 +205,7 @@ struct BoardDragState {
 
 // Nonobservable, diagnostic-only slots; callbacks retain their original attempt.
 final class BoardDragDiagnostics {
-    enum Stage: String, CaseIterable { case begin, cancel, validate, hover, drop, load, rebase }
+    enum Stage: String, CaseIterable { case begin, cancel, validate, hover, drop, load, rebase, roundoffRebase }
     final class Attempt {
         private var emitted = Set<Stage>()
         func take(_ stage: Stage) -> Bool { emitted.insert(stage).inserted }
@@ -283,8 +284,16 @@ struct BoardScreen: View {
             if dragMeasurements != value {
                 let original = drag.measurements
                 if drag.rebaseForVerticalScroll(value) {
-                    if let attempt = dragDiagnostics.attempt, attempt.take(.rebase) {
-                        logDragGeometry(reason: "geometry-scroll-rebased", original: original, next: value, capture: drag.capture)
+                    if let attempt = dragDiagnostics.attempt, let original,
+                       let before = original.columns.first, let after = value.columns.first {
+                        let delta = after.frame.minY - before.frame.minY
+                        let rounded = zip(original.columns, value.columns).contains {
+                            $0.1.frame != $0.0.frame.offsetBy(dx: 0, dy: delta)
+                        }
+                        if attempt.take(rounded ? .roundoffRebase : .rebase) {
+                            logDragGeometry(reason: rounded ? "geometry-scroll-roundoff-rebased" : "geometry-scroll-rebased",
+                                            original: original, next: value, capture: drag.capture)
+                        }
                     }
                 } else {
                     let reason = geometryCancellationReason(value)

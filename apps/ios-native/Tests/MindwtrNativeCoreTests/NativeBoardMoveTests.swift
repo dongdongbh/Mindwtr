@@ -1055,6 +1055,34 @@ final class NativeBoardMoveTests: XCTestCase {
     }
 
     func testBoardDragSubmittedDiagnosticIsContentFreeAndDoesNotClaimSavedEffect() async throws {
+        let scrollInbox = CGRect(x: 16, y: 175.66666666666666, width: 358, height: 67.66666666666669)
+        let scrollSource = CGRect(x: 16, y: 301.66666666666663, width: 358, height: 64)
+        let commonDelta = CGFloat(41) / 3
+        let movedInbox = scrollInbox.offsetBy(dx: 0, dy: commonDelta)
+        let movedSource = scrollSource.offsetBy(dx: 0, dy: commonDelta)
+        let inferredDelta = movedInbox.minY - scrollInbox.minY
+        XCTAssertEqual(movedSource.minY, 315.3333333333333)
+        XCTAssertNotEqual(movedSource, scrollSource.offsetBy(dx: 0, dy: inferredDelta))
+        XCTAssertTrue(NativeBoardDragGeometry.matchesVerticalTranslation(scrollInbox, movedInbox, delta: inferredDelta))
+        XCTAssertTrue(NativeBoardDragGeometry.matchesVerticalTranslation(scrollSource, movedSource, delta: inferredDelta))
+        XCTAssertTrue(NativeBoardDragGeometry.matchesVerticalTranslation(scrollSource, scrollSource.offsetBy(dx: 0, dy: -2), delta: -2))
+        for drift in [CGFloat(0.0001), CGFloat(0.01)] {
+            XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(scrollSource, movedSource.offsetBy(dx: 0, dy: drift), delta: inferredDelta))
+        }
+        for dimension in ["x", "width", "height"] {
+            var changed = movedSource
+            if dimension == "x" { changed.origin.x += 0.000000000001 }
+            if dimension == "width" { changed.size.width += 0.000000000001 }
+            if dimension == "height" { changed.size.height += 0.000000000001 }
+            XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(scrollSource, changed, delta: inferredDelta))
+        }
+        for invalid in [CGFloat.infinity, CGFloat.nan] {
+            XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(scrollSource, movedSource, delta: invalid))
+            XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(scrollSource,
+                CGRect(x: 16, y: invalid, width: 358, height: 64), delta: inferredDelta))
+        }
+        let extreme = CGRect(x: 16, y: CGFloat.greatestFiniteMagnitude, width: 358, height: 64)
+        XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(extreme, extreme, delta: .greatestFiniteMagnitude))
         let ids = try await seedBoardOrderFixture(), faults = HostIOFaults(), core = host(faults)
         _ = try await core.start()
         _ = try await core.call("dataSetting", argumentsJSON: json([json([
@@ -1168,6 +1196,12 @@ final class NativeBoardMoveTests: XCTestCase {
         XCTAssertTrue(NativeBoardDragGeometry.accepts(rebasedGeometry))
         _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(rebasedGeometry)]))
         geometryContexts.append(rebasedGeometry)
+        let roundoffGeometry = try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-scroll-roundoff-rebased",
+            originalViewport: sample, currentViewport: sample, originalArea: scrollSource, currentArea: movedSource,
+            originalRow: sample, currentRow: sample))
+        XCTAssertTrue(NativeBoardDragGeometry.accepts(roundoffGeometry))
+        _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(roundoffGeometry)]))
+        geometryContexts.append(roundoffGeometry)
         let missing = try XCTUnwrap(geometryContexts[5]["currentViewport"] as? [String: Any])
         XCTAssertEqual(missing["validity"] as? String, "missing")
         let nonfinite = try XCTUnwrap(geometryContexts[6]["currentViewport"] as? [String: Any])

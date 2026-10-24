@@ -340,11 +340,13 @@ describe('release diagnostics field names', () => {
             originalViewport: finite, currentViewport: finite, originalArea: finite, currentArea: finite,
             originalRow: missing, currentRow: nonfinite,
         };
-        const exported = sanitizeLogContext(context);
-        expect(exported?.releaseCheck).toBe(context.releaseCheck);
-        expect(exported?.reason).toBe(context.reason);
-        for (const field of ['originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow'] as const) {
-            expect(JSON.parse(exported?.[field] ?? 'null')).toEqual(context[field]);
+        for (const reason of [context.reason, 'geometry-scroll-roundoff-rebased']) {
+            const exported = sanitizeLogContext({ ...context, reason });
+            expect(exported?.releaseCheck).toBe(context.releaseCheck);
+            expect(exported?.reason).toBe(reason);
+            for (const field of ['originalViewport', 'currentViewport', 'originalArea', 'currentArea', 'originalRow', 'currentRow'] as const) {
+                expect(JSON.parse(exported?.[field] ?? 'null')).toEqual(context[field]);
+            }
         }
     });
 

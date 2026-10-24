@@ -7,7 +7,19 @@ public enum NativeBoardDragGeometry {
     public static let message = "Native iOS Board drag geometry"
     public static let releaseCheck = "v1.3.8/ios-board-drag-geometry"
     private static let rectangles = ["originalViewport", "currentViewport", "originalArea", "currentArea", "originalRow", "currentRow"]
-    private static let reasons = ["geometry-missing", "geometry-viewport", "geometry-area", "geometry-rows", "geometry-other", "geometry-scroll-rebased"]
+    private static let reasons = ["geometry-missing", "geometry-viewport", "geometry-area", "geometry-rows", "geometry-other", "geometry-scroll-rebased", "geometry-scroll-roundoff-rebased"]
+
+    /// Subtracting a common scroll offset at one column can round differently at another.
+    /// Only the translated y coordinate admits this subpixel arithmetic residue.
+    public static func matchesVerticalTranslation(_ original: CGRect, _ current: CGRect, delta: CGFloat) -> Bool {
+        guard [original.minX, original.minY, original.width, original.height, original.maxX, original.maxY,
+               current.minX, current.minY, current.width, current.height, current.maxX, current.maxY, delta]
+            .allSatisfy({ $0.isFinite }), original.width > 0, original.height > 0,
+              current.origin.x == original.origin.x, current.size == original.size else { return false }
+        let expectedY = original.origin.y + delta
+        let residual = current.origin.y - expectedY
+        return expectedY.isFinite && residual.isFinite && abs(residual) <= 0.000000001
+    }
 
     public static func payload(reason: String, originalViewport: CGRect?, currentViewport: CGRect?,
                                originalArea: CGRect?, currentArea: CGRect?, originalRow: CGRect?, currentRow: CGRect?) -> [String: Any]? {
