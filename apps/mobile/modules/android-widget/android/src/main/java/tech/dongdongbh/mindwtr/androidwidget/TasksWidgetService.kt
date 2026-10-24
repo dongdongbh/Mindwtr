@@ -116,8 +116,7 @@ class TasksWidgetFactory(
     if (kind == WidgetKind.COMPACT) return compactTaskRow(item, palette)
     val views = RemoteViews(context.packageName, R.layout.mindwtr_widget_item)
     val mutedText = palette?.mutedText ?: context.getColor(R.color.mindwtr_widget_muted_text)
-    val preview = item.upcomingDate != null || listId == WidgetPayload.UPCOMING_LIST_ID
-    val struck = !preview && item.id.isNotEmpty() && CheckoffStore.isStruck(context, item.id)
+    val struck = item.id.isNotEmpty() && CheckoffStore.isStruck(context, item.id)
     val title = boundedDisplayText(item.title)
     views.setTextViewText(R.id.mindwtr_widget_item_title, if (struck) struck(title) else title)
     // Priority ring: the priority colour, grey when the task has none; filled
@@ -131,8 +130,8 @@ class TasksWidgetFactory(
     // later stale taps reconcile presentation without touching the queue.
     // Without an action here the tap fell through
     // to the row and opened the app, which read as "check-off does nothing".
-    views.setViewVisibility(R.id.mindwtr_widget_item_ring_target, if (preview) View.GONE else View.VISIBLE)
-    if (!preview && item.id.isNotEmpty()) {
+    views.setViewVisibility(R.id.mindwtr_widget_item_ring_target, if (item.id.isEmpty()) View.GONE else View.VISIBLE)
+    if (item.id.isNotEmpty()) {
       views.setOnClickFillInIntent(R.id.mindwtr_widget_item_ring_target, Intent().setData(Uri.parse(WidgetTapActivity.checkoffUri(item.id))))
     }
     val contextLabel = item.contextLabel?.let(::boundedDisplayText)
@@ -160,8 +159,7 @@ class TasksWidgetFactory(
     }
     // Merged into the renderer's row template, which fixes component + action
     // and leaves the data to this row: the task's own sheet, else Focus.
-    val rowUri = if (preview) item.openUri ?: payload.openUriFor(listId)
-    else if (item.id.isNotEmpty()) WidgetTapActivity.peekUri(item.id) else payload.focusUri
+    val rowUri = if (item.id.isNotEmpty()) WidgetTapActivity.peekUri(item.id) else payload.focusUri
     views.setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent().setData(Uri.parse(rowUri)))
     return views
   }
@@ -169,10 +167,9 @@ class TasksWidgetFactory(
   private fun compactTaskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews =
     RemoteViews(context.packageName, R.layout.mindwtr_compact_widget_item).apply {
       val title = "• ${boundedDisplayText(item.title)}"
-      setTextViewText(R.id.mindwtr_widget_item_title, if (item.upcomingDate == null && CheckoffStore.isStruck(context, item.id)) struck(title) else title)
+      setTextViewText(R.id.mindwtr_widget_item_title, if (CheckoffStore.isStruck(context, item.id)) struck(title) else title)
       palette?.let { setTextColor(R.id.mindwtr_widget_item_title, it.text) }
-      val uri = if (item.upcomingDate != null) item.openUri ?: payload.openUriFor(listId)
-      else if (item.id.isNotEmpty()) WidgetTapActivity.peekUri(item.id) else payload.focusUri
+      val uri = if (item.id.isNotEmpty()) WidgetTapActivity.peekUri(item.id) else payload.focusUri
       setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent().setData(Uri.parse(uri)))
     }
 

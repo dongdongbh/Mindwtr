@@ -91,7 +91,7 @@ class UpcomingWidgetTest {
   }
 
   @Test
-  fun previewRowHasNoCompletionControlAndItsFillInIntentOpensThatTaskDirectly() {
+  fun upcomingRowUsesTheSameCompletionControlAndQuickActionsAsOtherTasks() {
     val tomorrow = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_MONTH, 1) }
     val raw = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(tomorrow.time)
     val payload = payload(listOf(item("task / +", raw)))
@@ -102,13 +102,17 @@ class UpcomingWidgetTest {
     RemoteViews::class.java.getDeclaredMethod("addFlags", Int::class.javaPrimitiveType)
       .apply { isAccessible = true }.invoke(views, 2)
     val row = views.apply(context, null)
-    assertEquals(View.GONE, row.findViewById<View>(R.id.mindwtr_widget_item_ring_target).visibility)
+    assertEquals(View.VISIBLE, row.findViewById<View>(R.id.mindwtr_widget_item_ring_target).visibility)
     assertEquals("task / +", row.findViewById<TextView>(R.id.mindwtr_widget_item_title).text.toString())
     val fillInId = context.resources.getIdentifier("fillInIntent", "id", "android")
     val response = row.getTag(fillInId)
     val intent = response.javaClass.getDeclaredField("mFillIntent")
       .apply { isAccessible = true }.get(response) as Intent
-    assertEquals("mindwtr://open?task=task%20%2F%20%2B", intent.dataString)
+    assertEquals(WidgetTapActivity.peekUri("task / +"), intent.dataString)
+    assertTrue(row.findViewById<View>(R.id.mindwtr_widget_item_ring_target).hasOnClickListeners())
+    CheckoffStore.toggle(context, "task / +")
+    val pendingRow = factory.getViewAt(0).apply(context, null)
+    assertTrue(pendingRow.findViewById<TextView>(R.id.mindwtr_widget_item_title).text is android.text.Spanned)
   }
 
   private fun date(raw: String): Date = SimpleDateFormat(
