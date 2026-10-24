@@ -7,6 +7,8 @@ import { canonicalInboxJSON, nativeInboxUndoOffer,
 import type { AppData, Task } from './types';
 import { buildProcessInboxUndoRestoreUpdates } from './process-inbox-model';
 import { SqliteAdapter } from './sqlite-adapter';
+import { readNativePreparedInboxWrite } from './native-host-contract-process-inbox';
+import * as logger from './logger';
 
 const NOW = '2026-10-20T12:00:00.000Z';
 const BEFORE = '2026-10-18T12:00:00.000Z';
@@ -73,7 +75,11 @@ describe('Process Inbox public Undo', () => {
                 expect(value(sqlite.host.inboxUndoValidate(undo))).toEqual(offer);
                 expect(value(await sqlite.host.inboxUndoCommit(undo))).toEqual(offer);
                 const restored = useTaskStore.getState()._tasksById.get(ID)!;
-                expect(buildProcessInboxUndoRestoreUpdates(restored)).toEqual(buildProcessInboxUndoRestoreUpdates(original));
+                const restoredFields = buildProcessInboxUndoRestoreUpdates(restored);
+                const originalFields = buildProcessInboxUndoRestoreUpdates(original);
+                expect({ ...restoredFields, dueReminderLeadMinutes: restoredFields.dueReminderLeadMinutes || undefined })
+                    .toEqual({ ...originalFields, dueReminderLeadMinutes: originalFields.dueReminderLeadMinutes || undefined });
+                if (kind === 'reference') expect(restored.dueReminderLeadMinutes).toBe(0);
                 expect(restored.deletedAt).toBeUndefined();
                 expect(restored.rev).toBeGreaterThan(original.rev!);
                 expect(await sqlite.sql('SELECT * FROM tasks WHERE id=?', [sentinel.id])).toEqual(originalRows);
@@ -96,6 +102,61 @@ describe('Process Inbox public Undo', () => {
             expect(useTaskStore.getState()._tasksById.get(decision.request.taskId)?.status).toBe(before.status);
             if (next.view) expect(value(sqlite.host.getInboxProcessingStep({ sessionId: next.view.sessionId, taskId: next.view.taskId,
                 step: next.view.step })).draft).toEqual(next.view.draft);
+        } finally { await sqlite.close(); }
+    });
+
+    it('validates and cold-replays the old Reference decision bytes without weakening configured-lead or row guards', async () => {
+        const sqlite = await openSqliteHost(seed());
+        try {
+            const current = prepareDecision(sqlite, 'reference');
+            expect(current.prepared.effect.tasks.find((row) => row.after.id === ID)?.after.dueReminderLeadMinutes).toBe(0);
+            const legacy = JSON.parse(canonicalInboxJSON(current)) as NativeInboxDecisionEnvelope;
+            delete legacy.prepared.effect.tasks.find((row) => row.after.id === ID)!.after.dueReminderLeadMinutes;
+            const frozen = canonicalInboxJSON(legacy);
+            const info = vi.spyOn(logger, 'logInfo');
+            expect(canonicalInboxJSON(readNativePreparedInboxWrite(legacy))).toBe(canonicalInboxJSON(legacy.prepared));
+            expect(info).toHaveBeenCalledWith('Legacy Reference decision validated', { scope: 'native-host', force: true,
+                context: { releaseCheck: 'v1.3.8/native-reference-legacy-decision', outcome: 'validated' } });
+            const forged = JSON.parse(frozen) as NativeInboxDecisionEnvelope;
+            forged.prepared.effect.tasks.find((row) => row.after.id === ID)!.after.title = 'Altered';
+            expect(readNativePreparedInboxWrite(forged)).toBeNull();
+            const configured = JSON.parse(frozen) as NativeInboxDecisionEnvelope;
+            for (const row of [configured.prepared.witness.source, ...configured.prepared.witness.lists.tasks,
+                configured.prepared.effect.sourceBefore, ...configured.prepared.effect.tasks.map((row) => row.before)]) {
+                if (row?.id === ID) row.dueReminderLeadMinutes = 15;
+            }
+            expect(readNativePreparedInboxWrite(configured)).toBeNull();
+            const done = value(await sqlite.host.inboxPreparedCommit(JSON.parse(frozen)));
+            const undo = prepareUndo(sqlite, legacy);
+            const frozenUndo = canonicalInboxJSON(undo);
+            expect(canonicalInboxJSON(readNativePreparedInboxUndo(JSON.parse(frozenUndo)))).toBe(frozenUndo);
+            expect(Object.prototype.hasOwnProperty.call(undo.prepared.effect.tasks.find((row) => row.after.id === ID)!.after,
+                'dueReminderLeadMinutes')).toBe(false);
+            const undone = value(await sqlite.host.inboxUndoCommit(JSON.parse(frozenUndo)));
+            await sqlite.client().run('UPDATE tasks SET dueReminderLeadMinutes=15,rev=rev+1 WHERE id=?', [ID]);
+            await sqlite.restart(undefined, { recoveryLoad: true });
+            const before = await snapshot(sqlite);
+            expect(value(sqlite.host.inboxPreparedValidate(JSON.parse(frozen)))).toEqual(done);
+            expect(value(await sqlite.host.inboxPreparedCommit(JSON.parse(frozen)))).toEqual(done);
+            expect(value(sqlite.host.inboxUndoOutcome(JSON.parse(frozenUndo)))).toEqual(undone);
+            expect(value(await sqlite.host.inboxUndoCommit(JSON.parse(frozenUndo)))).toEqual(undone);
+            expect(canonicalInboxJSON(legacy)).toBe(frozen);
+            expect(await snapshot(sqlite)).toEqual(before);
+            expect(useTaskStore.getState()._tasksById.get(ID)?.dueReminderLeadMinutes).toBe(15);
+        } finally { await sqlite.close(); }
+    });
+
+    it('refuses a receiptless old Reference decision after a current lead edit without touching the row', async () => {
+        const sqlite = await openSqliteHost(seed());
+        try {
+            const legacy = prepareDecision(sqlite, 'reference');
+            delete legacy.prepared.effect.tasks.find((row) => row.after.id === ID)!.after.dueReminderLeadMinutes;
+            expect(readNativePreparedInboxWrite(legacy)).not.toBeNull();
+            await useTaskStore.getState().updateTask(ID, { dueReminderLeadMinutes: 15 }); await flushPendingSave();
+            const before = await snapshot(sqlite);
+            expect(await sqlite.host.inboxPreparedCommit(legacy)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await snapshot(sqlite)).toEqual(before);
+            expect(useTaskStore.getState()._tasksById.get(ID)?.dueReminderLeadMinutes).toBe(15);
         } finally { await sqlite.close(); }
     });
 
@@ -141,7 +202,7 @@ describe('Process Inbox public Undo', () => {
             expect(sqlite.host.inboxUndoPrepare({ request, decision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             value(await sqlite.host.inboxPreparedCommit(decision));
             const undo = prepareUndo(sqlite, decision);
-            await useTaskStore.getState().updateTask(ID, { title: 'Newer remote content' }); await flushPendingSave();
+            await useTaskStore.getState().updateTask(ID, { title: 'Newer remote content', dueReminderLeadMinutes: 15 }); await flushPendingSave();
             const changed = await snapshot(sqlite);
             expect(sqlite.host.inboxUndoPrepare({ request, decision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             expect(await sqlite.host.inboxUndoCommit(undo)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -149,17 +210,24 @@ describe('Process Inbox public Undo', () => {
         } finally { await sqlite.close(); }
     });
 
-    it('gives its own proven Undo receipt priority after later source edits and missing original proof', async () => {
+    it('replays the old absent-lead Undo envelope unchanged after a later configured lead and missing original proof', async () => {
         const sqlite = await openSqliteHost(seed());
         try {
             const decision = prepareDecision(sqlite); value(await sqlite.host.inboxPreparedCommit(decision));
-            const undo = prepareUndo(sqlite, decision); const done = value(await sqlite.host.inboxUndoCommit(undo));
-            await useTaskStore.getState().updateTask(ID, { title: 'Later content' }); await flushPendingSave();
+            const undo = prepareUndo(sqlite, decision);
+            const after = undo.prepared.effect.tasks.find((row) => row.after.id === ID)!.after;
+            expect(Object.prototype.hasOwnProperty.call(after, 'dueReminderLeadMinutes')).toBe(false);
+            const frozen = canonicalInboxJSON(undo);
+            expect(canonicalInboxJSON(readNativePreparedInboxUndo(JSON.parse(frozen)))).toBe(frozen);
+            const done = value(await sqlite.host.inboxUndoCommit(JSON.parse(frozen)));
+            await useTaskStore.getState().updateTask(ID, { title: 'Later content', dueReminderLeadMinutes: 15 }); await flushPendingSave();
             await sqlite.client().run('DELETE FROM native_request_receipts WHERE request_id=?', [decision.request.requestId]);
             await sqlite.restart(undefined, { recoveryLoad: true });
             const before = await snapshot(sqlite);
-            expect(value(sqlite.host.inboxUndoOutcome(undo))).toEqual(done);
-            expect(value(await sqlite.host.inboxUndoCommit(undo))).toEqual(done);
+            expect(value(sqlite.host.inboxUndoOutcome(JSON.parse(frozen)))).toEqual(done);
+            expect(value(await sqlite.host.inboxUndoCommit(JSON.parse(frozen)))).toEqual(done);
+            expect(canonicalInboxJSON(undo)).toBe(frozen);
+            expect(useTaskStore.getState()._tasksById.get(ID)?.dueReminderLeadMinutes).toBe(15);
             expect(await snapshot(sqlite)).toEqual(before);
         } finally { await sqlite.close(); }
     });

@@ -3901,6 +3901,9 @@ fn duplicate_attachment_value(value: Option<&Value>, timestamp: &str) -> Option<
 }
 
 fn normalize_created_reference_task(task: &mut Map<String, Value>) {
+    let had_advance_reminder = task
+        .get("dueReminderLeadMinutes")
+        .is_some_and(|value| !value.is_null());
     for key in [
         "startTime",
         "dueDate",
@@ -3918,7 +3921,9 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
     ] {
         task.remove(key);
     }
-    task.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    if had_advance_reminder {
+        task.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
     task.insert("isFocusedToday".to_string(), Value::Bool(false));
     task.insert("pushCount".to_string(), Value::Number(0.into()));
 }
@@ -4518,6 +4523,13 @@ fn normalize_task_triage_patch(
     }
 
     if final_status == "reference" {
+        let clear_advance = previous_status != "reference"
+            || task
+                .get("dueReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null())
+            || sanitized
+                .get("dueReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null());
         for field in [
             "startTime",
             "dueDate",
@@ -4535,7 +4547,9 @@ fn normalize_task_triage_patch(
         ] {
             sanitized.insert(field.to_string(), Value::Null);
         }
-        sanitized.insert("dueReminderLeadMinutes".to_string(), json!(0));
+        if clear_advance {
+            sanitized.insert("dueReminderLeadMinutes".to_string(), json!(0));
+        }
         sanitized.insert("isFocusedToday".to_string(), Value::Bool(false));
         sanitized.insert("pushCount".to_string(), Value::Number(0.into()));
     }
@@ -7986,6 +8000,38 @@ mod tests {
     }
 
     #[test]
+    fn reference_advance_clear_preserves_absence_and_explicit_conversion() {
+        let mut absent = json!({"status":"reference"}).as_object().unwrap().clone();
+        normalize_created_reference_task(&mut absent);
+        assert!(!absent.contains_key("dueReminderLeadMinutes"));
+        let mut configured = json!({"status":"reference","dueReminderLeadMinutes":15})
+            .as_object()
+            .unwrap()
+            .clone();
+        normalize_created_reference_task(&mut configured);
+        assert_eq!(configured["dueReminderLeadMinutes"], 0);
+        for (before, expected) in [("reference", Value::Null), ("next", json!(0))] {
+            let mut task =
+                json!({"id":"task", "status":before, "title":"Task", "tags":[], "contexts":[]})
+                    .as_object()
+                    .unwrap()
+                    .clone();
+            apply_task_patch(
+                &mut task,
+                json!({"status":"reference","tags":["#changed"]})
+                    .as_object()
+                    .unwrap(),
+                "device",
+            )
+            .unwrap();
+            assert_eq!(
+                task.get("dueReminderLeadMinutes").unwrap_or(&Value::Null),
+                &expected
+            );
+        }
+    }
+
+    #[test]
     fn local_api_create_canonicalizes_reference_tasks() {
         let data = empty_local_api_data();
         let task = create_task_from_body(
@@ -8019,7 +8065,7 @@ mod tests {
         assert_eq!(task["status"], "reference");
         assert_eq!(task["isFocusedToday"], false);
         assert_eq!(task["pushCount"], 0);
-        assert_eq!(task["dueReminderLeadMinutes"], 0);
+        assert!(task.get("dueReminderLeadMinutes").is_none());
         for field in [
             "startTime",
             "dueDate",

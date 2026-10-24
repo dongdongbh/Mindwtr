@@ -4,7 +4,8 @@ import { mergeAppDataWithStats } from './sync';
 import { createMockTask, mockAppData } from './sync-test-utils';
 import { normalizeTaskForContentComparison, toComparableSignature } from './sync-signatures';
 import { createTaskDraft, taskDraftToUpdatePatch, setTaskDraftField } from './task-draft';
-import { normalizeTaskUpdate } from './store-helpers';
+import { applyTaskUpdates, normalizeTaskUpdate } from './store-helpers';
+import { buildProcessInboxUndoRestoreUpdates } from './process-inbox-model';
 import { TASK_SQLITE_COLUMNS, taskFromSqliteRow, taskToSqliteRow } from './task-sync-schema';
 
 const NOW = '2026-10-24T12:00:00.000Z';
@@ -46,6 +47,22 @@ describe('due advance reminder data lifecycle', () => {
         expect(second.data).toEqual(first.data);
         expect(second.stats.tasks.conflicts).toBe(0);
         expect(mergeAppDataWithStats(first.data, old, { nowIso: NOW }).data).toEqual(first.data);
+    });
+
+    it('preserves absent reference metadata but explicitly clears on conversion and snapshot restore', () => {
+        const existing = { ...task(), status: 'reference' as const };
+        expect(applyTaskUpdates(existing, { tags: ['#changed'] }, NOW).updatedTask.dueReminderLeadMinutes).toBeUndefined();
+        const configured = { ...existing, dueReminderLeadMinutes: 15 };
+        expect(applyTaskUpdates(configured, { tags: ['#changed'] }, NOW).updatedTask.dueReminderLeadMinutes).toBe(0);
+        const converted = applyTaskUpdates(task(), { status: 'reference' }, NOW).updatedTask;
+        expect(converted.dueReminderLeadMinutes).toBe(0);
+        const peer = mockAppData([{ ...task(15), rev: 1 }]);
+        const merged = mergeAppDataWithStats(peer, mockAppData([{ ...converted, rev: 2 }]), { nowIso: NOW }).data;
+        expect(merged.tasks[0].dueReminderLeadMinutes).toBe(0);
+        expect(normalizeTaskUpdate(task(), { dueReminderLeadMinutes: undefined }).dueReminderLeadMinutes).toBeUndefined();
+        const restored = normalizeTaskUpdate(task(15), buildProcessInboxUndoRestoreUpdates(task()));
+        expect(restored.dueReminderLeadMinutes).toBe(0);
+        expect(normalizeTaskUpdate(task(), buildProcessInboxUndoRestoreUpdates(task(15))).dueReminderLeadMinutes).toBe(15);
     });
 
     it('persists explicit Off through merge and draft editing without erasing hidden options', () => {

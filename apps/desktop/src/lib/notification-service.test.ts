@@ -63,7 +63,7 @@ describe('desktop advance reminders', () => {
     const initial = useTaskStore.getState();
     const tick = new Date('2026-06-17T09:00:00Z');
     const advanceTask: Task = { ...baseTask, dueDate: '2026-06-17T10:01:00Z', dueReminderLeadMinutes: 60 };
-    let delivered: ReturnType<typeof vi.fn>;
+    let delivered: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
 
     beforeEach(() => {
         vi.useFakeTimers();

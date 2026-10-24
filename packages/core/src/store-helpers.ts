@@ -90,7 +90,7 @@ export const matchesDuplicateSource = (source: Task, copy: Task, asNextAction = 
     return JSON.stringify(links) === JSON.stringify((copy.attachments ?? []).map((item) => ({ ...item, id: '' })));
 };
 
-export const getReferenceTaskFieldClears = (): Partial<Task> => ({
+export const getReferenceTaskFieldClears = (dueReminderLeadMinutes?: number): Partial<Task> => ({
     status: 'reference',
     startTime: undefined,
     dueDate: undefined,
@@ -101,7 +101,7 @@ export const getReferenceTaskFieldClears = (): Partial<Task> => ({
     timeEstimate: undefined,
     suppressMindwtrReminders: undefined,
     repeatReminderMinutes: undefined,
-    dueReminderLeadMinutes: 0,
+    dueReminderLeadMinutes: dueReminderLeadMinutes === undefined ? undefined : 0,
     showFutureRecurrence: undefined,
     isFocusedToday: false,
     focusOrder: undefined,
@@ -217,7 +217,8 @@ export function applyTaskUpdates(
     if (incomingStatus === 'reference') {
         finalUpdates = {
             ...finalUpdates,
-            ...getReferenceTaskFieldClears(),
+            ...getReferenceTaskFieldClears(finalUpdates.dueReminderLeadMinutes ?? oldTask.dueReminderLeadMinutes),
+            ...(statusChanged ? { dueReminderLeadMinutes: 0 } : {}),
         };
     }
 
@@ -308,8 +309,9 @@ export const normalizeTaskUpdate = (
 ): Partial<Task> => {
     let adjustedUpdates = updates;
     if (hasOwnField(updates, 'dueReminderLeadMinutes')) {
-        adjustedUpdates = { ...adjustedUpdates, dueReminderLeadMinutes: updates.dueReminderLeadMinutes == null
-            ? 0 : normalizeDueReminderLeadMinutes(updates.dueReminderLeadMinutes) };
+        adjustedUpdates = { ...adjustedUpdates, dueReminderLeadMinutes: updates.dueReminderLeadMinutes === undefined
+            && task.dueReminderLeadMinutes === undefined ? undefined
+            : updates.dueReminderLeadMinutes == null ? 0 : normalizeDueReminderLeadMinutes(updates.dueReminderLeadMinutes) };
     }
     if (hasOwnField(updates, 'reminderPolicy')) {
         const policy = normalizeTaskReminderPolicy(updates.reminderPolicy);

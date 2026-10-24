@@ -36,6 +36,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.8 (add before tagging, trim in the release after)
 
+- **`v1.3.8/native-reference-legacy-decision`** — `packages/core/src/native-host-contract-process-inbox.ts`. Forced `Legacy Reference decision validated` with `outcome=validated` after an accepted old v1 Reference decision is reconstructed with its original absent advance-reminder field. This proves compatible journal validation only; the existing Process Inbox durable-save markers prove persistence separately. Recover a pending pre-upgrade Reference choice and export Diagnostics: expect this marker, unchanged task content, and one saved result. No task text, dates or identifiers are logged. (#1386)
+
 - **`v1.3.8/saved-filter-date-preserved`** — `packages/core/src/sync-merge-settings.ts`, when a tied saved-filter merge retains the full criterion instead of an older client’s stripped copy. Forced privacy-safe outcome/count only; no names, criteria or identifiers. Sync a date filter through an older client without editing it, then back to the updated app: expect this marker and the original date condition. A genuinely newer edit still wins. (#1408)
 
 - **`v1.3.8/widget-snapshot-rollover`** — mobile `widget-service.ts` and native Android `host-widgets.ts`. Forced `Widget lists published from one snapshot` after native publication returns, with platform and Upcoming count only. After midnight, switch Upcoming → Focus → Upcoming before opening Mindwtr: cached rows and header must remain from the same publication. Open Mindwtr; expect this marker and freshly derived lists. The marker proves publication, not launcher paint or autonomous midnight refresh; no task text, identifiers or dates are logged. (#1396)

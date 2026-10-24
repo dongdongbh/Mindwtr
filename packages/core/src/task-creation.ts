@@ -62,7 +62,7 @@ export function buildNewTask({
     const resolvedSectionId = containerResolution.sectionId;
     const resolvedAreaId = containerResolution.areaId;
     const referenceClears = resolvedStatus === 'reference'
-        ? getReferenceTaskFieldClears()
+        ? getReferenceTaskFieldClears(initialTaskProps.dueReminderLeadMinutes)
         : {};
     const explicitOrder = getTaskOrder(initialTaskProps);
     const resolvedOrder = !hasTaskOrder && resolvedProjectId

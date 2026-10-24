@@ -78,14 +78,14 @@ afterEach(() => {
 });
 
 describe('native Pomodoro integration with the SQLite and store write gates', () => {
-    it('cold-loads and replays a committed schema4 receipt unchanged after schema5 policy edits', async () => {
+    it('cold-loads and replays a committed schema4 receipt unchanged after policy and advance-reminder edits', async () => {
         const env = await open(); const legacy = structuredClone(env.plan);
-        expect(TASK_SQLITE_COLUMNS).toHaveLength(47); expect(TASK_SQLITE_COLUMNS[46]).toBe('reminderPolicy');
+        expect(TASK_SQLITE_COLUMNS).toHaveLength(48); expect(TASK_SQLITE_COLUMNS[46]).toBe('reminderPolicy');
         legacy.target!.row = legacy.target!.row!.slice(0, 46);
         const payload = JSON.stringify(['pomodoroTransition', legacy]);
-        await env.sql.client.run('UPDATE tasks SET timeSpentMinutes=?,rev=?,revBy=?,updatedAt=?,reminderPolicy=?,title=? WHERE id=?',
+        await env.sql.client.run('UPDATE tasks SET timeSpentMinutes=?,rev=?,revBy=?,updatedAt=?,reminderPolicy=?,dueReminderLeadMinutes=?,title=? WHERE id=?',
             [legacy.taskPatch!.timeSpentMinutes, legacy.taskPatch!.rev, legacy.taskPatch!.revBy, legacy.taskPatch!.updatedAt,
-                'skip', 'Later policy edit', 'task']);
+                'skip', 15, 'Later policy edit', 'task']);
         await env.sql.client.run('UPDATE native_pomodoro_session SET state_json=? WHERE id=1', [legacy.sessionAfter]);
         await env.sql.client.run('INSERT INTO native_request_receipts (request_id,method,reply,saved_at) VALUES (?,?,?,?)',
             [legacy.request.requestId, payload, JSON.stringify(legacy.result), AT]);
@@ -102,6 +102,7 @@ describe('native Pomodoro integration with the SQLite and store write gates', ()
         expect((before.receipts[0] as { method: string }).method).toBe(payload);
         expect(nativePomodoroReceiptPayload(legacy)).toBe(payload);
         expect(useTaskStore.getState()._tasksById.get('task')!.reminderPolicy).toBe('skip');
+        expect(useTaskStore.getState()._tasksById.get('task')!.dueReminderLeadMinutes).toBe(15);
     });
     it('refuses a receiptless schema4 plan and a changed schema5 policy without domain SQL writes', async () => {
         const env = await open(); const legacy = structuredClone(env.plan); legacy.target!.row = legacy.target!.row!.slice(0, 46);

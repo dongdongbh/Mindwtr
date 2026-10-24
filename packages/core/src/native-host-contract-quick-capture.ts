@@ -277,7 +277,7 @@ const readPreparedTask = (value: unknown): Task | null => {
     if (task.order !== task.orderNum || (task.projectId && task.areaId) || (task.sectionId && !task.projectId)) return null;
     if (task.projectId ? !Number.isFinite(task.order) : task.order !== undefined) return null;
     if (!sameJson(taskToSqliteRow(task), taskToSqliteRow(normalizeTaskLifecycleFields(task)))) return null;
-    if (task.status === 'reference' && !sameJson(taskToSqliteRow(task), taskToSqliteRow({ ...task, ...getReferenceTaskFieldClears() }))) return null;
+    if (task.status === 'reference' && !sameJson(taskToSqliteRow(task), taskToSqliteRow({ ...task, ...getReferenceTaskFieldClears(task.dueReminderLeadMinutes) }))) return null;
     // Creation promotes a starred Inbox row; lifecycle/reference checks above
     // cover terminal states. Review-due Someday can also receive a valid star.
     if (task.isFocusedToday && task.status === 'inbox') return null;

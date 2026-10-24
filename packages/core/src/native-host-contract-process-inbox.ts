@@ -1,4 +1,5 @@
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
+import { logInfo } from './logger';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { safeParseDate } from './date';
 import { countFocusedTasksBeforeBoundary } from './task-utils';
@@ -631,11 +632,27 @@ export function readNativePreparedInboxWrite(input: unknown): NativePreparedInbo
                 if (!id) throw new Error('Missing frozen Inbox ID');
                 return id;
             } });
-        if (recomputed.reason !== undefined || idIndex !== witness.ids.length
-            || seen.size !== witness.parser.length || !same(recomputed.effect, prepared.effect)
+        if (recomputed.reason !== undefined) return null;
+        const hasAdvance = (task: Task) => Object.prototype.hasOwnProperty.call(task, 'dueReminderLeadMinutes');
+        const legacyReference = witness.decisionKind === 'reference' && witness.committed === 'reference'
+            && witness.source.status !== 'reference' && !hasAdvance(witness.source)
+            && witness.lists.tasks.every((task) => !hasAdvance(task))
+            && prepared.effect.tasks.every((row) => !hasAdvance(row.after) && (!row.before || !hasAdvance(row.before)))
+            && recomputed.effect.tasks.some((row) => row.after.id === witness.source.id
+                && row.after.status === 'reference' && row.after.dueReminderLeadMinutes === 0);
+        // Old v1 journals predate this field; compare their exact effect without the new transition-only Off value.
+        const effect = legacyReference ? { ...recomputed.effect, tasks: recomputed.effect.tasks.map((row) => {
+            if (row.after.id !== witness.source.id) return row;
+            const { dueReminderLeadMinutes: _advance, ...after } = row.after;
+            return { ...row, after };
+        }) } : recomputed.effect;
+        if (idIndex !== witness.ids.length
+            || seen.size !== witness.parser.length || !same(effect, prepared.effect)
             || !same(recomputed.result, prepared.result) || prepared.kind !== prepared.result.kind
             || !same(recomputed.decisionRequest, witness.decisionRequest)
             || !same(recomputed.preparedDecision, witness.preparedDecision)) return null;
+        if (legacyReference) logInfo('Legacy Reference decision validated', { scope: 'native-host', force: true,
+            context: { releaseCheck: 'v1.3.8/native-reference-legacy-decision', outcome: 'validated' } });
         return prepared;
     } catch {
         return null;
