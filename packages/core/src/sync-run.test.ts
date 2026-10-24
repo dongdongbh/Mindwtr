@@ -5168,6 +5168,60 @@ describe('activation with attachment files that no device location can serve', (
         expect(JSON.parse(device.record!)[SCOPE]['attachment-old-only'].sort()).toEqual([deadKey, OLD_KEY].sort());
     });
 
+    it('publishes the key of the location that holds the file, so a return there downloads it', async () => {
+        // The new location lists the row under a key it cannot serve. Publishing that key would
+        // carry it back to the old location, whose 404 would delete the row there.
+        const deadKey = 'attachments/dead-on-candidate.pdf';
+        const OLD_SCOPE = '["webdav","https://old.example/dav","me"]';
+        const requested: string[] = [];
+        let atOldLocation = false;
+        const adapter = vi.fn(async (data: AppData) => {
+            const next = cloneAppData(data);
+            for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+                if (!attachment.cloudKey || attachment.localStatus === 'available') continue;
+                requested.push(attachment.cloudKey);
+                if (atOldLocation && attachment.cloudKey === OLD_KEY) {
+                    attachment.uri = '/local/scan.pdf';
+                    attachment.localStatus = 'available';
+                } else {
+                    markAttachmentUnrecoverable(attachment);
+                }
+            }
+            return next;
+        });
+        const { harness, hooks, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask({ cloudKey: deadKey })]),
+            io: { syncAttachments: adapter },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        expect(harness.remote?.tasks[0]?.attachments?.[0]).toMatchObject({ cloudKey: OLD_KEY, fileHash: HASH });
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+
+        const newLocationSetup = vi.mocked(hooks.setupCycle).getMockImplementation()!;
+        vi.mocked(hooks.setupCycle).mockImplementation(async (...args) => ({
+            ...(await newLocationSetup(...args)),
+            locationScope: OLD_SCOPE,
+        }) as Awaited<ReturnType<typeof newLocationSetup>>);
+        atOldLocation = true;
+        harness.remote = createData([remoteOnlyTask()]);
+        requested.length = 0;
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(requested).toEqual([OLD_KEY]);
+        for (const data of [harness.persisted, harness.remote!]) {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.deletedAt).toBeUndefined();
+            expect(attachment?.cloudKey).toBe(OLD_KEY);
+        }
+        expect(harness.persisted.tasks[0]?.attachments?.[0]?.localStatus).toBe('available');
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+        expect(JSON.parse(device.record!)).toEqual({});
+    });
+
     it('refuses again when a row the user did not accept is also missing', async () => {
         const task = remoteOnlyTask();
         task.attachments!.push({ ...task.attachments![0]!, id: 'attachment-second', title: 'second.pdf', cloudKey: 'attachments/second.pdf' });

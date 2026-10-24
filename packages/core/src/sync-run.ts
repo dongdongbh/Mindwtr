@@ -1942,9 +1942,28 @@ class SharedSyncRunMachine {
                 visitLiveFileAttachments(data, (attachment) => {
                     if (accepted.has(attachment.id)) merged.set(attachment.id, attachment);
                 });
+                // A key this device carries names the file at the location it synced before. The
+                // merge may have chosen the new location's key, which that location cannot serve:
+                // carried back, its 404 there would tombstone the row beside the real file.
+                const ownContent = new Map<string, Attachment>();
+                if (this.state.localDataCache?.data) {
+                    visitLiveFileAttachments(this.state.localDataCache.data, (attachment) => {
+                        if (accepted.has(attachment.id) && attachment.cloudKey) ownContent.set(attachment.id, attachment);
+                    });
+                }
                 provenData = replaceAttachments(provenData, accepted, (attachment) => {
                     const original = merged.get(attachment.id) ?? attachment;
-                    return { ...original, localStatus: 'missing', pendingContentUpload: undefined };
+                    const own = ownContent.get(attachment.id);
+                    const content = own ? {
+                        cloudKey: own.cloudKey,
+                        fileHash: own.fileHash,
+                        contentRev: own.contentRev,
+                        contentMtimeMs: own.contentMtimeMs,
+                        contentSize: own.contentSize,
+                        size: own.size,
+                        mimeType: own.mimeType,
+                    } : {};
+                    return { ...original, ...content, localStatus: 'missing', pendingContentUpload: undefined };
                 });
                 this.state.acceptedMissingAttachments = new Map(
                     missingIds.map((id) => [id, [...(keysById.get(id) ?? [])]]),
