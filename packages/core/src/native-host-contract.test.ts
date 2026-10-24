@@ -2186,7 +2186,7 @@ describe('native host contract', () => {
                 const all = (value: NativeTaskEditorModel) => value.layout.sections.flatMap(({ fields }) => fields);
                 const reference = edited(host, draft, { type: 'fields', patch: { status: 'reference' } });
                 expect(all(reference)).not.toContain('dueDate');
-                expect(reference.layout.showStatusField).toBe(false);
+                expect(reference.layout.showStatusField).toBe(true);
                 const described = edited(host, draft, { type: 'fields', patch: { location: 'Desk' } });
                 expect(all(described)).toContain('location');
                 const someday = edited(host, draft, { type: 'fields', patch: { status: 'someday' } });

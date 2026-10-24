@@ -1727,7 +1727,12 @@ mod tests {
             let mut stream = TcpStream::connect(address).unwrap();
             if state == "expected" {
                 // Queue before completion so another test cannot reuse the closed listener's port.
-                queued = Some(TcpStream::connect(address).unwrap());
+                let stream = TcpStream::connect(address).unwrap();
+                // macOS rejects timeout changes after the queued connection has been reset.
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                queued = Some(stream);
             }
             write!(
                 stream,
@@ -1744,9 +1749,6 @@ mod tests {
         }
         assert_eq!(worker.join().unwrap().unwrap(), "one");
         let mut queued = queued.unwrap();
-        queued
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
         assert!(match queued.read(&mut [0; 1]) {
             Ok(0) => true,
             Err(err) => err.kind() == std::io::ErrorKind::ConnectionReset,
