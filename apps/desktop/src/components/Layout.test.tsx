@@ -14,6 +14,12 @@ const initialTaskState = useTaskStore.getState();
 const initialUiState = useUiStore.getState();
 const initialObsidianState = useObsidianStore.getState();
 const onNavigate = vi.fn();
+const syncStatusListeners = new Set<Parameters<typeof SyncService.subscribeSyncStatus>[0]>();
+const emitSyncStatus = (update: Partial<ReturnType<typeof SyncService.getSyncStatus>>) => act(() => {
+    const status = { ...SyncService.getSyncStatus(), ...update };
+    vi.mocked(SyncService.getSyncStatus).mockReturnValue(status);
+    for (const listener of syncStatusListeners) listener(status);
+});
 
 const dispatchDrag = (type: string, withTaskData: boolean) => act(() => {
     const event = new Event(type, { bubbles: true });
@@ -125,7 +131,11 @@ beforeEach(() => {
     // Pin a sync-enabled backend so footer/toast assertions don't race the async
     // backend read (jsdom's persisted default is 'off', which hides the footer).
     vi.spyOn(SyncService, 'refreshSyncBackendStatus').mockResolvedValue();
-    vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => undefined);
+    syncStatusListeners.clear();
+    vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation((listener) => {
+        syncStatusListeners.add(listener);
+        return () => { syncStatusListeners.delete(listener); };
+    });
     vi.spyOn(SyncService, 'getSyncStatus').mockReturnValue({
         inFlight: false,
         queued: false,
@@ -642,8 +652,11 @@ describe('Layout sync conflict surface', () => {
         performSyncSpy.mockRestore();
     });
 
-    it('shows a toast when a new sync conflict status is present', () => {
+    it('does not announce a persisted conflict on mount or backend hydration', () => {
         const showToast = vi.fn();
+        vi.mocked(SyncService.getSyncStatus).mockReturnValue({
+            ...SyncService.getSyncStatus(), backend: null,
+        });
         act(() => {
             useUiStore.setState((state) => ({
                 ...state,
@@ -661,6 +674,24 @@ describe('Layout sync conflict surface', () => {
 
         renderLayout();
 
+        emitSyncStatus({ backend: 'webdav' });
+        expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('shows a toast when a fresh sync completes with a conflict', () => {
+        const showToast = vi.fn();
+        act(() => { useUiStore.setState({ showToast }); });
+        renderLayout();
+        act(() => {
+            useTaskStore.setState((state) => ({
+                settings: { ...state.settings, lastSyncAt: '2026-04-22T12:00:00.000Z', lastSyncStatus: 'conflict' },
+            }));
+        });
+        expect(showToast).not.toHaveBeenCalled();
+        emitSyncStatus({ inFlight: true });
+        expect(showToast).not.toHaveBeenCalled();
+        emitSyncStatus({ inFlight: false, lastResult: 'success', lastResultAt: '2026-04-22T12:00:00.000Z' });
+
         expect(showToast).toHaveBeenCalledWith(
             'Sync conflict resolved with last-write-wins. Open Settings → Sync to review the details.',
             'info',
@@ -668,8 +699,27 @@ describe('Layout sync conflict surface', () => {
         );
     });
 
+    it('does not reannounce a completed conflict when Layout remounts', () => {
+        const showToast = vi.fn();
+        act(() => { useUiStore.setState({ showToast }); });
+        const first = renderLayout();
+        act(() => {
+            useTaskStore.setState((state) => ({
+                settings: { ...state.settings, lastSyncAt: '2026-04-22T12:00:00.000Z', lastSyncStatus: 'conflict' },
+            }));
+        });
+        emitSyncStatus({ lastResult: 'success', lastResultAt: '2026-04-22T12:00:00.000Z' });
+        expect(showToast).toHaveBeenCalledTimes(1);
+        first.unmount();
+        showToast.mockClear();
+        renderLayout();
+        expect(showToast).not.toHaveBeenCalled();
+    });
+
     it('does not repeat the same conflict toast when only the sync timestamp changes', async () => {
         const showToast = vi.fn();
+        act(() => { useUiStore.setState({ showToast }); });
+        renderLayout();
         act(() => {
             useUiStore.setState((state) => ({
                 ...state,
@@ -686,7 +736,7 @@ describe('Layout sync conflict surface', () => {
             }));
         });
 
-        renderLayout();
+        emitSyncStatus({ lastResult: 'success', lastResultAt: '2026-04-22T12:00:00.000Z' });
 
         expect(showToast).toHaveBeenCalledTimes(1);
 
@@ -701,6 +751,7 @@ describe('Layout sync conflict surface', () => {
                 },
             }));
         });
+        emitSyncStatus({ lastResult: 'success', lastResultAt: '2026-04-22T12:01:00.000Z' });
 
         await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1));
 
@@ -715,6 +766,7 @@ describe('Layout sync conflict surface', () => {
                 },
             }));
         });
+        emitSyncStatus({ lastResult: 'success', lastResultAt: '2026-04-22T12:02:00.000Z' });
 
         await waitFor(() => expect(showToast).toHaveBeenCalledTimes(2));
     });

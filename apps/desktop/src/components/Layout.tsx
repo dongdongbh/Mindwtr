@@ -180,6 +180,7 @@ export function Layout({
     const [syncFreshness, setSyncFreshness] = useState(() => getSyncFreshnessBucket(lastSyncAt));
     const lastSyncAtRef = useRef(lastSyncAt);
     const shownConflictToastKeyRef = useRef<string | null>(null);
+    const initialSyncResultAtRef = useRef(syncStatus.lastResultAt);
     lastSyncAtRef.current = lastSyncAt;
     useEffect(() => {
         setSyncFreshness(getSyncFreshnessBucket(lastSyncAt));
@@ -224,11 +225,15 @@ export function Layout({
         // persisted conflict status can never be cleared by a sync that will
         // never run again, so it would re-toast at every launch (#1001).
         if (syncStatus.backend === null || syncStatus.backend === 'off') return;
+        // Persisted history can hydrate after mount; only a newly completed cycle announces a conflict (#1446).
+        if (syncStatus.inFlight || syncStatus.lastResult !== 'success'
+            || syncStatus.lastResultAt === initialSyncResultAtRef.current) return;
         if (lastSyncStatus !== 'conflict' || !syncConflictToastKey) return;
         if (shownConflictToastKeyRef.current === syncConflictToastKey) return;
         shownConflictToastKeyRef.current = syncConflictToastKey;
         showToast(syncConflictNotice, 'info', 6000);
-    }, [lastSyncStatus, showToast, syncConflictNotice, syncConflictToastKey, syncStatus.backend]);
+    }, [lastSyncStatus, showToast, syncConflictNotice, syncConflictToastKey,
+        syncStatus.backend, syncStatus.inFlight, syncStatus.lastResult, syncStatus.lastResultAt]);
 
     // A sync cycle that queues a follow-up drops inFlight between runs while queued stays
     // true. Reading inFlight alone made the footer flicker on every hand-off — the status dot

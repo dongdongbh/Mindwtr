@@ -412,6 +412,7 @@ function* mergeEntitiesPass<T extends MergeableEntity>(
     let taskStatusResolutionWarnings = 0;
     let futureTimestampClampWarnings = 0;
     let archiveTwinMerges = 0;
+    let strippedArchiveClockMerges = 0;
     const nowTime = nowIso ? new Date(nowIso).getTime() : NaN;
     const maxAllowedMergeTime = Number.isFinite(nowTime) ? nowTime : Date.now();
     const getStringField = (item: T, field: string): string | undefined => {
@@ -526,10 +527,26 @@ function* mergeEntitiesPass<T extends MergeableEntity>(
         const shouldCheckContentDiff = hasRevision
             ? revDiff === 0 && localDeleted === incomingDeleted
             : localDeleted === incomingDeleted;
+        let strippedArchiveClock: string | undefined;
+        if (shouldCheckContentDiff && !comparableContentMatches && (entityType === 'task' || entityType === 'project')) {
+            const localArchive = normalizedLocalItem as unknown as Task | Project;
+            const incomingArchive = normalizedIncomingItem as unknown as Task | Project;
+            // An older peer can omit only this field from the same saved operation (#1446).
+            if (hasValidArchiveClock(localArchive.archivedAt) !== hasValidArchiveClock(incomingArchive.archivedAt)
+                && localArchive.rev === incomingArchive.rev && localArchive.revBy === incomingArchive.revBy
+                && localArchive.updatedAt === incomingArchive.updatedAt
+                && localArchive.status === incomingArchive.status
+                && localArchive.deletedAt === incomingArchive.deletedAt
+                && localArchive.purgedAt === incomingArchive.purgedAt
+                && JSON.stringify(toComparableValue({ ...normalizedLocalItem, archivedAt: undefined }))
+                    === JSON.stringify(toComparableValue({ ...normalizedIncomingItem, archivedAt: undefined }))) {
+                strippedArchiveClock = hasValidArchiveClock(localArchive.archivedAt) ? localArchive.archivedAt : incomingArchive.archivedAt;
+            }
+        }
         // #1430: two devices archiving the same task (auto-archive) give copies that differ only in archivedAt.
         const archiveTwin = shouldCheckContentDiff && !comparableContentMatches && !localDeleted
             && isArchiveClockTwin(normalizedLocalItem, normalizedIncomingItem, entityType, normalizeForComparison);
-        const contentDiff = shouldCheckContentDiff ? !comparableContentMatches && !archiveTwin : false;
+        const contentDiff = shouldCheckContentDiff ? !comparableContentMatches && !archiveTwin && !strippedArchiveClock : false;
         const unresolvedDeleteStateDiff = localDeleted !== incomingDeleted && (!hasRevision || revDiff === 0);
         const conflictReasons: ConflictReason[] = [];
         if (unresolvedDeleteStateDiff) conflictReasons.push('deleteState');
@@ -818,22 +835,9 @@ function* mergeEntitiesPass<T extends MergeableEntity>(
                 : localArchivedAt;
             if ((mergedItem as unknown as Task).archivedAt !== archivedAt) mergedItem = { ...mergedItem, archivedAt };
         }
-        if ((entityType === 'task' || entityType === 'project') && !hasValidArchiveClock((mergedItem as unknown as Task | Project).archivedAt)) {
-            const other = winner === normalizedLocalItem ? normalizedIncomingItem : normalizedLocalItem;
-            const withClock = other as unknown as Task | Project;
-            const withoutClock = mergedItem as unknown as Task | Project;
-            // A previous client can omit only this new field from the same saved operation.
-            // A newer operation with no clock must remain unknown and start a fresh period.
-            if (hasValidArchiveClock(withClock.archivedAt)
-                && withClock.rev === withoutClock.rev && withClock.revBy === withoutClock.revBy
-                && withClock.updatedAt === withoutClock.updatedAt
-                && withClock.status === withoutClock.status
-                && withClock.deletedAt === withoutClock.deletedAt
-                && withClock.purgedAt === withoutClock.purgedAt
-                && JSON.stringify(toComparableValue({ ...normalizedLocalItem, archivedAt: undefined }))
-                    === JSON.stringify(toComparableValue({ ...normalizedIncomingItem, archivedAt: undefined }))) {
-                mergedItem = { ...mergedItem, archivedAt: withClock.archivedAt };
-            }
+        if (strippedArchiveClock) {
+            strippedArchiveClockMerges += 1;
+            mergedItem = { ...mergedItem, archivedAt: strippedArchiveClock };
         }
         merged.push(normalizeTimestamps(mergedItem));
     }
@@ -865,6 +869,12 @@ function* mergeEntitiesPass<T extends MergeableEntity>(
         logInfo('Sync merge joined copies archived on two devices', {
             scope: 'sync',
             context: { releaseCheck: 'v1.3.7/auto-archive-converge', count: archiveTwinMerges },
+        });
+    }
+    if (strippedArchiveClockMerges > 0) {
+        logInfo('Sync merge retained archive clocks omitted by an equivalent peer', {
+            scope: 'sync', force: true,
+            context: { releaseCheck: 'v1.3.8/archive-clock-converge', entityType, count: strippedArchiveClockMerges },
         });
     }
 
