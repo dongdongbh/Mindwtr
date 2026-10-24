@@ -5302,6 +5302,20 @@ describe('activation with attachment files that no device location can serve', (
         expect(JSON.stringify(harness.infos)).not.toContain('scan.pdf');
     });
 
+    it('merges without the kept ids when the record cannot be read', async () => {
+        const { run } = createHarness({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask()]),
+            locationScope: SCOPE,
+            storage: {
+                readUnreachableAttachments: vi.fn(async () => { throw new Error('storage unavailable'); }),
+                writeUnreachableAttachments: vi.fn(async () => {}),
+            },
+        });
+
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+    });
+
     it('keeps the active location through a refused probe of another one', async () => {
         const OTHER_SCOPE = '["webdav","https://other.example/dav","me"]';
         const { hooks, run } = withRecord({

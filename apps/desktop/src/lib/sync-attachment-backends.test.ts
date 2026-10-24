@@ -528,6 +528,35 @@ describe('desktop sync attachment backends', () => {
         expect(gets()).toBe(first);
     });
 
+    it('never lets the 404 backoff stop an activation probe, nor sets it from one', async () => {
+        // A probe must prove every file now; a stale backoff would refuse "Continue".
+        const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
+        const appData = createCandidateAttachmentData();
+        Object.assign(appData.tasks[0].attachments![0], { uri: '', localStatus: 'missing' });
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        };
+        const run = (helpers?: Parameters<typeof syncWebdavAttachments>[4]) => syncWebdavAttachments(
+            appData,
+            { url: 'https://dav.example/mindwtr', username: 'alice' },
+            'https://dav.example/mindwtr',
+            deps,
+            helpers,
+        );
+        const gets = () => fetcher.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('attachments/attachment-1.txt')
+            && ((call as unknown[])[1] as RequestInit | undefined)?.method !== 'HEAD').length;
+
+        await run(activationHelpers());
+        await run();
+        expect(gets()).toBe(2);
+        await run(activationHelpers());
+        expect(gets()).toBe(3);
+    });
+
     it('marks cloud attachments unrecoverable when the remote file is missing', async () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
         const logSyncWarning = vi.fn();

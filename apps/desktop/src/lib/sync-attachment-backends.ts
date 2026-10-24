@@ -759,7 +759,8 @@ export async function syncWebdavAttachments(
     };
 
     const shouldDownload = (attachment: Attachment): boolean => {
-        if (getWebdavDownloadBackoff(attachment.id)) return false;
+        // A probe must prove every file now, as on mobile.
+        if (helpers?.activationProbe !== true && getWebdavDownloadBackoff(attachment.id)) return false;
         if (downloadCount >= WEBDAV_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC) {
             if (!downloadLimitLogged) {
                 deps.logSyncInfo('WebDAV attachment download limit reached', {
@@ -920,7 +921,7 @@ export async function syncWebdavAttachments(
                 }
                 if (getErrorStatus(error) === 404) {
                     // A row kept without its file stays live after this; the backoff frees its download slot.
-                    webdavDownloadBackoff.setFromError(attachment.id, error);
+                    if (helpers?.activationProbe !== true) webdavDownloadBackoff.setFromError(attachment.id, error);
                     const mutated = markAttachmentUnrecoverable(attachment);
                     deps.logSyncInfo('Cleared missing WebDAV cloud key after 404', { id: attachment.id });
                     return mutated;

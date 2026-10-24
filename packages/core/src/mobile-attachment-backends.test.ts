@@ -1095,6 +1095,33 @@ describe('WebDAV attachment pass', () => {
     expect(webdavGetFile).toHaveBeenCalledTimes(1);
   });
 
+  it('sets no 404 backoff from an activation probe', async () => {
+    const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(404); });
+    const { backends } = setup({ core: { webdavGetFile } });
+    const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
+
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { activationProbe: true, phase: 'post-merge' });
+    await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL);
+
+    expect(webdavGetFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('backs off a Dropbox download that answered not-found, so the next pass does not ask again', async () => {
+    const downloadDropboxFile = vi.fn(async (): Promise<ArrayBuffer> => { throw new DropboxFileNotFoundError(); });
+    const { backends } = setup({ core: { downloadDropboxFile } });
+    const data = withAttachment(fileAttachment({ uri: '', cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const resolveAccessToken = async () => 'token';
+
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken, activationProbe: true });
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken });
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(2);
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken });
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(2);
+    await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken, activationProbe: true });
+    expect(downloadDropboxFile).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps the local bytes when a remote-winner download fails', async () => {
     const webdavGetFile = vi.fn(async (): Promise<ArrayBuffer> => { throw httpError(500); });
     const { backends, memory } = setup({

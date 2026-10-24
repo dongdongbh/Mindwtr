@@ -2260,7 +2260,8 @@ class SharedSyncRunMachine {
     private async runMergePhase(): Promise<SyncRunResult> {
         this.hooks.onMergePhaseStart?.();
         // Rows kept without their file here: another device's upload of one wins the merge's key.
-        const unreachable = this.options.activationProbe ? null : await this.readUnreachableAttachments();
+        // A record that cannot be read only costs this one preference; the passes still guard the rows.
+        const unreachable = this.options.activationProbe ? null : await this.readUnreachableAttachments().catch(() => null);
         const keptIds = unreachable?.record[unreachable.scope];
         const syncResult = await this.performSyncCycleImpl(this.buildSyncCycleIO(keptIds?.length ? new Set(keptIds) : undefined));
         if (syncResult.status === 'skipped') {

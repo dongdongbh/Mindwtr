@@ -808,7 +808,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           const status = getErrorStatus(error);
           if (status === 404) {
             // A row kept without its file stays live after this; the backoff frees its download slot.
-            files.setWebdavDownloadBackoff(attachment.id, error);
+            if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, error);
             const mutated = markAttachmentUnrecoverable(attachment);
             files.logAttachmentInfo('Cleared missing WebDAV cloud key after 404', { id: attachment.id });
             return mutated;
@@ -1605,6 +1605,8 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
         continue;
       }
       if (!options.activationProbe && options.transferAdmission?.has(attachment, 'download')) continue;
+      // The WebDAV not-found backoff, id-keyed: a row kept without its file must not take a slot every pass.
+      if (!options.activationProbe && files.getWebdavDownloadBackoff(attachment.id)) continue;
       if (!options.activationProbe && downloadCount >= DROPBOX_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC) {
         files.logAttachmentInfo('Dropbox attachment download limit reached', {
           limit: String(DROPBOX_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC),
@@ -1673,6 +1675,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           && core.isDropboxFileNotFoundError(error)
           && attachment.cloudKey
         ) {
+          if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, { status: 404 });
           if (markAttachmentUnrecoverable(attachment)) {
             recordPatch(attachment);
           }
