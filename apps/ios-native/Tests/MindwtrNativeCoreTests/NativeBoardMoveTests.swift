@@ -1083,6 +1083,24 @@ final class NativeBoardMoveTests: XCTestCase {
         }
         let extreme = CGRect(x: 16, y: CGFloat.greatestFiniteMagnitude, width: 358, height: 64)
         XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(extreme, extreme, delta: .greatestFiniteMagnitude))
+        let recordedColumn = CGRect(x: 16, y: 395.3333333333333, width: 358, height: 67.66666666666669)
+        let recordedCurrent = CGRect(x: 16, y: 391.66666666666663, width: 358, height: 67.66666666666674)
+        let recordedDelta = recordedCurrent.minY - recordedColumn.minY
+        XCTAssertNotEqual(recordedColumn.height, recordedCurrent.height)
+        XCTAssertTrue(NativeBoardDragGeometry.matchesVerticalTranslation(recordedColumn, recordedCurrent, delta: recordedDelta))
+        let endpointULP = max(max(recordedColumn.minY.ulp, recordedColumn.maxY.ulp), max(recordedCurrent.minY.ulp, recordedCurrent.maxY.ulp))
+        let heightBound = min(CGFloat(0.000000001), 2 * endpointULP)
+        for drift in [4 * endpointULP, CGFloat(0.0001), CGFloat(0.01)] {
+            var changed = recordedCurrent; changed.size.height = recordedColumn.height + drift
+            XCTAssertGreaterThan(abs(changed.height - recordedColumn.height), heightBound)
+            XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(recordedColumn, changed, delta: recordedDelta))
+        }
+        var widthChanged = recordedCurrent; widthChanged.size.width = widthChanged.width.nextUp
+        XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(recordedColumn, widthChanged, delta: recordedDelta))
+        for invalid in [CGFloat.infinity, CGFloat.nan, CGFloat(0), CGFloat(-1), -recordedColumn.height] {
+            var changed = recordedCurrent; changed.size.height = invalid
+            XCTAssertFalse(NativeBoardDragGeometry.matchesVerticalTranslation(recordedColumn, changed, delta: recordedDelta))
+        }
         let ids = try await seedBoardOrderFixture(), faults = HostIOFaults(), core = host(faults)
         _ = try await core.start()
         _ = try await core.call("dataSetting", argumentsJSON: json([json([
@@ -1202,6 +1220,12 @@ final class NativeBoardMoveTests: XCTestCase {
         XCTAssertTrue(NativeBoardDragGeometry.accepts(roundoffGeometry))
         _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(roundoffGeometry)]))
         geometryContexts.append(roundoffGeometry)
+        let heightRoundoffGeometry = try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-scroll-height-roundoff-rebased",
+            originalViewport: sample, currentViewport: sample, originalArea: recordedColumn, currentArea: recordedCurrent,
+            originalRow: sample, currentRow: sample))
+        XCTAssertTrue(NativeBoardDragGeometry.accepts(heightRoundoffGeometry))
+        _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(heightRoundoffGeometry)]))
+        geometryContexts.append(heightRoundoffGeometry)
         let columnMismatch = try XCTUnwrap(NativeBoardDragGeometry.payload(reason: "geometry-area",
             originalViewport: sample, currentViewport: sample, originalArea: sample, currentArea: sample,
             originalRow: sample, currentRow: sample, rebaseReason: .columnSize, columnOrdinal: 2,

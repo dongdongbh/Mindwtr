@@ -342,7 +342,7 @@ describe('release diagnostics field names', () => {
             originalRow: missing, currentRow: nonfinite,
             rebaseReason: 'not-recorded', columnOrdinal: -1, originalColumn: missing, currentColumn: missing,
         };
-        for (const reason of [context.reason, 'geometry-scroll-roundoff-rebased']) {
+        for (const reason of [context.reason, 'geometry-scroll-roundoff-rebased', 'geometry-scroll-height-roundoff-rebased']) {
             const exported = sanitizeLogContext({ ...context, reason });
             expect(exported?.releaseCheck).toBe(context.releaseCheck);
             expect(exported?.reason).toBe(reason);

@@ -18,10 +18,10 @@ public enum NativeBoardDragGeometry {
         case sourceIneligible = "source-ineligible"
     }
     private static let columnRejections: [RebaseRejection] = [.columnIdentity, .columnInvalid, .columnX, .columnSize, .columnArithmetic, .columnY]
-    private static let reasons = ["geometry-missing", "geometry-viewport", "geometry-area", "geometry-rows", "geometry-other", "geometry-scroll-rebased", "geometry-scroll-roundoff-rebased"]
+    private static let reasons = ["geometry-missing", "geometry-viewport", "geometry-area", "geometry-rows", "geometry-other", "geometry-scroll-rebased", "geometry-scroll-roundoff-rebased", "geometry-scroll-height-roundoff-rebased"]
 
-    /// Subtracting a common scroll offset at one column can round differently at another.
-    /// Only the translated y coordinate admits this subpixel arithmetic residue.
+    /// Global vertical endpoints can round independently when converted into an origin and height.
+    /// Only height admits that endpoint ULP residue; horizontal geometry stays exact.
     public static func matchesVerticalTranslation(_ original: CGRect, _ current: CGRect, delta: CGFloat,
         rejected: (RebaseRejection) -> Void = { _ in }) -> Bool {
         func refuse(_ reason: RebaseRejection) -> Bool { rejected(reason); return false }
@@ -29,7 +29,12 @@ public enum NativeBoardDragGeometry {
                current.minX, current.minY, current.width, current.height, current.maxX, current.maxY, delta]
             .allSatisfy({ $0.isFinite }), original.width > 0, original.height > 0 else { return refuse(.columnInvalid) }
         guard current.origin.x == original.origin.x else { return refuse(.columnX) }
-        guard current.size == original.size else { return refuse(.columnSize) }
+        guard current.size.width == original.size.width else { return refuse(.columnSize) }
+        let endpointULP = max(max(original.minY.ulp, original.maxY.ulp), max(current.minY.ulp, current.maxY.ulp))
+        let heightRoundoff = min(CGFloat(0.000000001), 2 * endpointULP)
+        let heightResidual = current.size.height - original.size.height
+        guard original.size.height > 0, current.size.height > 0, heightResidual.isFinite,
+              abs(heightResidual) <= heightRoundoff else { return refuse(.columnSize) }
         let expectedY = original.origin.y + delta
         let residual = current.origin.y - expectedY
         guard expectedY.isFinite, residual.isFinite else { return refuse(.columnArithmetic) }

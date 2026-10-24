@@ -316,8 +316,11 @@ struct BoardScreen: View {
                         let rounded = zip(original.columns, value.columns).contains {
                             $0.1.frame != $0.0.frame.offsetBy(dx: 0, dy: delta)
                         }
+                        let heightRounded = zip(original.columns, value.columns).contains { $0.0.frame.height != $0.1.frame.height }
+                        let rebaseReason = heightRounded ? "geometry-scroll-height-roundoff-rebased"
+                            : rounded ? "geometry-scroll-roundoff-rebased" : "geometry-scroll-rebased"
                         if attempt.take(rounded ? .roundoffRebase : .rebase) {
-                            logDragGeometry(reason: rounded ? "geometry-scroll-roundoff-rebased" : "geometry-scroll-rebased",
+                            logDragGeometry(reason: rebaseReason,
                                             original: original, next: value, capture: drag.capture)
                         }
                     }
