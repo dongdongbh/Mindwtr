@@ -8615,8 +8615,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let attachments = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME);
         fs::create_dir_all(attachments.join("Archive")).expect("subfolder");
+        // Distinct without letter case too: Windows file systems fold "b.txt" and "B.txt" into one file.
         let names = [
-            "b.txt", "B.txt", "a-1.txt", "a.1.txt", "A.txt", "10.txt", "9.txt", "_x.txt", "Z-z.txt",
+            "b.txt", "C.txt", "a-1.txt", "a.1.txt", "A.txt", "10.txt", "9.txt", "_x.txt", "Z-z.txt",
         ];
         for name in names {
             fs::write(attachments.join(name), name).expect("attachment");
@@ -8640,7 +8641,7 @@ mod tests {
                 "9.txt",
                 "A.txt",
                 "Archive/x.txt",
-                "B.txt",
+                "C.txt",
                 "Z-z.txt",
                 "_x.txt",
                 "a-1.txt",
