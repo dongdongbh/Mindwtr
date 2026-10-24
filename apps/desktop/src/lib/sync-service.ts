@@ -64,6 +64,7 @@ import {
     injectExternalCalendars as injectExternalCalendarsForSync,
     persistExternalCalendars as persistExternalCalendarsForSync,
     summarizeMergeStats,
+    UNREACHABLE_ATTACHMENTS_KEY,
     withTimeout,
     withRetry,
     isRetryableError,
@@ -933,6 +934,8 @@ type SyncRunOptions = {
     /** Isolated candidate transport proof. The shared machine keeps merged
      *  local writes in memory and suppresses durable/finalization side effects. */
     activationProbe?: boolean;
+    /** Activation probe: the attachment ids the user chose to continue without. */
+    acceptMissingAttachmentIds?: readonly string[];
     /** Internal marker for the single automatic File Sync contention retry. */
     fileSyncLockBusyRetryAttempt?: number;
     /** The candidate was just activated; do not inherit the previous
@@ -1223,6 +1226,7 @@ export class SyncService {
         return (left?.backendOverride ?? undefined) === (right?.backendOverride ?? undefined)
             && (left?.configOverride ?? undefined) === (right?.configOverride ?? undefined)
             && (left?.activationProbe ?? false) === (right?.activationProbe ?? false)
+            && (left?.acceptMissingAttachmentIds ?? undefined) === (right?.acceptMissingAttachmentIds ?? undefined)
             && (left?.fileSyncLockBusyRetryAttempt ?? 0) === (right?.fileSyncLockBusyRetryAttempt ?? 0)
             && (left?.ignorePendingRemoteWriteBackoff ?? false)
                 === (right?.ignorePendingRemoteWriteBackoff ?? false);
@@ -2647,6 +2651,7 @@ export class SyncService {
             cloudProvider: context.cloudProvider,
             io: await SyncService.createBackendIO(context),
             fastSyncScope,
+            locationScope: desktopSyncLocationScope(context),
         };
     }
 
@@ -3615,6 +3620,7 @@ export class SyncService {
                 options: {
                     manual: options.manual,
                     activationProbe: options.activationProbe,
+                    acceptMissingAttachmentIds: options.acceptMissingAttachmentIds,
                     fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
                     ignorePendingRemoteWriteBackoff: options.ignorePendingRemoteWriteBackoff,
                 },
@@ -3625,6 +3631,8 @@ export class SyncService {
                     persistSyncStatus: (updates) => persistSyncSettings(updates),
                     readFastSyncState: async (scope) => readFastSyncState(scope),
                     writeFastSyncState: async (state) => writeFastSyncState(state, logSyncWarning),
+                    readUnreachableAttachments: async () => localStorage.getItem(UNREACHABLE_ATTACHMENTS_KEY),
+                    writeUnreachableAttachments: async (raw) => localStorage.setItem(UNREACHABLE_ATTACHMENTS_KEY, raw),
                     injectExternalCalendars: (data) => injectExternalCalendars(data),
                     persistExternalCalendars: (data) => persistExternalCalendars(data),
                 },

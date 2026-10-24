@@ -482,6 +482,38 @@ describe('useSyncSettings cloud token validation', () => {
         });
     });
 
+    it.each([true, false])('asks before activating without missing attachment files (continue: %s)', async (accept) => {
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            error: 'Candidate attachment proof failed for "scan.pdf" on task "Tax return"',
+            activationMissingAttachments: [{ id: 'a1', ownerType: 'task', ownerId: 't1', title: 'scan.pdf', ownerTitle: 'Tax return' }],
+        });
+        const requestConfirmation = vi.fn().mockResolvedValue(accept);
+        const { result } = setup(vi.fn(), requestConfirmation, true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        await act(async () => {
+            await result.current.syncPageProps.onSetSyncBackend('file');
+        });
+        act(() => result.current.syncPageProps.onSyncPathChange('/sync'));
+        await act(async () => {
+            await result.current.syncPageProps.onSaveSyncPath();
+        });
+
+        expect(requestConfirmation).toHaveBeenCalledWith({
+            title: 'Some attachment files are missing',
+            message: expect.stringContaining('• scan.pdf (Tax return)'),
+            confirmLabel: 'Continue without these files',
+        });
+        expect(requestConfirmation.mock.calls[0]?.[0].message).toContain('The files stay where they were and are not deleted.');
+        const calls = vi.mocked(SyncService.performSync).mock.calls.map(([options]) => options);
+        if (accept) {
+            expect(calls[1]).toMatchObject({ activationProbe: true, acceptMissingAttachmentIds: ['a1'] });
+            expect(calls[2]).toMatchObject({ ignorePendingRemoteWriteBackoff: true });
+        } else {
+            expect(calls).toHaveLength(1);
+        }
+    });
+
     it('tests the selected sync folder without saving it', async () => {
         languageMocks.t.mockImplementation((key: string) => (
             key === 'settings.folderTestSucceeded' ? 'Folder test passed.' : key

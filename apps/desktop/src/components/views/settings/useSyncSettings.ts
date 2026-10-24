@@ -18,6 +18,7 @@ import {
     addBreadcrumb,
     CLOCK_SKEW_THRESHOLD_MS,
     createImportDiagnostics,
+    formatActivationMissingAttachments,
     formatImportDiagnostic,
     getBackupSourceFileDiagnostic,
     getInMemoryAppDataSnapshot,
@@ -143,7 +144,7 @@ type UseSyncSettingsOptions = {
     showSaved: () => void;
     selectSyncFolderTitle: string;
     lastSyncNeverLabel: string;
-    requestConfirmation: (options: { title: string; message: string }) => Promise<boolean>;
+    requestConfirmation: (options: { title: string; message: string; confirmLabel?: string }) => Promise<boolean>;
 };
 
 export const useSyncSettings = ({
@@ -1229,21 +1230,50 @@ export const useSyncSettings = ({
                 // couple of times absorbs the ordinary case (an auto sync or an
                 // editor save racing the verification) instead of dropping the
                 // switch behind an info toast the user reads as "saved".
-                let probeResult = await SyncService.performSync({
+                let acceptMissingAttachmentIds: string[] | undefined;
+                const runActivationProbe = () => SyncService.performSync({
                     activationProbe: true,
                     configOverride,
                     manual: true,
+                    ...(acceptMissingAttachmentIds ? { acceptMissingAttachmentIds } : {}),
                 });
-                for (let attempt = 1; probeResult.skipped === 'requeued' && attempt < ACTIVATION_PROBE_ATTEMPTS; attempt += 1) {
-                    void logInfo('Sync activation probe requeued; retrying', {
-                        scope: 'sync',
-                        extra: { attempt: String(attempt + 1), backend: configOverride.backend },
+                const runActivationProbeWithRetries = async () => {
+                    let result = await runActivationProbe();
+                    for (let attempt = 1; result.skipped === 'requeued' && attempt < ACTIVATION_PROBE_ATTEMPTS; attempt += 1) {
+                        void logInfo('Sync activation probe requeued; retrying', {
+                            scope: 'sync',
+                            extra: { attempt: String(attempt + 1), backend: configOverride.backend },
+                        });
+                        result = await runActivationProbe();
+                    }
+                    return result;
+                };
+                let probeResult = await runActivationProbeWithRetries();
+                const missingAttachments = probeResult.success ? undefined : probeResult.activationMissingAttachments;
+                if (missingAttachments?.length) {
+                    // Continue keeps the rows (shown as missing) and leaves the files
+                    // where they are; Cancel keeps the previous settings active.
+                    const confirmed = await requestConfirmation({
+                        title: resolveText('settings.syncMissingFilesTitle', 'Some attachment files are missing'),
+                        message: formatText(
+                            'settings.syncMissingFilesBody',
+                            'These attachment files are not on this device and not at the new sync location:\n\n{files}\n\nYou can continue without them. The attachments stay in your tasks and projects and show as missing. The files stay where they were and are not deleted.',
+                            {
+                                files: formatActivationMissingAttachments(missingAttachments, (count) => formatText(
+                                    'settings.syncMissingFilesMore',
+                                    'and {count} more',
+                                    { count },
+                                )),
+                            },
+                        ),
+                        confirmLabel: resolveText('settings.syncMissingFilesContinue', 'Continue without these files'),
                     });
-                    probeResult = await SyncService.performSync({
-                        activationProbe: true,
-                        configOverride,
-                        manual: true,
-                    });
+                    if (!confirmed || syncConfigurationGeneration.current !== activationGeneration) {
+                        await resolveCapturedCredential();
+                        return;
+                    }
+                    acceptMissingAttachmentIds = missingAttachments.map((attachment) => attachment.id);
+                    probeResult = await runActivationProbeWithRetries();
                 }
                 if (probeResult.skipped === 'requeued') {
                     if (configOverride.dropboxCredentialHandle) {
@@ -1334,7 +1364,8 @@ export const useSyncSettings = ({
                     if (configOverride.dropboxCredentialHandle) {
                         await resolveCapturedCredential();
                     }
-                    if (probeResult.error) {
+                    // A missing-files refusal names the files: it stays on screen, never in the log.
+                    if (probeResult.error && !probeResult.activationMissingAttachments) {
                         void logError(new Error(probeResult.error), { scope: 'sync', step: 'activationProbe' });
                     }
                     const verificationMessage = resolveText(
@@ -1514,6 +1545,7 @@ export const useSyncSettings = ({
         isTauri,
         persistedCloudProvider,
         persistedSyncBackend,
+        requestConfirmation,
         resolveText,
         showToast,
         syncBackend,

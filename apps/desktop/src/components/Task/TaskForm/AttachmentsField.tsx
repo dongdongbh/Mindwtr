@@ -1,5 +1,5 @@
 import { BookOpen, Folder, FolderOpen, Link2, Paperclip, Pencil, Trash2 } from 'lucide-react';
-import { tFallback, type Attachment } from '@mindwtr/core';
+import { isAttachmentKeptWithoutFile, tFallback, type Attachment } from '@mindwtr/core';
 import { isFolderLinkAttachment, useBareFileReferenceCheck, useExternalFileReferenceCheck } from '../../../lib/attachment-reference';
 import { getAttachmentDisplayTitle } from '../../../lib/attachment-utils';
 import { isTauriRuntime } from '../../../lib/runtime';
@@ -191,7 +191,7 @@ export function AttachmentsField({
                         const isDownloading = attachment.localStatus === 'downloading';
                         const statusLabel = isDownloading
                             ? t('common.loading')
-                            : isMissing && attachment.cloudKey
+                            : isMissing && attachment.cloudKey && !isAttachmentKeptWithoutFile(attachment)
                                 ? t('attachments.download')
                                 : isMissing
                                     ? t('attachments.missing')

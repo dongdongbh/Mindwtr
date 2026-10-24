@@ -322,11 +322,11 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   const advancedPageProps = useSettingsAdvancedPage({ loadEnabled: advancedLoadEnabled, isTauri, showSaved, t });
 
   const requestSettingsConfirmation = useCallback(
-    ({ title, message }: { title: string; message: string }) =>
+    ({ title, message, confirmLabel }: { title: string; message: string; confirmLabel?: string }) =>
       requestConfirmation({
         title,
         description: message,
-        confirmLabel: "Continue",
+        confirmLabel: confirmLabel ?? "Continue",
         cancelLabel,
       }),
     [cancelLabel, requestConfirmation],
