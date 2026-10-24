@@ -1,4 +1,4 @@
-import { AppData, mergeAppDataWithStats, SqliteAdapter, searchAll, splitSqlStatements, taskMatchesQuery, type SqliteClient, type CalendarSyncEntry, StorageAdapter, type Task } from '@mindwtr/core';
+import { AppData, keepSavedFilters, mergeAppDataWithStats, SqliteAdapter, searchAll, splitSqlStatements, taskMatchesQuery, type SqliteClient, type CalendarSyncEntry, StorageAdapter, type Task } from '@mindwtr/core';
 import { AppState, NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -61,7 +61,9 @@ const SQLITE_DIRECTORY_NAME = 'SQLite';
 type SqliteState = {
     adapter: SqliteAdapter;
     client: SqliteClient;
-    writeBlockedReason?: 'json-ahead-recovery-read';
+    writeBlockedReason?: 'json-ahead-recovery-read' | 'json-migration-failed';
+    // Set with 'json-migration-failed': the copy that move failed to take.
+    jsonCopy?: string;
 };
 
 let sqliteStatePromise: Promise<SqliteState> | null = null;
@@ -91,11 +93,24 @@ class JsonAheadRecoveryReadError extends Error {
     }
 }
 
+// A failed first-launch move of the JSON copy into an empty SQLite. SQLite
+// then lacks everything; only the copy carried here holds the library.
+class JsonMigrationFailedError extends Error {
+    constructor(readonly jsonCopy: string, cause: unknown) {
+        super(formatError(cause));
+        this.name = 'JsonMigrationFailedError';
+    }
+}
+
+const SQLITE_WRITE_BLOCKED_MESSAGES: Record<NonNullable<SqliteState['writeBlockedReason']> | 'canonical-reload', string> = {
+    'canonical-reload': 'Pending local changes were recovered. Reload Mindwtr before saving again.',
+    'json-ahead-recovery-read': 'Saving is temporarily disabled while Mindwtr retries recovery of pending local changes.',
+    'json-migration-failed': 'Saving is blocked because moving your data into the database failed. Mindwtr tries again every minute. If this keeps happening, use Export Backup in Settings to keep a copy, then contact support.',
+};
+
 class SqliteWriteBlockedError extends Error {
-    constructor(reason: 'json-ahead-recovery-read' | 'canonical-reload') {
-        super(reason === 'canonical-reload'
-            ? 'Pending local changes were recovered. Reload Mindwtr before saving again.'
-            : 'Saving is temporarily disabled while Mindwtr retries recovery of pending local changes.');
+    constructor(reason: keyof typeof SQLITE_WRITE_BLOCKED_MESSAGES) {
+        super(SQLITE_WRITE_BLOCKED_MESSAGES[reason]);
         this.name = 'SqliteWriteBlockedError';
     }
 }
@@ -190,7 +205,7 @@ const awaitQueuedSqliteWrites = async (phase: string, timeoutMs = SQLITE_WRITE_W
     }
 };
 
-const shouldUseJsonBackupFastPath = () => preferJsonBackup && Date.now() < preferJsonBackupUntil;
+const shouldUseJsonBackupFastPath = () => preferJsonBackup && !jsonBackupFrozen && Date.now() < preferJsonBackupUntil;
 
 // Mirrors JSON_AHEAD_OF_SQLITE_KEY so the common path (SQLite healthy) never
 // pays an AsyncStorage write per save.
@@ -374,7 +389,12 @@ const getLegacyJson = async (AsyncStorage: any): Promise<string | null> => {
     for (const legacyKey of LEGACY_DATA_KEYS) {
         const legacyValue = await AsyncStorage.getItem(legacyKey);
         if (legacyValue != null) {
-            await AsyncStorage.setItem(DATA_KEY, legacyValue);
+            try {
+                await AsyncStorage.setItem(DATA_KEY, legacyValue);
+            } catch (error) {
+                // The legacy key still holds it; a full AsyncStorage must not stop startup.
+                logStorageWarn('[Storage] Failed to promote the legacy JSON copy', error);
+            }
             return legacyValue;
         }
     }
@@ -411,6 +431,18 @@ let jsonBackupOversizeAtMs = 0;
 let jsonBackupOversizeChars = 0;
 
 const isJsonBackupUsable = (): boolean => !jsonBackupSkippedOversize;
+
+// Set when the one-time reconcile failed: the JSON copy may hold data SQLite
+// lacks, so no backup may overwrite it until a later start reconciles it.
+// Until then SQLite is the only source: the copy is never served or pinned.
+let jsonBackupFrozen = false;
+
+// Before any pin or queued-write mark: a refused save must leave reads alone.
+const assertJsonBackupNotFrozen = (cause: unknown): void => {
+    if (!jsonBackupFrozen) return;
+    logStorageWarn('[Storage] SQLite save failed while the JSON backup is frozen', cause);
+    throw new Error('SQLite could not save this change, and the JSON backup holds data not yet merged into it.');
+};
 
 // The oversize flag above lives only in memory, so on a cold start a library
 // past the cap looked like it had a fallback: the first read failed fast into
@@ -463,6 +495,11 @@ const hasStoredJsonBackup = async (): Promise<boolean> => {
     }
     return jsonBackupStored;
 };
+
+// Pending or stored, and not outgrown: a fallback read would find a copy.
+const hasUsableJsonBackup = async (): Promise<boolean> => (
+    !jsonBackupFrozen && isJsonBackupUsable() && (jsonBackupCoalescer.hasPending() || await hasStoredJsonBackup())
+);
 
 // The #975 read-authority rule: reads come from the JSON backup while it is
 // preferred (fast path) or holds writes SQLite hasn't taken yet (json-ahead).
@@ -697,6 +734,7 @@ const jsonBackupCoalescer = createCoalescingWriter<AppData, { sizeChars: number;
     minIntervalMs: JSON_BACKUP_MIN_INTERVAL_MS,
     mergeMinimumUpdatedAtMs: (prevMs, nextMs) => Math.max(prevMs, nextMs),
     write: async (pending) => {
+        if (jsonBackupFrozen) return { sizeChars: 0, skipped: false };
         const result = await saveStartupJsonBackup(AsyncStorage, pending.data, pending.phasePrefix, pending.minimumUpdatedAtMs);
         if (result.skipped) await markJsonBackupOutgrown();
         return result;
@@ -828,6 +866,13 @@ export const getMobileStartupSnapshotFromBackup = async (): Promise<AppData | nu
     if (backupVersion !== STARTUP_BACKUP_VERSION || await readJsonBackupOutgrown()) {
         return null;
     }
+    // Before a reconcile the copy may be one SQLite would overrule; the startup
+    // view must never show it.
+    try {
+        if (await AsyncStorage.getItem(SQLITE_JSON_RECONCILE_KEY) == null) return null;
+    } catch {
+        return null;
+    }
     const jsonValue = await getLegacyJson(AsyncStorage);
     if (jsonValue == null) {
         return null;
@@ -845,8 +890,18 @@ export const getMobileStartupSnapshotFromBackup = async (): Promise<AppData | nu
 // again it holds pre-rc.1 data and the normal "migrate only into an empty DB" path
 // would silently drop everything written on rc.1. Recover by merging the backup into
 // SQLite once, through the same revision-aware merge sync uses (idempotent, LWW,
-// tombstone-safe). Never blocks startup: any failure is logged and retried next launch.
+// tombstone-safe). Never blocks startup: a failure freezes the JSON backup (see
+// prepareSqliteData) and is retried next launch.
 const SQLITE_JSON_RECONCILE_KEY = `${DATA_KEY}:sqlite-json-reconcile-v1`;
+
+// Best-effort: an unwritten marker only repeats an idempotent merge next launch.
+const markJsonReconcileDone = async (): Promise<void> => {
+    try {
+        await AsyncStorage.setItem(SQLITE_JSON_RECONCILE_KEY, '1');
+    } catch (error) {
+        logStorageWarn('[Storage] Failed to write the JSON reconcile marker', error);
+    }
+};
 
 const reconcileJsonBackupIntoSqlite = async (
     adapter: SqliteAdapter,
@@ -858,7 +913,7 @@ const reconcileJsonBackupIntoSqlite = async (
         // Only merge a backup maintained by the current SQLite bridge. An old,
         // unmarked legacy snapshot may be stale and must not reintroduce entities
         // after SQLite has already become the primary store.
-        await AsyncStorage.setItem(SQLITE_JSON_RECONCILE_KEY, '1');
+        await markJsonReconcileDone();
         return;
     }
     let jsonValue: string | null = null;
@@ -867,6 +922,8 @@ const reconcileJsonBackupIntoSqlite = async (
     } catch (error) {
         // Oversized backups (> Android's 2MB CursorWindow) are unreadable; there is
         // nothing to recover from them, so don't fail init and don't mark done.
+        // Any other read failure may pass; the copy must survive until it does.
+        if (!isPermanentJsonBackupReadError(error)) throw error;
         logStorageWarn('[Storage] Skipped JSON backup reconcile; backup unreadable', error);
         return;
     }
@@ -877,7 +934,7 @@ const reconcileJsonBackupIntoSqlite = async (
         } catch (error) {
             // A corrupt backup has nothing to recover; don't re-parse it every launch.
             logStorageWarn('[Storage] Skipped JSON backup reconcile; backup did not parse', error);
-            await AsyncStorage.setItem(SQLITE_JSON_RECONCILE_KEY, '1');
+            await markJsonReconcileDone();
             return;
         }
         const current = currentSnapshot ?? await adapter.getData();
@@ -890,7 +947,23 @@ const reconcileJsonBackupIntoSqlite = async (
             tasksFromBackup: String((stats.tasks?.incomingOnly ?? 0) + (stats.tasks?.resolvedUsingIncoming ?? 0)),
         });
     }
-    await AsyncStorage.setItem(SQLITE_JSON_RECONCILE_KEY, '1');
+    await markJsonReconcileDone();
+};
+
+// The sync merge starts from SQLite's settings and drops the copy's
+// device-local and unstamped ones. Into a SQLite with no settings nothing else
+// holds them, so the copy's settings move whole, minus filters SQLite cannot
+// store. The first move also keeps the copy's keys under settings a second
+// process wrote meanwhile.
+const mergeJsonCopyIntoSqlite = (current: AppData, copy: AppData, firstMove = false) => {
+    const result = mergeAppDataWithStats(current, copy);
+    const copySettings = { ...copy.settings, savedFilters: keepSavedFilters(copy.settings?.savedFilters) };
+    if (Object.keys(current.settings ?? {}).length === 0) {
+        result.data.settings = copySettings;
+    } else if (firstMove) {
+        result.data.settings = { ...copySettings, ...result.data.settings };
+    }
+    return result;
 };
 
 /**
@@ -939,7 +1012,7 @@ const recoverJsonAheadWrites = async (adapter: SqliteAdapter, currentSnapshot?: 
         return false;
     }
     const current = currentSnapshot ?? await adapter.getData();
-    const { data: merged, stats } = mergeAppDataWithStats(current, backup);
+    const { data: merged, stats } = mergeJsonCopyIntoSqlite(current, backup);
     await adapter.saveData(merged);
     await clearJsonAheadOfSqlite();
     logStorageInfo('[Storage] Recovered JSON-only writes into SQLite', {
@@ -949,6 +1022,17 @@ const recoverJsonAheadWrites = async (adapter: SqliteAdapter, currentSnapshot?: 
         tasksFromBackup: String((stats.tasks?.incomingOnly ?? 0) + (stats.tasks?.resolvedUsingIncoming ?? 0)),
     });
     return true;
+};
+
+// Forced: init runs before the settings that enable logging load.
+const logMigrationFailure = (step: 'migrate' | 'reconcile', error: unknown): void => {
+    void logWarn(step === 'migrate'
+        ? '[Storage] JSON migration into SQLite failed; saving is blocked'
+        : '[Storage] JSON reconcile into SQLite failed; JSON backup frozen', {
+        scope: 'storage',
+        force: true,
+        extra: { releaseCheck: 'v1.3.8/rn-migration-write-block', step, error: formatError(error) },
+    });
 };
 
 const prepareSqliteData = async (adapter: SqliteAdapter, client: SqliteClient): Promise<boolean> => {
@@ -983,8 +1067,14 @@ const prepareSqliteData = async (adapter: SqliteAdapter, client: SqliteClient): 
             await measureStartupPhase('mobile.storage.sqlite_init.reconcile_json_backup', async () =>
                 reconcileJsonBackupIntoSqlite(adapter, readableSnapshot)
             );
+            jsonBackupFrozen = false;
         } catch (error) {
-            logStorageWarn('[Storage] Failed to reconcile JSON backup into SQLite', error);
+            // SQLite stays the source and keeps taking saves; only the backup
+            // that would overwrite the unmerged copy is held back. A slow init
+            // may have pinned reads to that copy already; SQLite serves them now.
+            jsonBackupFrozen = true;
+            clearPreferJsonBackup();
+            logMigrationFailure('reconcile', error);
         }
         return recoveredJsonAhead;
     }
@@ -992,23 +1082,39 @@ const prepareSqliteData = async (adapter: SqliteAdapter, client: SqliteClient): 
     const jsonValue = await measureStartupPhase('mobile.storage.sqlite_init.read_legacy_json', async () =>
         getLegacyJson(AsyncStorage)
     );
-    if (jsonValue == null) return recoveredJsonAhead;
+    // Nothing to move counts as moved: the marker lets the startup snapshot show.
+    if (jsonValue == null) {
+        await markJsonReconcileDone();
+        return recoveredJsonAhead;
+    }
+    let backup: AppData;
     try {
-        const backup = parseStoredAppDataJson(jsonValue);
+        backup = parseStoredAppDataJson(jsonValue);
+    } catch (error) {
+        // A corrupt copy has nothing to move; blocking on it would lock the app for good.
+        logStorageWarn('[Storage] Skipped JSON migration; backup did not parse', error);
+        await markJsonReconcileDone();
+        return recoveredJsonAhead;
+    }
+    try {
         // Re-read after the emptiness probe and merge even on first migration.
         // A second process may have inserted rows between the two operations;
         // promoting the JSON snapshot directly would make those rows omissions.
         const current = readableSnapshot ?? await adapter.getData();
-        const { data: merged } = mergeAppDataWithStats(current, backup);
-        // Ensure fallback stays consistent before attempting the SQLite write.
-        await saveStartupJsonBackup(AsyncStorage, merged, 'mobile.storage.sqlite_init.migrate');
+        const { data: merged } = mergeJsonCopyIntoSqlite(current, backup, true);
+        try {
+            // Ensure fallback stays consistent before attempting the SQLite write.
+            await saveStartupJsonBackup(AsyncStorage, merged, 'mobile.storage.sqlite_init.migrate');
+        } catch (error) {
+            logStorageWarn('[Storage] Failed to refresh the JSON backup before migration', error);
+        }
         await measureStartupPhase('mobile.storage.sqlite_init.migrate_json_to_sqlite', async () =>
             adapter.saveData(merged)
         );
-        await AsyncStorage.setItem(SQLITE_JSON_RECONCILE_KEY, '1');
     } catch (error) {
-        logStorageWarn('[Storage] Failed to migrate JSON data to SQLite', error);
+        throw new JsonMigrationFailedError(jsonValue, error);
     }
+    await markJsonReconcileDone();
     return recoveredJsonAhead;
 };
 
@@ -1022,6 +1128,14 @@ const prepareSqliteState = async (adapter: SqliteAdapter, client: SqliteClient):
             requireCanonicalReload();
             markStartupPhase('mobile.storage.sqlite_init.write_quarantined');
             return { adapter, client, writeBlockedReason: 'json-ahead-recovery-read' };
+        }
+        if (error instanceof JsonMigrationFailedError) {
+            // A healthy state here would read the empty database, and its first
+            // backup would overwrite the only copy. Reads serve that copy and
+            // writes stay blocked until a later init succeeds.
+            logMigrationFailure('migrate', error);
+            markStartupPhase('mobile.storage.sqlite_init.write_quarantined');
+            return { adapter, client, writeBlockedReason: 'json-migration-failed', jsonCopy: error.jsonCopy };
         }
         if (__DEV__) {
             logStorageWarn('[Storage] SQLite availability check failed', error);
@@ -1178,6 +1292,10 @@ const createStorage = (): StorageAdapter => {
                     logStorageWarn('[Storage] Refusing oversized JSON backup fallback', undefined, { phase });
                     throw new Error('The library is too large for the local JSON backup; SQLite is the only readable copy.');
                 }
+                if (jsonBackupFrozen) {
+                    logStorageWarn('[Storage] Refusing frozen JSON backup fallback', undefined, { phase });
+                    throw new Error('The JSON backup holds data not yet merged into SQLite; SQLite is the only readable copy.');
+                }
                 if (shouldUseSqlite && await readJsonBackupOutgrown()) {
                     // Older than the library SQLite holds, legacy keys included.
                     logStorageWarn('[Storage] Refusing outgrown JSON backup fallback', undefined, { phase });
@@ -1236,8 +1354,7 @@ const createStorage = (): StorageAdapter => {
                 }
                 // Fail fast only when the JSON backup can actually catch us.
                 // A pending backup counts: the fallback read flushes it first.
-                hasJsonFallback = isJsonBackupUsable()
-                    && (jsonBackupCoalescer.hasPending() || await hasStoredJsonBackup());
+                hasJsonFallback = await hasUsableJsonBackup();
                 const readTimeoutMs = hasJsonFallback
                     ? SQLITE_STARTUP_TIMEOUT_MS
                     : SQLITE_NO_FALLBACK_READ_TIMEOUT_MS;
@@ -1255,6 +1372,10 @@ const createStorage = (): StorageAdapter => {
                         'SQLite initialization timed out'
                     )
                 );
+                if (state.jsonCopy != null) {
+                    // Past the fallback checks: no backup has been written over it since.
+                    return parseStoredAppDataJson(state.jsonCopy);
+                }
                 const { adapter } = state;
                 const readStartedAt = Date.now();
                 const data = await measureStartupPhase('mobile.storage.get_data.sqlite_read', async () =>
@@ -1293,7 +1414,7 @@ const createStorage = (): StorageAdapter => {
                 markStartupPhase('mobile.storage.get_data.end');
                 return data;
             } catch (e) {
-                if (!hasJsonFallback || !isJsonBackupUsable()) {
+                if (!hasJsonFallback || !isJsonBackupUsable() || jsonBackupFrozen) {
                     // There is no readable fallback, so pinning reads to it would
                     // only stall every read for the whole cooldown and fail the
                     // sync cycle waiting behind it, or serve an empty library over
@@ -1326,13 +1447,16 @@ const createStorage = (): StorageAdapter => {
             return enqueueSave(async () => {
                 markStartupPhase('mobile.storage.save_data.start');
                 const queueWaitMs = Date.now() - enqueuedAtMs;
-                const queuedWriteStartedAtMs = markQueuedWriteStarted();
+                // Marked only once the write may proceed: a refused save writes
+                // nothing, so it must not make the JSON backup look stale.
+                let queuedWriteStartedAtMs = 0;
                 try {
                     if (!shouldUseSqlite) {
                         throw new Error(sqliteUnavailableReason ?? 'SQLite unavailable');
                     }
                     const state = await measureStartupPhase('mobile.storage.save_data.sqlite_get_state', async () => getSqliteState());
                     assertSqliteWritesAllowed(state, reloadRequiredWhenEnqueued);
+                    queuedWriteStartedAtMs = markQueuedWriteStarted();
                     const { adapter } = state;
                     // Sample JS-thread congestion alongside the write: a setTimeout(0)
                     // that resolves late means the thread is starved, which inflates every
@@ -1397,6 +1521,8 @@ const createStorage = (): StorageAdapter => {
                         markStartupPhase('mobile.storage.save_data.write_quarantined');
                         throw error;
                     }
+                    assertJsonBackupNotFrozen(error);
+                    queuedWriteStartedAtMs ||= markQueuedWriteStarted();
                     markPreferJsonBackup();
                     if (__DEV__ && sqliteUnavailableReason) {
                         logStorageWarn(`[Storage] ${sqliteUnavailableReason}; keeping JSON backup`);
@@ -1427,13 +1553,14 @@ const createStorage = (): StorageAdapter => {
             const reloadRequiredWhenEnqueued = canonicalReloadRequired;
             return enqueueSave(async () => {
                 const queueWaitMs = Date.now() - enqueuedAtMs;
-                const queuedWriteStartedAtMs = markQueuedWriteStarted();
+                let queuedWriteStartedAtMs = 0;
                 try {
                     if (!shouldUseSqlite) {
                         throw new Error(sqliteUnavailableReason ?? 'SQLite unavailable');
                     }
                     const state = await measureStartupPhase('mobile.storage.save_task.sqlite_get_state', async () => getSqliteState());
                     assertSqliteWritesAllowed(state, reloadRequiredWhenEnqueued);
+                    queuedWriteStartedAtMs = markQueuedWriteStarted();
                     const { adapter } = state;
                     // Same unawaited probe as saveData: a single-row write taking
                     // seconds is either queued behind another save or starved by the
@@ -1461,6 +1588,8 @@ const createStorage = (): StorageAdapter => {
                     if (error instanceof SqliteWriteBlockedError) {
                         throw error;
                     }
+                    assertJsonBackupNotFrozen(error);
+                    queuedWriteStartedAtMs ||= markQueuedWriteStarted();
                     markPreferJsonBackup();
                     logStorageWarn('[Storage] SQLite task save failed', error);
                     if (!snapshot) {
@@ -1493,20 +1622,22 @@ const createStorage = (): StorageAdapter => {
             }
             try {
                 await awaitQueuedSqliteWrites('query_tasks');
-                const { adapter } = await withOperationTimeout(
+                const { adapter, writeBlockedReason } = await withOperationTimeout(
                     getSqliteState(),
                     SQLITE_QUERY_TIMEOUT_MS,
                     'SQLite query initialization timed out'
                 );
-                if (typeof (adapter as any).queryTasks === 'function') {
-                    return withOperationTimeout(
+                // Blocked after a failed migration: getData() below serves the JSON copy.
+                if (writeBlockedReason !== 'json-migration-failed' && typeof (adapter as any).queryTasks === 'function') {
+                    return await withOperationTimeout(
                         (adapter as any).queryTasks(options),
                         SQLITE_QUERY_TIMEOUT_MS,
                         'SQLite query timed out'
                     );
                 }
             } catch (error) {
-                markPreferJsonBackup();
+                // Pinning reads to an absent or outgrown backup would only fail them.
+                if (await hasUsableJsonBackup()) markPreferJsonBackup();
                 logStorageWarn('[Storage] SQLite query failed, falling back to in-memory filter', error);
             }
             const data = await mobileStorage.getData();
@@ -1522,20 +1653,20 @@ const createStorage = (): StorageAdapter => {
             }
             try {
                 await awaitQueuedSqliteWrites('search_all');
-                const { adapter } = await withOperationTimeout(
+                const { adapter, writeBlockedReason } = await withOperationTimeout(
                     getSqliteState(),
                     SQLITE_QUERY_TIMEOUT_MS,
                     'SQLite search initialization timed out'
                 );
-                if (typeof (adapter as any).searchAll === 'function') {
-                    return withOperationTimeout(
+                if (writeBlockedReason !== 'json-migration-failed' && typeof (adapter as any).searchAll === 'function') {
+                    return await withOperationTimeout(
                         (adapter as any).searchAll(query),
                         SQLITE_QUERY_TIMEOUT_MS,
                         'SQLite search timed out'
                     );
                 }
             } catch (error) {
-                markPreferJsonBackup();
+                if (await hasUsableJsonBackup()) markPreferJsonBackup();
                 logStorageWarn('[Storage] SQLite search failed, falling back to in-memory search', error);
             }
             const data = await mobileStorage.getData();
@@ -1598,6 +1729,7 @@ export const __mobileStorageTestUtils = {
         jsonBackupOversizeChars = 0;
         jsonBackupStored = null;
         jsonBackupOutgrown = null;
+        jsonBackupFrozen = false;
         widgetRefreshCoalescer.reset();
         initializeSqliteState = initSqliteState;
         jsonAheadOfSqlite = false;

@@ -665,7 +665,9 @@ describe('mobile storage adapter', () => {
       getData: vi.fn().mockImplementation(async () => emptySqlite()),
       saveData: vi.fn().mockRejectedValue(new Error('disk I/O error')),
     };
-    await firstRun.__mobileStorageTestUtils.prepareSqliteDataForTests(failingAdapter as never, client as never);
+    await expect(
+      firstRun.__mobileStorageTestUtils.prepareSqliteDataForTests(failingAdapter as never, client as never),
+    ).rejects.toThrow('disk I/O error');
     expect(failingAdapter.saveData).toHaveBeenCalledTimes(1);
     firstRun.__mobileStorageTestUtils.setSqliteStateForTests({
       adapter: { saveTask: sqliteAdapterSaveTask, getData: failingAdapter.getData },
@@ -688,6 +690,694 @@ describe('mobile storage adapter', () => {
       tasks: expect.arrayContaining([expect.objectContaining({ id: 'task-5999' })]),
     }));
   }, 30_000);
+
+  // A failed first-launch migration used to return a healthy state over the
+  // empty database: reads showed an empty library, and the next backup write
+  // (about 1 s later under the size cap, past the 5-minute throttle over it)
+  // put that empty library over the only copy.
+  it('serves the JSON copy and blocks writes after a failed first-launch migration, so nothing writes the empty SQLite over it', async () => {
+    const stored = useStoredAsyncStorage();
+    const oversized = makeOversizedLibrary();
+    stored.set('mindwtr-data', JSON.stringify(oversized));
+    stored.set('mindwtr-data:startup-backup-version', '2');
+    stored.set('mindwtr-data:startup-backup-updated-at', '1');
+    const emptySqlite = (): AppData => ({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] });
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const failingAdapter = {
+      getData: vi.fn().mockImplementation(async () => emptySqlite()),
+      saveData: vi.fn().mockRejectedValue(new Error('disk I/O error')),
+      queryTasks: vi.fn().mockResolvedValue([]),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(failingAdapter as never, client as never)
+    ));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const data = await mobileStorage.getData();
+      vi.setSystemTime(Date.now() + 6 * 60_000);
+      await __mobileStorageTestUtils.flushPendingStartupJsonBackup();
+      expect(stored.get('mindwtr-data')).toBe(JSON.stringify(oversized));
+      expect(data.tasks).toHaveLength(6_000);
+      await expect(mobileStorage.queryTasks!({})).resolves.toHaveLength(6_000);
+      expect(failingAdapter.queryTasks).not.toHaveBeenCalled();
+      // The user's first edits cannot lift the block or write a small backup.
+      await expect(mobileStorage.saveData(emptySqlite())).rejects.toThrow('moving your data into the database failed');
+      await expect(mobileStorage.saveTask!(makeWidgetTask('task-new'), emptySqlite()))
+        .rejects.toThrow('moving your data into the database failed');
+      await __mobileStorageTestUtils.flushPendingStartupJsonBackup();
+      expect(stored.get('mindwtr-data')).toBe(JSON.stringify(oversized));
+      expect(logWarnMock).toHaveBeenCalledWith(
+        '[Storage] JSON migration into SQLite failed; saving is blocked',
+        expect.objectContaining({ force: true, extra: expect.objectContaining({ releaseCheck: 'v1.3.8/rn-migration-write-block' }) }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const healthyAdapter = {
+      getData: vi.fn().mockImplementation(async () => emptySqlite()),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const state = await __mobileStorageTestUtils.prepareSqliteStateForTests(healthyAdapter as never, client as never);
+    expect(state.writeBlockedReason).toBeUndefined();
+    expect(healthyAdapter.saveData).toHaveBeenCalledWith(expect.objectContaining({
+      tasks: expect.arrayContaining([expect.objectContaining({ id: 'task-5999' })]),
+    }));
+  }, 30_000);
+
+  const storeVersionedBackup = (stored: Map<string, string>, data?: AppData) => {
+    if (data) stored.set('mindwtr-data', JSON.stringify(data));
+    stored.set('mindwtr-data:startup-backup-version', '2');
+    stored.set('mindwtr-data:startup-backup-updated-at', '1');
+  };
+
+  const failSetItemFor = (match: (key: string) => boolean) => {
+    const setItem = asyncStorageMock.setItem.getMockImplementation()!;
+    asyncStorageMock.setItem.mockImplementation(async (key: string, value: string) => {
+      if (match(key)) throw new Error('database or disk is full (code 13 SQLITE_FULL)');
+      return setItem(key, value);
+    });
+  };
+
+  const isReconcileMarker = (key: string) => key === 'mindwtr-data:sqlite-json-reconcile-v1';
+
+  // A failed reconcile used to make the app read-only. It now keeps SQLite as
+  // the source and only freezes the backup that would overwrite the unmerged copy.
+  it('keeps saving to SQLite after a failed reconcile, but writes no backup over the unmerged JSON copy until a later start merges it', async () => {
+    const stored = useStoredAsyncStorage();
+    const backup = makeWidgetSnapshot(makeWidgetTask('task-json-only'));
+    storeVersionedBackup(stored, backup);
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockRejectedValueOnce(new Error('disk I/O error')).mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const data = await mobileStorage.getData();
+      expect(data.tasks.map((task) => task.id)).toEqual(['task-sqlite']);
+      await expect(mobileStorage.saveData(data)).resolves.toBeUndefined();
+      vi.setSystemTime(Date.now() + 6 * 60_000);
+      await __mobileStorageTestUtils.flushPendingStartupJsonBackup();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(adapter.saveData).toHaveBeenCalledTimes(2);
+    expect(stored.get('mindwtr-data')).toBe(JSON.stringify(backup));
+    expect(stored.has('mindwtr-data:sqlite-json-reconcile-v1')).toBe(false);
+    expect(logWarnMock).toHaveBeenCalledWith(
+      '[Storage] JSON reconcile into SQLite failed; JSON backup frozen',
+      expect.objectContaining({ force: true, extra: expect.objectContaining({ step: 'reconcile' }) }),
+    );
+
+    // SQLite failing too must not put a backup over the frozen copy either.
+    adapter.saveData.mockRejectedValue(new Error('disk I/O error'));
+    await expect(mobileStorage.saveData(sqliteData)).rejects.toThrow('not yet merged');
+    await __mobileStorageTestUtils.flushPendingStartupJsonBackup();
+    expect(stored.get('mindwtr-data')).toBe(JSON.stringify(backup));
+    expect(stored.has('mindwtr-data:json-ahead-of-sqlite')).toBe(false);
+
+    __mobileStorageTestUtils.reset();
+    vi.resetModules();
+    const nextLaunch = await import('./storage-adapter');
+    const healthyAdapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    await nextLaunch.__mobileStorageTestUtils.prepareSqliteStateForTests(healthyAdapter as never, client as never);
+    const merged = healthyAdapter.saveData.mock.calls[0]?.[0] as AppData;
+    expect(merged.tasks.map((task) => task.id).sort()).toEqual(['task-json-only', 'task-sqlite']);
+  }, 20_000);
+
+  it('serves SQLite and keeps saving when only the reconcile marker write fails, and no copy is stored', async () => {
+    const stored = useStoredAsyncStorage();
+    storeVersionedBackup(stored);
+    failSetItemFor(isReconcileMarker);
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+
+    const data = await mobileStorage.getData();
+
+    expect(data.tasks.map((task) => task.id)).toEqual(['task-sqlite']);
+    await expect(mobileStorage.saveData(data)).resolves.toBeUndefined();
+  }, 10_000);
+
+  it('neither shows nor saves an unversioned legacy copy when only the reconcile marker write fails', async () => {
+    const stored = useStoredAsyncStorage();
+    stored.set('mindwtr-data', JSON.stringify(makeWidgetSnapshot(makeWidgetTask('task-legacy-stale'))));
+    failSetItemFor(isReconcileMarker);
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+
+    const data = await mobileStorage.getData();
+    await mobileStorage.saveData(data);
+
+    expect(data.tasks.map((task) => task.id)).toEqual(['task-sqlite']);
+    expect(adapter.saveData).toHaveBeenCalledTimes(1);
+    expect((adapter.saveData.mock.calls[0]?.[0] as AppData).tasks.map((task) => task.id)).toEqual(['task-sqlite']);
+  }, 10_000);
+
+  it('reads the newer SQLite row and freezes the backup when the reconcile marker cannot be read', async () => {
+    const stored = useStoredAsyncStorage();
+    const oldCopy = { ...makeWidgetSnapshot({ ...makeWidgetTask('task-1'), title: 'Old title', rev: 1 }) };
+    storeVersionedBackup(stored, oldCopy);
+    const getItem = asyncStorageMock.getItem.getMockImplementation()!;
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (isReconcileMarker(key)) throw new Error('transient AsyncStorage read failure');
+      return getItem(key);
+    });
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const sqliteData = makeWidgetSnapshot({ ...makeWidgetTask('task-1'), title: 'New title', rev: 9 });
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+
+    const data = await mobileStorage.getData();
+    await mobileStorage.saveData(data);
+    await __mobileStorageTestUtils.flushPendingStartupJsonBackup();
+
+    expect(data.tasks[0]?.title).toBe('New title');
+    expect((adapter.saveData.mock.calls[0]?.[0] as AppData).tasks[0]?.title).toBe('New title');
+    expect(stored.get('mindwtr-data')).toBe(JSON.stringify(oldCopy));
+  }, 10_000);
+
+  it('freezes the backup when the JSON copy cannot be read for the reconcile, so it survives to a later start', async () => {
+    const stored = useStoredAsyncStorage();
+    const copy = makeWidgetSnapshot(makeWidgetTask('task-json-only'));
+    storeVersionedBackup(stored, copy);
+    let failCopyRead = true;
+    const getItem = asyncStorageMock.getItem.getMockImplementation()!;
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (failCopyRead && key === 'mindwtr-data') throw new Error('transient AsyncStorage read failure');
+      return getItem(key);
+    });
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+
+    const data = await mobileStorage.getData();
+    failCopyRead = false;
+    await mobileStorage.saveData(data);
+    await __mobileStorageTestUtils.flushPendingStartupJsonBackup();
+
+    expect(stored.get('mindwtr-data')).toBe(JSON.stringify(copy));
+    expect(stored.has('mindwtr-data:sqlite-json-reconcile-v1')).toBe(false);
+  }, 10_000);
+
+  // While the backup is frozen SQLite is the only source: the unmerged copy is
+  // never served, pinned or judged stale, so a healthy SQLite keeps serving.
+  const startFrozen = async (sqliteData: AppData, adapterExtra: Record<string, unknown> = {}) => {
+    const stored = useStoredAsyncStorage();
+    storeVersionedBackup(stored, { ...makeWidgetSnapshot(makeWidgetTask('task-old')), settings: { theme: 'light' } });
+    const getItem = asyncStorageMock.getItem.getMockImplementation()!;
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (isReconcileMarker(key)) throw new Error('transient AsyncStorage read failure');
+      return getItem(key);
+    });
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+      saveTask: vi.fn().mockResolvedValue(undefined),
+      ...adapterExtra,
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+    return { stored, adapter, mobileStorage };
+  };
+
+  it('keeps reading SQLite after a save and a failed query while the backup is frozen', async () => {
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const { mobileStorage } = await startFrozen(sqliteData, {
+      queryTasks: vi.fn().mockRejectedValueOnce(new Error('database is locked')).mockResolvedValue(sqliteData.tasks),
+      searchAll: vi.fn().mockRejectedValueOnce(new Error('database is locked')).mockResolvedValue({ tasks: sqliteData.tasks, projects: [] }),
+    });
+
+    await mobileStorage.saveData(await mobileStorage.getData());
+
+    await expect(mobileStorage.queryTasks!({})).resolves.toEqual([expect.objectContaining({ id: 'task-sqlite' })]);
+    await expect(mobileStorage.searchAll!('Task')).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-sqlite' })],
+    }));
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-sqlite' })],
+    }));
+  }, 10_000);
+
+  it('does not pin reads to the frozen copy when the freeze refuses a save', async () => {
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const { stored, adapter, mobileStorage } = await startFrozen(sqliteData);
+    adapter.saveData.mockRejectedValue(new Error('database or disk is full'));
+    adapter.saveTask.mockRejectedValue(new Error('database or disk is full'));
+    const view = await mobileStorage.getData();
+
+    await expect(mobileStorage.saveData(view)).rejects.toThrow('not yet merged');
+    await expect(mobileStorage.saveTask!(makeWidgetTask('task-new'), view)).rejects.toThrow('not yet merged');
+
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-sqlite' })],
+    }));
+    expect(JSON.parse(stored.get('mindwtr-data')!).tasks[0].id).toBe('task-old');
+  }, 10_000);
+
+  it('gives a slow SQLite read the long bound while the backup is frozen', async () => {
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    let slow = false;
+    const { mobileStorage } = await startFrozen(sqliteData, {
+      getData: vi.fn().mockImplementation(async () => {
+        if (slow) await new Promise((resolve) => setTimeout(resolve, 4_000));
+        return structuredClone(sqliteData);
+      }),
+    });
+    await mobileStorage.saveData(await mobileStorage.getData());
+    slow = true;
+
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-sqlite' })],
+    }));
+  }, 20_000);
+
+  it('never serves the frozen copy when a SQLite read fails, so no save can write it over SQLite', async () => {
+    const sqliteData = { ...makeWidgetSnapshot(makeWidgetTask('task-sqlite')), settings: { theme: 'dark' } } as AppData;
+    let fail = false;
+    const { adapter, mobileStorage } = await startFrozen(sqliteData, {
+      getData: vi.fn().mockImplementation(async () => {
+        if (fail) throw new Error('database is locked');
+        return structuredClone(sqliteData);
+      }),
+    });
+    await mobileStorage.getData();
+    fail = true;
+
+    await expect(mobileStorage.getData()).rejects.toThrow('database is locked');
+    expect(adapter.saveData).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it('fails the first read instead of serving the copy when the reconcile fails and SQLite cannot be read', async () => {
+    const { adapter, mobileStorage } = await startFrozen(makeWidgetSnapshot(makeWidgetTask('task-sqlite')), {
+      getData: vi.fn().mockRejectedValue(new Error('database is locked')),
+    });
+
+    await expect(mobileStorage.getData()).rejects.toThrow('database is locked');
+    expect(adapter.saveData).not.toHaveBeenCalled();
+  }, 10_000);
+
+  // A slow init lets the first read fall back to the copy and pin reads to it
+  // before the reconcile fails; the freeze must hand reads back to SQLite.
+  it('hands pinned reads back to SQLite when a slow reconcile then fails', async () => {
+    const stored = useStoredAsyncStorage();
+    storeVersionedBackup(stored, makeWidgetSnapshot(makeWidgetTask('task-old')));
+    const getItem = asyncStorageMock.getItem.getMockImplementation()!;
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (isReconcileMarker(key)) {
+        await new Promise((resolve) => setTimeout(resolve, 4_000));
+        throw new Error('transient AsyncStorage read failure');
+      }
+      return getItem(key);
+    });
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    let init: Promise<unknown> = Promise.resolve();
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => {
+      const state = __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+      init = state;
+      return state;
+    });
+
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-old' })],
+    }));
+    await init;
+
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-sqlite' })],
+    }));
+  }, 20_000);
+
+  // A pin can still land after the freeze: a fallback read already past the
+  // frozen check when the reconcile fails. The fast path must ignore it.
+  it('reads SQLite, not a pin set after the freeze, once the backup is frozen', async () => {
+    const stored = useStoredAsyncStorage();
+    storeVersionedBackup(stored, makeWidgetSnapshot(makeWidgetTask('task-old')));
+    const getItem = asyncStorageMock.getItem.getMockImplementation()!;
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (isReconcileMarker(key)) {
+        await new Promise((resolve) => setTimeout(resolve, 4_000));
+        throw new Error('transient AsyncStorage read failure');
+      }
+      if (key === 'mindwtr-data') await new Promise((resolve) => setTimeout(resolve, 1_500));
+      return getItem(key);
+    });
+    const client = { get: vi.fn().mockResolvedValue({ count: 1 }) };
+    const sqliteData = makeWidgetSnapshot(makeWidgetTask('task-sqlite'));
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => structuredClone(sqliteData)),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    let init: Promise<unknown> = Promise.resolve();
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => {
+      const state = __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+      init = state;
+      return state;
+    });
+
+    await mobileStorage.getData();
+    await init;
+
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-sqlite' })],
+    }));
+  }, 20_000);
+
+  it('serves no startup snapshot while the reconcile marker is absent or unreadable', async () => {
+    const stored = useStoredAsyncStorage();
+    storeVersionedBackup(stored, makeWidgetSnapshot(makeWidgetTask('task-old')));
+    const { getMobileStartupSnapshotFromBackup } = await import('./storage-adapter');
+    await expect(getMobileStartupSnapshotFromBackup()).resolves.toBeNull();
+
+    const getItem = asyncStorageMock.getItem.getMockImplementation()!;
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (isReconcileMarker(key)) throw new Error('transient AsyncStorage read failure');
+      return getItem(key);
+    });
+    await expect(getMobileStartupSnapshotFromBackup()).resolves.toBeNull();
+
+    asyncStorageMock.getItem.mockImplementation(getItem);
+    stored.set('mindwtr-data:sqlite-json-reconcile-v1', '1');
+    await expect(getMobileStartupSnapshotFromBackup()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-old' })],
+    }));
+  }, 10_000);
+
+  // Core saveData reads each saved filter's id; the copy's raw settings once
+  // carried a null entry into it, so every move failed the same way.
+  it('drops broken saved filters from the copy so the move into SQLite succeeds', async () => {
+    const stored = useStoredAsyncStorage();
+    stored.set('mindwtr-data', JSON.stringify({
+      ...makeWidgetSnapshot(makeWidgetTask('task-a')),
+      settings: { theme: 'dark', savedFilters: [null] },
+    }));
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn(async (data: AppData) => {
+        (data.settings.savedFilters ?? []).forEach((filter) => filter.id);
+      }),
+    };
+    const { __mobileStorageTestUtils } = await import('./storage-adapter');
+
+    const state = await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+
+    expect(state.writeBlockedReason).toBeUndefined();
+    expect((adapter.saveData.mock.calls[0]?.[0] as AppData).settings).toEqual(expect.objectContaining({
+      theme: 'dark',
+      savedFilters: [],
+    }));
+  }, 10_000);
+
+  it('keeps device-local settings when it recovers JSON-ahead writes into a SQLite with no settings', async () => {
+    const stored = useStoredAsyncStorage();
+    const settings = { theme: 'dark', notificationsEnabled: false, syncPreferences: { appearance: false } } as AppData['settings'];
+    stored.set('mindwtr-data', JSON.stringify({ ...makeWidgetSnapshot(makeWidgetTask('task-a')), settings }));
+    stored.set('mindwtr-data:json-ahead-of-sqlite', '1');
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { __mobileStorageTestUtils } = await import('./storage-adapter');
+
+    await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+
+    for (const [written] of adapter.saveData.mock.calls) {
+      expect((written as AppData).settings).toEqual(expect.objectContaining(settings));
+    }
+    expect(adapter.saveData).toHaveBeenCalled();
+  }, 10_000);
+
+  it("shows the startup snapshot on a fresh install's second start", async () => {
+    const stored = useStoredAsyncStorage();
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { getMobileStartupSnapshotFromBackup, __mobileStorageTestUtils } = await import('./storage-adapter');
+    await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+    // The first run's first backup lands after the user adds a task.
+    storeVersionedBackup(stored, makeWidgetSnapshot(makeWidgetTask('task-new')));
+
+    await expect(getMobileStartupSnapshotFromBackup()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-new' })],
+    }));
+  }, 10_000);
+
+  it("keeps the copy's device-local settings when another process writes settings during the first move", async () => {
+    const stored = useStoredAsyncStorage();
+    stored.set('mindwtr-data', JSON.stringify({
+      ...makeWidgetSnapshot(makeWidgetTask('task-a')),
+      settings: { theme: 'dark', notificationsEnabled: false, savedFilters: [null] },
+    }));
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      // Empty at the probe; a second process wrote a setting before the re-read.
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [], settings: { language: 'de' } }),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { __mobileStorageTestUtils } = await import('./storage-adapter');
+
+    await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+
+    expect((adapter.saveData.mock.calls[0]?.[0] as AppData).settings).toEqual(expect.objectContaining({
+      theme: 'dark',
+      notificationsEnabled: false,
+      language: 'de',
+      savedFilters: [],
+    }));
+  }, 10_000);
+
+  it('starts from a legacy-key copy when AsyncStorage is full', async () => {
+    const stored = useStoredAsyncStorage();
+    stored.set('focus-gtd-data', JSON.stringify(makeWidgetSnapshot(makeWidgetTask('task-legacy'))));
+    failSetItemFor(() => true);
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { __mobileStorageTestUtils } = await import('./storage-adapter');
+
+    const state = await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+
+    expect(state.writeBlockedReason).toBeUndefined();
+    expect(adapter.saveData).toHaveBeenCalledWith(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-legacy' })],
+    }));
+  }, 10_000);
+
+  it('still moves the JSON copy into SQLite when AsyncStorage is full', async () => {
+    const stored = useStoredAsyncStorage();
+    stored.set('mindwtr-data', JSON.stringify(makeWidgetSnapshot(makeWidgetTask('task-a'))));
+    failSetItemFor(() => true);
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { __mobileStorageTestUtils } = await import('./storage-adapter');
+
+    const state = await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+
+    expect(state.writeBlockedReason).toBeUndefined();
+    expect(adapter.saveData).toHaveBeenCalledWith(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-a' })],
+    }));
+  }, 10_000);
+
+  // Since e15fa3642 the migrate merge started from SQLite's empty settings, and
+  // the sync merge drops device-local ones, so they reset on the move.
+  it('keeps device-local settings when it moves the JSON copy into SQLite, and in the blocked view', async () => {
+    const settings = {
+      theme: 'dark',
+      notificationsEnabled: false,
+      dailyDigestMorningEnabled: true,
+      syncPreferences: { appearance: false, language: false },
+    } as AppData['settings'];
+    const copy = { ...makeWidgetSnapshot(makeWidgetTask('task-a')), settings };
+    const emptySqlite = (): AppData => ({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] });
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const stored = useStoredAsyncStorage();
+    stored.set('mindwtr-data', JSON.stringify(copy));
+    const adapter = {
+      getData: vi.fn().mockImplementation(async () => emptySqlite()),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+    expect((adapter.saveData.mock.calls[0]?.[0] as AppData).settings).toEqual(expect.objectContaining(settings));
+    expect(JSON.parse(stored.get('mindwtr-data')!).settings).toEqual(expect.objectContaining(settings));
+
+    stored.set('mindwtr-data', JSON.stringify(copy));
+    adapter.saveData.mockRejectedValue(new Error('disk I/O error'));
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      settings: expect.objectContaining(settings),
+    }));
+  }, 10_000);
+
+  // The block lifts on the 60 s retry; the store then saves the view it holds.
+  it('lifts the block on the retry after the cooldown and then saves the full library to SQLite', async () => {
+    const stored = useStoredAsyncStorage();
+    const copy = { ...makeWidgetSnapshot(makeWidgetTask('task-a')), tasks: [makeWidgetTask('task-a'), makeWidgetTask('task-b')] };
+    storeVersionedBackup(stored, copy);
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn().mockRejectedValueOnce(new Error('disk I/O error')).mockResolvedValue(undefined),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const view = await mobileStorage.getData();
+      await expect(mobileStorage.saveData(view)).rejects.toThrow('Mindwtr tries again every minute');
+      vi.setSystemTime(Date.now() + 61_000);
+      await expect(mobileStorage.saveData(view)).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+    // Failed migration, retried migration, then the store's save.
+    expect(adapter.saveData).toHaveBeenCalledTimes(3);
+    for (const [written] of adapter.saveData.mock.calls.slice(1)) {
+      expect((written as AppData).tasks.map((task) => task.id).sort()).toEqual(['task-a', 'task-b']);
+    }
+  }, 10_000);
+
+  // A slow first init pinned reads to the JSON copy; a refused save then
+  // marked a queued write, so every pinned read refused that copy as stale.
+  it('keeps serving pinned JSON reads after a blocked save', async () => {
+    const stored = useStoredAsyncStorage();
+    storeVersionedBackup(stored, makeWidgetSnapshot(makeWidgetTask('task-a')));
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    let failMigration: () => void = () => undefined;
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn(() => new Promise<void>((_, reject) => {
+        failMigration = () => reject(new Error('disk I/O error'));
+      })),
+    };
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteInitializerForTests(() => (
+      __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never)
+    ));
+
+    const first = await mobileStorage.getData();
+    failMigration();
+    await expect(mobileStorage.saveData(first)).rejects.toThrow('moving your data into the database failed');
+
+    await expect(mobileStorage.getData()).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-a' })],
+    }));
+  }, 20_000);
+
+  it('migrates nothing from a corrupt JSON copy and keeps SQLite writable', async () => {
+    const stored = useStoredAsyncStorage();
+    stored.set('mindwtr-data', '{"tasks": [');
+    const client = { get: vi.fn().mockResolvedValue({ count: 0 }) };
+    const adapter = {
+      getData: vi.fn().mockResolvedValue({ ...makeWidgetSnapshot(makeWidgetTask('unused')), tasks: [] }),
+      saveData: vi.fn().mockResolvedValue(undefined),
+    };
+    const { __mobileStorageTestUtils } = await import('./storage-adapter');
+
+    const state = await __mobileStorageTestUtils.prepareSqliteStateForTests(adapter as never, client as never);
+
+    expect(state.writeBlockedReason).toBeUndefined();
+    expect(adapter.saveData).not.toHaveBeenCalled();
+    expect(stored.get('mindwtr-data:sqlite-json-reconcile-v1')).toBe('1');
+  }, 10_000);
+
+  it('pins reads to the JSON fast path when a SQLite query fails and a backup is stored', async () => {
+    const stored = useStoredAsyncStorage();
+    storeStaleBackup(stored);
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteStateForTests({
+      adapter: {
+        saveTask: sqliteAdapterSaveTask,
+        getData: vi.fn().mockResolvedValue(makeWidgetSnapshot(makeWidgetTask('task-real'))),
+        queryTasks: vi.fn().mockRejectedValue(new Error('database is locked')),
+      } as never,
+      client: {},
+    });
+
+    await expect(mobileStorage.queryTasks!({})).resolves.toEqual([expect.objectContaining({ id: 'task-stale' })]);
+  }, 10_000);
+
+  it('does not pin reads to the JSON fast path when a SQLite query fails and no backup is stored', async () => {
+    useStoredAsyncStorage();
+    const library = makeWidgetSnapshot(makeWidgetTask('task-real'));
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteStateForTests({
+      adapter: {
+        saveTask: sqliteAdapterSaveTask,
+        getData: vi.fn().mockResolvedValue(library),
+        queryTasks: vi.fn().mockRejectedValue(new Error('database is locked')),
+        searchAll: vi.fn().mockRejectedValue(new Error('database is locked')),
+      } as never,
+      client: {},
+    });
+
+    await expect(mobileStorage.queryTasks!({})).resolves.toEqual(library.tasks);
+    await expect(mobileStorage.searchAll!('Task')).resolves.toEqual(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: 'task-real' })],
+    }));
+  }, 10_000);
 
   it('writes and trusts an oversized JSON backup on iOS, where it is the only fallback when SQLite fails (#979)', async () => {
     mockPlatformOS.value = 'ios';
@@ -1858,6 +2548,9 @@ describe('mobile storage adapter', () => {
     asyncStorageMock.getItem.mockImplementation((key: string) => {
       if (key === 'mindwtr-data:startup-backup-version') {
         return Promise.resolve('2');
+      }
+      if (key === 'mindwtr-data:sqlite-json-reconcile-v1') {
+        return Promise.resolve('1');
       }
       if (key === 'mindwtr-data') {
         return Promise.resolve(JSON.stringify(backup));
