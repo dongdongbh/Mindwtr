@@ -11,7 +11,7 @@ let package = Package(
       name: "SyncFileLockEngine",
       path: ".",
       exclude: ["SyncFileLock.podspec", "Tests"],
-      sources: ["SyncFileLockModule.swift"]
+      sources: ["SyncFileLockModule.swift", "NativeFileSyncReadOwner.swift"]
     ),
     .testTarget(
       name: "SyncFileLockEngineTests",

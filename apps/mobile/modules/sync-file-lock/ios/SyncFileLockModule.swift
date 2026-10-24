@@ -11,6 +11,11 @@ struct SyncFileLockIdentity: Equatable {
   let inode: UInt64
 }
 
+enum SyncFileLockStrictBoundary: Equatable {
+  case retainedRoot
+  case validatedRoot
+}
+
 enum SyncFileLockEngineError: Error, CustomStringConvertible {
   case busy
   case unavailable(String)
@@ -97,9 +102,14 @@ final class SyncFileLockEngine {
   private var held: [String: HeldSyncFileLease] = [:]
   private var destroyed = false
   private let beforeLeaseRegistrationForTesting: () -> Void
+  private let strictRootBoundaryForTesting: (SyncFileLockStrictBoundary) -> Void
 
-  init(beforeLeaseRegistrationForTesting: @escaping () -> Void = {}) {
+  init(
+    beforeLeaseRegistrationForTesting: @escaping () -> Void = {},
+    strictRootBoundaryForTesting: @escaping (SyncFileLockStrictBoundary) -> Void = { _ in }
+  ) {
     self.beforeLeaseRegistrationForTesting = beforeLeaseRegistrationForTesting
+    self.strictRootBoundaryForTesting = strictRootBoundaryForTesting
   }
 
   private func synchronized<T>(_ body: () throws -> T) rethrows -> T {
@@ -124,12 +134,25 @@ final class SyncFileLockEngine {
   }
 
   func acquire(_ uriValue: String) throws -> String {
+    try acquireRoot({ try rootDirectory(uriValue) }, strictDirectory: false)
+  }
+
+  // Internal prerequisite for a future native folder owner, not an Expo export.
+  // A selected directory never takes the legacy file-or-folder parent fallback.
+  func acquireDirectory(_ selected: URL) throws -> String {
+    guard selected.isFileURL else {
+      throw SyncFileLockEngineError.unavailable("selected sync root is not a file URL")
+    }
+    return try acquireRoot({ selected.standardizedFileURL }, strictDirectory: true)
+  }
+
+  private func acquireRoot(_ resolveRoot: () throws -> URL, strictDirectory: Bool) throws -> String {
     try synchronized {
       guard !destroyed else {
         throw SyncFileLockEngineError.unavailable("lock engine was destroyed")
       }
     }
-    let root = try rootDirectory(uriValue)
+    let root = try resolveRoot()
     let rootPath = root.path
     let expectedRoot = try pathIdentity(rootPath, requireDirectory: true)
     let rootFd = open(rootPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
@@ -146,9 +169,24 @@ final class SyncFileLockEngine {
       }
 
       let lockPath = root.appendingPathComponent(lockName).path
-      var lockFd = open(lockPath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+      if strictDirectory {
+        strictRootBoundaryForTesting(.retainedRoot)
+        guard try pathIdentity(rootPath, requireDirectory: true) == expectedRoot,
+              try identity(fd: rootFd, requireDirectory: true) == expectedRoot else {
+          throw SyncFileLockEngineError.unavailable("selected sync root identity changed")
+        }
+        strictRootBoundaryForTesting(.validatedRoot)
+      }
+      // A pathname can be rebound after validation. Strict metadata IO stays on
+      // the originally selected inode; final validation still refuses its lease
+      // if displaced. Never follow a replacement root to create its lock file.
+      var lockFd = strictDirectory
+        ? openat(rootFd, lockName, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        : open(lockPath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
       if lockFd < 0 {
-        lockFd = open(lockPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
+        lockFd = strictDirectory
+          ? openat(rootFd, lockName, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
+          : open(lockPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
       }
       guard lockFd >= 0 else {
         throw SyncFileLockEngineError.unavailable("cannot open \(lockName)")
@@ -173,6 +211,7 @@ final class SyncFileLockEngine {
         try lease.revalidate()
         let token = UUID().uuidString
         beforeLeaseRegistrationForTesting()
+        if strictDirectory { try lease.revalidate() }
         let registered = synchronized {
           guard !destroyed else { return false }
           held[token] = lease
