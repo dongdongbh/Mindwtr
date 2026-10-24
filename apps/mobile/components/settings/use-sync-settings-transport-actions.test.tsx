@@ -15,6 +15,7 @@ import {
     WEBDAV_URL_KEY,
     WEBDAV_USERNAME_KEY,
 } from '@/lib/sync-constants';
+import { Alert } from 'react-native';
 import { pickAndParseSyncFolder } from '@/lib/storage-file';
 import { useSyncSettingsTransportActions } from './use-sync-settings-transport-actions';
 
@@ -97,6 +98,9 @@ vi.mock('@mindwtr/core', async () => ({
     )),
     ...(await vi.importActual<typeof import('../../../../packages/core/src/sync-client-helpers')>(
         '../../../../packages/core/src/sync-client-helpers',
+    )),
+    ...(await vi.importActual<typeof import('../../../../packages/core/src/unreachable-attachments')>(
+        '../../../../packages/core/src/unreachable-attachments',
     )),
     addBreadcrumb: mocked.addBreadcrumb,
     probeWebdavSyncCompatibility: mocked.probeWebdavSyncCompatibility,
@@ -543,6 +547,46 @@ describe('useSyncSettingsTransportActions', () => {
             [SYNC_PATH_KEY, 'file:///picked-folder/data.json'],
             [SYNC_PATH_BOOKMARK_KEY, 'picked-bookmark'],
         ]);
+    });
+
+    it.each([
+        ['Continue without these files', true],
+        ['Cancel', false],
+    ] as const)('asks before activating without missing attachment files: %s', async (_label, accept) => {
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.asyncStorage.multiSet.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            error: 'Candidate attachment proof failed',
+            activationMissingAttachments: [{ id: 'a1', ownerType: 'task', ownerId: 't1', title: 'scan.pdf', ownerTitle: 'Tax return' }],
+        });
+        const alert = vi.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+            const button = buttons?.find((item) => (accept ? item.style !== 'cancel' : item.style === 'cancel'));
+            button?.onPress?.();
+        });
+        vi.mocked(pickAndParseSyncFolder).mockResolvedValue({ __fileUri: 'file:///picked/data.json' } as never);
+
+        await act(async () => {
+            await latestHookResult?.handleSetSyncPath();
+        });
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        expect(alert).toHaveBeenCalledWith('settings.syncMissingFilesTitle', expect.any(String), [
+            expect.objectContaining({ text: 'common.cancel', style: 'cancel' }),
+            expect.objectContaining({ text: 'settings.syncMissingFilesContinue' }),
+        ], expect.any(Object));
+        const probe = { activationProbe: true, manual: true, configOverride: { backend: 'file', syncPath: 'file:///picked/data.json', syncPathBookmark: null } };
+        if (accept) {
+            expect(mocked.performMobileSync).toHaveBeenNthCalledWith(2, 'file:///picked/data.json', { ...probe, acceptMissingAttachmentIds: ['a1'] });
+            expect(mocked.asyncStorage.multiSet).toHaveBeenCalled();
+        } else {
+            expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+            expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
+        }
+        alert.mockRestore();
     });
 
     it('keeps Dropbox selection in session state until its first sync succeeds', async () => {

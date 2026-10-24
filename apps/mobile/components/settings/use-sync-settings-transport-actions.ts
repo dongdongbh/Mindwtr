@@ -6,6 +6,7 @@ import {
     addBreadcrumb,
     CLOCK_SKEW_THRESHOLD_MS,
     cloudGetJson,
+    formatActivationMissingAttachments,
     isConnectionAllowed,
     isSyncEncryptionRemoteVersionUnavailableError,
     isValidCloudSyncToken,
@@ -68,8 +69,29 @@ export type { SyncSettingsBackend as SyncBackend, CloudKitAccountStatus } from '
 
 type UseSyncSettingsTransportActionsParams = SyncSettingsTransportParams;
 
+// Activation found files on neither this device nor the new location: Continue keeps the
+// rows (shown as missing) and leaves the files where they are; Cancel changes nothing.
+const confirmActivationWithoutFiles = (
+    tr: UseSyncSettingsTransportActionsParams['tr'],
+): NonNullable<SyncSettingsTransportParams['confirmActivationWithoutFiles']> => (files) => new Promise<boolean>((resolve) => {
+    Alert.alert(
+        tr('settings.syncMissingFilesTitle'),
+        tr('settings.syncMissingFilesBody', {
+            files: formatActivationMissingAttachments(files, (count) => tr('settings.syncMissingFilesMore', { count })),
+        }),
+        [
+            { text: tr('common.cancel'), style: 'cancel', onPress: () => resolve(false) },
+            { text: tr('settings.syncMissingFilesContinue'), onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+    );
+});
+
 const createTransport = (params: () => UseSyncSettingsTransportActionsParams): SyncSettingsTransport => createSyncSettingsTransport({
-    params,
+    params: () => {
+        const current = params();
+        return { ...current, confirmActivationWithoutFiles: confirmActivationWithoutFiles(current.tr) };
+    },
     storage: {
         multiGet: (keys) => AsyncStorage.multiGet(keys),
         setItem: (key, value) => AsyncStorage.setItem(key, value),

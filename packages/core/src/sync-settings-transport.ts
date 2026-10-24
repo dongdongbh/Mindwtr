@@ -43,7 +43,7 @@ import { addBreadcrumb } from './log-breadcrumbs';
 import { isSandboxMode } from './sandbox';
 import { SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTransitionIncompleteError, isSyncEncryptionRemoteVersionUnavailableError, type SyncEncryptionTransitionKind } from './sync-encryption';
 import { normalizeCloudUrl, normalizeWebdavUrl } from './sync-helpers';
-import type { SyncRunResult } from './sync-run-ports';
+import type { ActivationMissingAttachment, SyncRunResult } from './sync-run-ports';
 import { isLikelyOfflineSyncError } from './sync-service-utils';
 import { formatSyncClockSkew, isValidSyncHttpUrl, redactSyncText, type CloudKitAccountStatus, type SyncSettingsBackend, type SyncSettingsCloudProvider } from './sync-settings-model';
 import {
@@ -106,6 +106,12 @@ export type SyncSettingsTransportParams = {
     showToast: (toast: SyncSettingsToast) => void;
     supportsNativeICloudSync: boolean;
     t: (key: string) => string;
+    /**
+     * Activation found attachment files on neither this device nor the new location: ask
+     * whether to continue without them (rows kept, files left where they are) or cancel.
+     * A host without it shows the refusal as an error, as before.
+     */
+    confirmActivationWithoutFiles?: (files: ActivationMissingAttachment[]) => Promise<boolean>;
 };
 
 export type SyncSettingsSyncResult = SyncRunResult & {
@@ -212,6 +218,7 @@ export type SyncSettingsTransportHost = {
     performSync(syncPathOverride: string | undefined, options: {
         manual?: boolean;
         activationProbe?: boolean;
+        acceptMissingAttachmentIds?: readonly string[];
         ignorePendingRemoteWriteBackoff?: boolean;
         configOverride?: MobileSyncConfigOverride;
     }): Promise<SyncSettingsSyncResult>;
@@ -1251,11 +1258,25 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
                         await host.rememberWebdavCapabilityProof(configOverride.webdav as SyncSettingsWebDavFields);
                     }
                 }
-                const probeResult = await host.performSync(
-                    effectiveBackend === 'file' ? effectiveSyncPath || undefined : undefined,
+                const probeSyncPath = effectiveBackend === 'file' ? effectiveSyncPath || undefined : undefined;
+                let probeResult = await host.performSync(
+                    probeSyncPath,
                     { activationProbe: true, manual: true, configOverride }
                 );
                 if (discardSupersededActivationProof(activationSequence)) return;
+                const missingAttachments = probeResult.success ? undefined : probeResult.activationMissingAttachments;
+                if (missingAttachments?.length && p.confirmActivationWithoutFiles) {
+                    // Cancel keeps everything as it is: the previous settings stay active.
+                    if (!await p.confirmActivationWithoutFiles(missingAttachments)) return;
+                    if (discardSupersededActivationProof(activationSequence)) return;
+                    probeResult = await host.performSync(probeSyncPath, {
+                        activationProbe: true,
+                        manual: true,
+                        configOverride,
+                        acceptMissingAttachmentIds: missingAttachments.map((attachment) => attachment.id),
+                    });
+                    if (discardSupersededActivationProof(activationSequence)) return;
+                }
                 if (probeResult.skipped === 'offline' || core.isLikelyOfflineSyncError(probeResult.error)) {
                     const serverUnreachable = probeResult.skipped === 'offline' && probeResult.offlineCause === 'request';
                     showToast({

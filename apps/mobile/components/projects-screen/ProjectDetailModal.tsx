@@ -1,5 +1,5 @@
 import React from 'react';
-import { AREA_PRESET_COLORS, DEFAULT_PROJECT_COLOR, getProjectToSectionEligibility, isGettingStartedProject } from '@mindwtr/core';
+import { AREA_PRESET_COLORS, DEFAULT_PROJECT_COLOR, getProjectToSectionEligibility, isAttachmentKeptWithoutFile, isGettingStartedProject } from '@mindwtr/core';
 import { GettingStartedActions, type GettingStartedAction } from '../GettingStartedActions';
 import {
     Alert,
@@ -1563,7 +1563,7 @@ export function ProjectDetailModal({
                                                         .map((attachment) => {
                                                             const isMissing = attachment.kind === 'file'
                                                                 && (!attachment.uri || attachment.localStatus === 'missing');
-                                                            const canDownload = isMissing && Boolean(attachment.cloudKey);
+                                                            const canDownload = isMissing && Boolean(attachment.cloudKey) && !isAttachmentKeptWithoutFile(attachment);
                                                             const isDownloading = attachment.localStatus === 'downloading';
                                                             return (
                                                                 <View key={attachment.id} style={[styles.attachmentRow, { borderBottomColor: tc.border }]}>

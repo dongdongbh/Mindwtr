@@ -290,6 +290,56 @@ describe('sync settings transport', () => {
         expect(transport.getProven()).toEqual({ backend: 'off', cloudProvider: 'selfhosted', pending: true });
     });
 
+    describe('activation that finds attachment files on neither this device nor the new location', () => {
+        const missing = [{ id: 'a1', ownerType: 'task' as const, ownerId: 't1', title: 'scan.pdf', ownerTitle: 'Tax return' }];
+        const refusal: SyncSettingsSyncResult = {
+            success: false,
+            error: 'Candidate attachment proof failed for "scan.pdf" on task "Tax return"',
+            activationMissingAttachments: missing,
+        };
+        const webdavProbe = { activationProbe: true, manual: true, configOverride: { backend: 'webdav', webdav: { allowInsecureHttp: false, password: 'secret', url: 'https://dav.example.com/', username: 'alice' } } };
+        const withConfirm = (answer: boolean) => {
+            const harness = setup([refusal]);
+            const confirm = vi.fn(async () => answer);
+            const params = harness.host.params;
+            harness.host.params = () => ({ ...params(), confirmActivationWithoutFiles: confirm });
+            return { ...harness, confirm };
+        };
+
+        it('continues without them when the user says so, then activates', async () => {
+            const { transport, storage, syncs, confirm } = withConfirm(true);
+            await transport.load().done;
+            await transport.handleSaveWebDavSettings(fields);
+            expect(confirm).toHaveBeenCalledWith(missing);
+            expect(syncs).toEqual([
+                webdavProbe,
+                { ...webdavProbe, acceptMissingAttachmentIds: ['a1'] },
+                { manual: true, ignorePendingRemoteWriteBackoff: true },
+            ]);
+            expect(storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+        });
+
+        it('keeps everything as it is on Cancel', async () => {
+            const { transport, storage, secrets, syncs, toasts } = withConfirm(false);
+            await transport.load().done;
+            await transport.handleSaveWebDavSettings(fields);
+            expect(syncs).toEqual([webdavProbe]);
+            expect(storage.get(SYNC_BACKEND_KEY)).toBeUndefined();
+            expect(secrets.size).toBe(0);
+            expect(toasts).toEqual([]);
+            expect(transport.getState().isSyncing).toBe(false);
+        });
+
+        it('shows the refusal as an error on a host that cannot ask', async () => {
+            const { transport, storage, syncs, toasts } = setup([refusal]);
+            await transport.load().done;
+            await transport.handleSaveWebDavSettings(fields);
+            expect(syncs).toEqual([webdavProbe]);
+            expect(storage.get(SYNC_BACKEND_KEY)).toBeUndefined();
+            expect(toasts.at(-1)).toMatchObject({ tone: 'error', message: `failed: ${refusal.error}` });
+        });
+    });
+
     it('stores a proven WebDAV configuration, then runs the first sync', async () => {
         const { transport, storage, secrets, syncs } = setup([]);
         await transport.load().done;

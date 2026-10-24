@@ -1558,6 +1558,10 @@ export const daOverrides: Record<string, string> = {
     'settings.syncQueuedBody': 'Lokale ændringer ankom under synkronisering. Et genforsøg blev automatisk sat i kø.',
     'settings.syncActivationRequeuedBody':
         'Mindwtr fandt nye ændringer under test af denne synkroniseringsopsætning. Kør Synkroniser nu igen.',
+    'settings.syncMissingFilesTitle': 'Nogle vedhæftede filer mangler',
+    'settings.syncMissingFilesBody': 'Disse vedhæftede filer findes ikke på denne enhed og ikke på den nye synkroniseringsplacering:\n\n{files}\n\nDu kan fortsætte uden dem. De vedhæftede filer bliver i dine opgaver og projekter og vises som manglende. Filerne bliver, hvor de var, og slettes ikke.',
+    'settings.syncMissingFilesMore': 'og {count} mere',
+    'settings.syncMissingFilesContinue': 'Fortsæt uden disse filer',
     'settings.syncCompleted': 'Synkronisering fuldført!',
     'settings.syncCompletedWithConflicts': 'Synkronisering fuldført med {count}-konflikter (løst automatisk).',
     'settings.syncClockSkewWarning':

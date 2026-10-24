@@ -25,6 +25,7 @@ import {
     buildTaskChecklistFieldModel,
     generateUUID,
     getAttachmentDisplayTitle,
+    isAttachmentKeptWithoutFile,
     isMarkdownEditorAssistEnabled,
     resolveAutoTextDirection,
     useTaskStore,
@@ -573,7 +574,7 @@ export function TaskEditContentField({
                                 const displayTitle = getAttachmentDisplayTitle(attachment);
                                 const isMissing = attachment.kind === 'file'
                                     && (!attachment.uri || attachment.localStatus === 'missing');
-                                const canDownload = isMissing && Boolean(attachment.cloudKey);
+                                const canDownload = isMissing && Boolean(attachment.cloudKey) && !isAttachmentKeptWithoutFile(attachment);
                                 const isDownloading = attachment.localStatus === 'downloading';
                                 return (
                                     <View key={attachment.id} style={[styles.attachmentRow, { borderBottomColor: tc.border }]}>
