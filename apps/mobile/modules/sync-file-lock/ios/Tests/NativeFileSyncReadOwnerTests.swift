@@ -251,6 +251,71 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     let token = try competing.acquireDirectory(root); try competing.release(token)
   }
 
+  func testAwaitedCloseWaitsForEnteredCoordinatedReadAndRejectsNewReads() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), document = Data([1, 2, 3]), sentinel = Data([0, 255, 7])
+    try document.write(to: root.appendingPathComponent("document"))
+    try sentinel.write(to: root.appendingPathComponent("late"))
+    let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+    let closeStarted = DispatchSemaphore(value: 0), closed = DispatchSemaphore(value: 0)
+    let lateStarted = DispatchSemaphore(value: 0), counts = Counts()
+    var io = access(counts)
+    let coordinate = io.coordinate
+    io.coordinate = { url, body in
+      try coordinate(url) { supplied in
+        counts.increment("coordinator-entered")
+        defer { counts.increment("coordinator-exited") }
+        body(supplied)
+      }
+    }
+    io.read = { fd, buffer, length in
+      counts.increment("read")
+      if counts.count("read") == 1 {
+        entered.signal()
+        guard release.wait(timeout: .now() + 5) == .success else { errno = EIO; return -1 }
+      }
+      return Darwin.read(fd, buffer, length)
+    }
+    let reader = owner(root, counts, access: io), handle = try await reader.open()
+    let reading = Task { try await reader.read("document", using: handle) }
+    XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+    XCTAssertEqual(counts.count("coordinator-entered") - counts.count("coordinator-exited"), 1)
+    let admittedCoordinations = counts.count("coordinator-entered")
+    let closing = Task {
+      closeStarted.signal()
+      defer { closed.signal() }
+      try await reader.close(handle)
+      counts.increment("close-returned")
+      XCTAssertEqual(counts.count("coordinator-entered"), counts.count("coordinator-exited"),
+                     "Awaited close returned while coordinated IO was still entered")
+    }
+    XCTAssertEqual(closeStarted.wait(timeout: .now() + 5), .success)
+    // The read barrier controls the race; this bounded completion wait is not an IO-scheduling sleep.
+    XCTAssertEqual(closed.wait(timeout: .now() + 0.05), .timedOut)
+    XCTAssertEqual(counts.count("scope-stop"), 0)
+    let competing = SyncFileLockEngine(); defer { competing.drain() }
+    XCTAssertThrowsError(try competing.acquireDirectory(root))
+    let late = Task {
+      lateStarted.signal()
+      return try await reader.read("late", using: handle)
+    }
+    XCTAssertEqual(lateStarted.wait(timeout: .now() + 5), .success)
+    XCTAssertEqual(counts.count("coordinator-entered"), admittedCoordinations)
+    release.signal()
+    do { _ = try await reading.value; XCTFail("Closing owner must not publish the entered read") }
+    catch { XCTAssertEqual(error as? Owner.Failure, .closed) }
+    try await closing.value
+    do { _ = try await late.value; XCTFail("Closing owner must refuse the queued read") }
+    catch { XCTAssertEqual(error as? Owner.Failure, .closed) }
+    XCTAssertEqual(counts.count("close-returned"), 1)
+    XCTAssertEqual(counts.count("coordinator-entered"), admittedCoordinations)
+    XCTAssertEqual(counts.count("scope-start"), 1); XCTAssertEqual(counts.count("scope-stop"), 1)
+    let token = try competing.acquireDirectory(root); try competing.release(token)
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("document")), document)
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("late")), sentinel)
+    await refuses { _ = try await reader.read("late", using: handle) }
+  }
+
   /// Optional artifact is produced by actual owner IO, never a replacement fixture transcript.
   func testSharedReadPolicyArtifactComesFromActualOwnerResults() async throws {
     let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
