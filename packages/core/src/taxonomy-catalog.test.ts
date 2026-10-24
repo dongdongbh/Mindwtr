@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { addSavedTaxonomyToken, getSavedTaxonomyTokens, isTaxonomyCatalog, mergeTaxonomyCatalog, normalizeTaxonomyToken,
-    planTaxonomyCatalogChange, retainTaskTaxonomy, retainTaxonomyEffects } from './taxonomy-catalog';
+    planTaxonomyCatalogChange, retainProjectTaxonomy, retainTaskTaxonomy, retainTaxonomyEffects } from './taxonomy-catalog';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { SqliteAdapter } from './sqlite-adapter';
 import { mergeSettingsForSync } from './sync-merge-settings';
@@ -9,7 +9,7 @@ import { areSyncPayloadsEqual, sanitizeAppDataForRemote } from './sync-helpers';
 import { prepareRestoredBackupDataForSync, validateBackupJson } from './backup-transfer';
 import { parseSyncDocument } from './sync-document';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
-import type { AppData, AppSettings, Task } from './types';
+import type { AppData, AppSettings, Project, Task } from './types';
 
 const AT = '2026-10-20T12:00:00.000Z';
 const task = (extra: Partial<Task> = {}): Task => ({ id: 'task', title: 'task', status: 'next',
@@ -126,6 +126,85 @@ describe('saved contexts and tags', () => {
         else await useTaskStore.getState().deleteTask('task');
         await flushPendingSave();
         expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Legacy']);
+    });
+
+    it('retains a task token only when the write can make it unused', () => {
+        const settings: AppSettings = { deviceId: 'device' };
+        const before = task({ contexts: ['@Kept', '@Dropped'], tags: ['#Legacy'] });
+        const later = { updatedAt: '2026-10-21T12:00:00.000Z', rev: 2 };
+        // Status, focus, title and order writes leave every token in use: settings stay the same object.
+        for (const change of [{ status: 'waiting' as const }, { status: 'reference' as const }, { isFocusedToday: true },
+            { title: 'renamed' }, { order: 3 }]) expect(retainTaskTaxonomy(settings, before, { ...before, ...later, ...change })).toBe(settings);
+        const removed = retainTaskTaxonomy(settings, before, { ...before, ...later, contexts: ['@Kept'] });
+        expect(getSavedTaxonomyTokens(removed, 'context')).toEqual(['@Dropped']);
+        expect(getSavedTaxonomyTokens(removed, 'tag')).toEqual([]);
+        // Delete leaves every list; Done leaves the Contexts pickers; Archived leaves the visible task list.
+        for (const change of [{ deletedAt: later.updatedAt }, { status: 'done' as const }, { status: 'archived' as const }]) {
+            const left = retainTaskTaxonomy(settings, before, { ...before, ...later, ...change });
+            expect(getSavedTaxonomyTokens(left, 'context')).toEqual(['@Dropped', '@Kept']);
+            expect(getSavedTaxonomyTokens(left, 'tag')).toEqual(['#Legacy']);
+        }
+        expect(getSavedTaxonomyTokens(retainTaskTaxonomy(settings, before, { ...before, ...later, tags: ['#Legacy', '#New'] }), 'tag'))
+            .toEqual(['#New']);
+        // A row already Done or Archived left those lists earlier: editing it again writes nothing.
+        for (const status of ['done', 'archived'] as const) {
+            const finished = { ...before, status };
+            expect(retainTaskTaxonomy(settings, finished, { ...finished, ...later, title: 'renamed' })).toBe(settings);
+        }
+        const done = { ...before, status: 'done' as const };
+        expect(getSavedTaxonomyTokens(retainTaskTaxonomy(settings, done, { ...done, ...later, status: 'archived' }), 'tag'))
+            .toEqual(['#Legacy']);
+    });
+
+    it('retains a Project tag only when it is removed or the Project is deleted', () => {
+        const settings: AppSettings = { deviceId: 'device' };
+        const before: Project = { id: 'project', title: 'Project', status: 'active', color: '#94a3b8', order: 0,
+            tagIds: ['#Kept', '#Dropped'], rev: 1, revBy: 'device', createdAt: AT, updatedAt: AT };
+        const later = { updatedAt: '2026-10-21T12:00:00.000Z', rev: 2 };
+        for (const change of [{ title: 'renamed' }, { status: 'someday' as const }, { status: 'archived' as const }, { isFocused: true }])
+            expect(retainProjectTaxonomy(settings, before, { ...before, ...later, ...change })).toBe(settings);
+        expect(getSavedTaxonomyTokens(retainProjectTaxonomy(settings, before, { ...before, ...later, tagIds: ['#Kept'] }), 'tag'))
+            .toEqual(['#Dropped']);
+        expect(getSavedTaxonomyTokens(retainProjectTaxonomy(settings, before, { ...before, ...later, deletedAt: later.updatedAt }), 'tag'))
+            .toEqual(['#Dropped', '#Kept']);
+    });
+
+    it('saves a status-only edit of a legacy-tagged task as one row and retains its tokens on completion', async () => {
+        const env = await open(document({ deviceId: 'device' }, [task({ tags: ['#Legacy'] })]));
+        await useTaskStore.getState().updateTask('task', { status: 'waiting' });
+        await flushPendingSave();
+        expect(env.saveTask).toHaveBeenCalledTimes(1);
+        expect(env.saved().settings.taxonomy).toBeUndefined();
+        await useTaskStore.getState().updateTask('task', { status: 'done' });
+        await flushPendingSave();
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Legacy']);
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'tag')).toEqual(['#Legacy']);
+    });
+
+    it('retains the tokens of tasks that completing a Project archives', async () => {
+        const project: Project = { id: 'project', title: 'Project', status: 'active', color: '#94a3b8', order: 0,
+            rev: 1, revBy: 'device', createdAt: AT, updatedAt: AT };
+        const env = await open({ ...document({ deviceId: 'device' }, [task({ projectId: 'project', tags: ['#Legacy'] })]),
+            projects: [project] });
+        const logs: LogPayload[] = [];
+        setLogger((payload) => { logs.push(payload); });
+        expect((await useTaskStore.getState().updateProject('project', { status: 'archived' })).success).toBe(true);
+        await flushPendingSave();
+        expect(logs.filter((log) => log.message === 'Project archive taxonomy retained').map((log) => log.context))
+            .toEqual([{ releaseCheck: 'v1.3.8/project-archive-taxonomy', operation: 'update' }]);
+        expect(env.saved().tasks[0].status).toBe('done');
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'context')).toEqual(['@Legacy']);
+        expect(getSavedTaxonomyTokens(env.saved().settings, 'tag')).toEqual(['#Legacy']);
+    });
+
+    it('keeps a skipped recurring occurrence\'s tokens in use through its follow-up', async () => {
+        const env = await open(document({ deviceId: 'device' }, [task({ tags: ['#Legacy'], dueDate: '2026-10-20',
+            recurrence: { rule: 'daily', strategy: 'strict' } })]));
+        expect((await useTaskStore.getState().skipRecurringTaskOccurrence('task')).success).toBe(true);
+        await flushPendingSave();
+        const live = env.saved().tasks.filter((row) => !row.deletedAt && row.status !== 'archived');
+        expect(live.map((row) => [row.contexts, row.tags])).toEqual([[['@Legacy'], ['#Legacy']]]);
+        expect(useTaskStore.getState().getDerivedState().allTags).toEqual(['#Legacy']);
     });
 
     it('keeps deletion tombstones through unrelated edits and permits intentional assignment again', () => {

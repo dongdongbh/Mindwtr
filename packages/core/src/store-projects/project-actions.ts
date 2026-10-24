@@ -740,6 +740,10 @@ export const logProjectFlowModeSaved = (mode: string, sectionDefaults: number): 
         context: { releaseCheck: 'v1.3.7/section-flow-mode', mode, sectionDefaults } });
 };
 
+const logProjectArchiveTaxonomy = (operation: 'update' | 'native-lifecycle') => logInfo('Project archive taxonomy retained', {
+    scope: 'store', category: 'storage', context: { releaseCheck: 'v1.3.8/project-archive-taxonomy', operation },
+});
+
 export const createProjectCoreActions = ({
     set,
     get,
@@ -1345,6 +1349,7 @@ export const createProjectCoreActions = ({
     commitPreparedProjectLifecycle: async (input, raw): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict',
             error: 'Prepared Project lifecycle conflicts with current data' };
+        let retainedTaxonomy = false;
         set((memory) => {
             let state = memory;
             const durable = raw?.authority.snapshot;
@@ -1388,8 +1393,10 @@ export const createProjectCoreActions = ({
             const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
             const nextTasks = replaceEntitiesInArray(state._allTasks, planned.tasks.map((row) => row.after));
             const nextSections = replaceEntitiesInArray(state._allSections, planned.sections.map((row) => row.after));
-            const settings = input.deviceIdToInitialize
+            const deviceSettings = input.deviceIdToInitialize
                 ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            const settings = retainTaxonomyEffects(deviceSettings, planned.tasks, [planned.project]);
+            retainedTaxonomy = settings !== deviceSettings;
             clearDerivedCache();
             if (raw && durable) {
                 const tasks = replaceEntitiesInArray(durable.tasks, planned.tasks.map((row) => row.after));
@@ -1413,6 +1420,7 @@ export const createProjectCoreActions = ({
             return { _allProjects: projects, _allTasks: nextTasks, _allSections: nextSections, settings,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
         });
+        if (retainedTaxonomy && result.success) logProjectArchiveTaxonomy('native-lifecycle');
         return result;
     },
 
@@ -1426,6 +1434,7 @@ export const createProjectCoreActions = ({
         const now = new Date().toISOString();
         let missingProject = false;
         let selectedAreaMetadataChanged = false;
+        let retainedTaxonomy = false;
         if (
             Object.prototype.hasOwnProperty.call(updates, 'cancelledAt')
             && updates.cancelledAt != null
@@ -1473,7 +1482,10 @@ export const createProjectCoreActions = ({
                     : {}),
             };
 
-            let settings = deviceState.settings;
+            // Completing or cancelling a Project archives its tasks, which can leave their tokens unused.
+            let settings = retainTaxonomyEffects(deviceState.settings, state._allTasks.flatMap((before, index) =>
+                newAllTasks[index] !== before ? [{ before, after: newAllTasks[index] }] : []));
+            retainedTaxonomy = settings !== deviceState.settings;
             const retainUpdatedProject = (after: Project) => {
                 settings = retainProjectTaxonomy(settings, oldProject, after);
                 return after;
@@ -1517,6 +1529,7 @@ export const createProjectCoreActions = ({
             set({ error: message });
             return actionFail(message);
         }
+        if (retainedTaxonomy) logProjectArchiveTaxonomy('update');
         if (selectedAreaMetadataChanged) {
             logInfo('Project Area selection synchronized metadata', {
                 scope: 'store', category: 'storage',

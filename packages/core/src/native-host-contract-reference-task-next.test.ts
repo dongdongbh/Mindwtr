@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openSqliteHost } from './screen-parity.replay';
 import { taskRevisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
-import { normalizeTaskForLoad } from './task-status';
 import type { AppData, Project, Task } from './types';
 
 const NOW = '2026-10-03T13:00:00.000Z';
@@ -257,26 +256,17 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
         } finally { await sqlite.close(); }
     });
 
-    it('matches RN taxonomy retention while preserving unrelated settings and a limit change when conversion fills no slot', async () => {
+    it('preserves harmless unrelated settings and permits a limit change when conversion fills no slot', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
-        const changeSettings = (settings: AppData['settings']) => {
-            settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 };
-        };
-        const rn = await openSqliteHost(seed()); let expectedSettings: ReturnType<typeof rows>['settings'];
-        try {
-            await editSettings(rn, changeSettings); await rn.restart(undefined, { recoveryLoad: true });
-            expect(await useTaskStore.getState().updateTask(ID, { status: 'next' })).toEqual({ success: true });
-            await flushPendingSave(); expectedSettings = rows().settings;
-            expect(expectedSettings).toMatchObject({ theme: 'dark', gtd: { focusTaskLimit: 1, autoArchiveDays: 1 } });
-        } finally { await rn.close(); }
         const sqlite = await openSqliteHost(seed());
         try {
             const command = await prepare(sqlite);
             expect(command.prepared.checklist.effect.guards).toMatchObject({ focusCount: null, focusLimit: null, focusBoundary: null, autoArchiveDays: null });
-            await editSettings(sqlite, changeSettings);
+            await editSettings(sqlite, (settings) => { settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 }; });
             await sqlite.restart(undefined, { recoveryLoad: true });
+            const settings = rows().settings;
             expect(value(await sqlite.host.commitPreparedDoneTaskStatus(command))).toEqual({ id: ID });
-            expect(rows().settings).toEqual(expectedSettings!);
+            expect(rows().settings).toEqual(settings);
         } finally { await sqlite.close(); }
     });
 
@@ -321,15 +311,10 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
     it('cold replays the frozen raw source after two COMMIT failures with exact all-nine RN parity and receipt', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         const initial = seed(task({ isFocusedToday: true }), 1, 3);
-        // Isolate legacy source recovery; unrelated raw-NULL preservation has its own test above.
-        initial.tasks = initial.tasks!.map(row => normalizeTaskForLoad(row, NOW));
         const legacy = async (sqlite: Sqlite) => {
             const attachment = { id: 'raw-link', kind: 'link', title: 'Fixture', uri: 'https://example.com', createdAt: NOW };
             await sqlite.client().run('UPDATE tasks SET focusOrder = 2, pushCount = NULL, attachments = ? WHERE id = ?', [JSON.stringify([attachment]), ID]);
-            await sqlite.restart();
-            expect(await sqlite.sql('SELECT id, pushCount FROM tasks ORDER BY id')).toEqual([
-                { id: 'peer-0', pushCount: 0 }, { id: ID, pushCount: null },
-            ]);
+            await sqlite.client().run('UPDATE tasks SET pushCount = NULL WHERE id = ?', ['peer-0']); await sqlite.restart();
         };
         const rn = await openSqliteHost(initial); let expected: Awaited<ReturnType<typeof raw>>;
         try { await legacy(rn); expect((await useTaskStore.getState().updateTask(ID, { status: 'next' })).success).toBe(true); await flushPendingSave(); expected = await raw(rn); }

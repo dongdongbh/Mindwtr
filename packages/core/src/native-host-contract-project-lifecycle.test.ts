@@ -7,6 +7,8 @@ import { reactivateArchivedProject } from './archive-view-model';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { loadNativeRequestReceipts, NativeReceiptSqliteAdapter, resetNativeRequestReceipts } from './native-request-receipts';
 import type { SqliteClient } from './sqlite-adapter';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
+import * as logger from './logger';
 import type { AppData, Project, Section, Task } from './types';
 
 const AT = '2026-10-01T12:00:00.000Z';
@@ -268,10 +270,18 @@ describe('prepared Project Complete and Reactivate', () => {
         vi.setSystemTime(new Date('2026-10-02T12:00:00.000Z'));
         const source = initial();
         const snapshot = () => copy({ projects: useTaskStore.getState()._allProjects,
-            tasks: useTaskStore.getState()._allTasks, sections: useTaskStore.getState()._allSections });
+            tasks: useTaskStore.getState()._allTasks, sections: useTaskStore.getState()._allSections,
+            settings: { taxonomy: useTaskStore.getState().settings.taxonomy } });
         const native = await open(source);
+        const diagnostic = vi.spyOn(logger, 'logInfo');
         value(await native.host.commitPreparedProjectLifecycle(native.prepare('complete')));
+        expect(diagnostic).toHaveBeenCalledWith('Project archive taxonomy retained', { scope: 'store', category: 'storage',
+            context: { releaseCheck: 'v1.3.8/project-archive-taxonomy', operation: 'native-lifecycle' } });
+        diagnostic.mockRestore();
         const nativeCompleted = snapshot();
+        // Complete archives the children, so their tokens are retained in the saved catalogue.
+        expect(getSavedTaxonomyTokens(nativeCompleted.settings, 'context')).toEqual(['@home']);
+        expect(getSavedTaxonomyTokens(nativeCompleted.settings, 'tag')).toEqual(['#kept']);
         value(await native.host.commitPreparedProjectLifecycle(native.prepare('reactivate')));
         const nativeReactivated = snapshot();
 
@@ -321,7 +331,8 @@ describe('prepared Project Cancel', () => {
         source.tasks.push(task('inbox', { status: 'inbox' }));
         source.tasks[5] = task('archived', { status: 'archived', cancelledAt: AT, archivedAt: AT });
         const snapshot = () => copy({ projects: useTaskStore.getState()._allProjects,
-            tasks: useTaskStore.getState()._allTasks, sections: useTaskStore.getState()._allSections });
+            tasks: useTaskStore.getState()._allTasks, sections: useTaskStore.getState()._allSections,
+            settings: { taxonomy: useTaskStore.getState().settings.taxonomy } });
 
         const native = await open(source);
         const cancelled = native.prepare('cancel');
@@ -335,6 +346,7 @@ describe('prepared Project Cancel', () => {
         expect(value(native.host.validatePreparedProjectLifecycle(cancelled))).toEqual({ id: ID, status: 'archived' });
         expect(value(await native.host.commitPreparedProjectLifecycle(cancelled))).toEqual({ id: ID, status: 'archived' });
         const nativeRows = snapshot();
+        expect(getSavedTaxonomyTokens(nativeRows.settings, 'tag')).toEqual(['#kept']);
         for (const id of ['next', 'waiting', 'someday', 'inbox', 'section-only']) {
             const saved = native.state()._tasksById.get(id);
             expect(saved).toMatchObject({ status: 'archived', cancelledAt: at, archivedAt: at,

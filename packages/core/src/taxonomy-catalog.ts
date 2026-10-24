@@ -1,3 +1,4 @@
+import { isTaskFinished } from './task-status';
 import type { AppSettings, Project, Task, TaxonomyCatalog, TaxonomyCatalogEntry } from './types';
 
 export type TaxonomyCatalogKind = 'context' | 'tag';
@@ -115,39 +116,38 @@ export function planTaxonomyCatalogChange(catalogue: TaxonomyCatalog | null, kin
     ]).taxonomy!;
 }
 
-const taskTaxonomyWrites = (settings: AppSettings, before: Task | undefined, after: Task): TaxonomyWrite[] => {
+/**
+ * Retain a token only when this write can make it unused: removed from the row, or the row leaves the lists
+ * that read tokens (deleted; for a task also entering Done, which the Contexts pickers skip, or Archived, which
+ * the visible task list skips). New tokens are written too. Other writes never touch settings.
+ */
+const tokenWrites = (kind: TaxonomyCatalogKind, before: readonly string[], after: readonly string[], leaves: boolean,
+    deviceId: string, now: string): TaxonomyWrite[] => {
     const writes: TaxonomyWrite[] = [];
-    for (const kind of ['context', 'tag'] as const) {
-        const name = field(kind); const previous = new Set((before?.[name] ?? []).map((token) => identity(kind, token)));
-        for (const token of before?.[name] ?? []) {
-            const normalized = normalizeTaxonomyToken(kind, token);
-            if (normalized) writes.push({ kind, token: normalized, deviceId: after.revBy ?? settings.deviceId!,
-                now: after.updatedAt, onlyIfMissing: true });
-        }
-        for (const token of after.deletedAt ? [] : after[name] ?? []) {
-            const normalized = normalizeTaxonomyToken(kind, token);
-            if (normalized && !previous.has(normalized.toLowerCase())) writes.push({ kind, token: normalized,
-                deviceId: after.revBy ?? settings.deviceId!, now: after.updatedAt });
-        }
+    const previous = new Set(before.map((token) => identity(kind, token)));
+    const next = new Set(leaves ? [] : after.map((token) => identity(kind, token)));
+    for (const token of before) {
+        const normalized = normalizeTaxonomyToken(kind, token);
+        if (normalized && !next.has(normalized.toLowerCase())) writes.push({ kind, token: normalized, deviceId, now, onlyIfMissing: true });
+    }
+    for (const token of after) {
+        const normalized = normalizeTaxonomyToken(kind, token);
+        if (normalized && !previous.has(normalized.toLowerCase())) writes.push({ kind, token: normalized, deviceId, now });
     }
     return writes;
 };
 
-const projectTaxonomyWrites = (settings: AppSettings, before: Project | undefined, after: Project): TaxonomyWrite[] => {
-    const previous = new Set((before?.tagIds ?? []).map((token) => identity('tag', token)));
-    const writes: TaxonomyWrite[] = [];
-    for (const token of before?.tagIds ?? []) {
-        const normalized = normalizeTaxonomyToken('tag', token);
-        if (normalized) writes.push({ kind: 'tag', token: normalized, deviceId: after.revBy ?? settings.deviceId!,
-            now: after.updatedAt, onlyIfMissing: true });
-    }
-    for (const token of after.deletedAt ? [] : after.tagIds ?? []) {
-        const normalized = normalizeTaxonomyToken('tag', token);
-        if (normalized && !previous.has(normalized.toLowerCase())) writes.push({ kind: 'tag', token: normalized,
-            deviceId: after.revBy ?? settings.deviceId!, now: after.updatedAt });
-    }
-    return writes;
+const taskTaxonomyWrites = (settings: AppSettings, before: Task | undefined, after: Task): TaxonomyWrite[] => {
+    const leaves = Boolean(before) && (Boolean(after.deletedAt) && !before!.deletedAt
+        || isTaskFinished(after) && !isTaskFinished(before)
+        || after.status === 'archived' && before!.status !== 'archived');
+    return (['context', 'tag'] as const).flatMap((kind) => tokenWrites(kind, before?.[field(kind)] ?? [],
+        after.deletedAt ? [] : after[field(kind)] ?? [], leaves, after.revBy ?? settings.deviceId!, after.updatedAt));
 };
+
+const projectTaxonomyWrites = (settings: AppSettings, before: Project | undefined, after: Project): TaxonomyWrite[] =>
+    tokenWrites('tag', before?.tagIds ?? [], after.deletedAt ? [] : after.tagIds ?? [], Boolean(after.deletedAt && !before?.deletedAt),
+        after.revBy ?? settings.deviceId!, after.updatedAt);
 
 /** Only newly assigned values can restore a removed catalogue entry. */
 export function retainTaskTaxonomy(settings: AppSettings, before: Task | undefined, after: Task): AppSettings {

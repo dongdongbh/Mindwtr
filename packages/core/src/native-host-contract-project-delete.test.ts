@@ -80,7 +80,7 @@ const insertOwnedRow = (id: string, order: number) => {
 };
 
 describe('prepared Project Delete and Undo', () => {
-    it('matches RN Undo taxonomy retention from the same legacy deleted document without a catalog', async () => {
+    it('matches RN Undo from the same legacy deleted document without a catalog', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(AT));
         const original = await open();
         const links = collectProjectTaskLinks(ID);
@@ -92,8 +92,8 @@ describe('prepared Project Delete and Undo', () => {
         const before = copy(rn.data());
         await undoProjectDelete(ID, links); await flushPendingSave();
         const expected = copy(rn.data());
-        expect(expected.settings.taxonomy?.tags?.map(row => row.token)).toContain('#kept');
-        expect(expected.settings.taxonomy?.contexts?.map(row => row.token)).toContain('@home');
+        // Undo puts the tokens back in use, so neither side writes a catalogue.
+        expect(expected.settings.taxonomy).toBeUndefined();
         const native = await open(legacyDeleted);
         expect(native.data()).toEqual(before);
         value(await native.host.commitPreparedProjectDeleteUndo(native.prepareUndo(deletion)));

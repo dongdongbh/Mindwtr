@@ -275,10 +275,11 @@ describe('Archive Project Delete through the prepared Project Delete writer', ()
             expect(value(await sqlite.host.commitPreparedProjectDelete({ request: original, prepared })))
                 .toEqual(prepared.result);
             expect(useTaskStore.getState()._projectsById.get(PROJECT_ID)?.deletedAt).toBe(NOW);
+            // Delete detaches the tasks, so only the deleted Project's own tag can become unused.
             expect(useTaskStore.getState().settings).toMatchObject({ theme: 'dark', taxonomy: {
-                contexts: [{ token: '@home', rev: 1, revBy: 'device-a', updatedAt: NOW }],
                 tags: [{ token: '#kept', rev: 1, revBy: 'device-a', updatedAt: NOW }],
             } });
+            expect(useTaskStore.getState().settings.taxonomy?.contexts).toBeUndefined();
             expect(diagnostic).toHaveBeenCalledWith('Native Project delete taxonomy retained', {
                 scope: 'native-host', category: 'storage', context: {
                     releaseCheck: 'v1.3.7/native-project-delete-taxonomy', operation: 'delete', outcome: 'confirmed',

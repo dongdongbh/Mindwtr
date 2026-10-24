@@ -16,6 +16,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // Widget presentation/archive convergence reuse lists/entityType/count/outcome; Focus uses bounded UI state.
     'section', 'grouping', 'collapsed', 'refresh',
     // MCP view-section writes reuse operation below; entityType is task/project, never an ID.
+    // project-archive-taxonomy reuses releaseCheck and operation below; no tokens or identifiers.
     'entityType',
     // Android modal IME recovery and background reminder widget publication; no identifiers.
     'eventInset', 'nativeInset', 'widgetUpdated',

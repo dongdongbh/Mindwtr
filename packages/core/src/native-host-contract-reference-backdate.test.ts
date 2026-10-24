@@ -135,7 +135,7 @@ describe('Reference backdate uses the exact RN row-completion patch without Undo
             expect(await sqlite.host.prepareReferenceTaskBackdate(request(null))).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             const envelope = await prepare(sqlite, request('25'));
             const [settingsRow] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1');
-            const settings = retainTaxonomyEffects(JSON.parse(settingsRow.data), rows().tasks.map(row => ({ before: row, after: row }))); settings.features.pomodoro = false;
+            const settings = retainTaxonomyEffects(JSON.parse(settingsRow.data), rows().tasks.map(after => ({ after }))); settings.features.pomodoro = false;
             await sqlite.client().run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify(settings)]);
             const before = await raw(sqlite);
             expect(await sqlite.host.commitPreparedReferenceTaskBackdate(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -179,7 +179,7 @@ describe('Reference backdate uses the exact RN row-completion patch without Undo
         try {
             await sqlite.client().run('UPDATE tasks SET pushCount=NULL,focusOrder=2,attachments=? WHERE id=?',
                 ['[{"id":"legacy","kind":"file","title":"old.txt","uri":"file:///old.txt","createdAt":"2026-10-03T13:00:00.000Z"}]', 'raw-sibling']);
-            const [saved] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = retainTaxonomyEffects(JSON.parse(saved.data), rows().tasks.map(row => ({ before: row, after: row })));
+            const [saved] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = retainTaxonomyEffects(JSON.parse(saved.data), rows().tasks.map(after => ({ after })));
             settings.savedFilters = [{ id: 'raw-filter', name: 'Raw', view: 'tasks', criteria: { tags: ['#first'] }, createdAt: NOW, updatedAt: NOW }];
             await sqlite.client().run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify(settings, null, 2)]);
             await sqlite.client().run('INSERT INTO saved_filters (id,name,view,criteria,createdAt,updatedAt) VALUES (?,?,?,?,?,?)',
@@ -253,7 +253,7 @@ describe('Reference backdate uses the exact RN row-completion patch without Undo
         try {
             const envelope = await prepare(sqlite, request('25')); fault.commits = 10;
             expect(await sqlite.host.commitPreparedReferenceTaskBackdate(envelope)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } }); fault.commits = 0;
-            const [saved] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = retainTaxonomyEffects(JSON.parse(saved.data), rows().tasks.map(row => ({ before: row, after: row })));
+            const [saved] = await sqlite.sql<{ data: string }>('SELECT data FROM settings WHERE id=1'); const settings = retainTaxonomyEffects(JSON.parse(saved.data), rows().tasks.map(after => ({ after })));
             settings.gtd.pomodoro.linkTask = false; await sqlite.client().run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify(settings)]);
             const before = await raw(sqlite);
             expect(await sqlite.host.commitPreparedReferenceTaskBackdate(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
