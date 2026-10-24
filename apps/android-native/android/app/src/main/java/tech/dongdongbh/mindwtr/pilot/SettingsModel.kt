@@ -509,6 +509,9 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
             "gtdSetting" -> {
                 val edit = input.getJSONObject("edit")
                 val type = edit.getString("type")
+                // RN re-plans its alert when a Pomodoro setting changes (the alert turned off cancels a pending one): core's card
+                // and the alerts again, any ended phase settled first (design §3b K5).
+                if (type.startsWith("pomodoro")) shell.pomodoro.refresh(planAlarms = true)
                 val notice = page?.view?.optJSONObject("pomodoro")?.optString("autoStartNotice").orEmpty()
                 if ((type == "pomodoroAutoStartBreaks" || type == "pomodoroAutoStartFocus") && edit.optBoolean("value") && reply.optBoolean("changed")
                     && !local.optBoolean("noticeShown") && notice.isNotEmpty()) {
