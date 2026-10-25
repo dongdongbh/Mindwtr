@@ -9563,6 +9563,9 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(editor, /Text\(guideLink\(help\.getString\("readGuide"\)/);
     assert.match(details, /Text\(guideLink\(guide\.getString\("label"\)/);
     assert.match(editor, /\{ expanded = !expanded \}\s+\/\/[^\n]*\s+\.semantics \{ contentDescription = label; stateDescription = /);
+    // RN's editor Focus star sits in the Title row beside the layout help (15c42df63), not in the top bar (O2f-parity pairs).
+    assert.match(editor, /FieldHeading\(Lucide\.Type, t\("taskEdit\.titleLabel"\)[\s\S]{0,1500}testTag\("task-edit-focus-star"\)[\s\S]{0,400}FocusStar\(focused, !starEnabled, 18, Modifier\)[\s\S]{0,300}val helpLabel = t\("taskEdit\.editorLayoutHelpLabel"\)/);
+    assert.doesNotMatch(editor, /FocusStar\(focused, !starEnabled, 22/);
     // RN's row statusBadge has a borderColor but no borderWidth: a plain fill (O2f-parity pairs).
     assert.match(source('TaskRowView.kt'), /\.heightIn\(min = 44\.dp\)\.clip\(shape\)\.background\(colors\.bg\)\s+\.then\(tap\)/);
 }

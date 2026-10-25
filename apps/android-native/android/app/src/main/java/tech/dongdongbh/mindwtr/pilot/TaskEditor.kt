@@ -62,6 +62,7 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -448,7 +449,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     LaunchedEffect(editor.session, aiDraft, busy) { if (!busy) { delay(150); ai.readEditor() } }
 
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("task-editor")) {
-        // RN's TaskEditHeader: Close at the left, Save at the right (Close alone when read-only). Its More menu is not built.
+        // RN's TaskEditHeader: Close at the left, Save at the right (Close alone when read-only). Its More menu is not built yet.
         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (!editor.readOnly) {
@@ -456,19 +457,6 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
                 Box(Modifier.size(44.dp).clickable(enabled = !busy && !failed, role = Role.Button, onClick = leave)
                     .semantics { contentDescription = closeLabel }, contentAlignment = Alignment.CenterStart) {
                     Icon(Lucide.X, null, tint = c.tint, modifier = Modifier.size(22.dp).fade(if (!busy && !failed) 1f else 0.5f))
-                }
-                if (editor.text("status") != "archived") {
-                    val focused = editor.flag("focusedToday")
-                    val star = editor.view.focusStar
-                    val blocked = star.optString("blockedText").takeIf { it.isNotEmpty() && it != "null" }
-                    val starEnabled = !locked && (focused || star.getBoolean("canToggle"))
-                    val actionLabel = t(if (focused) "agenda.removeFromFocus" else "agenda.addToFocus")
-                    val starLabel = blocked ?: if (star.getBoolean("queued")) {
-                        if (focused) "$actionLabel. ${t("agenda.focusWhenAvailable")}" else t("agenda.focusWhenAvailable")
-                    } else actionLabel
-                    FocusStar(focused, !starEnabled, 22, Modifier.size(44.dp)
-                        .clickable(enabled = starEnabled, role = Role.Button) { editFields(mapOf("focusedToday" to !focused)) }
-                        .semantics { contentDescription = starLabel; if (!starEnabled) disabled() })
                 }
             }
             Spacer(Modifier.weight(1f))
@@ -499,6 +487,23 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
             FormGroup {
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     FieldHeading(Lucide.Type, t("taskEdit.titleLabel"), Modifier.weight(1f), bottom = 0)
+                    // RN's Focus star sits in the Title row beside the layout help, styled like it (15c42df63 moved it from the top bar).
+                    if (!editor.readOnly && editor.text("status") != "archived") {
+                        val focused = editor.flag("focusedToday")
+                        val star = editor.view.focusStar
+                        val blocked = star.optString("blockedText").takeIf { it.isNotEmpty() && it != "null" }
+                        val starEnabled = !locked && (focused || star.getBoolean("canToggle"))
+                        val actionLabel = t(if (focused) "agenda.removeFromFocus" else "agenda.addToFocus")
+                        val starLabel = blocked ?: if (star.getBoolean("queued")) {
+                            if (focused) "$actionLabel. ${t("agenda.focusWhenAvailable")}" else t("agenda.focusWhenAvailable")
+                        } else actionLabel
+                        Box(Modifier.padding(end = 12.dp).size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(7.dp))
+                            .clickable(enabled = starEnabled, role = Role.Button) { editFields(mapOf("focusedToday" to !focused)) }
+                            .semantics { contentDescription = starLabel; selected = focused; if (!starEnabled) disabled() }
+                            .testTag("task-edit-focus-star"), contentAlignment = Alignment.Center) {
+                            FocusStar(focused, !starEnabled, 18, Modifier)
+                        }
+                    }
                     val helpLabel = t("taskEdit.editorLayoutHelpLabel")
                     Box(Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(7.dp))
                         .clickable(role = Role.Button) { help = true }.semantics { contentDescription = helpLabel }, contentAlignment = Alignment.Center) {
