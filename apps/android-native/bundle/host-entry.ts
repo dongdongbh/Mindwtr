@@ -4820,9 +4820,12 @@ globalThis.MindwtrHost = {
             const plan = planNativePomodoroAlarmEffects({ intent, granted, raw, scope, nowMs,
                 pending: pomodoroJSON(pendingJSON, 4 * 1024 * 1024), delivered: pomodoroJSON(deliveredJSON, 4 * 1024 * 1024),
                 android: { deliveryLedger: true, lateLimitMs: NATIVE_POMODORO_LATE_LIMIT_MS } });
-            // Android posts on the reminder channel, which it creates under core's name when no reminder made it first.
-            return plan.schedule ? { ...plan, schedule: { ...plan.schedule,
-                details: { ...plan.schedule.details, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME } } } : plan;
+            // Android posts on the reminder channel, which it creates under core's name when no reminder made it first, and
+            // stamps the alert with its phase end (CoreNotifications.postPomodoro's setWhen), as RN's alarm data carries endsAtMs.
+            if (!plan.schedule) return plan;
+            const details = plan.schedule.details as { data?: Record<string, string> };
+            return { ...plan, schedule: { ...plan.schedule, details: { ...details, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME,
+                data: { ...details.data, endsAtMs: String(plan.schedule.fireAtMs) } } } };
         });
     },
     /** Kotlin applied a plan's effects and stored its published record: the tester's line (diagnostics-ledger.md). */
