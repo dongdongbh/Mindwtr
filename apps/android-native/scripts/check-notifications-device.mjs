@@ -358,6 +358,9 @@ const startFocus = async (nodes) => {
     await waitUntil('core\'s record of the focus alert', () => { const { alarm } = book(); return alarm?.fireAtMs === alert.fireAtMs && alarm.phase === 'focus'; }, 15_000);
     return { ...alert, id: pomodoroId(alert) };
 };
+// How late an alert may come: with no exact-alarm grant (Android 14's default) the app's alarm is inexact, as RN's is; the
+// S23 gave it windows up to about 80 s.
+const LATE_MS = 120_000;
 const armedAt = (alert) => pomodoroAlarms().filter((at) => at === alert.fireAtMs).length;
 
 /** The start as found (each control's shown state), to put back at the end. */
@@ -540,7 +543,7 @@ try {
     check(book().armed.some((entry) => entry.id === first.id) && pomodoroAlarms().length === 1,
         `(3) Start arms one alarm at the phase end (${new Date(first.fireAtMs).toISOString()}) under core's id`);
     await killApp();
-    await waitUntil('the focus alert', () => shownOnce(first).length === 1, Math.max(0, first.fireAtMs - Date.now()) + 60_000);
+    await waitUntil('the focus alert', () => shownOnce(first).length === 1, Math.max(0, first.fireAtMs - Date.now()) + LATE_MS);
     const late = Date.now() - first.fireAtMs;
     const [focusAlert] = shownOnce(first);
     check(focusAlert.title === en['pomodoro.mobileTitle'] && focusAlert.text === en['pomodoro.focusComplete'] && focusAlert.when === first.fireAtMs && late > -2000,
@@ -592,7 +595,7 @@ try {
     await setPomodoroSwitch(POMODORO.alert, false);
     await waitUntil('the alarm to go', () => pomodoroAlarms().length === 0, 15_000);
     check(!book().armed.some((entry) => entry.id === silenced.id), '(8) the alert turned off in Settings cancels the armed alarm');
-    await sleep(Math.max(0, silenced.fireAtMs - Date.now()) + 20_000);
+    await sleep(Math.max(0, silenced.fireAtMs - Date.now()) + LATE_MS);
     check(shownOnce(silenced).length === 0 && pomodoroAlarms().length === 0, '(8) nothing shows after the phase end');
     await setPomodoroSwitch(POMODORO.alert, true);
     nodes = await toCard();
@@ -629,7 +632,7 @@ try {
     // The app stays open on Focus: the card settles the phase at 0, and the break's alarm is armed.
     const openBreak = await breakOf(open, Math.max(0, open.fireAtMs - Date.now()) + 30_000);
     await waitUntil('the break\'s alarm', () => armedAt(openBreak) === 1, 30_000, 2000);
-    await waitUntil('the focus alert', () => shownOnce(open).length === 1, 30_000);
+    await waitUntil('the focus alert', () => shownOnce(open).length === 1, Math.max(0, open.fireAtMs - Date.now()) + LATE_MS);
     await sleep(3000);
     check(shownOnce(open).length === 1 && shownOnce(open)[0].text === en['pomodoro.focusComplete'], '(5) the break starts and the focus alert shows, once');
     check(openBreak.id !== open.id && book().armed.some((entry) => entry.id === openBreak.id) && pomodoroAlarms().length === 1,
@@ -645,9 +648,9 @@ try {
     await waitUntil('the alarm', () => armedAt(dark) === 1, 15_000);
     sh('input keyevent KEYCODE_SLEEP');
     await waitUntil('the screen off', () => /mWakefulness=Asleep|mWakefulness=Dozing/.test(sh('dumpsys power')), 15_000);
-    await waitUntil('the focus alert', () => shownOnce(dark).length === 1, Math.max(0, dark.fireAtMs - Date.now()) + 60_000);
+    await waitUntil('the focus alert', () => shownOnce(dark).length === 1, Math.max(0, dark.fireAtMs - Date.now()) + LATE_MS);
     const darkLate = Date.now() - dark.fireAtMs;
-    check(shownOnce(dark)[0].when === dark.fireAtMs && darkLate > -2000 && darkLate < 30_000,
+    check(shownOnce(dark)[0].when === dark.fireAtMs && darkLate > -2000 && darkLate < LATE_MS,
         `(6) with the screen off the focus alert arrives at the phase end (${darkLate} ms after it), stamped with it`);
     await sleep(15_000);
     check(pomodoroAlarms().length === 0 && !book().armed.some((entry) => entry.sessionID === dark.sessionID && entry.phase === 'break'),
@@ -657,7 +660,7 @@ try {
     const darkBreak = await breakOf(dark, 30_000);
     await waitUntil('the break\'s alarm once the app runs', () => armedAt(darkBreak) === 1, 30_000);
     check(Date.now() < darkBreak.fireAtMs, '(6) the screen on again resumes the app, which arms the break\'s alert at its end');
-    await waitUntil('the break\'s alert', () => shownOnce(darkBreak).length === 1, Math.max(0, darkBreak.fireAtMs - Date.now()) + 60_000);
+    await waitUntil('the break\'s alert', () => shownOnce(darkBreak).length === 1, Math.max(0, darkBreak.fireAtMs - Date.now()) + LATE_MS);
     check(shownOnce(darkBreak)[0].text === en['pomodoro.breakComplete'] && shownOnce(darkBreak)[0].when === darkBreak.fireAtMs,
         '(6) the break\'s alert arrives at its end, stamped with it');
     await waitFor('the break settled', (current) => primary(current) === en['common.start'], 30_000);
