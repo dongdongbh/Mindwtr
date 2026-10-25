@@ -30,7 +30,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { box, button, check, connect, evidenced, fail, inboxCount, inEditor, inList, isOn, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
-import { hostDevice, serveWebdav } from './sync-harness.mjs';
+import { hostDevice, serveWebdav, webdavDocument } from './sync-harness.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -200,6 +200,41 @@ const capture = async (text) => {
     await waitFor(`"${text}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === text, 15_000);
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
+/** Earlier runs' project files that exist nowhere (a run cut off before step (8) removed its kept file): each would stall the
+ *  next switch of sync location on the missing-files question. */
+const leftovers = () => sqlite(pullFile(`files/${DB}`, 'db'),
+    "SELECT p.title AS project, j.value->>'title' AS file FROM projects p, json_each(p.attachments) j WHERE p.deletedAt IS NULL "
+    + "AND p.title LIKE 'A2 project %' AND j.value->>'kind' = 'file' AND j.value->>'deletedAt' IS NULL "
+    + "AND (j.value->>'localStatus' = 'missing' OR coalesce(j.value->>'uri', '') = '')");
+/** Projects showing its list (Back from an open project: the tab keeps the last project open). */
+const projectList = async () => {
+    let nodes = await toTabs();
+    nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
+    const inProject = (current) => current.some((node) => /(^|\/)project-(title-input|details-[a-z]+|attachment-add-link)$/.test(node['resource-id'] ?? ''));
+    for (let step = 0; step < 4 && inProject(nodes); step += 1) {
+        await hideKeyboard();
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(1000);
+        nodes = await screen();
+    }
+    return inProject(nodes) ? fail('the project list did not come back') : nodes;
+};
+/** Opens [project] with its Details and taps Remove beside [file]; answers once the row is gone. */
+const removeProjectFile = async (project, file) => {
+    await projectList();
+    let nodes = await device.reveal(project);
+    nodes = await tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
+    if (!tagged(nodes, 'project-attachment-add-link')) {
+        nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
+    }
+    const row = await reveal((current) => current.find((node) => node.text === file), file, false);
+    nodes = await screen();
+    const [, top, , bottom] = box(row);
+    const remove = nodes.find((node) => node.text === en['attachments.remove'] && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
+    await tapExpecting(remove ?? fail(`no Remove beside ${file}`), (current) => !current.some((node) => node.text === file), `${file} removed`);
+    await projectList();
+};
 const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -327,6 +362,12 @@ try {
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
     device.launch(ACTIVITY);
     await waitFor('the Inbox', onInbox, 60_000);
+
+    for (const { project, file } of leftovers()) {
+        console.log(`note - removing an earlier run's file that exists nowhere: ${file} (${project})`);
+        await removeProjectFile(project, file);
+    }
+    check(leftovers().length === 0, 'no earlier run left a project file that exists nowhere');
 
     // (1) The phone and the second device on one local WebDAV folder; the second device adds the project.
     let nodes = await openSync();
@@ -522,7 +563,17 @@ try {
     const removed = await second.call('menuCommand', 'attachmentRemove', JSON.stringify({ requestId: randomUUID(), owner: { kind: 'project', projectId }, attachmentId: goneId }));
     if (removed.kind !== 'saved') fail(`the second device did not remove the kept attachment (${JSON.stringify(removed)})`);
     await second.syncNow('webdav', { ...webdavFields, password: null });
-    await syncNow('Sync now (the second device removed the kept file)');
+    // The second device's own automatic sync can hold the tap's cycle: wait for the tombstone in the folder before the phone syncs.
+    const remoteGone = () => webdavDocument(dav, FOLDER)?.projects?.find((p) => p.id === projectId)?.attachments?.find((a) => a.id === goneId);
+    await until('the second device\'s delete in the folder', async () => {
+        if (remoteGone()?.deletedAt) return true;
+        await second.syncNow('webdav', { ...webdavFields, password: null });
+        return Boolean(remoteGone()?.deletedAt);
+    }, 120_000, 5_000);
+    // A Sync now that joins a cycle the phone had already started reads the folder from before the delete: tap again.
+    for (let attempt = 0; attempt < 3 && !stored('projects', names.project).find((a) => a.id === goneId)?.deletedAt; attempt += 1) {
+        await syncNow(`Sync now (the second device removed the kept file, try ${attempt + 1})`);
+    }
     await until('the kept attachment deleted on the phone', () => stored('projects', names.project).find((a) => a.id === goneId)?.deletedAt, 60_000, 3_000);
     check(true, '(8) the second device\'s Remove deleted the kept attachment on the phone (a real delete still wins)');
 
