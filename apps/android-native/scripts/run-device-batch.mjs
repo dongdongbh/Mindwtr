@@ -33,7 +33,8 @@ const ORDER = ['check-projects-device', 'check-bgsync-device', 'check-encryption
     'check-review-device', 'check-calendar-board-device', 'check-toolbars-device', 'check-settings-editor-device',
     'check-sweep-saved-device', 'check-review-organize-device', 'check-app-lock-device', 'check-net-device',
     'check-intl-device', 'check-sync-device', 'check-language-device', 'check-focus-device', 'check-log-device',
-    'check-ai-device', 'check-attachments-device', 'check-reminders-device', 'check-runner-device', 'check-upgrade-device'];
+    'check-ai-device', 'check-attachments-device', 'check-continue-without-files-device', 'check-reminders-device', 'check-runner-device',
+    'check-upgrade-device'];
 const LAST = 'check-upgrade-device';
 
 export function parseArgs(argv) {
