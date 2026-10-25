@@ -183,7 +183,10 @@ try {
     sh(`input text '${ADDED.replaceAll(' ', '%s')}'`);
     nodes = await waitFor('the typed capture', (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === ADDED), 10_000);
     nodes = await tapExpecting(button(nodes, en['common.save']) ?? fail('no Save'), (current) => !tagged(current, 'quick-capture') && hasText(current, ADDED), 'the task in the project', 30_000);
-    check(projectTitled(nodes, STARTER_TITLE), '(c) the captured task shows in Getting Started');
+    check(projectTitled(nodes, STARTER_TITLE) && nodes.some((node) => node['content-desc'] === `${ADDED}. Status: Next`),
+        '(c) the captured task shows in Getting Started, as Next');
+    // The list scrolled to the new task (RN's highlight, #916): back to the top for Getting Started's actions.
+    nodes = await device.toTop();
     nodes = await tapExpecting(byText(nodes, en['starter.processInbox.check1']) ?? fail('no Open Inbox'), (current) => tabSelected(current, en['tab.inbox']), 'the Inbox');
     check(tabSelected(nodes, en['tab.inbox']), '(c) Open Inbox closes the project and shows the Inbox');
 
