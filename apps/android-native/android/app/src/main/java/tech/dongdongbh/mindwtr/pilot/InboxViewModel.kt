@@ -1822,8 +1822,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** Projects, and the open project from offset 0 as deep as it is shown, in the background: on every resume of the Projects tab. */
     fun refreshProjects() {
-        // Never read yet (the boot left it for later): a running action delays the read, never drops it.
-        if (projects == null && busy) return menu.whenIdle(::refreshProjects)
+        // A running action delays the read, never drops it: the list may be unread (the boot left it for later) or older than a
+        // write made outside a command (the welcome sheet's Getting Started, whose openProject is that running action).
+        if (busy) return menu.whenIdle(::refreshProjects)
         val at = depth()
         background(listOf(Part.Projects, Part.Project), { runtime -> ProjectsView.parse(runtime.projects()) to readOpen(runtime, at) }) { (list, detail), mine ->
             if (fresh(mine, Part.Projects)) projects = list
