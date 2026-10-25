@@ -293,7 +293,8 @@ private fun StatusControl(model: InboxViewModel, task: TaskRow, icon: Boolean, e
         }
     } else {
         val shape = RoundedCornerShape(8.dp)
-        Box(Modifier.padding(start = 12.dp, end = 12.dp).heightIn(min = 44.dp).clip(shape).background(colors.bg).border(1.dp, colors.border, shape)
+        // RN's statusBadge sets a borderColor but no borderWidth: the row's badge is a plain fill (the editor's TaskStatusBadge has a border).
+        Box(Modifier.padding(start = 12.dp, end = 12.dp).heightIn(min = 44.dp).clip(shape).background(colors.bg)
             .then(tap).padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
             Text(label.replaceFirstChar { it.uppercase() }, style = rnText(10, 600), color = colors.text)
         }

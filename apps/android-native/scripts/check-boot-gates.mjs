@@ -9563,5 +9563,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(editor, /Text\(guideLink\(help\.getString\("readGuide"\)/);
     assert.match(details, /Text\(guideLink\(guide\.getString\("label"\)/);
     assert.match(editor, /\{ expanded = !expanded \}\s+\/\/[^\n]*\s+\.semantics \{ contentDescription = label; stateDescription = /);
+    // RN's row statusBadge has a borderColor but no borderWidth: a plain fill (O2f-parity pairs).
+    assert.match(source('TaskRowView.kt'), /\.heightIn\(min = 44\.dp\)\.clip\(shape\)\.background\(colors\.bg\)\s+\.then\(tap\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
