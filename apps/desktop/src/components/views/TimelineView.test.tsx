@@ -342,6 +342,16 @@ describe('TimelineView (#1111)', () => {
         expect(barFor('plain')?.style.border).toBe('1px solid rgba(0, 255, 0, 0.7)');
     });
 
+    it('gives a project with no area and no color the grey group dot (#1422)', () => {
+        setStore({
+            tasks: [makeTask({ id: 'plain', title: 'Plain', projectId: 'p1', startTime: iso(0), dueDate: iso(1) })],
+            projects: [{ id: 'p1', title: 'Plain project', status: 'active', createdAt: iso(-60), updatedAt: iso(-60) } as Project],
+        });
+        renderTimeline();
+        const dot = screen.getByTestId('timeline-group').querySelector('.rounded-full') as HTMLElement;
+        expect(dot.style.backgroundColor).toBe('rgb(148, 163, 184)');
+    });
+
     it('groups rows by project with unassigned tasks last', () => {
         setStore({
             tasks: [

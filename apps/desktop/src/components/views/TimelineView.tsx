@@ -8,6 +8,7 @@ import { SortableContext } from '@dnd-kit/sortable';
 import {
     buildProjectTaskListModel,
     compareAreasByOrder,
+    DEFAULT_AREA_COLOR,
     compareProjectsByOrder,
     canEditTimelineTaskDates,
     canEditTimelineProjectDates,
@@ -766,10 +767,11 @@ export function TimelineView() {
             const groupDates = project ? describeDates(t, project.startDate, project.dueDate) : '';
             const groupActionLabel = groupDates ? `${row.label}. ${groupDates}` : row.label;
             const gutterClassName = 'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-muted pl-3 pr-2 text-left text-xs font-semibold text-foreground';
+            // A project with no color keeps the grey default dot, as in Focus and Next actions (#1422).
             const dot = (
                 <span
                     className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: row.color || 'hsl(var(--primary))' }}
+                    style={{ backgroundColor: row.color || (project ? DEFAULT_AREA_COLOR : 'hsl(var(--primary))') }}
                 />
             );
             // The first row is always a group, so any later group opens a new
