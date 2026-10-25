@@ -6,9 +6,9 @@
 //   153  this worktree's native app, build type `upgradetest`
 //   154  RN recovery, built from RECOVERY_COMMIT with only versionCode raised
 //   155  RN with its Pomodoro alarm re-arm fix (45dff1573), built from RN_FIX_COMMIT the same way
-//   151  with --parity-rn: RN at this checkout's HEAD, the RN side of capture-parity-screens' pairs
+//   151  with --parity-rn[=<rev>]: RN at <rev> (default HEAD), the RN side of capture-parity-screens' pairs
 //
-//   node apps/android-native/scripts/build-upgrade-harness.mjs [--rebuild-rn] [--parity-rn]
+//   node apps/android-native/scripts/build-upgrade-harness.mjs [--rebuild-rn] [--parity-rn[=<rev>]]
 //
 // Each RN build comes from a `git archive` of its pinned commit in a throwaway
 // folder under $MINDWTR_HARNESS_DIR (default /home/dd/.mindwtr-harness). Only
@@ -73,9 +73,10 @@ const linkFarm = (from, to, skip) => {
 };
 
 const patchId = sha256(patch).slice(0, 12);
-// --parity-rn: also the RN app at this checkout's HEAD (versionCode 151, below the native 153 installed over it), the RN side of
-// capture-parity-screens' pairs, so they compare with today's RN rather than RN 154's older source.
-const parityCommit = process.argv.includes('--parity-rn') ? out('git', ['-C', repo, 'rev-parse', 'HEAD']) : null;
+// --parity-rn[=<rev>]: also the RN app at <rev> (default this checkout's HEAD; versionCode 151, below the native 153 installed
+// over it), the RN side of capture-parity-screens' pairs, so they compare with today's RN rather than RN 154's older source.
+const parityArg = process.argv.find((arg) => arg === '--parity-rn' || arg.startsWith('--parity-rn='));
+const parityCommit = parityArg ? out('git', ['-C', repo, 'rev-parse', `${parityArg.split('=')[1] ?? 'HEAD'}^{commit}`]) : null;
 const patchFor = (commit) => (commit === RN_FIX_COMMIT || commit === parityCommit ? patchFix : patch);
 const rnApk = (commit, code) => resolve(apks, `rn-${commit.slice(0, 12)}-${sha256(patchFor(commit)).slice(0, 12)}-${code}.apk`);
 
