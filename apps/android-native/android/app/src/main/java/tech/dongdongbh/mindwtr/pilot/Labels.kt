@@ -95,11 +95,15 @@ object Labels {
     /** Snapshot state: a language chosen in Settings reloads it, and every screen redraws in that language. */
     private var strings by mutableStateOf<Map<String, String>>(emptyMap())
     private val logged: MutableSet<String> = Collections.synchronizedSet(HashSet())
+    /** Core's language of the loaded map: a synced language core switched to without a device key write reloads it too. */
+    @Volatile var language: String? = null
+        private set
 
     /** Replaces the map with a getStrings reply. Core already put English in for a key the language lacks. */
     fun load(reply: JSONObject, reportLoaded: (String) -> Unit = { Log.i(CoreHost.TAG, it) }) {
         val values = reply.getJSONObject("strings")
         strings = LABEL_KEYS.filter(values::has).associateWith(values::getString)
+        language = reply.getString("language")
         val missing = reply.getJSONArray("missing")
         for (index in 0 until missing.length()) missing(missing.getString(index))
         reportLoaded("Native Android labels language=${reply.getString("language")} missing=${missing.length()}")

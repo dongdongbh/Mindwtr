@@ -58,12 +58,17 @@ class PersistentCaptureTest {
      */
     @Test fun aRestoreTheSwitchOvertookAppliesNothing() {
         val applied = mutableListOf<JSONObject>()
-        PersistentCapture.restoreWith(read = { PersistentCapture.switchApplied(); on }, granted = { true }, apply = { applied += it }, log = { _, _ -> })
-        PersistentCapture.restoreWith(read = { on }, granted = { PersistentCapture.switchApplied(); true }, apply = { applied += it }, log = { _, _ -> })
+        val logged = mutableListOf<String>()
+        val log = { line: String, _: JSONObject -> logged += line }
+        PersistentCapture.restoreWith(read = { PersistentCapture.switchApplied(); on }, granted = { true }, apply = { applied += it }, log = log)
+        PersistentCapture.restoreWith(read = { on }, granted = { PersistentCapture.switchApplied(); true }, apply = { applied += it }, log = log)
         assertEquals(0, applied.size)
-        // A restore no switch overtook still applies.
-        PersistentCapture.restoreWith(read = { on }, granted = { true }, apply = { applied += it }, log = { _, _ -> })
+        // Each skip is in Settings › Diagnostics, so a tester's log shows the new path ran.
+        assertEquals(listOf(PersistentCapture.OVERTAKEN, PersistentCapture.OVERTAKEN), logged)
+        // A restore no switch overtook still applies, and logs nothing.
+        PersistentCapture.restoreWith(read = { on }, granted = { true }, apply = { applied += it }, log = log)
         assertEquals(listOf(on), applied)
+        assertEquals(2, logged.size)
     }
 
     /** A process start has no engine yet: its failure is kept (one short name) and the next boot's restore logs it once. */

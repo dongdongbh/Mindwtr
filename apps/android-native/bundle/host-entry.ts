@@ -2384,7 +2384,7 @@ globalThis.MindwtrHost = {
     widgetsRefresh(mode = ''): string {
         return submit(async () => ({ published: (mode === 'leave' ? widgets?.flush() : widgets?.publish()) ?? false }));
     },
-    /** Opt-in iOS read: a settled synced language wins; the legacy device-key route above is unchanged. */
+    /** iOS and Android (after boot and each finished sync): a settled synced language wins; the device-key route above is unchanged. */
     languageSaved(stored: string, system: string): string {
         return submit(async () => {
             if (!bootAdapter) throw new Error('Native storage has not been loaded and validated');

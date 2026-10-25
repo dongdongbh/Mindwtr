@@ -8645,9 +8645,11 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     assert.match(viewModelKt, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)/, 'boot applies synced choices after the device ones');
     assert.match(viewModelKt, /if \(cycles != syncCycles\) \{[\s\S]{0,400}?refreshAll\(synced = true\)/, 'a finished sync cycle applies synced choices');
     assert.match(viewModelKt, /if \(synced\) applySyncedChoices\(runtime, prefs\)/);
+    // The labels follow core's language, not only a device key write: languageSaved can switch core's language with none.
+    assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
     assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject = callAsync\("languageSaved", stored, system\)/);
 }
-// The new iOS-only route reads the settled Settings row. The two-arg Android route above keeps its device-key semantics.
+// languageSaved reads the settled Settings row (iOS, and Android after boot and each sync). The two-arg route above keeps its device-key semantics.
 {
     const savedLanguage = async (stored = 'zh', system = 'en-US') => await poll(ready, ready.MindwtrHost.languageSaved(stored, system));
     assert.deepEqual(await savedLanguage(), { ok: true, value: { language: 'zh', deviceWrites: [] } });

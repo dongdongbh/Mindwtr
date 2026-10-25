@@ -142,6 +142,8 @@ internal fun coreTime(hour: Int, minute: Int): String = String.format(Locale.ROO
 internal object PersistentCapture {
     /** The line Settings › Diagnostics shows for a notification that was not posted or removed (docs/release-notes/diagnostics-ledger.md). */
     const val FAILED = "Native Android persistent capture notification not applied releaseCheck=v1.3.5/native-persistent-capture"
+    /** The line for a restore a switch change overtook, which applied nothing (RN 29b363e6e). */
+    const val OVERTAKEN = "Native Android persistent capture restore overtaken by the switch releaseCheck=v1.3.8/native-capture-restore-overtaken"
     /** Held by every post, removal and process-start restore, so a removal never runs between a restore's read and its post. */
     private val LOCK = Any()
     /** A process start's failure, kept here (no engine runs yet) until the next boot's restore logs it. */
@@ -201,11 +203,17 @@ internal object PersistentCapture {
             val generation = switchGeneration.get()
             val reply = read()
             // The switch changed while the read ran: it already applied what is stored now (RN 29b363e6e).
-            if (generation != switchGeneration.get()) return@guarded
+            val overtaken = { generation != switchGeneration.get() }
+            if (overtaken()) return@guarded skipped(log)
             if (!reply.isNull("post") && !granted()) return@guarded
-            if (generation != switchGeneration.get()) return@guarded
+            if (overtaken()) return@guarded skipped(log)
             apply(reply)
         }
+    }
+
+    private fun skipped(log: (String, JSONObject) -> Unit) {
+        runCatching { log(OVERTAKEN, JSONObject().put("releaseCheck", "v1.3.8/native-capture-restore-overtaken").put("outcome", "skipped")) }
+        runCatching { Log.i(CoreHost.TAG, "Native Android persistent capture restore overtaken by the switch releaseCheck=v1.3.8/native-capture-restore-overtaken") }
     }
 
     /** [block], its failure in Settings › Diagnostics (core's log) and logcat: no screen shows a notification that was not posted. */
