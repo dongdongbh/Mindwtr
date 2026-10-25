@@ -595,7 +595,13 @@ jobs:
             done
           done
           readelf -lW "$RUNNER_TEMP/libsync-file-lock-arm64-v8a.so" | awk '$1 == "LOAD" && $NF != "0x4000" { exit 1 }'
-          ./gradlew :app:testPlayDebugUnitTest --tests '*SafDocumentsCore*' --tests '*SyncFileLockModuleTest' --tests '*HostDocumentsTest' --tests '*HostSyncLockTest' --no-daemon
+
+      # Every native :app JVM test (CoreJob, ReminderJob, ProjectDetails, RoutedDeviceStore, RKStorage on the real SQLite, ...),
+      # not only the File Sync subset: the local prepush gates ran the rest alone before (audit 10-25 gap 16). One channel: the
+      # tests do not differ by channel, and the local gates run both.
+      - name: Run the native app's JVM tests
+        working-directory: apps/android-native/android
+        run: ./gradlew :app:testPlayDebugUnitTest --no-daemon
 
   ios-client:
     # shortcut: paused during native iOS migration; remove false && when migration is complete.
