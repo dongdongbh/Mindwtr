@@ -262,6 +262,20 @@ const createChecklistState = (checklist = [{ id: 'check-1', title: 'Item 1', isC
 };
 
 describe('TaskEditContentField', () => {
+  it('lets the user remove a missing file the sync location could not find', () => {
+    // A remote "not found" keeps the row; Remove is how a truly lost file goes.
+    const removeAttachment = vi.fn();
+    const missing = { id: 'gone', kind: 'file' as const, title: 'scan.pdf', uri: '', cloudKey: 'attachments/gone.pdf',
+      localStatus: 'missing' as const, createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z' };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskEditContentField {...baseProps} fieldId="attachments" visibleAttachments={[missing]} removeAttachment={removeAttachment} />);
+    });
+    const remove = tree.root.findAll((node) => node.props.accessibilityLabel === 'attachments.remove' && typeof node.props.onPress === 'function')[0]!;
+    act(() => remove.props.onPress());
+    expect(removeAttachment).toHaveBeenCalledWith('gone');
+  });
+
   it('edits the recurring checklist policy without changing current items', () => {
     const setDraftField = vi.fn();
     const checklist = [{ id: 'a', title: 'First', isCompleted: true }];

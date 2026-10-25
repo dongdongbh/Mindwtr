@@ -40,4 +40,14 @@ describe('merge of an attachment kept without its file', () => {
 
         expect(keyOf(mergeAppData(local, keyless, { preferIncomingAttachmentCloudKeyIds: kept }))).toBe('attachments/att.pdf');
     });
+
+    it('still removes the row when another device deleted the attachment, with or without the record', () => {
+        // A real delete is a tombstone in the synced data, never a "not found": it must win as before.
+        const local = doc('attachments/att.pdf');
+        const deleted = doc('attachments/att.pdf', { deletedAt: '2026-07-02T00:00:00.000Z', updatedAt: '2026-07-02T00:00:00.000Z' });
+
+        for (const options of [{}, { preferIncomingAttachmentCloudKeyIds: new Set(['att']) }]) {
+            expect(mergeAppData(local, deleted, options).tasks[0]!.attachments![0]!.deletedAt).toBe('2026-07-02T00:00:00.000Z');
+        }
+    });
 });

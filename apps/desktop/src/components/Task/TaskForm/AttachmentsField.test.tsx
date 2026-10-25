@@ -35,6 +35,31 @@ describe('AttachmentsField', () => {
         expect(queryByText('attachments.missing')).not.toBeInTheDocument();
     });
 
+    it('lets the user remove a missing file the sync location could not find', () => {
+        // A remote "not found" keeps the row; Remove is how a truly lost file goes.
+        const removeAttachment = vi.fn();
+        const { getByText, getByRole } = render(
+            <AttachmentsField
+                t={(key) => key}
+                attachmentError={null}
+                visibleEditAttachments={[{
+                    id: 'gone', kind: 'file', title: 'scan.pdf', uri: '', cloudKey: 'attachments/gone.pdf', localStatus: 'missing',
+                    createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z',
+                }]}
+                addFileAttachment={vi.fn()}
+                addLinkAttachment={vi.fn()}
+                addObsidianNoteAttachment={vi.fn()}
+                showObsidianNoteAttachment={false}
+                editLinkAttachment={vi.fn()}
+                openAttachment={vi.fn()}
+                removeAttachment={removeAttachment}
+            />
+        );
+        expect(getByText('scan.pdf')).toBeVisible();
+        fireEvent.click(getByRole('button', { name: 'attachments.remove' }));
+        expect(removeAttachment).toHaveBeenCalledWith('gone');
+    });
+
     it('renders image attachments as inline previews and opens them on click', () => {
         const openAttachment = vi.fn();
         const attachment = {

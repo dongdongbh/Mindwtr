@@ -315,6 +315,16 @@ describe('native host contract: attachments, crash safety', () => {
         expect(stored().attachments![0]).toEqual(removed);
     });
 
+    it('removes a missing file the sync location could not find, so such rows never pile up', async () => {
+        // A remote "not found" keeps the row as a missing file; the user's Remove is how a truly lost file goes.
+        const missing = pdf('gone', { uri: '', cloudKey: 'attachments/gone.pdf', fileHash: 'c'.repeat(64), localStatus: 'missing' });
+        env = await openSqliteHost({ projects: [seedProject([missing])] }, undefined, { attachments: fakeHost({ ports: {}, log: [] }) });
+
+        ok(await env.host.removeAttachment({ requestId: '00000000-0000-4000-8000-00000000a013', owner: projectOwner, attachmentId: 'gone' }));
+
+        expect(stored().attachments![0]).toMatchObject({ id: 'gone', deletedAt: expect.any(String) });
+    });
+
     it('downloads a project file; a replay after a restart finds it there and writes nothing', async () => {
         const state = { ports: {} as Ports, log: [] as unknown[][] };
         env = await openSqliteHost({ projects: [seedProject([remote('r1')])] }, undefined, { attachments: fakeHost(state) });
