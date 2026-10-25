@@ -52,6 +52,20 @@ class PersistentCaptureTest {
         assertFalse(shown)
     }
 
+    /**
+     * RN 29b363e6e: a restore whose read the switch overtook acts on nothing; the switch already applied what is stored now.
+     * Without it, turning the notification off while a resume's restore was reading could post it again.
+     */
+    @Test fun aRestoreTheSwitchOvertookAppliesNothing() {
+        val applied = mutableListOf<JSONObject>()
+        PersistentCapture.restoreWith(read = { PersistentCapture.switchApplied(); on }, granted = { true }, apply = { applied += it }, log = { _, _ -> })
+        PersistentCapture.restoreWith(read = { on }, granted = { PersistentCapture.switchApplied(); true }, apply = { applied += it }, log = { _, _ -> })
+        assertEquals(0, applied.size)
+        // A restore no switch overtook still applies.
+        PersistentCapture.restoreWith(read = { on }, granted = { true }, apply = { applied += it }, log = { _, _ -> })
+        assertEquals(listOf(on), applied)
+    }
+
     /** A process start has no engine yet: its failure is kept (one short name) and the next boot's restore logs it once. */
     @Test fun aProcessStartFailureReachesTheDiagnosticsLogOnce() {
         var kept: String? = null

@@ -471,7 +471,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     internal fun applied(runtime: CoreHost, reply: JSONObject) {
         // Notifications' persistent capture switch: RN's notification posted or removed as core's reply says (RN's
         // applyPersistentCaptureNotification, PersistentCaptureNotifier.kt).
-        reply.optJSONObject("persistentCapture")?.let { PersistentCapture.apply(shell.getApplication<Application>(), it, runtime::logLine) }
+        reply.optJSONObject("persistentCapture")?.let { PersistentCapture.switched(shell.getApplication<Application>(), it, runtime::logLine) }
         val writes = reply.optJSONArray("deviceWrites") ?: return
         val keys = List(writes.length()) { writes.getJSONObject(it).getString("key") }
         if (LANGUAGE_KEY in keys) {

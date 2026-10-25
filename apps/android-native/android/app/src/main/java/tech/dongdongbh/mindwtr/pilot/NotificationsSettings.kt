@@ -148,6 +148,16 @@ internal object PersistentCapture {
     private const val PREFS = "mindwtr_persistent_capture_host"
     private const val START_FAILURE = "startFailure"
 
+    /** Bumped by every switch the user applies (RN's switchGeneration, 29b363e6e): a restore whose read it overtook acts on nothing. */
+    private val switchGeneration = java.util.concurrent.atomic.AtomicLong()
+    internal fun switchApplied() { switchGeneration.incrementAndGet() }
+
+    /** The switch's own apply (Settings › Notifications): it overtakes any restore still reading. */
+    fun switched(context: Context, reply: JSONObject, log: (String, JSONObject) -> Unit) {
+        switchApplied()
+        apply(context, reply, log)
+    }
+
     /** Core's `{ post }`: the title, text and channel's name to post, or null to remove it. A failure goes to [log] (core's log). */
     fun apply(context: Context, reply: JSONObject, log: (String, JSONObject) -> Unit) = guarded(log) {
         val post = reply.optJSONObject("post")
@@ -188,8 +198,13 @@ internal object PersistentCapture {
         startFailure: () -> String? = { null }) {
         runCatching { startFailure() }.getOrNull()?.let { failure -> runCatching { log(FAILED, JSONObject().put("error", failure).put("path", "process-start")) } }
         guarded(log) {
+            val generation = switchGeneration.get()
             val reply = read()
-            if (reply.isNull("post") || granted()) apply(reply)
+            // The switch changed while the read ran: it already applied what is stored now (RN 29b363e6e).
+            if (generation != switchGeneration.get()) return@guarded
+            if (!reply.isNull("post") && !granted()) return@guarded
+            if (generation != switchGeneration.get()) return@guarded
+            apply(reply)
         }
     }
 
